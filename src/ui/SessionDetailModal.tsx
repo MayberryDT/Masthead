@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { SafeAction, SessionDetailView } from "../core/types";
 import { Icon } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
@@ -13,10 +13,34 @@ type Props = {
 
 export function SessionDetailModal({ session, onClose, onAction, actionStatus }: Props) {
   const modalRef = useRef<HTMLElement>(null);
+  const closeTimeoutRef = useRef<number | undefined>(undefined);
+  const [modalState, setModalState] = useState<"opening" | "open" | "closing">("opening");
+  const modalClassName = [
+    "session-detail-modal",
+    "t-modal",
+    modalState === "closing" ? "is-closing" : "",
+    modalState === "open" ? "is-open" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   useEffect(() => {
     modalRef.current?.focus();
   }, [session.sessionId]);
+
+  useEffect(() => {
+    setModalState("opening");
+    const frame = window.requestAnimationFrame(() => setModalState("open"));
+    return () => window.cancelAnimationFrame(frame);
+  }, [session.sessionId]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current !== undefined) {
+        window.clearTimeout(closeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -29,16 +53,24 @@ export function SessionDetailModal({ session, onClose, onAction, actionStatus }:
     };
   }, []);
 
+  const requestClose = () => {
+    if (modalState === "closing") return;
+    setModalState("closing");
+    const closeMs =
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--modal-close-dur")) || 150;
+    closeTimeoutRef.current = window.setTimeout(onClose, closeMs);
+  };
+
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="modal-backdrop" role="presentation" onClick={requestClose}>
       <article
         ref={modalRef}
-        className="session-detail-modal"
+        className={modalClassName}
         aria-labelledby={`${session.sessionId}-modal-title`}
         aria-modal="true"
         role="dialog"
         onClick={(event) => event.stopPropagation()}
-        onKeyDown={(event) => handleModalKeyDown(event, modalRef.current, onClose)}
+        onKeyDown={(event) => handleModalKeyDown(event, modalRef.current, requestClose)}
         tabIndex={-1}
       >
         <header className="modal-head">
@@ -53,7 +85,7 @@ export function SessionDetailModal({ session, onClose, onAction, actionStatus }:
               <p className="mono-label">Session details</p>
               <h2 id={`${session.sessionId}-modal-title`}>{session.copy.headline}</h2>
             </div>
-            <button type="button" className="icon-button" aria-label="Close session details" onClick={onClose}>
+            <button type="button" className="icon-button" aria-label="Close session details" onClick={requestClose}>
               <Icon name="close" size="toolbar" weight={iconWeights.toolbar} />
             </button>
           </div>

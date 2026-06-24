@@ -19,6 +19,11 @@
   --red-soft: rgba(255, 97, 97, 0.14);
   --blue: #57c1ff;
   --blue-soft: rgba(87, 193, 255, 0.14);
+  --modal-open-dur: 250ms;
+  --modal-close-dur: 150ms;
+  --modal-scale: 0.96;
+  --modal-scale-close: 0.96;
+  --modal-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-technical: "IBM Plex Mono", ui-monospace, monospace;
   --font-sans: var(--font-ui);
@@ -102,6 +107,7 @@ h3 {
   color: var(--ink);
   font-weight: 600;
   letter-spacing: 0;
+  text-wrap: balance;
 }
 
 h1 {
@@ -119,6 +125,7 @@ p {
   color: var(--mute);
   font-size: 13px;
   line-height: 1.5;
+  text-wrap: pretty;
 }
 
 main {
@@ -219,6 +226,18 @@ main {
   padding: 11px;
   color: var(--body);
   text-align: left;
+  transition-property: background-color, border-color, transform;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.rail-session:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-card);
+}
+
+.rail-session:active {
+  transform: scale(0.96);
 }
 
 .rail-session.selected {
@@ -405,16 +424,29 @@ main {
 }
 
 .primary-pill {
+  min-height: 40px;
   padding: 0 15px;
   background: var(--ink);
   color: var(--black);
+  transition-property: background-color, border-color, color, transform;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
 }
 
 .ghost-pill {
+  min-height: 40px;
   padding: 0 15px;
   border: 1px solid var(--line);
   background: var(--surface-elevated);
   color: var(--body);
+  transition-property: background-color, border-color, color, transform;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.primary-pill:active,
+.ghost-pill:active {
+  transform: scale(0.96);
 }
 
 .active-filter {
@@ -584,6 +616,87 @@ main {
   font-size: 24px;
 }
 
+.observability-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: var(--space-sm);
+}
+
+.metric-card {
+  display: grid;
+  min-height: 124px;
+  align-content: space-between;
+  gap: var(--space-sm);
+  border: 1px solid var(--surface-metal-border);
+  border-radius: 5px;
+  background: var(--surface-metal-fill);
+  box-shadow: var(--shadow-border);
+  padding: var(--space-md);
+}
+
+.metric-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--mute);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-wrap: pretty;
+}
+
+.metric-icon {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--blue);
+  box-shadow: 0 0 0 3px rgba(46, 167, 255, 0.12);
+}
+
+.metric-card-value {
+  color: var(--ink);
+  font-family: var(--font-technical);
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-card .metric-delta {
+  margin: 0;
+  color: var(--mute);
+  font-family: var(--font-technical);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.metric-card .metric-delta.good {
+  color: var(--green);
+}
+
+.metric-card .metric-delta.bad {
+  color: var(--red);
+}
+
+.demo-badge {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 207, 54, 0.24);
+  border-radius: 4px;
+  background: rgba(255, 207, 54, 0.1);
+  color: #ffe28b;
+  padding: 0 6px;
+  font-family: var(--font-technical);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .board-toolbar,
 .attention-queue,
 .history-panel {
@@ -607,7 +720,7 @@ main {
 }
 
 .search-field input {
-  min-height: 38px;
+  min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-elevated);
@@ -919,6 +1032,32 @@ main {
   background-color: var(--modal-bg);
   box-shadow: var(--modal-shadow);
   color: var(--modal-ink);
+}
+
+.t-modal {
+  transform-origin: center;
+  transform: scale(var(--modal-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--modal-open-dur) var(--modal-ease),
+    opacity var(--modal-open-dur) var(--modal-ease);
+  will-change: transform, opacity;
+}
+
+.t-modal.is-open {
+  transform: scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.t-modal.is-closing {
+  transform: scale(var(--modal-scale-close));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--modal-close-dur) var(--modal-ease),
+    opacity var(--modal-close-dur) var(--modal-ease);
 }
 
 .session-detail-modal::after {
@@ -1398,6 +1537,15 @@ main {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .observability-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .observability-status-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .history-results {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1457,6 +1605,7 @@ main {
 
   .connection-strip,
   .control-center .console-summary,
+  .observability-metric-grid,
   .control-center .session-board,
   .console-summary,
   .session-board,
@@ -1749,7 +1898,8 @@ body {
   width: 35px;
   height: 35px;
   object-fit: contain;
-  outline: none;
+  outline: 1px solid rgba(255, 255, 255, 0.1);
+  outline-offset: -1px;
 }
 
 .sidebar-brand strong,
@@ -1816,7 +1966,7 @@ body {
 .sidebar-link {
   position: relative;
   display: flex;
-  height: 32px;
+  min-height: 40px;
   align-items: center;
   gap: 10px;
   overflow: hidden;
@@ -1825,10 +1975,14 @@ body {
   color: #d5e4f0;
   font-size: 15px;
   font-weight: 500;
-  line-height: 32px;
-  transition-property: background-color, box-shadow, color;
+  line-height: 40px;
+  transition-property: background-color, box-shadow, color, transform;
   transition-duration: 160ms;
   transition-timing-function: ease;
+}
+
+.sidebar-link:active {
+  transform: scale(0.96);
 }
 
 .sidebar-link:hover {
@@ -1942,7 +2096,7 @@ body {
   flex: 0 1 210px;
   min-width: 0;
   max-width: 240px;
-  height: 32px;
+  min-height: 40px;
   align-items: center;
   gap: var(--space-xs);
   border: 1px solid rgba(63, 118, 150, 0.18);
@@ -2000,8 +2154,8 @@ body {
   flex: 0 0 auto;
   width: 166px;
   min-width: 166px;
-  height: 32px;
-  min-height: 32px;
+  height: 40px;
+  min-height: 40px;
   align-items: center;
   justify-content: space-between;
   border: 1px solid rgba(92, 153, 187, 0.18);
@@ -2056,7 +2210,7 @@ body {
   width: 100%;
   height: 100%;
   min-width: 0;
-  min-height: 0;
+  min-height: 40px;
   overflow: hidden;
   border: 0;
   outline: 0;
@@ -2143,8 +2297,7 @@ body {
   box-sizing: border-box;
   width: 100%;
   min-width: 116px;
-  min-height: 30px;
-  height: 30px;
+  min-height: 40px;
   border: 0;
   border-radius: 3px;
   background: transparent;
@@ -2153,7 +2306,7 @@ body {
   padding: 0 10px;
   font: inherit;
   font-weight: 500;
-  line-height: 30px;
+  line-height: 40px;
   text-align: left;
   white-space: nowrap;
 }
@@ -2203,8 +2356,8 @@ body {
 .toolbar-connector-button {
   display: inline-flex;
   min-width: 104px;
-  height: 32px;
-  min-height: 32px;
+  height: 40px;
+  min-height: 40px;
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(92, 153, 187, 0.18);
@@ -2255,9 +2408,9 @@ body {
 
 .toolbar-icon-button {
   display: grid;
-  width: 32px;
-  height: 32px;
-  min-height: 32px;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
   place-items: center;
   border: 1px solid rgba(92, 153, 187, 0.18);
   border-radius: 3px;
@@ -2313,7 +2466,7 @@ body {
   border-radius: 5px;
   background-color: var(--surface-metal-fill);
   box-shadow: var(--shadow-border);
-  transition-property: border-color, box-shadow;
+  transition-property: background-color, border-color, box-shadow, transform;
   transition-duration: 160ms;
   transition-timing-function: ease;
 }
@@ -2422,6 +2575,10 @@ body {
 
 .observability-console .session-card:hover {
   border-left-color: var(--status-rail);
+}
+
+.observability-console .session-card:active {
+  transform: translateY(0) scale(0.96);
 }
 
 .observability-card-head {
@@ -2812,11 +2969,23 @@ body {
   left: var(--space-md);
   bottom: var(--space-md);
   display: inline-flex;
+  min-height: 40px;
   align-items: center;
   gap: 4px;
   color: #12bfff;
   font-size: 13px;
   font-weight: 500;
+  transition-property: color, transform;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.models a:hover {
+  color: #8de6ff;
+}
+
+.models a:active {
+  transform: scale(0.96);
 }
 
 .tokens {
@@ -2936,6 +3105,55 @@ body {
 
 .blocked-dot {
   background: var(--red);
+}
+
+.observability-status-banner {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  border: 1px solid var(--surface-metal-border);
+  border-radius: 5px;
+  background: var(--surface-metal-fill);
+  box-shadow: var(--shadow-border);
+  padding: var(--space-md);
+}
+
+.observability-status-banner div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-xs);
+  color: var(--body);
+  font-size: 13px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.observability-status-banner strong {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.observability-status-banner span {
+  min-width: 0;
+}
+
+.health-token {
+  display: inline-flex;
+  min-height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-xs);
+  border: 1px solid rgba(54, 216, 105, 0.24);
+  border-radius: 4px;
+  background: rgba(54, 216, 105, 0.1);
+  color: #9df2b8;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 @media (max-width: 1320px) {
@@ -3069,18 +3287,35 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .t-modal {
+    transition: none !important;
+  }
+
   .observability-console .metal-surface,
   .observability-console .metal-surface::before,
   .sidebar-link,
   .observability-toolbar .search-field,
   .toolbar-select,
   .toolbar-connector-button,
-  .toolbar-icon-button {
+  .toolbar-icon-button,
+  .models a {
+    transition-duration: 1ms;
+  }
+
+  .rail-session,
+  .primary-pill,
+  .ghost-pill {
     transition-duration: 1ms;
   }
 
   .observability-console .metal-surface:hover::before,
-  .observability-console .session-card:hover {
+  .observability-console .session-card:hover,
+  .observability-console .session-card:active,
+  .models a:active,
+  .rail-session:active,
+  .sidebar-link:active,
+  .primary-pill:active,
+  .ghost-pill:active {
     transform: none;
   }
 }
