@@ -1,0 +1,116 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, test } from "vitest";
+import type { StoreRecord } from "../../core/store";
+import { filtersFromQuery, HistoryPanel } from "../HistoryPanel";
+
+describe("HistoryPanel", () => {
+  test("parses explicit PRD history search filters", () => {
+    expect(
+      filtersFromQuery(
+        "project:App session:session-1 file:src/app.ts command:\"npm test\" status:failed branch:agent/demo alert:conflict conflict:shared_resource outcome:needs_review disposition:reviewed"
+      )
+    ).toEqual({
+      project: "App",
+      sessionId: "session-1",
+      filePath: "src/app.ts",
+      command: "npm test",
+      status: "failed",
+      branch: "agent/demo",
+      alertType: "conflict",
+      conflictType: "shared_resource",
+      outcome: "needs_review",
+      disposition: "reviewed"
+    });
+  });
+
+  test("renders searchable local history without raw session metadata or unsafe actions", () => {
+    const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:App" onQueryChange={() => {}} />);
+
+    expect(html).toContain("Local history");
+    expect(html).toContain("Search history");
+    expect(html).toContain("Session needs review");
+    expect(html).toContain("1 file changed");
+    expect(html).toContain("1 follow-up signal");
+    expect(html).toContain("Showing 1 of 1; searching");
+    expect(html).not.toContain("History case");
+    expect(html).not.toContain("src/app.ts");
+    expect(html).not.toContain("agent/demo");
+    expect(html).not.toContain("stale_verification");
+    expect(html).not.toContain("Approve request");
+    expect(html).not.toContain("Run command");
+    expect(html).not.toContain("Git commit");
+  });
+
+  test("renders no-match queries with an explicit zero result count", () => {
+    const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:Missing" onQueryChange={() => {}} />);
+
+    expect(html).toContain("Local history");
+    expect(html).toContain("0</strong>");
+    expect(html).toContain("Showing 0 of 0; searching 0 local records");
+    expect(html).not.toContain("History case");
+  });
+});
+
+function records(): StoreRecord[] {
+  return [
+    {
+      recordId: "record:event:event-1",
+      recordType: "event",
+      observedAt: "2026-06-23T07:00:00.000Z",
+      value: {
+        schemaVersion: 1,
+        eventId: "event-1",
+        sessionId: "session-1",
+        source: { adapter: "codex", surface: "fixture", sourceEventId: "event-1" },
+        occurredAt: "2026-06-23T07:00:00.000Z",
+        receivedAt: "2026-06-23T07:00:00.000Z",
+        type: "session.started",
+        workspace: {
+          repoRoot: "/workspace/app",
+          worktreePath: "/workspace/app",
+          gitCommonDir: "/workspace/app/.git",
+          branch: "agent/demo"
+        },
+        summary: "Started",
+        payload: { project: "App", title: "History case" },
+        sensitivity: "metadata",
+        payloadHash: "hash-event-1",
+        evidence: [{ id: "event-1", kind: "event", observedAt: "2026-06-23T07:00:00.000Z", source: "fixture" }]
+      }
+    },
+    {
+      recordId: "record:git_snapshot:snapshot-1",
+      recordType: "git_snapshot",
+      observedAt: "2026-06-23T07:01:00.000Z",
+      value: {
+        snapshotId: "snapshot-1",
+        sessionId: "session-1",
+        repoRoot: "/workspace/app",
+        worktreePath: "/workspace/app",
+        gitCommonDir: "/workspace/app/.git",
+        branch: "agent/demo",
+        changedPaths: [{ path: "src/app.ts", status: "modified", staged: false, sensitivity: "metadata" }],
+        observedAt: "2026-06-23T07:01:00.000Z"
+      }
+    },
+    {
+      recordId: "record:attention_item:attention-1",
+      recordType: "attention_item",
+      observedAt: "2026-06-23T07:02:00.000Z",
+      value: {
+        itemId: "attention-1",
+        sessionId: "session-1",
+        project: "App",
+        type: "stale_verification",
+        severity: "P2",
+        title: "Verification is stale",
+        createdAt: "2026-06-23T07:02:00.000Z",
+        affectedPaths: ["src/app.ts"],
+        affectedCommandIds: ["cmd-test"],
+        evidence: [{ id: "event-1", kind: "event", observedAt: "2026-06-23T07:00:00.000Z", source: "fixture" }],
+        support: "deterministic",
+        suggestedNextAction: "Re-run verification."
+      }
+    }
+  ];
+}

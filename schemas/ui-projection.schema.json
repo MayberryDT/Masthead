@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.local/schemas/ui-projection.schema.json",
+  "title": "LiveBoardProjection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "cards", "attentionQueue", "conflicts"],
+  "properties": {
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active", "needsAttention", "conflicts", "completed"],
+      "properties": {
+        "active": { "type": "integer", "minimum": 0 },
+        "needsAttention": { "type": "integer", "minimum": 0 },
+        "conflicts": { "type": "integer", "minimum": 0 },
+        "completed": { "type": "integer", "minimum": 0 },
+        "running": { "type": "integer", "minimum": 0 },
+        "needsAction": { "type": "integer", "minimum": 0 },
+        "idle": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "lanes": { "type": "array", "items": { "$ref": "#/$defs/lifecycleLaneView" } },
+    "cards": { "type": "array", "items": { "$ref": "#/$defs/sessionCardView" } },
+    "expandedSession": { "$ref": "#/$defs/expandedSessionView" },
+    "selectedSession": { "$ref": "#/$defs/sessionDetailView" },
+    "brief": { "$ref": "#/$defs/boardBrief" },
+    "attentionQueue": { "type": "array", "items": { "$ref": "attention-item.schema.json" } },
+    "conflicts": { "type": "array", "items": { "$ref": "conflict-card.schema.json" } }
+  },
+  "$defs": {
+    "boardBrief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "source", "priority"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "source": { "enum": ["deterministic", "llm", "fallback"] },
+        "priority": { "enum": ["normal", "attention"] }
+      }
+    },
+    "eventType": {
+      "enum": [
+        "session.started",
+        "approval.requested",
+        "user.question",
+        "command.started",
+        "command.finished",
+        "file.changed",
+        "session.completed"
+      ]
+    },
+    "sessionLifecycle": {
+      "enum": ["running", "idle", "ended"]
+    },
+    "sessionEndReason": {
+      "enum": ["completed", "blocked", "failed", "needs_user", "needs_approval", "abandoned", "unknown"]
+    },
+    "sessionOutcomeLabel": {
+      "enum": ["completed", "needs_attention", "blocked", "failed", "abandoned", "unknown"]
+    },
+    "sessionStatus": {
+      "enum": [
+        "starting",
+        "planning",
+        "reading",
+        "editing",
+        "running_command",
+        "testing",
+        "waiting_for_approval",
+        "waiting_for_user",
+        "blocked",
+        "stalled",
+        "possibly_looping",
+        "failed",
+        "completed_unreviewed",
+        "completed_reviewed",
+        "abandoned",
+        "unknown"
+      ]
+    },
+    "lifecycleLaneView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["laneId", "title", "count", "sessionIds"],
+      "properties": {
+        "laneId": { "enum": ["running", "idle", "needs_action", "history"] },
+        "title": { "type": "string", "minLength": 1 },
+        "count": { "type": "integer", "minimum": 0 },
+        "sessionIds": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "safeAction": {
+      "enum": [
+        "open_source_session",
+        "open_repo",
+        "open_file",
+        "open_readonly_diff",
+        "snooze",
+        "dismiss",
+        "mark_reviewed",
+        "mark_expected"
+      ]
+    },
+    "sessionCardBase": {
+      "type": "object",
+      "required": [
+        "sessionId",
+        "project",
+        "title",
+        "copy",
+        "stateLabel",
+        "primaryStatus",
+        "lifecycle",
+        "priorityRank",
+        "durationLabel",
+        "lastActivity",
+        "lastActivityLabel",
+        "changedFileCount",
+        "indicators",
+        "identityConfidence",
+        "safeActions",
+        "isExpanded"
+      ],
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "project": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "copy": { "$ref": "#/$defs/sessionPlainCopy" },
+        "stateLabel": { "type": "string", "minLength": 1 },
+        "primaryStatus": { "$ref": "#/$defs/sessionStatus" },
+        "lifecycle": { "$ref": "#/$defs/sessionLifecycle" },
+        "outcomeLabel": { "$ref": "#/$defs/sessionOutcomeLabel" },
+        "endReason": { "$ref": "#/$defs/sessionEndReason" },
+        "priorityRank": { "type": "number" },
+        "durationLabel": { "type": "string" },
+        "branchOrWorktree": { "type": "string" },
+        "lastActivity": { "type": "string" },
+        "lastActivityLabel": { "type": "string" },
+        "changedFileCount": { "type": "integer", "minimum": 0 },
+        "attentionReason": { "type": "string" },
+        "indicators": {
+          "type": "array",
+          "items": { "enum": ["attention", "conflict", "verification", "degraded", "risk"] }
+        },
+        "identityConfidence": { "enum": ["direct", "correlated", "shared_workspace", "unattributed"] },
+        "safeActions": { "type": "array", "items": { "$ref": "#/$defs/safeAction" } },
+        "isExpanded": { "type": "boolean" },
+        "workContext": { "$ref": "#/$defs/workAreaContext" },
+        "latestFeedbackSignal": { "$ref": "#/$defs/latestFeedbackSignal" }
+      }
+    },
+    "sessionCardView": {
+      "allOf": [{ "$ref": "#/$defs/sessionCardBase" }],
+      "unevaluatedProperties": false
+    },
+    "sessionPlainCopy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline", "status", "reason", "source"],
+      "properties": {
+        "headline": { "type": "string", "minLength": 2, "maxLength": 48 },
+        "status": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "reason": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "nextStep": { "type": "string", "maxLength": 100 },
+        "source": { "enum": ["deterministic", "llm", "fallback"] }
+      }
+    },
+    "sessionDetailView": {
+      "allOf": [
+        { "$ref": "#/$defs/sessionCardBase" },
+        {
+          "type": "object",
+          "required": ["currentActivity", "reviewAnnotations", "evidence", "conflicts", "attentionItems", "timeline"],
+          "properties": {
+            "currentActivity": { "type": "string", "minLength": 1 },
+            "reviewAnnotations": { "type": "array", "items": { "$ref": "#/$defs/reviewAnnotation" } },
+            "evidence": { "$ref": "#/$defs/evidenceGroups" },
+            "conflicts": { "type": "array", "items": { "$ref": "conflict-card.schema.json" } },
+            "attentionItems": { "type": "array", "items": { "$ref": "attention-item.schema.json" } },
+            "timeline": { "type": "array", "items": { "$ref": "#/$defs/sessionTimelineItem" } },
+            "latestFeedback": { "$ref": "#/$defs/latestFeedbackSnapshot" },
+            "inspectorSections": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/inspectorSectionId" }
+            },
+            "workspace": { "$ref": "#/$defs/workspaceRef" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "expandedSessionView": {
+      "allOf": [
+        { "$ref": "#/$defs/sessionCardBase" },
+        {
+          "type": "object",
+          "required": ["evidence", "conflicts", "attentionItems"],
+          "properties": {
+            "evidence": { "$ref": "#/$defs/evidenceGroups" },
+            "conflicts": { "type": "array", "items": { "$ref": "conflict-card.schema.json" } },
+            "attentionItems": { "type": "array", "items": { "$ref": "attention-item.schema.json" } }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "reviewAnnotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "recordedAt", "stale"],
+      "properties": {
+        "status": { "enum": ["reviewed", "expected", "dismissed", "snoozed", "false_positive"] },
+        "recordedAt": { "type": "string", "format": "date-time" },
+        "stale": { "type": "boolean" },
+        "reason": { "type": "string" },
+        "snoozedUntil": { "type": "string", "format": "date-time" }
+      }
+    },
+    "evidenceGroups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed", "inferred", "missing"],
+      "properties": {
+        "observed": { "type": "array", "items": { "$ref": "#/$defs/evidenceRef" } },
+        "inferred": { "type": "array", "items": { "$ref": "#/$defs/evidenceRef" } },
+        "missing": { "type": "array", "items": { "$ref": "#/$defs/evidenceRef" } }
+      }
+    },
+    "sessionTimelineItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventId", "type", "occurredAt", "summary"],
+      "properties": {
+        "eventId": { "type": "string", "minLength": 1 },
+        "type": { "$ref": "#/$defs/eventType" },
+        "occurredAt": { "type": "string", "format": "date-time" },
+        "summary": { "type": "string" }
+      }
+    },
+    "workspaceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cwd": { "type": "string" },
+        "repoRoot": { "type": "string" },
+        "worktreePath": { "type": "string" },
+        "gitCommonDir": { "type": "string" },
+        "branch": { "type": "string" },
+        "headSha": { "type": "string" }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "observedAt", "source"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["event", "command", "git_snapshot", "file_change", "conflict", "redaction"] },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "source": { "type": "string", "minLength": 1 }
+      }
+    },
+    "workAreaContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "confidence", "pathClusters", "sourceSignals"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "confidence": { "enum": ["title", "branch", "path_cluster", "event_summary", "feedback_snapshot", "generic"] },
+        "pathClusters": { "type": "array", "items": { "type": "string" } },
+        "sourceSignals": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "latestFeedbackSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "source", "observedAt", "redacted", "bytesIn", "charsOut", "claims"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "source": { "enum": ["stop_hook"] },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "redacted": { "const": true },
+        "bytesIn": { "type": "integer", "minimum": 0 },
+        "charsOut": { "type": "integer", "minimum": 0 },
+        "claims": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/latestFeedbackClaim" }
+        }
+      }
+    },
+    "latestFeedbackSignal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "source", "observedAt", "claims"],
+      "properties": {
+        "present": { "const": true },
+        "source": { "enum": ["stop_hook"] },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "claims": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/latestFeedbackClaim" }
+        }
+      }
+    },
+    "latestFeedbackClaim": {
+      "enum": ["claims_complete", "mentions_blocked", "mentions_tests", "mentions_error", "mentions_files"]
+    },
+    "inspectorSectionId": {
+      "enum": ["state", "latest_feedback", "attention_conflicts", "evidence", "timeline", "actions"]
+    }
+  }
+}

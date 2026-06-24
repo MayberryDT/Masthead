@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.local/schemas/git-snapshot.schema.json",
+  "title": "GitSnapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "snapshotId",
+    "sessionId",
+    "repoRoot",
+    "worktreePath",
+    "gitCommonDir",
+    "changedPaths",
+    "observedAt"
+  ],
+  "properties": {
+    "snapshotId": { "type": "string", "minLength": 1 },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "repoRoot": { "type": "string", "minLength": 1 },
+    "worktreePath": { "type": "string", "minLength": 1 },
+    "gitCommonDir": { "type": "string", "minLength": 1 },
+    "branch": { "type": "string" },
+    "headSha": { "type": "string" },
+    "changedPaths": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/gitChangedPath" }
+    },
+    "observedAt": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "gitChangedPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "status", "staged", "sensitivity"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["added", "modified", "deleted", "renamed", "untracked"] },
+        "staged": { "type": "boolean" },
+        "additions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 },
+        "sensitivity": { "enum": ["metadata", "sensitive_path_only"] }
+      }
+    }
+  }
+}

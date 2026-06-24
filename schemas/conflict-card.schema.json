@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.local/schemas/conflict-card.schema.json",
+  "title": "ConflictCard",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "conflictId",
+    "type",
+    "severity",
+    "sessionIds",
+    "repo",
+    "sharedPaths",
+    "attribution",
+    "title",
+    "evidence"
+  ],
+  "properties": {
+    "conflictId": { "type": "string", "minLength": 1 },
+    "type": { "enum": ["exact_file_overlap", "same_worktree", "shared_resource"] },
+    "severity": { "enum": ["high", "medium", "low"] },
+    "sessionIds": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gitCommonDir", "worktreePaths"],
+      "properties": {
+        "gitCommonDir": { "type": "string", "minLength": 1 },
+        "worktreePaths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "sharedPaths": { "type": "array", "items": { "type": "string" } },
+    "attribution": { "enum": ["direct", "degraded"] },
+    "title": { "type": "string", "minLength": 1 },
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidenceRef" } }
+  },
+  "$defs": {
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "observedAt", "source"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["event", "command", "git_snapshot", "file_change", "conflict", "redaction"] },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "source": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

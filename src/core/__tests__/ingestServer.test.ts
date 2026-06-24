@@ -1,0 +1,371 @@
+import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import type { Readable } from "node:stream";
+import { afterEach, describe, expect, test } from "vitest";
+
+const projectRoot = fileURLToPath(new URL("../../..", import.meta.url));
+const serverScript = fileURLToPath(new URL("../../../scripts/masthead-ingest-server.js", import.meta.url));
+const execFileAsync = promisify(execFile);
+type TestServerProcess = ChildProcessByStdio<null, Readable, Readable>;
+
+describe("ingest server live projection", () => {
+  const servers: TestServerProcess[] = [];
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(servers.map(stopServer));
+    servers.length = 0;
+    await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
+    tempDirs.length = 0;
+  });
+
+  test("normalizes hooks, dedupes provider events, projects live board state, and persists across restart", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const firstServer = await startServer(storePath);
+    servers.push(firstServer.child);
+
+    const accepted = await postJson(firstServer.baseUrl, "/ingest", liveApprovalPayload("server-approval"));
+    expect(accepted.status).toBe("accepted");
+    expect(accepted.events).toBe(1);
+
+    const duplicate = await postJson(firstServer.baseUrl, "/ingest", liveApprovalPayload("server-approval"));
+    expect(duplicate.status).toBe("duplicate");
+    expect(duplicate.events).toBe(1);
+
+    const projection = await getJson(firstServer.baseUrl, "/projection?expandedSessionId=server-live");
+    expect(projection).toMatchObject({
+      ok: true,
+      source: "live",
+      events: 1,
+      projection: {
+        summary: {
+          active: 1,
+          needsAttention: 1,
+          conflicts: 0,
+          completed: 0
+        }
+      }
+    });
+    expect(projection.projection.cards[0]).toMatchObject({
+      sessionId: "server-live",
+      project: "Masthead",
+      title: "Server live projection",
+      primaryStatus: "waiting_for_approval"
+    });
+    expect(projection.projection.attentionQueue[0]).toMatchObject({
+      type: "approval_requested",
+      severity: "P0",
+      affectedCommandIds: ["cmd-server-live"]
+    });
+    const events = await getJson(firstServer.baseUrl, "/events");
+    expect(events).toMatchObject({
+      ok: true,
+      events: [expect.objectContaining({ eventId: "codex:server-approval", sessionId: "server-live" })],
+      gitSnapshots: [],
+      diagnostics: []
+    });
+
+    await stopServer(firstServer.child);
+    servers.length = 0;
+
+    const restartedServer = await startServer(storePath);
+    servers.push(restartedServer.child);
+    const restartedProjection = await getJson(restartedServer.baseUrl, "/projection?expandedSessionId=server-live");
+
+    expect(restartedProjection.events).toBe(1);
+    expect(restartedProjection.projection.cards[0]).toMatchObject({
+      sessionId: "server-live",
+      title: "Server live projection"
+    });
+    const restartedEvents = await getJson(restartedServer.baseUrl, "/events");
+    expect(restartedEvents.events).toHaveLength(1);
+    expect(restartedEvents.events[0]).toMatchObject({ sessionId: "server-live" });
+  });
+
+  test("malformed hook payload records a diagnostic without accepting an event", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const server = await startServer(join(tempDir, "events.ndjson"));
+    servers.push(server.child);
+
+    const response = await fetch(`${server.baseUrl}/ingest`, {
+      body: "{bad json",
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({
+      ok: false,
+      status: "malformed",
+      events: 0,
+      diagnostic: {
+        code: "malformed_json"
+      }
+    });
+
+    const health = await getJson(server.baseUrl, "/health");
+    expect(health).toMatchObject({ events: 0, diagnostics: 1 });
+  });
+
+  test("reports non-secret LLM copy status without exposing the API key", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const server = await startServer(join(tempDir, "events.ndjson"), {
+      MASTHEAD_LLM_COPY: "1",
+      OPENAI_API_KEY: "redacted-local-test-key",
+      MASTHEAD_OPENAI_MODEL: "gpt-5-nano-2025-08-07"
+    });
+    servers.push(server.child);
+
+    const health = await getJson(server.baseUrl, "/health");
+    const serialized = JSON.stringify(health);
+
+    expect(health.llmCopy).toMatchObject({
+      enabled: true,
+      configured: true,
+      model: "gpt-5-nano-2025-08-07",
+      cacheEntries: 0
+    });
+    expect(serialized).not.toContain("redacted-local-test-key");
+    expect(serialized).not.toContain("OPENAI_API_KEY");
+  });
+
+  test("applies local retention to persisted live event history", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const server = await startServer(join(tempDir, "events.ndjson"));
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveApprovalPayload("server-retention"));
+    const retainedBefore = await getJson(server.baseUrl, "/events");
+    expect(retainedBefore.events).toHaveLength(1);
+
+    const pruned = await postJson(server.baseUrl, "/retention", {
+      policy: {
+        cutoffAt: "2026-06-24T00:00:00.000Z",
+        recordTypes: ["event"],
+        keepUnresolvedAttention: true
+      }
+    });
+
+    expect(pruned.result).toMatchObject({
+      removedRecords: 1,
+      removedRecordIds: ["event:codex:server-retention"],
+      retainedRecords: 0,
+      touchedExternalState: false
+    });
+    expect(pruned.events).toBe(0);
+    const retainedAfter = await getJson(server.baseUrl, "/events");
+    expect(retainedAfter.events).toEqual([]);
+    const projection = await getJson(server.baseUrl, "/projection");
+    expect(projection.projection.cards).toEqual([]);
+  });
+
+  test("clears persisted live collector history without touching external state", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const server = await startServer(join(tempDir, "events.ndjson"));
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveApprovalPayload("server-clear"));
+    expect((await getJson(server.baseUrl, "/events")).events).toHaveLength(1);
+
+    const cleared = await postJson(server.baseUrl, "/clear", {});
+
+    expect(cleared.result).toMatchObject({
+      removedRecords: 1,
+      touchedExternalState: false
+    });
+    expect(cleared.events).toBe(0);
+    expect(cleared.gitSnapshots).toBe(0);
+    expect((await getJson(server.baseUrl, "/events")).events).toEqual([]);
+    expect((await getJson(server.baseUrl, "/projection")).projection.cards).toEqual([]);
+  });
+
+  test("collects live Git snapshots and projects exact-file conflicts", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const repoPath = join(tempDir, "repo");
+    await createDirtyRepo(repoPath);
+    const server = await startServer(join(tempDir, "events.ndjson"));
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveSessionPayload("server-git-a", "session-git-a", repoPath));
+    const accepted = await postJson(server.baseUrl, "/ingest", liveSessionPayload("server-git-b", "session-git-b", repoPath));
+    expect(accepted.gitSnapshots).toBe(2);
+
+    const projection = await getJson(server.baseUrl, "/projection?expandedSessionId=session-git-a");
+
+    expect(projection.gitSnapshots).toBe(2);
+    expect(projection.projection.summary.conflicts).toBe(1);
+    expect(projection.projection.conflicts[0]).toMatchObject({
+      type: "exact_file_overlap",
+      severity: "high",
+      attribution: "degraded",
+      sharedPaths: ["src/shared.ts"],
+      sessionIds: ["session-git-a", "session-git-b"]
+    });
+    expect(projection.projection.cards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sessionId: "session-git-a", changedFileCount: 1, indicators: expect.arrayContaining(["conflict"]) }),
+        expect.objectContaining({ sessionId: "session-git-b", changedFileCount: 1, indicators: expect.arrayContaining(["conflict"]) })
+      ])
+    );
+  });
+
+  test("refreshes known live Git sessions after later file changes", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const repoPath = join(tempDir, "repo");
+    await createCleanRepo(repoPath);
+    const server = await startServer(join(tempDir, "events.ndjson"), { MASTHEAD_GIT_REFRESH_MS: "0" });
+    servers.push(server.child);
+
+    const accepted = await postJson(server.baseUrl, "/ingest", liveSessionPayload("server-refresh", "session-refresh", repoPath));
+    expect(accepted.gitSnapshots).toBe(1);
+    let projection = await getJson(server.baseUrl, "/projection?expandedSessionId=session-refresh");
+    expect(projection.projection.cards[0]).toMatchObject({ sessionId: "session-refresh", changedFileCount: 0 });
+
+    await writeFile(join(repoPath, "src/shared.ts"), "export const value = 3;\n", "utf8");
+    const refresh = await postJson(server.baseUrl, "/refresh", {});
+    expect(refresh.refreshed).toBe(1);
+    expect(refresh.gitSnapshots).toBe(2);
+    const events = await getJson(server.baseUrl, "/events");
+    expect(events.gitSnapshots).toHaveLength(2);
+
+    projection = await getJson(server.baseUrl, "/projection?expandedSessionId=session-refresh");
+    expect(projection.projection.cards[0]).toMatchObject({
+      sessionId: "session-refresh",
+      changedFileCount: 1,
+      primaryStatus: "editing"
+    });
+  });
+});
+
+async function startServer(
+  storePath: string,
+  env: Record<string, string> = {}
+): Promise<{ baseUrl: string; child: TestServerProcess }> {
+  const child = spawn(process.execPath, [serverScript], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      MASTHEAD_PORT: "0",
+      MASTHEAD_STORE_PATH: storePath,
+      ...env
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const baseUrl = await readServerUrl(child);
+  return { baseUrl, child };
+}
+
+function readServerUrl(child: TestServerProcess): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    const timeout = setTimeout(() => reject(new Error(`server did not start: ${output}`)), 5_000);
+
+    child.stdout.on("data", (chunk) => {
+      output += chunk.toString();
+      const match = output.match(/http:\/\/127\.0\.0\.1:(\d+)/);
+      if (!match) return;
+      clearTimeout(timeout);
+      resolve(`http://127.0.0.1:${match[1]}`);
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk.toString();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("exit", (code) => {
+      if (code !== null && code !== 0) {
+        clearTimeout(timeout);
+        reject(new Error(`server exited with ${code}: ${output}`));
+      }
+    });
+  });
+}
+
+async function stopServer(child: TestServerProcess): Promise<void> {
+  if (child.exitCode !== null || child.killed) return;
+  child.kill("SIGINT");
+  await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+}
+
+async function postJson(baseUrl: string, path: string, body: unknown): Promise<Record<string, unknown>> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST"
+  });
+  expect(response.status).toBe(202);
+  return response.json() as Promise<Record<string, unknown>>;
+}
+
+async function getJson(baseUrl: string, path: string): Promise<Record<string, any>> {
+  const response = await fetch(`${baseUrl}${path}`);
+  expect(response.status).toBe(200);
+  return response.json() as Promise<Record<string, any>>;
+}
+
+function liveApprovalPayload(providerEventId: string): Record<string, unknown> {
+  return {
+    provider_event_id: providerEventId,
+    event: "approval_requested",
+    session_id: "server-live",
+    timestamp: "2026-06-23T03:30:00.000Z",
+    cwd: "/workspace/masthead",
+    repo_root: "/workspace/masthead",
+    git_common_dir: "/workspace/masthead/.git",
+    branch: "agent/server-live",
+    project: "Masthead",
+    title: "Server live projection",
+    command_id: "cmd-server-live",
+    blast_radius: "production",
+    summary: "Server live approval"
+  };
+}
+
+function liveSessionPayload(providerEventId: string, sessionId: string, repoPath: string): Record<string, unknown> {
+  return {
+    provider_event_id: providerEventId,
+    event: "session_started",
+    session_id: sessionId,
+    timestamp: "2026-06-23T03:35:00.000Z",
+    cwd: repoPath,
+    repo_root: repoPath,
+    git_common_dir: join(repoPath, ".git"),
+    branch: "master",
+    project: "Masthead",
+    title: `Live Git ${sessionId}`
+  };
+}
+
+async function createDirtyRepo(repoPath: string): Promise<void> {
+  await createCleanRepo(repoPath);
+  await writeFile(join(repoPath, "src/shared.ts"), "export const value = 2;\n", "utf8");
+}
+
+async function createCleanRepo(repoPath: string): Promise<void> {
+  await mkdir(join(repoPath, "src"), { recursive: true });
+  await git(repoPath, ["init"]);
+  await git(repoPath, ["config", "user.email", "masthead@example.test"]);
+  await git(repoPath, ["config", "user.name", "Masthead Test"]);
+  await writeFile(join(repoPath, "src/shared.ts"), "export const value = 1;\n", "utf8");
+  await git(repoPath, ["add", "src/shared.ts"]);
+  await git(repoPath, ["commit", "-m", "initial"]);
+}
+
+async function git(cwd: string, args: string[]): Promise<void> {
+  await execFileAsync("git", ["-C", cwd, ...args]);
+}

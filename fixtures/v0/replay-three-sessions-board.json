@@ -1,0 +1,283 @@
+{
+  "expandedSessionId": "codex-auth-fix",
+  "events": [
+    {
+      "schemaVersion": 1,
+      "eventId": "event-auth-start",
+      "sessionId": "codex-auth-fix",
+      "source": {
+        "adapter": "codex",
+        "surface": "fixture",
+        "sourceEventId": "codex-auth-start"
+      },
+      "occurredAt": "2026-06-23T02:00:00.000Z",
+      "receivedAt": "2026-06-23T02:00:00.050Z",
+      "type": "session.started",
+      "workspace": {
+        "cwd": "/workspace/pip-auth",
+        "repoRoot": "/workspace/pip",
+        "worktreePath": "/workspace/pip-auth",
+        "gitCommonDir": "/workspace/pip/.git",
+        "branch": "agent/auth-fix",
+        "headSha": "abc123"
+      },
+      "summary": "Fix Google OAuth callback",
+      "payload": {
+        "project": "Pip",
+        "title": "Fix Google OAuth callback",
+        "objective": "Repair OAuth callback session handling",
+        "attribution": "direct"
+      },
+      "sensitivity": "metadata",
+      "payloadHash": "hash-auth-start",
+      "evidence": [
+        {
+          "id": "event-auth-start",
+          "kind": "event",
+          "observedAt": "2026-06-23T02:00:00.000Z",
+          "source": "codex.fixture"
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "event-auth-test-failed",
+      "sessionId": "codex-auth-fix",
+      "source": {
+        "adapter": "codex",
+        "surface": "fixture",
+        "sourceEventId": "codex-auth-test-failed"
+      },
+      "occurredAt": "2026-06-23T02:05:00.000Z",
+      "receivedAt": "2026-06-23T02:05:00.045Z",
+      "type": "command.finished",
+      "workspace": {
+        "cwd": "/workspace/pip-auth",
+        "repoRoot": "/workspace/pip",
+        "worktreePath": "/workspace/pip-auth",
+        "gitCommonDir": "/workspace/pip/.git",
+        "branch": "agent/auth-fix",
+        "headSha": "abc123"
+      },
+      "summary": "Auth test command failed",
+      "payload": {
+        "commandId": "cmd-auth-test",
+        "normalizedCommand": "npm test -- auth",
+        "category": "test",
+        "exitCode": 2,
+        "attribution": "shared_workspace",
+        "latestFeedbackSnapshot": {
+          "text": "Auth tests are still failing after callback changes.",
+          "source": "stop_hook",
+          "observedAt": "2026-06-23T02:05:00.000Z",
+          "redacted": true,
+          "bytesIn": 52,
+          "charsOut": 52,
+          "claims": ["mentions_tests", "mentions_error"]
+        }
+      },
+      "sensitivity": "metadata",
+      "payloadHash": "hash-auth-test-failed",
+      "evidence": [
+        {
+          "id": "event-auth-test-failed",
+          "kind": "event",
+          "observedAt": "2026-06-23T02:05:00.000Z",
+          "source": "codex.fixture"
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "event-imports-start",
+      "sessionId": "codex-imports",
+      "source": {
+        "adapter": "codex",
+        "surface": "fixture",
+        "sourceEventId": "codex-imports-start"
+      },
+      "occurredAt": "2026-06-23T02:01:00.000Z",
+      "receivedAt": "2026-06-23T02:01:00.050Z",
+      "type": "session.started",
+      "workspace": {
+        "cwd": "/workspace/internal-tools",
+        "repoRoot": "/workspace/internal-tools",
+        "worktreePath": "/workspace/internal-tools",
+        "gitCommonDir": "/workspace/internal-tools/.git",
+        "branch": "agent/imports",
+        "headSha": "def456"
+      },
+      "summary": "Rebuild customer import pipeline",
+      "payload": {
+        "project": "Internal Tools",
+        "title": "Rebuild customer import pipeline",
+        "objective": "Repair CSV import flow",
+        "attribution": "direct"
+      },
+      "sensitivity": "metadata",
+      "payloadHash": "hash-imports-start",
+      "evidence": [
+        {
+          "id": "event-imports-start",
+          "kind": "event",
+          "observedAt": "2026-06-23T02:01:00.000Z",
+          "source": "codex.fixture"
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "event-imports-approval",
+      "sessionId": "codex-imports",
+      "source": {
+        "adapter": "codex",
+        "surface": "fixture",
+        "sourceEventId": "codex-imports-approval"
+      },
+      "occurredAt": "2026-06-23T02:04:00.000Z",
+      "receivedAt": "2026-06-23T02:04:00.040Z",
+      "type": "approval.requested",
+      "workspace": {
+        "cwd": "/workspace/internal-tools",
+        "repoRoot": "/workspace/internal-tools",
+        "worktreePath": "/workspace/internal-tools",
+        "gitCommonDir": "/workspace/internal-tools/.git",
+        "branch": "agent/imports",
+        "headSha": "def456"
+      },
+      "summary": "Remote migration request waiting in Codex",
+      "payload": {
+        "commandId": "cmd-imports-migrate",
+        "command": "supabase db push --project [redacted]",
+        "blastRadius": "production",
+        "attribution": "direct"
+      },
+      "sensitivity": "redacted",
+      "payloadHash": "hash-imports-approval",
+      "evidence": [
+        {
+          "id": "event-imports-approval",
+          "kind": "event",
+          "observedAt": "2026-06-23T02:04:00.000Z",
+          "source": "codex.fixture"
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "event-middleware-start",
+      "sessionId": "codex-middleware-cleanup",
+      "source": {
+        "adapter": "codex",
+        "surface": "fixture",
+        "sourceEventId": "codex-middleware-start"
+      },
+      "occurredAt": "2026-06-23T02:02:00.000Z",
+      "receivedAt": "2026-06-23T02:02:00.050Z",
+      "type": "session.started",
+      "workspace": {
+        "cwd": "/workspace/pip-middleware",
+        "repoRoot": "/workspace/pip",
+        "worktreePath": "/workspace/pip-middleware",
+        "gitCommonDir": "/workspace/pip/.git",
+        "branch": "agent/middleware-cleanup",
+        "headSha": "abc123"
+      },
+      "summary": "Simplify session middleware",
+      "payload": {
+        "project": "Pip",
+        "title": "Simplify session middleware",
+        "objective": "Clean up auth middleware session handling",
+        "attribution": "direct"
+      },
+      "sensitivity": "metadata",
+      "payloadHash": "hash-middleware-start",
+      "evidence": [
+        {
+          "id": "event-middleware-start",
+          "kind": "event",
+          "observedAt": "2026-06-23T02:02:00.000Z",
+          "source": "codex.fixture"
+        }
+      ]
+    }
+  ],
+  "gitSnapshots": [
+    {
+      "snapshotId": "git-auth-fix-1",
+      "sessionId": "codex-auth-fix",
+      "repoRoot": "/workspace/pip",
+      "worktreePath": "/workspace/pip-auth",
+      "gitCommonDir": "/workspace/pip/.git",
+      "branch": "agent/auth-fix",
+      "headSha": "abc123",
+      "changedPaths": [
+        {
+          "path": "src/lib/auth/session.ts",
+          "status": "modified",
+          "staged": false,
+          "additions": 42,
+          "deletions": 11,
+          "sensitivity": "metadata"
+        },
+        {
+          "path": "src/app/api/auth/callback.ts",
+          "status": "modified",
+          "staged": false,
+          "additions": 22,
+          "deletions": 8,
+          "sensitivity": "metadata"
+        }
+      ],
+      "observedAt": "2026-06-23T02:07:00.000Z"
+    },
+    {
+      "snapshotId": "git-middleware-1",
+      "sessionId": "codex-middleware-cleanup",
+      "repoRoot": "/workspace/pip",
+      "worktreePath": "/workspace/pip-middleware",
+      "gitCommonDir": "/workspace/pip/.git",
+      "branch": "agent/middleware-cleanup",
+      "headSha": "abc123",
+      "changedPaths": [
+        {
+          "path": "src/lib/auth/session.ts",
+          "status": "modified",
+          "staged": false,
+          "additions": 18,
+          "deletions": 4,
+          "sensitivity": "metadata"
+        },
+        {
+          "path": "src/middleware.ts",
+          "status": "modified",
+          "staged": false,
+          "additions": 15,
+          "deletions": 12,
+          "sensitivity": "metadata"
+        }
+      ],
+      "observedAt": "2026-06-23T02:07:05.000Z"
+    },
+    {
+      "snapshotId": "git-imports-1",
+      "sessionId": "codex-imports",
+      "repoRoot": "/workspace/internal-tools",
+      "worktreePath": "/workspace/internal-tools",
+      "gitCommonDir": "/workspace/internal-tools/.git",
+      "branch": "agent/imports",
+      "headSha": "def456",
+      "changedPaths": [
+        {
+          "path": "supabase/migrations/20260623020500_import_pipeline.sql",
+          "status": "added",
+          "staged": false,
+          "additions": 81,
+          "deletions": 0,
+          "sensitivity": "metadata"
+        }
+      ],
+      "observedAt": "2026-06-23T02:06:00.000Z"
+    }
+  ]
+}

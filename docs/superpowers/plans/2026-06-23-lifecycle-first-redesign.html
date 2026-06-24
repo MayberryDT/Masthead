@@ -1,0 +1,923 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Masthead Lifecycle-First Redesign Plan</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --canvas: #07080a;
+        --surface: #0d0d0d;
+        --surface-elevated: #101111;
+        --surface-card: #121212;
+        --hairline: #242728;
+        --hairline-strong: rgba(255, 255, 255, 0.16);
+        --ink: #f4f4f6;
+        --body: #cdcdcd;
+        --mute: #9c9c9d;
+        --ash: #6a6b6c;
+        --green: #59d499;
+        --green-soft: rgba(89, 212, 153, 0.15);
+        --yellow: #ffc533;
+        --yellow-soft: rgba(255, 197, 51, 0.15);
+        --red: #ff6161;
+        --red-soft: rgba(255, 97, 97, 0.15);
+        --blue: #57c1ff;
+        --blue-soft: rgba(87, 193, 255, 0.15);
+        --white: #ffffff;
+        --black: #000000;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-feature-settings: "calt", "kern", "liga", "ss03";
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-height: 100%;
+        -webkit-font-smoothing: antialiased;
+        font-variant-numeric: tabular-nums;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background: var(--canvas);
+        color: var(--ink);
+      }
+
+      body::before {
+        position: fixed;
+        inset: 0 0 auto;
+        height: 10px;
+        background:
+          linear-gradient(115deg, transparent 0 18%, #ff5757 18% 30%, transparent 30% 38%, #c32127 38% 50%, transparent 50% 58%, #7f1015 58% 70%, transparent 70%),
+          var(--canvas);
+        content: "";
+        opacity: 0.9;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .shell {
+        width: min(1320px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 42px 0 72px;
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 20px;
+        align-items: center;
+        min-height: 56px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .brand {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        min-width: 0;
+      }
+
+      .mark {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--white);
+        font-weight: 600;
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0;
+      }
+
+      .brand p,
+      .eyebrow,
+      .meta,
+      .muted,
+      .task p,
+      .modal p,
+      .card p,
+      .lane-caption {
+        margin: 0;
+        color: var(--mute);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .primary-pill,
+      .ghost-pill,
+      .chip,
+      .state {
+        display: inline-flex;
+        min-height: 34px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        padding: 0 13px;
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      .primary-pill {
+        background: var(--white);
+        color: var(--black);
+      }
+
+      .ghost-pill,
+      .chip,
+      .state {
+        border: 1px solid var(--hairline);
+        background: var(--surface-elevated);
+        color: var(--body);
+      }
+
+      .intro {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 0.55fr);
+        gap: 24px;
+        align-items: end;
+        padding: 44px 0 28px;
+      }
+
+      .intro h2 {
+        max-width: 780px;
+        margin: 0;
+        color: var(--ink);
+        font-size: clamp(34px, 5vw, 58px);
+        font-weight: 600;
+        line-height: 1.05;
+        letter-spacing: 0;
+        text-wrap: balance;
+      }
+
+      .intro-card,
+      .panel,
+      .task,
+      .lane,
+      .card,
+      .modal,
+      .rubric {
+        border: 1px solid var(--hairline);
+        background: var(--surface);
+      }
+
+      .intro-card {
+        display: grid;
+        gap: 14px;
+        border-radius: 10px;
+        padding: 18px;
+      }
+
+      .intro-card strong {
+        color: var(--white);
+        font-size: 24px;
+        font-weight: 500;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .section {
+        display: grid;
+        gap: 16px;
+        margin-top: 32px;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .section h3 {
+        margin: 0;
+        color: var(--white);
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: 0;
+      }
+
+      .mock-app {
+        overflow: hidden;
+        border: 1px solid var(--hairline);
+        border-radius: 16px;
+        background: var(--surface);
+      }
+
+      .mock-nav {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        align-items: center;
+        min-height: 58px;
+        border-bottom: 1px solid var(--hairline);
+        padding: 0 18px;
+        background: var(--canvas);
+      }
+
+      .mock-main {
+        display: grid;
+        gap: 14px;
+        padding: 18px;
+      }
+
+      .status-row {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--surface-elevated);
+      }
+
+      .metric {
+        padding: 14px;
+        border-left: 1px solid var(--hairline);
+      }
+
+      .metric:first-child {
+        border-left: 0;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--ash);
+        font-size: 12px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 5px;
+        color: var(--white);
+        font-size: 28px;
+        font-weight: 500;
+      }
+
+      .lanes {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .lane {
+        min-width: 0;
+        border-radius: 10px;
+        background: var(--surface);
+      }
+
+      .lane-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        border-bottom: 1px solid var(--hairline);
+        padding: 13px;
+      }
+
+      .lane-head h4 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .lane-body {
+        display: grid;
+        gap: 10px;
+        padding: 10px;
+      }
+
+      .card {
+        display: grid;
+        gap: 12px;
+        min-height: 142px;
+        border-radius: 8px;
+        padding: 13px;
+        background: var(--surface-elevated);
+      }
+
+      .card-top,
+      .card-footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: start;
+      }
+
+      .card h5 {
+        margin: 0;
+        color: var(--white);
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .state.running {
+        border-color: rgba(89, 212, 153, 0.34);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .state.action {
+        border-color: rgba(255, 97, 97, 0.34);
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .state.ended {
+        border-color: rgba(255, 197, 51, 0.34);
+        background: var(--yellow-soft);
+        color: var(--yellow);
+      }
+
+      .state.inferred {
+        border-color: rgba(87, 193, 255, 0.34);
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .facts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .fact {
+        border: 1px solid var(--hairline);
+        border-radius: 6px;
+        padding: 4px 7px;
+        background: var(--surface-card);
+        color: var(--body);
+        font-size: 12px;
+      }
+
+      .modal-demo {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1fr);
+        gap: 16px;
+        align-items: start;
+      }
+
+      .modal {
+        overflow: hidden;
+        border-radius: 16px;
+        background: var(--surface);
+      }
+
+      .modal-bar {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        border-bottom: 1px solid var(--hairline);
+        padding: 15px 16px;
+      }
+
+      .modal h4 {
+        margin: 0;
+        color: var(--white);
+        font-size: 18px;
+      }
+
+      .modal-grid {
+        display: grid;
+        grid-template-columns: 0.85fr 1.15fr;
+        gap: 1px;
+        background: var(--hairline);
+      }
+
+      .modal-section {
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+        background: var(--surface);
+        padding: 16px;
+      }
+
+      .modal-section h5,
+      .task h4,
+      .rubric h4 {
+        margin: 0;
+        color: var(--white);
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .timeline {
+        display: grid;
+        gap: 8px;
+      }
+
+      .timeline-row {
+        display: grid;
+        grid-template-columns: 72px 1fr;
+        gap: 10px;
+        font-size: 13px;
+      }
+
+      .timeline-row span {
+        color: var(--ash);
+      }
+
+      .tasks {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .task {
+        display: grid;
+        align-content: start;
+        gap: 10px;
+        min-height: 190px;
+        border-radius: 10px;
+        padding: 16px;
+      }
+
+      .task-num {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        background: var(--surface-card);
+        color: var(--white);
+        font-size: 12px;
+      }
+
+      .rubric-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .rubric {
+        border-radius: 10px;
+        padding: 16px;
+      }
+
+      .rubric strong {
+        display: block;
+        color: var(--white);
+        font-size: 30px;
+        font-weight: 500;
+      }
+
+      .footer-note {
+        margin-top: 28px;
+        border-top: 1px solid var(--hairline);
+        padding-top: 18px;
+      }
+
+      @media (max-width: 980px) {
+        .intro,
+        .modal-demo,
+        .modal-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .lanes,
+        .tasks,
+        .rubric-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      @media (max-width: 620px) {
+        .shell {
+          width: min(100% - 20px, 1320px);
+        }
+
+        .topbar,
+        .mock-nav,
+        .section-head {
+          grid-template-columns: 1fr;
+          align-items: start;
+        }
+
+        .status-row,
+        .lanes,
+        .tasks,
+        .rubric-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .metric {
+          border-left: 0;
+          border-top: 1px solid var(--hairline);
+        }
+
+        .metric:first-child {
+          border-top: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="mark">M</div>
+          <div>
+            <h1>Masthead lifecycle-first redesign plan</h1>
+            <p>Plan artifact for the next implementation pass. No app code has been changed by this file.</p>
+          </div>
+        </div>
+        <a class="primary-pill" href="./2026-06-23-lifecycle-first-redesign.md">Open implementation plan</a>
+      </header>
+
+      <section class="intro">
+        <div>
+          <p class="eyebrow">Design thesis</p>
+          <h2>The board should answer: what is running, what ended, why did it end, and what do I do next?</h2>
+        </div>
+        <aside class="intro-card">
+          <p class="eyebrow">Current failure</p>
+          <strong>Live data is present, but stale review labels are louder than runtime truth.</strong>
+          <p>Dismissed, reviewed, and evidence counts should not be front-and-center on active session cards. They belong in secondary context or the modal.</p>
+          <div class="chips">
+            <span class="chip">Lifecycle first</span>
+            <span class="chip">Modal details</span>
+            <span class="chip">Quiet chrome</span>
+          </div>
+        </aside>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Target first screen</p>
+            <h3>Lifecycle lanes replace expanding cards</h3>
+          </div>
+          <p class="muted">Cards show current runtime facts. Clicking opens the modal.</p>
+        </div>
+
+        <div class="mock-app">
+          <div class="mock-nav">
+            <div class="brand">
+              <div class="mark">M</div>
+              <div>
+                <h1>Masthead</h1>
+                <p>Live collector - 271 events - last projection 8s ago</p>
+              </div>
+            </div>
+            <div class="chips">
+              <span class="ghost-pill">Sessions</span>
+              <span class="ghost-pill">History</span>
+              <span class="primary-pill">Open active session</span>
+            </div>
+          </div>
+
+          <div class="mock-main">
+            <div class="status-row">
+              <div class="metric">
+                <span>Running</span>
+                <strong>2</strong>
+              </div>
+              <div class="metric">
+                <span>Needs action</span>
+                <strong>0</strong>
+              </div>
+              <div class="metric">
+                <span>Ended to review</span>
+                <strong>1</strong>
+              </div>
+              <div class="metric">
+                <span>Completed</span>
+                <strong>4</strong>
+              </div>
+            </div>
+
+            <div class="lanes">
+              <section class="lane">
+                <div class="lane-head">
+                  <div>
+                    <h4>Running now</h4>
+                    <p class="lane-caption">Fresh hook activity</p>
+                  </div>
+                  <span class="state running">2</span>
+                </div>
+                <div class="lane-body">
+                  <article class="card">
+                    <div class="card-top">
+                      <div>
+                        <h5>Pip Codex session</h5>
+                        <p>Last event 8s ago</p>
+                      </div>
+                      <span class="state running">Editing</span>
+                    </div>
+                    <p>Current worktree has fresh activity. Previous dismissals do not change runtime state.</p>
+                    <div class="facts">
+                      <span class="fact">Pip</span>
+                      <span class="fact">13 files</span>
+                      <span class="fact">Codex hook</span>
+                    </div>
+                  </article>
+                  <article class="card">
+                    <div class="card-top">
+                      <div>
+                        <h5>Masthead Codex session</h5>
+                        <p>Last event 20s ago</p>
+                      </div>
+                      <span class="state running">Reading</span>
+                    </div>
+                    <p>Quiet active session. No action needed.</p>
+                    <div class="facts">
+                      <span class="fact">Masthead</span>
+                      <span class="fact">0 files</span>
+                      <span class="fact">Direct</span>
+                    </div>
+                  </article>
+                </div>
+              </section>
+
+              <section class="lane">
+                <div class="lane-head">
+                  <div>
+                    <h4>Needs action</h4>
+                    <p class="lane-caption">Approvals, questions, failures</p>
+                  </div>
+                  <span class="state action">0</span>
+                </div>
+                <div class="lane-body">
+                  <article class="card">
+                    <div class="card-top">
+                      <div>
+                        <h5>Empty by design</h5>
+                        <p>No approvals or failures</p>
+                      </div>
+                      <span class="state running">Clear</span>
+                    </div>
+                    <p>This lane should be quiet unless there is an actual next action.</p>
+                    <div class="facts">
+                      <span class="fact">No stale dismissals</span>
+                      <span class="fact">No false failures</span>
+                    </div>
+                  </article>
+                </div>
+              </section>
+
+              <section class="lane">
+                <div class="lane-head">
+                  <div>
+                    <h4>Ended to review</h4>
+                    <p class="lane-caption">Ended sessions grouped by reason</p>
+                  </div>
+                  <span class="state ended">1</span>
+                </div>
+                <div class="lane-body">
+                  <article class="card">
+                    <div class="card-top">
+                      <div>
+                        <h5>Auth cleanup session</h5>
+                        <p>Ended 12m ago</p>
+                      </div>
+                      <span class="state ended">Needs review</span>
+                    </div>
+                    <p>Completed hook observed, but no post-change verification was captured.</p>
+                    <div class="facts">
+                      <span class="fact">Reason: completed unverified</span>
+                      <span class="fact">4 files</span>
+                    </div>
+                  </article>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Detail pattern</p>
+            <h3>Card click opens a modal, not an expanded grid card</h3>
+          </div>
+          <p class="muted">The modal can carry all evidence without making the board noisy.</p>
+        </div>
+
+        <div class="modal-demo">
+          <div class="panel" style="border-radius: 10px; padding: 16px;">
+            <p class="eyebrow">Why modal wins here</p>
+            <div class="tasks" style="grid-template-columns: 1fr; margin-top: 12px;">
+              <div class="task">
+                <span class="task-num">1</span>
+                <h4>Board stays scannable</h4>
+                <p>Cards can stay small and lifecycle-focused while details move into a deliberate inspection surface.</p>
+              </div>
+              <div class="task">
+                <span class="task-num">2</span>
+                <h4>Review state is contextual</h4>
+                <p>Dismissed or reviewed becomes a note in the modal, not the runtime status on the card.</p>
+              </div>
+              <div class="task">
+                <span class="task-num">3</span>
+                <h4>Evidence can stay complete</h4>
+                <p>Raw evidence references, timeline, changed files, and classifier output still exist, just not front-and-center.</p>
+              </div>
+            </div>
+          </div>
+
+          <aside class="modal">
+            <div class="modal-bar">
+              <div>
+                <p class="eyebrow">Session detail</p>
+                <h4>Pip Codex session</h4>
+              </div>
+              <span class="state running">Running now</span>
+            </div>
+            <div class="modal-grid">
+              <section class="modal-section">
+                <h5>Current activity</h5>
+                <p>Editing in `/home/tyler/Documents/Pip`. Last hook event 8 seconds ago.</p>
+                <div class="facts">
+                  <span class="fact">13 changed files</span>
+                  <span class="fact">Codex hook</span>
+                  <span class="fact">Direct session</span>
+                </div>
+              </section>
+              <section class="modal-section">
+                <h5>Lifecycle and outcome</h5>
+                <p>Lifecycle is deterministic: running. Outcome classifier waits until the session ends or goes stale.</p>
+                <div class="facts">
+                  <span class="state inferred">LLM off until end</span>
+                  <span class="fact">No current action</span>
+                </div>
+              </section>
+              <section class="modal-section">
+                <h5>Review state</h5>
+                <p>Previously dismissed 50 minutes ago. New activity has arrived since then, so the dismissal no longer labels the active card.</p>
+              </section>
+              <section class="modal-section">
+                <h5>Recent timeline</h5>
+                <div class="timeline">
+                  <div class="timeline-row"><span>8s</span><strong>command.finished</strong></div>
+                  <div class="timeline-row"><span>12s</span><strong>git snapshot refreshed</strong></div>
+                  <div class="timeline-row"><span>50m</span><strong>user dismissed old item</strong></div>
+                </div>
+              </section>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Implementation sequence</p>
+            <h3>Build the lifecycle model before repainting the UI</h3>
+          </div>
+          <p class="muted">The optimized order fixes data truth before UI and visual polish.</p>
+        </div>
+
+        <div class="tasks">
+          <article class="task">
+            <span class="task-num">0</span>
+            <h4>Regression freeze</h4>
+            <p>Lock the stale dismissed-running-session bug, idle-not-ended behavior, and terminal needs-review case in tests.</p>
+            <span class="chip">Failing tests first</span>
+          </article>
+          <article class="task">
+            <span class="task-num">1</span>
+            <h4>Compatible contracts</h4>
+            <p>Add lifecycle, outcome, lane, review annotation, and modal view types without breaking current projection consumers.</p>
+            <span class="chip">Migration safety</span>
+          </article>
+          <article class="task">
+            <span class="task-num">2</span>
+            <h4>Lifecycle engine</h4>
+            <p>Derive running, idle, and ended deterministically from events, timestamps, terminal state, and observer data.</p>
+            <span class="chip">Core tests first</span>
+          </article>
+          <article class="task">
+            <span class="task-num">3</span>
+            <h4>Outcome policy</h4>
+            <p>Classify ended sessions as completed, needs attention, blocked, failed, abandoned, or unknown.</p>
+            <span class="chip">Evidence before claims</span>
+          </article>
+          <article class="task">
+            <span class="task-num">4</span>
+            <h4>LLM candidate validation</h4>
+            <p>Validate optional outcome candidates against evidence refs without enabling remote model calls by default.</p>
+            <span class="chip">Model cannot decide running</span>
+          </article>
+          <article class="task">
+            <span class="task-num">5</span>
+            <h4>Disposition freshness</h4>
+            <p>Dismiss and review become secondary annotations. New activity invalidates stale session-level labels.</p>
+            <span class="chip">Fix stale semantics</span>
+          </article>
+          <article class="task">
+            <span class="task-num">6</span>
+            <h4>Lifecycle projection</h4>
+            <p>Project sessions into Needs action, Running, Idle, Ended to review, and History lanes.</p>
+            <span class="chip">Board source of truth</span>
+          </article>
+          <article class="task">
+            <span class="task-num">7</span>
+            <h4>Modal detail</h4>
+            <p>Replace expanded cards with a modal for current activity, review state, worktree, evidence, and timeline.</p>
+            <span class="chip">Less busy board</span>
+          </article>
+          <article class="task">
+            <span class="task-num">8</span>
+            <h4>Visual redesign</h4>
+            <p>Apply the design reference: near-black canvas, hairline borders, no shadows, Inter ss03, sparse color.</p>
+            <span class="chip">Premium console feel</span>
+          </article>
+          <article class="task">
+            <span class="task-num">9</span>
+            <h4>Dogfood gates</h4>
+            <p>Add gates for live running visibility, stale dismissal behavior, idle state, end reasons, and modal evidence.</p>
+            <span class="chip">Prove live behavior</span>
+          </article>
+          <article class="task">
+            <span class="task-num">10</span>
+            <h4>Browser QA</h4>
+            <p>Verify desktop and mobile widths in the in-app Browser with real live collector data.</p>
+            <span class="chip">Rendered proof</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">LLM role</p>
+            <h3>Use a small fast model for why it ended, not whether it is running</h3>
+          </div>
+        </div>
+        <div class="tasks" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+          <article class="task">
+            <span class="task-num">A</span>
+            <h4>Deterministic source of truth</h4>
+            <p>Running, idle, and ended come from hook events, timestamps, terminal events, and observer state.</p>
+          </article>
+          <article class="task">
+            <span class="task-num">B</span>
+            <h4>Evidence-backed inference</h4>
+            <p>A future model receives redacted metadata and returns a strict outcome candidate with evidence refs.</p>
+          </article>
+          <article class="task">
+            <span class="task-num">C</span>
+            <h4>Visible uncertainty</h4>
+            <p>Low-confidence candidates show as inferred context and never become urgent P0 alerts.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Plan score</p>
+            <h3>Self-check against the redesign goal</h3>
+          </div>
+        </div>
+        <div class="rubric-grid">
+          <div class="rubric">
+            <strong>19/20</strong>
+            <h4>Lifecycle clarity</h4>
+            <p>Runtime lifecycle is deterministic and separate from outcome and review overlays.</p>
+          </div>
+          <div class="rubric">
+            <strong>14/15</strong>
+            <h4>Data correctness</h4>
+            <p>Outcomes require evidence; missing exit status does not become false failure.</p>
+          </div>
+          <div class="rubric">
+            <strong>14/15</strong>
+            <h4>Visual direction</h4>
+            <p>Cards are quiet, modal carries detail, and design tokens are concrete.</p>
+          </div>
+          <div class="rubric">
+            <strong>93/100</strong>
+            <h4>Implementation risk</h4>
+            <p>Compatibility and live gates reduce the risk of another misleading board.</p>
+          </div>
+        </div>
+      </section>
+
+      <p class="footer-note muted">
+        Acceptance target: when a new Codex session starts, it appears under Running quickly. When it ends, it moves to an ended lane with a reason. Dismissed/reviewed labels never override fresh runtime state.
+      </p>
+    </main>
+  </body>
+</html>

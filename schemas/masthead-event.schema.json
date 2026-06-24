@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.local/schemas/masthead-event.schema.json",
+  "title": "NormalizedEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "source",
+    "occurredAt",
+    "receivedAt",
+    "type",
+    "summary",
+    "payload",
+    "sensitivity",
+    "payloadHash",
+    "evidence"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "eventId": { "type": "string", "minLength": 1 },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter", "surface"],
+      "properties": {
+        "adapter": { "enum": ["codex", "git", "masthead"] },
+        "surface": { "enum": ["hook", "fixture", "observer", "user"] },
+        "sourceEventId": { "type": "string" }
+      }
+    },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "receivedAt": { "type": "string", "format": "date-time" },
+    "type": {
+      "enum": [
+        "session.started",
+        "approval.requested",
+        "user.question",
+        "command.started",
+        "command.finished",
+        "file.changed",
+        "session.completed"
+      ]
+    },
+    "workspace": { "$ref": "#/$defs/workspaceRef" },
+    "summary": { "type": "string" },
+    "payload": { "type": "object", "additionalProperties": true },
+    "sensitivity": { "enum": ["metadata", "redacted", "sensitive_path_only"] },
+    "payloadHash": { "type": "string", "minLength": 1 },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceRef" }
+    }
+  },
+  "$defs": {
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "observedAt", "source"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["event", "command", "git_snapshot", "file_change", "conflict", "redaction"] },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "source": { "type": "string", "minLength": 1 }
+      }
+    },
+    "workspaceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cwd": { "type": "string" },
+        "repoRoot": { "type": "string" },
+        "worktreePath": { "type": "string" },
+        "gitCommonDir": { "type": "string" },
+        "branch": { "type": "string" },
+        "headSha": { "type": "string" }
+      }
+    }
+  }
+}

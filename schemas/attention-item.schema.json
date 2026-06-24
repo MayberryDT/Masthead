@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.local/schemas/attention-item.schema.json",
+  "title": "AttentionItem",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "itemId",
+    "sessionId",
+    "project",
+    "type",
+    "severity",
+    "title",
+    "createdAt",
+    "affectedPaths",
+    "affectedCommandIds",
+    "evidence",
+    "support",
+    "suggestedNextAction"
+  ],
+  "properties": {
+    "itemId": { "type": "string", "minLength": 1 },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "project": { "type": "string", "minLength": 1 },
+    "type": {
+      "enum": [
+        "approval_requested",
+        "user_question",
+        "command_failed",
+        "repeated_failure",
+        "stalled",
+        "completed_without_verification",
+        "stale_verification",
+        "high_risk_change",
+        "conflict"
+      ]
+    },
+    "severity": { "enum": ["P0", "P1", "P2", "P3"] },
+    "title": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "affectedPaths": { "type": "array", "items": { "type": "string" } },
+    "affectedCommandIds": { "type": "array", "items": { "type": "string" } },
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidenceRef" } },
+    "support": { "enum": ["deterministic", "inferred"] },
+    "suggestedNextAction": { "type": "string", "minLength": 1 },
+    "dismissedAt": { "type": "string", "format": "date-time" },
+    "snoozedUntil": { "type": "string", "format": "date-time" },
+    "resolvedAt": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "observedAt", "source"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["event", "command", "git_snapshot", "file_change", "conflict", "redaction"] },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "source": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
