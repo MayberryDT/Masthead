@@ -14,6 +14,7 @@ type Props = {
 export function SessionDetailModal({ session, onClose, onAction, actionStatus }: Props) {
   const modalRef = useRef<HTMLElement>(null);
   const closeTimeoutRef = useRef<number | undefined>(undefined);
+  const closeFrameRef = useRef<number | undefined>(undefined);
   const [modalState, setModalState] = useState<"opening" | "open" | "closing">("opening");
   const modalClassName = [
     "session-detail-modal",
@@ -39,6 +40,9 @@ export function SessionDetailModal({ session, onClose, onAction, actionStatus }:
       if (closeTimeoutRef.current !== undefined) {
         window.clearTimeout(closeTimeoutRef.current);
       }
+      if (closeFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(closeFrameRef.current);
+      }
     };
   }, []);
 
@@ -58,7 +62,12 @@ export function SessionDetailModal({ session, onClose, onAction, actionStatus }:
     setModalState("closing");
     const closeMs =
       parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--modal-close-dur")) || 150;
-    closeTimeoutRef.current = window.setTimeout(onClose, closeMs);
+    closeFrameRef.current = window.requestAnimationFrame(() => {
+      closeFrameRef.current = window.requestAnimationFrame(() => {
+        closeFrameRef.current = undefined;
+        closeTimeoutRef.current = window.setTimeout(onClose, closeMs);
+      });
+    });
   };
 
   return (

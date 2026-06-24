@@ -97,6 +97,7 @@ export function SessionBoard({
   );
 }
 
+
 function laneDescription(laneId: LifecycleLaneView["laneId"]): string {
   const descriptions: Record<LifecycleLaneView["laneId"], string> = {
     running: "Active now",

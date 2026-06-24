@@ -21,6 +21,8 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
   return (
     <article
       className={`session-card metal-surface metal-card ${className}`}
+      data-session-id={session.sessionId}
+      style={{ viewTransitionName: `session-card-${viewTransitionNamePart(session.sessionId)}` }}
       role="button"
       aria-label={`Open ${session.copy.headline} details`}
       tabIndex={0}
@@ -64,6 +66,10 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
       </footer>
     </article>
   );
+}
+
+function viewTransitionNamePart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
 function Fact({

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import fixture from "../../fixtures/v0/replay-three-sessions-board.json";
 import { buildHistoryRecords } from "../core/historyRecords";
 import {
@@ -50,6 +51,8 @@ type ConnectorActionState =
   | { state: "started"; message?: string }
   | { state: "unsupported"; message?: string }
   | { state: "error"; message?: string };
+
+type CardLayoutSnapshot = Map<string, DOMRect>;
 
 const replay = fixture as FixtureReplay;
 const liveProjectionUrl = defaultLiveProjectionUrl();
@@ -158,6 +161,18 @@ export function App() {
       ? board.selectedSession
       : undefined;
   const connectorDisplayState = connectorStateForToolbar(liveConnection, connectorAction);
+  const toggleDensity = useCallback(() => {
+    const updateDensity = () => setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      updateDensity();
+      return;
+    }
+
+    const previousLayout = captureCardLayout();
+    flushSync(updateDensity);
+    animateCardLayoutFrom(previousLayout);
+  }, []);
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -435,7 +450,7 @@ export function App() {
               onActivityWindowChange={setActivityWindow}
               onRefreshRateChange={setRefreshRateMs}
               onConnectorAction={handleStartConnector}
-              onDensityToggle={() => setDensity((current) => (current === "compact" ? "comfortable" : "compact"))}
+              onDensityToggle={toggleDensity}
               searchInputRef={searchInputRef}
             />
             <SessionBoard
@@ -472,6 +487,54 @@ export function App() {
       ) : null}
     </>
   );
+}
+
+function captureCardLayout(): CardLayoutSnapshot {
+  const rects: CardLayoutSnapshot = new Map();
+  document.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card) => {
+    const sessionId = card.dataset.sessionId;
+    if (sessionId) rects.set(sessionId, card.getBoundingClientRect());
+  });
+  return rects;
+}
+
+function animateCardLayoutFrom(previousLayout: CardLayoutSnapshot): void {
+  document.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card) => {
+    const sessionId = card.dataset.sessionId;
+    const previousRect = sessionId ? previousLayout.get(sessionId) : undefined;
+    if (!previousRect) return;
+
+    const nextRect = card.getBoundingClientRect();
+    const deltaX = previousRect.left - nextRect.left;
+    const deltaY = previousRect.top - nextRect.top;
+    const scaleX = previousRect.width / Math.max(nextRect.width, 1);
+    const scaleY = previousRect.height / Math.max(nextRect.height, 1);
+    const moved = Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5;
+    const resized = Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01;
+    if (!moved && !resized) return;
+
+    const previousTransition = card.style.transition;
+    const previousTransform = card.style.transform;
+    const previousTransformOrigin = card.style.transformOrigin;
+
+    card.classList.add("is-layout-animating");
+    card.style.transition = "none";
+    card.style.transformOrigin = "top left";
+    card.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`;
+    void card.offsetWidth;
+
+    window.requestAnimationFrame(() => {
+      card.style.transition = "transform 300ms cubic-bezier(0.22, 1, 0.36, 1)";
+      card.style.transform = "translate(0, 0) scale(1, 1)";
+
+      window.setTimeout(() => {
+        card.style.transition = previousTransition;
+        card.style.transform = previousTransform;
+        card.style.transformOrigin = previousTransformOrigin;
+        card.classList.remove("is-layout-animating");
+      }, 320);
+    });
+  });
 }
 
 function connectorStateForToolbar(

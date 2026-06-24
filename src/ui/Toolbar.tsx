@@ -69,6 +69,7 @@ export function Toolbar({
 }: Props) {
   const connectorLabel = connectorButtonLabel(connectorState, connectorBusy);
   const connectorDisabled = connectorState !== "disconnected" || connectorBusy || !onConnectorAction;
+  const toggleLayoutLabel = density === "compact" ? "Comfortable grid" : "Compact grid";
 
   return (
     <section className="board-toolbar observability-toolbar metal-toolbar" aria-label="Board controls">
@@ -140,13 +141,14 @@ export function Toolbar({
         ) : null}
         <button
           type="button"
-          className={`toolbar-icon-button metal-control ${density === "compact" ? "active" : ""}`}
-          aria-label={density === "compact" ? "Comfortable grid" : "Compact grid"}
+          className={`toolbar-icon-button metal-control layout-toggle ${density === "compact" ? "active" : ""}`}
+          aria-label={toggleLayoutLabel}
           aria-pressed={density === "compact"}
           title="Change layout"
           onClick={onDensityToggle}
         >
           <Icon name="changeLayout" size="toolbar" weight={iconWeights.toolbar} />
+          <span className="layout-toggle-text">{toggleLayoutLabel}</span>
         </button>
       </div>
     </section>
@@ -175,7 +177,9 @@ function ToolbarSelect<T extends string>({
   onChange: (value: string) => void;
   className?: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [menuState, setMenuState] = useState<"closed" | "open" | "closing">("closed");
+  const open = menuState === "open";
+  const menuMounted = menuState !== "closed";
   const selectedIndex = Math.max(
     0,
     options.findIndex((option) => option.value === value)
@@ -185,6 +189,41 @@ function ToolbarSelect<T extends string>({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const closeTimerRef = useRef<number | undefined>(undefined);
+  const closeFrameRef = useRef<number | undefined>(undefined);
+
+  const clearCloseTimers = () => {
+    if (closeTimerRef.current !== undefined) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = undefined;
+    }
+
+    if (closeFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(closeFrameRef.current);
+      closeFrameRef.current = undefined;
+    }
+  };
+
+  const openMenu = () => {
+    clearCloseTimers();
+    setMenuState("open");
+  };
+
+  const closeMenu = () => {
+    clearCloseTimers();
+
+    const closeMs = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur")) || 150;
+    setMenuState((current) => (current === "closed" ? current : "closing"));
+    closeFrameRef.current = window.requestAnimationFrame(() => {
+      closeFrameRef.current = window.requestAnimationFrame(() => {
+        closeFrameRef.current = undefined;
+        closeTimerRef.current = window.setTimeout(() => {
+          setMenuState("closed");
+          closeTimerRef.current = undefined;
+        }, closeMs);
+      });
+    });
+  };
 
   useEffect(() => {
     if (!open) {
@@ -193,7 +232,7 @@ function ToolbarSelect<T extends string>({
 
     const onPointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
+        closeMenu();
       }
     };
 
@@ -213,9 +252,13 @@ function ToolbarSelect<T extends string>({
     return () => window.cancelAnimationFrame(frame);
   }, [open, selectedIndex]);
 
+  useEffect(() => {
+    return clearCloseTimers;
+  }, []);
+
   const choose = (nextValue: string) => {
     onChange(nextValue);
-    setOpen(false);
+    closeMenu();
     triggerRef.current?.focus();
   };
 
@@ -227,12 +270,12 @@ function ToolbarSelect<T extends string>({
   const onTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      setOpen(true);
+      openMenu();
     }
 
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setOpen(true);
+      openMenu();
       window.requestAnimationFrame(() => focusOption(options.length - 1));
     }
   };
@@ -242,7 +285,7 @@ function ToolbarSelect<T extends string>({
 
     if (event.key === "Escape") {
       event.preventDefault();
-      setOpen(false);
+      closeMenu();
       triggerRef.current?.focus();
     }
 
@@ -277,7 +320,7 @@ function ToolbarSelect<T extends string>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => (open ? closeMenu() : openMenu())}
         onKeyDown={onTriggerKeyDown}
       >
         <Icon name={icon} size="toolbar" weight={iconWeights.toolbar} className="toolbar-select-leading-icon" />
@@ -287,10 +330,11 @@ function ToolbarSelect<T extends string>({
 
       <div
         id={listboxId}
-        className="toolbar-select-menu"
+        className={`toolbar-select-menu t-dropdown ${open ? "is-open" : ""} ${menuState === "closing" ? "is-closing" : ""}`.trim()}
+        data-origin="top-right"
         role="listbox"
         aria-label={label}
-        hidden={!open}
+        hidden={!menuMounted}
         onKeyDown={onMenuKeyDown}
       >
         {options.map((option) => (

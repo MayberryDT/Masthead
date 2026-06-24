@@ -20,10 +20,17 @@
   --blue: #57c1ff;
   --blue-soft: rgba(87, 193, 255, 0.14);
   --modal-open-dur: 250ms;
-  --modal-close-dur: 150ms;
+  --modal-close-dur: 220ms;
   --modal-scale: 0.96;
   --modal-scale-close: 0.96;
   --modal-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dropdown-open-dur: 250ms;
+  --dropdown-close-dur: 260ms;
+  --dropdown-pre-scale: 0.97;
+  --dropdown-closing-scale: 0.99;
+  --dropdown-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --layout-dur: 300ms;
+  --layout-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-technical: "IBM Plex Mono", ui-monospace, monospace;
   --font-sans: var(--font-ui);
@@ -987,6 +994,17 @@ main {
   overscroll-behavior: contain;
   background: rgba(0, 0, 0, 0.74);
   padding: 24px;
+  opacity: 1;
+  transition:
+    background-color var(--modal-open-dur) var(--modal-ease),
+    opacity var(--modal-open-dur) var(--modal-ease);
+}
+
+.modal-backdrop:has(.t-modal.is-closing) {
+  opacity: 0;
+  transition:
+    background-color var(--modal-close-dur) var(--modal-ease),
+    opacity var(--modal-close-dur) var(--modal-ease);
 }
 
 .session-detail-modal {
@@ -2169,9 +2187,9 @@ body {
   padding: 0;
   font-size: 13px;
   white-space: nowrap;
-  transition-property: background-color, border-color, box-shadow;
-  transition-duration: 160ms;
-  transition-timing-function: ease;
+  transition-property: background-color, border-color, box-shadow, transform;
+  transition-duration: 180ms;
+  transition-timing-function: var(--dropdown-ease);
 }
 
 .toolbar-select:hover,
@@ -2185,6 +2203,7 @@ body {
 }
 
 .toolbar-select:active {
+  transform: scale(0.96);
   box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.38),
     inset 0 -1px 0 rgba(190, 225, 245, 0.018);
@@ -2241,6 +2260,11 @@ body {
   height: var(--icon-inline);
   color: #b9cde0;
   pointer-events: none;
+  transition: transform var(--dropdown-open-dur) var(--dropdown-ease);
+}
+
+.toolbar-select.open .toolbar-select-chevron {
+  transform: rotate(180deg);
 }
 
 .toolbar-select-trigger:focus-visible,
@@ -2270,6 +2294,52 @@ body {
     inset 0 1px 0 rgba(190, 225, 245, 0.055),
     inset 0 -1px 0 rgba(0, 0, 0, 0.46);
   padding: 4px;
+}
+
+.t-dropdown {
+  transform-origin: top left;
+  transform: scale(var(--dropdown-pre-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dropdown-open-dur) var(--dropdown-ease),
+    opacity var(--dropdown-open-dur) var(--dropdown-ease);
+  will-change: transform, opacity;
+}
+
+.t-dropdown[data-origin="top-right"] {
+  transform-origin: top right;
+}
+
+.t-dropdown[data-origin="top-center"] {
+  transform-origin: top center;
+}
+
+.t-dropdown[data-origin="bottom-left"] {
+  transform-origin: bottom left;
+}
+
+.t-dropdown[data-origin="bottom-center"] {
+  transform-origin: bottom center;
+}
+
+.t-dropdown[data-origin="bottom-right"] {
+  transform-origin: bottom right;
+}
+
+.t-dropdown.is-open {
+  transform: scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.t-dropdown.is-closing {
+  transform: scale(var(--dropdown-closing-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dropdown-close-dur) var(--dropdown-ease),
+    opacity var(--dropdown-close-dur) var(--dropdown-ease);
 }
 
 .toolbar-select-menu[hidden] {
@@ -2309,6 +2379,9 @@ body {
   line-height: 40px;
   text-align: left;
   white-space: nowrap;
+  transition-property: background-color, color, transform;
+  transition-duration: 160ms;
+  transition-timing-function: var(--dropdown-ease);
 }
 
 .toolbar-select-option:hover,
@@ -2316,6 +2389,7 @@ body {
   outline: 0;
   background: rgba(9, 38, 58, 0.78);
   color: #f7fbff;
+  transform: translateX(2px);
 }
 
 .toolbar-select-option:focus-visible {
@@ -2412,6 +2486,7 @@ body {
   height: 40px;
   min-height: 40px;
   place-items: center;
+  overflow: hidden;
   border: 1px solid rgba(92, 153, 187, 0.18);
   border-radius: 3px;
   background: var(--control-raised);
@@ -2422,9 +2497,9 @@ body {
   color: #d9e7f2;
   cursor: pointer;
   padding: 0;
-  transition-property: background-color, border-color, box-shadow, color;
-  transition-duration: 160ms;
-  transition-timing-function: ease;
+  transition-property: background-color, border-color, box-shadow, color, transform;
+  transition-duration: 180ms;
+  transition-timing-function: var(--layout-ease);
 }
 
 .toolbar-icon-button:hover {
@@ -2434,6 +2509,7 @@ body {
 }
 
 .toolbar-icon-button:active {
+  transform: scale(0.96);
   box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.4),
     inset 0 -1px 0 rgba(190, 225, 245, 0.018);
@@ -2458,6 +2534,38 @@ body {
   height: var(--icon-toolbar);
 }
 
+.toolbar-icon-button.layout-toggle {
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  gap: 0;
+  width: auto;
+  min-width: 40px;
+  padding: 0 11px;
+}
+
+.toolbar-icon-button.layout-toggle .layout-toggle-text {
+  display: inline-block;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateX(-4px);
+  filter: blur(2px);
+  white-space: nowrap;
+  transition:
+    max-width var(--layout-dur) var(--layout-ease),
+    opacity 180ms var(--layout-ease),
+    transform 180ms var(--layout-ease),
+    filter 180ms var(--layout-ease);
+}
+
+.toolbar-icon-button.layout-toggle:hover .layout-toggle-text,
+.toolbar-icon-button.layout-toggle:focus-visible .layout-toggle-text {
+  max-width: 112px;
+  opacity: 1;
+  transform: translateX(6px);
+  filter: blur(0);
+}
+
 .observability-console .metal-surface {
   position: relative;
   isolation: isolate;
@@ -2467,8 +2575,8 @@ body {
   background-color: var(--surface-metal-fill);
   box-shadow: var(--shadow-border);
   transition-property: background-color, border-color, box-shadow, transform;
-  transition-duration: 160ms;
-  transition-timing-function: ease;
+  transition-duration: 180ms;
+  transition-timing-function: var(--layout-ease);
 }
 
 .observability-console .metal-card {
@@ -2527,10 +2635,14 @@ body {
 }
 
 .observability-card-grid {
+  view-transition-name: session-card-grid;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-sm);
   width: 100%;
+  transition:
+    gap var(--layout-dur) var(--layout-ease),
+    grid-template-columns var(--layout-dur) var(--layout-ease);
 }
 
 .observability-card-grid.compact {
@@ -2546,6 +2658,13 @@ body {
   --status-rail: var(--green);
   border-left: 3px solid var(--status-rail);
   padding: 0;
+  transition:
+    height var(--layout-dur) var(--layout-ease),
+    min-height var(--layout-dur) var(--layout-ease),
+    border-color 180ms var(--layout-ease),
+    background-color 180ms var(--layout-ease),
+    box-shadow 180ms var(--layout-ease),
+    transform 180ms var(--layout-ease);
 }
 
 .observability-card-grid.compact .session-card {
@@ -2579,6 +2698,10 @@ body {
 
 .observability-console .session-card:active {
   transform: translateY(0) scale(0.96);
+}
+
+.observability-console .session-card.is-layout-animating {
+  will-change: transform;
 }
 
 .observability-card-head {
@@ -3287,7 +3410,16 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .t-dropdown,
   .t-modal {
+    transition: none !important;
+  }
+
+  .modal-backdrop,
+  .observability-card-grid,
+  .observability-console .session-card,
+  .toolbar-icon-button.layout-toggle,
+  .toolbar-icon-button.layout-toggle .layout-toggle-text {
     transition: none !important;
   }
 
@@ -3317,5 +3449,18 @@ body {
   .primary-pill:active,
   .ghost-pill:active {
     transform: none;
+  }
+}
+
+@supports (view-transition-name: none) {
+  ::view-transition-group(*) {
+    animation-duration: var(--layout-dur);
+    animation-timing-function: var(--layout-ease);
+  }
+
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: var(--layout-dur);
+    animation-timing-function: var(--layout-ease);
   }
 }
