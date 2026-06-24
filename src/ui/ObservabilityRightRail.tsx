@@ -1,4 +1,6 @@
 import type { LiveBoardProjection } from "../core/types";
+import { Icon } from "./icons/Icon";
+import { iconWeights } from "./icons/icon-tokens";
 import { observabilityDemoTelemetry } from "./observabilityDemo";
 
 type Props = {
@@ -17,18 +19,23 @@ export function ObservabilityRightRail({ summary, showDemoTelemetry = false }: P
     <>
       {showDemoTelemetry ? (
         <>
-          <section className="rail-card metric">
+          <section className="rail-card metal-surface metal-card metric">
             <p className="rail-title">
-              <span className="ring" aria-hidden="true" />
+              <span className="rail-icon" aria-hidden="true">
+                <Icon name="usage" size="panel" weight={iconWeights.panel} />
+              </span>
               Total Tokens (24h)
             </p>
             <div className="metric-row">
               <span className="metric-value">{observabilityDemoTelemetry.tokens24h.value}</span>
-              <span className="metric-delta">↑ 12.1M</span>
+              <span className="metric-delta">
+                <Icon name="trendUp" size="inline" weight={iconWeights.inline} />
+                12.1M
+              </span>
             </div>
           </section>
 
-          <section id="top-models" className="rail-card models">
+          <section id="top-models" className="rail-card metal-surface metal-card models">
             <h2 className="rail-heading">Top Models (24h)</h2>
             <div className="model-table">
               <span>Model</span>
@@ -40,14 +47,20 @@ export function ObservabilityRightRail({ summary, showDemoTelemetry = false }: P
                 </div>
               ))}
             </div>
-            <a href="#top-models">View all models →</a>
+            <a href="#top-models">
+              View all models
+              <Icon name="arrowRight" size="inline" weight={iconWeights.inline} />
+            </a>
           </section>
 
-          <section id="tokens-per-minute" className="rail-card tokens">
+          <section id="tokens-per-minute" className="rail-card metal-surface metal-card tokens">
             <h2 className="rail-heading">Tokens / Min</h2>
             <div className="metric-row">
               <span className="metric-value">{tokensPerMinute?.value ?? "12.4K"}</span>
-              <span className="metric-delta">↑ 1.8K</span>
+              <span className="metric-delta">
+                <Icon name="trendUp" size="inline" weight={iconWeights.inline} />
+                1.8K
+              </span>
             </div>
             <div className="tokens-sparkline" aria-label="Tokens per minute sparkline">
               <svg viewBox="0 0 232 37" preserveAspectRatio="none" aria-hidden="true">
@@ -61,9 +74,11 @@ export function ObservabilityRightRail({ summary, showDemoTelemetry = false }: P
         </>
       ) : (
         <>
-          <section className="rail-card metric">
+          <section className="rail-card metal-surface metal-card metric">
             <p className="rail-title">
-              <span className="ring" aria-hidden="true" />
+              <span className="rail-icon" aria-hidden="true">
+                <Icon name="sessions" size="panel" weight={iconWeights.panel} />
+              </span>
               Live Sessions
             </p>
             <div className="metric-row">
@@ -72,7 +87,7 @@ export function ObservabilityRightRail({ summary, showDemoTelemetry = false }: P
             </div>
           </section>
 
-          <section id="top-models" className="rail-card models">
+          <section id="top-models" className="rail-card metal-surface metal-card models">
             <h2 className="rail-heading">Session Source</h2>
             <div className="model-table">
               <span>Source</span>
@@ -90,7 +105,7 @@ export function ObservabilityRightRail({ summary, showDemoTelemetry = false }: P
         </>
       )}
 
-      <section className="rail-card lifecycle">
+      <section className="rail-card metal-surface metal-card lifecycle">
         <h2 className="rail-heading">Session Mix</h2>
         <div className="mix-total">
           <span>Visible sessions</span>

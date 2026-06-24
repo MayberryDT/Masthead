@@ -14,6 +14,11 @@ import type {
   SessionPlainCopy
 } from "../core/types";
 
+type ProjectionEnv = {
+  VITE_MASTHEAD_MODE?: string;
+  VITE_MASTHEAD_PROJECTION_URL?: string;
+};
+
 type EnvWithProjectionUrl = ImportMeta & {
   env?: {
     VITE_MASTHEAD_MODE?: string;
@@ -22,11 +27,11 @@ type EnvWithProjectionUrl = ImportMeta & {
 };
 
 export function defaultLiveProjectionUrl(meta: ImportMeta = import.meta): string {
-  return (meta as EnvWithProjectionUrl).env?.VITE_MASTHEAD_PROJECTION_URL ?? "http://127.0.0.1:17373/projection";
+  return importMetaEnv(meta).VITE_MASTHEAD_PROJECTION_URL ?? "http://127.0.0.1:17373/projection";
 }
 
 export function defaultFixtureMode(meta: ImportMeta = import.meta, search = locationSearch()): boolean {
-  const envMode = (meta as EnvWithProjectionUrl).env?.VITE_MASTHEAD_MODE?.toLowerCase();
+  const envMode = importMetaEnv(meta).VITE_MASTHEAD_MODE?.toLowerCase();
   if (envMode === "fixture" || envMode === "demo") return true;
 
   const params = new URLSearchParams(search);
@@ -144,6 +149,17 @@ export function normalizeLiveBoardProjection(
 
 function locationSearch(): string {
   return typeof window === "undefined" ? "" : window.location.search;
+}
+
+function importMetaEnv(meta: ImportMeta): ProjectionEnv {
+  if (meta === import.meta) {
+    return {
+      VITE_MASTHEAD_MODE: import.meta.env.VITE_MASTHEAD_MODE,
+      VITE_MASTHEAD_PROJECTION_URL: import.meta.env.VITE_MASTHEAD_PROJECTION_URL
+    };
+  }
+
+  return (meta as EnvWithProjectionUrl).env ?? {};
 }
 
 export type LiveEventsEnvelope = {

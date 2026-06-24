@@ -18,6 +18,8 @@ describe("SessionInspector", () => {
     expect(html).toContain("Session brief");
     expect(html).toContain("Runtime");
     expect(html).toContain("Model");
+    expect(html).toContain("Thinking");
+    expect(html).toContain("High");
     expect(html).toContain("Evidence health");
     expect(html).toContain("1 observed");
     expect(html).toContain("Worktree");
@@ -45,6 +47,7 @@ function session(): SessionDetailView {
     priorityRank: 10,
     durationLabel: "4m",
     model: "gpt-5.5",
+    thinkingLevel: "High",
     harness: "Codex",
     startedAt: "2026-06-23T02:00:00.000Z",
     branchOrWorktree: "agent/test",

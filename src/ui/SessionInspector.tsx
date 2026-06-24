@@ -60,6 +60,7 @@ export function SessionInspector({ session, onAction, actionStatus, compactHeade
 function SessionBrief({ session }: { session: SessionDetailView }) {
   const worktree = session.workspace?.branch ?? session.branchOrWorktree ?? "None";
   const model = session.model ?? "Not captured";
+  const thinkingLevel = session.thinkingLevel ?? "Not captured";
   const harness = session.harness ?? "Codex";
   const observed = session.evidence.observed.length;
   const inferred = session.evidence.inferred.length;
@@ -81,6 +82,10 @@ function SessionBrief({ session }: { session: SessionDetailView }) {
         <div>
           <dt>Model</dt>
           <dd>{model}</dd>
+        </div>
+        <div>
+          <dt>Thinking</dt>
+          <dd>{thinkingLevel}</dd>
         </div>
         <div>
           <dt>Harness</dt>

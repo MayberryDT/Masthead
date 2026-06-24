@@ -157,6 +157,20 @@ function toCard(
   const feedbackSignal = latestFeedbackSignal(latestFeedback);
   const branchOrWorktree = session.workspace?.branch ?? session.workspace?.worktreePath?.split("/").at(-1);
   const model = latestStringPayload(sessionEvents, ["model", "modelName", "modelId"]);
+  const thinkingLevel = normalizedThinkingLevel(
+    latestStringPayload(sessionEvents, [
+      "thinkingLevel",
+      "thinking",
+      "modelThinkingLevel",
+      "model_thinking_level",
+      "reasoningEffort",
+      "reasoning_effort",
+      "reasoningLevel",
+      "reasoning_level",
+      "modelReasoningEffort",
+      "model_reasoning_effort"
+    ])
+  );
   const startedAt = firstSessionTimestamp(session.sessionId, events);
   const workContext = deriveWorkContext({
     title: session.title,
@@ -179,6 +193,7 @@ function toCard(
     durationLabel: durationLabel(session.sessionId, events),
     branchOrWorktree,
     model,
+    thinkingLevel,
     harness: "Codex",
     startedAt,
     lastActivity: session.lastMeaningfulActivityAt,
@@ -560,4 +575,24 @@ function latestStringPayload(events: NormalizedEvent[], keys: string[]): string 
     }
   }
   return undefined;
+}
+
+function normalizedThinkingLevel(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+
+  const cleanValue = value.trim();
+  const normalized = cleanValue.toLowerCase().replace(/[\s_-]+/g, "_");
+  const labels: Record<string, string> = {
+    minimal: "Minimal",
+    low: "Low",
+    medium: "Medium",
+    med: "Medium",
+    high: "High",
+    xhigh: "Extra High",
+    x_high: "Extra High",
+    extra_high: "Extra High",
+    extrahigh: "Extra High"
+  };
+
+  return labels[normalized] ?? cleanValue;
 }

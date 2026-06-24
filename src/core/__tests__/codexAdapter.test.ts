@@ -19,6 +19,7 @@ describe("codex hook adapter", () => {
         category: "test",
         project: "Masthead",
         title: "Implement hook ingestion",
+        modelReasoningEffort: "xhigh",
         summary: "Tests passed"
       },
       { receivedAt: "2026-06-23T02:10:00.100Z" }
@@ -51,7 +52,8 @@ describe("codex hook adapter", () => {
       exitCode: 0,
       category: "test",
       project: "Masthead",
-      title: "Implement hook ingestion"
+      title: "Implement hook ingestion",
+      modelReasoningEffort: "xhigh"
     });
     expect(event.payloadHash).toHaveLength(64);
     expect(event.evidence).toEqual([

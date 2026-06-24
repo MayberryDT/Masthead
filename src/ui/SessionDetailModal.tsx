@@ -1,5 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import type { SafeAction, SessionDetailView } from "../core/types";
+import { Icon } from "./icons/Icon";
+import { iconWeights } from "./icons/icon-tokens";
 import { SessionInspector } from "./SessionInspector";
 
 type Props = {
@@ -44,6 +46,7 @@ export function SessionDetailModal({ session, onClose, onAction, actionStatus }:
             <span>{session.project}</span>
             <span>{session.lifecycle}</span>
             <span>{session.durationLabel}</span>
+            <span>Thinking {session.thinkingLevel ?? "Not captured"}</span>
           </div>
           <div className="modal-title-row">
             <div>
@@ -51,7 +54,7 @@ export function SessionDetailModal({ session, onClose, onAction, actionStatus }:
               <h2 id={`${session.sessionId}-modal-title`}>{session.copy.headline}</h2>
             </div>
             <button type="button" className="icon-button" aria-label="Close session details" onClick={onClose}>
-              x
+              <Icon name="close" size="toolbar" weight={iconWeights.toolbar} />
             </button>
           </div>
         </header>

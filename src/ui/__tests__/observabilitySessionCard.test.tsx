@@ -18,6 +18,8 @@ describe("observability session card", () => {
     expect(html).toContain("card-harness");
     expect(html).toContain("Model");
     expect(html).toContain("Worktree");
+    expect(html).toContain("Thinking");
+    expect(html).toContain("High");
     expect(html).toContain("Last activity");
     expect(html).toContain("Started");
     expect(html).not.toContain("5 files");
@@ -127,11 +129,12 @@ describe("observability session card", () => {
 
   test("does not apply demo harness or model values to live observability cards", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[session()]} variant="observability" onOpenSession={() => undefined} />
+      <SessionBoard cards={[session({ thinkingLevel: undefined })]} variant="observability" onOpenSession={() => undefined} />
     );
 
     expect(html).toContain("Codex");
     expect(html).toContain("Not captured");
+    expect(html).not.toContain("High");
     expect(html).not.toContain("Claude Code");
     expect(html).not.toContain("OpenClaw");
     expect(html).not.toContain("Hermes");
@@ -155,6 +158,14 @@ describe("observability session card", () => {
     expect(html).toContain("gpt-5.5");
     expect(html).not.toContain("OpenClaw");
     expect(html).not.toContain("Hermes");
+  });
+
+  test("renders captured live thinking values without static preview text", () => {
+    const html = renderToStaticMarkup(
+      <SessionBoard cards={[session({ thinkingLevel: "Extra High" })]} variant="observability" onOpenSession={() => undefined} />
+    );
+
+    expect(html).toContain("Extra High");
   });
 
   test("uses the actual branch or none for the worktree fact instead of the summary label", () => {
@@ -197,6 +208,7 @@ function session(overrides: Partial<SessionCardView> = {}): SessionCardView {
     priorityRank: 10,
     durationLabel: "8m 42s",
     branchOrWorktree: "local",
+    thinkingLevel: "High",
     lastActivity: "2026-06-23T02:04:00.000Z",
     lastActivityLabel: "0s ago",
     changedFileCount: 5,

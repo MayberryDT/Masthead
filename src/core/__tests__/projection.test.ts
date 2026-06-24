@@ -247,6 +247,22 @@ describe("Live Board projection", () => {
     expect(board.cards.find((card) => card.sessionId === "model-session")?.model).toBe("gpt-5.5");
   });
 
+  test("projects captured reasoning effort as a normalized thinking level", () => {
+    const board = projectFixture({
+      events: [
+        event("start", "thinking-session", "session.started", "2026-06-23T02:00:00.000Z", {
+          modelReasoningEffort: "low"
+        }),
+        event("latest", "thinking-session", "command.finished", "2026-06-23T02:02:00.000Z", {
+          reasoningEffort: "xhigh"
+        })
+      ],
+      gitSnapshots: []
+    });
+
+    expect(board.cards.find((card) => card.sessionId === "thinking-session")?.thinkingLevel).toBe("Extra High");
+  });
+
   test("projects session started time and harness for toolbar sorting and filtering", () => {
     const board = projectFixture({
       events: [

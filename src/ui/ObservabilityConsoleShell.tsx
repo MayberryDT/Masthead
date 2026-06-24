@@ -9,7 +9,7 @@ type Props = {
 export function ObservabilityConsoleShell({ sidebar, main, rightRail }: Props) {
   return (
     <main className="observability-console" aria-label="Masthead observability console">
-      <aside className="observability-sidebar" aria-label="Primary navigation">
+      <aside className="observability-sidebar metal-sidebar" aria-label="Primary navigation">
         {sidebar}
       </aside>
       <section className="observability-workspace">

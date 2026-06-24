@@ -1,35 +1,46 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { buildLiveDevPlan, startReadOnlyConnectorBridge } from "../src/core/worktreeConnector.ts";
 
-const host = process.env.MASTHEAD_HOST || "127.0.0.1";
-const collectorPort = process.env.MASTHEAD_PORT || "17373";
-const uiPort = process.env.MASTHEAD_UI_PORT || "5173";
-const projectionUrl = `http://${host}:${collectorPort}/projection`;
-const allowedOrigins =
-  process.env.MASTHEAD_ALLOWED_ORIGINS || `http://${host}:${uiPort},http://localhost:${uiPort},tauri://localhost,http://tauri.localhost`;
+const plan = await buildLiveDevPlan(process.env);
 const children = new Set();
+const bridges = new Set();
 let shuttingDown = false;
 
 console.log("Starting Masthead live app");
-console.log(`Collector: http://${host}:${collectorPort}`);
-console.log(`App:       http://${host}:${uiPort}`);
+console.log(`App:       ${plan.uiUrl}`);
 
-const collector = start("collector", process.execPath, ["scripts/masthead-ingest-server.js"], {
-  MASTHEAD_HOST: host,
-  MASTHEAD_PORT: collectorPort,
-  MASTHEAD_ALLOWED_ORIGINS: allowedOrigins
-});
+let collector;
+if (plan.connector.mode === "primary") {
+  console.log(`Connector: ${plan.connector.baseUrl} (primary)`);
+  collector = start("collector", process.execPath, ["scripts/masthead-ingest-server.js"], {
+    MASTHEAD_HOST: plan.host,
+    MASTHEAD_PORT: String(plan.connector.port),
+    MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins
+  });
 
-await waitForHealth(`http://${host}:${collectorPort}/health`, 8_000);
+  await waitForHealth(`${plan.connector.baseUrl}/health`, 8_000);
+} else {
+  console.log(`Connector: ${plan.connector.baseUrl} (read-only worktree bridge)`);
+  console.log(`Upstream:  ${plan.connector.upstreamBaseUrl}`);
+  const bridge = await startReadOnlyConnectorBridge({
+    allowedOrigins: plan.allowedOrigins,
+    host: plan.host,
+    port: plan.connector.port,
+    upstreamBaseUrl: plan.connector.upstreamBaseUrl
+  });
+  bridges.add(bridge);
+  await waitForHealth(`${bridge.baseUrl}/health`, 8_000);
+}
 
 const viteBin = resolve("node_modules/vite/bin/vite.js");
-start("ui", process.execPath, [viteBin, "--host", host, "--port", uiPort, "--strictPort"], {
-  VITE_MASTHEAD_PROJECTION_URL: projectionUrl
+start("ui", process.execPath, [viteBin, "--host", plan.host, "--port", String(plan.uiPort), "--strictPort"], {
+  VITE_MASTHEAD_PROJECTION_URL: plan.projectionUrl
 });
 
 console.log("Masthead is ready.");
-console.log(`Open http://${host}:${uiPort}`);
+console.log(`Open ${plan.uiUrl}`);
 
 process.on("SIGINT", stopAll);
 process.on("SIGTERM", stopAll);
@@ -59,7 +70,7 @@ function start(label, command, args, extraEnv = {}) {
 async function waitForHealth(url, timeoutMs) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    if (collector.exitCode !== null) break;
+    if (collector && collector.exitCode !== null) break;
     try {
       const response = await fetch(url, { headers: { accept: "application/json" } });
       if (response.ok) return;
@@ -82,6 +93,9 @@ function stopAll(exitCode = 0) {
   shuttingDown = true;
   for (const child of children) {
     child.kill("SIGTERM");
+  }
+  for (const bridge of bridges) {
+    void bridge.close();
   }
   setTimeout(() => process.exit(exitCode), 250).unref();
 }

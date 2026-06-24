@@ -276,6 +276,7 @@ export type SessionCardView = {
   durationLabel: string;
   branchOrWorktree?: string;
   model?: string;
+  thinkingLevel?: string;
   harness?: string;
   startedAt?: string;
   lastActivity: string;

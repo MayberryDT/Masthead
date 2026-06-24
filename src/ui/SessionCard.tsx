@@ -1,5 +1,7 @@
 import type { SessionCardView } from "../core/types";
 import { stateClassName } from "./format";
+import { Icon, type IconName } from "./icons/Icon";
+import { iconWeights } from "./icons/icon-tokens";
 import type { DemoSessionTelemetry } from "./observabilityDemo";
 
 type Props = {
@@ -13,11 +15,12 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
   const model = demoTelemetry?.model.value ?? session.model ?? "Not captured";
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Codex";
   const worktree = session.branchOrWorktree ?? "None";
+  const thinkingLevel = session.thinkingLevel ?? "Not captured";
   const sessionName = sessionHeaderName(session);
 
   return (
     <article
-      className={`session-card ${className}`}
+      className={`session-card metal-surface metal-card ${className}`}
       role="button"
       aria-label={`Open ${session.copy.headline} details`}
       tabIndex={0}
@@ -42,27 +45,45 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
       <h2>{session.copy.headline}</h2>
 
       <dl className="observability-card-facts">
-        <Fact label="Runtime" value={session.durationLabel} />
-        <Fact label="Model" value={model} />
-        <Fact label="Worktree" value={worktree} />
+        <Fact icon="runtime" label="Runtime" value={session.durationLabel} valueClassName="runtime-value" />
+        <Fact icon="model" label="Model" value={model} valueClassName="model-name" />
+        <Fact icon="worktree" label="Worktree" value={worktree} valueClassName="worktree-name" />
+        <Fact icon="thinking" label="Thinking" value={thinkingLevel} valueClassName="thinking-level" />
       </dl>
 
       <span className="card-rule" aria-hidden="true" />
 
       <footer className="observability-card-footer">
-        <span>Last activity {session.lastActivityLabel}</span>
-        <span>Started {startedLabel(session.startedAt ?? session.lastActivity)}</span>
+        <span className="card-footer-meta">
+          <Icon name="lastActivity" size="inline" weight={iconWeights.inline} />
+          Last activity <span className="timestamp">{session.lastActivityLabel}</span>
+        </span>
+        <span>
+          Started <span className="timestamp">{startedLabel(session.startedAt ?? session.lastActivity)}</span>
+        </span>
       </footer>
     </article>
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({
+  icon,
+  label,
+  value,
+  valueClassName
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) {
   return (
     <div>
-      <span className="fact-icon" aria-hidden="true" />
+      <span className="fact-icon" aria-hidden="true">
+        <Icon name={icon} size="cardMeta" weight={iconWeights.cardMeta} />
+      </span>
       <dt>{label}</dt>
-      <dd>{value}</dd>
+      <dd className={valueClassName}>{value}</dd>
     </div>
   );
 }

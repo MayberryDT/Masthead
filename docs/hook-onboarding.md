@@ -14,7 +14,9 @@ From the Masthead repo:
 npm run dev
 ```
 
-This starts both the local ingest collector and the Vite UI. Open:
+This is the harness-neutral launcher for both the primary checkout and secondary worktrees. It starts a connector and a Vite UI when the primary port is free. If a healthy primary connector is already running, it starts a read-only worktree bridge instead and points the new UI at that bridge.
+
+Open the URL printed by the launcher, usually:
 
 ```text
 http://127.0.0.1:5173
@@ -29,6 +31,16 @@ Defaults:
 - Health URL: `http://127.0.0.1:17373/health`
 - UI URL: `http://127.0.0.1:5173`
 - Local event store: `.masthead/events.ndjson`
+
+Secondary worktree behavior:
+
+- UI port: first available port starting at `5173`
+- Bridge port: first available port starting at `17374`
+- Upstream connector: `http://127.0.0.1:17373`
+- Bridge projection URL: `http://127.0.0.1:<bridge-port>/projection`
+- Read-only endpoints: `/health`, `/projection`, `/events`, `/fixture`
+
+Do not manually point a secondary worktree UI directly at `http://127.0.0.1:17373/projection`. The primary connector generally only allows the primary UI origin, so secondary UIs should go through the launcher-created bridge.
 
 Run the readiness check with:
 
@@ -46,6 +58,14 @@ Override the collector listener with:
 
 ```bash
 MASTHEAD_HOST=127.0.0.1 MASTHEAD_PORT=17374 npm run ingest
+```
+
+Force launcher modes with:
+
+```bash
+MASTHEAD_CONNECTOR_MODE=primary npm run dev
+MASTHEAD_CONNECTOR_MODE=bridge MASTHEAD_UPSTREAM_URL=http://127.0.0.1:17373 npm run dev
+MASTHEAD_UI_PORT=5180 npm run dev
 ```
 
 ## Preview the User-Level Hook Config

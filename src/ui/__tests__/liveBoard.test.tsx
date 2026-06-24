@@ -223,6 +223,7 @@ describe("Live Board UI", () => {
       lifecycle: "running",
       priorityRank: 10,
       durationLabel: "4m",
+      thinkingLevel: "Extra High",
       branchOrWorktree: "agent/test",
       lastActivity: "2026-06-23T02:04:00.000Z",
       lastActivityLabel: "0s ago",
@@ -297,6 +298,7 @@ describe("Live Board UI", () => {
 
     expect(html).toContain("modal-scroll-frame");
     expect(html).toContain("modal-session-meta");
+    expect(html).toContain("Thinking Extra High");
     expect(html).toContain("Session brief");
     expect(html).toContain("Evidence health");
     expect(html).toContain("Still running");

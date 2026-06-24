@@ -36,13 +36,8 @@ body::before {
   position: fixed;
   inset: 56px 0 0;
   z-index: -1;
-  background-image:
-    linear-gradient(var(--wire-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--wire-grid) 1px, transparent 1px);
-  background-size: 48px 48px;
+  background: transparent;
   content: "";
-  opacity: 0.18;
-  --wire-grid: rgba(92, 92, 97, 0.36);
 }
 
 a {

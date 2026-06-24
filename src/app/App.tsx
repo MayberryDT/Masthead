@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import fixture from "../../fixtures/v0/replay-three-sessions-board.json";
 import { buildHistoryRecords } from "../core/historyRecords";
 import {
@@ -18,7 +18,7 @@ import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/ob
 import { OperationsPanel } from "../ui/OperationsPanel";
 import { SessionBoard } from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
-import { Toolbar } from "../ui/Toolbar";
+import { Toolbar, type ConnectorDisplayState } from "../ui/Toolbar";
 import { filterAttentionItemsForCards, filterCards, mainScanCards, summarizeMainScanCards, type BoardFilter } from "../ui/filterBoard";
 import {
   activityWindowMs,
@@ -39,9 +39,17 @@ import {
   projectionRequestUrl,
   retentionRequestUrl
 } from "./liveProjectionClient";
+import { startLiveConnector } from "./connectorClient";
 import { appendLocalRecords, clearLocalData, exportedRecordCount, exportLocalData, pruneLocalData, readLocalRecords } from "./nativeStoreClient";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
+
+type ConnectorActionState =
+  | { state: "idle"; message?: string }
+  | { state: "starting"; message?: string }
+  | { state: "started"; message?: string }
+  | { state: "unsupported"; message?: string }
+  | { state: "error"; message?: string };
 
 const replay = fixture as FixtureReplay;
 const liveProjectionUrl = defaultLiveProjectionUrl();
@@ -92,6 +100,7 @@ export function App() {
   const [liveConnection, setLiveConnection] = useState<ConnectionState>({ state: "connecting" });
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
   const [liveGitSnapshots, setLiveGitSnapshots] = useState<GitSnapshot[]>();
+  const [connectorAction, setConnectorAction] = useState<ConnectorActionState>({ state: "idle" });
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
   const [localStoreRecords, setLocalStoreRecords] = useState<StoreRecord[]>([]);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
@@ -101,6 +110,7 @@ export function App() {
     message?: string;
   }>({ state: "idle" });
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const liveRequestIdRef = useRef(0);
   const fixtureBoard = useMemo(() => buildObservabilityDemoBoard(selectedSessionId), [selectedSessionId]);
   const baseBoard = showDemoData ? fixtureBoard : liveProjection ?? emptyLiveBoard;
   const board = useMemo(() => applyReviewDispositions(baseBoard, reviewDispositions), [baseBoard, reviewDispositions]);
@@ -147,6 +157,7 @@ export function App() {
     board.selectedSession && filteredCards.some((card) => card.sessionId === board.selectedSession?.sessionId)
       ? board.selectedSession
       : undefined;
+  const connectorDisplayState = connectorStateForToolbar(liveConnection, connectorAction);
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -186,61 +197,89 @@ export function App() {
     };
   }, []);
 
+  const loadLiveProjection = useCallback(async () => {
+    const requestId = liveRequestIdRef.current + 1;
+    liveRequestIdRef.current = requestId;
+    const selectedLiveSessionId = selectedSessionId ?? undefined;
+    const isCurrentRequest = () => liveRequestIdRef.current === requestId;
+
+    try {
+      const response = await fetch(projectionRequestUrl(liveProjectionUrl, selectedLiveSessionId), {
+        headers: { accept: "application/json" }
+      });
+      if (!response.ok) throw new Error(`projection request failed: ${response.status}`);
+      const body: unknown = await response.json();
+      if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
+      const eventsResponse = await fetch(eventsRequestUrl(liveProjectionUrl), { headers: { accept: "application/json" } });
+      const eventsBody: unknown = eventsResponse.ok ? await eventsResponse.json() : undefined;
+      if (!isCurrentRequest()) return false;
+      setLiveProjection(normalizeLiveBoardProjection(body.projection, selectedSessionId));
+      setShowDemoData(false);
+      setConnectorAction((current) =>
+        current.state === "starting" || current.state === "started" ? { state: "started", message: "Collector connected." } : current
+      );
+      setLiveConnection({
+        state: "live",
+        events: body.events,
+        gitSnapshots: body.gitSnapshots,
+        diagnostics: body.diagnostics,
+        generatedAt: body.generatedAt
+      });
+      if (isLiveEventsEnvelope(eventsBody)) {
+        setLiveEvents(eventsBody.events);
+        setLiveGitSnapshots(eventsBody.gitSnapshots);
+      }
+      return true;
+    } catch (error) {
+      if (!isCurrentRequest()) return false;
+      setLiveProjection(undefined);
+      setLiveEvents(undefined);
+      setLiveGitSnapshots(undefined);
+      setLiveConnection({
+        state: "offline",
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return false;
+    }
+  }, [selectedSessionId]);
+
   useEffect(() => {
     let cancelled = false;
     let timeoutId: number | undefined;
 
-    const loadLiveProjection = async () => {
-      const selectedLiveSessionId = selectedSessionId ?? undefined;
-      try {
-        const response = await fetch(projectionRequestUrl(liveProjectionUrl, selectedLiveSessionId), {
-          headers: { accept: "application/json" }
-        });
-        if (!response.ok) throw new Error(`projection request failed: ${response.status}`);
-        const body: unknown = await response.json();
-        if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
-        const eventsResponse = await fetch(eventsRequestUrl(liveProjectionUrl), { headers: { accept: "application/json" } });
-        const eventsBody: unknown = eventsResponse.ok ? await eventsResponse.json() : undefined;
-        if (!cancelled) {
-          setLiveProjection(normalizeLiveBoardProjection(body.projection, selectedSessionId));
-          setShowDemoData(false);
-          setLiveConnection({
-            state: "live",
-            events: body.events,
-            gitSnapshots: body.gitSnapshots,
-            diagnostics: body.diagnostics,
-            generatedAt: body.generatedAt
-          });
-          if (isLiveEventsEnvelope(eventsBody)) {
-            setLiveEvents(eventsBody.events);
-            setLiveGitSnapshots(eventsBody.gitSnapshots);
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setLiveProjection(undefined);
-          setLiveEvents(undefined);
-          setLiveGitSnapshots(undefined);
-          setLiveConnection({
-            state: "offline",
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
-      } finally {
-        if (!cancelled) timeoutId = window.setTimeout(loadLiveProjection, refreshRateMs);
-      }
+    const pollLiveProjection = async () => {
+      await loadLiveProjection();
+      if (!cancelled) timeoutId = window.setTimeout(pollLiveProjection, refreshRateMs);
     };
 
-    void loadLiveProjection();
+    void pollLiveProjection();
     return () => {
       cancelled = true;
+      liveRequestIdRef.current += 1;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [refreshRateMs, selectedSessionId]);
+  }, [loadLiveProjection, refreshRateMs]);
 
   const handleOpenSession = (sessionId: string) => {
     setSelectedSessionId(sessionId);
     setDetailModalOpen(true);
+  };
+
+  const handleStartConnector = async () => {
+    setConnectorAction({ state: "starting", message: "Starting local connector..." });
+    try {
+      const result = await startLiveConnector();
+      setConnectorAction({
+        state: result.ok ? "started" : "unsupported",
+        message: result.message
+      });
+      await loadLiveProjection();
+    } catch (error) {
+      setConnectorAction({
+        state: "error",
+        message: `Could not start connector: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
   };
 
   const handleExportLocalData = async () => {
@@ -386,6 +425,8 @@ export function App() {
               activityWindow={activityWindow}
               refreshRateMs={refreshRateMs}
               density={density}
+              connectorState={showDemoData ? undefined : connectorDisplayState}
+              connectorBusy={connectorAction.state === "starting"}
               onQueryChange={setQuery}
               onFilterChange={setFilter}
               onHarnessFilterChange={setHarnessFilter}
@@ -393,6 +434,7 @@ export function App() {
               onSortModeChange={setSortMode}
               onActivityWindowChange={setActivityWindow}
               onRefreshRateChange={setRefreshRateMs}
+              onConnectorAction={handleStartConnector}
               onDensityToggle={() => setDensity((current) => (current === "compact" ? "comfortable" : "compact"))}
               searchInputRef={searchInputRef}
             />
@@ -432,6 +474,16 @@ export function App() {
   );
 }
 
+function connectorStateForToolbar(
+  liveConnection: ConnectionState,
+  connectorAction: ConnectorActionState
+): ConnectorDisplayState {
+  if (connectorAction.state === "starting") return "connecting";
+  if (liveConnection.state === "live") return "connected";
+  if (liveConnection.state === "connecting") return "connecting";
+  return "disconnected";
+}
+
 function emptyBoardTitle({
   showDemoData,
   hasActiveToolbarFilters,
@@ -460,7 +512,7 @@ function emptyBoardMessage({
   if (hasActiveToolbarFilters) return "Adjust the toolbar filters to bring sessions back into view.";
   if (showDemoData) return "Demo replay is available only when fixture data exists.";
   if (liveConnection.state === "live") return "New Codex hook events will appear here as sessions run.";
-  if (liveConnection.state === "offline") return "Start Masthead with the app launcher so the collector and board run together.";
+  if (liveConnection.state === "offline") return "Use the Connector panel to start or check the local collector.";
   return "The board will switch to live sessions when the local collector responds.";
 }
 

@@ -3,6 +3,18 @@ import { describe, expect, test } from "vitest";
 import { ObservabilityRightRail } from "../ObservabilityRightRail";
 
 describe("ObservabilityRightRail", () => {
+  test("does not render connector controls in the telemetry rail", () => {
+    const html = renderToStaticMarkup(
+      <ObservabilityRightRail
+        summary={{ active: 1, needsAttention: 0, conflicts: 0, completed: 0, running: 1, idle: 0, needsAction: 0 }}
+      />
+    );
+
+    expect(html).not.toContain("Connector");
+    expect(html).not.toContain("Connected");
+    expect(html).not.toContain("Reconnect");
+  });
+
   test("renders live session telemetry without fake model or token values by default", () => {
     const html = renderToStaticMarkup(
       <ObservabilityRightRail
