@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { adapterRecordFromCodexHook, codexHookSource } from "../adapters/codex/hookAdapter.ts";
@@ -43,6 +44,7 @@ import { queueImportJob, type ImportWorkResult } from "./import/importCoordinato
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
+import { buildMastheadHealth } from "./healthService.ts";
 import { getMcpStatus, listMcpTools } from "./mcpStatusService.ts";
 import {
   getCodexHookSettings,
@@ -108,6 +110,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     );
     const queuedEnrichmentSessionIds = new Set<string>();
     let enrichmentQueueScheduled = false;
+    const daemonInstanceId = randomUUID();
+    const daemonStartedAt = new Date().toISOString();
 
   function queueSessionEnrichment(sessionId: string | undefined): void {
     if (!sessionId) return;
@@ -452,11 +456,25 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/health") {
+      const health = buildMastheadHealth(
+        config,
+        database,
+        {
+          daemonInstanceId,
+          startedAt: daemonStartedAt,
+          port: () => boundPort(server, config.port)
+        },
+        {
+          events: state.events.length,
+          diagnostics: state.diagnostics.length,
+          gitSnapshots: gitSnapshots.length
+        }
+      );
       sendJson(request, response, config.allowedOrigins, 200, {
-        ok: true,
-        events: state.events.length,
-        diagnostics: state.diagnostics.length,
-        gitSnapshots: gitSnapshots.length,
+        ...health,
+        events: health.live.events,
+        diagnostics: health.live.diagnostics,
+        gitSnapshots: health.live.gitSnapshots,
         storePath: config.storePath,
         databasePath: config.databasePath,
         projectionUrl: `http://${config.host}:${config.port}/projection`,
@@ -1091,6 +1109,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     database.close();
     throw error;
   }
+}
+
+function boundPort(server: Server, fallback: number): number {
+  const address = server.address();
+  return typeof address === "object" && address ? address.port : fallback;
 }
 
 function readBody(request: IncomingMessage): Promise<string> {

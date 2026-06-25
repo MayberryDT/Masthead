@@ -1,5 +1,6 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, test } from "vitest";
+import currentHealth from "../../../fixtures/protocol/current-health.json";
 import {
   buildLiveDevPlan,
   connectorBaseUrl,
@@ -44,7 +45,7 @@ describe("Masthead worktree connector planning", () => {
       {},
       {
         findAvailablePort: async (_host, startPort) => (startPort === 5173 ? 5180 : startPort),
-        getConnectorHealth: async () => ({ ok: true, events: 12 }),
+        getConnectorHealth: async () => currentHealth,
         isPortAvailable: async () => false
       }
     );
@@ -91,8 +92,12 @@ describe("Masthead worktree connector planning", () => {
     const upstream = createServer((request, response) => {
       if (request.url === "/health") {
         sendJson(response, 200, {
-          ok: true,
-          events: 3,
+          ...currentHealth,
+          live: {
+            events: 3,
+            diagnostics: 0,
+            gitSnapshots: 0
+          },
           projectionUrl: "http://127.0.0.1:17373/projection"
         });
         return;
@@ -153,6 +158,15 @@ describe("Masthead worktree connector planning", () => {
     expect(healthResponse.headers.get("access-control-allow-origin")).toBe("http://127.0.0.1:5180");
     expect(health).toMatchObject({
       ok: true,
+      product: "masthead",
+      runtime: {
+        mode: "read_only_bridge",
+        writable: false,
+        upstream: {
+          baseUrl: upstreamBaseUrl,
+          daemonInstanceId: "fixture-daemon"
+        }
+      },
       bridge: {
         mode: "read_only",
         upstreamBaseUrl

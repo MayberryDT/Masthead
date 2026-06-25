@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { MastheadDatabase } from "./sqlite.ts";
+import { randomUUID } from "node:crypto";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const migrations = [
@@ -26,6 +27,8 @@ const migrations = [
     path: resolve(currentDir, "migrations/004_cursor_context.sql")
   }
 ];
+
+export const CURRENT_SCHEMA_VERSION = migrations[migrations.length - 1]?.version ?? 0;
 
 const criticalTables = [
   "raw_events",
@@ -69,6 +72,39 @@ export function migrateDatabase(db: MastheadDatabase): void {
     }
   }
   validateCriticalTables(db);
+}
+
+export function getOrCreateDatabaseIdentity(db: MastheadDatabase): string {
+  const row = db.prepare("SELECT setting_json AS value FROM app_settings WHERE setting_key = ?").get("database_identity") as
+    | { value: string }
+    | undefined;
+  const existing = parseDatabaseIdentity(row?.value);
+  if (existing) return existing;
+
+  const databaseId = randomUUID();
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO app_settings(setting_key, setting_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(setting_key) DO UPDATE SET
+      setting_json = excluded.setting_json,
+      updated_at = excluded.updated_at`
+  ).run("database_identity", JSON.stringify({ databaseId, createdAt: now }), now);
+  return databaseId;
+}
+
+function parseDatabaseIdentity(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (typeof parsed === "string" && parsed.trim()) return parsed;
+    if (typeof parsed === "object" && parsed !== null && "databaseId" in parsed && typeof parsed.databaseId === "string") {
+      return parsed.databaseId;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 function validateCriticalTables(db: MastheadDatabase): void {

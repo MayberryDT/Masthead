@@ -23,8 +23,46 @@ export const REQUIRED_CLIENT_CAPABILITIES: MastheadCapability[] = [
   "settings"
 ];
 
+export type MastheadRuntimeMode = "primary" | "read_only_bridge";
+
+export type MastheadHealthDto = {
+  ok: true;
+  product: typeof MASTHEAD_PRODUCT;
+  apiVersion: number;
+  schemaVersion: number;
+  buildVersion: string;
+  buildSha?: string;
+  capabilities: MastheadCapability[];
+  runtime: {
+    daemonInstanceId: string;
+    startedAt: string;
+    mode: MastheadRuntimeMode;
+    writable: boolean;
+    host: string;
+    port: number;
+    upstream?: {
+      baseUrl: string;
+      daemonInstanceId: string;
+    };
+  };
+  data: {
+    dataDirectory: string;
+    databasePath: string;
+    databaseId: string;
+    migrationState: "ready" | "migrating" | "failed";
+    sessions: number;
+    sources: number;
+  };
+  live: {
+    events: number;
+    diagnostics: number;
+    gitSnapshots: number;
+  };
+};
+
 export type DaemonCompatibility =
   | { state: "compatible"; apiVersion: number }
+  | { state: "degraded"; reason: "migration_failed" }
   | { state: "incompatible"; reason: "missing_protocol_identity" }
   | { state: "incompatible"; reason: "wrong_product"; product: unknown }
   | { state: "incompatible"; reason: "unsupported_api_version"; apiVersion: unknown; requiredApiVersion: number }
@@ -65,6 +103,10 @@ export function classifyDaemonHealth(
   const missingCapabilities = requiredCapabilities.filter((capability) => !capabilities.has(capability));
   if (missingCapabilities.length > 0) {
     return { state: "incompatible", reason: "missing_capabilities", missingCapabilities };
+  }
+
+  if (isRecord(value.data) && value.data.migrationState === "failed") {
+    return { state: "degraded", reason: "migration_failed" };
   }
 
   return { state: "compatible", apiVersion: value.apiVersion };

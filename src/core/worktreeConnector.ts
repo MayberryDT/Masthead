@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { classifyDaemonHealth } from "../shared/protocol.ts";
 
 export type ConnectorMode = "primary" | "bridge";
 
@@ -215,8 +216,11 @@ async function requireHealthyConnector(
   getHealth: (baseUrl: string) => Promise<Record<string, unknown> | undefined>
 ): Promise<void> {
   const health = await getHealth(baseUrl);
-  if (health?.ok === true) return;
-  throw new Error(`Port ${new URL(baseUrl).port} is busy, but no healthy Masthead connector responded at ${baseUrl}/health.`);
+  const compatibility = classifyDaemonHealth(health);
+  if (compatibility.state === "compatible") return;
+  throw new Error(
+    `Port ${new URL(baseUrl).port} is busy, but no compatible Masthead connector responded at ${baseUrl}/health (${compatibility.state}).`
+  );
 }
 
 async function handleBridgeRequest(
@@ -271,9 +275,27 @@ function rewriteHealthBody(
 ): string {
   try {
     const parsed = JSON.parse(body) as Record<string, unknown>;
+    const runtime = isRecord(parsed.runtime) ? parsed.runtime : undefined;
+    const upstreamDaemonInstanceId =
+      runtime && typeof runtime.daemonInstanceId === "string" ? runtime.daemonInstanceId : "legacy/unknown";
     return JSON.stringify(
       {
         ...parsed,
+        ...(runtime
+          ? {
+              runtime: {
+                ...runtime,
+                mode: "read_only_bridge",
+                writable: false,
+                host: options.baseUrl ? new URL(options.baseUrl).hostname : runtime.host,
+                port: options.baseUrl ? Number(new URL(options.baseUrl).port) : runtime.port,
+                upstream: {
+                  baseUrl: options.upstreamBaseUrl,
+                  daemonInstanceId: upstreamDaemonInstanceId
+                }
+              }
+            }
+          : {}),
         bridge: {
           mode: "read_only",
           upstreamBaseUrl: options.upstreamBaseUrl
@@ -288,6 +310,10 @@ function rewriteHealthBody(
   } catch {
     return body;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function corsHeaders(request: IncomingMessage, allowedOrigins: string[]): Record<string, string> {

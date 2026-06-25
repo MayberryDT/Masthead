@@ -16,4 +16,33 @@ describe("daemon compatibility", () => {
       state: "compatible"
     });
   });
+
+  test("rejects a health response from another product", () => {
+    expect(classifyDaemonHealth({ ...currentHealth, product: "other" })).toMatchObject({
+      state: "incompatible",
+      reason: "wrong_product"
+    });
+  });
+
+  test("rejects an older API version", () => {
+    expect(classifyDaemonHealth({ ...currentHealth, apiVersion: 0 })).toMatchObject({
+      state: "incompatible",
+      reason: "unsupported_api_version"
+    });
+  });
+
+  test("rejects missing required capabilities", () => {
+    expect(classifyDaemonHealth({ ...currentHealth, capabilities: ["live_projection"] })).toMatchObject({
+      state: "incompatible",
+      reason: "missing_capabilities",
+      missingCapabilities: ["canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings"]
+    });
+  });
+
+  test("treats a migration failure as degraded rather than compatible", () => {
+    expect(classifyDaemonHealth({ ...currentHealth, data: { ...currentHealth.data, migrationState: "failed" } })).toMatchObject({
+      state: "degraded",
+      reason: "migration_failed"
+    });
+  });
 });
