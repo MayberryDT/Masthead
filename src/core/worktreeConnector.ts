@@ -37,7 +37,7 @@ export type ReadOnlyBridge = {
 const defaultHost = "127.0.0.1";
 const defaultConnectorPort = 17373;
 const defaultUiPort = 5173;
-const readOnlyPaths = new Set(["/health", "/projection", "/events", "/fixture"]);
+const readOnlyPaths = new Set(["/health", "/projection", "/events", "/fixture", "/sources", "/logbook/search"]);
 
 export async function buildLiveDevPlan(
   env: NodeJS.ProcessEnv = process.env,

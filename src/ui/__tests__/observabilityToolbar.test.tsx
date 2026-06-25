@@ -45,7 +45,7 @@ describe("Observability toolbar", () => {
     expect(html).toContain('aria-label="Compact grid"');
   });
 
-  test("renders the connector button beside the compact grid control", () => {
+  test("renders the compact grid control beside the refresh selector", () => {
     const html = renderToStaticMarkup(
       <Toolbar
         query=""
@@ -73,7 +73,11 @@ describe("Observability toolbar", () => {
     );
 
     expect(html).toContain("Reconnect");
-    expect(html.indexOf("Reconnect")).toBeLessThan(html.indexOf('aria-label="Compact grid"'));
+    expect(html.indexOf('class="toolbar-select metal-control  refresh"')).toBeLessThan(
+      html.indexOf('aria-label="Compact grid"')
+    );
+    expect(html.indexOf('aria-label="Compact grid"')).toBeLessThan(html.indexOf("Reconnect"));
+    expect(html).not.toContain("layout-toggle-text");
     expect(html).not.toContain("Live projection");
     expect(html).not.toContain("git snapshots");
   });

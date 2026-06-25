@@ -1,6 +1,8 @@
 import type { ChangeEvent } from "react";
 import { searchHistory, type HistorySearchFilters, type HistorySession } from "../core/history";
 import type { StoreRecord } from "../core/store";
+import { Icon, type IconName } from "./icons/Icon";
+import { iconWeights } from "./icons/icon-tokens";
 
 type Props = {
   records?: StoreRecord[];
@@ -25,40 +27,65 @@ export type LogbookSession = {
 
 export function HistoryPanel({ records = [], sessions, query, total, loading = false, onQueryChange }: Props) {
   const filters = filtersFromQuery(query);
-  const result = sessions ? undefined : searchHistory(records, filters);
+  const usesLogbookStore = sessions !== undefined || total !== undefined || loading;
+  const result = usesLogbookStore ? undefined : searchHistory(records, filters);
   const visibleSessions = sessions ?? [];
+  const legacySessions = result?.sessions ?? [];
   const visibleTotal = total ?? result?.sessions.length ?? visibleSessions.length;
   const recordCount = result?.recordCount ?? visibleTotal;
+  const visibleCardCount = Math.min(usesLogbookStore ? visibleSessions.length : legacySessions.length, maxVisibleHistorySessions);
 
   return (
-    <section id="history" className="history-panel" aria-label="Local history">
-      <header className="section-head">
+    <section id="history" className="history-panel surface-panel" aria-label="Logbook">
+      <header className="surface-panel-head metal-surface">
         <div>
-          <p className="mono-label">History</p>
-          <h1>Logbook</h1>
+          <p className="mono-label">Logbook</p>
+          <h1>Session memory</h1>
         </div>
-        <strong>{visibleTotal}</strong>
+        <strong className="surface-count">{visibleTotal}</strong>
       </header>
-      <label className="search-field history-search">
-        <span className="mono-label">Search history</span>
-        <input
-          type="search"
-          placeholder="Search project, status, files, commands, alerts, or outcome"
-          value={query}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => onQueryChange(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") onQueryChange("");
-          }}
-        />
-      </label>
-      <div className="history-results">
-        {loading ? <p className="toolbar-result">Loading Logbook results...</p> : null}
-        {sessions
-          ? visibleSessions.slice(0, maxVisibleHistorySessions).map((session) => <LogbookSessionItem key={session.sessionId} session={session} />)
-          : result?.sessions.slice(0, maxVisibleHistorySessions).map((session) => <LegacyHistoryItem key={session.sessionId} session={session} />)}
+
+      <div className="surface-panel-toolbar">
+        <label className="search-field history-search surface-search">
+          <span className="mono-label">Search history</span>
+          <input
+            type="search"
+            placeholder="Search project, status, files, commands, alerts, or outcome"
+            value={query}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => onQueryChange(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") onQueryChange("");
+            }}
+          />
+        </label>
+        <div className="surface-panel-stats" aria-label="Logbook summary">
+          <SummaryStat label="Indexed" value={visibleTotal} />
+          <SummaryStat label="Showing" value={visibleCardCount} />
+          <SummaryStat label="Records" value={recordCount} />
+          <SummaryStat label="Mode" value={usesLogbookStore ? "SQLite" : "Local"} />
+        </div>
       </div>
-      <p className="toolbar-result">
-        Showing {Math.min(visibleTotal, maxVisibleHistorySessions)} of {visibleTotal}; searching {recordCount} local records
+
+      {loading && visibleCardCount > 0 ? <p className="toolbar-result surface-status">Refreshing Logbook results...</p> : null}
+
+      {loading && visibleCardCount === 0 ? (
+        <EmptyPanel label="Logbook" title="Loading Logbook results" message="Session memory is being indexed." />
+      ) : visibleCardCount === 0 ? (
+        <EmptyPanel label="Logbook" title="No matching sessions" message="Try a broader query or refresh the session source." />
+      ) : (
+        <div className="history-results surface-card-grid">
+          {usesLogbookStore
+            ? visibleSessions
+                .slice(0, maxVisibleHistorySessions)
+                .map((session) => <LogbookSessionItem key={session.sessionId} session={session} />)
+            : legacySessions
+                .slice(0, maxVisibleHistorySessions)
+                .map((session) => <LegacyHistoryItem key={session.sessionId} session={session} />)}
+        </div>
+      )}
+
+      <p className="toolbar-result surface-status">
+        Showing {visibleCardCount} of {visibleTotal}; searching {recordCount} local records
       </p>
     </section>
   );
@@ -66,17 +93,34 @@ export function HistoryPanel({ records = [], sessions, query, total, loading = f
 
 function LogbookSessionItem({ session }: { session: LogbookSession }) {
   return (
-    <article className="history-item">
-      <header>
-        <div>
-          <p className="mono-label">
-            {session.project ?? "Masthead"} / {session.runtime ?? "unknown"}
-          </p>
-          <h2>{session.title}</h2>
-        </div>
-        <span className="state-token">{session.state ?? "indexed"}</span>
+    <article className={`history-item surface-data-card logbook-card metal-surface metal-card ${session.snippet ? "has-snippet" : ""}`.trim()}>
+      <header className="surface-card-head">
+        <span className="card-session-name" title={session.project ?? "Masthead"}>
+          {session.project ?? "Masthead"}
+        </span>
+        <span className="card-harness">{runtimeLabel(session.runtime)}</span>
+        <span className={`state-token ${stateToneClass(session.state)}`.trim()}>{statusLabel(session.state ?? "indexed")}</span>
       </header>
+
+      <h2>{session.title}</h2>
       {session.snippet ? <HighlightedSnippet snippet={session.snippet} /> : null}
+
+      <dl className="surface-card-facts history-facts">
+        <SurfaceFact icon="logbook" label="Session" value={shortId(session.sessionId)} />
+        <SurfaceFact icon="model" label="Model" value={session.model ?? "Not captured"} />
+        <SurfaceFact icon="source" label="Host" value={session.host ?? "Local"} />
+        <SurfaceFact icon="lastActivity" label="Activity" value={formatActivity(session.lastActivityAt)} />
+      </dl>
+
+      <span className="surface-card-rule" aria-hidden="true" />
+
+      <footer className="surface-card-footer">
+        <span className="card-footer-meta">
+          <Icon name="lastActivity" size="inline" weight={iconWeights.inline} />
+          Indexed
+        </span>
+        <span className="timestamp">{shortId(session.sessionId)}</span>
+      </footer>
     </article>
   );
 }
@@ -105,43 +149,69 @@ function HighlightedSnippet({ snippet }: { snippet: string }) {
 
 function LegacyHistoryItem({ session }: { session: HistorySession }) {
   return (
-    <article className="history-item">
-      <header>
-        <div>
-          <p className="mono-label">
-            {session.project} / {statusText(session.status)}
-          </p>
-          <h2>{historyHeadline(session)}</h2>
-        </div>
-        <span className="state-token">{outcomeText(session.outcome)}</span>
+    <article className={`history-item surface-data-card logbook-card metal-surface metal-card ${stateToneClass(session.outcome)}`.trim()}>
+      <header className="surface-card-head">
+        <span className="card-session-name" title={session.project}>
+          {session.project}
+        </span>
+        <span className="card-harness">{statusText(session.status)}</span>
+        <span className={`state-token ${stateToneClass(session.outcome)}`.trim()}>{outcomeText(session.outcome)}</span>
       </header>
+
+      <h2>{historyHeadline(session)}</h2>
+
       <dl className="history-facts">
-        <div>
-          <dt>Files</dt>
-          <dd>{formatCount(session.changedPaths.length, "file changed", "files changed")}</dd>
-        </div>
-        <div>
-          <dt>Commands</dt>
-          <dd>{formatCount(Math.max(session.commands.length, session.commandIds.length), "command observed", "commands observed")}</dd>
-        </div>
-        <div>
-          <dt>Alerts</dt>
-          <dd>{formatCount(session.alertTypes.length, "follow-up signal", "follow-up signals")}</dd>
-        </div>
-        <div>
-          <dt>Outcome</dt>
-          <dd>{outcomeText(session.outcome)}</dd>
-        </div>
-        <div>
-          <dt>Disposition</dt>
-          <dd>{formatCount(session.dispositionStatuses.length, "review label", "review labels")}</dd>
-        </div>
-        <div>
-          <dt>Records</dt>
-          <dd>{session.records.length}</dd>
-        </div>
+        <SurfaceFact icon="worktree" label="Files" value={formatCount(session.changedPaths.length, "file changed", "files changed")} />
+        <SurfaceFact
+          icon="runtime"
+          label="Commands"
+          value={formatCount(Math.max(session.commands.length, session.commandIds.length), "command observed", "commands observed")}
+        />
+        <SurfaceFact icon="alerts" label="Alerts" value={formatCount(session.alertTypes.length, "follow-up signal", "follow-up signals")} />
+        <SurfaceFact icon="logbook" label="Records" value={String(session.records.length)} />
       </dl>
+
+      <span className="surface-card-rule" aria-hidden="true" />
+
+      <footer className="surface-card-footer">
+        <span className="card-footer-meta">
+          <Icon name="lastActivity" size="inline" weight={iconWeights.inline} />
+          Outcome
+        </span>
+        <span>{outcomeText(session.outcome)}</span>
+      </footer>
     </article>
+  );
+}
+
+function SummaryStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="surface-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function SurfaceFact({ icon, label, value }: { icon: IconName; label: string; value: string }) {
+  return (
+    <div>
+      <span className="fact-icon" aria-hidden="true">
+        <Icon name={icon} size="cardMeta" weight={iconWeights.cardMeta} />
+      </span>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+function EmptyPanel({ label, title, message }: { label: string; title: string; message: string }) {
+  return (
+    <div className="empty-session-state surface-empty-state">
+      <p className="mono-label">{label}</p>
+      <h2>{title}</h2>
+      <p>{message}</p>
+    </div>
   );
 }
 
@@ -215,4 +285,36 @@ function formatCount(count: number, one: string, many: string): string {
   if (count === 0) return `No ${many}`;
   if (count === 1) return `1 ${one}`;
   return `${count} ${many}`;
+}
+
+function runtimeLabel(runtime: string | undefined): string {
+  if (!runtime) return "Unknown";
+  return runtime === "codex" ? "Codex" : runtime;
+}
+
+function statusLabel(value: string): string {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function stateToneClass(value: string | undefined): string {
+  const normalized = value?.toLowerCase() ?? "";
+  if (normalized.includes("fail") || normalized.includes("attention") || normalized.includes("blocked")) return "attention";
+  if (normalized.includes("unknown") || normalized.includes("pending")) return "neutral";
+  return "";
+}
+
+function shortId(value: string): string {
+  if (value.length <= 12) return value;
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function formatActivity(value: string | undefined): string {
+  if (!value) return "Not captured";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }

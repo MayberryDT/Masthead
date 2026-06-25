@@ -1,0 +1,412 @@
+---
+version: alpha
+name: Masthead
+description: Local-first operator board for supervising parallel coding-agent sessions. The UI is a dense developer console that routes attention, exposes evidence, and stays quiet when work is healthy.
+colors:
+  primary: "#031019"
+  secondary: "#071b28"
+  tertiary: "#2ea7ff"
+  neutral: "#f6fbff"
+  canvas: "#031019"
+  sidebar-bg: "#041522"
+  toolbar-bg: "#051724"
+  surface: "#071b28"
+  surface-hover: "#082130"
+  control-bg: "#061925"
+  control-raised: "#081d2a"
+  control-raised-hover: "#092231"
+  surface-border: "rgba(92, 153, 187, 0.18)"
+  surface-border-hover: "rgba(112, 173, 205, 0.24)"
+  line: "rgba(194, 221, 241, 0.13)"
+  line-strong: "rgba(196, 226, 248, 0.2)"
+  ink: "#f6fbff"
+  body: "#d6e4ef"
+  mute: "#91a8ba"
+  ash: "#61798e"
+  green: "#36d869"
+  green-soft: "rgba(89, 212, 153, 0.14)"
+  blue: "#2ea7ff"
+  blue-soft: "rgba(45, 168, 255, 0.16)"
+  yellow: "#ffcf36"
+  yellow-soft: "rgba(247, 201, 72, 0.15)"
+  red: "#ff483e"
+  red-soft: "rgba(255, 77, 77, 0.14)"
+typography:
+  heading-lg:
+    fontFamily: IBM Plex Sans
+    fontSize: 24px
+    fontWeight: 600
+    lineHeight: 1.1
+    letterSpacing: 0
+  heading-md:
+    fontFamily: IBM Plex Sans
+    fontSize: 17px
+    fontWeight: 600
+    lineHeight: 1.32
+    letterSpacing: 0
+  body-sm:
+    fontFamily: IBM Plex Sans
+    fontSize: 13px
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: 0
+  label-mono:
+    fontFamily: IBM Plex Mono
+    fontSize: 11px
+    fontWeight: 500
+    lineHeight: 1.3
+    letterSpacing: 0
+  data-mono:
+    fontFamily: IBM Plex Mono
+    fontSize: 11.5px
+    fontWeight: 400
+    lineHeight: 18px
+    letterSpacing: 0
+rounded:
+  control: 3px
+  card: 5px
+  panel: 5px
+  modal: 8px
+  legacy-rail: 10px
+  full: 9999px
+spacing:
+  xs: 8px
+  sm: 12px
+  md: 16px
+  lg: 24px
+  shell-gap: 14px
+  sidebar-width: 215px
+  surface-card-height: 238px
+  surface-card-mobile-height: 268px
+  minimum-control-height: 40px
+components:
+  app-shell:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.neutral}"
+    typography: "{typography.body-sm}"
+    width: 100%
+  canvas:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-sm}"
+  sidebar:
+    backgroundColor: "{colors.sidebar-bg}"
+    textColor: "{colors.body}"
+    typography: "{typography.body-sm}"
+    width: "{spacing.sidebar-width}"
+  toolbar:
+    backgroundColor: "{colors.toolbar-bg}"
+    textColor: "{colors.body}"
+    typography: "{typography.body-sm}"
+    height: "{spacing.minimum-control-height}"
+  surface-panel:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.body}"
+    typography: "{typography.body-sm}"
+    padding: 0
+  surface-data-card:
+    backgroundColor: "{colors.secondary}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-sm}"
+    rounded: "{rounded.card}"
+    height: "{spacing.surface-card-height}"
+  surface-data-card-hover:
+    backgroundColor: "{colors.surface-hover}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-sm}"
+    rounded: "{rounded.card}"
+    height: "{spacing.surface-card-height}"
+  hairline-border:
+    backgroundColor: "{colors.surface-border}"
+    height: 1px
+  hairline-border-hover:
+    backgroundColor: "{colors.surface-border-hover}"
+    height: 1px
+  divider:
+    backgroundColor: "{colors.line}"
+    height: 1px
+  divider-strong:
+    backgroundColor: "{colors.line-strong}"
+    height: 1px
+  muted-label:
+    backgroundColor: "{colors.secondary}"
+    textColor: "{colors.mute}"
+    typography: "{typography.label-mono}"
+  secondary-label:
+    backgroundColor: "{colors.secondary}"
+    textColor: "{colors.mute}"
+    typography: "{typography.label-mono}"
+  ash-swatch:
+    backgroundColor: "{colors.ash}"
+    height: 1px
+  low-control:
+    backgroundColor: "{colors.control-bg}"
+    textColor: "{colors.body}"
+    typography: "{typography.body-sm}"
+    rounded: "{rounded.control}"
+    height: "{spacing.minimum-control-height}"
+  toolbar-button:
+    backgroundColor: "{colors.control-raised}"
+    textColor: "{colors.body}"
+    typography: "{typography.body-sm}"
+    rounded: "{rounded.control}"
+    height: "{spacing.minimum-control-height}"
+  toolbar-button-hover:
+    backgroundColor: "{colors.control-raised-hover}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-sm}"
+    rounded: "{rounded.control}"
+    height: "{spacing.minimum-control-height}"
+  modal-panel:
+    backgroundColor: "{colors.secondary}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-sm}"
+    rounded: "{rounded.modal}"
+  status-active:
+    backgroundColor: "{colors.green}"
+    textColor: "{colors.primary}"
+    typography: "{typography.label-mono}"
+    rounded: "{rounded.full}"
+  status-active-soft:
+    backgroundColor: "{colors.green-soft}"
+    rounded: "{rounded.full}"
+  status-info:
+    backgroundColor: "{colors.tertiary}"
+    textColor: "{colors.primary}"
+    typography: "{typography.label-mono}"
+    rounded: "{rounded.full}"
+  status-observed:
+    backgroundColor: "{colors.blue}"
+    textColor: "{colors.primary}"
+    typography: "{typography.label-mono}"
+    rounded: "{rounded.full}"
+  status-observed-soft:
+    backgroundColor: "{colors.blue-soft}"
+    rounded: "{rounded.full}"
+  status-warning:
+    backgroundColor: "{colors.yellow}"
+    textColor: "{colors.primary}"
+    typography: "{typography.label-mono}"
+    rounded: "{rounded.full}"
+  status-warning-soft:
+    backgroundColor: "{colors.yellow-soft}"
+    rounded: "{rounded.full}"
+  status-danger:
+    backgroundColor: "{colors.red}"
+    textColor: "{colors.primary}"
+    typography: "{typography.label-mono}"
+    rounded: "{rounded.full}"
+  status-danger-soft:
+    backgroundColor: "{colors.red-soft}"
+    rounded: "{rounded.full}"
+x-motion:
+  modal-open-duration: 250ms
+  modal-close-duration: 220ms
+  dropdown-open-duration: 250ms
+  dropdown-close-duration: 260ms
+  layout-change-duration: 300ms
+  easing: "cubic-bezier(0.22, 1, 0.36, 1)"
+---
+
+# Masthead Design
+
+This is the master design source for Masthead. The repo intentionally uses the lowercase filename `design.md`; tools or agents that expect Google's uppercase `DESIGN.md` format should be pointed at this file.
+
+Product requirements live in `prd.md`. Historical implementation plans under `docs/superpowers/plans/` are not current visual direction. Do not use deleted files, old screenshots, generic dashboard examples, or the previous Raycast-inspired document as design authority.
+
+## Overview
+
+Masthead is a local-first operator board for supervising parallel coding-agent work. It should feel like a native developer console built for continuous second-monitor use: dense, calm, readable, and evidence-forward.
+
+The UI has one job: help the developer answer what is happening, what needs attention, and what may collide. It is not a marketing site, KPI dashboard, analytics product, task manager, employee monitor, chat client, or token-spend console.
+
+The center workspace is the product. Sessions, Logbook, and Sources must share one visual language: a headed operator surface, a compact search or control band, status/stat tiles when useful, and a grid of fixed-format data cards. Healthy background work should stay visually quiet. Attention, conflicts, failed verification, stale data, and inferred states should be prominent only when they change what the developer should do next.
+
+Masthead should look specific to coding-agent supervision. Every card should expose concrete evidence such as session state, project, branch, command, source path, changed files, timestamp, outcome, or confidence. Decorative charts, generic metric blocks, oversized hero text, and empty visual ornament are failures.
+
+## Colors
+
+The palette is a near-black blue operator console with restrained semantic color. The background should read as a deep local-machine workspace, not a purple SaaS dashboard, beige productivity app, or bright analytics interface.
+
+- **Canvas (`#031019`):** Full app background and the base of the observability console.
+- **Sidebar and toolbar blues (`#041522`, `#051724`):** Persistent navigation and control chrome. These surfaces should recede behind the center board.
+- **Surface metal (`#071b28`):** Cards, data panels, and repeated operational surfaces.
+- **Raised control (`#081d2a`):** Buttons, inputs, filters, and select triggers.
+- **Ink (`#f6fbff`):** Primary text and high-confidence data.
+- **Body (`#d6e4ef`):** Normal readable text.
+- **Mute (`#91a8ba`):** Secondary labels, descriptions, and old timestamps.
+- **Green:** healthy, complete, verified, active, or source-connected.
+- **Blue:** inferred, informational, idle, selected, or locally observed.
+- **Yellow:** warning, review-needed, stale, or pending.
+- **Red:** attention, conflict, failed, destructive risk, or broken connection.
+
+State color must be sparse. Do not color every card for variety. A card may carry a thin state rail, status token, or small accent only when the state has meaning. The default healthy card should mostly be metal, border, typography, and evidence.
+
+## Typography
+
+Use IBM Plex Sans for interface text and IBM Plex Mono for paths, timestamps, counts, command names, short IDs, and technical facts. Numeric data should use tabular numerals.
+
+Headings inside the app are compact. The center surface heading can use 24px, but cards, panels, rails, and controls should stay in the 11px to 17px range. Do not use landing-page or hero-scale type inside the product.
+
+Letter spacing is 0. Do not introduce negative tracking. Avoid all-caps paragraphs. Monospace labels can be uppercase when they are short metadata labels, but do not let label styling overpower the actual evidence.
+
+Text must wrap deliberately. Long project names, source paths, branches, and snippets need ellipsis, line clamps, or `overflow-wrap: anywhere` depending on the container. Text may not overlap icons, rails, buttons, or following content.
+
+## Layout
+
+The primary layout is an observability console:
+
+- Left sidebar: navigation and product identity.
+- Center workspace: the active operator board.
+- Right rail when present: supporting telemetry, status, and secondary evidence.
+
+The center workspace is a grid system, not a stack of generic panels. Sessions, Logbook, and Sources should all use the same middle-section contract:
+
+1. A `surface-panel-head` with the view name and a compact count or status token.
+2. A toolbar band for search, filters, and small action controls.
+3. Optional stat tiles only when they explain the current data set.
+4. A `surface-card-grid` of fixed-format cards.
+5. A quiet empty state that still looks like part of the console.
+
+Desktop card grids should prefer three columns when width allows, two columns on tablet, and one column on mobile. Cards need stable dimensions so hover states, labels, snippets, icons, and data facts do not resize the grid. Current data cards use 238px height on desktop and 268px on narrow mobile.
+
+Do not put cards inside other cards. Do not wrap whole page sections in floating cards. Use full-width bands or unframed layouts for sections, and reserve cards for repeated data items, modals, and genuinely framed tools.
+
+Mobile should be a usable operator board, not a crushed desktop screenshot. Collapse rails, keep controls at least 40px tall, reduce card columns to one, and preserve the evidence hierarchy.
+
+## Elevation & Depth
+
+Depth comes from hairline borders, subtle inset highlights, low-opacity shadows, and the anodized surface texture. It should feel like machined dark UI, not glassmorphism or marketing gloss.
+
+Use:
+
+- 1px borders with `surface-border` or `line`.
+- Inset top highlights for raised metal surfaces.
+- Soft, tight shadows that imply separation without floating the card off the board.
+- Hover states that add one step of surface brightness and border clarity.
+
+Avoid:
+
+- Big drop shadows.
+- Gradient blobs, bokeh, or decorative background orbs.
+- Bright neon outlines except for accessibility focus.
+- White cards or translucent frosted panels.
+- Busy grid backgrounds behind dense information.
+
+## Shapes
+
+The interface uses small radii. Controls are 3px, cards and panels are 5px, modals can be 8px, and legacy rail surfaces may remain 10px until touched for product reasons.
+
+Do not introduce pill-shaped rectangles for normal buttons. Reserve full radius for small state tokens, count chips, and compact tags where the pill shape carries metadata meaning.
+
+Buttons and inputs should maintain a minimum 40px hit area. Smaller inline buttons are allowed only inside dense card footers or source chips where the available space is constrained.
+
+## Components
+
+### Session Cards
+
+Session cards are the reference pattern for the middle workspace. A card must show state, project or task identity, meaningful timing, and evidence of recent activity. Healthy cards stay quiet. Attention, conflicts, approvals, failed commands, stale verification, and review-needed states should be visually scannable from the board without opening the modal.
+
+Clicking a card opens the detail modal. The card itself should not become a miniature dashboard. Keep it focused on the decision a developer can make from the board.
+
+### Logbook
+
+The Logbook is not an old utility list. It should look like the Sessions middle section translated to history search. Use the same `surface-panel`, `surface-panel-toolbar`, `surface-card-grid`, and `surface-data-card` system.
+
+Each Logbook card should answer: what happened, where, when, what state it ended in, and what evidence or snippet makes it reviewable. Snippets belong in constrained evidence blocks, not free-floating paragraphs.
+
+### Sources
+
+Sources is not a settings table. It should look like an operator inventory for local data sources. Use the same center-surface system as Sessions and Logbook.
+
+Each source card should show source identity, health, event volume, freshness, capture policy, and any action that affects local observation. Exclude or retention controls should be compact and plainly scoped.
+
+### Toolbar, Filters, And Dropdowns
+
+Toolbar controls should feel mechanical and responsive. Use raised dark controls, 40px minimum hit areas, exact-property transitions, and clear selected state.
+
+Dropdowns must animate. Open with opacity and a slight scale from the trigger origin. Close with a short opacity/scale transition before unmounting. Chevron rotation should track the open state. Options should have hover and selected states, but they should not bounce or over-animate.
+
+### Layout Change Button
+
+Changing card density or layout must animate the cards, not only flip the button state. Use a transform-based FLIP pattern or equivalent view transition so cards preserve spatial continuity as they resize and move.
+
+The button itself needs hover, focus, and active press transitions. The layout change should be smooth enough to read as intentional, but short enough that repeated supervision remains efficient.
+
+### Modals
+
+The session modal is the strongest current interaction and should stay central. Open and close with synchronized backdrop opacity and panel transform/opacity. Keep focus trap, Escape close, backdrop click, and a 40px close control.
+
+The modal content should remain an evidence inspector, not a form-heavy settings panel. Use compact fact grids, sections, and read-only evidence blocks.
+
+### Buttons And Actions
+
+Buttons should use icons when the command is familiar and text when the action needs clarity. Press states should use a small scale change around 0.96 to 0.98. Hover and focus states should be visible but not loud.
+
+Dangerous or mutating actions must be visually distinct and must state their blast radius in copy near the action. Masthead observes before it controls, so avoid casual destructive controls.
+
+### Empty States
+
+Empty states should be quiet operator states. They should explain the missing data in one short line and preserve the surrounding surface geometry. Do not turn empty states into onboarding cards, marketing panels, illustrations, or generic "get started" flows.
+
+## Motion
+
+Motion is part of the design system, not a bonus. It should clarify state changes, preserve spatial continuity, and make interactive controls feel responsive.
+
+Use the current motion tokens:
+
+- Modal open: 250ms with `cubic-bezier(0.22, 1, 0.36, 1)`.
+- Modal close: 220ms.
+- Dropdown open: 250ms.
+- Dropdown close: 260ms.
+- Layout change: 300ms.
+- Button hover and press: about 160ms.
+
+Animate exact properties only: `transform`, `opacity`, `border-color`, `background-color`, `box-shadow`, and `color`. Do not use `transition: all`.
+
+Required motion:
+
+- Dropdown menus open and close with transform and opacity.
+- Layout/density changes animate cards moving and resizing.
+- Modals open and close with panel and backdrop transitions.
+- Buttons, source actions, and card hover/press states have transitions.
+
+Do not animate evidence values just because they changed. Use motion for spatial changes and interaction feedback, not for decorative activity. Respect reduced-motion settings by removing transform motion while keeping state changes visible.
+
+## Do's and Don'ts
+
+Do:
+
+- Read this file before UI work.
+- Use the rendered Sessions middle section as the visual reference for Logbook and Sources.
+- Keep Masthead dense, local, evidence-forward, and state-first.
+- Make healthy work quiet and attention states unmistakable.
+- Use fixed card dimensions and responsive grid tracks.
+- Keep controls at 40px minimum height unless there is a strong dense-card reason.
+- Verify with the in-app Browser at desktop and mobile widths.
+- Update this file first when the visual direction changes.
+
+Don't:
+
+- Recreate the deleted Raycast-inspired design file.
+- Treat archived plan files or old screenshots as current design authority.
+- Build Logbook or Sources as flat old-style utility lists.
+- Use generic SaaS analytics patterns, hero sections, decorative KPI cards, token dashboards, or marketing copy.
+- Add cards inside cards or floating page-section cards.
+- Add decorative blobs, one-note purple gradients, beige productivity palettes, or bright dashboard themes.
+- Use `transition: all`.
+- Let text overlap, resize the grid, or spill outside buttons and cards.
+- Hide uncertainty. Inferred or weakly attributed states must be labeled.
+
+## Verification
+
+Any UI change that touches the visual system should pass these gates before being called done:
+
+1. Run the relevant unit tests and `npm run build`.
+2. Open the rendered app with the Codex in-app Browser at the active local URL.
+3. Verify Sessions, Logbook, and Sources against live or fixture data.
+4. Check desktop, tablet, and a narrow mobile width around 390px.
+5. Confirm no `No live connection` state appears when a healthy connector or bridge is expected.
+6. Confirm dropdowns, layout changes, card hover/press states, and modals visibly transition.
+7. Confirm all text fits, wraps, clamps, or ellipsizes inside its container.
+8. Confirm Logbook and Sources use the same middle-section surface system as Sessions.

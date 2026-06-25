@@ -81,6 +81,22 @@ describe("Masthead worktree connector planning", () => {
         return;
       }
 
+      if (request.url === "/sources") {
+        sendJson(response, 200, {
+          ok: true,
+          sources: [{ sourceId: "codex-sessions", runtime: "codex", sourceKind: "jsonl", confidence: "authoritative" }]
+        });
+        return;
+      }
+
+      if (request.url === "/logbook/search?q=Server") {
+        sendJson(response, 200, {
+          sessions: [{ sessionId: "session-1", title: "Server logbook session" }],
+          total: 1
+        });
+        return;
+      }
+
       sendJson(response, 404, { ok: false });
     });
     servers.push(upstream);
@@ -115,12 +131,35 @@ describe("Masthead worktree connector planning", () => {
     });
     await expect(projectionResponse.json()).resolves.toMatchObject({ ok: true, source: "live", events: 3 });
 
+    const sourcesResponse = await fetch(`${bridge.baseUrl}/sources`, {
+      headers: { origin: "http://127.0.0.1:5180" }
+    });
+    await expect(sourcesResponse.json()).resolves.toMatchObject({
+      ok: true,
+      sources: [expect.objectContaining({ sourceId: "codex-sessions" })]
+    });
+
+    const logbookResponse = await fetch(`${bridge.baseUrl}/logbook/search?q=Server`, {
+      headers: { origin: "http://127.0.0.1:5180" }
+    });
+    await expect(logbookResponse.json()).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ title: "Server logbook session" })],
+      total: 1
+    });
+
     const blockedResponse = await fetch(`${bridge.baseUrl}/clear`, { method: "POST" });
     await expect(blockedResponse.json()).resolves.toMatchObject({
       ok: false,
       error: "read-only Masthead worktree bridge"
     });
     expect(blockedResponse.status).toBe(405);
+
+    const blockedSourceWrite = await fetch(`${bridge.baseUrl}/sources/codex/import-metadata`, { method: "POST" });
+    await expect(blockedSourceWrite.json()).resolves.toMatchObject({
+      ok: false,
+      error: "read-only Masthead worktree bridge"
+    });
+    expect(blockedSourceWrite.status).toBe(405);
   });
 });
 

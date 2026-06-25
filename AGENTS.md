@@ -1,5 +1,13 @@
 # Masthead Agent Instructions
 
+## Design Source Of Truth
+
+Read `design.md` before Masthead UI work. It is the single master design source for this repo and follows Google's DESIGN.md structure while preserving this project's lowercase filename.
+
+`prd.md` remains the product/source-of-scope document. Historical files under `docs/superpowers/plans/` are implementation history, not current visual direction. Do not resurrect the old Raycast-inspired design file or use archived screenshots as the current design contract unless Tyler explicitly asks for that.
+
+The main visual invariant is that Sessions, Logbook, and Sources share the same center-workspace system: operator heading, compact toolbar, meaningful stats when useful, and fixed-format evidence cards. Do not rebuild Logbook or Sources as flat utility lists or generic analytics dashboards.
+
 ## Browser Automation
 
 When browser automation is needed, use the Codex in-app Browser plugin with the `iab` backend first. Do not fall back to standalone Playwright, external browser-control servers, shell-launched browsers, or Computer Use for browser work unless the user explicitly approves that fallback. References to `tab.playwright` inside the Browser plugin are acceptable only after the in-app Browser runtime is connected, because that still controls the in-app Browser.
@@ -19,7 +27,7 @@ Do this from whatever Masthead checkout or Git worktree the agent is working in.
 - If no primary connector is running, it starts the connector on `127.0.0.1:17373` and the UI on the first available UI port starting at `5173`.
 - If a healthy primary connector is already running on `127.0.0.1:17373`, it starts a read-only worktree bridge on the first available bridge port starting at `17374`, starts the UI on the first available UI port, and points that UI at the bridge.
 
-The bridge forwards read endpoints only: `/health`, `/projection`, `/events`, and `/fixture`. It intentionally rejects write endpoints such as `/ingest`, `/retention`, and `/clear`, so a secondary worktree cannot clear or mutate the primary connector store while UI work is being tested.
+The bridge forwards read endpoints only: `/health`, `/projection`, `/events`, `/fixture`, `/sources`, and `/logbook/search`. It intentionally rejects write endpoints such as `/ingest`, `/retention`, and `/clear`, so a secondary worktree cannot clear or mutate the primary connector store while UI work is being tested.
 
 Useful overrides:
 

@@ -127,6 +127,16 @@ export function Toolbar({
           className="refresh"
           onChange={(value) => onRefreshRateChange(Number(value))}
         />
+        <button
+          type="button"
+          className={`toolbar-icon-button metal-control layout-toggle ${density === "compact" ? "active" : ""}`}
+          aria-label={toggleLayoutLabel}
+          aria-pressed={density === "compact"}
+          title={toggleLayoutLabel}
+          onClick={onDensityToggle}
+        >
+          <Icon name="changeLayout" size="toolbar" weight={iconWeights.toolbar} />
+        </button>
       </div>
       <div className="toolbar-actions">
         {connectorState ? (
@@ -139,17 +149,6 @@ export function Toolbar({
             {connectorLabel}
           </button>
         ) : null}
-        <button
-          type="button"
-          className={`toolbar-icon-button metal-control layout-toggle ${density === "compact" ? "active" : ""}`}
-          aria-label={toggleLayoutLabel}
-          aria-pressed={density === "compact"}
-          title="Change layout"
-          onClick={onDensityToggle}
-        >
-          <Icon name="changeLayout" size="toolbar" weight={iconWeights.toolbar} />
-          <span className="layout-toggle-text">{toggleLayoutLabel}</span>
-        </button>
       </div>
     </section>
   );

@@ -37,7 +37,7 @@ The board should keep all useful information available, but the first screen sho
 - Ended sessions are grouped by outcome: `completed`, `needs_attention`, `blocked`, `failed`, `abandoned`, or `unknown`.
 - Card fronts show only lifecycle-critical facts: state, recency, project/workspace, changed-file count, and one next action when needed.
 - Modal details expose evidence, timeline, worktree state, attention items, conflicts, review history, and safe actions.
-- The visual redesign follows `DESIGN-MastHead.md`: near-black canvas, surface ladder, hairline borders, no drop shadows, Inter with `ss03`, restrained semantic color, and no busy grid background.
+- Historical note: the visual redesign originally referenced the now-deleted `DESIGN-MastHead.md`. Current UI work must follow `design.md`.
 - `npm test -- --run`, `npm run typecheck`, `npm run build`, and `npm run dogfood:live` pass.
 - In-app Browser verification passes at `390`, `768`, `1280`, and the current desktop viewport with no horizontal overflow.
 
@@ -134,7 +134,7 @@ If stale, show it only in the modal as review history, for example: `Previously 
 - `src/ui/AttentionQueue.tsx`: Keep as secondary context, not the primary organizing surface.
 - `src/ui/Toolbar.tsx` and `src/ui/ConnectionStatus.tsx`: Simplify chrome and make live/demo/collector state clear without visual noise.
 - `src/ui/format.ts`: Add lifecycle labels, recency labels, outcome labels, and review annotation labels.
-- `src/styles/masthead.css`: Rebuild around `DESIGN-MastHead.md`.
+- `src/styles/masthead.css`: Rebuild around the design source of truth. Current UI work must follow `design.md`.
 - `docs/release-gates.md`: Update after implementation with the new lifecycle gates and actual verification results.
 - `docs/superpowers/plans/2026-06-23-lifecycle-first-redesign.html`: Visual target for the redesigned board.
 
@@ -487,7 +487,7 @@ Expected: the redesign is verified with tests, build checks, live dogfood, and r
 - [ ] Card fronts stay quiet and scannable.
 - [ ] Modal details contain the full evidence and timeline.
 - [ ] LLM outcome candidates are optional, schema-validated, evidence-backed, and never lifecycle source of truth.
-- [ ] Visual system matches `DESIGN-MastHead.md`.
+- [ ] Visual system matches `design.md`.
 - [ ] Full test, typecheck, build, dogfood, and browser QA gates pass.
 
 ## Implementation Order
