@@ -1716,7 +1716,7 @@ main {
   width: 100%;
 }
 
-.surface-data-card {
+.surface-fixed-card {
   position: relative;
   isolation: isolate;
   width: 100%;
@@ -1732,28 +1732,28 @@ main {
     transform 180ms var(--layout-ease);
 }
 
-.surface-data-card.healthy {
+.surface-fixed-card.healthy {
   --status-rail: var(--green);
 }
 
-.surface-data-card.inferred {
+.surface-fixed-card.inferred {
   --status-rail: var(--blue);
 }
 
-.surface-data-card.attention {
+.surface-fixed-card.attention {
   --status-rail: var(--red);
 }
 
-.surface-data-card:hover {
+.surface-fixed-card:hover {
   border-left-color: var(--status-rail);
   transform: translateY(-1px);
 }
 
-.surface-data-card:active {
+.surface-fixed-card:active {
   transform: translateY(0) scale(0.98);
 }
 
-.surface-card-head {
+.surface-fixed-card .surface-card-head {
   position: absolute;
   z-index: 2;
   top: var(--space-sm);
@@ -1764,7 +1764,7 @@ main {
   gap: var(--space-xs);
 }
 
-.surface-data-card h2 {
+.surface-fixed-card h2 {
   position: absolute;
   z-index: 2;
   top: 50px;
@@ -1786,7 +1786,7 @@ main {
   -webkit-line-clamp: 2;
 }
 
-.history-snippet {
+.surface-fixed-card .history-snippet {
   position: absolute;
   z-index: 2;
   top: 101px;
@@ -1814,8 +1814,8 @@ main {
   padding: 0 2px;
 }
 
-.surface-card-facts,
-.history-facts {
+.surface-fixed-card .surface-card-facts,
+.surface-fixed-card .history-facts {
   position: absolute;
   z-index: 2;
   top: 148px;
@@ -1834,16 +1834,16 @@ main {
   top: 116px;
 }
 
-.surface-card-facts div,
-.history-facts div {
+.surface-fixed-card .surface-card-facts div,
+.surface-fixed-card .history-facts div {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   column-gap: var(--space-xs);
   min-width: 0;
 }
 
-.surface-card-facts dt,
-.history-facts dt {
+.surface-fixed-card .surface-card-facts dt,
+.surface-fixed-card .history-facts dt {
   grid-column: 2;
   grid-row: 2;
   overflow: hidden;
@@ -1855,8 +1855,8 @@ main {
   white-space: nowrap;
 }
 
-.surface-card-facts dd,
-.history-facts dd {
+.surface-fixed-card .surface-card-facts dd,
+.surface-fixed-card .history-facts dd {
   grid-column: 2;
   grid-row: 1;
   margin: 0;
@@ -1870,7 +1870,7 @@ main {
   white-space: nowrap;
 }
 
-.surface-card-rule {
+.surface-fixed-card .surface-card-rule {
   position: absolute;
   z-index: 2;
   right: var(--space-md);
@@ -1880,7 +1880,7 @@ main {
   background: rgba(205, 228, 245, 0.09);
 }
 
-.surface-card-footer {
+.surface-fixed-card .surface-card-footer {
   position: absolute;
   z-index: 2;
   right: var(--space-md);
@@ -1896,7 +1896,7 @@ main {
   font-weight: 400;
 }
 
-.surface-card-footer > span {
+.surface-fixed-card .surface-card-footer > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2142,13 +2142,13 @@ main {
     min-height: 68px;
   }
 
-  .surface-data-card {
+  .surface-fixed-card {
     height: 268px;
     min-height: 268px;
   }
 
-  .surface-card-facts,
-  .history-facts,
+  .surface-fixed-card .surface-card-facts,
+  .surface-fixed-card .history-facts,
   .logbook-card:not(.has-snippet) .surface-card-facts,
   .logbook-card:not(.has-snippet) .history-facts,
   .source-card .surface-card-facts,
@@ -4003,7 +4003,7 @@ body {
   .toolbar-connector-button,
   .toolbar-icon-button,
   .surface-search input,
-  .surface-data-card,
+  .surface-fixed-card,
   .surface-action-button,
   .source-exclude-button,
   .models a {
@@ -4022,8 +4022,8 @@ body {
   .masthead-shell .metal-surface:hover::before,
   .masthead-shell .session-card:hover,
   .masthead-shell .session-card:active,
-  .surface-data-card:hover,
-  .surface-data-card:active,
+  .surface-fixed-card:hover,
+  .surface-fixed-card:active,
   .surface-action-button:active,
   .source-exclude-button:active,
   .models a:active,

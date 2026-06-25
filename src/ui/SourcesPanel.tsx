@@ -76,7 +76,7 @@ function SourceCard({
   const sourcePath = source.path ?? source.detectedPath ?? source.sourceId;
 
   return (
-    <article className={`source-item surface-data-card source-card metal-surface metal-card ${sourceToneClass(source)}`.trim()}>
+    <article className={`source-item surface-data-card surface-fixed-card source-card metal-surface metal-card ${sourceToneClass(source)}`.trim()}>
       <header className="surface-card-head">
         <span className="card-session-name" title={`${labelForRuntime(source.runtime)} / ${sourceKindLabel(source.sourceKind)}`}>
           {labelForRuntime(source.runtime)}

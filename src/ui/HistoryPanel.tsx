@@ -174,7 +174,11 @@ function LogbookSessionItem({ session, onSessionSelect }: { session: LogbookSess
   const lifecycle = session.lifecycle ?? session.state ?? "indexed";
   const primaryModel = session.models?.[0] ?? session.model;
   return (
-    <article className={`history-item surface-data-card logbook-card metal-surface metal-card ${session.snippet ? "has-snippet" : ""}`.trim()}>
+    <article
+      className={`history-item surface-data-card surface-fixed-card logbook-card metal-surface metal-card ${
+        session.snippet ? "has-snippet" : ""
+      }`.trim()}
+    >
       <header className="surface-card-head">
         <span className="card-session-name" title={session.project ?? "Masthead"}>
           {session.project ?? "Masthead"}
@@ -232,7 +236,11 @@ function HighlightedSnippet({ snippet }: { snippet: string }) {
 
 function LegacyHistoryItem({ session }: { session: HistorySession }) {
   return (
-    <article className={`history-item surface-data-card logbook-card metal-surface metal-card ${stateToneClass(session.outcome)}`.trim()}>
+    <article
+      className={`history-item surface-data-card surface-fixed-card logbook-card metal-surface metal-card ${stateToneClass(
+        session.outcome
+      )}`.trim()}
+    >
       <header className="surface-card-head">
         <span className="card-session-name" title={session.project}>
           {session.project}

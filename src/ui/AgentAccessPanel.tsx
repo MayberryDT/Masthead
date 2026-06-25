@@ -20,13 +20,13 @@ export function AgentAccessPanel() {
       </header>
 
       <div className="surface-card-grid">
-        <article className="surface-data-card metal-surface metal-card">
+        <article className="surface-data-card surface-fixed-card metal-surface metal-card">
           <p className="mono-label">Stdio command</p>
           <h2>Local MCP server</h2>
           <pre className="setup-snippet">{command}</pre>
           <p className="surface-status">Runs against Masthead's local SQLite session graph.</p>
         </article>
-        <article className="surface-data-card metal-surface metal-card">
+        <article className="surface-data-card surface-fixed-card metal-surface metal-card">
           <p className="mono-label">Guarantees</p>
           <h2>Local-only and read-only</h2>
           <ul className="agent-access-list">
@@ -35,7 +35,7 @@ export function AgentAccessPanel() {
             <li>MCP exclusions are enforced before sessions leave Masthead.</li>
           </ul>
         </article>
-        <article className="surface-data-card metal-surface metal-card">
+        <article className="surface-data-card surface-fixed-card metal-surface metal-card">
           <p className="mono-label">Tools</p>
           <h2>Exposed retrieval tools</h2>
           <ul className="agent-access-list">
@@ -44,7 +44,7 @@ export function AgentAccessPanel() {
             ))}
           </ul>
         </article>
-        <article className="surface-data-card metal-surface metal-card">
+        <article className="surface-data-card surface-fixed-card metal-surface metal-card">
           <p className="mono-label">Audit</p>
           <h2>Recent MCP queries</h2>
           <p className="surface-status">Query audit rows are stored locally in `mcp_query_log`.</p>
