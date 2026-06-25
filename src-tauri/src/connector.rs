@@ -122,6 +122,15 @@ pub fn mcp_launch_config_command(app: AppHandle) -> Result<McpLaunchConfigResult
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct MastheadHealthSummary {
+    api_version: Option<i64>,
+    build_sha: Option<String>,
+    database_id: Option<String>,
+    database_path: Option<String>,
+    mode: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct DaemonLaunchTarget {
     data_directory: PathBuf,
     node_path: PathBuf,
@@ -347,6 +356,60 @@ mod tests {
     };
     use serde_json::json;
     use std::path::PathBuf;
+
+    #[test]
+    fn compatible_health_parser_accepts_current_contract_and_rejects_legacy() {
+        let legacy = json!({ "ok": true, "events": 18 });
+        assert!(parse_compatible_health_value(&legacy).is_none());
+
+        let current = json!({
+            "ok": true,
+            "product": "masthead",
+            "apiVersion": 1,
+            "capabilities": [
+                "live_projection",
+                "canonical_sessions",
+                "logbook_search",
+                "source_discovery",
+                "adapter_inventory",
+                "mcp_status",
+                "settings"
+            ],
+            "runtime": { "mode": "primary" },
+            "data": {
+                "databaseId": "db",
+                "databasePath": "/tmp/masthead.sqlite",
+                "migrationState": "ready"
+            }
+        });
+
+        let parsed = parse_compatible_health_value(&current).expect("compatible health");
+        assert_eq!(parsed.api_version, Some(1));
+        assert_eq!(parsed.database_id, Some("db".to_string()));
+        assert_eq!(parsed.database_path, Some("/tmp/masthead.sqlite".to_string()));
+        assert_eq!(parsed.mode, Some("primary".to_string()));
+    }
+
+    #[test]
+    fn compatible_health_parser_rejects_failed_migration() {
+        let failed = json!({
+            "ok": true,
+            "product": "masthead",
+            "apiVersion": 1,
+            "capabilities": [
+                "live_projection",
+                "canonical_sessions",
+                "logbook_search",
+                "source_discovery",
+                "adapter_inventory",
+                "mcp_status",
+                "settings"
+            ],
+            "data": { "migrationState": "failed" }
+        });
+
+        assert!(parse_compatible_health_value(&failed).is_none());
+    }
 
     #[test]
     fn development_daemon_target_uses_env_entry_without_project_script() {

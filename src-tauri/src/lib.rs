@@ -1,8 +1,37 @@
 pub mod connector;
+mod http_probe;
 pub mod native_store;
+
+use tauri::{menu::MenuBuilder, tray::TrayIconBuilder, Manager};
 
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            let menu = MenuBuilder::new(app)
+                .text("show", "Show Masthead")
+                .separator()
+                .text("quit", "Quit Masthead")
+                .build()?;
+
+            TrayIconBuilder::with_id("main")
+                .icon(tauri::include_image!("./icons/32x32.png"))
+                .menu(&menu)
+                .tooltip("Masthead")
+                .show_menu_on_left_click(true)
+                .on_menu_event(|app, event| match event.id().0.as_str() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .build(app)?;
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             connector::mcp_launch_config_command,
             connector::start_live_connector_command,
