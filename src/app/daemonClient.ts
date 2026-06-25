@@ -7,12 +7,34 @@ export type SourceStatus = {
   sourceKind: string;
   path?: string;
   detectedPath?: string;
+  discoveredSessions?: number;
+  importedSessions?: number;
+  importedRecords?: number;
+  queuedRecords?: number;
+  failureCount?: number;
+  lastSyncAt?: string;
+  transcriptImportEnabled?: boolean;
+  enrichmentEnabled?: boolean;
+  mcpEnabled?: boolean;
   sessionCount?: number;
   importedCount?: number;
   queuedCount?: number;
   failures?: number;
   lastSync?: string;
   confidence: "authoritative" | "inferred" | "heuristic";
+};
+
+export type ImportJob = {
+  importJobId: string;
+  sourceId: string;
+  importKind: "metadata" | "transcript" | "enrichment";
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  discoveredCount: number;
+  importedCount: number;
+  queuedCount: number;
+  failureCount: number;
+  updatedAt: string;
+  failureMessage?: string;
 };
 
 export type SourceExclusionInput = {
@@ -47,6 +69,33 @@ export async function importCodexMetadata(baseUrl = defaultLiveProjectionUrl()):
   const response = await fetch(url.toString(), { method: "POST", headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`codex metadata import failed: ${response.status}`);
   return response.json() as Promise<{ imported: number; sources: number }>;
+}
+
+export async function startImport(
+  input: { sourceId: string; kind: ImportJob["importKind"] },
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<ImportJob> {
+  const url = new URL(baseUrl);
+  url.pathname = "/imports";
+  url.search = "";
+  const response = await fetch(url.toString(), {
+    body: JSON.stringify(input),
+    headers: { accept: "application/json", "content-type": "application/json" },
+    method: "POST"
+  });
+  if (!response.ok) throw new Error(`import request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; job: ImportJob };
+  return body.job;
+}
+
+export async function listImports(baseUrl = defaultLiveProjectionUrl()): Promise<ImportJob[]> {
+  const url = new URL(baseUrl);
+  url.pathname = "/imports";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`imports request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; imports: ImportJob[] };
+  return body.imports;
 }
 
 export async function addSourceExclusion(input: SourceExclusionInput, baseUrl = defaultLiveProjectionUrl()): Promise<void> {

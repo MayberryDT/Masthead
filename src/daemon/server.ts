@@ -16,6 +16,7 @@ import type { CodexHookDiagnostic } from "../core/codexAdapter.ts";
 import type { GitSnapshot, NormalizedEvent } from "../core/types.ts";
 import type { DaemonConfig } from "./config.ts";
 import { deleteAllMastheadData, exportSessionGraph, getDataSummary } from "./db/dataLifecycleRepository.ts";
+import { getImportJob, listImportJobs, updateImportJob, type ImportJobKind } from "./db/importJobRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
@@ -24,6 +25,10 @@ import { migrateDatabase } from "./db/schema.ts";
 import { createSessionRepository, ingestAdapterRecord } from "./db/sessionRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "./db/sqlite.ts";
 import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
+import { setSourcePolicy, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
+import { runImportJob, type ImportWorkResult } from "./import/importCoordinator.ts";
+import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
+import { getSourceStatuses } from "./import/sourceStatusService.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 
 export type MastheadDaemon = {
@@ -193,6 +198,75 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return refreshed;
   }
 
+  async function discoverCodexSourcesAndPersist(): Promise<DiscoveredSource[]> {
+    const sources = await discoverCodexSources({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
+    getSourceStatuses(database, sources);
+    return sources;
+  }
+
+  async function importMetadataSources(sources: DiscoveredSource[]): Promise<ImportWorkResult> {
+    const result = emptyImportResult();
+    for (const source of sources) {
+      for await (const record of importCodexMetadata(source)) {
+        const { sessionId } = ingestAdapterRecord(database, record, {
+          hostId: `host:${config.host}`,
+          hostname: config.host,
+          runtimeKind: "codex",
+          runtimeVersion: record.source.runtimeVersion
+        });
+        if (sessionId) indexCanonicalSessionSearch(database, sessionId);
+        countImportedRecord(result, record, Boolean(sessionId));
+      }
+    }
+    return result;
+  }
+
+  async function importTranscriptSources(sources: DiscoveredSource[]): Promise<ImportWorkResult> {
+    const result = emptyImportResult();
+    for (const source of sources) {
+      for (const transcriptSource of await transcriptSources(source)) {
+        if (!transcriptSource.path || sourceIsExcluded(database, transcriptSource.path)) {
+          result.queuedCount += 1;
+          continue;
+        }
+        const cursor = readCursor(database, transcriptSource.sourceId, transcriptSource.path);
+        let latestOffset = cursor?.byteOffset ?? 0;
+        for await (const record of parseCodexTranscript(transcriptSource, cursor)) {
+          const nextOffset = offsetFromSourceRecordKey(record.sourceRecordKey) ?? latestOffset;
+          const { sessionId } = ingestAdapterRecord(database, record, {
+            cursor: {
+              byteOffset: nextOffset
+            },
+            hostId: `host:${config.host}`,
+            hostname: config.host,
+            runtimeKind: "codex",
+            runtimeVersion: record.source.runtimeVersion
+          });
+          if (sessionId) {
+            indexCanonicalSessionSearch(database, sessionId);
+            latestOffset = nextOffset;
+          }
+          countImportedRecord(result, record, Boolean(sessionId));
+        }
+        const info = await stat(transcriptSource.path);
+        upsertCursor(database, {
+          byteOffset: latestOffset,
+          contentFingerprint: `${info.size}:${Math.trunc(info.mtimeMs)}`,
+          modifiedAt: info.mtime.toISOString(),
+          sourceId: transcriptSource.sourceId,
+          sourcePath: transcriptSource.path
+        });
+      }
+    }
+    return result;
+  }
+
+  function runImportWorkerForSource(importKind: ImportJobKind, source: DiscoveredSource): Promise<ImportWorkResult> {
+    if (importKind === "metadata") return importMetadataSources([source]);
+    if (importKind === "transcript") return importTranscriptSources([source]);
+    return Promise.resolve(emptyImportResult());
+  }
+
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || "/", `http://${config.host}:${config.port}`);
 
@@ -242,16 +316,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/sources") {
-      const sources = await discoverCodexSources({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
+      const sources = await discoverCodexSourcesAndPersist();
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
-        sources: sources.map((source) => ({
-          confidence: source.confidence,
-          path: source.path,
-          runtime: source.runtime,
-          sourceId: source.sourceId,
-          sourceKind: source.sourceKind
-        }))
+        sources: getSourceStatuses(database, sources)
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/discover") {
+      const sources = await discoverCodexSourcesAndPersist();
+      sendJson(request, response, config.allowedOrigins, 202, {
+        ok: true,
+        sources: getSourceStatuses(database, sources)
       });
       return;
     }
@@ -289,6 +366,109 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         gitSnapshots: gitSnapshots.length,
         events: state.events.length
       });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/imports") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        imports: listImportJobs(database)
+      });
+      return;
+    }
+
+    const importMatch = url.pathname.match(/^\/imports\/([^/]+)(?:\/(cancel|retry))?$/);
+    if (request.method === "GET" && importMatch?.[1] && !importMatch[2]) {
+      const job = getImportJob(database, importMatch[1]);
+      sendJson(request, response, config.allowedOrigins, job ? 200 : 404, job ? { ok: true, job } : { ok: false, error: "import not found" });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/imports") {
+      try {
+        const body = JSON.parse(await readBody(request)) as { sourceId?: string; kind?: string };
+        if (!body.sourceId || !isImportJobKind(body.kind)) throw new Error("sourceId and kind are required");
+        const sources = await discoverCodexSourcesAndPersist();
+        const source = sources.find((candidate) => candidate.sourceId === body.sourceId);
+        if (!source) throw new Error(`Unknown source: ${body.sourceId}`);
+        if (body.kind === "transcript" && !transcriptImportApproved(database)) {
+          sendJson(request, response, config.allowedOrigins, 409, {
+            ok: false,
+            error: "Transcript import requires persisted source review approval."
+          });
+          return;
+        }
+        const job = await runImportJob(database, { importKind: body.kind, sourceId: source.sourceId }, () =>
+          runImportWorkerForSource(body.kind as ImportJobKind, source)
+        );
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          importJobId: job.importJobId,
+          job
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && importMatch?.[1] && importMatch[2] === "cancel") {
+      try {
+        const job = updateImportJob(database, importMatch[1], {
+          status: "cancelled",
+          updatedAt: new Date().toISOString()
+        });
+        sendJson(request, response, config.allowedOrigins, 202, { ok: true, job });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 404, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && importMatch?.[1] && importMatch[2] === "retry") {
+      const existing = getImportJob(database, importMatch[1]);
+      if (!existing) {
+        sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "import not found" });
+        return;
+      }
+      const sources = await discoverCodexSourcesAndPersist();
+      const source = sources.find((candidate) => candidate.sourceId === existing.sourceId);
+      if (!source) {
+        sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "source not found" });
+        return;
+      }
+      const job = await runImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId }, () =>
+        runImportWorkerForSource(existing.importKind, source)
+      );
+      sendJson(request, response, config.allowedOrigins, 202, { ok: true, importJobId: job.importJobId, job });
+      return;
+    }
+
+    const sourcePolicyMatch = url.pathname.match(/^\/sources\/([^/]+)\/policies$/);
+    if (request.method === "PUT" && sourcePolicyMatch?.[1]) {
+      try {
+        const body = JSON.parse(await readBody(request)) as { policyKind?: string; enabled?: unknown; reason?: string };
+        if (!isSourcePolicyKind(body.policyKind) || typeof body.enabled !== "boolean") throw new Error("policyKind and enabled are required");
+        setSourcePolicy(database, {
+          decidedAt: new Date().toISOString(),
+          enabled: body.enabled,
+          policyKind: body.policyKind,
+          reason: body.reason,
+          sourceId: sourcePolicyMatch[1]
+        });
+        sendJson(request, response, config.allowedOrigins, 202, { ok: true });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
       return;
     }
 
@@ -403,25 +583,18 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "POST" && url.pathname === "/sources/codex/import-metadata") {
-      const sources = await discoverCodexSources({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
+      const sources = await discoverCodexSourcesAndPersist();
       let imported = 0;
+      const jobs = [];
       for (const source of sources) {
-        for await (const record of importCodexMetadata(source)) {
-          const { sessionId } = ingestAdapterRecord(database, record, {
-            hostId: `host:${config.host}`,
-            hostname: config.host,
-            runtimeKind: "codex",
-            runtimeVersion: record.source.runtimeVersion
-          });
-          if (sessionId) {
-            imported += 1;
-            indexCanonicalSessionSearch(database, sessionId);
-          }
-        }
+        const job = await runImportJob(database, { importKind: "metadata", sourceId: source.sourceId }, () => importMetadataSources([source]));
+        imported += job.importedCount;
+        jobs.push(job);
       }
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
         imported,
+        jobs,
         sources: sources.length
       });
       return;
@@ -468,47 +641,20 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         });
         return;
       }
-      const sources = await discoverCodexSources({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
+      const sources = await discoverCodexSourcesAndPersist();
       let imported = 0;
       let skipped = 0;
+      const jobs = [];
       for (const source of sources) {
-        for (const transcriptSource of await transcriptSources(source)) {
-          if (!transcriptSource.path || sourceIsExcluded(database, transcriptSource.path)) {
-            skipped += 1;
-            continue;
-          }
-          const cursor = readCursor(database, transcriptSource.sourceId, transcriptSource.path);
-          let latestOffset = cursor?.byteOffset ?? 0;
-          for await (const record of parseCodexTranscript(transcriptSource, cursor)) {
-            const nextOffset = offsetFromSourceRecordKey(record.sourceRecordKey) ?? latestOffset;
-            const { sessionId } = ingestAdapterRecord(database, record, {
-              cursor: {
-                byteOffset: nextOffset
-              },
-              hostId: `host:${config.host}`,
-              hostname: config.host,
-              runtimeKind: "codex",
-              runtimeVersion: record.source.runtimeVersion
-            });
-            if (sessionId) {
-              indexCanonicalSessionSearch(database, sessionId);
-              latestOffset = nextOffset;
-              imported += 1;
-            }
-          }
-          const info = await stat(transcriptSource.path);
-          upsertCursor(database, {
-            byteOffset: latestOffset,
-            contentFingerprint: `${info.size}:${Math.trunc(info.mtimeMs)}`,
-            modifiedAt: info.mtime.toISOString(),
-            sourceId: transcriptSource.sourceId,
-            sourcePath: transcriptSource.path
-          });
-        }
+        const job = await runImportJob(database, { importKind: "transcript", sourceId: source.sourceId }, () => importTranscriptSources([source]));
+        imported += job.importedCount;
+        skipped += job.queuedCount;
+        jobs.push(job);
       }
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
         imported,
+        jobs,
         skipped,
         sources: sources.length
       });
@@ -659,6 +805,14 @@ function assertReviewDisposition(value: unknown): asserts value is ReviewDisposi
   if (typeof record.recordedAt !== "string" || Number.isNaN(Date.parse(record.recordedAt))) {
     throw new Error("recordedAt must be an ISO timestamp.");
   }
+}
+
+function isImportJobKind(value: unknown): value is ImportJobKind {
+  return value === "metadata" || value === "transcript" || value === "enrichment";
+}
+
+function isSourcePolicyKind(value: unknown): value is SourcePolicyKind {
+  return value === "metadata_import" || value === "transcript_import" || value === "mcp_access" || value === "enrichment";
 }
 
 function sendJson(

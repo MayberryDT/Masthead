@@ -406,6 +406,43 @@ describe("ingest server live projection", () => {
     }
   });
 
+  test("runs metadata import through the generic import job endpoint", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const codexHome = join(tempDir, "home");
+    await mkdir(join(codexHome, ".codex"), { recursive: true });
+    await writeFile(
+      join(codexHome, ".codex", "session_index.jsonl"),
+      `${JSON.stringify({
+        session_id: "job-session",
+        timestamp: "2026-06-24T12:00:00.000Z",
+        project: "Masthead",
+        title: "Import job Codex session"
+      })}\n`,
+      "utf8"
+    );
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, { MASTHEAD_CODEX_HOME: codexHome, MASTHEAD_DB_PATH: databasePath });
+    servers.push(server.child);
+
+    await getJson(server.baseUrl, "/sources");
+    const imported = await postJson(server.baseUrl, "/imports", {
+      kind: "metadata",
+      sourceId: "codex-session-index"
+    });
+
+    expect(imported).toMatchObject({
+      ok: true,
+      job: {
+        importedCount: 1,
+        status: "succeeded"
+      }
+    });
+    const imports = await getJson(server.baseUrl, "/imports");
+    expect(imports.imports).toEqual([expect.objectContaining({ sourceId: "codex-session-index", status: "succeeded" })]);
+  });
+
   test("imports Codex transcripts incrementally using persisted cursors", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
