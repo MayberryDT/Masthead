@@ -1,8 +1,12 @@
-import type { ChangeEvent } from "react";
 import { searchHistory, type HistorySearchFilters, type HistorySession } from "../core/history";
 import type { StoreRecord } from "../core/store";
-import { Icon, type IconName } from "./icons/Icon";
-import { iconWeights } from "./icons/icon-tokens";
+import type { LogbookSort, LogbookSummary } from "../app/daemonClient";
+import { LogbookFacets } from "./logbook/LogbookFacets";
+import { LogbookTable } from "./logbook/LogbookTable";
+import { LogbookToolbar } from "./logbook/LogbookToolbar";
+import { PageHeader } from "./primitives/PageHeader";
+import { StatStrip, type StatStripItem } from "./primitives/StatStrip";
+import { StatusBadge } from "./primitives/StatusBadge";
 
 type Props = {
   records?: StoreRecord[];
@@ -13,10 +17,16 @@ type Props = {
   total?: number;
   nextCursor?: string;
   loading?: boolean;
+  summary?: LogbookSummary;
+  sort?: LogbookSort;
+  density?: "comfortable" | "compact";
+  selectedSessionId?: string;
+  onDensityToggle?: () => void;
   onQueryChange: (query: string) => void;
   onLoadMore?: () => void;
   onRetry?: () => void;
   onSessionSelect?: (sessionId: string) => void;
+  onSortChange?: (sort: LogbookSort) => void;
 };
 
 export type LogbookLoadState =
@@ -51,18 +61,24 @@ export type LogbookSession = {
 };
 
 export function HistoryPanel({
-  records = [],
+  density = "comfortable",
   loadState,
-  refreshError,
-  sessions,
-  query,
-  total,
-  nextCursor,
   loading = false,
-  onQueryChange,
+  nextCursor,
+  onDensityToggle,
   onLoadMore,
+  onQueryChange,
   onRetry,
-  onSessionSelect
+  onSessionSelect,
+  onSortChange,
+  query,
+  records = [],
+  refreshError,
+  selectedSessionId,
+  sessions,
+  sort = "recent",
+  summary,
+  total
 }: Props) {
   const filters = filtersFromQuery(query);
   const resolvedLoadState =
@@ -77,67 +93,51 @@ export function HistoryPanel({
   const readyState = resolvedLoadState?.state === "ready" ? resolvedLoadState : undefined;
   const errorState = resolvedLoadState?.state === "error" ? resolvedLoadState : undefined;
   const loadingState = resolvedLoadState?.state === "loading";
-  const visibleSessions = readyState?.sessions ?? [];
+  const canonicalSessions = readyState?.sessions ?? [];
   const legacySessions = result?.sessions ?? [];
-  const visibleTotal = readyState?.total ?? result?.sessions.length ?? visibleSessions.length;
+  const tableSessions = usesLogbookStore ? canonicalSessions : legacySessions.map(legacyToLogbookSession);
+  const visibleTotal = readyState?.total ?? result?.sessions.length ?? tableSessions.length;
   const recordCount = result?.recordCount ?? visibleTotal;
-  const visibleCardCount = usesLogbookStore ? visibleSessions.length : Math.min(legacySessions.length, maxVisibleHistorySessions);
   const visibleNextCursor = readyState?.nextCursor ?? nextCursor;
   const isLoading = loading || loadingState;
+  const summaryItems = summaryItemsFor(summary, visibleTotal, recordCount);
 
   return (
-    <section id="history" className="history-panel surface-panel" aria-label="Logbook">
-      <header className="surface-panel-head metal-surface">
-        <div>
-          <p className="mono-label">Logbook</p>
-          <h1>Session memory</h1>
-        </div>
-        <strong className="surface-count">{visibleTotal}</strong>
-      </header>
+    <section id="history" className="history-panel logbook-panel surface-panel" aria-label="Logbook">
+      <PageHeader
+        eyebrow="Logbook"
+        title="Session library"
+        description="Search and inspect durable agent-session history."
+        trailing={<StatusBadge tone={errorState ? "danger" : "info"}>{formatCount(visibleTotal)} sessions</StatusBadge>}
+      />
 
-      <div className="surface-panel-toolbar">
-        <label className="search-field history-search surface-search">
-          <span className="mono-label">Search history</span>
-          <input
-            type="search"
-            placeholder="Search project, status, files, commands, alerts, or outcome"
-            value={query}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => onQueryChange(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") onQueryChange("");
-            }}
-          />
-        </label>
-        {errorState ? null : (
-          <div className="surface-panel-stats" aria-label="Logbook summary">
-            <SummaryStat label="Indexed" value={visibleTotal} />
-            <SummaryStat label="Showing" value={visibleCardCount} />
-            <SummaryStat label="Records" value={recordCount} />
-            <SummaryStat label="Mode" value={usesLogbookStore ? "SQLite" : "Local"} />
-          </div>
-        )}
-      </div>
+      <LogbookToolbar
+        density={density}
+        query={query}
+        sort={sort}
+        onDensityToggle={onDensityToggle ?? (() => undefined)}
+        onQueryChange={onQueryChange}
+        onSortChange={onSortChange ?? (() => undefined)}
+      />
+      <LogbookFacets facets={query ? [{ label: "Query", value: query, onRemove: () => onQueryChange("") }] : []} />
+      <StatStrip items={summaryItems} label="Logbook summary" />
 
-      {isLoading && visibleCardCount > 0 ? <p className="toolbar-result surface-status">Refreshing Logbook results...</p> : null}
-      {refreshError && visibleCardCount > 0 ? (
-        <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p>
-      ) : null}
+      {isLoading && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Refreshing Logbook results...</p> : null}
+      {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
 
       {errorState ? (
         <CanonicalErrorPanel message={errorState.message} onRetry={onRetry} />
-      ) : isLoading && visibleCardCount === 0 ? (
-        <EmptyPanel label="Logbook" title="Loading Logbook results" message="Session memory is being indexed." />
-      ) : visibleCardCount === 0 ? (
-        <EmptyPanel label="Logbook" title="No matching sessions" message="Try a broader query or refresh the session source." />
+      ) : isLoading && tableSessions.length === 0 ? (
+        <LogbookSkeleton />
+      ) : tableSessions.length === 0 ? (
+        <EmptyPanel title="No matching sessions" message="Try a broader query or refresh the session source." />
       ) : (
-        <div className="history-results surface-card-grid">
-          {usesLogbookStore
-            ? visibleSessions
-                .map((session) => <LogbookSessionItem key={session.sessionId} session={session} onSessionSelect={onSessionSelect} />)
-            : legacySessions
-                .slice(0, maxVisibleHistorySessions)
-                .map((session) => <LegacyHistoryItem key={session.sessionId} session={session} />)}
-        </div>
+        <LogbookTable
+          density={density}
+          sessions={tableSessions}
+          selectedSessionId={selectedSessionId}
+          onSelect={(sessionId) => onSessionSelect?.(sessionId)}
+        />
       )}
 
       {usesLogbookStore && visibleNextCursor && onLoadMore ? (
@@ -148,7 +148,7 @@ export function HistoryPanel({
 
       {errorState ? null : (
         <p className="toolbar-result surface-status">
-          Showing {visibleCardCount} of {visibleTotal}; searching {recordCount} {usesLogbookStore ? "canonical sessions" : "local records"}
+          Showing {tableSessions.length} of {visibleTotal}; searching {recordCount} {usesLogbookStore ? "canonical sessions" : "local records"}
         </p>
       )}
     </section>
@@ -170,140 +170,59 @@ function CanonicalErrorPanel({ message, onRetry }: { message: string; onRetry?: 
   );
 }
 
-function LogbookSessionItem({ session, onSessionSelect }: { session: LogbookSession; onSessionSelect?: (sessionId: string) => void }) {
-  const lifecycle = session.lifecycle ?? session.state ?? "indexed";
-  const primaryModel = session.models?.[0] ?? session.model;
+function LogbookSkeleton() {
   return (
-    <article
-      className={`history-item surface-data-card surface-fixed-card logbook-card metal-surface metal-card ${
-        session.snippet ? "has-snippet" : ""
-      }`.trim()}
-    >
-      <header className="surface-card-head">
-        <span className="card-session-name" title={session.project ?? "Masthead"}>
-          {session.project ?? "Masthead"}
-        </span>
-        <span className="card-harness">{runtimeLabel(session.runtime)}</span>
-        <span className={`state-token ${stateToneClass(lifecycle)}`.trim()}>{statusLabel(lifecycle)}</span>
-      </header>
-
-      <h2>{session.title}</h2>
-      {session.snippet ? <HighlightedSnippet snippet={session.snippet} /> : null}
-
-      <dl className="surface-card-facts history-facts">
-        <SurfaceFact icon="logbook" label="Session" value={shortId(session.sessionId)} />
-        <SurfaceFact icon="model" label="Model" value={primaryModel ?? "Not captured"} />
-        <SurfaceFact icon="source" label="Host" value={session.hostId ?? session.host ?? "Local"} />
-        <SurfaceFact icon="lastActivity" label="Activity" value={formatActivity(session.lastActivityAt)} />
-      </dl>
-
-      <span className="surface-card-rule" aria-hidden="true" />
-
-      <footer className="surface-card-footer">
-        <span className="card-footer-meta">
-          <Icon name="lastActivity" size="inline" weight={iconWeights.inline} />
-          {formatCount(session.fileCount ?? 0, "file", "files")} / {formatCount(session.toolCount ?? 0, "tool", "tools")}
-        </span>
-        <button type="button" className="surface-inline-action" onClick={() => onSessionSelect?.(session.sessionId)}>
-          View details
-        </button>
-      </footer>
-    </article>
-  );
-}
-
-function HighlightedSnippet({ snippet }: { snippet: string }) {
-  const parts = snippet.split(/(<mark>|<\/mark>)/g);
-  let highlighted = false;
-
-  return (
-    <p className="history-snippet">
-      {parts.map((part, index) => {
-        if (part === "<mark>") {
-          highlighted = true;
-          return null;
-        }
-        if (part === "</mark>") {
-          highlighted = false;
-          return null;
-        }
-        if (!part) return null;
-        return highlighted ? <mark key={index}>{part}</mark> : <span key={index}>{part}</span>;
-      })}
-    </p>
-  );
-}
-
-function LegacyHistoryItem({ session }: { session: HistorySession }) {
-  return (
-    <article
-      className={`history-item surface-data-card surface-fixed-card logbook-card metal-surface metal-card ${stateToneClass(
-        session.outcome
-      )}`.trim()}
-    >
-      <header className="surface-card-head">
-        <span className="card-session-name" title={session.project}>
-          {session.project}
-        </span>
-        <span className="card-harness">{statusText(session.status)}</span>
-        <span className={`state-token ${stateToneClass(session.outcome)}`.trim()}>{outcomeText(session.outcome)}</span>
-      </header>
-
-      <h2>{historyHeadline(session)}</h2>
-
-      <dl className="history-facts">
-        <SurfaceFact icon="worktree" label="Files" value={formatCount(session.changedPaths.length, "file changed", "files changed")} />
-        <SurfaceFact
-          icon="runtime"
-          label="Commands"
-          value={formatCount(Math.max(session.commands.length, session.commandIds.length), "command observed", "commands observed")}
-        />
-        <SurfaceFact icon="alerts" label="Alerts" value={formatCount(session.alertTypes.length, "follow-up signal", "follow-up signals")} />
-        <SurfaceFact icon="logbook" label="Records" value={String(session.records.length)} />
-      </dl>
-
-      <span className="surface-card-rule" aria-hidden="true" />
-
-      <footer className="surface-card-footer">
-        <span className="card-footer-meta">
-          <Icon name="lastActivity" size="inline" weight={iconWeights.inline} />
-          Outcome
-        </span>
-        <span>{outcomeText(session.outcome)}</span>
-      </footer>
-    </article>
-  );
-}
-
-function SummaryStat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="surface-stat">
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <div className="logbook-skeleton" aria-label="Loading Logbook results">
+      {Array.from({ length: 6 }, (_, index) => (
+        <span key={index} />
+      ))}
     </div>
   );
 }
 
-function SurfaceFact({ icon, label, value }: { icon: IconName; label: string; value: string }) {
-  return (
-    <div>
-      <span className="fact-icon" aria-hidden="true">
-        <Icon name={icon} size="cardMeta" weight={iconWeights.cardMeta} />
-      </span>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </div>
-  );
-}
-
-function EmptyPanel({ label, title, message }: { label: string; title: string; message: string }) {
+function EmptyPanel({ title, message }: { title: string; message: string }) {
   return (
     <div className="empty-session-state surface-empty-state">
-      <p className="mono-label">{label}</p>
+      <p className="mono-label">Logbook</p>
       <h2>{title}</h2>
       <p>{message}</p>
     </div>
   );
+}
+
+function summaryItemsFor(summary: LogbookSummary | undefined, visibleTotal: number, recordCount: number): StatStripItem[] {
+  if (!summary) {
+    return [
+      { label: "Sessions", value: formatCount(visibleTotal) },
+      { label: "Projects", value: "n/a" },
+      { label: "Harnesses", value: "n/a" },
+      { label: "Records", value: formatCount(recordCount) }
+    ];
+  }
+
+  return [
+    { label: "Sessions", value: formatCount(summary.sessions) },
+    { label: "Projects", value: formatCount(summary.projects) },
+    { label: "Harnesses", value: formatCount(summary.runtimes.length) },
+    { label: "Messages", value: formatCount(summary.messages) },
+    { label: "Tool calls", value: formatCount(summary.toolCalls) },
+    { label: "Date range", value: dateRange(summary.earliestActivityAt, summary.latestActivityAt) }
+  ];
+}
+
+function legacyToLogbookSession(session: HistorySession): LogbookSession {
+  return {
+    errorCount: session.status === "failed" || session.outcome === "failed" ? 1 : 0,
+    fileCount: session.changedPaths.length,
+    lastActivityAt: session.records.at(-1)?.observedAt,
+    lifecycle: session.status,
+    project: session.project,
+    runtime: "codex",
+    sessionId: session.sessionId,
+    sourceSessionId: session.sessionId,
+    title: historyHeadline(session),
+    toolCount: Math.max(session.commands.length, session.commandIds.length)
+  };
 }
 
 export function filtersFromQuery(query: string): HistorySearchFilters {
@@ -336,8 +255,6 @@ export function filtersFromQuery(query: string): HistorySearchFilters {
   return filters;
 }
 
-const maxVisibleHistorySessions = 6;
-
 function tokenizeQuery(query: string): string[] {
   const tokens: string[] = [];
   const pattern = /(?:[^\s"]+:"[^"]*"|"[^"]*"|[^\s"]+)/g;
@@ -364,48 +281,17 @@ function historyHeadline(session: HistorySession): string {
   return "Session activity recorded";
 }
 
-function statusText(status: HistorySession["status"]): string {
-  return status.replaceAll("_", " ");
+function formatCount(value: number): string {
+  return new Intl.NumberFormat().format(value);
 }
 
-function outcomeText(outcome: HistorySession["outcome"]): string {
-  return outcome.replaceAll("_", " ");
+function dateRange(earliest: string | undefined, latest: string | undefined): string {
+  if (!earliest || !latest) return "n/a";
+  return `${formatMonth(earliest)} - ${formatMonth(latest)}`;
 }
 
-function formatCount(count: number, one: string, many: string): string {
-  if (count === 0) return `No ${many}`;
-  if (count === 1) return `1 ${one}`;
-  return `${count} ${many}`;
-}
-
-function runtimeLabel(runtime: string | undefined): string {
-  if (!runtime) return "Unknown";
-  return runtime === "codex" ? "Codex" : runtime;
-}
-
-function statusLabel(value: string): string {
-  return value
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part[0].toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function stateToneClass(value: string | undefined): string {
-  const normalized = value?.toLowerCase() ?? "";
-  if (normalized.includes("fail") || normalized.includes("attention") || normalized.includes("blocked")) return "attention";
-  if (normalized.includes("unknown") || normalized.includes("pending")) return "neutral";
-  return "";
-}
-
-function shortId(value: string): string {
-  if (value.length <= 12) return value;
-  return `${value.slice(0, 6)}...${value.slice(-4)}`;
-}
-
-function formatActivity(value: string | undefined): string {
-  if (!value) return "Not captured";
+function formatMonth(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleDateString([], { month: "short", year: "numeric" });
 }

@@ -73,6 +73,7 @@ describe("Masthead worktree connector planning", () => {
     "/projects",
     "/imports",
     "/data/summary",
+    "/logbook/summary",
     "/mcp/status",
     "/mcp/tools",
     "/mcp/audit"

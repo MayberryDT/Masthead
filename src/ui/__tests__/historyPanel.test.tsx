@@ -27,11 +27,12 @@ describe("HistoryPanel", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:App" onQueryChange={() => {}} />);
 
     expect(html).toContain("Logbook");
-    expect(html).toContain("Search history");
+    expect(html).toContain("Search all session history");
+    expect(html).toContain("SESSION / MATCH");
     expect(html).toContain("Session needs review");
-    expect(html).toContain("1 file changed");
-    expect(html).toContain("1 follow-up signal");
     expect(html).toContain("Showing 1 of 1; searching");
+    expect(html).not.toContain("surface-card-grid");
+    expect(html).not.toContain("logbook-card");
     expect(html).not.toContain("History case");
     expect(html).not.toContain("src/app.ts");
     expect(html).not.toContain("agent/demo");
@@ -104,7 +105,7 @@ describe("HistoryPanel", () => {
     expect(opened).toEqual([]);
     expect(html).toContain("Session 1");
     expect(html).toContain("Session 8");
-    expect(html).toContain("View details");
+    expect(html).toContain("<table");
     expect(html).toContain("Showing 8 of 8");
   });
 
@@ -112,7 +113,7 @@ describe("HistoryPanel", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:Missing" onQueryChange={() => {}} />);
 
     expect(html).toContain("Logbook");
-    expect(html).toContain("0</strong>");
+    expect(html).toContain("<dd>0</dd>");
     expect(html).toContain("Showing 0 of 0; searching 0 local records");
     expect(html).not.toContain("History case");
   });

@@ -36,7 +36,10 @@ export type SessionQuery = {
   limit: number;
   cursor?: string;
   offset?: number;
+  sort?: LogbookSort;
 };
+
+export type LogbookSort = "recent" | "oldest" | "duration_desc" | "files_desc" | "tools_desc" | "errors_desc" | "project";
 
 export type SessionQueryResult = {
   sessions: SessionListItemDto[];
@@ -121,7 +124,7 @@ export function querySessions(db: MastheadDatabase, query: SessionQuery): Sessio
   const snippetBySession = new Map(candidates?.map((candidate) => [candidate.sessionId, candidate.snippet]) ?? []);
   const candidateOrder = new Map(candidates?.map((candidate, index) => [candidate.sessionId, index]) ?? []);
   const rows = loadSessionRows(db, query, candidates?.map((candidate) => candidate.sessionId));
-  const sortedRows = candidates
+  const sortedRows = candidates && !query.sort
     ? rows.toSorted((left, right) => (candidateOrder.get(left.sessionId) ?? 0) - (candidateOrder.get(right.sessionId) ?? 0))
     : rows;
   const page = sortedRows.slice(offset, offset + limit);
@@ -341,9 +344,30 @@ function loadSessionRows(
       JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
       JOIN hosts ON hosts.host_id = sessions.host_id
       ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
-      ORDER BY sessions.last_activity_at DESC, sessions.session_id DESC`
+      ${sortOrderClause(query.sort)}`
     )
     .all(...params) as SessionRow[];
+}
+
+function sortOrderClause(sort: LogbookSort | undefined): string {
+  if (sort === "oldest") return "ORDER BY sessions.last_activity_at ASC, sessions.session_id ASC";
+  if (sort === "duration_desc") {
+    return `ORDER BY
+      CASE
+        WHEN sessions.started_at IS NOT NULL AND sessions.ended_at IS NOT NULL
+        THEN unixepoch(sessions.ended_at) - unixepoch(sessions.started_at)
+        ELSE 0
+      END DESC,
+      sessions.last_activity_at DESC,
+      sessions.session_id DESC`;
+  }
+  if (sort === "files_desc") return "ORDER BY fileCount DESC, sessions.last_activity_at DESC, sessions.session_id DESC";
+  if (sort === "tools_desc") return "ORDER BY toolCount DESC, sessions.last_activity_at DESC, sessions.session_id DESC";
+  if (sort === "errors_desc") return "ORDER BY errorCount DESC, sessions.last_activity_at DESC, sessions.session_id DESC";
+  if (sort === "project") {
+    return "ORDER BY lower(COALESCE(sessions.project_label, '')), sessions.last_activity_at DESC, sessions.session_id DESC";
+  }
+  return "ORDER BY sessions.last_activity_at DESC, sessions.session_id DESC";
 }
 
 function rowToListItem(row: SessionRow, snippet?: string): SessionListItemDto {

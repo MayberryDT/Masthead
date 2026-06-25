@@ -49,6 +49,21 @@ export type LogbookSearchResult = {
   nextCursor?: string;
 };
 
+export type LogbookSort = "recent" | "oldest" | "duration_desc" | "files_desc" | "tools_desc" | "errors_desc" | "project";
+
+export type LogbookSummary = {
+  sessions: number;
+  projects: number;
+  runtimes: Array<{ runtime: string; count: number }>;
+  models: Array<{ model: string; count: number }>;
+  lifecycles: Array<{ lifecycle: string; count: number }>;
+  messages: number;
+  toolCalls: number;
+  fileEffects: number;
+  earliestActivityAt?: string;
+  latestActivityAt?: string;
+};
+
 export type LogbookSession = {
   sessionId: string;
   sourceSessionId: string;
@@ -108,6 +123,7 @@ export type LogbookSearchFilters = {
   dateTo?: string;
   limit?: number;
   cursor?: string;
+  sort?: LogbookSort;
 };
 
 export type ProjectOption = {
@@ -234,6 +250,16 @@ export async function searchLogbook(
   const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
   if (!response.ok) throw new Error(`logbook search failed: ${response.status}`);
   return response.json() as Promise<LogbookSearchResult>;
+}
+
+export async function getLogbookSummary(baseUrl = defaultLiveProjectionUrl(), options: { signal?: AbortSignal } = {}): Promise<LogbookSummary> {
+  const url = new URL(baseUrl);
+  url.pathname = "/logbook/summary";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`logbook summary failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; summary: LogbookSummary };
+  return body.summary;
 }
 
 export async function getLogbookSession(

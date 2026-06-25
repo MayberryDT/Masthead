@@ -28,6 +28,7 @@ import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
+import { getLogbookSummary } from "./db/logbookSummaryRepository.ts";
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
 import { migrateDatabase } from "./db/schema.ts";
 import { createSessionRepository, ingestAdapterRecord } from "./db/sessionRepository.ts";
@@ -433,6 +434,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       liveEnvelope.projection = await sessionCopyEnricher.enrichProjection(liveEnvelope.projection);
       sessions.replaceBoardProjection(liveEnvelope.projection, liveEnvelope.generatedAt);
       sendJson(request, response, config.allowedOrigins, 200, liveEnvelope);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/logbook/summary") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        summary: getLogbookSummary(database)
+      });
       return;
     }
 
@@ -1004,8 +1013,24 @@ function sessionQueryFromUrl(url: URL): SessionQuery {
     project: url.searchParams.get("project") ?? undefined,
     query: url.searchParams.get("q") ?? "",
     runtime: url.searchParams.get("runtime") ?? undefined,
+    sort: logbookSortFromUrl(url.searchParams.get("sort")),
     state: url.searchParams.get("state") ?? undefined
   };
+}
+
+function logbookSortFromUrl(value: string | null): SessionQuery["sort"] {
+  if (
+    value === "recent" ||
+    value === "oldest" ||
+    value === "duration_desc" ||
+    value === "files_desc" ||
+    value === "tools_desc" ||
+    value === "errors_desc" ||
+    value === "project"
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
 function assertReviewDisposition(value: unknown): asserts value is ReviewDisposition {

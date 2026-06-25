@@ -46,6 +46,7 @@ import {
   deleteMastheadData as deleteCanonicalMastheadData,
   exportMastheadData,
   getDataSummary,
+  getLogbookSummary,
   getLogbookSession,
   getLogbookSessionExcerpts,
   importCodexMetadata,
@@ -56,6 +57,8 @@ import {
   type LogbookExcerpt,
   type LogbookSearchResult,
   type LogbookSessionDetail,
+  type LogbookSort,
+  type LogbookSummary,
   type SourceStatus,
   type DataSummary,
   type DeleteMastheadDataScope
@@ -128,9 +131,12 @@ export function App() {
   const [sourcesBusy, setSourcesBusy] = useState(false);
   const [sourcesStatus, setSourcesStatus] = useState<string>();
   const [logbookResult, setLogbookResult] = useState<LogbookSearchResult>();
+  const [logbookSummary, setLogbookSummary] = useState<LogbookSummary>();
   const [logbookLoading, setLogbookLoading] = useState(false);
   const [logbookError, setLogbookError] = useState<string>();
   const [logbookRetryKey, setLogbookRetryKey] = useState(0);
+  const [logbookSort, setLogbookSort] = useState<LogbookSort>("recent");
+  const [logbookDensity, setLogbookDensity] = useState<"comfortable" | "compact">("comfortable");
   const [selectedLogbookSessionId, setSelectedLogbookSessionId] = useState<string>();
   const [selectedLogbookSession, setSelectedLogbookSession] = useState<LogbookSessionDetail>();
   const [selectedLogbookExcerpts, setSelectedLogbookExcerpts] = useState<LogbookExcerpt[]>([]);
@@ -375,7 +381,7 @@ export function App() {
     const timer = window.setTimeout(() => {
       setLogbookLoading(true);
       setLogbookError(undefined);
-      void searchLogbook({ limit: 50, q: historyQuery }, liveProjectionUrl, { signal: controller.signal })
+      void searchLogbook({ limit: 50, q: historyQuery, sort: logbookSort }, liveProjectionUrl, { signal: controller.signal })
         .then((result) => {
           setLogbookResult(result);
           setLogbookError(undefined);
@@ -395,7 +401,18 @@ export function App() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [activeSurface, historyQuery, logbookRetryKey]);
+  }, [activeSurface, historyQuery, logbookRetryKey, logbookSort]);
+
+  useEffect(() => {
+    if (activeSurface !== "logbook") return;
+    const controller = new AbortController();
+    void getLogbookSummary(liveProjectionUrl, { signal: controller.signal })
+      .then((summary) => setLogbookSummary(summary))
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) console.error("[masthead] Logbook summary failed", error);
+      });
+    return () => controller.abort();
+  }, [activeSurface, logbookRetryKey]);
 
   useEffect(() => {
     if (activeSurface !== "logbook" || !selectedLogbookSessionId) {
@@ -674,7 +691,7 @@ export function App() {
     if (!logbookResult?.nextCursor || logbookLoading) return;
     setLogbookLoading(true);
     try {
-      const nextPage = await searchLogbook({ cursor: logbookResult.nextCursor, limit: 50, q: historyQuery }, liveProjectionUrl);
+      const nextPage = await searchLogbook({ cursor: logbookResult.nextCursor, limit: 50, q: historyQuery, sort: logbookSort }, liveProjectionUrl);
       setLogbookResult({
         nextCursor: nextPage.nextCursor,
         sessions: [...logbookResult.sessions, ...nextPage.sessions],
@@ -705,13 +722,22 @@ export function App() {
         <HistoryPanel
           records={showDemoData ? historyRecords : undefined}
           query={historyQuery}
+          density={logbookDensity}
           loadState={showDemoData ? undefined : logbookLoadState}
           refreshError={logbookResult ? logbookError : undefined}
+          selectedSessionId={selectedLogbookSessionId}
+          sort={logbookSort}
+          summary={logbookSummary}
           loading={logbookLoading}
+          onDensityToggle={() => setLogbookDensity((current) => (current === "compact" ? "comfortable" : "compact"))}
           onQueryChange={handleLogbookQueryChange}
           onLoadMore={handleLoadMoreLogbook}
           onRetry={() => setLogbookRetryKey((current) => current + 1)}
           onSessionSelect={setSelectedLogbookSessionId}
+          onSortChange={(nextSort) => {
+            setLogbookSort(nextSort);
+            setSelectedLogbookSessionId(undefined);
+          }}
         />
         {selectedLogbookSessionId ? (
           <SessionLibraryDetail
