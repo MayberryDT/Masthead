@@ -15,7 +15,6 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
   const model = demoTelemetry?.model.value ?? session.model ?? "Not captured";
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Codex";
   const worktree = session.branchOrWorktree ?? "None";
-  const thinkingLevel = session.thinkingLevel ?? "Not captured";
   const sessionName = sessionHeaderName(session);
 
   return (
@@ -47,10 +46,10 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
       <h2>{session.copy.headline}</h2>
 
       <dl className="observability-card-facts">
-        <Fact icon="runtime" label="Runtime" value={session.durationLabel} valueClassName="runtime-value" />
+        <Fact icon="runtime" label="Runtime" value={harness} valueClassName="runtime-value" />
+        <Fact icon="lastActivity" label="Duration" value={session.durationLabel} />
         <Fact icon="model" label="Model" value={model} valueClassName="model-name" />
         <Fact icon="worktree" label="Worktree" value={worktree} valueClassName="worktree-name" />
-        <Fact icon="thinking" label="Thinking" value={thinkingLevel} valueClassName="thinking-level" />
       </dl>
 
       <span className="card-rule" aria-hidden="true" />

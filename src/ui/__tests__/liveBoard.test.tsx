@@ -23,8 +23,7 @@ const forbiddenPrimaryDashboardText = [
   "Blocked At",
   "Total Cost",
   "System status:",
-  "Work is progressing",
-  "Needs attention"
+  "Work is progressing"
 ];
 
 describe("Live Board UI", () => {
@@ -34,19 +33,18 @@ describe("Live Board UI", () => {
     expect(html).toContain("Masthead");
     expect(html).not.toContain("System status:");
     expect(html).not.toContain("AI Agent Observability");
-    expect(html).toContain('aria-label="Masthead observability console"');
+    expect(html).toContain('aria-label="Masthead session manager"');
     expect(html).toContain('aria-label="Primary navigation"');
-    expect(html).toContain('aria-label="Session observability board"');
-    expect(html).toContain('aria-label="Telemetry panels"');
+    expect(html).toContain('aria-label="Session workspace"');
+    expect(html).toContain('aria-label="Context panel"');
     expect(html).not.toContain('aria-label="Agent health metrics"');
-    expect(html).toContain("Live Sessions");
-    expect(html).toContain("Session Source");
-    expect(html).toContain("Codex");
+    expect(html).toContain("Active Sessions");
+    expect(html).toContain("Connected sources");
     expect(html).not.toContain("Total Tokens (24h)");
     expect(html).not.toContain("Top Models (24h)");
     expect(html).not.toContain("Tokens / Min");
     expect(html).toContain("Session Mix");
-    expect(html).toContain("Visible sessions");
+    expect(html).toContain("Connected sources");
     expect(html).not.toContain("Resource Utilization");
     expect(html).not.toContain("Recent Errors");
     expect(html).toContain("All Harnesses");
@@ -61,7 +59,7 @@ describe("Live Board UI", () => {
     expect(html).not.toContain('aria-label="Filters"');
     expect(html).not.toContain("History");
     expect(html).not.toContain("Ended to review");
-    expect(html).toContain("The board will switch to live sessions when the local collector responds.");
+    expect(html).toContain("Now will switch to live sessions when the local collector responds.");
     expect(html).not.toContain("Fix Google OAuth callback");
     expect(html).not.toContain("Approve request");
     expect(html).not.toContain("Run command");
@@ -78,7 +76,7 @@ describe("Live Board UI", () => {
     const html = renderToStaticMarkup(<App />);
 
     expect(html).not.toContain("System status:");
-    expect(html).toContain("0 active");
+    expect(html).toContain("0 running");
     expect(html).not.toMatch(/\byou|your|urgent|critical|dangerous/i);
   });
 

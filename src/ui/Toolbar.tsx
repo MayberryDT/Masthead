@@ -72,7 +72,7 @@ export function Toolbar({
   const toggleLayoutLabel = density === "compact" ? "Comfortable grid" : "Compact grid";
 
   return (
-    <section className="board-toolbar observability-toolbar metal-toolbar" aria-label="Board controls">
+    <section className="board-toolbar observability-toolbar metal-toolbar" aria-label="Now controls">
       <label className="search-field metal-input">
         <Icon name="search" size="toolbar" weight={iconWeights.toolbar} className="search-icon" />
         <input

@@ -10,8 +10,8 @@ import {
 import type { ReviewDisposition, StoreRecord } from "../core/store";
 import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent, SafeAction, SessionDetailView } from "../core/types";
 import { AttentionQueue } from "../ui/AttentionQueue";
+import { AppShell } from "../ui/AppShell";
 import { HistoryPanel } from "../ui/HistoryPanel";
-import { ObservabilityConsoleShell } from "../ui/ObservabilityConsoleShell";
 import { ObservabilityRightRail } from "../ui/ObservabilityRightRail";
 import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
@@ -57,6 +57,11 @@ import {
   type SourceStatus
 } from "./daemonClient";
 import { clearLocalData, exportedRecordCount, exportLocalData, pruneLocalData, readLocalRecords } from "./nativeStoreClient";
+import { AgentAccessSurface } from "./surfaces/AgentAccessSurface";
+import { LogbookSurface } from "./surfaces/LogbookSurface";
+import { NowSurface } from "./surfaces/NowSurface";
+import { SettingsSurface } from "./surfaces/SettingsSurface";
+import { SourcesSurface } from "./surfaces/SourcesSurface";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
 
@@ -103,7 +108,7 @@ const emptyLiveBoard: LiveBoardProjection = {
 };
 
 export function App() {
-  const [activeSurface, setActiveSurface] = useState<AppSurface>("board");
+  const [activeSurface, setActiveSurface] = useState<AppSurface>("now");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [historyQuery, setHistoryQuery] = useState("");
@@ -574,16 +579,18 @@ export function App() {
 
   const mainSurface =
     activeSurface === "sources" ? (
-      <SourcesPanel
-        sources={sources}
-        busy={sourcesBusy}
-        status={sourcesStatus}
-        onRefresh={handleRefreshSources}
-        onImportCodexMetadata={handleImportCodexMetadata}
-        onExcludePath={handleExcludeSourcePath}
-      />
+      <SourcesSurface>
+        <SourcesPanel
+          sources={sources}
+          busy={sourcesBusy}
+          status={sourcesStatus}
+          onRefresh={handleRefreshSources}
+          onImportCodexMetadata={handleImportCodexMetadata}
+          onExcludePath={handleExcludeSourcePath}
+        />
+      </SourcesSurface>
     ) : activeSurface === "logbook" ? (
-      <>
+      <LogbookSurface>
         <HistoryPanel
           records={historyRecords}
           query={historyQuery}
@@ -603,58 +610,66 @@ export function App() {
             onClose={() => setSelectedLogbookSessionId(undefined)}
           />
         ) : null}
-      </>
+      </LogbookSurface>
+    ) : activeSurface === "agent_access" ? (
+      <AgentAccessSurface />
     ) : activeSurface === "settings" ? (
-      <OperationsPanel
-        localDataStatus={localDataStatus}
-        onExportLocalData={handleExportLocalData}
-        onRequestPruneLocalData={handleRequestPruneLocalData}
-        onConfirmPruneLocalData={handleConfirmPruneLocalData}
-        onRequestDeleteLocalData={handleRequestDeleteLocalData}
-        onConfirmDeleteLocalData={handleConfirmDeleteLocalData}
-      />
+      <SettingsSurface>
+        <OperationsPanel
+          localDataStatus={localDataStatus}
+          onExportLocalData={handleExportLocalData}
+          onRequestPruneLocalData={handleRequestPruneLocalData}
+          onConfirmPruneLocalData={handleConfirmPruneLocalData}
+          onRequestDeleteLocalData={handleRequestDeleteLocalData}
+          onConfirmDeleteLocalData={handleConfirmDeleteLocalData}
+        />
+      </SettingsSurface>
     ) : (
-      <>
-        <Toolbar
-          query={query}
-          filter={filter}
-          resultCount={filteredCards.length}
-          totalCount={scanCards.length}
-          harnessFilter={harnessFilter}
-          lifecycleFilter={lifecycleFilter}
-          sortMode={sortMode}
-          activityWindow={activityWindow}
-          refreshRateMs={refreshRateMs}
-          density={density}
-          connectorState={showDemoData ? undefined : connectorDisplayState}
-          connectorBusy={connectorAction.state === "starting"}
-          onQueryChange={setQuery}
-          onFilterChange={setFilter}
-          onHarnessFilterChange={setHarnessFilter}
-          onLifecycleFilterChange={setLifecycleFilter}
-          onSortModeChange={setSortMode}
-          onActivityWindowChange={setActivityWindow}
-          onRefreshRateChange={setRefreshRateMs}
-          onConnectorAction={handleStartConnector}
-          onDensityToggle={toggleDensity}
-          searchInputRef={searchInputRef}
-        />
-        <SessionBoard
-          cards={filteredCards}
-          lanes={board.lanes}
-          variant="observability"
-          emptyTitle={emptyBoardTitle({ showDemoData, hasActiveToolbarFilters, liveConnection })}
-          emptyMessage={emptyBoardMessage({ showDemoData, hasActiveToolbarFilters, liveConnection })}
-          onOpenSession={handleOpenSession}
-          showDemoTelemetry={showDemoData}
-          density={density}
-        />
-      </>
+      <NowSurface
+        toolbar={
+          <Toolbar
+            query={query}
+            filter={filter}
+            resultCount={filteredCards.length}
+            totalCount={scanCards.length}
+            harnessFilter={harnessFilter}
+            lifecycleFilter={lifecycleFilter}
+            sortMode={sortMode}
+            activityWindow={activityWindow}
+            refreshRateMs={refreshRateMs}
+            density={density}
+            connectorState={showDemoData ? undefined : connectorDisplayState}
+            connectorBusy={connectorAction.state === "starting"}
+            onQueryChange={setQuery}
+            onFilterChange={setFilter}
+            onHarnessFilterChange={setHarnessFilter}
+            onLifecycleFilterChange={setLifecycleFilter}
+            onSortModeChange={setSortMode}
+            onActivityWindowChange={setActivityWindow}
+            onRefreshRateChange={setRefreshRateMs}
+            onConnectorAction={handleStartConnector}
+            onDensityToggle={toggleDensity}
+            searchInputRef={searchInputRef}
+          />
+        }
+        board={
+          <SessionBoard
+            cards={filteredCards}
+            lanes={board.lanes}
+            variant="observability"
+            emptyTitle={emptyBoardTitle({ showDemoData, hasActiveToolbarFilters, liveConnection })}
+            emptyMessage={emptyBoardMessage({ showDemoData, hasActiveToolbarFilters, liveConnection })}
+            onOpenSession={handleOpenSession}
+            showDemoTelemetry={showDemoData}
+            density={density}
+          />
+        }
+      />
     );
 
   return (
     <>
-      <ObservabilityConsoleShell
+      <AppShell
         sidebar={
           <ObservabilitySidebar
             version={APP_VERSION_LABEL}
@@ -665,10 +680,13 @@ export function App() {
         }
         main={mainSurface}
         rightRail={
-          <ObservabilityRightRail
-            summary={visibleSummary}
-            showDemoTelemetry={showDemoData}
-          />
+          activeSurface === "logbook" || activeSurface === "settings" ? undefined : (
+            <ObservabilityRightRail
+              summary={visibleSummary}
+              activeSurface={activeSurface}
+              sourceCount={sources.length}
+            />
+          )
         }
       />
 
@@ -757,7 +775,7 @@ function emptyBoardTitle({
 }): string {
   if (hasActiveToolbarFilters) return "No sessions match";
   if (showDemoData) return "No demo sessions";
-  if (liveConnection.state === "live") return "No live Codex sessions yet";
+  if (liveConnection.state === "live") return "No active sessions";
   if (liveConnection.state === "offline") return "No live connection";
   return "Connecting to Masthead collector";
 }
@@ -773,9 +791,9 @@ function emptyBoardMessage({
 }): string {
   if (hasActiveToolbarFilters) return "Adjust the toolbar filters to bring sessions back into view.";
   if (showDemoData) return "Demo replay is available only when fixture data exists.";
-  if (liveConnection.state === "live") return "New Codex hook events will appear here as sessions run.";
+  if (liveConnection.state === "live") return "New activity from connected sources will appear here.";
   if (liveConnection.state === "offline") return "Use the Connector panel to start or check the local collector.";
-  return "The board will switch to live sessions when the local collector responds.";
+  return "Now will switch to live sessions when the local collector responds.";
 }
 
 async function pruneLiveCollectorData(policy: {
@@ -813,10 +831,10 @@ function prunedRecordCount(value: unknown): number | undefined {
 
 function reasonForAction(action: Extract<SafeAction, "snooze" | "dismiss" | "mark_reviewed" | "mark_expected">): string {
   const reasons = {
-    snooze: "Snoozed from Masthead board.",
-    dismiss: "Dismissed from Masthead board.",
-    mark_reviewed: "Marked reviewed from Masthead board.",
-    mark_expected: "Marked expected from Masthead board."
+    snooze: "Snoozed from Masthead Now.",
+    dismiss: "Dismissed from Masthead Now.",
+    mark_reviewed: "Marked reviewed from Masthead Now.",
+    mark_expected: "Marked expected from Masthead Now."
   };
   return reasons[action];
 }

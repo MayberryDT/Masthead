@@ -15,11 +15,13 @@ describe("observability session card", () => {
     expect(html).toContain("Refactor auth flow");
     expect(html).toContain("Active");
     expect(html).toContain("8m 42s");
+    expect(html).toContain("Runtime");
+    expect(html).toContain("Duration");
     expect(html).toContain("card-harness");
     expect(html).toContain("Model");
     expect(html).toContain("Worktree");
-    expect(html).toContain("Thinking");
-    expect(html).toContain("High");
+    expect(html).not.toContain("Thinking");
+    expect(html).not.toContain("High");
     expect(html).toContain("Last activity");
     expect(html).toContain("Started");
     expect(html).not.toContain("5 files");
@@ -160,12 +162,12 @@ describe("observability session card", () => {
     expect(html).not.toContain("Hermes");
   });
 
-  test("renders captured live thinking values without static preview text", () => {
+  test("does not render captured thinking values as a primary card fact", () => {
     const html = renderToStaticMarkup(
       <SessionBoard cards={[session({ thinkingLevel: "Extra High" })]} variant="observability" onOpenSession={() => undefined} />
     );
 
-    expect(html).toContain("Extra High");
+    expect(html).not.toContain("Extra High");
   });
 
   test("uses the actual branch or none for the worktree fact instead of the summary label", () => {

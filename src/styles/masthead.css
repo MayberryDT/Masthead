@@ -2228,7 +2228,8 @@ body {
   background: var(--scrollbar-track);
 }
 
-.observability-console {
+.observability-console,
+.masthead-shell {
   --space-xs: 8px;
   --space-sm: 12px;
   --space-md: 16px;
@@ -2309,7 +2310,9 @@ body {
 }
 
 .observability-console,
-.observability-console * {
+.observability-console *,
+.masthead-shell,
+.masthead-shell * {
   font-variant-numeric: tabular-nums;
 }
 
@@ -2317,18 +2320,25 @@ body {
 .observability-workspace,
 .observability-content,
 .observability-main,
-.observability-right-rail {
+.observability-right-rail,
+.masthead-sidebar,
+.masthead-workspace,
+.masthead-content,
+.masthead-main,
+.masthead-right-rail {
   min-width: 0;
 }
 
-.observability-sidebar {
+.observability-sidebar,
+.masthead-sidebar {
   position: relative;
   min-height: 100vh;
   border-right: 0;
   background: var(--sidebar-bg);
 }
 
-.observability-console .metal-sidebar {
+.observability-console .metal-sidebar,
+.masthead-shell .metal-sidebar {
   isolation: isolate;
   overflow: hidden;
   box-shadow:
@@ -2336,7 +2346,8 @@ body {
     inset -2px 0 0 rgba(0, 0, 0, 0.25);
 }
 
-.observability-console .metal-sidebar::after {
+.observability-console .metal-sidebar::after,
+.masthead-shell .metal-sidebar::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -2349,13 +2360,15 @@ body {
   pointer-events: none;
 }
 
-.observability-workspace {
+.observability-workspace,
+.masthead-workspace {
   display: grid;
   min-width: 0;
   background: var(--canvas);
 }
 
-.observability-content {
+.observability-content,
+.masthead-content {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 267px;
   gap: var(--space-sm);
@@ -2364,12 +2377,21 @@ body {
   padding: var(--space-md);
 }
 
-.observability-main {
+.masthead-content.without-right-rail {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.observability-main,
+.masthead-main {
   display: grid;
   gap: var(--space-sm);
   align-content: start;
   background: var(--canvas);
   padding: 0;
+}
+
+.app-surface {
+  min-width: 0;
 }
 
 .sidebar-shell {
@@ -3020,7 +3042,8 @@ body {
   height: var(--icon-toolbar);
 }
 
-.observability-console .metal-surface {
+.observability-console .metal-surface,
+.masthead-shell .metal-surface {
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -3033,12 +3056,15 @@ body {
   transition-timing-function: var(--layout-ease);
 }
 
-.observability-console .metal-card {
+.observability-console .metal-card,
+.masthead-shell .metal-card {
   --surface-grain-opacity: 0.018;
 }
 
 .observability-console .metal-surface::before,
-.observability-console .metal-surface::after {
+.observability-console .metal-surface::after,
+.masthead-shell .metal-surface::before,
+.masthead-shell .metal-surface::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -3047,14 +3073,16 @@ body {
   pointer-events: none;
 }
 
-.observability-console .metal-surface::before {
+.observability-console .metal-surface::before,
+.masthead-shell .metal-surface::before {
   background: var(--surface-grazing-light);
   transition-property: opacity, transform;
   transition-duration: 160ms;
   transition-timing-function: ease;
 }
 
-.observability-console .metal-surface::after {
+.observability-console .metal-surface::after,
+.masthead-shell .metal-surface::after {
   background-image: var(--surface-grain-image);
   background-repeat: repeat;
   background-size: 96px 96px;
@@ -3062,7 +3090,8 @@ body {
   opacity: var(--surface-grain-opacity);
 }
 
-.observability-console .metal-surface:hover {
+.observability-console .metal-surface:hover,
+.masthead-shell .metal-surface:hover {
   border-color: var(--surface-metal-border-hover);
   background-color: var(--surface-metal-fill-hover);
   box-shadow:
@@ -3073,12 +3102,14 @@ body {
     inset 0 -1px 0 var(--surface-metal-edge-dark);
 }
 
-.observability-console .metal-surface:hover::before {
+.observability-console .metal-surface:hover::before,
+.masthead-shell .metal-surface:hover::before {
   background: var(--surface-grazing-light-hover);
   transform: translate(2px, -1px);
 }
 
-.observability-console .rail-card > * {
+.observability-console .rail-card > *,
+.masthead-shell .rail-card > * {
   position: relative;
   z-index: 2;
 }
@@ -3104,7 +3135,8 @@ body {
   gap: var(--space-sm);
 }
 
-.observability-console .session-card {
+.observability-console .session-card,
+.masthead-shell .session-card {
   display: block;
   width: 100%;
   height: 218px;
@@ -3126,35 +3158,44 @@ body {
   min-height: 178px;
 }
 
-.observability-console .session-card.running {
+.observability-console .session-card.running,
+.masthead-shell .session-card.running {
   --status-rail: var(--green);
   border-color: var(--surface-metal-border);
   border-left-color: var(--status-rail);
 }
 
-.observability-console .session-card.stalled {
+.observability-console .session-card.stalled,
+.masthead-shell .session-card.stalled {
   --status-rail: var(--blue);
 }
 
 .observability-console .session-card.needs-attention,
 .observability-console .session-card.conflict,
-.observability-console .session-card.ended {
+.observability-console .session-card.ended,
+.masthead-shell .session-card.needs-attention,
+.masthead-shell .session-card.conflict,
+.masthead-shell .session-card.ended {
   --status-rail: var(--red);
 }
 
-.observability-console .session-card.complete {
+.observability-console .session-card.complete,
+.masthead-shell .session-card.complete {
   --status-rail: rgba(174, 191, 205, 0.72);
 }
 
-.observability-console .session-card:hover {
+.observability-console .session-card:hover,
+.masthead-shell .session-card:hover {
   border-left-color: var(--status-rail);
 }
 
-.observability-console .session-card:active {
+.observability-console .session-card:active,
+.masthead-shell .session-card:active {
   transform: translateY(0) scale(0.96);
 }
 
-.observability-console .session-card.is-layout-animating {
+.observability-console .session-card.is-layout-animating,
+.masthead-shell .session-card.is-layout-animating {
   will-change: transform;
 }
 
@@ -3244,18 +3285,22 @@ body {
   color: var(--red);
 }
 
-.observability-console .session-card.stalled .state-token {
+.observability-console .session-card.stalled .state-token,
+.masthead-shell .session-card.stalled .state-token {
   background: #123f67;
   color: #a9d7ff;
 }
 
 .observability-console .session-card.complete .state-token,
-.observability-console .session-card.ended .state-token {
+.observability-console .session-card.ended .state-token,
+.masthead-shell .session-card.complete .state-token,
+.masthead-shell .session-card.ended .state-token {
   background: #263948;
   color: #c8d8e5;
 }
 
-.observability-console .session-card h2 {
+.observability-console .session-card h2,
+.masthead-shell .session-card h2 {
   position: absolute;
   z-index: 2;
   left: var(--space-md);
@@ -3423,7 +3468,8 @@ body {
   font-size: 11.5px;
 }
 
-.observability-right-rail {
+.observability-right-rail,
+.masthead-right-rail {
   display: grid;
   width: 267px;
   align-content: start;
@@ -3734,15 +3780,36 @@ body {
 }
 
 @media (max-width: 1320px) {
-  .observability-console {
+  .observability-console,
+  .masthead-shell {
     overflow: visible;
   }
 
-  .observability-content {
+  .observability-content,
+  .masthead-content {
     grid-template-columns: 1fr;
   }
 
-  .observability-right-rail {
+  .observability-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .toolbar-select-row {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-select {
+    flex: 1 1 160px;
+    min-width: 148px;
+  }
+
+  .toolbar-actions {
+    margin-left: auto;
+  }
+
+  .observability-right-rail,
+  .masthead-right-rail {
     width: 100%;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3761,15 +3828,18 @@ body {
 }
 
 @media (max-width: 760px) {
-  .observability-console {
+  .observability-console,
+  .masthead-shell {
     grid-template-columns: 1fr;
   }
 
-  .observability-workspace {
+  .observability-workspace,
+  .masthead-workspace {
     grid-row: 1;
   }
 
-  .observability-sidebar {
+  .observability-sidebar,
+  .masthead-sidebar {
     grid-row: 2;
     min-height: auto;
     border-right: 0;
@@ -3779,7 +3849,8 @@ body {
     min-height: 520px;
   }
 
-  .observability-content {
+  .observability-content,
+  .masthead-content {
     grid-template-columns: 1fr;
     padding: 12px;
   }
@@ -3854,7 +3925,8 @@ body {
   }
 
   .observability-card-grid,
-  .observability-right-rail {
+  .observability-right-rail,
+  .masthead-right-rail {
     grid-template-columns: 1fr;
   }
 
@@ -3872,12 +3944,15 @@ body {
   .modal-backdrop,
   .observability-card-grid,
   .observability-console .session-card,
+  .masthead-shell .session-card,
   .toolbar-icon-button.layout-toggle {
     transition: none !important;
   }
 
   .observability-console .metal-surface,
   .observability-console .metal-surface::before,
+  .masthead-shell .metal-surface,
+  .masthead-shell .metal-surface::before,
   .sidebar-link,
   .observability-toolbar .search-field,
   .toolbar-select,
@@ -3900,6 +3975,9 @@ body {
   .observability-console .metal-surface:hover::before,
   .observability-console .session-card:hover,
   .observability-console .session-card:active,
+  .masthead-shell .metal-surface:hover::before,
+  .masthead-shell .session-card:hover,
+  .masthead-shell .session-card:active,
   .surface-data-card:hover,
   .surface-data-card:active,
   .surface-action-button:active,

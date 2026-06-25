@@ -3,26 +3,25 @@ import { describe, expect, test } from "vitest";
 import { ObservabilitySidebar } from "../ObservabilitySidebar";
 
 describe("ObservabilitySidebar", () => {
-  test("renders Masthead identity and observability nav", () => {
-    const html = renderToStaticMarkup(
-      <ObservabilitySidebar version="v0.1.0" activeCount={24} alertCount={3} />
-    );
+  test("renders Masthead identity and session product nav", () => {
+    const html = renderToStaticMarkup(<ObservabilitySidebar version="v0.1.0" activeCount={24} />);
 
     expect(html).toContain("Masthead");
     expect(html).toContain("v0.1.0");
-    expect(html).toContain("Sessions");
+    expect(html).toContain("Now");
     expect(html).toContain("24");
     expect(html).not.toContain("Traces");
-    expect(html).toContain("Models");
-    expect(html).toContain("Alerts");
-    expect(html).toContain("3");
+    expect(html).not.toContain("Models");
+    expect(html).not.toContain("Alerts");
     expect(html).toContain("Logbook");
     expect(html).toContain("Sources");
-    expect(html).toContain("Overview");
-    expect(html).toContain("Analysis");
+    expect(html).toContain("Agent Access");
+    expect(html).toContain("Workspace");
+    expect(html).not.toContain("Overview");
+    expect(html).not.toContain("Analysis");
     expect(html).not.toContain("Configuration");
-    expect(html).toContain("Performance");
-    expect(html).toContain("Usage");
+    expect(html).not.toContain("Performance");
+    expect(html).not.toContain("Usage");
     expect(html).toContain("Settings");
     expect(html).not.toContain("Costs");
     expect(html).not.toContain("Agents");

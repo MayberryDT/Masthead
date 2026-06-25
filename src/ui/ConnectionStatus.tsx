@@ -77,7 +77,7 @@ function connectionEyebrow(connection: ConnectionState): string {
 
 function connectionTitle(connection: ConnectionState): string {
   if (connection.state === "live") return "Real Codex sessions";
-  if (connection.state === "offline") return "No live Codex connection";
+  if (connection.state === "offline") return "No live connection";
   return "Connecting to local collector";
 }
 
