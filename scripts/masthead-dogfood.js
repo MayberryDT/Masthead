@@ -16,6 +16,7 @@ const fixturePath = resolve(process.cwd(), args[0] ?? "fixtures/v0/replay-three-
 
 const report = liveUrl ? await loadAndEvaluateLive(liveUrl) : await loadAndEvaluateFixture(fixturePath);
 process.stdout.write(formatDogfoodReport(report));
+process.stdout.write("\nCodex session data loop: docs/acceptance/codex-session-data-loop.md\n");
 process.exitCode = dogfoodExitCode(report);
 
 async function loadAndEvaluateFixture(path) {
