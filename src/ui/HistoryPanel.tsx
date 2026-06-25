@@ -6,6 +6,8 @@ import { iconWeights } from "./icons/icon-tokens";
 
 type Props = {
   records?: StoreRecord[];
+  loadState?: LogbookLoadState;
+  refreshError?: string;
   sessions?: LogbookSession[];
   query: string;
   total?: number;
@@ -13,8 +15,14 @@ type Props = {
   loading?: boolean;
   onQueryChange: (query: string) => void;
   onLoadMore?: () => void;
+  onRetry?: () => void;
   onSessionSelect?: (sessionId: string) => void;
 };
+
+export type LogbookLoadState =
+  | { state: "loading" }
+  | { state: "ready"; sessions: LogbookSession[]; total: number; nextCursor?: string }
+  | { state: "error"; message: string };
 
 export type LogbookSession = {
   sessionId: string;
@@ -44,6 +52,8 @@ export type LogbookSession = {
 
 export function HistoryPanel({
   records = [],
+  loadState,
+  refreshError,
   sessions,
   query,
   total,
@@ -51,16 +61,29 @@ export function HistoryPanel({
   loading = false,
   onQueryChange,
   onLoadMore,
+  onRetry,
   onSessionSelect
 }: Props) {
   const filters = filtersFromQuery(query);
-  const usesLogbookStore = sessions !== undefined || total !== undefined || loading;
+  const resolvedLoadState =
+    loadState ??
+    (sessions !== undefined || total !== undefined
+      ? ({ state: "ready", sessions: sessions ?? [], total: total ?? sessions?.length ?? 0, nextCursor } satisfies LogbookLoadState)
+      : loading
+        ? ({ state: "loading" } satisfies LogbookLoadState)
+        : undefined);
+  const usesLogbookStore = resolvedLoadState !== undefined;
   const result = usesLogbookStore ? undefined : searchHistory(records, filters);
-  const visibleSessions = sessions ?? [];
+  const readyState = resolvedLoadState?.state === "ready" ? resolvedLoadState : undefined;
+  const errorState = resolvedLoadState?.state === "error" ? resolvedLoadState : undefined;
+  const loadingState = resolvedLoadState?.state === "loading";
+  const visibleSessions = readyState?.sessions ?? [];
   const legacySessions = result?.sessions ?? [];
-  const visibleTotal = total ?? result?.sessions.length ?? visibleSessions.length;
+  const visibleTotal = readyState?.total ?? result?.sessions.length ?? visibleSessions.length;
   const recordCount = result?.recordCount ?? visibleTotal;
   const visibleCardCount = usesLogbookStore ? visibleSessions.length : Math.min(legacySessions.length, maxVisibleHistorySessions);
+  const visibleNextCursor = readyState?.nextCursor ?? nextCursor;
+  const isLoading = loading || loadingState;
 
   return (
     <section id="history" className="history-panel surface-panel" aria-label="Logbook">
@@ -85,17 +108,24 @@ export function HistoryPanel({
             }}
           />
         </label>
-        <div className="surface-panel-stats" aria-label="Logbook summary">
-          <SummaryStat label="Indexed" value={visibleTotal} />
-          <SummaryStat label="Showing" value={visibleCardCount} />
-          <SummaryStat label="Records" value={recordCount} />
-          <SummaryStat label="Mode" value={usesLogbookStore ? "SQLite" : "Local"} />
-        </div>
+        {errorState ? null : (
+          <div className="surface-panel-stats" aria-label="Logbook summary">
+            <SummaryStat label="Indexed" value={visibleTotal} />
+            <SummaryStat label="Showing" value={visibleCardCount} />
+            <SummaryStat label="Records" value={recordCount} />
+            <SummaryStat label="Mode" value={usesLogbookStore ? "SQLite" : "Local"} />
+          </div>
+        )}
       </div>
 
-      {loading && visibleCardCount > 0 ? <p className="toolbar-result surface-status">Refreshing Logbook results...</p> : null}
+      {isLoading && visibleCardCount > 0 ? <p className="toolbar-result surface-status">Refreshing Logbook results...</p> : null}
+      {refreshError && visibleCardCount > 0 ? (
+        <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p>
+      ) : null}
 
-      {loading && visibleCardCount === 0 ? (
+      {errorState ? (
+        <CanonicalErrorPanel message={errorState.message} onRetry={onRetry} />
+      ) : isLoading && visibleCardCount === 0 ? (
         <EmptyPanel label="Logbook" title="Loading Logbook results" message="Session memory is being indexed." />
       ) : visibleCardCount === 0 ? (
         <EmptyPanel label="Logbook" title="No matching sessions" message="Try a broader query or refresh the session source." />
@@ -110,16 +140,33 @@ export function HistoryPanel({
         </div>
       )}
 
-      {usesLogbookStore && nextCursor && onLoadMore ? (
-        <button type="button" className="surface-secondary-action" onClick={onLoadMore} disabled={loading}>
+      {usesLogbookStore && visibleNextCursor && onLoadMore ? (
+        <button type="button" className="surface-secondary-action" onClick={onLoadMore} disabled={isLoading}>
           Load more
         </button>
       ) : null}
 
-      <p className="toolbar-result surface-status">
-        Showing {visibleCardCount} of {visibleTotal}; searching {recordCount} local records
-      </p>
+      {errorState ? null : (
+        <p className="toolbar-result surface-status">
+          Showing {visibleCardCount} of {visibleTotal}; searching {recordCount} {usesLogbookStore ? "canonical sessions" : "local records"}
+        </p>
+      )}
     </section>
+  );
+}
+
+function CanonicalErrorPanel({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="empty-session-state surface-empty-state" role="status">
+      <p className="mono-label">Logbook</p>
+      <h2>Logbook could not read the Masthead session database.</h2>
+      <p>{message}</p>
+      {onRetry ? (
+        <button type="button" className="surface-secondary-action" onClick={onRetry}>
+          Retry
+        </button>
+      ) : null}
+    </div>
   );
 }
 

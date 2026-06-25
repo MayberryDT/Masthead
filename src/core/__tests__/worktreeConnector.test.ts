@@ -1,6 +1,12 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, test } from "vitest";
-import { buildLiveDevPlan, connectorBaseUrl, startReadOnlyConnectorBridge, type ReadOnlyBridge } from "../worktreeConnector";
+import {
+  buildLiveDevPlan,
+  connectorBaseUrl,
+  isAllowedReadOnlyBridgeRequest,
+  startReadOnlyConnectorBridge,
+  type ReadOnlyBridge
+} from "../worktreeConnector";
 
 describe("Masthead worktree connector planning", () => {
   const servers: Server[] = [];
@@ -60,6 +66,25 @@ describe("Masthead worktree connector planning", () => {
     expect(connectorBaseUrl("http://127.0.0.1:17373/projection?selectedSessionId=s1")).toBe("http://127.0.0.1:17373");
   });
 
+  test.each([
+    "/sessions",
+    "/sessions/session-1",
+    "/sessions/session-1/excerpts",
+    "/projects",
+    "/imports",
+    "/data/summary",
+    "/mcp/status",
+    "/mcp/tools",
+    "/mcp/audit"
+  ])("forwards canonical read endpoint %s", async (pathname) => {
+    expect(isAllowedReadOnlyBridgeRequest("GET", pathname)).toBe(true);
+  });
+
+  test("still blocks mutations", () => {
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/imports")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/data/delete")).toBe(false);
+  });
+
   test("proxies read endpoints through a read-only worktree bridge", async () => {
     const upstream = createServer((request, response) => {
       if (request.url === "/health") {
@@ -93,6 +118,14 @@ describe("Masthead worktree connector planning", () => {
         sendJson(response, 200, {
           sessions: [{ sessionId: "session-1", title: "Server logbook session" }],
           total: 1
+        });
+        return;
+      }
+
+      if (request.url === "/sessions/session-1/excerpts?limit=8") {
+        sendJson(response, 200, {
+          ok: true,
+          excerpts: [{ excerptId: "excerpt-1", kind: "message", text: "Bridge excerpt" }]
         });
         return;
       }
@@ -145,6 +178,14 @@ describe("Masthead worktree connector planning", () => {
     await expect(logbookResponse.json()).resolves.toMatchObject({
       sessions: [expect.objectContaining({ title: "Server logbook session" })],
       total: 1
+    });
+
+    const excerptResponse = await fetch(`${bridge.baseUrl}/sessions/session-1/excerpts?limit=8`, {
+      headers: { origin: "http://127.0.0.1:5180" }
+    });
+    await expect(excerptResponse.json()).resolves.toMatchObject({
+      ok: true,
+      excerpts: [expect.objectContaining({ text: "Bridge excerpt" })]
     });
 
     const blockedResponse = await fetch(`${bridge.baseUrl}/clear`, { method: "POST" });

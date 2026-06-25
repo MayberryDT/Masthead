@@ -45,7 +45,12 @@ Do this from whatever Masthead checkout or Git worktree the agent is working in.
 - If no primary connector is running, it starts the connector on `127.0.0.1:17373` and the UI on the first available UI port starting at `5173`.
 - If a healthy primary connector is already running on `127.0.0.1:17373`, it starts a read-only worktree bridge on the first available bridge port starting at `17374`, starts the UI on the first available UI port, and points that UI at the bridge.
 
-The bridge forwards read endpoints only: `/health`, `/projection`, `/events`, `/fixture`, `/sources`, and `/logbook/search`. It intentionally rejects write endpoints such as `/ingest`, `/retention`, and `/clear`, so a secondary worktree cannot clear or mutate the primary connector store while UI work is being tested.
+The bridge forwards read endpoints only. The route matcher is method-aware and covers the live
+projection endpoints plus canonical read APIs such as session search/detail/excerpts, projects,
+sources, imports, data summary, and MCP status/tools/audit reads. Keep new read-only product APIs
+behind that matcher rather than maintaining a stale literal documentation list. It intentionally
+rejects write endpoints such as `/ingest`, `/retention`, `/data/delete`, and `/clear`, so a
+secondary worktree cannot clear or mutate the primary connector store while UI work is being tested.
 
 Useful overrides:
 

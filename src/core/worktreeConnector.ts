@@ -37,7 +37,27 @@ export type ReadOnlyBridge = {
 const defaultHost = "127.0.0.1";
 const defaultConnectorPort = 17373;
 const defaultUiPort = 5173;
-const readOnlyPaths = new Set(["/health", "/projection", "/events", "/fixture", "/sources", "/logbook/search"]);
+const staticReadOnlyBridgePaths = new Set([
+  "/health",
+  "/projection",
+  "/events",
+  "/fixture",
+  "/sources",
+  "/sessions",
+  "/projects",
+  "/imports",
+  "/data/summary",
+  "/mcp/status",
+  "/mcp/tools",
+  "/mcp/audit",
+  "/logbook/search"
+]);
+
+export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathname: string): boolean {
+  if (method !== "GET") return false;
+  if (staticReadOnlyBridgePaths.has(pathname)) return true;
+  return /^\/sessions\/[^/]+(?:\/excerpts)?$/.test(pathname) || /^\/imports\/[^/]+$/.test(pathname);
+}
 
 export async function buildLiveDevPlan(
   env: NodeJS.ProcessEnv = process.env,
@@ -215,7 +235,7 @@ async function handleBridgeRequest(
     return;
   }
 
-  if (request.method !== "GET" || !readOnlyPaths.has(requestUrl.pathname)) {
+  if (!isAllowedReadOnlyBridgeRequest(request.method, requestUrl.pathname)) {
     sendJson(response, 405, headers, { ok: false, error: "read-only Masthead worktree bridge" });
     return;
   }

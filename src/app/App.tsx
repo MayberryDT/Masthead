@@ -11,7 +11,7 @@ import type { ReviewDisposition, StoreRecord } from "../core/store";
 import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent, SafeAction, SessionDetailView } from "../core/types";
 import { AttentionQueue } from "../ui/AttentionQueue";
 import { AppShell } from "../ui/AppShell";
-import { HistoryPanel } from "../ui/HistoryPanel";
+import { HistoryPanel, type LogbookLoadState } from "../ui/HistoryPanel";
 import { ObservabilityRightRail } from "../ui/ObservabilityRightRail";
 import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
@@ -129,6 +129,8 @@ export function App() {
   const [sourcesStatus, setSourcesStatus] = useState<string>();
   const [logbookResult, setLogbookResult] = useState<LogbookSearchResult>();
   const [logbookLoading, setLogbookLoading] = useState(false);
+  const [logbookError, setLogbookError] = useState<string>();
+  const [logbookRetryKey, setLogbookRetryKey] = useState(0);
   const [selectedLogbookSessionId, setSelectedLogbookSessionId] = useState<string>();
   const [selectedLogbookSession, setSelectedLogbookSession] = useState<LogbookSessionDetail>();
   const [selectedLogbookExcerpts, setSelectedLogbookExcerpts] = useState<LogbookExcerpt[]>([]);
@@ -191,6 +193,18 @@ export function App() {
     harnessFilter !== "all" ||
     lifecycleFilter !== "all" ||
     activityWindow !== "24h";
+  const logbookLoadState = useMemo<LogbookLoadState>(() => {
+    if (logbookResult) {
+      return {
+        state: "ready",
+        sessions: logbookResult.sessions,
+        total: logbookResult.total,
+        nextCursor: logbookResult.nextCursor
+      };
+    }
+    if (logbookError) return { state: "error", message: logbookError };
+    return { state: "loading" };
+  }, [logbookError, logbookResult]);
   const filteredAttentionItems = useMemo(
     () => filterAttentionItemsForCards(board.attentionQueue, filteredCards),
     [board.attentionQueue, filteredCards]
@@ -360,15 +374,17 @@ export function App() {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setLogbookLoading(true);
+      setLogbookError(undefined);
       void searchLogbook({ limit: 50, q: historyQuery }, liveProjectionUrl, { signal: controller.signal })
         .then((result) => {
           setLogbookResult(result);
+          setLogbookError(undefined);
           setSelectedLogbookSessionId(undefined);
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted) {
             console.error("[masthead] Logbook search failed", error);
-            setLogbookResult(undefined);
+            setLogbookError(error instanceof Error ? error.message : String(error));
           }
         })
         .finally(() => {
@@ -379,7 +395,7 @@ export function App() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [activeSurface, historyQuery]);
+  }, [activeSurface, historyQuery, logbookRetryKey]);
 
   useEffect(() => {
     if (activeSurface !== "logbook" || !selectedLogbookSessionId) {
@@ -650,6 +666,7 @@ export function App() {
 
   const handleLogbookQueryChange = (nextQuery: string) => {
     setHistoryQuery(nextQuery);
+    setLogbookError(undefined);
     setSelectedLogbookSessionId(undefined);
   };
 
@@ -665,6 +682,7 @@ export function App() {
       });
     } catch (error) {
       console.error("[masthead] Logbook pagination failed", error);
+      setLogbookError(error instanceof Error ? error.message : String(error));
     } finally {
       setLogbookLoading(false);
     }
@@ -685,14 +703,14 @@ export function App() {
     ) : activeSurface === "logbook" ? (
       <LogbookSurface>
         <HistoryPanel
-          records={historyRecords}
+          records={showDemoData ? historyRecords : undefined}
           query={historyQuery}
-          sessions={logbookResult?.sessions}
-          total={logbookResult?.total}
-          nextCursor={logbookResult?.nextCursor}
+          loadState={showDemoData ? undefined : logbookLoadState}
+          refreshError={logbookResult ? logbookError : undefined}
           loading={logbookLoading}
           onQueryChange={handleLogbookQueryChange}
           onLoadMore={handleLoadMoreLogbook}
+          onRetry={() => setLogbookRetryKey((current) => current + 1)}
           onSessionSelect={setSelectedLogbookSessionId}
         />
         {selectedLogbookSessionId ? (

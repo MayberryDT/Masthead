@@ -44,19 +44,22 @@ describe("HistoryPanel", () => {
   test("renders database-backed Logbook sessions", () => {
     const html = renderToStaticMarkup(
       <HistoryPanel
+        loadState={{
+          state: "ready",
+          sessions: [
+            {
+              project: "Masthead",
+              runtime: "codex",
+              sessionId: "session-1",
+              snippet: 'Import <script>alert("x")</script> Codex history into <mark>SQLite</mark>',
+              state: "unknown",
+              title: "Masthead data layer"
+            }
+          ],
+          total: 1
+        }}
         loading={false}
         query="sqlite"
-        sessions={[
-          {
-            project: "Masthead",
-            runtime: "codex",
-            sessionId: "session-1",
-            snippet: 'Import <script>alert("x")</script> Codex history into <mark>SQLite</mark>',
-            state: "unknown",
-            title: "Masthead data layer"
-          }
-        ]}
-        total={1}
         onQueryChange={() => {}}
       />
     );
@@ -73,23 +76,26 @@ describe("HistoryPanel", () => {
     const opened: string[] = [];
     const html = renderToStaticMarkup(
       <HistoryPanel
+        loadState={{
+          state: "ready",
+          sessions: Array.from({ length: 8 }, (_, index) => ({
+            fileCount: index,
+            hostId: "host:test",
+            lifecycle: "ended",
+            models: ["gpt-5"],
+            project: "Masthead",
+            runtime: "codex",
+            sessionId: `session-${index + 1}`,
+            sourceConfidence: "authoritative",
+            sourceSessionId: `source-session-${index + 1}`,
+            title: `Session ${index + 1}`,
+            toolCount: index + 1,
+            topics: ["session-memory"]
+          })),
+          total: 8
+        }}
         loading={false}
         query=""
-        sessions={Array.from({ length: 8 }, (_, index) => ({
-          fileCount: index,
-          hostId: "host:test",
-          lifecycle: "ended",
-          models: ["gpt-5"],
-          project: "Masthead",
-          runtime: "codex",
-          sessionId: `session-${index + 1}`,
-          sourceConfidence: "authoritative",
-          sourceSessionId: `source-session-${index + 1}`,
-          title: `Session ${index + 1}`,
-          toolCount: index + 1,
-          topics: ["session-memory"]
-        }))}
-        total={8}
         onQueryChange={() => {}}
         onSessionSelect={(sessionId) => opened.push(sessionId)}
       />
@@ -109,6 +115,23 @@ describe("HistoryPanel", () => {
     expect(html).toContain("0</strong>");
     expect(html).toContain("Showing 0 of 0; searching 0 local records");
     expect(html).not.toContain("History case");
+  });
+
+  test("does not fall back to local history when the canonical Logbook request fails", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        records={records()}
+        loadState={{ state: "error", message: "logbook search failed: 405" }}
+        query="project:App"
+        onQueryChange={() => {}}
+      />
+    );
+
+    expect(html).toContain("Logbook could not read the Masthead session database.");
+    expect(html).toContain("logbook search failed: 405");
+    expect(html).not.toContain("Session needs review");
+    expect(html).not.toContain("Mode");
+    expect(html).not.toContain("Local");
   });
 });
 
