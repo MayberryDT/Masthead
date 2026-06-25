@@ -32,13 +32,14 @@ import {
 } from "../ui/toolbarOptions";
 import {
   defaultFixtureMode,
-  defaultLiveProjectionUrl,
+
   isLiveEventsEnvelope,
   isLiveProjectionEnvelope,
   normalizeLiveBoardProjection,
 } from "./liveProjectionClient";
-import { MastheadApiClient } from "./api/MastheadApiClient";
-import { startLiveConnector, type ConnectorStartResult } from "./connectorClient";
+import { startLiveConnector } from "./connectorClient";
+import { useMastheadConnection } from "./connection/useMastheadConnection";
+import { ConnectionRecoveryPanel } from "../ui/ConnectionRecoveryPanel";
 import {
   addSourceExclusion,
   applyDefaultRetention as applyDefaultDataRetention,
@@ -85,7 +86,6 @@ type ConnectorActionState =
 type CardLayoutSnapshot = Map<string, DOMRect>;
 
 const replay = fixture as FixtureReplay;
-const initialLiveProjectionUrl = defaultLiveProjectionUrl();
 const startsInFixtureMode = defaultFixtureMode();
 
 const emptyLiveBoard: LiveBoardProjection = {
@@ -109,9 +109,6 @@ const emptyLiveBoard: LiveBoardProjection = {
   conflicts: []
 };
 
-export function activeProjectionUrlAfterConnectorStart(result: ConnectorStartResult, currentProjectionUrl: string): string {
-  return result.ok ? result.projectionUrl : currentProjectionUrl;
-}
 
 export function App() {
   const [activeSurface, setActiveSurface] = useState<AppSurface>("now");
@@ -131,9 +128,8 @@ export function App() {
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
   const [liveGitSnapshots, setLiveGitSnapshots] = useState<GitSnapshot[]>();
   const [connectorAction, setConnectorAction] = useState<ConnectorActionState>({ state: "idle" });
-  // The top-level App still owns activeProjectionUrl during the transition.
-  // Do not add new direct defaultLiveProjectionUrl() calls.
-  const [activeProjectionUrl, setActiveProjectionUrl] = useState(initialLiveProjectionUrl);
+  const connection = useMastheadConnection();
+  const activeProjectionUrl = connection.baseUrl;
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
   const [sources, setSources] = useState<SourceStatus[]>([]);
@@ -230,7 +226,14 @@ export function App() {
     board.selectedSession && filteredCards.some((card) => card.sessionId === board.selectedSession?.sessionId)
       ? board.selectedSession
       : undefined;
-  const connectorDisplayState = connectorStateForToolbar(liveConnection, connectorAction);
+  const effectiveLiveConnection = useMemo<ConnectionState>(() => {
+    if (connection.state.state === "offline" || connection.state.state === "incompatible") {
+      return { state: "offline", error: "error" in connection.state ? connection.state.error : "Masthead daemon unavailable" };
+    }
+    if (connection.state.state === "probing") return { state: "connecting" };
+    return liveConnection;
+  }, [connection.state, liveConnection]);
+  const connectorDisplayState = connectorStateForToolbar(effectiveLiveConnection, connectorAction);
   const toggleDensity = useCallback(() => {
     const updateDensity = () => setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
 
@@ -287,7 +290,7 @@ export function App() {
     const selectedLiveSessionId = selectedSessionId ?? undefined;
     const isCurrentRequest = () => liveRequestIdRef.current === requestId;
 
-    const mastheadApi = new MastheadApiClient(activeProjectionUrl);
+    const mastheadApi = connection.api;
     try {
       const body = await mastheadApi.getLiveProjection(selectedLiveSessionId);
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
@@ -350,7 +353,7 @@ export function App() {
     try {
       const result = await startLiveConnector();
       if (result.ok) {
-        setActiveProjectionUrl((current) => activeProjectionUrlAfterConnectorStart(result, current));
+        connection.setBaseUrl(result.projectionUrl);
         setConnectorAction({
           state: "started",
           message: `${result.message} Connected to ${result.baseUrl}.`
@@ -399,11 +402,11 @@ export function App() {
   }, [loadSourceInventory]);
 
   useEffect(() => {
-    if (liveConnection.state !== "live") return;
+    if (effectiveLiveConnection.state !== "live") return;
     void loadSourceInventory().catch((error: unknown) => {
       console.error("[masthead] Source inventory refresh failed", error);
     });
-  }, [liveConnection.state, loadSourceInventory]);
+  }, [effectiveLiveConnection.state, loadSourceInventory]);
 
   useEffect(() => {
     if (activeSurface !== "sources") return;
@@ -529,7 +532,7 @@ export function App() {
   const handleExportLocalData = async () => {
     setLocalDataStatus({ state: "busy", message: "Preparing local export..." });
     try {
-      const canonicalExport = liveConnection.state === "live" ? await exportMastheadData(activeProjectionUrl) : undefined;
+      const canonicalExport = effectiveLiveConnection.state === "live" ? await exportMastheadData(activeProjectionUrl) : undefined;
       const exported = canonicalExport ? JSON.stringify(canonicalExport, null, 2) : await exportLocalData();
       const count = canonicalExport ? exportedSessionCount(canonicalExport) : exportedRecordCount(exported);
       downloadTextFile(`masthead-export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, exported);
@@ -753,9 +756,15 @@ export function App() {
     }
   };
 
+  const needsRecoveryPanel = connection.state.state === "offline" || connection.state.state === "incompatible";
+  const recoveryPanel = (
+    <ConnectionRecoveryPanel connection={connection.state} onRetry={connection.refresh} onStart={handleStartConnector} />
+  );
+
+
   const mainSurface =
     activeSurface === "sources" ? (
-      <SourcesSurface>
+      <SourcesSurface>{needsRecoveryPanel ? recoveryPanel : (
         <SourcesPanel
           sources={sources}
           adapters={adapters}
@@ -766,67 +775,81 @@ export function App() {
           onImportCodexMetadata={handleImportCodexMetadata}
           onExcludePath={handleExcludeSourcePath}
         />
-      </SourcesSurface>
+      )}</SourcesSurface>
     ) : activeSurface === "logbook" ? (
       <LogbookSurface>
-        <HistoryPanel
-          records={showDemoData ? historyRecords : undefined}
-          query={historyQuery}
-          density={logbookDensity}
-          loadState={showDemoData ? undefined : logbookLoadState}
-          refreshError={logbookResult ? logbookError : undefined}
-          selectedSessionId={selectedLogbookSessionId}
-          sort={logbookSort}
-          summary={logbookSummary}
-          loading={logbookLoading}
-          onDensityToggle={() => setLogbookDensity((current) => (current === "compact" ? "comfortable" : "compact"))}
-          onQueryChange={handleLogbookQueryChange}
-          onLoadMore={handleLoadMoreLogbook}
-          onRetry={() => setLogbookRetryKey((current) => current + 1)}
-          onSessionSelect={setSelectedLogbookSessionId}
-          onSortChange={(nextSort) => {
-            setLogbookSort(nextSort);
-            setSelectedLogbookSessionId(undefined);
-          }}
-        />
-        {selectedLogbookSessionId ? (
-          <SessionLibraryDetail
-            session={selectedLogbookSession}
-            excerpts={selectedLogbookExcerpts}
-            loading={logbookDetailLoading}
-            onClose={() => setSelectedLogbookSessionId(undefined)}
-          />
-        ) : null}
+        {needsRecoveryPanel ? (
+          recoveryPanel
+        ) : (
+          <>
+            <HistoryPanel
+              records={showDemoData ? historyRecords : undefined}
+              query={historyQuery}
+              density={logbookDensity}
+              loadState={showDemoData ? undefined : logbookLoadState}
+              refreshError={logbookResult ? logbookError : undefined}
+              selectedSessionId={selectedLogbookSessionId}
+              sort={logbookSort}
+              summary={logbookSummary}
+              loading={logbookLoading}
+              onDensityToggle={() => setLogbookDensity((current) => (current === "compact" ? "comfortable" : "compact"))}
+              onQueryChange={handleLogbookQueryChange}
+              onLoadMore={handleLoadMoreLogbook}
+              onRetry={() => setLogbookRetryKey((current) => current + 1)}
+              onSessionSelect={setSelectedLogbookSessionId}
+              onSortChange={(nextSort) => {
+                setLogbookSort(nextSort);
+                setSelectedLogbookSessionId(undefined);
+              }}
+            />
+            {selectedLogbookSessionId ? (
+              <SessionLibraryDetail
+                session={selectedLogbookSession}
+                excerpts={selectedLogbookExcerpts}
+                loading={logbookDetailLoading}
+                onClose={() => setSelectedLogbookSessionId(undefined)}
+              />
+            ) : null}
+          </>
+        )}
       </LogbookSurface>
     ) : activeSurface === "agent_access" ? (
-      <AgentAccessSurface />
+      needsRecoveryPanel ? (
+        <section className="app-surface agent-access-surface surface-panel" aria-label="Agent Access">
+          {recoveryPanel}
+        </section>
+      ) : (
+        <AgentAccessSurface />
+      )
     ) : activeSurface === "settings" ? (
       <SettingsSurface>
-        <OperationsPanel
-          dataSummary={dataSummary}
-          deletionScopeKind={deletionScopeKind}
-          deletionScopeTarget={deletionScopeTarget}
-          localDataStatus={localDataStatus}
-          onCancelLocalDataAction={() => {
-            setLocalDataStatus({ state: "idle" });
-            setPendingDeletionScope(undefined);
-          }}
-          onDeletionScopeKindChange={(kind) => {
-            setDeletionScopeKind(kind);
-            setPendingDeletionScope(undefined);
-          }}
-          onDeletionScopeTargetChange={(target) => {
-            setDeletionScopeTarget(target);
-            setPendingDeletionScope(undefined);
-          }}
-          onExportLocalData={handleExportLocalData}
-          onRequestPruneLocalData={handleRequestPruneLocalData}
-          onConfirmPruneLocalData={handleConfirmPruneLocalData}
-          onRequestScopedDelete={handleRequestScopedDelete}
-          onConfirmScopedDelete={handleConfirmScopedDelete}
-          onRequestDeleteLocalData={handleRequestDeleteLocalData}
-          onConfirmDeleteLocalData={handleConfirmDeleteLocalData}
-        />
+        {needsRecoveryPanel ? recoveryPanel : (
+          <OperationsPanel
+            dataSummary={dataSummary}
+            deletionScopeKind={deletionScopeKind}
+            deletionScopeTarget={deletionScopeTarget}
+            localDataStatus={localDataStatus}
+            onCancelLocalDataAction={() => {
+              setLocalDataStatus({ state: "idle" });
+              setPendingDeletionScope(undefined);
+            }}
+            onDeletionScopeKindChange={(kind) => {
+              setDeletionScopeKind(kind);
+              setPendingDeletionScope(undefined);
+            }}
+            onDeletionScopeTargetChange={(target) => {
+              setDeletionScopeTarget(target);
+              setPendingDeletionScope(undefined);
+            }}
+            onExportLocalData={handleExportLocalData}
+            onRequestPruneLocalData={handleRequestPruneLocalData}
+            onConfirmPruneLocalData={handleConfirmPruneLocalData}
+            onRequestScopedDelete={handleRequestScopedDelete}
+            onConfirmScopedDelete={handleConfirmScopedDelete}
+            onRequestDeleteLocalData={handleRequestDeleteLocalData}
+            onConfirmDeleteLocalData={handleConfirmDeleteLocalData}
+          />
+        )}
       </SettingsSurface>
     ) : (
       <NowSurface
@@ -861,8 +884,8 @@ export function App() {
             cards={filteredCards}
             lanes={board.lanes}
             variant="observability"
-            emptyTitle={emptyBoardTitle({ showDemoData, hasActiveToolbarFilters, liveConnection })}
-            emptyMessage={emptyBoardMessage({ showDemoData, hasActiveToolbarFilters, liveConnection })}
+            emptyTitle={emptyBoardTitle({ showDemoData, hasActiveToolbarFilters, liveConnection: effectiveLiveConnection })}
+            emptyMessage={emptyBoardMessage({ showDemoData, hasActiveToolbarFilters, liveConnection: effectiveLiveConnection })}
             onOpenSession={handleOpenSession}
             showDemoTelemetry={showDemoData}
             density={density}

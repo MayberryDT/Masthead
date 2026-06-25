@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getMcpStatus, listMcpAudit, listMcpTools, type McpAuditRowDto, type McpStatusDto, type McpToolDto } from "../daemonClient";
+import { useMastheadConnection } from "../connection/useMastheadConnection";
 import { AgentAccessPanel } from "../../ui/AgentAccessPanel";
 
 export function AgentAccessSurface() {
@@ -8,10 +9,15 @@ export function AgentAccessSurface() {
   const [audit, setAudit] = useState<McpAuditRowDto[]>([]);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | undefined>();
+  const connection = useMastheadConnection();
 
   const loadMcpState = useCallback((signal?: AbortSignal) => {
     setLoadState((current) => (current === "ready" ? current : "loading"));
-    void Promise.all([getMcpStatus(undefined, { signal }), listMcpTools(undefined, { signal }), listMcpAudit(undefined, { limit: 50, signal })])
+    void Promise.all([
+      getMcpStatus(connection.baseUrl, { signal }),
+      listMcpTools(connection.baseUrl, { signal }),
+      listMcpAudit(connection.baseUrl, { limit: 50, signal })
+    ])
       .then(([nextStatus, nextTools, nextAudit]) => {
         setStatus(nextStatus);
         setTools(nextTools);
@@ -24,7 +30,7 @@ export function AgentAccessSurface() {
         setError(nextError instanceof Error ? nextError.message : String(nextError));
         setLoadState("error");
       });
-  }, []);
+  }, [connection.baseUrl]);
 
   useEffect(() => {
     const controller = new AbortController();

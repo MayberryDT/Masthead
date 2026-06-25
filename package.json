@@ -8,9 +8,11 @@
   },
   "scripts": {
     "dev": "npm run build:daemon && node scripts/masthead-live-dev.js",
+    "dev:desktop": "tauri dev",
     "dev:ui": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "dev:fixture": "VITE_MASTHEAD_MODE=fixture vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "tsc --noEmit && vite build && npm run build:daemon",
+    "build:desktop": "tauri build",
     "build:daemon": "tsc -p tsconfig.daemon.json && node scripts/copy-daemon-assets.js",
     "prepare:daemon-resources": "node scripts/prepare-daemon-resources.js",
     "probe": "node scripts/masthead-endpoint-matrix.js",
@@ -39,9 +41,11 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.3",
     "@types/node": "24.10.2",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
+    "happy-dom": "^20.10.6",
     "typescript": "5.9.3",
     "vite": "8.0.16",
     "vitest": "4.1.9"

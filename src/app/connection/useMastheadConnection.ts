@@ -1,5 +1,5 @@
 import { useContext } from "react";
-import { MastheadConnectionContext } from "./MastheadConnectionProvider.tsx";
+import { MastheadConnectionContext } from "./MastheadConnectionProvider";
 
 export function useMastheadConnection() {
   const context = useContext(MastheadConnectionContext);
