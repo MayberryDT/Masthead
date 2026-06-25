@@ -4,7 +4,7 @@ import { classifyDaemonHealth } from "../shared/protocol.ts";
 import { locateCompatibleDaemon } from "./daemonLocator.ts";
 import { readDaemonOwnershipMetadata, type DaemonOwnershipMetadata } from "./daemonOwnership.ts";
 
-export type ConnectorMode = "primary" | "bridge";
+export type ConnectorMode = "primary" | "bridge" | "isolated_primary";
 
 export type LiveDevPlan = {
   host: string;
@@ -95,6 +95,7 @@ export async function buildLiveDevPlan(
     env.MASTHEAD_UPSTREAM_URL || env.MASTHEAD_PRIMARY_CONNECTOR_URL || `http://${host}:${requestedConnectorPort}`
   );
   const connectorMode = env.MASTHEAD_CONNECTOR_MODE || "auto";
+  const expectedDataDirectory = env.MASTHEAD_DATA_DIR;
 
   if (connectorMode === "primary") {
     return primaryPlan(host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins, env);

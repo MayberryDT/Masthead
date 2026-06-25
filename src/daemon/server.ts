@@ -540,6 +540,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         ingestUrl: `http://${config.host}:${config.port}/ingest`,
         allowedOrigins: config.allowedOrigins,
         data: {
+          dataDirectory: dirname(config.databasePath),
+          databasePath: config.databasePath,
           legacyMigration: {
             copiedSqlite: legacySqliteMigration.copied,
             legacyPath: legacySqliteMigration.legacyPath,

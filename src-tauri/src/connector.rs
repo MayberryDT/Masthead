@@ -68,7 +68,6 @@ pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnector
         });
     }
 
-    let launch = daemon_launch_target(&app)?;
     if !launch.entry_path.exists() {
         return Err(format!("Masthead daemon entry not found at {}", launch.entry_path.display()));
     }
@@ -145,6 +144,7 @@ struct MastheadHealthSummary {
     build_sha: Option<String>,
     database_id: Option<String>,
     database_path: Option<String>,
+    data_directory: Option<String>,
     mode: Option<String>,
 }
 
@@ -157,6 +157,7 @@ struct DaemonLaunchTarget {
     database_path: PathBuf,
     legacy_store_path: PathBuf,
     port: u16,
+    data_directory: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,6 +231,7 @@ fn daemon_launch_target_from_paths(input: DaemonLaunchTargetInput) -> Result<Dae
             database_path,
             legacy_store_path,
             port: input.port,
+            data_directory: input.app_data_dir,
         });
     }
 
@@ -244,10 +246,11 @@ fn daemon_launch_target_from_paths(input: DaemonLaunchTargetInput) -> Result<Dae
             .join("src")
             .join("daemon")
             .join("main.js"),
-        cwd: input.app_data_dir,
+        cwd: input.app_data_dir.clone(),
         database_path,
         legacy_store_path,
         port: input.port,
+        data_directory: input.app_data_dir,
     })
 }
 
@@ -402,7 +405,8 @@ mod tests {
             "data": {
                 "databaseId": "db",
                 "databasePath": "/tmp/masthead.sqlite",
-                "migrationState": "ready"
+                "migrationState": "ready",
+                "dataDirectory": "/tmp/masthead-data"
             }
         });
 
@@ -410,7 +414,36 @@ mod tests {
         assert_eq!(parsed.api_version, Some(1));
         assert_eq!(parsed.database_id, Some("db".to_string()));
         assert_eq!(parsed.database_path, Some("/tmp/masthead.sqlite".to_string()));
+        assert_eq!(parsed.data_directory, Some("/tmp/masthead-data".to_string()));
         assert_eq!(parsed.mode, Some("primary".to_string()));
+    }
+
+    #[test]
+    fn compatible_health_rejected_when_data_directory_is_wrong() {
+        let current = json!({
+            "ok": true,
+            "product": "masthead",
+            "apiVersion": 1,
+            "capabilities": [
+                "live_projection",
+                "canonical_sessions",
+                "logbook_search",
+                "source_discovery",
+                "adapter_inventory",
+                "mcp_status",
+                "settings"
+            ],
+            "runtime": { "mode": "primary" },
+            "data": {
+                "databaseId": "db",
+                "databasePath": "/tmp/masthead-data/masthead.sqlite",
+                "dataDirectory": "/tmp/masthead-data",
+                "migrationState": "ready"
+            }
+        });
+
+        assert!(super::parse_compatible_health_value_for_data_directory(&current, &PathBuf::from("/tmp/masthead-data")).is_some());
+        assert!(super::parse_compatible_health_value_for_data_directory(&current, &PathBuf::from("/tmp/other-masthead")).is_none());
     }
 
     #[test]
