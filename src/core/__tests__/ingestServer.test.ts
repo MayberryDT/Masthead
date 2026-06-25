@@ -268,6 +268,63 @@ describe("ingest server live projection", () => {
     }
   });
 
+  test("data lifecycle endpoints summarize, export, and delete canonical session data", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveApprovalPayload("server-data-lifecycle"));
+    await getJson(server.baseUrl, "/projection?expandedSessionId=server-live");
+
+    expect(await getJson(server.baseUrl, "/data/summary")).toMatchObject({
+      ok: true,
+      summary: {
+        rawEvents: 1,
+        sessions: 1
+      }
+    });
+    expect(await getJson(server.baseUrl, "/data/export")).toMatchObject({
+      ok: true,
+      export: {
+        metadata: {
+          format: "masthead.session-graph.v1",
+          schemaVersion: 1
+        },
+        sessions: [expect.objectContaining({ source_session_id: "server-live" })]
+      }
+    });
+
+    const deleted = await postJson(server.baseUrl, "/data/delete", {});
+
+    expect(deleted).toMatchObject({
+      ok: true,
+      result: {
+        rawEvents: 1,
+        sessions: 1
+      },
+      events: 0,
+      gitSnapshots: 0
+    });
+    expect(await getJson(server.baseUrl, "/data/summary")).toMatchObject({
+      ok: true,
+      summary: {
+        rawEvents: 0,
+        sessions: 0
+      }
+    });
+    const db = new DatabaseSync(databasePath);
+    try {
+      expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM raw_events").get()).toEqual({ count: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM session_search").get()).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   test("hydrates canonical sessions from an existing event journal before persisting Board state", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);

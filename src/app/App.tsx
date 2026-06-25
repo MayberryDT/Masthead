@@ -5,8 +5,7 @@ import { buildHistoryRecords } from "../core/historyRecords";
 import {
   applyReviewDispositions,
   createReviewDisposition,
-  isReviewSafeAction,
-  reviewDispositionRecord
+  isReviewSafeAction
 } from "../core/reviewDispositions";
 import type { ReviewDisposition, StoreRecord } from "../core/store";
 import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent, SafeAction, SessionDetailView } from "../core/types";
@@ -45,12 +44,14 @@ import { startLiveConnector } from "./connectorClient";
 import {
   addSourceExclusion,
   importCodexMetadata,
+  listReviewDispositions,
   listSources,
+  saveReviewDisposition,
   searchLogbook,
   type LogbookSearchResult,
   type SourceStatus
 } from "./daemonClient";
-import { appendLocalRecords, clearLocalData, exportedRecordCount, exportLocalData, pruneLocalData, readLocalRecords } from "./nativeStoreClient";
+import { clearLocalData, exportedRecordCount, exportLocalData, pruneLocalData, readLocalRecords } from "./nativeStoreClient";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
 
@@ -204,12 +205,13 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
 
-    const hydrateReviewDispositions = async () => {
+    const hydrateLocalData = async () => {
       try {
         const records = await readLocalRecords();
+        const dispositions = await listReviewDispositions(liveProjectionUrl).catch(() => []);
         if (!cancelled) {
           setLocalStoreRecords(records);
-          setReviewDispositions(reviewDispositionsFromRecords(records));
+          setReviewDispositions(dispositions);
         }
       } catch (error) {
         if (!cancelled) {
@@ -221,7 +223,7 @@ export function App() {
       }
     };
 
-    void hydrateReviewDispositions();
+    void hydrateLocalData();
     return () => {
       cancelled = true;
     };
@@ -429,8 +431,9 @@ export function App() {
       const liveRemovedRecords = liveProjection ? await pruneLiveCollectorData(policy) : undefined;
       const result = await pruneLocalData(policy);
       const records = await readLocalRecords();
+      const dispositions = await listReviewDispositions(liveProjectionUrl);
       setLocalStoreRecords(records);
-      setReviewDispositions(reviewDispositionsFromRecords(records));
+      setReviewDispositions(dispositions);
       const liveMessage =
         liveRemovedRecords === undefined ? "" : ` Live collector pruned ${liveRemovedRecords} records.`;
       setLocalDataStatus({
@@ -487,11 +490,9 @@ export function App() {
       snoozedUntil: action === "snooze" ? new Date(recordedAt.getTime() + 60 * 60 * 1000).toISOString() : undefined,
       reason: reasonForAction(action)
     });
-    const record = reviewDispositionRecord(disposition);
 
     try {
-      await appendLocalRecords([record]);
-      setLocalStoreRecords((current) => [...current, record]);
+      await saveReviewDisposition(disposition, liveProjectionUrl);
       setReviewDispositions((current) => [...current, disposition]);
       setSessionActionStatus({
         sessionId: session.sessionId,
@@ -696,16 +697,6 @@ function emptyBoardMessage({
   if (liveConnection.state === "live") return "New Codex hook events will appear here as sessions run.";
   if (liveConnection.state === "offline") return "Use the Connector panel to start or check the local collector.";
   return "The board will switch to live sessions when the local collector responds.";
-}
-
-function isReviewDispositionRecord(
-  record: StoreRecord
-): record is Extract<StoreRecord, { recordType: "review_disposition" }> {
-  return record.recordType === "review_disposition";
-}
-
-function reviewDispositionsFromRecords(records: StoreRecord[]): ReviewDisposition[] {
-  return records.filter(isReviewDispositionRecord).map((record) => record.value);
 }
 
 async function pruneLiveCollectorData(policy: {

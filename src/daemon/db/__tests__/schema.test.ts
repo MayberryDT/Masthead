@@ -50,11 +50,17 @@ describe("daemon database schema", () => {
         "session_topics",
         "project_summaries",
         "mcp_query_log",
-        "session_search"
+        "session_search",
+        "app_settings",
+        "source_policies",
+        "legacy_migrations"
       ])
     );
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
-    expect(applied).toEqual([{ version: 1, name: "001_initial" }]);
+    expect(applied).toEqual([
+      { version: 1, name: "001_initial" },
+      { version: 2, name: "002_session_data_product" }
+    ]);
     expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     expect((db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toBe("wal");
     db.prepare("INSERT INTO session_search(session_id, title, normalized_text) VALUES (?, ?, ?)").run(

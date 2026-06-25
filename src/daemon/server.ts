@@ -11,10 +11,13 @@ import { createIngestionState, ingestNormalizedEvent } from "../core/ingestion.t
 import { projectLiveEvents } from "../core/liveProjection.ts";
 import { createOpenAISessionCopyEnricher } from "../core/openaiSessionCopy.ts";
 import { createFileBackedStore, type StoreRecord } from "../core/store.ts";
+import type { ReviewDisposition } from "../core/store.ts";
 import type { CodexHookDiagnostic } from "../core/codexAdapter.ts";
 import type { GitSnapshot, NormalizedEvent } from "../core/types.ts";
 import type { DaemonConfig } from "./config.ts";
+import { deleteAllMastheadData, exportSessionGraph, getDataSummary } from "./db/dataLifecycleRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
+import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
 import { migrateDatabase } from "./db/schema.ts";
@@ -167,6 +170,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return true;
   }
 
+  async function clearInMemoryAndLegacyStore(): Promise<{ removedRecords: number; touchedExternalState: boolean }> {
+    const result = await store.clearLocalData();
+    state.events.length = 0;
+    gitSnapshots.length = 0;
+    gitSnapshotSignatures.clear();
+    return result;
+  }
+
   async function refreshKnownGitSnapshots(): Promise<number> {
     const eventsBySession = new Map(
       state.events.toSorted((a, b) => a.occurredAt.localeCompare(b.occurredAt)).map((event) => [event.sessionId, event])
@@ -281,6 +292,65 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/review-dispositions") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        dispositions: listReviewDispositions(database)
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/review-dispositions") {
+      try {
+        const disposition = JSON.parse(await readBody(request));
+        assertReviewDisposition(disposition);
+        upsertReviewDisposition(database, disposition);
+        sendJson(request, response, config.allowedOrigins, 202, { ok: true, disposition });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/data/summary") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        summary: getDataSummary(database)
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/data/export") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        export: exportSessionGraph(database)
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/data/delete") {
+      try {
+        const result = deleteAllMastheadData(database);
+        const legacy = await clearInMemoryAndLegacyStore();
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          result,
+          legacy,
+          events: state.events.length,
+          gitSnapshots: gitSnapshots.length
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 500, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/retention") {
       try {
         const body = await readBody(request);
@@ -314,15 +384,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/clear") {
       try {
-        const result = await store.clearLocalData();
-        hookRawJournal.clearStoreRecords();
-        observerRawJournal.clearStoreRecords();
-        state.events.length = 0;
-        gitSnapshots.length = 0;
-        gitSnapshotSignatures.clear();
+        const canonical = deleteAllMastheadData(database);
+        const result = await clearInMemoryAndLegacyStore();
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           result,
+          canonical,
           events: state.events.length,
           gitSnapshots: gitSnapshots.length
         });
@@ -558,6 +625,26 @@ async function jsonlFiles(directory: string): Promise<string[]> {
 function offsetFromSourceRecordKey(sourceRecordKey: string): number | undefined {
   const offset = Number.parseInt(sourceRecordKey.split(":").at(-1) ?? "", 10);
   return Number.isFinite(offset) ? offset : undefined;
+}
+
+function assertReviewDisposition(value: unknown): asserts value is ReviewDisposition {
+  if (typeof value !== "object" || value === null) throw new Error("Review disposition must be an object.");
+  const record = value as Record<string, unknown>;
+  if (typeof record.dispositionId !== "string" || !record.dispositionId.trim()) {
+    throw new Error("dispositionId is required.");
+  }
+  if (typeof record.subjectId !== "string" || !record.subjectId.trim()) {
+    throw new Error("subjectId is required.");
+  }
+  if (!["session", "attention_item", "conflict_card"].includes(String(record.subjectType))) {
+    throw new Error("subjectType is invalid.");
+  }
+  if (!["reviewed", "expected", "dismissed", "snoozed", "false_positive"].includes(String(record.status))) {
+    throw new Error("status is invalid.");
+  }
+  if (typeof record.recordedAt !== "string" || Number.isNaN(Date.parse(record.recordedAt))) {
+    throw new Error("recordedAt must be an ISO timestamp.");
+  }
 }
 
 function sendJson(

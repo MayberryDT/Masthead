@@ -1,4 +1,5 @@
 import { defaultLiveProjectionUrl } from "./liveProjectionClient";
+import type { ReviewDisposition } from "../core/store";
 
 export type SourceStatus = {
   sourceId: string;
@@ -68,4 +69,26 @@ export async function searchLogbook(query: string, baseUrl = defaultLiveProjecti
   const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`logbook search failed: ${response.status}`);
   return response.json() as Promise<LogbookSearchResult>;
+}
+
+export async function listReviewDispositions(baseUrl = defaultLiveProjectionUrl()): Promise<ReviewDisposition[]> {
+  const url = new URL(baseUrl);
+  url.pathname = "/review-dispositions";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`review dispositions request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; dispositions: ReviewDisposition[] };
+  return body.dispositions;
+}
+
+export async function saveReviewDisposition(disposition: ReviewDisposition, baseUrl = defaultLiveProjectionUrl()): Promise<void> {
+  const url = new URL(baseUrl);
+  url.pathname = "/review-dispositions";
+  url.search = "";
+  const response = await fetch(url.toString(), {
+    body: JSON.stringify(disposition),
+    headers: { accept: "application/json", "content-type": "application/json" },
+    method: "POST"
+  });
+  if (!response.ok) throw new Error(`review disposition save failed: ${response.status}`);
 }

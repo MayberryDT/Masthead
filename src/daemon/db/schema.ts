@@ -9,6 +9,11 @@ const migrations = [
     version: 1,
     name: "001_initial",
     path: resolve(currentDir, "migrations/001_initial.sql")
+  },
+  {
+    version: 2,
+    name: "002_session_data_product",
+    path: resolve(currentDir, "migrations/002_session_data_product.sql")
   }
 ];
 
@@ -23,7 +28,10 @@ const criticalTables = [
   "messages",
   "session_enrichments",
   "mcp_query_log",
-  "session_search"
+  "session_search",
+  "app_settings",
+  "source_policies",
+  "legacy_migrations"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {

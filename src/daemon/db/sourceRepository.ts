@@ -1,4 +1,5 @@
 import { stableRecordId } from "../identity.ts";
+import { setSourcePolicy, sourcePolicyEnabled } from "./sourcePolicyRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type SourceExclusionInput = {
@@ -30,24 +31,14 @@ export function approveTranscriptImport(
     reason: string;
   }
 ): void {
-  addSourceExclusion(db, {
-    createdAt: input.approvedAt,
-    exclusionKind: "source",
-    pattern: "__masthead_transcript_import_approved__",
+  setSourcePolicy(db, {
+    decidedAt: input.approvedAt,
+    enabled: true,
+    policyKind: "transcript_import",
     reason: input.reason
   });
 }
 
 export function transcriptImportApproved(db: MastheadDatabase): boolean {
-  const row = db
-    .prepare(
-      `SELECT 1 AS approved
-      FROM source_exclusions
-      WHERE exclusion_kind = 'source'
-        AND pattern = '__masthead_transcript_import_approved__'
-        AND disabled_at IS NULL
-      LIMIT 1`
-    )
-    .get() as { approved: number } | undefined;
-  return Boolean(row);
+  return sourcePolicyEnabled(db, "transcript_import");
 }
