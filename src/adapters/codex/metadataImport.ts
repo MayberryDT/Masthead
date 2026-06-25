@@ -20,14 +20,18 @@ export async function* importCodexMetadata(source: DiscoveredSource): AsyncItera
     for await (const line of reader) {
       lineNumber += 1;
       if (!line.trim()) continue;
-      const parsed = safeJson(line);
-      const sessionId = sourceSessionId(parsed, file);
-      const observedAt = stringField(parsed, ["timestamp", "created_at", "createdAt", "updated_at", "updatedAt"]) ?? new Date(0).toISOString();
+      const parsed = parseJson(line);
+      if (!parsed.ok) {
+        yield diagnosticRecord(source, file, line, lineNumber, parsed.message);
+        continue;
+      }
+      const sessionId = sourceSessionId(parsed.value, file);
+      const observedAt = stringField(parsed.value, ["timestamp", "created_at", "createdAt", "updated_at", "updatedAt"]) ?? new Date(0).toISOString();
       const metadata = {
         observedAt,
-        project: stringField(parsed, ["project", "cwd", "repo_root", "repoRoot"]),
+        project: stringField(parsed.value, ["project", "cwd", "repo_root", "repoRoot"]),
         sessionId,
-        title: stringField(parsed, ["title", "objective", "prompt"])
+        title: stringField(parsed.value, ["title", "objective", "prompt"])
       };
       yield {
         diagnostics: [],
@@ -52,13 +56,44 @@ export async function* importCodexMetadata(source: DiscoveredSource): AsyncItera
   }
 }
 
-function safeJson(line: string): Record<string, unknown> {
+function parseJson(line: string): { ok: true; value: Record<string, unknown> } | { ok: false; message: string } {
   try {
     const parsed = JSON.parse(line);
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    if (typeof parsed === "object" && parsed !== null) return { ok: true, value: parsed as Record<string, unknown> };
+    return { ok: false, message: "Codex metadata record was not a JSON object." };
   } catch {
-    return {};
+    return { ok: false, message: "Codex metadata record was malformed JSON." };
   }
+}
+
+function diagnosticRecord(source: DiscoveredSource, file: string, line: string, lineNumber: number, message: string): AdapterRecord {
+  const observedAt = new Date(0).toISOString();
+  return {
+    diagnostics: [
+      {
+        code: "malformed_json",
+        message,
+        observedAt,
+        severity: "error"
+      }
+    ],
+    normalized: {
+      confidence: "heuristic",
+      kind: "event",
+      sourceRef: {
+        runtimeVersion: source.runtimeVersion,
+        schemaVersion: source.schemaVersion,
+        sourceKind: "jsonl",
+        sourcePath: file
+      },
+      value: {}
+    },
+    observedAt,
+    payload: {},
+    payloadHash: hashLine(line),
+    source: { ...source, path: file },
+    sourceRecordKey: `${basename(file)}:${lineNumber}`
+  };
 }
 
 function sourceSessionId(value: Record<string, unknown>, file: string): string {

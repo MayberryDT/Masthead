@@ -7,7 +7,7 @@ import {
   createReviewDisposition,
   isReviewSafeAction
 } from "../core/reviewDispositions";
-import type { ReviewDisposition, StoreRecord } from "../core/store";
+import type { ReviewDisposition } from "../core/store";
 import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent, SafeAction, SessionDetailView } from "../core/types";
 import { AttentionQueue } from "../ui/AttentionQueue";
 import { AppShell } from "../ui/AppShell";
@@ -67,7 +67,7 @@ import {
   type DataSummary,
   type DeleteMastheadDataScope
 } from "./daemonClient";
-import { exportedRecordCount, exportLocalData, readLocalRecords } from "./nativeStoreClient";
+import { exportedRecordCount, exportLocalData } from "./nativeStoreClient";
 import { AgentAccessSurface } from "./surfaces/AgentAccessSurface";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
@@ -129,7 +129,6 @@ export function App() {
   const [liveGitSnapshots, setLiveGitSnapshots] = useState<GitSnapshot[]>();
   const [connectorAction, setConnectorAction] = useState<ConnectorActionState>({ state: "idle" });
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
-  const [localStoreRecords, setLocalStoreRecords] = useState<StoreRecord[]>([]);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
   const [sources, setSources] = useState<SourceStatus[]>([]);
   const [adapters, setAdapters] = useState<AdapterStatus[]>([]);
@@ -179,9 +178,9 @@ export function App() {
         attentionItems: baseBoard.attentionQueue,
         conflicts: baseBoard.conflicts,
         reviewDispositions,
-        storedRecords: localStoreRecords
+        storedRecords: []
       }),
-    [baseBoard.attentionQueue, baseBoard.conflicts, liveEvents, liveGitSnapshots, localStoreRecords, reviewDispositions, showDemoData]
+    [baseBoard.attentionQueue, baseBoard.conflicts, liveEvents, liveGitSnapshots, reviewDispositions, showDemoData]
   );
   const scanCards = useMemo(
     () => mainScanCards(board.cards, { activityWindowMs: selectedActivityWindowMs }),
@@ -256,10 +255,8 @@ export function App() {
 
     const hydrateLocalData = async () => {
       try {
-        const records = await readLocalRecords();
         const dispositions = await listReviewDispositions(liveProjectionUrl).catch(() => []);
         if (!cancelled) {
-          setLocalStoreRecords(records);
           setReviewDispositions(dispositions);
         }
       } catch (error) {
@@ -646,7 +643,6 @@ export function App() {
     setLocalDataStatus({ state: "busy", message: "Deleting canonical Masthead data..." });
     try {
       const response = await deleteCanonicalMastheadData({ kind: "all" }, liveProjectionUrl);
-      setLocalStoreRecords([]);
       setReviewDispositions([]);
       setDataSummary(response.summary);
       setLiveProjection(emptyLiveBoard);

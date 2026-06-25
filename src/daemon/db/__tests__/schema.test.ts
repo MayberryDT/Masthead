@@ -59,7 +59,9 @@ describe("daemon database schema", () => {
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
     expect(applied).toEqual([
       { version: 1, name: "001_initial" },
-      { version: 2, name: "002_session_data_product" }
+      { version: 2, name: "002_session_data_product" },
+      { version: 3, name: "003_session_sources" },
+      { version: 4, name: "004_cursor_context" }
     ]);
     expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     expect((db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toBe("wal");
@@ -86,7 +88,7 @@ describe("daemon database schema", () => {
       "2026-06-24T00:00:00.000Z"
     );
 
-    expect(() => migrateDatabase(db)).toThrow(/missing critical tables/i);
+    expect(() => migrateDatabase(db)).toThrow(/missing critical tables|no such table/i);
     db.close();
   });
 

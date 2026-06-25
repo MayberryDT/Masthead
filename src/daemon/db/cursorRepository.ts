@@ -6,12 +6,26 @@ export function upsertCursor(db: MastheadDatabase, cursor: Omit<IngestCursor, "c
   const cursorId = stableRecordId("cursor", [cursor.sourceId, cursor.sourcePath ?? ""]);
   ensureCursorSource(db, cursor.sourceId, cursor.sourcePath);
   db.prepare(
-    `INSERT INTO ingest_cursors (cursor_id, source_id, source_path, byte_offset, modified_at, content_fingerprint, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO ingest_cursors (
+      cursor_id,
+      source_id,
+      source_path,
+      byte_offset,
+      modified_at,
+      content_fingerprint,
+      source_session_id,
+      cwd,
+      model,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(source_id, source_path) DO UPDATE SET
       byte_offset = excluded.byte_offset,
       modified_at = excluded.modified_at,
       content_fingerprint = excluded.content_fingerprint,
+      source_session_id = COALESCE(excluded.source_session_id, ingest_cursors.source_session_id),
+      cwd = COALESCE(excluded.cwd, ingest_cursors.cwd),
+      model = COALESCE(excluded.model, ingest_cursors.model),
       updated_at = excluded.updated_at`
   ).run(
     cursorId,
@@ -20,6 +34,9 @@ export function upsertCursor(db: MastheadDatabase, cursor: Omit<IngestCursor, "c
     cursor.byteOffset,
     cursor.modifiedAt ?? null,
     cursor.contentFingerprint ?? null,
+    cursor.sourceSessionId ?? null,
+    cursor.cwd ?? null,
+    cursor.model ?? null,
     new Date().toISOString()
   );
 }
@@ -50,7 +67,10 @@ export function readCursor(db: MastheadDatabase, sourceId: string, sourcePath?: 
         source_path AS sourcePath,
         byte_offset AS byteOffset,
         modified_at AS modifiedAt,
-        content_fingerprint AS contentFingerprint
+        content_fingerprint AS contentFingerprint,
+        source_session_id AS sourceSessionId,
+        cwd AS cwd,
+        model AS model
       FROM ingest_cursors
       WHERE source_id = ? AND source_path IS ?`
     )

@@ -23,16 +23,22 @@ describe("ingest cursors", () => {
     upsertCursor(db, {
       byteOffset: 120,
       contentFingerprint: "fingerprint-1",
+      cwd: "/work/masthead",
       modifiedAt: "2026-06-24T12:30:00.000Z",
+      model: "gpt-5",
       sourceId: "codex-sessions",
-      sourcePath: "/tmp/session.jsonl"
+      sourcePath: "/tmp/session.jsonl",
+      sourceSessionId: "session-1"
     });
 
     expect(readCursor(db, "codex-sessions", "/tmp/session.jsonl")).toMatchObject({
       byteOffset: 120,
       contentFingerprint: "fingerprint-1",
+      cwd: "/work/masthead",
+      model: "gpt-5",
       sourceId: "codex-sessions",
-      sourcePath: "/tmp/session.jsonl"
+      sourcePath: "/tmp/session.jsonl",
+      sourceSessionId: "session-1"
     });
     db.close();
   });

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import type { AdapterRecord, DiscoveredSource, IngestCursor } from "../types.ts";
 
 type CodexParseContext = {
@@ -17,13 +18,27 @@ type NormalizedCodexRecord = {
 
 export async function* parseCodexTranscript(source: DiscoveredSource, cursor?: IngestCursor): AsyncIterable<AdapterRecord> {
   if (!source.path) return;
+  const fileInfo = await stat(source.path);
+  const requestedOffset = cursor?.byteOffset ?? 0;
+  const startOffset = requestedOffset > fileInfo.size ? 0 : requestedOffset;
+  const context: CodexParseContext = {
+    completeOffset: startOffset,
+    cwd: cursor?.cwd,
+    model: cursor?.model,
+    sourceSessionId: cursor?.sourceSessionId
+  };
+  if (startOffset > 0 && (!context.sourceSessionId || !context.cwd || !context.model)) {
+    await restoreContextBeforeOffset(source, startOffset, context);
+  }
+  if (requestedOffset > fileInfo.size) {
+    yield diagnosticRecord(source, "source_truncated", `Source was smaller than cursor offset ${requestedOffset}; reparsing from byte 0.`, startOffset);
+  }
   const stream = createReadStream(source.path, {
     encoding: "utf8",
-    start: cursor?.byteOffset ?? 0
+    start: startOffset
   });
-  let offset = cursor?.byteOffset ?? 0;
+  let offset = startOffset;
   let buffer = "";
-  const context: CodexParseContext = { completeOffset: offset };
 
   for await (const chunk of stream) {
     buffer += chunk;
@@ -40,9 +55,12 @@ export async function* parseCodexTranscript(source: DiscoveredSource, cursor?: I
 }
 
 function recordFromLine(source: DiscoveredSource, line: string, offset: number, context: CodexParseContext): AdapterRecord {
-  const parsed = safeJson(line);
-  const observedAt = observedAtFor(parsed);
-  const normalized = normalizeCodexRecord(parsed, observedAt, context);
+  const parsed = parseJson(line);
+  if (!parsed.ok) {
+    return diagnosticRecord(source, "malformed_json", parsed.message, offset, line);
+  }
+  const observedAt = observedAtFor(parsed.value);
+  const normalized = normalizeCodexRecord(parsed.value, observedAt, context);
   return {
     diagnostics: [],
     normalized: {
@@ -57,7 +75,69 @@ function recordFromLine(source: DiscoveredSource, line: string, offset: number, 
       value: normalized.value
     },
     observedAt,
-    payload: parsed,
+    payload: parsed.value,
+    payloadHash: hashLine(line),
+    source,
+    sourceRecordKey: `${source.path}:${offset}`
+  };
+}
+
+async function restoreContextBeforeOffset(source: DiscoveredSource, offset: number, context: CodexParseContext): Promise<void> {
+  if (!source.path || offset <= 0) return;
+  const stream = createReadStream(source.path, {
+    encoding: "utf8",
+    end: offset - 1,
+    start: 0
+  });
+  let completeOffset = 0;
+  let buffer = "";
+  for await (const chunk of stream) {
+    buffer += chunk;
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline);
+      buffer = buffer.slice(newline + 1);
+      completeOffset += Buffer.byteLength(line) + 1;
+      if (completeOffset <= offset && line.trim()) {
+        const parsed = parseJson(line);
+        if (parsed.ok) normalizeCodexRecord(parsed.value, observedAtFor(parsed.value), context);
+      }
+      newline = buffer.indexOf("\n");
+    }
+  }
+  context.completeOffset = offset;
+}
+
+function diagnosticRecord(
+  source: DiscoveredSource,
+  code: string,
+  message: string,
+  offset: number,
+  line = ""
+): AdapterRecord {
+  const observedAt = new Date(0).toISOString();
+  return {
+    diagnostics: [
+      {
+        code,
+        message,
+        observedAt,
+        severity: code === "source_truncated" ? "warning" : "error"
+      }
+    ],
+    normalized: {
+      confidence: "heuristic",
+      kind: "event",
+      sourceRef: {
+        runtimeVersion: source.runtimeVersion,
+        schemaVersion: source.schemaVersion,
+        sourceKind: "jsonl",
+        sourcePath: source.path
+      },
+      value: {}
+    },
+    observedAt,
+    payload: {},
     payloadHash: hashLine(line),
     source,
     sourceRecordKey: `${source.path}:${offset}`
@@ -308,12 +388,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function safeJson(line: string): Record<string, unknown> {
+function parseJson(line: string): { ok: true; value: Record<string, unknown> } | { ok: false; message: string } {
   try {
     const parsed = JSON.parse(line);
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    if (typeof parsed === "object" && parsed !== null) return { ok: true, value: parsed as Record<string, unknown> };
+    return { ok: false, message: "Codex transcript record was not a JSON object." };
   } catch {
-    return {};
+    return { ok: false, message: "Codex transcript record was malformed JSON." };
   }
 }
 

@@ -18,6 +18,9 @@ export type AdapterIngestionContext = SessionRepositoryContext & {
     byteOffset: number;
     modifiedAt?: string;
     contentFingerprint?: string;
+    sourceSessionId?: string;
+    cwd?: string;
+    model?: string;
   };
 };
 
@@ -741,12 +744,18 @@ function upsertAdapterCursor(
       byte_offset,
       modified_at,
       content_fingerprint,
+      source_session_id,
+      cwd,
+      model,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(source_id, source_path) DO UPDATE SET
       byte_offset = excluded.byte_offset,
       modified_at = excluded.modified_at,
       content_fingerprint = excluded.content_fingerprint,
+      source_session_id = COALESCE(excluded.source_session_id, ingest_cursors.source_session_id),
+      cwd = COALESCE(excluded.cwd, ingest_cursors.cwd),
+      model = COALESCE(excluded.model, ingest_cursors.model),
       updated_at = excluded.updated_at`
   ).run(
     `cursor:${hash(`${record.source.sourceId}\0${sourcePath ?? ""}`)}`,
@@ -755,6 +764,9 @@ function upsertAdapterCursor(
     cursor.byteOffset,
     cursor.modifiedAt ?? null,
     cursor.contentFingerprint ?? null,
+    cursor.sourceSessionId ?? null,
+    cursor.cwd ?? null,
+    cursor.model ?? null,
     new Date().toISOString()
   );
 }

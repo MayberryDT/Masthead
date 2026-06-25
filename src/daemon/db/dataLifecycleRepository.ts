@@ -284,17 +284,20 @@ function deleteSessionScope(
 ): CanonicalDeleteResult {
   const sessions = sessionRowsForScope(db, scope);
   const sessionIds = sessions.map((session) => session.session_id);
+  const sourceSessionIds = new Set(sessions.map((session) => session.source_session_id));
   const projects = affectedProjects(scope, sessions);
+  const rawEventIds = rawEventIdsForScope(db, scope, sourceSessionIds);
   const result = {
     auditRows: sessionIds.length === 0 ? 0 : countMcpAuditRowsForSessions(db, sessionIds),
     enrichments: sessionIds.length === 0 ? 0 : countWhereIn(db, "session_enrichments", "session_id", sessionIds),
-    rawEvents: 0,
+    rawEvents: rawEventIds.length,
     sessions: sessionIds.length
   };
 
   db.exec("BEGIN IMMEDIATE;");
   try {
     deleteWhereIn(db, "session_search", "session_id", sessionIds);
+    deleteWhereIn(db, "raw_events", "raw_event_id", rawEventIds);
     deleteReviewDispositionsForSessions(db, sessionIds);
     deleteMcpAuditRowsForSessions(db, sessionIds);
     deleteWhereIn(db, "project_summaries", "project_key", projects);
@@ -355,8 +358,40 @@ function rawEventCountForScope(
   scope: Exclude<DeleteMastheadDataScope, { kind: "all" } | { kind: "raw_payloads" }>,
   sourceSessionIds: Set<string>
 ): number {
-  const rows = db.prepare("SELECT payload_json FROM raw_events").all() as Array<{ payload_json: string }>;
-  return rows.filter((row) => rawEventPayloadMatchesScope(row.payload_json, scope, sourceSessionIds)).length;
+  return rawEventIdsForScope(db, scope, sourceSessionIds).length;
+}
+
+function rawEventIdsForScope(
+  db: MastheadDatabase,
+  scope: Exclude<DeleteMastheadDataScope, { kind: "all" } | { kind: "raw_payloads" }>,
+  sourceSessionIds: Set<string>
+): string[] {
+  const rows = db
+    .prepare("SELECT raw_event_id, source_id, source_record_key, source_path, payload_json FROM raw_events")
+    .all() as Array<{
+    raw_event_id: string;
+    source_id: string;
+    source_record_key: string;
+    source_path: string | null;
+    payload_json: string;
+  }>;
+  return rows
+    .filter((row) => rawEventMatchesScope(row, scope, sourceSessionIds))
+    .map((row) => row.raw_event_id);
+}
+
+function rawEventMatchesScope(
+  row: { source_id: string; source_record_key: string; source_path: string | null; payload_json: string },
+  scope: Exclude<DeleteMastheadDataScope, { kind: "all" } | { kind: "raw_payloads" }>,
+  sourceSessionIds: Set<string>
+): boolean {
+  if (rawEventPayloadMatchesScope(row.payload_json, scope, sourceSessionIds)) return true;
+  for (const sourceSessionId of sourceSessionIds) {
+    if (row.source_id.includes(sourceSessionId)) return true;
+    if (row.source_record_key.includes(sourceSessionId)) return true;
+    if (row.source_path?.includes(sourceSessionId)) return true;
+  }
+  return false;
 }
 
 function rawEventPayloadMatchesScope(
@@ -372,6 +407,15 @@ function rawEventPayloadMatchesScope(
   }
   const record = objectRecord(parsed);
   const value = objectRecord(record.value);
+  const payload = objectRecord(record.payload);
+  const directSessionId =
+    stringValue(record.sessionId) ??
+    stringValue(record.session_id) ??
+    stringValue(payload.sessionId) ??
+    stringValue(payload.session_id) ??
+    stringValue(payload.conversationId) ??
+    stringValue(payload.conversation_id);
+  if (directSessionId && sourceSessionIds.has(directSessionId)) return true;
   if (record.recordType === "event") {
     const sessionId = stringValue(value.sessionId);
     if (sessionId && sourceSessionIds.has(sessionId)) return true;

@@ -40,6 +40,9 @@ export type IngestCursor = {
   byteOffset: number;
   modifiedAt?: string;
   contentFingerprint?: string;
+  sourceSessionId?: string;
+  cwd?: string;
+  model?: string;
 };
 
 export type AdapterRecord = {

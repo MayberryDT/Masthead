@@ -39,7 +39,7 @@ import { createSessionRepository, ingestAdapterRecord } from "./db/sessionReposi
 import { openMastheadDatabase, type MastheadDatabase } from "./db/sqlite.ts";
 import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
 import { setSourcePolicy, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
-import { queueImportJob, runImportJob, type ImportWorkResult } from "./import/importCoordinator.ts";
+import { queueImportJob, type ImportWorkResult } from "./import/importCoordinator.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
@@ -90,8 +90,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     });
     const existingRecords = store.readAll();
     indexExistingCanonicalSessions();
-    const state = createIngestionState(store.readEvents());
-    const gitSnapshots = store.readGitSnapshots();
+    const state = createIngestionState(canonicalLiveEvents(database));
+    const gitSnapshots = canonicalGitSnapshots(database);
     const gitSnapshotSignatures = new Map(gitSnapshots.map((snapshot) => [snapshot.sessionId, gitSnapshotSignature(snapshot)]));
     const sessionCopyEnricher = createOpenAISessionCopyEnricher({
       enabled: config.llmCopyEnabled,
@@ -145,7 +145,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
   async function appendStoreRecord(record: StoreRecord, journal = hookRawJournal): Promise<void> {
     journal.appendStoreRecord(record);
-    await store.append(record);
   }
 
   let closed = false;
@@ -194,6 +193,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       await yieldToEventLoop();
     }
     indexExistingCanonicalSessions();
+    rebuildLiveStateFromCanonical();
   }
 
   function legacyJournalHydrated(records: StoreRecord[]): boolean {
@@ -226,6 +226,23 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
   function yieldToEventLoop(): Promise<void> {
     return new Promise((resolve) => setImmediate(resolve));
+  }
+
+  function rebuildLiveStateFromCanonical(): void {
+    const nextState = createIngestionState(canonicalLiveEvents(database));
+    state.events.length = 0;
+    state.events.push(...nextState.events);
+    state.seenPayloadHashes.clear();
+    for (const hash of nextState.seenPayloadHashes) state.seenPayloadHashes.add(hash);
+    state.seenProviderEventIds.clear();
+    for (const providerEventId of nextState.seenProviderEventIds) state.seenProviderEventIds.add(providerEventId);
+
+    gitSnapshots.length = 0;
+    gitSnapshots.push(...canonicalGitSnapshots(database));
+    gitSnapshotSignatures.clear();
+    for (const gitSnapshot of gitSnapshots) {
+      gitSnapshotSignatures.set(gitSnapshot.sessionId, gitSnapshotSignature(gitSnapshot));
+    }
   }
 
   async function appendGitSnapshotIfChanged(gitSnapshot: GitSnapshot): Promise<boolean> {
@@ -302,12 +319,16 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           continue;
         }
         const cursor = readCursor(database, transcriptSource.sourceId, transcriptSource.path);
-        let latestOffset = cursor?.byteOffset ?? 0;
+        const info = await stat(transcriptSource.path);
+        let latestOffset = cursor && cursor.byteOffset > info.size ? 0 : cursor?.byteOffset ?? 0;
+        let cursorContext = cursorContextFromCursor(cursor);
         for await (const record of parseCodexTranscript(transcriptSource, cursor)) {
           const nextOffset = offsetFromSourceRecordKey(record.sourceRecordKey) ?? latestOffset;
+          cursorContext = cursorContextFromRecord(record, cursorContext);
           const { sessionId } = ingestAdapterRecord(database, record, {
             cursor: {
-              byteOffset: nextOffset
+              byteOffset: nextOffset,
+              ...cursorContext
             },
             hostId: `host:${config.host}`,
             hostname: config.host,
@@ -321,13 +342,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           }
           countImportedRecord(result, record, Boolean(sessionId));
         }
-        const info = await stat(transcriptSource.path);
         upsertCursor(database, {
           byteOffset: latestOffset,
           contentFingerprint: `${info.size}:${Math.trunc(info.mtimeMs)}`,
           modifiedAt: info.mtime.toISOString(),
           sourceId: transcriptSource.sourceId,
-          sourcePath: transcriptSource.path
+          sourcePath: transcriptSource.path,
+          ...cursorContext
         });
       }
     }
@@ -344,9 +365,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const result = await store.deleteRecords(isRawSourceStoreRecord);
     hookRawJournal.pruneStoreRecords(rawSourceRetentionPolicy);
     observerRawJournal.pruneStoreRecords(rawSourceRetentionPolicy);
-    state.events.length = 0;
-    gitSnapshots.length = 0;
-    gitSnapshotSignatures.clear();
     return { removedRecords: result.removedRecords, touchedExternalState: false };
   }
 
@@ -866,14 +884,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const result = await store.pruneLocalData(policy);
         hookRawJournal.pruneStoreRecords(policy);
         observerRawJournal.pruneStoreRecords(policy);
-        state.events.length = 0;
-        state.events.push(...store.readEvents());
-        gitSnapshots.length = 0;
-        gitSnapshots.push(...store.readGitSnapshots());
-        gitSnapshotSignatures.clear();
-        for (const gitSnapshot of gitSnapshots) {
-          gitSnapshotSignatures.set(gitSnapshot.sessionId, gitSnapshotSignature(gitSnapshot));
-        }
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           result,
@@ -911,17 +921,16 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/sources/codex/import-metadata") {
       const sources = await discoverCodexSourcesAndPersist();
-      let imported = 0;
       const jobs = [];
       for (const source of sources) {
-        const job = await runImportJob(database, { importKind: "metadata", sourceId: source.sourceId }, () => importMetadataSources([source]));
-        imported += job.importedCount;
+        const job = queueImportJob(database, { importKind: "metadata", sourceId: source.sourceId }, () => importMetadataSources([source]));
         jobs.push(job);
       }
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
-        imported,
+        imported: 0,
         jobs,
+        queued: jobs.length,
         sources: sources.length
       });
       return;
@@ -969,20 +978,17 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         return;
       }
       const sources = await discoverCodexSourcesAndPersist();
-      let imported = 0;
-      let skipped = 0;
       const jobs = [];
       for (const source of sources) {
-        const job = await runImportJob(database, { importKind: "transcript", sourceId: source.sourceId }, () => importTranscriptSources([source]));
-        imported += job.importedCount;
-        skipped += job.queuedCount;
+        const job = queueImportJob(database, { importKind: "transcript", sourceId: source.sourceId }, () => importTranscriptSources([source]));
         jobs.push(job);
       }
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
-        imported,
+        imported: 0,
         jobs,
-        skipped,
+        queued: jobs.length,
+        skipped: 0,
         sources: sources.length
       });
       return;
@@ -1042,6 +1048,18 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           void refreshKnownGitSnapshots();
         }, config.gitRefreshMs).unref()
       : undefined;
+  const sourceReconcileTimer = setInterval(() => {
+    if (closed) return;
+    void discoverCodexSourcesAndPersist().catch((error: unknown) => {
+      console.error("[masthead] source reconciliation failed", error);
+    });
+  }, 60_000).unref();
+  queueMicrotask(() => {
+    if (closed) return;
+    void discoverCodexSourcesAndPersist().catch((error: unknown) => {
+      console.error("[masthead] source reconciliation failed", error);
+    });
+  });
 
   return {
     server,
@@ -1052,6 +1070,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       await hydrationPromise;
       await new Promise<void>((resolve) => {
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
+        clearInterval(sourceReconcileTimer);
         server.close(() => {
           database.close();
           resolve();
@@ -1081,6 +1100,51 @@ const rawSourceRetentionPolicy = {
   keepUnresolvedAttention: false,
   recordTypes: ["event", "git_snapshot", "attention_item", "conflict_card"] as Array<StoreRecord["recordType"]>
 };
+
+function canonicalLiveEvents(database: MastheadDatabase): NormalizedEvent[] {
+  return canonicalStoreRecords(database, [codexHookSource.sourceId])
+    .filter((record): record is Extract<StoreRecord, { recordType: "event" }> => record.recordType === "event")
+    .map((record) => record.value);
+}
+
+function canonicalGitSnapshots(database: MastheadDatabase): GitSnapshot[] {
+  return canonicalStoreRecords(database, ["masthead-git-observer"])
+    .filter((record): record is Extract<StoreRecord, { recordType: "git_snapshot" }> => record.recordType === "git_snapshot")
+    .map((record) => record.value);
+}
+
+function canonicalStoreRecords(database: MastheadDatabase, sourceIds: string[]): StoreRecord[] {
+  if (sourceIds.length === 0) return [];
+  const placeholders = sourceIds.map(() => "?").join(", ");
+  const rows = database
+    .prepare(
+      `SELECT payload_json
+      FROM raw_events
+      WHERE source_id IN (${placeholders})
+      ORDER BY observed_at ASC, raw_event_id ASC`
+    )
+    .all(...sourceIds) as Array<{ payload_json: string }>;
+  return rows.map((row) => parseStoreRecord(row.payload_json)).filter((record): record is StoreRecord => Boolean(record));
+}
+
+function parseStoreRecord(payloadJson: string): StoreRecord | undefined {
+  try {
+    const parsed = JSON.parse(payloadJson) as Partial<StoreRecord>;
+    if (!parsed || typeof parsed !== "object") return undefined;
+    if (
+      parsed.recordType === "event" ||
+      parsed.recordType === "git_snapshot" ||
+      parsed.recordType === "attention_item" ||
+      parsed.recordType === "conflict_card" ||
+      parsed.recordType === "review_disposition"
+    ) {
+      return parsed as StoreRecord;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function isRawSourceStoreRecord(record: StoreRecord): boolean {
   return rawSourceRetentionPolicy.recordTypes.includes(record.recordType);
@@ -1153,6 +1217,34 @@ async function jsonlFiles(directory: string): Promise<string[]> {
 function offsetFromSourceRecordKey(sourceRecordKey: string): number | undefined {
   const offset = Number.parseInt(sourceRecordKey.split(":").at(-1) ?? "", 10);
   return Number.isFinite(offset) ? offset : undefined;
+}
+
+type TranscriptCursorContext = {
+  sourceSessionId?: string;
+  cwd?: string;
+  model?: string;
+};
+
+function cursorContextFromCursor(cursor: ReturnType<typeof readCursor>): TranscriptCursorContext {
+  return {
+    cwd: cursor?.cwd,
+    model: cursor?.model,
+    sourceSessionId: cursor?.sourceSessionId
+  };
+}
+
+function cursorContextFromRecord(record: { normalized: { value: unknown } }, fallback: TranscriptCursorContext): TranscriptCursorContext {
+  const value = objectRecord(record.normalized.value);
+  return {
+    cwd: stringRecordValue(value, "cwd") ?? fallback.cwd,
+    model: stringRecordValue(value, "model") ?? stringRecordValue(value, "modelName") ?? fallback.model,
+    sourceSessionId:
+      stringRecordValue(value, "sessionId") ??
+      stringRecordValue(value, "session_id") ??
+      stringRecordValue(value, "conversationId") ??
+      stringRecordValue(value, "conversation_id") ??
+      fallback.sourceSessionId
+  };
 }
 
 function sessionQueryFromUrl(url: URL): SessionQuery {
@@ -1235,6 +1327,11 @@ function deleteScopeFromUrl(url: URL): DeleteMastheadDataScope {
 
 function objectRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function stringRecordValue(value: Record<string, unknown>, key: string): string | undefined {
+  const candidate = value[key];
+  return typeof candidate === "string" && candidate.trim() ? candidate : undefined;
 }
 
 function requiredString(value: unknown, name: string): string {

@@ -54,11 +54,11 @@ describe("data lifecycle API", () => {
       ok: true,
       summary: {
         tables: {
-          raw_events: 0,
+          raw_events: 1,
           sessions: 1
         },
         storageClasses: {
-          raw_payloads: { records: 0 },
+          raw_payloads: { records: 1 },
           searchable_messages: { records: 1 }
         }
       }
@@ -68,11 +68,11 @@ describe("data lifecycle API", () => {
 
     expect(deleted.preview).toMatchObject({
       tables: {
-        raw_events: 0,
+        raw_events: 1,
         sessions: 1
       },
       storageClasses: {
-        raw_payloads: { records: 0 },
+        raw_payloads: { records: 1 },
         searchable_messages: { records: 1 }
       }
     });
@@ -80,21 +80,22 @@ describe("data lifecycle API", () => {
     expect(sessionIds(daemon.database)).toEqual(["session:1"]);
     expect(searchSessionIds(daemon.database)).toEqual(["session:1"]);
     expect(projectKeys(daemon.database)).toEqual(["Masthead"]);
-    expect(count(daemon.database, "raw_events")).toBe(2);
+    expect(count(daemon.database, "raw_events")).toBe(1);
   });
 
-  test("default retention removes live raw copies from memory and the file-backed journal", async () => {
+  test("default retention removes raw copies without blanking live normalized state", async () => {
     const { daemon, storePath } = await createTestHarness();
     const baseUrl = await listen(daemon);
 
     await postJson(baseUrl, "/ingest", liveApprovalPayload("raw-retention"));
     expect((await getJson(baseUrl, "/events")).events).toHaveLength(1);
-    expect(await readFile(storePath, "utf8")).toContain("raw-retention");
+    expect(await readTextOrEmpty(storePath)).toBe("");
+    expect(count(daemon.database, "raw_events")).toBe(1);
 
     await postJson(baseUrl, "/data/retention/default", {});
 
-    expect((await getJson(baseUrl, "/events")).events).toEqual([]);
-    expect(await readFile(storePath, "utf8")).toBe("");
+    expect((await getJson(baseUrl, "/events")).events).toHaveLength(1);
+    expect(await readTextOrEmpty(storePath)).toBe("");
     expect(count(daemon.database, "sessions")).toBe(1);
     expect(count(daemon.database, "raw_events")).toBe(0);
   });
@@ -122,7 +123,7 @@ describe("data lifecycle API", () => {
     const deleted = await postJson(baseUrl, "/data/delete", { scope: { kind: "session", sessionId: "server-live" } });
     expect(deleted.result).toMatchObject({ sessions: 1 });
     expect((await getJson(baseUrl, "/events")).events).toEqual([]);
-    expect(await readFile(storePath, "utf8")).toBe("");
+    expect(await readTextOrEmpty(storePath)).toBe("");
 
     const projection = await getJson(baseUrl, "/projection?expandedSessionId=server-live");
     expect(projection.projection.cards).toEqual([]);
@@ -201,6 +202,15 @@ async function postJson(baseUrl: string, path: string, body: unknown): Promise<R
   return response.json() as Promise<Record<string, any>>;
 }
 
+async function readTextOrEmpty(path: string): Promise<string> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
 function liveApprovalPayload(providerEventId: string): Record<string, unknown> {
   return {
     provider_event_id: providerEventId,
@@ -237,7 +247,17 @@ function seedCanonicalSessionGraph(
     `INSERT INTO raw_events (
       raw_event_id, source_id, source_record_key, observed_at, received_at, source_kind, source_path, payload_hash, payload_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(`raw:${suffix}`, "source:codex", `${suffix}:1`, now, now, "jsonl", "/tmp/rollout.jsonl", `hash:${suffix}`, "{}");
+  ).run(
+    `raw:${suffix}`,
+    "source:codex",
+    `${suffix}:1`,
+    now,
+    now,
+    "jsonl",
+    "/tmp/rollout.jsonl",
+    `hash:${suffix}`,
+    JSON.stringify({ payload: { session_id: `source-${suffix}` } })
+  );
   db.prepare("INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
     "host:test",
     "test-host",

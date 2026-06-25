@@ -19,6 +19,11 @@ const migrations = [
     version: 3,
     name: "003_session_sources",
     path: resolve(currentDir, "migrations/003_session_sources.sql")
+  },
+  {
+    version: 4,
+    name: "004_cursor_context",
+    path: resolve(currentDir, "migrations/004_cursor_context.sql")
   }
 ];
 

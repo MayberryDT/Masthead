@@ -44,12 +44,11 @@ type EvidenceRow = {
 
 export function searchMcpSessions(db: MastheadDatabase, query: SessionQuery): { sessions: McpSessionCapsule[]; total: number; coverage: object } {
   const limit = boundedLimit(query.limit, 10);
-  const result = querySessions(db, { ...query, limit: Math.max(limit, 100) });
-  const sessions = result.sessions.filter((session) => sessionMcpAllowed(db, session.sessionId)).slice(0, limit);
+  const result = querySessions(db, { ...query, limit, mcpAllowedOnly: true });
   return {
     coverage: coverage(db),
-    sessions: sessions.map((session) => ({ ...session, sourceRefs: sourceRefsForSessions(db, [session.sessionId]) })),
-    total: sessions.length
+    sessions: result.sessions.map((session) => ({ ...session, sourceRefs: sourceRefsForSessions(db, [session.sessionId]) })),
+    total: result.total
   };
 }
 

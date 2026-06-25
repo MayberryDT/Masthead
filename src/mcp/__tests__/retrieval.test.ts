@@ -44,6 +44,24 @@ describe("MCP session retrieval", () => {
     );
     db.close();
   });
+
+  test("search totals count all allowed matches before pagination", async () => {
+    const db = await openDb();
+    const excludedSessionId = seedSession(db, "excluded");
+    seedSession(db, "allowed-a");
+    seedSession(db, "allowed-b");
+    db.prepare("UPDATE sessions SET excluded_from_mcp_at = ? WHERE session_id = ?").run(
+      "2026-06-25T12:05:00.000Z",
+      excludedSessionId
+    );
+
+    const result = searchMcpSessions(db, { limit: 1, project: "Pip", query: "OAuth" });
+
+    expect(result.sessions).toHaveLength(1);
+    expect(result.total).toBe(2);
+    expect(result.sessions[0].sessionId).not.toBe(excludedSessionId);
+    db.close();
+  });
 });
 
 async function openDb() {
@@ -54,17 +72,17 @@ async function openDb() {
   return db;
 }
 
-function seedSession(db: Awaited<ReturnType<typeof openDb>>): string {
+function seedSession(db: Awaited<ReturnType<typeof openDb>>, suffix = "retrieval"): string {
   const now = "2026-06-24T15:02:00.000Z";
   const repository = createSessionRepository(db, {
     hostId: "host:test",
     hostname: "masthead-test-host",
     runtimeKind: "codex"
   });
-  const sessionId = repository.upsertLiveEvent(liveEvent("retrieval", { message: "OAuth callback work", project: "Pip", title: "OAuth callback repair" }));
+  const sessionId = repository.upsertLiveEvent(liveEvent(suffix, { message: "OAuth callback work", project: "Pip", title: `OAuth ${suffix}` }));
   if (!sessionId) throw new Error("session was not created");
   db.prepare("INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)").run(
-    "file:retrieval",
+    `file:${suffix}`,
     sessionId,
     "src/auth/callback.ts",
     "modified",
@@ -72,7 +90,7 @@ function seedSession(db: Awaited<ReturnType<typeof openDb>>): string {
     "{}"
   );
   db.prepare("INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, ?, ?, ?)").run(
-    "tool:retrieval",
+    `tool:${suffix}`,
     sessionId,
     "exec_command",
     now,

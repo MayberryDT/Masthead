@@ -40,6 +40,7 @@ export type SessionQuery = {
   cursor?: string;
   offset?: number;
   sort?: LogbookSort;
+  mcpAllowedOnly?: boolean;
 };
 
 export type LogbookSort = "recent" | "oldest" | "duration_desc" | "files_desc" | "tools_desc" | "errors_desc" | "project";
@@ -256,6 +257,7 @@ function loadSessionRows(
   const params: Array<string | number | null> = [];
 
   if (!options.includeDeleted) where.push("sessions.deleted_at IS NULL");
+  if (query.mcpAllowedOnly) where.push(mcpSessionPolicySql("sessions"));
   if (candidateIds) {
     where.push(`sessions.session_id IN (${candidateIds.map(() => "?").join(", ")})`);
     params.push(...candidateIds);
@@ -351,6 +353,26 @@ function loadSessionRows(
       ${sortOrderClause(query.sort)}`
     )
     .all(...params) as SessionRow[];
+}
+
+function mcpSessionPolicySql(sessionAlias: string): string {
+  return `${sessionAlias}.excluded_from_mcp_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM source_policies global_mcp_policy
+      WHERE global_mcp_policy.policy_kind = 'mcp_access'
+        AND global_mcp_policy.source_id IS NULL
+        AND global_mcp_policy.enabled = 0
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM session_aliases mcp_session_aliases
+      JOIN source_policies source_mcp_policy
+        ON source_mcp_policy.source_id = mcp_session_aliases.source_id
+       AND source_mcp_policy.policy_kind = 'mcp_access'
+       AND source_mcp_policy.enabled = 0
+      WHERE mcp_session_aliases.session_id = ${sessionAlias}.session_id
+    )`;
 }
 
 function sortOrderClause(sort: LogbookSort | undefined): string {
