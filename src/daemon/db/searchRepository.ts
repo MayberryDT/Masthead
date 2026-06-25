@@ -53,6 +53,11 @@ type TextRow = {
   text: string;
 };
 
+type EnrichmentRow = {
+  enrichmentKind: string;
+  contentJson: string | null;
+};
+
 export function indexSessionSearch(db: MastheadDatabase, document: SessionSearchDocument): void {
   db.prepare("DELETE FROM session_search WHERE session_id = ?").run(document.sessionId);
   db.prepare(
@@ -129,10 +134,20 @@ export function indexCanonicalSessionSearch(db: MastheadDatabase, sessionId: str
   const usage = db
     .prepare("SELECT DISTINCT COALESCE(model, '') || ' ' || COALESCE(provider, '') AS text FROM model_usage WHERE session_id = ?")
     .all(sessionId) as TextRow[];
+  const enrichments = db
+    .prepare(
+      `SELECT enrichment_kind AS enrichmentKind, content_json AS contentJson
+      FROM session_enrichments
+      WHERE session_id = ?
+        AND status = 'current'
+        AND enrichment_kind IN ('session_capsule', 'search_projection')`
+    )
+    .all(sessionId) as EnrichmentRow[];
+  const enrichmentText = enrichments.flatMap((row) => textFromEnrichment(row.contentJson));
 
   const title = session.title ?? session.objective ?? session.projectLabel ?? session.sourceSessionId;
   indexSessionSearch(db, {
-    capsule: joinText([session.objective, session.outcomeLabel, ...signals.map((row) => row.text)]),
+    capsule: joinText([session.objective, session.outcomeLabel, ...signals.map((row) => row.text), ...enrichmentText]),
     commands: joinText(toolNames.map((row) => row.text)),
     filePaths: joinText(filePaths.map((row) => row.text)),
     finalResponse: assistantMessages[0]?.text ?? "",
@@ -149,11 +164,12 @@ export function indexCanonicalSessionSearch(db: MastheadDatabase, sessionId: str
       session.runtimeKind,
       session.runtimeVersion,
       ...messages.map((row) => row.text),
-      ...usage.map((row) => row.text)
+      ...usage.map((row) => row.text),
+      ...enrichmentText
     ]),
     projectAliases: session.projectLabel ?? "",
     sessionId,
-    tags: joinText([session.runtimeKind, session.lifecycle, session.outcomeLabel]),
+    tags: joinText([session.runtimeKind, session.lifecycle, session.outcomeLabel, ...enrichmentText]),
     title,
     toolNames: joinText(toolNames.map((row) => row.text))
   });
@@ -211,4 +227,51 @@ function ftsQuery(query: string): string | undefined {
 
 function joinText(values: Array<string | null | undefined>): string {
   return values.filter((value): value is string => Boolean(value?.trim())).join(" ");
+}
+
+function textFromEnrichment(contentJson: string | null): string[] {
+  if (!contentJson) return [];
+  try {
+    const content = JSON.parse(contentJson) as unknown;
+    if (!isRecord(content)) return [];
+    return [
+      stringField(content, "title"),
+      stringField(content, "objective"),
+      stringField(content, "liveSummary"),
+      stringField(content, "outcome"),
+      stringField(content, "text"),
+      stringField(content, "searchText"),
+      ...stringArrayField(content, "topics"),
+      ...stringArrayField(content, "technologies"),
+      ...stringArrayField(content, "searchPhrases"),
+      ...claimTextArray(content, "candidateDecisions"),
+      ...claimTextArray(content, "unresolved")
+    ].filter((value): value is string => Boolean(value?.trim()));
+  } catch {
+    return [];
+  }
+}
+
+function stringField(record: Record<string, unknown>, field: string): string | undefined {
+  const value = record[field];
+  return typeof value === "string" ? value : undefined;
+}
+
+function stringArrayField(record: Record<string, unknown>, field: string): string[] {
+  const value = record[field];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function claimTextArray(record: Record<string, unknown>, field: string): string[] {
+  const value = record[field];
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => (isRecord(item) && typeof item.text === "string" ? item.text : undefined)).filter(isString);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
 }
