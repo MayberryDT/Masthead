@@ -513,6 +513,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/health") {
+
       const health = buildMastheadHealth(
         config,
         database,
@@ -529,6 +530,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       );
       sendJson(request, response, config.allowedOrigins, 200, {
         ...health,
+
         events: health.live.events,
         diagnostics: health.live.diagnostics,
         gitSnapshots: health.live.gitSnapshots,
@@ -1315,6 +1317,7 @@ async function backupDatabaseBeforeMigration(databasePath: string): Promise<void
   const staleBackups = backups.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(3);
   await Promise.all(staleBackups.map((backup) => rm(join(directory, backup.entry), { force: true })));
 }
+
 
 function readBody(request: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {

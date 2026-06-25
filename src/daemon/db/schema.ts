@@ -94,7 +94,6 @@ export function hasPendingMigrations(db: MastheadDatabase): boolean {
   );
   return migrations.some((migration) => !applied.has(migration.version));
 }
-
 export function getOrCreateDatabaseIdentity(db: MastheadDatabase): string {
   const row = db.prepare("SELECT setting_json AS value FROM app_settings WHERE setting_key = ?").get("database_identity") as
     | { value: string }

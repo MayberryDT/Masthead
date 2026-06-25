@@ -395,6 +395,7 @@ async function readRequestBody(request: IncomingMessage): Promise<string> {
   return body;
 }
 
+
 function corsHeaders(request: IncomingMessage, allowedOrigins: string[]): Record<string, string> {
   const origin = request.headers.origin;
   const allowedOrigin = typeof origin === "string" && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
