@@ -22,14 +22,32 @@ export type SourceStatus = {
   failures?: number;
   lastSync?: string;
   confidence: "authoritative" | "inferred" | "heuristic";
+  checkedPaths?: string[];
+  diagnostics?: SourceDiagnostic[];
+};
+
+export type SourceDiagnostic = {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+  observedAt?: string;
+  details?: string;
+  path?: string;
 };
 
 export type AdapterStatus = {
   runtime: string;
-  state: "connected" | "degraded" | "disabled" | "not_detected";
+  name?: string;
+  description?: string;
+  state: "connected" | "degraded" | "disabled" | "not_detected" | "planned";
+  implementationState?: "active" | "planned";
+  discoveredCount?: number;
+  importedCount?: number;
   discoveredSessions: number;
   importedSessions: number;
   lastSyncAt?: string;
+  checkedPaths?: string[];
+  diagnostics?: SourceDiagnostic[];
   sourceLocations: SourceStatus[];
   policies: {
     metadataImport: boolean;

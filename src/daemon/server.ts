@@ -50,6 +50,7 @@ import { setSourcePolicy, type SourcePolicyKind } from "./db/sourcePolicyReposit
 import { queueImportJob, type ImportWorkResult } from "./import/importCoordinator.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
+import { discoverSourceSnapshot, type SourceDiscoverySnapshot } from "./sources/sourceDiscoveryService.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { buildMastheadHealth } from "./healthService.ts";
 import { getMcpStatus, listMcpTools } from "./mcpStatusService.ts";
@@ -350,6 +351,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return refreshed;
   }
 
+  async function discoverSourceSnapshotAndPersist(): Promise<SourceDiscoverySnapshot> {
+    const snapshot = await discoverSourceSnapshot({ codexHomeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
+    getSourceStatuses(database, snapshot.sources);
+    return snapshot;
+  }
+
   async function discoverCodexSourcesAndPersist(): Promise<DiscoveredSource[]> {
     const sources = await discoverCodexSources({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
     getSourceStatuses(database, sources);
@@ -587,9 +594,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/adapters") {
-      const sources = await discoverCodexSourcesAndPersist();
+      const snapshot = await discoverSourceSnapshotAndPersist();
       sendJson(request, response, config.allowedOrigins, 200, {
-        adapters: getAdapterStatuses(database, sources),
+        adapters: getAdapterStatuses(database, snapshot),
         ok: true
       });
       return;

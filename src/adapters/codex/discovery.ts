@@ -7,14 +7,55 @@ export type CodexDiscoveryResult = {
   transcripts: DiscoveredSource[];
 };
 
-export async function discoverCodexSources(context: DiscoveryContext): Promise<DiscoveredSource[]> {
-  const root = join(context.homeDir, ".codex");
-  const candidates = [
-    { id: "session-index", path: join(root, "session_index.jsonl"), kind: "jsonl" as const },
-    { id: "history", path: join(root, "history.jsonl"), kind: "jsonl" as const },
-    { id: "sessions", path: join(root, "sessions"), kind: "jsonl" as const },
-    { id: "archived-sessions", path: join(root, "archived_sessions"), kind: "jsonl" as const }
+export type CodexSourceCandidate = {
+  id: string;
+  label: string;
+  path: string;
+  preflightPattern: string;
+  expectedKind: "file" | "directory";
+  kind: "jsonl";
+};
+
+export function codexSourceCandidates(homeDir: string): CodexSourceCandidate[] {
+  const root = join(homeDir, ".codex");
+  return [
+    {
+      expectedKind: "file",
+      id: "session-index",
+      kind: "jsonl",
+      label: "Codex session index",
+      path: join(root, "session_index.jsonl"),
+      preflightPattern: ".codex/session_index.jsonl"
+    },
+    {
+      expectedKind: "file",
+      id: "history",
+      kind: "jsonl",
+      label: "Codex prompt history",
+      path: join(root, "history.jsonl"),
+      preflightPattern: ".codex/history.jsonl"
+    },
+    {
+      expectedKind: "directory",
+      id: "sessions",
+      kind: "jsonl",
+      label: "Codex active session transcripts",
+      path: join(root, "sessions"),
+      preflightPattern: ".codex/sessions/**/*.jsonl"
+    },
+    {
+      expectedKind: "directory",
+      id: "archived-sessions",
+      kind: "jsonl",
+      label: "Codex archived session transcripts",
+      path: join(root, "archived_sessions"),
+      preflightPattern: ".codex/archived_sessions/**/*.jsonl"
+    }
   ];
+}
+
+export async function discoverCodexSources(context: DiscoveryContext): Promise<DiscoveredSource[]> {
+  const candidates = codexSourceCandidates(context.homeDir);
   const sources: DiscoveredSource[] = [];
   for (const candidate of candidates) {
     if (isExcluded(candidate.path, context.exclusions)) continue;

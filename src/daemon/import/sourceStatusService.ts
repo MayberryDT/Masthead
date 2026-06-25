@@ -1,10 +1,12 @@
-import type { DiscoveredSource } from "../../adapters/types.ts";
+import type { AdapterDiagnostic, DiscoveredSource, RuntimeKind } from "../../adapters/types.ts";
 import { countDistinctSessionsForSource } from "../db/sessionSourceRepository.ts";
+import { supportedAdapters, type AdapterImplementationState } from "../sources/supportedAdapters.ts";
+import type { SourcePreflightResult } from "../sources/sourcePreflight.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 
 export type SourceStatusDto = {
   sourceId: string;
-  runtime: string;
+  runtime: RuntimeKind;
   sourceKind: string;
   path?: string;
   confidence: "authoritative" | "inferred" | "heuristic";
@@ -25,11 +27,17 @@ export type SourceStatusDto = {
 };
 
 export type AdapterStatusDto = {
-  runtime: string;
-  state: "connected" | "degraded" | "disabled" | "not_detected";
+  runtime: RuntimeKind;
+  name: string;
+  description: string;
+  state: "connected" | "degraded" | "disabled" | "not_detected" | "planned";
+  implementationState: AdapterImplementationState;
+  discoveredCount: number;
+  importedCount: number;
   discoveredSessions: number;
   importedSessions: number;
   lastSyncAt?: string;
+  diagnostics: AdapterDiagnostic[];
   sourceLocations: SourceStatusDto[];
   policies: {
     metadataImport: boolean;
@@ -72,7 +80,7 @@ export function getSourceStatuses(db: MastheadDatabase, discoveredSources: Disco
       mcpEnabled: policyEnabled(db, row.source_id, "mcp_access", true),
       path: row.source_path ?? undefined,
       queuedRecords: counts.queuedRecords ?? 0,
-      runtime: row.adapter,
+      runtime: row.adapter as RuntimeKind,
       sourceId: row.source_id,
       sourceKind: row.source_kind,
       transcriptImportEnabled: policyEnabled(db, row.source_id, "transcript_import")
@@ -88,36 +96,74 @@ export function getSourceStatuses(db: MastheadDatabase, discoveredSources: Disco
   });
 }
 
-export function getAdapterStatuses(db: MastheadDatabase, discoveredSources: DiscoveredSource[] = []): AdapterStatusDto[] {
+export type AdapterStatusInput =
+  | DiscoveredSource[]
+  | {
+      sources?: DiscoveredSource[];
+      preflights?: SourcePreflightResult[];
+    };
+
+export function getAdapterStatuses(db: MastheadDatabase, input: AdapterStatusInput = []): AdapterStatusDto[] {
+  const { sources: discoveredSources, preflights } = normalizeAdapterStatusInput(input);
   const sources = getSourceStatuses(db, discoveredSources);
-  const byRuntime = new Map<string, SourceStatusDto[]>();
+  const byRuntime = new Map<RuntimeKind, SourceStatusDto[]>();
   for (const source of sources) {
     const current = byRuntime.get(source.runtime) ?? [];
     current.push(source);
     byRuntime.set(source.runtime, current);
   }
 
-  return Array.from(byRuntime.entries())
-    .map(([runtime, sourceLocations]) => {
-      const failureCount = sourceLocations.reduce((total, source) => total + source.failureCount, 0);
-      const importedSessions = sourceLocations.reduce((total, source) => total + source.importedSessions, 0);
-      const lastSyncAt = latestDate(sourceLocations.map((source) => source.lastSyncAt));
-      return {
-        discoveredSessions: importedSessions,
-        importedSessions,
-        lastSyncAt,
-        policies: {
-          enrichment: sourceLocations.some((source) => source.enrichmentEnabled),
-          mcpAccess: sourceLocations.some((source) => source.mcpEnabled),
-          metadataImport: true,
-          transcriptImport: sourceLocations.some((source) => source.transcriptImportEnabled)
-        },
-        runtime,
-        sourceLocations,
-        state: failureCount > 0 ? "degraded" : "connected"
-      } satisfies AdapterStatusDto;
-    })
-    .toSorted((left, right) => left.runtime.localeCompare(right.runtime));
+  return supportedAdapters.map((adapter) => {
+    const sourceLocations = byRuntime.get(adapter.runtime) ?? [];
+    const failureCount = sourceLocations.reduce((total, source) => total + source.failureCount, 0);
+    const importedSessions = sourceLocations.reduce((total, source) => total + source.importedSessions, 0);
+    const lastSyncAt = latestDate(sourceLocations.map((source) => source.lastSyncAt));
+    const preflight = preflights.find((result) => result.runtime === adapter.runtime);
+    const diagnostics = [...(preflight?.diagnostics ?? [])];
+    if (failureCount > 0) {
+      diagnostics.push({
+        code: "adapter_import_failures",
+        message: `${failureCount} import failure${failureCount === 1 ? "" : "s"} recorded for ${adapter.name}.`,
+        observedAt: lastSyncAt ?? new Date().toISOString(),
+        severity: "warning"
+      });
+    }
+    const discoveredCount =
+      preflight?.discoveredCount ?? sourceLocations.reduce((total, source) => total + source.discoveredSessions, 0);
+    const state =
+      adapter.implementationState === "planned"
+        ? "planned"
+        : failureCount > 0 || preflight?.state === "degraded"
+          ? "degraded"
+          : discoveredCount > 0
+            ? "connected"
+            : "not_detected";
+    return {
+      description: adapter.description,
+      diagnostics,
+      discoveredCount,
+      discoveredSessions: discoveredCount,
+      implementationState: adapter.implementationState,
+      importedCount: importedSessions,
+      importedSessions,
+      lastSyncAt,
+      name: adapter.name,
+      policies: {
+        enrichment: sourceLocations.some((source) => source.enrichmentEnabled),
+        mcpAccess: sourceLocations.some((source) => source.mcpEnabled),
+        metadataImport: adapter.implementationState === "active",
+        transcriptImport: sourceLocations.some((source) => source.transcriptImportEnabled)
+      },
+      runtime: adapter.runtime,
+      sourceLocations,
+      state
+    } satisfies AdapterStatusDto;
+  });
+}
+
+function normalizeAdapterStatusInput(input: AdapterStatusInput): { sources: DiscoveredSource[]; preflights: SourcePreflightResult[] } {
+  if (Array.isArray(input)) return { preflights: [], sources: input };
+  return { preflights: input.preflights ?? [], sources: input.sources ?? [] };
 }
 
 function upsertDiscoveredSources(db: MastheadDatabase, sources: DiscoveredSource[]): void {

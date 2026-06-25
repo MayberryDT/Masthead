@@ -65,6 +65,6 @@ describe("SourcesPanel", () => {
     expect(html).toContain("Metadata import ready");
     expect(html).not.toContain("surface-card-grid");
     expect(html).not.toContain("source-card");
-    expect(html).not.toContain("transcript");
+    expect(html).not.toContain("hello from transcript");
   });
 });

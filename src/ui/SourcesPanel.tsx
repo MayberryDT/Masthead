@@ -61,7 +61,7 @@ export function SourcesPanel({
         ]}
       />
 
-      <AdapterList adapters={adapterRows} busy={busy} onExcludePath={onExcludePath} />
+      <AdapterList adapters={adapterRows} busy={busy} onExcludePath={onExcludePath} onImportCodexMetadata={onImportCodexMetadata} />
       <ImportJobsTable imports={imports} />
     </section>
   );
@@ -90,20 +90,36 @@ function adaptersFromSources(sources: SourceStatus[]): AdapterStatus[] {
   }));
 }
 
+type AdapterTotalsStatus = AdapterStatus & {
+  diagnostics?: { severity?: string }[];
+  importedCount?: number;
+};
+
 function sourceTotals(adapters: AdapterStatus[]) {
   return adapters.reduce(
-    (totals, adapter) => ({
-      failures:
-        totals.failures +
-        adapter.sourceLocations.reduce((sourceTotal, source) => sourceTotal + (source.failureCount ?? source.failures ?? 0), 0),
-      imported:
-        totals.imported +
-        adapter.sourceLocations.reduce((sourceTotal, source) => sourceTotal + (source.importedRecords ?? source.importedCount ?? 0), 0),
-      queued:
-        totals.queued +
-        adapter.sourceLocations.reduce((sourceTotal, source) => sourceTotal + (source.queuedRecords ?? source.queuedCount ?? 0), 0),
-      sessions: totals.sessions + adapter.importedSessions
-    }),
+    (totals, adapter) => {
+      const row = adapter as AdapterTotalsStatus;
+      const sourceFailures = row.sourceLocations.reduce(
+        (sourceTotal, source) => sourceTotal + (source.failureCount ?? source.failures ?? 0),
+        0
+      );
+      const diagnosticFailures = row.diagnostics?.filter((diagnostic) => diagnostic.severity === "error").length ?? 0;
+      const importedRecords = row.sourceLocations.reduce(
+        (sourceTotal, source) => sourceTotal + (source.importedRecords ?? source.importedCount ?? 0),
+        0
+      );
+      const queuedRecords = row.sourceLocations.reduce(
+        (sourceTotal, source) => sourceTotal + (source.queuedRecords ?? source.queuedCount ?? 0),
+        0
+      );
+
+      return {
+        failures: totals.failures + sourceFailures + diagnosticFailures,
+        imported: totals.imported + (row.importedCount ?? importedRecords),
+        queued: totals.queued + queuedRecords,
+        sessions: totals.sessions + row.importedSessions
+      };
+    },
     { failures: 0, imported: 0, queued: 0, sessions: 0 }
   );
 }

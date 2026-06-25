@@ -9,7 +9,7 @@ export function SourcePolicyControls({ policies }: Props) {
   return (
     <dl className="source-policy-controls" aria-label="Adapter policies">
       <Policy label="Metadata" enabled={policies.metadataImport} />
-      <Policy label="Messages" enabled={policies.transcriptImport} />
+      <Policy label="Transcripts" enabled={policies.transcriptImport} />
       <Policy label="Enrichment" enabled={policies.enrichment} />
       <Policy label="MCP access" enabled={policies.mcpAccess} />
     </dl>

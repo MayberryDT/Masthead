@@ -5,9 +5,10 @@ type Props = {
   adapters: AdapterStatus[];
   busy: boolean;
   onExcludePath: (path: string) => void;
+  onImportCodexMetadata?: () => void;
 };
 
-export function AdapterList({ adapters, busy, onExcludePath }: Props) {
+export function AdapterList({ adapters, busy, onExcludePath, onImportCodexMetadata }: Props) {
   if (adapters.length === 0) {
     return (
       <div className="empty-session-state surface-empty-state">
@@ -22,7 +23,13 @@ export function AdapterList({ adapters, busy, onExcludePath }: Props) {
     <section className="adapter-list" aria-label="Runtime adapters">
       <p className="mono-label">ADAPTERS</p>
       {adapters.map((adapter) => (
-        <AdapterRow key={adapter.runtime} adapter={adapter} busy={busy} onExcludePath={onExcludePath} />
+        <AdapterRow
+          key={adapter.runtime}
+          adapter={adapter}
+          busy={busy}
+          onExcludePath={onExcludePath}
+          onImportCodexMetadata={onImportCodexMetadata}
+        />
       ))}
     </section>
   );
