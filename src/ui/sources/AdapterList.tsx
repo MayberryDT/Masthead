@@ -4,11 +4,22 @@ import { AdapterRow } from "./AdapterRow";
 type Props = {
   adapters: AdapterStatus[];
   busy: boolean;
+  onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
-  onImportCodexMetadata?: () => void;
+  onImportMetadata?: (runtime: string) => void;
+  onImportTranscripts?: (runtime: string) => void;
+  onSyncAdapter?: (runtime: string) => void;
 };
 
-export function AdapterList({ adapters, busy, onExcludePath, onImportCodexMetadata }: Props) {
+export function AdapterList({
+  adapters,
+  busy,
+  onEnableTranscriptImport,
+  onExcludePath,
+  onImportMetadata,
+  onImportTranscripts,
+  onSyncAdapter
+}: Props) {
   if (adapters.length === 0) {
     return (
       <div className="empty-session-state surface-empty-state">
@@ -27,8 +38,11 @@ export function AdapterList({ adapters, busy, onExcludePath, onImportCodexMetada
           key={adapter.runtime}
           adapter={adapter}
           busy={busy}
+          onEnableTranscriptImport={onEnableTranscriptImport}
           onExcludePath={onExcludePath}
-          onImportCodexMetadata={onImportCodexMetadata}
+          onImportMetadata={onImportMetadata}
+          onImportTranscripts={onImportTranscripts}
+          onSyncAdapter={onSyncAdapter}
         />
       ))}
     </section>

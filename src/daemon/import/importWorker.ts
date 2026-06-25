@@ -4,6 +4,7 @@ import type { ImportWorkResult } from "./importCoordinator.ts";
 export function emptyImportResult(): ImportWorkResult {
   return {
     discoveredCount: 0,
+    processedCount: 0,
     failureCount: 0,
     importedCount: 0,
     queuedCount: 0
@@ -12,6 +13,7 @@ export function emptyImportResult(): ImportWorkResult {
 
 export function countImportedRecord(result: ImportWorkResult, record: AdapterRecord, imported: boolean): void {
   result.discoveredCount += 1;
+  result.processedCount += 1;
   if (imported) {
     result.importedCount += 1;
   } else if (record.diagnostics.length > 0) {

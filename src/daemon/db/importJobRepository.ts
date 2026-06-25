@@ -2,7 +2,7 @@ import { stableRecordId } from "../identity.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type ImportJobKind = "metadata" | "transcript" | "enrichment";
-export type ImportJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type ImportJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "cancelling";
 
 export type ImportJobDto = {
   importJobId: string;
@@ -10,11 +10,16 @@ export type ImportJobDto = {
   importKind: ImportJobKind;
   status: ImportJobStatus;
   discoveredCount: number;
+  processedCount: number;
   importedCount: number;
   queuedCount: number;
   failureCount: number;
   updatedAt: string;
+  currentPath?: string;
   failureMessage?: string;
+  progressCurrent: number;
+  progressTotal?: number;
+  progressPercent?: number;
 };
 
 type ImportJobRow = {
@@ -23,10 +28,12 @@ type ImportJobRow = {
   import_kind: ImportJobKind;
   status: ImportJobStatus;
   discovered_count: number;
+  processed_count: number;
   imported_count: number;
   queued_count: number;
   failure_count: number;
   updated_at: string;
+  current_path: string | null;
   failure_message: string | null;
 };
 
@@ -54,7 +61,15 @@ export function createImportJob(
 export function updateImportJob(
   db: MastheadDatabase,
   importJobId: string,
-  updates: Partial<Pick<ImportJobDto, "status" | "discoveredCount" | "importedCount" | "queuedCount" | "failureCount" | "failureMessage">> & {
+  updates: {
+    status?: ImportJobStatus;
+    discoveredCount?: number;
+    processedCount?: number;
+    importedCount?: number;
+    queuedCount?: number;
+    failureCount?: number;
+    currentPath?: string | null;
+    failureMessage?: string | null;
     updatedAt: string;
   }
 ): ImportJobDto {
@@ -64,20 +79,24 @@ export function updateImportJob(
     `UPDATE import_jobs
     SET status = ?,
       discovered_count = ?,
+      processed_count = ?,
       imported_count = ?,
       queued_count = ?,
       failure_count = ?,
       updated_at = ?,
+      current_path = ?,
       failure_message = ?
     WHERE import_job_id = ?`
   ).run(
     updates.status ?? current.status,
     updates.discoveredCount ?? current.discoveredCount,
+    updates.processedCount ?? current.processedCount,
     updates.importedCount ?? current.importedCount,
     updates.queuedCount ?? current.queuedCount,
     updates.failureCount ?? current.failureCount,
     updates.updatedAt,
-    updates.failureMessage ?? current.failureMessage ?? null,
+    updates.currentPath === undefined ? (current.currentPath ?? null) : updates.currentPath,
+    updates.failureMessage === undefined ? (current.failureMessage ?? null) : updates.failureMessage,
     importJobId
   );
   return getImportJob(db, importJobId) as ImportJobDto;
@@ -94,13 +113,22 @@ export function listImportJobs(db: MastheadDatabase): ImportJobDto[] {
 }
 
 function importJobFromRow(row: ImportJobRow): ImportJobDto {
+  const progressTotal = row.discovered_count > 0 ? row.discovered_count : undefined;
+  const progressPercent = progressTotal
+    ? Math.min(100, Math.max(0, Math.round((row.processed_count / progressTotal) * 100)))
+    : undefined;
   return {
+    currentPath: row.current_path ?? undefined,
     discoveredCount: row.discovered_count,
     failureCount: row.failure_count,
     ...(row.failure_message ? { failureMessage: row.failure_message } : {}),
     importedCount: row.imported_count,
     importJobId: row.import_job_id,
     importKind: row.import_kind,
+    processedCount: row.processed_count,
+    progressCurrent: row.processed_count,
+    progressPercent,
+    progressTotal,
     queuedCount: row.queued_count,
     sourceId: row.source_id,
     status: row.status,

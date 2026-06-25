@@ -25,6 +25,11 @@ const migrations = [
     version: 4,
     name: "004_cursor_context",
     path: resolve(currentDir, "migrations/004_cursor_context.sql")
+  },
+  {
+    version: 5,
+    name: "005_import_progress",
+    path: resolve(currentDir, "migrations/005_import_progress.sql")
   }
 ];
 

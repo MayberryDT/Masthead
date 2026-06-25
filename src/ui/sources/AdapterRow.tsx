@@ -28,8 +28,8 @@ type Props = {
   onChooseLocation?: (runtime: string) => void;
   onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
-  onImportCodexMetadata?: () => void;
-  onImportCodexTranscripts?: (runtime: string) => void;
+  onImportMetadata?: (runtime: string) => void;
+  onImportTranscripts?: (runtime: string) => void;
   onSyncAdapter?: (runtime: string) => void;
 };
 
@@ -39,8 +39,8 @@ export function AdapterRow({
   onChooseLocation,
   onEnableTranscriptImport,
   onExcludePath,
-  onImportCodexMetadata,
-  onImportCodexTranscripts,
+  onImportMetadata,
+  onImportTranscripts,
   onSyncAdapter
 }: Props) {
   const view = adapter as AdapterRowModel;
@@ -75,7 +75,10 @@ export function AdapterRow({
             <AppButton disabled>Coming later</AppButton>
           ) : isCodexConnected ? (
             <>
-              <AppButton onClick={onImportCodexMetadata} disabled={busy || !onImportCodexMetadata}>
+              <AppButton
+                onClick={() => onImportMetadata?.(view.runtime)}
+                disabled={busy || !onImportMetadata}
+              >
                 Import metadata
               </AppButton>
               <AppButton
@@ -87,15 +90,15 @@ export function AdapterRow({
               </AppButton>
               <AppButton
                 variant="quiet"
-                disabled={busy || !view.policies.transcriptImport || !onImportCodexTranscripts}
-                onClick={() => onImportCodexTranscripts?.(view.runtime)}
+                disabled={busy || !view.policies.transcriptImport || !onImportTranscripts}
+                onClick={() => onImportTranscripts?.(view.runtime)}
               >
                 Import transcripts
               </AppButton>
               <AppButton
                 variant="primary"
-                disabled={busy || (!onSyncAdapter && !onImportCodexMetadata)}
-                onClick={() => (onSyncAdapter ? onSyncAdapter(view.runtime) : onImportCodexMetadata?.())}
+                disabled={busy || !onSyncAdapter}
+                onClick={() => onSyncAdapter?.(view.runtime)}
               >
                 Sync all
               </AppButton>

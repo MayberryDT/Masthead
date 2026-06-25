@@ -52,8 +52,9 @@ describe("SourcesPanel", () => {
         busy={false}
         status="Metadata import ready"
         onExcludePath={() => undefined}
-        onImportCodexMetadata={() => undefined}
+        onImportMetadata={() => undefined}
         onRefresh={() => undefined}
+        onSyncAdapter={() => undefined}
       />
     );
 

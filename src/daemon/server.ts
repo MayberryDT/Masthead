@@ -27,7 +27,7 @@ import {
   getDataSummary,
   type DeleteMastheadDataScope
 } from "./db/dataLifecycleRepository.ts";
-import { getImportJob, listImportJobs, updateImportJob, type ImportJobKind } from "./db/importJobRepository.ts";
+import { getImportJob, listImportJobs, type ImportJobKind } from "./db/importJobRepository.ts";
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
@@ -47,7 +47,7 @@ import {
 } from "./legacyDataMigration.ts";
 import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
 import { setSourcePolicy, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
-import { queueImportJob, type ImportWorkResult } from "./import/importCoordinator.ts";
+import { cancelImportJob, queueImportJob, type ImportJobControls, type ImportWorkResult } from "./import/importCoordinator.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { discoverSourceSnapshot, type SourceDiscoverySnapshot } from "./sources/sourceDiscoveryService.ts";
@@ -290,7 +290,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   function yieldToEventLoop(): Promise<void> {
-    return new Promise((resolve) => setImmediate(resolve));
+    return new Promise((resolve) => {
+      setImmediate(resolve);
+    });
   }
 
   function rebuildLiveStateFromCanonical(): void {
@@ -363,10 +365,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return sources;
   }
 
-  async function importMetadataSources(sources: DiscoveredSource[]): Promise<ImportWorkResult> {
+  async function importMetadataSources(sources: DiscoveredSource[], controls?: ImportJobControls): Promise<ImportWorkResult> {
     const result = emptyImportResult();
     for (const source of sources) {
+      controls?.throwIfCancelled();
+      controls?.updateProgress({ currentPath: source.path ?? source.sourceId });
       for await (const record of importCodexMetadata(source)) {
+        controls?.throwIfCancelled();
         const { sessionId } = ingestAdapterRecord(database, record, {
           hostId: `host:${config.host}`,
           hostname: config.host,
@@ -376,17 +381,32 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         if (sessionId) indexCanonicalSessionSearch(database, sessionId);
         queueSessionEnrichment(sessionId);
         countImportedRecord(result, record, Boolean(sessionId));
+        controls?.updateProgress({
+          currentPath: record.normalized.sourceRef.sourcePath ?? record.source.path ?? source.path ?? source.sourceId,
+          discoveredCount: result.discoveredCount,
+          failureCount: result.failureCount,
+          importedCount: result.importedCount,
+          processedCount: result.processedCount,
+          queuedCount: result.queuedCount
+        });
       }
     }
     return result;
   }
 
-  async function importTranscriptSources(sources: DiscoveredSource[]): Promise<ImportWorkResult> {
+  async function importTranscriptSources(sources: DiscoveredSource[], controls?: ImportJobControls): Promise<ImportWorkResult> {
     const result = emptyImportResult();
     for (const source of sources) {
+      controls?.throwIfCancelled();
       for (const transcriptSource of await transcriptSources(source)) {
+        controls?.throwIfCancelled();
+        controls?.updateProgress({ currentPath: transcriptSource.path ?? transcriptSource.sourceId });
         if (!transcriptSource.path || sourceIsExcluded(database, transcriptSource.path)) {
           result.queuedCount += 1;
+          controls?.updateProgress({
+            currentPath: transcriptSource.path ?? transcriptSource.sourceId,
+            queuedCount: result.queuedCount
+          });
           continue;
         }
         const cursor = readCursor(database, transcriptSource.sourceId, transcriptSource.path);
@@ -394,6 +414,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         let latestOffset = cursor && cursor.byteOffset > info.size ? 0 : cursor?.byteOffset ?? 0;
         let cursorContext = cursorContextFromCursor(cursor);
         for await (const record of parseCodexTranscript(transcriptSource, cursor)) {
+          controls?.throwIfCancelled();
           const nextOffset = offsetFromSourceRecordKey(record.sourceRecordKey) ?? latestOffset;
           cursorContext = cursorContextFromRecord(record, cursorContext);
           const { sessionId } = ingestAdapterRecord(database, record, {
@@ -412,7 +433,16 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             latestOffset = nextOffset;
           }
           countImportedRecord(result, record, Boolean(sessionId));
+          controls?.updateProgress({
+            currentPath: transcriptSource.path,
+            discoveredCount: result.discoveredCount,
+            failureCount: result.failureCount,
+            importedCount: result.importedCount,
+            processedCount: result.processedCount,
+            queuedCount: result.queuedCount
+          });
         }
+        controls?.throwIfCancelled();
         upsertCursor(database, {
           byteOffset: latestOffset,
           contentFingerprint: `${info.size}:${Math.trunc(info.mtimeMs)}`,
@@ -426,10 +456,36 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return result;
   }
 
-  function runImportWorkerForSource(importKind: ImportJobKind, source: DiscoveredSource): Promise<ImportWorkResult> {
-    if (importKind === "metadata") return importMetadataSources([source]);
-    if (importKind === "transcript") return importTranscriptSources([source]);
+  function runImportWorkerForSource(importKind: ImportJobKind, source: DiscoveredSource, controls: ImportJobControls): Promise<ImportWorkResult> {
+    if (importKind === "metadata") return importMetadataSources([source], controls);
+    if (importKind === "transcript") return importTranscriptSources([source], controls);
     return Promise.resolve(emptyImportResult());
+  }
+
+  async function queueCodexMetadataImports(): Promise<{ jobs: ReturnType<typeof queueImportJob>[]; sources: number }> {
+    const sources = await discoverCodexSourcesAndPersist();
+    const jobs = sources.map((source) =>
+      queueImportJob(database, { importKind: "metadata", sourceId: source.sourceId }, (controls) => importMetadataSources([source], controls))
+    );
+    return { jobs, sources: sources.length };
+  }
+
+  async function queueCodexTranscriptImports(): Promise<{ jobs: ReturnType<typeof queueImportJob>[]; sources: number }> {
+    if (!transcriptImportApproved(database)) {
+      throw clientError("Transcript import requires persisted source review approval.");
+    }
+    const sources = await discoverCodexSourcesAndPersist();
+    const jobs = sources.map((source) =>
+      queueImportJob(database, { importKind: "transcript", sourceId: source.sourceId }, (controls) => importTranscriptSources([source], controls))
+    );
+    return { jobs, sources: sources.length };
+  }
+
+  function approveCodexTranscriptImports(): void {
+    approveTranscriptImport(database, {
+      approvedAt: new Date().toISOString(),
+      reason: "Source exclusions reviewed before transcript ingestion."
+    });
   }
 
   async function clearRawSourceCopies(): Promise<{ removedRecords: number; touchedExternalState: false }> {
@@ -794,8 +850,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           });
           return;
         }
-        const job = queueImportJob(database, { importKind: body.kind, sourceId: source.sourceId }, () =>
-          runImportWorkerForSource(body.kind as ImportJobKind, source)
+        const job = queueImportJob(database, { importKind: body.kind, sourceId: source.sourceId }, (controls) =>
+          runImportWorkerForSource(body.kind as ImportJobKind, source, controls)
         );
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
@@ -813,10 +869,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && importMatch?.[1] && importMatch[2] === "cancel") {
       try {
-        const job = updateImportJob(database, importMatch[1], {
-          status: "cancelled",
-          updatedAt: new Date().toISOString()
-        });
+        const job = cancelImportJob(database, importMatch[1]);
         sendJson(request, response, config.allowedOrigins, 202, { ok: true, job });
       } catch (error) {
         sendJson(request, response, config.allowedOrigins, 404, {
@@ -839,8 +892,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "source not found" });
         return;
       }
-      const job = queueImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId }, () =>
-        runImportWorkerForSource(existing.importKind, source)
+      const job = queueImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId }, (controls) =>
+        runImportWorkerForSource(existing.importKind, source, controls)
       );
       sendJson(request, response, config.allowedOrigins, 202, { ok: true, importJobId: job.importJobId, job });
       return;
@@ -1021,19 +1074,74 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/sources/codex/import-metadata") {
-      const sources = await discoverCodexSourcesAndPersist();
-      const jobs = [];
-      for (const source of sources) {
-        const job = queueImportJob(database, { importKind: "metadata", sourceId: source.sourceId }, () => importMetadataSources([source]));
-        jobs.push(job);
+    const adapterImportMatch = url.pathname.match(/^\/adapters\/([^/]+)\/(import-metadata|approve-transcripts|import-transcripts|sync)$/);
+    if (request.method === "POST" && adapterImportMatch?.[1] && adapterImportMatch[2]) {
+      const runtime = decodeURIComponent(adapterImportMatch[1]);
+      if (runtime !== "codex") {
+        sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: `Unsupported adapter runtime: ${runtime}` });
+        return;
       }
+      const action = adapterImportMatch[2];
+      if (action === "approve-transcripts") {
+        approveCodexTranscriptImports();
+        sendJson(request, response, config.allowedOrigins, 202, { ok: true });
+        return;
+      }
+      if (action === "import-metadata") {
+        const queued = await queueCodexMetadataImports();
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          imported: 0,
+          jobs: queued.jobs,
+          queued: queued.jobs.length,
+          sources: queued.sources
+        });
+        return;
+      }
+      if (action === "import-transcripts") {
+        if (!transcriptImportApproved(database)) {
+          sendJson(request, response, config.allowedOrigins, 409, {
+            ok: false,
+            error: "Transcript import requires persisted source review approval."
+          });
+          return;
+        }
+        const queued = await queueCodexTranscriptImports();
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          imported: 0,
+          jobs: queued.jobs,
+          queued: queued.jobs.length,
+          skipped: 0,
+          sources: queued.sources
+        });
+        return;
+      }
+      const metadata = await queueCodexMetadataImports();
+      const transcriptsApproved = transcriptImportApproved(database);
+      const transcripts = transcriptsApproved ? await queueCodexTranscriptImports() : { jobs: [], sources: 0 };
+      const jobs = [...metadata.jobs, ...transcripts.jobs];
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
         imported: 0,
         jobs,
+        metadataJobs: metadata.jobs,
         queued: jobs.length,
-        sources: sources.length
+        skipped: transcriptsApproved ? 0 : 1,
+        sources: metadata.sources + transcripts.sources,
+        transcriptJobs: transcripts.jobs
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/codex/import-metadata") {
+      const queued = await queueCodexMetadataImports();
+      sendJson(request, response, config.allowedOrigins, 202, {
+        ok: true,
+        imported: 0,
+        jobs: queued.jobs,
+        queued: queued.jobs.length,
+        sources: queued.sources
       });
       return;
     }
@@ -1063,10 +1171,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "POST" && url.pathname === "/sources/codex/approve-transcripts") {
-      approveTranscriptImport(database, {
-        approvedAt: new Date().toISOString(),
-        reason: "Source exclusions reviewed before transcript ingestion."
-      });
+      approveCodexTranscriptImports();
       sendJson(request, response, config.allowedOrigins, 202, { ok: true });
       return;
     }
@@ -1079,19 +1184,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         });
         return;
       }
-      const sources = await discoverCodexSourcesAndPersist();
-      const jobs = [];
-      for (const source of sources) {
-        const job = queueImportJob(database, { importKind: "transcript", sourceId: source.sourceId }, () => importTranscriptSources([source]));
-        jobs.push(job);
-      }
+      const queued = await queueCodexTranscriptImports();
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
         imported: 0,
-        jobs,
-        queued: jobs.length,
+        jobs: queued.jobs,
+        queued: queued.jobs.length,
         skipped: 0,
-        sources: sources.length
+        sources: queued.sources
       });
       return;
     }

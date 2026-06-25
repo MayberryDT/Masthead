@@ -61,13 +61,28 @@ export type ImportJob = {
   importJobId: string;
   sourceId: string;
   importKind: "metadata" | "transcript" | "enrichment";
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "cancelling";
   discoveredCount: number;
   importedCount: number;
   queuedCount: number;
   failureCount: number;
   updatedAt: string;
   failureMessage?: string;
+  currentPath?: string;
+  processedCount?: number;
+  progressCurrent?: number;
+  progressTotal?: number;
+  progressPercent?: number;
+};
+
+export type AdapterImportActionResult = {
+  imported?: number;
+  importJobId?: string;
+  job?: ImportJob;
+  jobs?: ImportJob[];
+  queued?: number;
+  skipped?: number;
+  sources?: number;
 };
 
 export type SourceExclusionInput = {
@@ -349,15 +364,30 @@ export async function listAdapters(baseUrl = defaultLiveProjectionUrl()): Promis
   return body.adapters;
 }
 
-export async function importCodexMetadata(
+export async function importAdapterMetadata(
+  runtime: string,
   baseUrl = defaultLiveProjectionUrl()
-): Promise<{ imported: number; sources: number; queued?: number; jobs?: ImportJob[] }> {
-  const url = new URL(baseUrl);
-  url.pathname = "/sources/codex/import-metadata";
-  url.search = "";
-  const response = await fetch(url.toString(), { method: "POST", headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`codex metadata import failed: ${response.status}`);
-  return response.json() as Promise<{ imported: number; sources: number; queued?: number; jobs?: ImportJob[] }>;
+): Promise<AdapterImportActionResult> {
+  return postAdapterImportAction(runtime, "import-metadata", "metadata import", baseUrl);
+}
+
+export async function importCodexMetadata(baseUrl = defaultLiveProjectionUrl()): Promise<AdapterImportActionResult> {
+  return importAdapterMetadata("codex", baseUrl);
+}
+
+export async function approveAdapterTranscripts(runtime: string, baseUrl = defaultLiveProjectionUrl()): Promise<void> {
+  await postAdapterImportAction(runtime, "approve-transcripts", "transcript approval", baseUrl);
+}
+
+export async function importAdapterTranscripts(
+  runtime: string,
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<AdapterImportActionResult> {
+  return postAdapterImportAction(runtime, "import-transcripts", "transcript import", baseUrl);
+}
+
+export async function syncAdapter(runtime: string, baseUrl = defaultLiveProjectionUrl()): Promise<AdapterImportActionResult> {
+  return postAdapterImportAction(runtime, "sync", "adapter sync", baseUrl);
 }
 
 export async function startImport(
@@ -377,14 +407,54 @@ export async function startImport(
   return body.job;
 }
 
-export async function listImports(baseUrl = defaultLiveProjectionUrl()): Promise<ImportJob[]> {
+export async function listImports(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<ImportJob[]> {
   const url = new URL(baseUrl);
   url.pathname = "/imports";
   url.search = "";
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
   if (!response.ok) throw new Error(`imports request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; imports: ImportJob[] };
   return body.imports;
+}
+
+export async function cancelImport(importJobId: string, baseUrl = defaultLiveProjectionUrl()): Promise<ImportJob> {
+  return postImportJobAction(importJobId, "cancel", "import cancel", baseUrl);
+}
+
+export async function retryImport(importJobId: string, baseUrl = defaultLiveProjectionUrl()): Promise<ImportJob> {
+  return postImportJobAction(importJobId, "retry", "import retry", baseUrl);
+}
+
+async function postAdapterImportAction(
+  runtime: string,
+  action: "approve-transcripts" | "import-metadata" | "import-transcripts" | "sync",
+  label: string,
+  baseUrl: string
+): Promise<AdapterImportActionResult> {
+  const url = new URL(baseUrl);
+  url.pathname = `/adapters/${encodeURIComponent(runtime)}/${action}`;
+  url.search = "";
+  const response = await fetch(url.toString(), { method: "POST", headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`${label} failed: ${response.status}`);
+  return response.json() as Promise<AdapterImportActionResult>;
+}
+
+async function postImportJobAction(
+  importJobId: string,
+  action: "cancel" | "retry",
+  label: string,
+  baseUrl: string
+): Promise<ImportJob> {
+  const url = new URL(baseUrl);
+  url.pathname = `/imports/${encodeURIComponent(importJobId)}/${action}`;
+  url.search = "";
+  const response = await fetch(url.toString(), { method: "POST", headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`${label} failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; job: ImportJob };
+  return body.job;
 }
 
 export async function addSourceExclusion(input: SourceExclusionInput, baseUrl = defaultLiveProjectionUrl()): Promise<void> {

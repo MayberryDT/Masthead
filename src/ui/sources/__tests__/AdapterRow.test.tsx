@@ -1,12 +1,26 @@
+// @vitest-environment happy-dom
+
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { AdapterStatus } from "../../../app/daemonClient";
 import { AdapterRow } from "../AdapterRow";
 
 const noop = () => undefined;
 
 function renderAdapter(adapter: AdapterStatus) {
-  return renderToStaticMarkup(<AdapterRow adapter={adapter} busy={false} onExcludePath={noop} onImportCodexMetadata={noop} />);
+  return renderToStaticMarkup(
+    <AdapterRow
+      adapter={adapter}
+      busy={false}
+      onEnableTranscriptImport={noop}
+      onExcludePath={noop}
+      onImportMetadata={noop}
+      onImportTranscripts={noop}
+      onSyncAdapter={noop}
+    />
+  );
 }
 
 describe("AdapterRow", () => {
@@ -46,6 +60,64 @@ describe("AdapterRow", () => {
     expect(html).toContain("Import transcripts");
     expect(html).toContain("Sync all");
     expect(html).toContain("/home/tyler/.codex/sessions");
+  });
+
+  test("invokes Codex metadata, transcript, and sync callbacks", async () => {
+    const onImportMetadata = vi.fn();
+    const onImportTranscripts = vi.fn();
+    const onSyncAdapter = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <AdapterRow
+          adapter={codexAdapter({ transcriptImport: true })}
+          busy={false}
+          onExcludePath={noop}
+          onImportMetadata={onImportMetadata}
+          onImportTranscripts={onImportTranscripts}
+          onSyncAdapter={onSyncAdapter}
+        />
+      );
+    });
+
+    await act(async () => {
+      buttonByText(container, "Import metadata").click();
+      buttonByText(container, "Import transcripts").click();
+      buttonByText(container, "Sync all").click();
+    });
+
+    expect(onImportMetadata).toHaveBeenCalledWith("codex");
+    expect(onImportTranscripts).toHaveBeenCalledWith("codex");
+    expect(onSyncAdapter).toHaveBeenCalledWith("codex");
+
+    await act(async () => root.unmount());
+  });
+
+  test("invokes Codex transcript approval callback", async () => {
+    const onEnableTranscriptImport = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <AdapterRow
+          adapter={codexAdapter({ transcriptImport: false })}
+          busy={false}
+          onEnableTranscriptImport={onEnableTranscriptImport}
+          onExcludePath={noop}
+        />
+      );
+    });
+
+    await act(async () => {
+      buttonByText(container, "Enable transcript import").click();
+    });
+
+    expect(onEnableTranscriptImport).toHaveBeenCalledWith("codex");
+
+    await act(async () => root.unmount());
   });
 
   test("renders Claude Code not-detected diagnostics and checked paths", () => {
@@ -95,3 +167,25 @@ describe("AdapterRow", () => {
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Coming later<\/button>/);
   });
 });
+
+function codexAdapter({ transcriptImport }: { transcriptImport: boolean }): AdapterStatus {
+  return {
+    runtime: "codex",
+    state: "connected",
+    discoveredSessions: 742,
+    importedSessions: 120,
+    policies: {
+      metadataImport: true,
+      transcriptImport,
+      enrichment: false,
+      mcpAccess: true
+    },
+    sourceLocations: []
+  };
+}
+
+function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
+  const button = Array.from(container.querySelectorAll("button")).find((candidate) => candidate.textContent === text);
+  expect(button).toBeDefined();
+  return button as HTMLButtonElement;
+}

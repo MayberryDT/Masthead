@@ -43,19 +43,24 @@ import { ConnectionRecoveryPanel } from "../ui/ConnectionRecoveryPanel";
 import {
   addSourceExclusion,
   applyDefaultRetention as applyDefaultDataRetention,
+  approveAdapterTranscripts,
+  cancelImport,
   deleteMastheadData as deleteCanonicalMastheadData,
   exportMastheadData,
   getDataSummary,
   getLogbookSummary,
   getLogbookSession,
   getLogbookSessionExcerpts,
-  importCodexMetadata,
+  importAdapterMetadata,
+  importAdapterTranscripts,
   listAdapters,
   listImports,
   listReviewDispositions,
   listSources,
+  retryImport,
   saveReviewDisposition,
   searchLogbook,
+  syncAdapter,
   type LogbookExcerpt,
   type AdapterStatus,
   type ImportJob,
@@ -388,6 +393,11 @@ export function App() {
     if (options.showStatus && sourceResult.status === "fulfilled") {
       setSourcesStatus(`${sourceResult.value.length} source${sourceResult.value.length === 1 ? "" : "s"} detected.`);
     }
+    return {
+      adapters: adapterResult.status === "fulfilled" ? adapterResult.value : undefined,
+      imports: importResult.status === "fulfilled" ? importResult.value : undefined,
+      sources: sourceResult.status === "fulfilled" ? sourceResult.value : undefined
+    };
   }, [activeProjectionUrl]);
 
   const handleRefreshSources = useCallback(async () => {
@@ -481,27 +491,115 @@ export function App() {
     return () => controller.abort();
   }, [activeProjectionUrl, activeSurface, selectedLogbookSessionId, historyQuery]);
 
-  const handleImportCodexMetadata = async () => {
-    setSourcesBusy(true);
-    setSourcesStatus("Importing Codex metadata...");
+  const handlePollActiveImports = useCallback(async () => {
+    const activeImportIds = new Set(
+      imports.filter((job) => job.status === "queued" || job.status === "running").map((job) => job.importJobId)
+    );
     try {
-      const result = await importCodexMetadata(activeProjectionUrl);
-      const queued = result.queued ?? result.jobs?.length ?? 0;
-      setSourcesStatus(
-        queued > 0
-          ? `Metadata import queued: ${queued} job${queued === 1 ? "" : "s"} across ${result.sources} sources.`
-          : `Metadata import ready: ${result.imported} records from ${result.sources} sources.`
-      );
-      const [nextAdapters, nextSources, nextImports] = await Promise.all([
-        listAdapters(activeProjectionUrl),
-        listSources(activeProjectionUrl),
-        listImports(activeProjectionUrl)
-      ]);
-      setAdapters(nextAdapters);
-      setSources(nextSources);
-      setImports(nextImports);
+      const result = await loadSourceInventory();
+      if (result.imports?.some((job) => activeImportIds.has(job.importJobId) && job.status === "succeeded")) {
+        setLogbookRetryKey((current) => current + 1);
+      }
+    } catch (error) {
+      console.error("[masthead] Active import poll failed", error);
+    }
+  }, [imports, loadSourceInventory]);
+
+  const refreshSourcesAfterImportAction = async () => {
+    await loadSourceInventory();
+    setLogbookRetryKey((current) => current + 1);
+  };
+
+  const importActionStatus = (
+    label: string,
+    result: { imported?: number; importJobId?: string; job?: ImportJob; jobs?: ImportJob[]; queued?: number; sources?: number }
+  ) => {
+    const queued = result.queued ?? result.jobs?.length ?? (result.job || result.importJobId ? 1 : 0);
+    const sourcesCount = result.sources ?? result.jobs?.length ?? (result.job || result.importJobId ? 1 : 0);
+    if (queued > 0) return `${label} queued: ${queued} job${queued === 1 ? "" : "s"} across ${sourcesCount} source${sourcesCount === 1 ? "" : "s"}.`;
+    if (typeof result.imported === "number") return `${label} complete: ${result.imported} records from ${sourcesCount} source${sourcesCount === 1 ? "" : "s"}.`;
+    return `${label} requested.`;
+  };
+
+  const handleImportMetadata = async (runtime: string) => {
+    setSourcesBusy(true);
+    setSourcesStatus(`Importing ${runtime} metadata...`);
+    try {
+      const result = await importAdapterMetadata(runtime, activeProjectionUrl);
+      setSourcesStatus(importActionStatus("Metadata import", result));
+      await refreshSourcesAfterImportAction();
     } catch (error) {
       setSourcesStatus(`Metadata import failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
+  const handleEnableTranscriptImport = async (runtime: string) => {
+    setSourcesBusy(true);
+    setSourcesStatus(`Enabling ${runtime} transcript import...`);
+    try {
+      await approveAdapterTranscripts(runtime, activeProjectionUrl);
+      setSourcesStatus("Transcript import enabled. Review exclusions before importing raw transcripts.");
+      await refreshSourcesAfterImportAction();
+    } catch (error) {
+      setSourcesStatus(`Transcript import approval failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
+  const handleImportTranscripts = async (runtime: string) => {
+    setSourcesBusy(true);
+    setSourcesStatus(`Importing ${runtime} transcripts...`);
+    try {
+      const result = await importAdapterTranscripts(runtime, activeProjectionUrl);
+      setSourcesStatus(importActionStatus("Transcript import", result));
+      await refreshSourcesAfterImportAction();
+    } catch (error) {
+      setSourcesStatus(`Transcript import failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
+  const handleSyncAdapter = async (runtime: string) => {
+    setSourcesBusy(true);
+    setSourcesStatus(`Syncing ${runtime} source data...`);
+    try {
+      const result = await syncAdapter(runtime, activeProjectionUrl);
+      setSourcesStatus(importActionStatus("Sync", result));
+      await refreshSourcesAfterImportAction();
+    } catch (error) {
+      setSourcesStatus(`Sync failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
+  const handleCancelImport = async (importJobId: string) => {
+    setSourcesBusy(true);
+    setSourcesStatus("Cancelling import job...");
+    try {
+      await cancelImport(importJobId, activeProjectionUrl);
+      setSourcesStatus("Import job cancelled.");
+      await refreshSourcesAfterImportAction();
+    } catch (error) {
+      setSourcesStatus(`Import cancel failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
+  const handleRetryImport = async (importJobId: string) => {
+    setSourcesBusy(true);
+    setSourcesStatus("Retrying import job...");
+    try {
+      await retryImport(importJobId, activeProjectionUrl);
+      setSourcesStatus("Import job retry queued.");
+      await refreshSourcesAfterImportAction();
+    } catch (error) {
+      setSourcesStatus(`Import retry failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setSourcesBusy(false);
     }
@@ -771,9 +869,15 @@ export function App() {
           imports={imports}
           busy={sourcesBusy}
           status={sourcesStatus}
-          onRefresh={handleRefreshSources}
-          onImportCodexMetadata={handleImportCodexMetadata}
+          onCancelImport={handleCancelImport}
+          onEnableTranscriptImport={handleEnableTranscriptImport}
           onExcludePath={handleExcludeSourcePath}
+          onImportMetadata={handleImportMetadata}
+          onImportTranscripts={handleImportTranscripts}
+          onPollImports={handlePollActiveImports}
+          onRefresh={handleRefreshSources}
+          onRetryImport={handleRetryImport}
+          onSyncAdapter={handleSyncAdapter}
         />
       )}</SourcesSurface>
     ) : activeSurface === "logbook" ? (

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { AdapterStatus, ImportJob, SourceStatus } from "../app/daemonClient";
 import { AppButton } from "./primitives/AppButton";
 import { PageHeader } from "./primitives/PageHeader";
@@ -12,23 +13,45 @@ type Props = {
   sources: SourceStatus[];
   busy: boolean;
   status?: string;
-  onRefresh: () => void;
-  onImportCodexMetadata: () => void;
+  onCancelImport?: (importJobId: string) => void;
+  onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
+  onImportMetadata?: (runtime: string) => void;
+  onImportTranscripts?: (runtime: string) => void;
+  onPollImports?: () => void;
+  onRefresh: () => void;
+  onRetryImport?: (importJobId: string) => void;
+  onSyncAdapter?: (runtime: string) => void;
 };
 
 export function SourcesPanel({
   adapters,
   busy,
   imports = [],
+  onCancelImport,
+  onEnableTranscriptImport,
   onExcludePath,
-  onImportCodexMetadata,
+  onImportMetadata,
+  onImportTranscripts,
+  onPollImports,
   onRefresh,
+  onRetryImport,
+  onSyncAdapter,
   sources,
   status
 }: Props) {
   const adapterRows = adapters ?? adaptersFromSources(sources);
   const totals = sourceTotals(adapterRows);
+  const activeImportCount = imports.filter((job) => job.status === "queued" || job.status === "running").length;
+  const syncRuntime = adapterRows.find((adapter) => adapter.runtime === "codex")?.runtime ?? adapterRows[0]?.runtime ?? "codex";
+
+  useEffect(() => {
+    if (activeImportCount === 0 || !onPollImports) return undefined;
+    const timer = window.setInterval(() => {
+      onPollImports();
+    }, 1_500);
+    return () => window.clearInterval(timer);
+  }, [activeImportCount, onPollImports]);
 
   return (
     <section id="sources" className="sources-panel sources-management surface-panel" aria-label="Session sources">
@@ -43,7 +66,7 @@ export function SourcesPanel({
           <AppButton type="button" onClick={onRefresh} disabled={busy}>
             Discover sources
           </AppButton>
-          <AppButton type="button" variant="primary" onClick={onImportCodexMetadata} disabled={busy}>
+          <AppButton type="button" variant="primary" onClick={() => onSyncAdapter?.(syncRuntime)} disabled={busy || !onSyncAdapter}>
             Sync all
           </AppButton>
         </div>
@@ -61,8 +84,16 @@ export function SourcesPanel({
         ]}
       />
 
-      <AdapterList adapters={adapterRows} busy={busy} onExcludePath={onExcludePath} onImportCodexMetadata={onImportCodexMetadata} />
-      <ImportJobsTable imports={imports} />
+      <AdapterList
+        adapters={adapterRows}
+        busy={busy}
+        onEnableTranscriptImport={onEnableTranscriptImport}
+        onExcludePath={onExcludePath}
+        onImportMetadata={onImportMetadata}
+        onImportTranscripts={onImportTranscripts}
+        onSyncAdapter={onSyncAdapter}
+      />
+      <ImportJobsTable busy={busy} imports={imports} onCancelImport={onCancelImport} onRetryImport={onRetryImport} />
     </section>
   );
 }

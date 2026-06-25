@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { getImportJob } from "../../db/importJobRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
-import { queueImportJob, type ImportWorkResult } from "../importCoordinator.ts";
+import { queueImportJob, type ImportJobControls, type ImportWorkResult } from "../importCoordinator.ts";
 
 const tempDirs: string[] = [];
 
@@ -18,21 +18,43 @@ describe("import coordinator", () => {
   test("returns a queued job before running the worker", async () => {
     const db = await openTestDatabase();
     seedSource(db);
-    let resolveWorker: (result: ImportWorkResult) => void = () => undefined;
+    let resolveWorker: (value: ImportWorkResult) => void = () => undefined;
     const worker = new Promise<ImportWorkResult>((resolve) => {
       resolveWorker = resolve;
     });
+    let controls: ImportJobControls | undefined;
 
-    const job = queueImportJob(db, { importKind: "metadata", sourceId: "codex-sessions", now: fixedNow }, () => worker);
+    const job = queueImportJob(db, { importKind: "metadata", sourceId: "codex-sessions", now: fixedNow }, (workerControls) => {
+      controls = workerControls;
+      return worker;
+    });
 
     expect(job.status).toBe("queued");
     expect(getImportJob(db, job.importJobId)?.status).toBe("queued");
 
     await Promise.resolve();
     expect(getImportJob(db, job.importJobId)?.status).toBe("running");
+    expect(controls).toBeDefined();
+    controls?.updateProgress({
+      currentPath: "/tmp/.codex/sessions/2026/06/25/import.jsonl",
+      discoveredCount: 4,
+      failureCount: 0,
+      importedCount: 1,
+      processedCount: 1,
+      queuedCount: 0
+    });
+    expect(getImportJob(db, job.importJobId)).toMatchObject({
+      currentPath: "/tmp/.codex/sessions/2026/06/25/import.jsonl",
+      discoveredCount: 4,
+      processedCount: 1,
+      progressCurrent: 1,
+      progressPercent: 25,
+      progressTotal: 4,
+      status: "running"
+    });
 
-    resolveWorker({ discoveredCount: 2, failureCount: 0, importedCount: 2, queuedCount: 0 });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveWorker({ discoveredCount: 2, failureCount: 0, importedCount: 2, processedCount: 2, queuedCount: 0 });
+    await Promise.resolve();
     expect(getImportJob(db, job.importJobId)).toMatchObject({
       discoveredCount: 2,
       importedCount: 2,

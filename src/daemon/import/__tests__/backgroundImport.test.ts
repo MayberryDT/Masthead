@@ -25,7 +25,7 @@ describe("background import jobs", () => {
 
     expect(job.status).toBe("queued");
     await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForMacrotask();
     expect(getImportJob(db, job.importJobId)).toMatchObject({
       failureCount: 1,
       failureMessage: "metadata file disappeared",
@@ -34,6 +34,12 @@ describe("background import jobs", () => {
     db.close();
   });
 });
+
+function waitForMacrotask(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
 
 async function openTestDatabase(): Promise<MastheadDatabase> {
   const tempDir = await mkdtemp(join(tmpdir(), "masthead-background-import-"));
