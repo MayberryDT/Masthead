@@ -7,6 +7,7 @@ import {
   isLiveEventsEnvelope,
   isLiveProjectionEnvelope,
   normalizeLiveBoardProjection,
+  normalizeDaemonBaseUrl,
   projectionRequestUrl,
   retentionRequestUrl
 } from "../liveProjectionClient";
@@ -22,6 +23,16 @@ describe("live projection client helpers", () => {
   test("omits selected session id when the board is intentionally unselected", () => {
     expect(projectionRequestUrl("http://127.0.0.1:17373/projection?source=live&selectedSessionId=old", null)).toBe(
       "http://127.0.0.1:17373/projection?source=live"
+    );
+  });
+
+  test("normalizes projection URL to daemon base URL", () => {
+    expect(normalizeDaemonBaseUrl("http://127.0.0.1:17374/projection?x=1")).toBe("http://127.0.0.1:17374");
+  });
+
+  test("builds projection URL from daemon base URL", () => {
+    expect(projectionRequestUrl("http://127.0.0.1:17374", "s1")).toBe(
+      "http://127.0.0.1:17374/projection?selectedSessionId=s1"
     );
   });
 

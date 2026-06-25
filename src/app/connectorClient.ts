@@ -18,6 +18,7 @@ export type ConnectorStartResult =
       command: string;
       health: MastheadHealthSummary;
       message: string;
+
       projectionUrl: string;
     }
   | {
@@ -78,6 +79,7 @@ function isConnectorStartSuccess(value: unknown): value is Extract<ConnectorStar
     value.health !== null &&
     "message" in value &&
     typeof value.message === "string" &&
+
     "projectionUrl" in value &&
     typeof value.projectionUrl === "string"
   );

@@ -25,7 +25,9 @@ describe("connector client", () => {
     expect(result).toMatchObject({
       ok: true,
       started: true,
-      message: "Started local Masthead collector."
+      message: "Started local Masthead collector.",
+      baseUrl: "http://127.0.0.1:17374",
+      projectionUrl: "http://127.0.0.1:17374/projection"
     });
   });
 
@@ -68,7 +70,9 @@ describe("connector client", () => {
     expect(result).toMatchObject({
       ok: true,
       started: true,
-      message: "Started local Masthead collector."
+      message: "Started local Masthead collector.",
+      baseUrl: "http://127.0.0.1:17374",
+      projectionUrl: "http://127.0.0.1:17374/projection"
     });
   });
 });

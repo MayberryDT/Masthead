@@ -29,6 +29,14 @@ type EnvWithProjectionUrl = ImportMeta & {
 export function defaultLiveProjectionUrl(meta: ImportMeta = import.meta): string {
   return importMetaEnv(meta).VITE_MASTHEAD_PROJECTION_URL ?? "http://127.0.0.1:17373/projection";
 }
+export function normalizeDaemonBaseUrl(inputUrl: string): string {
+  const url = new URL(inputUrl);
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 
 export function defaultFixtureMode(meta: ImportMeta = import.meta, search = locationSearch()): boolean {
   const envMode = importMetaEnv(meta).VITE_MASTHEAD_MODE?.toLowerCase();
@@ -40,6 +48,7 @@ export function defaultFixtureMode(meta: ImportMeta = import.meta, search = loca
 
 export function projectionRequestUrl(baseUrl: string, selectedSessionId?: string | null): string {
   const url = new URL(baseUrl);
+  url.pathname = "/projection";
   url.searchParams.delete("expandedSessionId");
   if (selectedSessionId) {
     url.searchParams.set("selectedSessionId", selectedSessionId);

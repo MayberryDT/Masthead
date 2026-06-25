@@ -45,12 +45,16 @@ function mastheadConnectorManager(): Plugin {
 }
 
 async function startCollectorFromDevServer(projectRoot: string) {
-  if (await collectorHealthy()) {
+  const baseUrl = connectorBaseUrl();
+  const projectionUrl = `${baseUrl}/projection`;
+  if (await collectorHealthy(baseUrl)) {
     return {
       ok: true,
       started: false,
       command: connectorCommand,
-      message: "Local Masthead collector is already running."
+      message: "Local Masthead collector is already running.",
+      baseUrl,
+      projectionUrl
     };
   }
 
@@ -59,7 +63,9 @@ async function startCollectorFromDevServer(projectRoot: string) {
       ok: true,
       started: false,
       command: connectorCommand,
-      message: "Local Masthead collector is already starting."
+      message: "Local Masthead collector is already starting.",
+      baseUrl,
+      projectionUrl
     };
   }
 
@@ -76,33 +82,39 @@ async function startCollectorFromDevServer(projectRoot: string) {
   });
   collectorProcess.unref();
 
-  await waitForCollector();
+  await waitForCollector(baseUrl);
   return {
     ok: true,
     started: true,
     command: connectorCommand,
-    message: "Started local Masthead collector."
+    message: "Started local Masthead collector.",
+    baseUrl,
+    projectionUrl
   };
 }
 
-async function waitForCollector(): Promise<void> {
+async function waitForCollector(baseUrl: string): Promise<void> {
   const deadline = Date.now() + 3_000;
   while (Date.now() < deadline) {
-    if (await collectorHealthy()) return;
+    if (await collectorHealthy(baseUrl)) return;
     await new Promise((resolve) => setTimeout(resolve, 120));
   }
   throw new Error("Started collector process, but /health did not respond.");
 }
 
-async function collectorHealthy(): Promise<boolean> {
+async function collectorHealthy(baseUrl = connectorBaseUrl()): Promise<boolean> {
   try {
-    const response = await fetch("http://127.0.0.1:17373/health", {
+    const response = await fetch(`${baseUrl}/health`, {
       signal: AbortSignal.timeout(400)
     });
     return response.ok;
   } catch {
     return false;
   }
+}
+
+function connectorBaseUrl(): string {
+  return `http://127.0.0.1:${process.env.MASTHEAD_PORT ?? "17373"}`;
 }
 
 function sendJson(response: { statusCode: number; setHeader(name: string, value: string): void; end(body: string): void }, status: number, body: unknown) {

@@ -12,6 +12,8 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
+const DEFAULT_CONNECTOR_PORT: u16 = 17373;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartLiveConnectorResult {
@@ -33,6 +35,21 @@ pub struct MastheadHealthSummary {
     database_path: Option<String>,
     mode: Option<String>,
 }
+fn connector_port_from_env() -> u16 {
+    std::env::var("MASTHEAD_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(DEFAULT_CONNECTOR_PORT)
+}
+
+fn connector_base_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
+fn connector_projection_url(port: u16) -> String {
+    format!("{}/projection", connector_base_url(port))
+}
+
 
 #[tauri::command]
 pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnectorResult, String> {
@@ -88,6 +105,7 @@ pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnector
         command: command_label,
         health,
         message: "Started local Masthead collector.".to_string(),
+        base_url: base_url.clone(),
         projection_url: format!("{base_url}/projection"),
     })
 }
@@ -138,6 +156,7 @@ struct DaemonLaunchTarget {
     cwd: PathBuf,
     database_path: PathBuf,
     legacy_store_path: PathBuf,
+    port: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,6 +175,7 @@ struct DaemonLaunchTargetInput {
     daemon_entry: Option<PathBuf>,
     node_path: Option<PathBuf>,
     project_dir: Option<PathBuf>,
+    port: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +199,7 @@ fn daemon_launch_target(app: &AppHandle) -> Result<DaemonLaunchTarget, String> {
         daemon_entry: std::env::var("MASTHEAD_DAEMON_ENTRY").ok().map(PathBuf::from),
         node_path: std::env::var("MASTHEAD_NODE_PATH").ok().map(PathBuf::from),
         project_dir: std::env::var("MASTHEAD_PROJECT_DIR").ok().map(PathBuf::from),
+        port: connector_port_from_env(),
     })
 }
 
@@ -208,6 +229,7 @@ fn daemon_launch_target_from_paths(input: DaemonLaunchTargetInput) -> Result<Dae
             cwd: input.project_dir.unwrap_or(input.current_dir),
             database_path,
             legacy_store_path,
+            port: input.port,
         });
     }
 
@@ -225,6 +247,7 @@ fn daemon_launch_target_from_paths(input: DaemonLaunchTargetInput) -> Result<Dae
         cwd: input.app_data_dir,
         database_path,
         legacy_store_path,
+        port: input.port,
     })
 }
 
@@ -420,6 +443,7 @@ mod tests {
             daemon_entry: Some(PathBuf::from("/tmp/masthead/dist/daemon/src/daemon/main.js")),
             node_path: Some(PathBuf::from("/tmp/node")),
             project_dir: Some(PathBuf::from("/tmp/masthead")),
+            port: 17374,
         })
         .expect("development target");
 
@@ -440,6 +464,7 @@ mod tests {
             daemon_entry: None,
             node_path: None,
             project_dir: None,
+            port: DEFAULT_CONNECTOR_PORT,
         })
         .expect("packaged target");
 

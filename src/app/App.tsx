@@ -38,7 +38,7 @@ import {
   normalizeLiveBoardProjection,
 } from "./liveProjectionClient";
 import { MastheadApiClient } from "./api/MastheadApiClient";
-import { startLiveConnector } from "./connectorClient";
+import { startLiveConnector, type ConnectorStartResult } from "./connectorClient";
 import {
   addSourceExclusion,
   applyDefaultRetention as applyDefaultDataRetention,
@@ -85,9 +85,8 @@ type ConnectorActionState =
 type CardLayoutSnapshot = Map<string, DOMRect>;
 
 const replay = fixture as FixtureReplay;
-const liveProjectionUrl = defaultLiveProjectionUrl();
+const initialLiveProjectionUrl = defaultLiveProjectionUrl();
 const startsInFixtureMode = defaultFixtureMode();
-const mastheadApi = new MastheadApiClient(liveProjectionUrl);
 
 const emptyLiveBoard: LiveBoardProjection = {
   summary: {
@@ -110,6 +109,10 @@ const emptyLiveBoard: LiveBoardProjection = {
   conflicts: []
 };
 
+export function activeProjectionUrlAfterConnectorStart(result: ConnectorStartResult, currentProjectionUrl: string): string {
+  return result.ok ? result.projectionUrl : currentProjectionUrl;
+}
+
 export function App() {
   const [activeSurface, setActiveSurface] = useState<AppSurface>("now");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -128,6 +131,9 @@ export function App() {
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
   const [liveGitSnapshots, setLiveGitSnapshots] = useState<GitSnapshot[]>();
   const [connectorAction, setConnectorAction] = useState<ConnectorActionState>({ state: "idle" });
+  // The top-level App still owns activeProjectionUrl during the transition.
+  // Do not add new direct defaultLiveProjectionUrl() calls.
+  const [activeProjectionUrl, setActiveProjectionUrl] = useState(initialLiveProjectionUrl);
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
   const [sources, setSources] = useState<SourceStatus[]>([]);
@@ -255,7 +261,7 @@ export function App() {
 
     const hydrateLocalData = async () => {
       try {
-        const dispositions = await listReviewDispositions(liveProjectionUrl).catch(() => []);
+        const dispositions = await listReviewDispositions(activeProjectionUrl).catch(() => []);
         if (!cancelled) {
           setReviewDispositions(dispositions);
         }
@@ -273,7 +279,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [activeProjectionUrl]);
 
   const loadLiveProjection = useCallback(async () => {
     const requestId = liveRequestIdRef.current + 1;
@@ -281,6 +287,7 @@ export function App() {
     const selectedLiveSessionId = selectedSessionId ?? undefined;
     const isCurrentRequest = () => liveRequestIdRef.current === requestId;
 
+    const mastheadApi = new MastheadApiClient(activeProjectionUrl);
     try {
       const body = await mastheadApi.getLiveProjection(selectedLiveSessionId);
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
@@ -314,7 +321,7 @@ export function App() {
       });
       return false;
     }
-  }, [selectedSessionId]);
+  }, [activeProjectionUrl, selectedSessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -342,11 +349,19 @@ export function App() {
     setConnectorAction({ state: "starting", message: "Starting local connector..." });
     try {
       const result = await startLiveConnector();
+      if (result.ok) {
+        setActiveProjectionUrl((current) => activeProjectionUrlAfterConnectorStart(result, current));
+        setConnectorAction({
+          state: "started",
+          message: `${result.message} Connected to ${result.baseUrl}.`
+        });
+        return;
+      }
+
       setConnectorAction({
-        state: result.ok ? "started" : "unsupported",
+        state: "unsupported",
         message: result.message
       });
-      await loadLiveProjection();
     } catch (error) {
       setConnectorAction({
         state: "error",
@@ -357,9 +372,9 @@ export function App() {
 
   const loadSourceInventory = useCallback(async (options: { showStatus?: boolean } = {}) => {
     const [adapterResult, sourceResult, importResult] = await Promise.allSettled([
-      listAdapters(liveProjectionUrl),
-      listSources(liveProjectionUrl),
-      listImports(liveProjectionUrl)
+      listAdapters(activeProjectionUrl),
+      listSources(activeProjectionUrl),
+      listImports(activeProjectionUrl)
     ]);
     if (adapterResult.status === "fulfilled") setAdapters(adapterResult.value);
     if (sourceResult.status === "fulfilled") setSources(sourceResult.value);
@@ -370,7 +385,7 @@ export function App() {
     if (options.showStatus && sourceResult.status === "fulfilled") {
       setSourcesStatus(`${sourceResult.value.length} source${sourceResult.value.length === 1 ? "" : "s"} detected.`);
     }
-  }, []);
+  }, [activeProjectionUrl]);
 
   const handleRefreshSources = useCallback(async () => {
     setSourcesBusy(true);
@@ -401,7 +416,7 @@ export function App() {
     const timer = window.setTimeout(() => {
       setLogbookLoading(true);
       setLogbookError(undefined);
-      void searchLogbook({ limit: 50, q: historyQuery, sort: logbookSort }, liveProjectionUrl, { signal: controller.signal })
+      void searchLogbook({ limit: 50, q: historyQuery, sort: logbookSort }, activeProjectionUrl, { signal: controller.signal })
         .then((result) => {
           setLogbookResult(result);
           setLogbookError(undefined);
@@ -421,18 +436,18 @@ export function App() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [activeSurface, historyQuery, logbookRetryKey, logbookSort]);
+  }, [activeProjectionUrl, activeSurface, historyQuery, logbookRetryKey, logbookSort]);
 
   useEffect(() => {
     if (activeSurface !== "logbook") return;
     const controller = new AbortController();
-    void getLogbookSummary(liveProjectionUrl, { signal: controller.signal })
+    void getLogbookSummary(activeProjectionUrl, { signal: controller.signal })
       .then((summary) => setLogbookSummary(summary))
       .catch((error: unknown) => {
         if (!controller.signal.aborted) console.error("[masthead] Logbook summary failed", error);
       });
     return () => controller.abort();
-  }, [activeSurface, logbookRetryKey]);
+  }, [activeProjectionUrl, activeSurface, logbookRetryKey]);
 
   useEffect(() => {
     if (activeSurface !== "logbook" || !selectedLogbookSessionId) {
@@ -443,8 +458,8 @@ export function App() {
     const controller = new AbortController();
     setLogbookDetailLoading(true);
     void Promise.all([
-      getLogbookSession(selectedLogbookSessionId, liveProjectionUrl, { signal: controller.signal }),
-      getLogbookSessionExcerpts(selectedLogbookSessionId, { limit: 8, q: historyQuery }, liveProjectionUrl, { signal: controller.signal })
+      getLogbookSession(selectedLogbookSessionId, activeProjectionUrl, { signal: controller.signal }),
+      getLogbookSessionExcerpts(selectedLogbookSessionId, { limit: 8, q: historyQuery }, activeProjectionUrl, { signal: controller.signal })
     ])
       .then(([session, excerpts]) => {
         setSelectedLogbookSession(session);
@@ -461,13 +476,13 @@ export function App() {
         if (!controller.signal.aborted) setLogbookDetailLoading(false);
       });
     return () => controller.abort();
-  }, [activeSurface, selectedLogbookSessionId, historyQuery]);
+  }, [activeProjectionUrl, activeSurface, selectedLogbookSessionId, historyQuery]);
 
   const handleImportCodexMetadata = async () => {
     setSourcesBusy(true);
     setSourcesStatus("Importing Codex metadata...");
     try {
-      const result = await importCodexMetadata(liveProjectionUrl);
+      const result = await importCodexMetadata(activeProjectionUrl);
       const queued = result.queued ?? result.jobs?.length ?? 0;
       setSourcesStatus(
         queued > 0
@@ -475,9 +490,9 @@ export function App() {
           : `Metadata import ready: ${result.imported} records from ${result.sources} sources.`
       );
       const [nextAdapters, nextSources, nextImports] = await Promise.all([
-        listAdapters(liveProjectionUrl),
-        listSources(liveProjectionUrl),
-        listImports(liveProjectionUrl)
+        listAdapters(activeProjectionUrl),
+        listSources(activeProjectionUrl),
+        listImports(activeProjectionUrl)
       ]);
       setAdapters(nextAdapters);
       setSources(nextSources);
@@ -498,10 +513,10 @@ export function App() {
           pattern: path,
           reason: "Excluded from full transcript ingestion."
         },
-        liveProjectionUrl
+        activeProjectionUrl
       );
       setSourcesStatus("Source exclusion saved.");
-      const [nextAdapters, nextSources] = await Promise.all([listAdapters(liveProjectionUrl), listSources(liveProjectionUrl)]);
+      const [nextAdapters, nextSources] = await Promise.all([listAdapters(activeProjectionUrl), listSources(activeProjectionUrl)]);
       setAdapters(nextAdapters);
       setSources(nextSources);
     } catch (error) {
@@ -514,7 +529,7 @@ export function App() {
   const handleExportLocalData = async () => {
     setLocalDataStatus({ state: "busy", message: "Preparing local export..." });
     try {
-      const canonicalExport = liveConnection.state === "live" ? await exportMastheadData(liveProjectionUrl) : undefined;
+      const canonicalExport = liveConnection.state === "live" ? await exportMastheadData(activeProjectionUrl) : undefined;
       const exported = canonicalExport ? JSON.stringify(canonicalExport, null, 2) : await exportLocalData();
       const count = canonicalExport ? exportedSessionCount(canonicalExport) : exportedRecordCount(exported);
       downloadTextFile(`masthead-export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, exported);
@@ -531,7 +546,7 @@ export function App() {
   };
 
   const loadDataDeletionPreview = async (scope?: DeleteMastheadDataScope): Promise<DataSummary> => {
-    const summary = await getDataSummary(liveProjectionUrl, scope);
+    const summary = await getDataSummary(activeProjectionUrl, scope);
     setDataSummary(summary);
     return summary;
   };
@@ -577,8 +592,8 @@ export function App() {
   const handleConfirmPruneLocalData = async () => {
     setLocalDataStatus({ state: "busy", message: "Deleting raw source copies..." });
     try {
-      const response = await applyDefaultDataRetention(liveProjectionUrl);
-      const dispositions = await listReviewDispositions(liveProjectionUrl);
+      const response = await applyDefaultDataRetention(activeProjectionUrl);
+      const dispositions = await listReviewDispositions(activeProjectionUrl);
       setReviewDispositions(dispositions);
       setDataSummary(response.summary);
       setLocalDataStatus({
@@ -638,7 +653,7 @@ export function App() {
     }
     setLocalDataStatus({ state: "busy", message: `Deleting Masthead records for ${scopeLabel(scope)}...` });
     try {
-      const response = await deleteCanonicalMastheadData(scope, liveProjectionUrl);
+      const response = await deleteCanonicalMastheadData(scope, activeProjectionUrl);
       setDataSummary(response.summary);
       setPendingDeletionScope(undefined);
       setLocalDataStatus({
@@ -658,7 +673,7 @@ export function App() {
   const handleConfirmDeleteLocalData = async () => {
     setLocalDataStatus({ state: "busy", message: "Deleting canonical Masthead data..." });
     try {
-      const response = await deleteCanonicalMastheadData({ kind: "all" }, liveProjectionUrl);
+      const response = await deleteCanonicalMastheadData({ kind: "all" }, activeProjectionUrl);
       setReviewDispositions([]);
       setDataSummary(response.summary);
       setLiveProjection(emptyLiveBoard);
@@ -700,7 +715,7 @@ export function App() {
     });
 
     try {
-      await saveReviewDisposition(disposition, liveProjectionUrl);
+      await saveReviewDisposition(disposition, activeProjectionUrl);
       setReviewDispositions((current) => [...current, disposition]);
       setSessionActionStatus({
         sessionId: session.sessionId,
@@ -724,7 +739,7 @@ export function App() {
     if (!logbookResult?.nextCursor || logbookLoading) return;
     setLogbookLoading(true);
     try {
-      const nextPage = await searchLogbook({ cursor: logbookResult.nextCursor, limit: 50, q: historyQuery, sort: logbookSort }, liveProjectionUrl);
+      const nextPage = await searchLogbook({ cursor: logbookResult.nextCursor, limit: 50, q: historyQuery, sort: logbookSort }, activeProjectionUrl);
       setLogbookResult({
         nextCursor: nextPage.nextCursor,
         sessions: [...logbookResult.sessions, ...nextPage.sessions],
