@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { NormalizedEvent } from "../../core/types.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { createSessionRepository } from "../../daemon/db/sessionRepository.ts";
-import { indexCanonicalSessionSearch, indexSessionSearch } from "../../daemon/db/searchRepository.ts";
+import { indexCanonicalSessionSearch } from "../../daemon/db/searchRepository.ts";
 import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { HISTORICAL_UNTRUSTED_PREFIX } from "../redaction.ts";
 import {
@@ -27,22 +27,16 @@ afterEach(async () => {
 describe("Masthead MCP tools", () => {
   test("searches sessions compactly and logs the read-only query", async () => {
     const db = await openDb();
-    indexSessionSearch(db, {
-      capsule: "Import Codex history into canonical SQLite",
-      commands: "npm test",
-      filePaths: "src/daemon/main.ts",
-      finalResponse: "",
-      firstPrompt: "Turn this into an implementation plan",
-      normalizedText: "daemon logbook mcp",
-      projectAliases: "Masthead",
-      sessionId: "session-1",
-      tags: "codex sqlite",
-      title: "Masthead data layer",
-      toolNames: "exec_command"
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "codex"
     });
+    const sessionId = repository.upsertLiveEvent(liveEvent("canonical", { message: "canonical SQLite", project: "Masthead", title: "Masthead data layer" }));
+    indexCanonicalSessionSearch(db, sessionId!);
 
     expect(searchSessionsTool(db, { limit: 5, query: "canonical" })).toMatchObject({
-      sessions: [expect.objectContaining({ sessionId: "session-1", title: "Masthead data layer" })]
+      sessions: [expect.objectContaining({ sessionId, sourceRefs: [expect.objectContaining({ sourceRuntime: "codex" })], title: "Masthead data layer" })]
     });
     expect(db.prepare("SELECT tool_name, result_count, status FROM mcp_query_log").all()).toEqual([
       { result_count: 1, status: "succeeded", tool_name: "search_sessions" }
@@ -50,15 +44,22 @@ describe("Masthead MCP tools", () => {
     db.close();
   });
 
-  test("returns bounded historical excerpts labeled as untrusted evidence", async () => {
+  test("returns bounded historical excerpts from canonical data only", async () => {
     const db = await openDb();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "codex"
+    });
+    const sessionId = repository.upsertLiveEvent(liveEvent("excerpt", { message: "Real authentication callback evidence", project: "Masthead" }));
     const result = getSessionExcerptTool(db, {
       maxBytes: 12,
-      sessionId: "session-1",
-      text: "This is a long historical response that must be bounded."
+      query: "authentication",
+      sessionId: sessionId!
     });
 
     expect(result.text).toContain(HISTORICAL_UNTRUSTED_PREFIX);
+    expect(result.text).not.toContain("fake historical");
     expect(Buffer.byteLength(result.text.split("\n\n").at(-1) ?? "", "utf8")).toBeLessThanOrEqual(12);
     expect(db.prepare("SELECT tool_name, bounded_bytes, status FROM mcp_query_log").all()).toEqual([
       { bounded_bytes: 12, status: "succeeded", tool_name: "get_session_excerpt" }
@@ -90,7 +91,9 @@ describe("Masthead MCP tools", () => {
     expect(listProjectSessionsTool(db, { project: "Masthead", limit: 5 }).sessions).toEqual([
       expect.objectContaining({ sessionId, title: "MCP canonical session" })
     ]);
-    expect(getProjectHistoryTool(db, { project: "Masthead", limit: 5, maxBytes: 128 })).toMatchObject({
+    expect(getProjectHistoryTool(db, { project: "Masthead", limit: 5 })).toMatchObject({
+      coverage: expect.any(Object),
+      phases: [expect.objectContaining({ sessionIds: [sessionId] })],
       project: "Masthead",
       sessions: [expect.objectContaining({ sessionId })]
     });
