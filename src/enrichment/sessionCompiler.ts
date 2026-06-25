@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import type { EvidenceRef } from "../core/types";
-import type { SessionCapsule } from "./types";
+import type { SessionCapsule, SessionTitleSource } from "./types";
+export type { SessionTitleSource } from "./types";
 
 export type SessionFacts = {
   sessionId: string;
+  sourceSessionId?: string;
   title: string;
   project: string;
   objective?: string;
@@ -25,6 +27,7 @@ export function fingerprintSessionFacts(facts: SessionFacts): string {
         objective: facts.objective,
         project: facts.project,
         sessionId: facts.sessionId,
+        sourceSessionId: facts.sourceSessionId,
         title: facts.title
       })
     )
@@ -32,28 +35,45 @@ export function fingerprintSessionFacts(facts: SessionFacts): string {
 }
 
 export function deterministicCapsuleFromFacts(facts: SessionFacts): SessionCapsule {
-  const title = derivedTitle(facts);
-  return {
+  const titleSelection = selectSessionTitle(facts);
+  const capsule = {
     candidateDecisions: [],
-    liveSummary: `${facts.project}: ${title}`,
+    liveSummary: `${facts.project}: ${titleSelection.title}`,
     objective: facts.objective,
-    searchPhrases: unique([facts.project, title, facts.objective, ...facts.commands, ...facts.files].filter(isString)),
+    searchPhrases: unique([facts.project, titleSelection.title, facts.objective, ...facts.commands, ...facts.files].filter(isString)),
     technologies: unique(facts.files.map(technologyFromPath).filter(isString)),
-    title,
+    title: titleSelection.title,
+    titleSource: titleSelection.source,
     topics: unique([facts.project, ...facts.commands.map(firstWord), ...facts.files.map(topPathSegment)].filter(isString)),
     unresolved: []
-  };
+  } satisfies SessionCapsule;
+  return capsule;
 }
 
-function derivedTitle(facts: SessionFacts): string {
-  if (isMeaningfulTitle(facts.title)) return cleanTitle(facts.title) ?? facts.title;
-  const prompt = facts.messages.map(messageTitleCandidate).find(isString);
-  return prompt ?? cleanTitle(facts.title) ?? `${facts.project} session`;
+export function selectSessionTitle(facts: SessionFacts): { title: string; source: SessionTitleSource } {
+  const sessionTitle = cleanTitle(facts.title);
+  if (isMeaningfulSessionTitle(sessionTitle, facts)) return { title: sessionTitle, source: "session_title" };
+
+  const objective = cleanTitle(facts.objective);
+  if (isMeaningfulSessionTitle(objective, facts)) return { title: objective, source: "objective" };
+
+  const prompt = facts.messages.map((message) => messageTitleCandidate(message, facts)).find(isString);
+  if (prompt) return { title: prompt, source: "message" };
+
+  const project = cleanTitle(facts.project);
+  if (project) return { title: `${project} session`, source: "project" };
+
+  return { title: "Codex session", source: "fallback" };
 }
 
-function messageTitleCandidate(value: string): string | undefined {
-  const cleaned = cleanTitle(value.replace(/^(user|assistant|system|tool):\s*/i, ""));
-  if (!cleaned || !isMeaningfulTitle(cleaned)) return undefined;
+function messageTitleCandidate(value: string, facts: SessionFacts): string | undefined {
+  const firstUsableLine = value
+    .replace(/^(user|assistant|system|tool):\s*/i, "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#+\s*/, "").trim())
+    .find((line) => line.length > 0 && !isPromptScaffoldLine(line));
+  const cleaned = cleanTitle(firstUsableLine);
+  if (!isMeaningfulSessionTitle(cleaned, facts)) return undefined;
   return cleaned;
 }
 
@@ -66,10 +86,50 @@ function cleanTitle(value: string | undefined): string | undefined {
   return cleaned.length > 80 ? `${cleaned.slice(0, 77).trim()}...` : cleaned;
 }
 
-function isMeaningfulTitle(value: string | undefined): value is string {
-  const normalized = value?.trim().toLowerCase();
-  if (!normalized) return false;
-  return normalized !== "codex session" && normalized !== "untitled session" && normalized !== "session";
+export function isMeaningfulSessionTitle(value: string | undefined, facts: Pick<SessionFacts, "project" | "sessionId" | "sourceSessionId">): value is string {
+  const cleaned = cleanTitle(value);
+  const normalized = cleaned?.toLowerCase();
+  if (!cleaned || !normalized) return false;
+  if (normalized === facts.sessionId.toLowerCase() || normalized === facts.sourceSessionId?.toLowerCase()) return false;
+  if (isInstructionWrapper(cleaned)) return false;
+  if (isGenericSessionTitle(cleaned, facts.project)) return false;
+  if (isOpaqueIdentifier(cleaned)) return false;
+  if (looksLikeSerializedPayload(cleaned)) return false;
+  return true;
+}
+
+function isInstructionWrapper(value: string): boolean {
+  return /^(complete|finish|do|handle)\s+(the\s+)?(assignment|task|request)\s+(below|above|only)?(?:,\s*\w+)?[:\s]*$/i.test(value);
+}
+
+function isPromptScaffoldLine(value: string): boolean {
+  if (isInstructionWrapper(value)) return true;
+  return /^(target|change|acceptance|constraints|contract|goal)$/i.test(value.trim());
+}
+
+function isGenericSessionTitle(value: string, project: string | undefined): boolean {
+  const normalized = value.trim().toLowerCase();
+  const projectPrefix = project?.trim().toLowerCase();
+  const genericTitles = new Set(["codex session", "untitled session", "new session", "session", "chat session"]);
+  if (genericTitles.has(normalized)) return true;
+  if (projectPrefix && (normalized === `${projectPrefix} session` || normalized === `${projectPrefix} codex session`)) return true;
+  return /^(codex|claude|cursor|masthead)?\s*(work\s*)?session\s*\d*$/i.test(value);
+}
+
+function isOpaqueIdentifier(value: string): boolean {
+  const normalized = value.trim();
+  if (
+    /^[0-9a-f]{12,}$/i.test(normalized) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)
+  ) {
+    return true;
+  }
+  if (/^session[-_:][a-z0-9][a-z0-9_-]{5,}$/i.test(normalized)) return true;
+  return !/\s/.test(normalized) && /^[a-z0-9_-]{24,}$/i.test(normalized);
+}
+
+function looksLikeSerializedPayload(value: string): boolean {
+  return value.startsWith("{") || value.includes('"event"') || value.includes("\\n") || /^https?:\/\//i.test(value);
 }
 
 function firstWord(value: string): string {

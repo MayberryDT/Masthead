@@ -5,7 +5,13 @@ import {
 } from "../daemon/db/enrichmentRepository.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 import { buildSessionFacts } from "./sessionFacts.ts";
-import { fingerprintSessionFacts, SESSION_CAPSULE_PROMPT_VERSION } from "./sessionCompiler.ts";
+import {
+  fingerprintSessionFacts,
+  isMeaningfulSessionTitle,
+  selectSessionTitle,
+  SESSION_CAPSULE_PROMPT_VERSION,
+  type SessionFacts
+} from "./sessionCompiler.ts";
 import type { SessionEnrichmentProvider } from "./provider.ts";
 import type { SessionCapsule, SessionEnrichmentKind, SessionEnrichmentRecord } from "./types.ts";
 
@@ -19,7 +25,7 @@ export function createEnrichmentCoordinator(db: MastheadDatabase, provider: Sess
     async enrich(sessionId) {
       const facts = buildSessionFacts(db, sessionId);
       const fingerprint = fingerprintSessionFacts(facts);
-      const capsule = await provider.enrich({ facts });
+      const capsule = applyTitleQuality(await provider.enrich({ facts }), facts);
       const generatedAt = new Date().toISOString();
 
       db.exec("BEGIN IMMEDIATE;");
@@ -111,6 +117,24 @@ function writeEnrichment(
     sourceRefs: options.sourceRefs,
     status: "current"
   });
+}
+
+function applyTitleQuality(capsule: SessionCapsule, facts: SessionFacts): SessionCapsule {
+  const title = capsule.title?.trim();
+  if (isMeaningfulSessionTitle(title, facts)) {
+    return {
+      ...capsule,
+      title,
+      titleSource: capsule.titleSource ?? selectSessionTitle(facts).source
+    };
+  }
+
+  const selected = selectSessionTitle(facts);
+  return {
+    ...capsule,
+    title: selected.title,
+    titleSource: selected.source
+  };
 }
 
 function searchProjectionText(capsule: SessionCapsule): string {

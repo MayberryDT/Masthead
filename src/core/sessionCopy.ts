@@ -381,11 +381,11 @@ function isSentenceHeadline(value: string): boolean {
 
 function latestFeedbackHeadline(summary: string | undefined): string | undefined {
   const cleaned = cleanLatestFeedbackHeadline(summary);
-  if (!cleaned || unsafeCopyPattern.test(cleaned)) return undefined;
+  if (!cleaned || unsafeCopyPattern.test(cleaned) || isLowQualitySessionHeadline(cleaned)) return undefined;
   if (isSentenceHeadline(cleaned)) return cleaned;
 
   const sentence = sentenceFromFeedbackFragment(cleaned);
-  if (!sentence || unsafeCopyPattern.test(sentence) || !isSentenceHeadline(sentence)) return undefined;
+  if (!sentence || unsafeCopyPattern.test(sentence) || isLowQualitySessionHeadline(sentence) || !isSentenceHeadline(sentence)) return undefined;
   return sentence;
 }
 
@@ -398,6 +398,15 @@ function cleanLatestFeedbackHeadline(value: string | undefined): string | undefi
   if (/\bis\s*,/i.test(cleaned) || /\bgenerated\s*\./i.test(cleaned)) return undefined;
   if (/\b(now|then|before|after):[.!?]?$/i.test(cleaned)) return undefined;
   return cleaned;
+}
+
+function isLowQualitySessionHeadline(value: string): boolean {
+  const normalized = value.replace(/[.!?]+$/g, "").trim().toLowerCase();
+  if (["codex session", "untitled session", "new session", "session", "chat session"].includes(normalized)) return true;
+  if (/^[\w .-]+\s+codex session$/i.test(normalized)) return true;
+  if (/^updated\s+(codex|untitled|new|chat)?\s*session$/i.test(normalized)) return true;
+  if (/^[0-9a-f]{12,}$/i.test(normalized) || /^session[-_:][a-z0-9][a-z0-9_-]{5,}$/i.test(normalized)) return true;
+  return false;
 }
 
 function sentenceFromFeedbackFragment(value: string): string | undefined {

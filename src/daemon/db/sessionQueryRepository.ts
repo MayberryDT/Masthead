@@ -1,3 +1,4 @@
+import { isMeaningfulSessionTitle } from "../../enrichment/sessionCompiler.ts";
 import { currentSessionEnrichmentViews, type SessionEnrichmentView } from "./enrichmentViewRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
@@ -421,11 +422,31 @@ function rowToListItem(row: SessionRow, snippet?: string, enrichment?: SessionEn
     sourceConfidence: row.sourceConfidence,
     sourceSessionId: row.sourceSessionId,
     startedAt: row.startedAt ?? undefined,
-    title: enrichment?.title ?? row.title ?? row.objective ?? row.project ?? row.sourceSessionId,
+    title: bestSessionTitle(row, enrichment),
     toolCount: row.toolCount,
     topics,
     unresolved: enrichment?.unresolved ?? []
   };
+}
+
+function bestSessionTitle(row: SessionRow, enrichment?: SessionEnrichmentView): string {
+  const titleFacts = {
+    project: row.project ?? "",
+    sessionId: row.sessionId,
+    sourceSessionId: row.sourceSessionId
+  };
+  const candidates = [enrichment?.title, enrichment?.liveSummary, row.title, row.objective];
+  for (const candidate of candidates) {
+    const cleaned = cleanDisplayTitle(candidate);
+    if (isMeaningfulSessionTitle(cleaned, titleFacts)) return cleaned;
+  }
+  return row.project ? `${row.project} session` : row.sourceSessionId;
+}
+
+function cleanDisplayTitle(value: string | null | undefined): string | undefined {
+  const cleaned = value?.replace(/\s+/g, " ").trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > 96 ? `${cleaned.slice(0, 93).trim()}...` : cleaned;
 }
 
 function ftsQuery(query: string): string | undefined {

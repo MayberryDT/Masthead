@@ -6,8 +6,11 @@ export type DerivedClaim = {
   evidence: EvidenceRef[];
 };
 
+export type SessionTitleSource = "session_title" | "objective" | "message" | "project" | "fallback";
+
 export type SessionCapsule = {
   title: string;
+  titleSource?: SessionTitleSource;
   objective?: string;
   liveSummary?: string;
   outcome?: string;

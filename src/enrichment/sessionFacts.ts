@@ -52,7 +52,8 @@ export function buildSessionFacts(db: MastheadDatabase, sessionId: string): Sess
     objective: session.objective ?? undefined,
     project: session.project_label ?? session.source_session_id,
     sessionId,
-    title: session.title ?? session.objective ?? session.project_label ?? session.source_session_id
+    sourceSessionId: session.source_session_id,
+    title: session.title ?? ""
   };
 }
 
