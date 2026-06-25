@@ -63,6 +63,7 @@ const staticReadOnlyBridgePaths = new Set([
   "/imports",
   "/data/summary",
   "/mcp/status",
+  "/mcp/launch-config",
   "/mcp/tools",
   "/mcp/audit",
   "/settings",
@@ -72,6 +73,7 @@ const staticReadOnlyBridgePaths = new Set([
 ]);
 
 export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathname: string): boolean {
+  if (method === "POST" && (pathname === "/mcp/launch-config/validate" || pathname === "/mcp/test-connection")) return true;
   if (method !== "GET") return false;
   if (staticReadOnlyBridgePaths.has(pathname)) return true;
   return /^\/sessions\/[^/]+(?:\/excerpts)?$/.test(pathname) || /^\/imports\/[^/]+$/.test(pathname);
@@ -313,8 +315,14 @@ async function handleBridgeRequest(
 
   try {
     const target = new URL(`${requestUrl.pathname}${requestUrl.search}`, `${options.upstreamBaseUrl}/`);
+    const method = request.method || "GET";
+    const requestBody = method === "GET" || method === "HEAD" ? undefined : await readRequestBody(request);
+    const requestHeaders: Record<string, string> = { accept: request.headers.accept || "application/json" };
+    if (typeof request.headers["content-type"] === "string") requestHeaders["content-type"] = request.headers["content-type"];
     const upstreamResponse = await fetch(target, {
-      headers: { accept: request.headers.accept || "application/json" }
+      body: requestBody,
+      headers: requestHeaders,
+      method
     });
     const body = await upstreamResponse.text();
     const contentType = upstreamResponse.headers.get("content-type") || "application/json";
@@ -379,12 +387,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+async function readRequestBody(request: IncomingMessage): Promise<string> {
+  let body = "";
+  for await (const chunk of request) {
+    body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+  }
+  return body;
+}
+
 function corsHeaders(request: IncomingMessage, allowedOrigins: string[]): Record<string, string> {
   const origin = request.headers.origin;
   const allowedOrigin = typeof origin === "string" && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
   return {
     "access-control-allow-headers": "content-type",
-    "access-control-allow-methods": "GET,OPTIONS",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-origin": allowedOrigin,
     "vary": "origin"
   };

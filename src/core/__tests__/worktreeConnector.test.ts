@@ -141,10 +141,15 @@ describe("Masthead worktree connector planning", () => {
     "/data/summary",
     "/logbook/summary",
     "/mcp/status",
+    "/mcp/launch-config",
     "/mcp/tools",
     "/mcp/audit"
   ])("forwards canonical read endpoint %s", async (pathname) => {
     expect(isAllowedReadOnlyBridgeRequest("GET", pathname)).toBe(true);
+  });
+
+  test.each(["/mcp/launch-config/validate", "/mcp/test-connection"])("forwards MCP launch check endpoint %s", async (pathname) => {
+    expect(isAllowedReadOnlyBridgeRequest("POST", pathname)).toBe(true);
   });
 
   test("still blocks mutations", () => {

@@ -1,4 +1,9 @@
-import { resolve } from "node:path";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { constants } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
+import { access } from "node:fs/promises";
+import { delimiter, isAbsolute, resolve } from "node:path";
 import {
   getMcpQuerySummary,
   globalMcpAccessEnabled,
@@ -15,6 +20,35 @@ export type McpLaunchConfigDto = {
   env: Record<string, string>;
 };
 
+export type McpLaunchValidationDto = {
+  ready: boolean;
+  valid: boolean;
+  commandExists: boolean;
+  entryExists: boolean;
+  databaseMatches: boolean;
+  problems: string[];
+  commandPath: string;
+  entryPath?: string;
+  configuredDatabasePath?: string;
+  expectedDatabasePath: string;
+};
+
+export type McpTestConnectionDto = {
+  ok: boolean;
+  status: "passed" | "failed";
+  attemptedAt: string;
+  testedAt: string;
+  validation: McpLaunchValidationDto;
+  serverInfo?: {
+    name?: string;
+    version?: string;
+  };
+  protocolVersion?: string;
+  message: string;
+  problems?: string[];
+  stderr?: string;
+};
+
 export type McpStatusDto = {
   ready: boolean;
   databasePath: string;
@@ -24,7 +58,6 @@ export type McpStatusDto = {
   queryCount: number;
   lastQueryAt?: string;
   globalAccessEnabled: boolean;
-  launchConfig: McpLaunchConfigDto;
   permissions: McpPermissionsDto;
 };
 
@@ -91,6 +124,7 @@ export const MCP_TOOL_CATALOG: McpToolDto[] = [
 
 const allowedPermissions = ["Search session summaries", "Read bounded historical excerpts", "Read project history"];
 const blockedPermissions = ["Execute shell commands", "Mutate files or Git", "Modify harness sessions"];
+const testConnectionTimeoutMs = 2_500;
 
 export function getMcpStatus(db: MastheadDatabase, databasePath: string, dataDirectory?: string): McpStatusDto {
   const summary = getMcpQuerySummary(db);
@@ -99,7 +133,6 @@ export function getMcpStatus(db: MastheadDatabase, databasePath: string, dataDir
     databasePath,
     globalAccessEnabled: globalAccess,
     lastQueryAt: summary.lastQueryAt,
-    launchConfig: mcpLaunchConfig(databasePath, dataDirectory),
     mode: "stdio",
     permissions: {
       allowed: allowedPermissions,
@@ -119,7 +152,7 @@ export function listMcpTools(): McpToolDto[] {
   return MCP_TOOL_CATALOG;
 }
 
-function mcpLaunchConfig(databasePath: string, dataDirectory?: string): McpLaunchConfigDto {
+export function getMcpLaunchConfig(databasePath: string, dataDirectory?: string): McpLaunchConfigDto {
   const command = process.env.MASTHEAD_MCP_COMMAND || process.env.MASTHEAD_NODE_PATH || process.execPath;
   const entryPath = process.env.MASTHEAD_MCP_ENTRY || resolve(process.cwd(), "dist/daemon/src/mcp/server.js");
   return {
@@ -130,4 +163,182 @@ function mcpLaunchConfig(databasePath: string, dataDirectory?: string): McpLaunc
       MASTHEAD_DB_PATH: databasePath
     }
   };
+}
+
+export function coerceMcpLaunchConfig(value: unknown, fallback: McpLaunchConfigDto): McpLaunchConfigDto {
+  const record = objectRecord(value) ?? {};
+  const candidate = objectRecord(record.launchConfig) ?? record;
+  const command = typeof candidate?.command === "string" && candidate.command.trim() ? candidate.command : fallback.command;
+  const args = Array.isArray(candidate?.args) && candidate.args.every((arg) => typeof arg === "string") ? candidate.args : fallback.args;
+  const env = objectRecord(candidate?.env);
+  return {
+    args,
+    command,
+    env: {
+      ...fallback.env,
+      ...(env ? stringRecord(env) : {})
+    }
+  };
+}
+
+export async function validateMcpLaunchConfig(
+  launchConfig: McpLaunchConfigDto,
+  activeDatabasePath: string
+): Promise<McpLaunchValidationDto> {
+  const problems: string[] = [];
+  const commandExists = await executableExists(launchConfig.command);
+  const entryPath = launchConfig.args[0];
+  const entryExists = typeof entryPath === "string" && entryPath.trim() ? await readableFileExists(entryPath) : false;
+  const configuredDatabasePath = launchConfig.env.MASTHEAD_DB_PATH;
+  const databaseMatches = typeof configuredDatabasePath === "string" && resolve(configuredDatabasePath) === resolve(activeDatabasePath);
+
+  if (!commandExists) problems.push(`Command not found: ${launchConfig.command}`);
+  if (!entryExists) problems.push(entryPath ? `MCP entry not found: ${entryPath}` : "MCP entry argument is missing.");
+  if (!configuredDatabasePath) problems.push("MASTHEAD_DB_PATH is required in the MCP environment.");
+  else if (!databaseMatches) problems.push(`MASTHEAD_DB_PATH does not match active database: ${activeDatabasePath}`);
+
+  const ready = problems.length === 0;
+  return {
+    commandExists,
+    commandPath: launchConfig.command,
+    configuredDatabasePath,
+    databaseMatches,
+    entryExists,
+    entryPath,
+    expectedDatabasePath: activeDatabasePath,
+    problems,
+    ready,
+    valid: ready
+  };
+}
+
+export async function testMcpConnection(
+  launchConfig: McpLaunchConfigDto,
+  activeDatabasePath: string,
+  timeoutMs = testConnectionTimeoutMs
+): Promise<McpTestConnectionDto> {
+  const attemptedAt = new Date().toISOString();
+  const validation = await validateMcpLaunchConfig(launchConfig, activeDatabasePath);
+  if (!validation.ready) {
+    return {
+      attemptedAt,
+      testedAt: attemptedAt,
+      ok: false,
+      status: "failed",
+      validation,
+      message: validation.problems.join(" ") || "MCP launch config is invalid.",
+      problems: validation.problems
+    };
+  }
+
+  const child = spawn(launchConfig.command, launchConfig.args, {
+    env: { ...process.env, ...launchConfig.env },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  let stdoutBuffer = "";
+  let stderr = "";
+  const onStderr = (chunk: Buffer) => {
+    stderr += chunk.toString("utf8");
+  };
+  child.stderr.on("data", onStderr);
+  child.stdin.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
+
+  type ProbeResult = Omit<McpTestConnectionDto, "attemptedAt" | "testedAt" | "validation" | "status">;
+  const readResponse = async (): Promise<ProbeResult> => {
+    for await (const chunk of child.stdout) {
+      stdoutBuffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+      const newlineIndex = stdoutBuffer.indexOf("\n");
+      if (newlineIndex === -1) continue;
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      if (!line) continue;
+      try {
+        const response = JSON.parse(line) as {
+          result?: { protocolVersion?: string; serverInfo?: { name?: string; version?: string } };
+          error?: { message?: string };
+        };
+        if (response.result?.serverInfo?.name === "masthead") {
+          return {
+            ok: true,
+            message: "MCP server initialized successfully.",
+            protocolVersion: response.result.protocolVersion,
+            serverInfo: response.result.serverInfo,
+            stderr: stderr.trim() || undefined
+          };
+        }
+        return {
+          ok: false,
+          message: response.error?.message || "MCP server returned an unexpected initialize response.",
+          stderr: stderr.trim() || undefined
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          message: `MCP server returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+          stderr: stderr.trim() || undefined
+        };
+      }
+    }
+    return { ok: false, message: "MCP server stdout closed before initialize response.", stderr: stderr.trim() || undefined };
+  };
+
+  const exitResult = once(child, "exit").then(([code, signal]) => ({
+    ok: false,
+    message: `MCP server exited before initialize response (${code ?? signal ?? "unknown"}).`,
+    stderr: stderr.trim() || undefined
+  }));
+  const errorResult = once(child, "error").then(([error]) => ({
+    ok: false,
+    message: `MCP server failed to start: ${error instanceof Error ? error.message : String(error)}`,
+    stderr: stderr.trim() || undefined
+  }));
+  const timeoutResult = delay(timeoutMs).then(() => ({
+    ok: false,
+    message: `MCP server did not respond within ${timeoutMs}ms.`,
+    stderr: stderr.trim() || undefined
+  }));
+
+  const result = await Promise.race([readResponse(), exitResult, errorResult, timeoutResult]);
+  child.stderr.off("data", onStderr);
+  if (!child.killed) child.kill();
+  return { attemptedAt, testedAt: attemptedAt, validation, status: result.ok ? "passed" : "failed", ...result };
+}
+
+async function executableExists(command: string): Promise<boolean> {
+  if (!command.trim()) return false;
+  if (looksLikePath(command)) return fileExists(command, constants.X_OK);
+
+  const pathDirs = (process.env.PATH || "").split(delimiter).filter(Boolean);
+  const extensions = process.platform === "win32" ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";") : [""];
+  for (const directory of pathDirs) {
+    for (const extension of extensions) {
+      const candidate = resolve(directory, command.endsWith(extension) ? command : `${command}${extension}`);
+      if (await fileExists(candidate, constants.X_OK)) return true;
+    }
+  }
+  return false;
+}
+
+async function readableFileExists(path: string): Promise<boolean> {
+  return fileExists(path, constants.R_OK);
+}
+
+async function fileExists(path: string, mode: number): Promise<boolean> {
+  try {
+    await access(path, mode);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function looksLikePath(command: string): boolean {
+  return isAbsolute(command) || command.startsWith(".") || command.includes("/") || command.includes("\\");
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
+}
+
+function stringRecord(value: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }

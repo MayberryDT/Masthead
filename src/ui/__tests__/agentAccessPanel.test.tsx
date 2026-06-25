@@ -2,12 +2,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { AgentAccessPanel } from "../AgentAccessPanel";
 import type { McpAuditRowDto, McpStatusDto, McpToolDto } from "../../app/daemonClient";
+import type { McpLaunchConfigDto, McpLaunchValidationDto } from "../../app/mcpLaunchClient";
 
 describe("AgentAccessPanel", () => {
   test("shows setup, permissions, tools, exclusions, and audit without fixed cards", () => {
     const html = renderToStaticMarkup(
       <AgentAccessPanel
         audit={audit}
+        launchConfig={launchConfig}
+        launchValidation={validLaunchConfig}
         status={status}
         tools={tools}
       />
@@ -32,18 +35,27 @@ describe("AgentAccessPanel", () => {
 const status: McpStatusDto = {
   databasePath: "/home/tyler/.local/share/masthead/masthead.sqlite",
   globalAccessEnabled: true,
-  launchConfig: {
-    args: ["/opt/Masthead/resources/daemon/dist/src/mcp/server.js"],
-    command: "/opt/Masthead/resources/daemon/node",
-    env: {
-      MASTHEAD_DB_PATH: "/home/tyler/.local/share/masthead/masthead.sqlite"
-    }
-  },
   mode: "stdio",
   queryCount: 1,
   readOnly: true,
   ready: true,
   toolCount: 2
+};
+
+const launchConfig: McpLaunchConfigDto = {
+  args: ["/opt/Masthead/resources/daemon/dist/src/mcp/server.js"],
+  command: "/opt/Masthead/resources/daemon/node",
+  env: {
+    MASTHEAD_DB_PATH: "/home/tyler/.local/share/masthead/masthead.sqlite"
+  }
+};
+
+const validLaunchConfig: McpLaunchValidationDto = {
+  commandExists: true,
+  databaseMatches: true,
+  entryExists: true,
+  problems: [],
+  valid: true
 };
 
 const tools: McpToolDto[] = [

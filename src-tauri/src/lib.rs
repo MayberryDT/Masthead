@@ -34,6 +34,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             connector::mcp_launch_config_command,
+            connector::mcp_validate_launch_config_command,
             connector::start_live_connector_command,
             native_store::append_store_records_command,
             native_store::read_store_records_command,

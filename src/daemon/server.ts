@@ -53,7 +53,7 @@ import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusServ
 import { discoverSourceSnapshot, type SourceDiscoverySnapshot } from "./sources/sourceDiscoveryService.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { buildMastheadHealth } from "./healthService.ts";
-import { getMcpStatus, listMcpTools } from "./mcpStatusService.ts";
+import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
 import {
   getCodexHookSettings,
   getSettingsState,
@@ -701,6 +701,51 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/mcp/launch-config") {
+      const launchConfig = getMcpLaunchConfig(config.databasePath, config.dataDirectory);
+      sendJson(request, response, config.allowedOrigins, 200, {
+        launchConfig,
+        ok: true,
+        validation: await validateMcpLaunchConfig(launchConfig, config.databasePath)
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/mcp/launch-config/validate") {
+      try {
+        const fallback = getMcpLaunchConfig(config.databasePath, config.dataDirectory);
+        const launchConfig = coerceMcpLaunchConfig(await optionalJsonBody(request), fallback);
+        sendJson(request, response, config.allowedOrigins, 200, {
+          launchConfig,
+          ok: true,
+          validation: await validateMcpLaunchConfig(launchConfig, config.databasePath)
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          error: error instanceof Error ? error.message : String(error),
+          ok: false
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/mcp/test-connection") {
+      try {
+        const fallback = getMcpLaunchConfig(config.databasePath, config.dataDirectory);
+        const launchConfig = coerceMcpLaunchConfig(await optionalJsonBody(request), fallback);
+        sendJson(request, response, config.allowedOrigins, 200, {
+          ok: true,
+          result: await testMcpConnection(launchConfig, config.databasePath)
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          error: error instanceof Error ? error.message : String(error),
+          ok: false
+        });
+      }
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/mcp/tools") {
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
@@ -1345,6 +1390,11 @@ function readBody(request: IncomingMessage): Promise<string> {
     });
     request.on("end", () => resolve(body));
   });
+}
+
+async function optionalJsonBody(request: IncomingMessage): Promise<unknown> {
+  const body = (await readBody(request)).trim();
+  return body ? JSON.parse(body) : undefined;
 }
 
 const rawSourceRetentionPolicy = {

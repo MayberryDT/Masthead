@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -20,8 +20,8 @@ afterEach(async () => {
 });
 
 describe("MCP status API", () => {
-  test("returns real launch config, tool metadata, and recent query audit rows", async () => {
-    const { daemon, databasePath } = await createTestHarness();
+  test("keeps status separate from launch config, validation, tool metadata, and recent query audit rows", async () => {
+    const { daemon, databasePath, tempDir } = await createTestHarness();
     seedMcpAuditRow(daemon.database);
     const baseUrl = await listen(daemon);
 
@@ -38,9 +38,64 @@ describe("MCP status API", () => {
         toolCount: 6
       }
     });
-    expect(status.status.launchConfig.env.MASTHEAD_DB_PATH).toBe(databasePath);
-    expect(status.status.launchConfig.command).not.toBe("npm");
+    expect(status.status.launchConfig).toBeUndefined();
 
+    const launch = await getJson(baseUrl, "/mcp/launch-config");
+    expect(launch.launchConfig.env.MASTHEAD_DB_PATH).toBe(databasePath);
+    expect(launch.launchConfig.command).not.toBe("npm");
+    expect(launch.validation).toMatchObject({
+      commandExists: true,
+      databaseMatches: true
+    });
+
+    const validation = await postJson(baseUrl, "/mcp/launch-config/validate", {
+      launchConfig: { ...launch.launchConfig, args: [databasePath] }
+    });
+    expect(validation.validation).toMatchObject({
+      commandExists: true,
+      databaseMatches: true,
+      entryExists: true,
+      problems: [],
+      ready: true,
+      valid: true
+    });
+
+    const mismatch = await postJson(baseUrl, "/mcp/launch-config/validate", {
+      launchConfig: { ...launch.launchConfig, args: [databasePath], env: { MASTHEAD_DB_PATH: `${databasePath}.other` } }
+    });
+    expect(mismatch.validation).toMatchObject({
+      commandExists: true,
+      databaseMatches: false,
+      entryExists: true,
+      ready: false
+    });
+    expect(mismatch.validation.problems.join(" ")).toContain("does not match active database");
+
+    const testEntry = join(tempDir, "mcp-test-server.js");
+    await writeFile(
+      testEntry,
+      [
+        "process.stdin.setEncoding('utf8');",
+        "process.stdin.on('data', (chunk) => {",
+        "  const request = JSON.parse(String(chunk).trim());",
+        "  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', serverInfo: { name: 'masthead', version: 'api-test' } } }) + '\\n');",
+        "});"
+      ].join("\n")
+    );
+    const connection = await postJson(baseUrl, "/mcp/test-connection", {
+      launchConfig: { ...launch.launchConfig, args: [testEntry] }
+    });
+    expect(connection.result).toMatchObject({
+      ok: true,
+      status: "passed",
+      serverInfo: { name: "masthead", version: "api-test" },
+      validation: {
+        commandExists: true,
+        databaseMatches: true,
+        entryExists: true,
+        ready: true
+      }
+    });
     const tools = await getJson(baseUrl, "/mcp/tools");
     expect(tools.tools).toEqual(
       expect.arrayContaining([
@@ -112,6 +167,16 @@ function listen(daemon: MastheadDaemon): Promise<string> {
 
 async function getJson(baseUrl: string, path: string): Promise<Record<string, any>> {
   const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" } });
+  expect(response.status).toBe(200);
+  return response.json() as Promise<Record<string, any>>;
+}
+
+async function postJson(baseUrl: string, path: string, body: unknown): Promise<Record<string, any>> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    body: JSON.stringify(body),
+    headers: { accept: "application/json", "content-type": "application/json" },
+    method: "POST"
+  });
   expect(response.status).toBe(200);
   return response.json() as Promise<Record<string, any>>;
 }

@@ -207,11 +207,6 @@ export type DataSummary = {
   storageClasses: Record<RetentionClass, RetentionClassSummary>;
 };
 
-export type McpLaunchConfigDto = {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-};
 
 export type McpExclusionDto = {
   exclusionKind: "source" | "project" | "path";
@@ -245,7 +240,6 @@ export type McpStatusDto = {
   queryCount: number;
   lastQueryAt?: string;
   globalAccessEnabled: boolean;
-  launchConfig: McpLaunchConfigDto;
   permissions?: McpPermissionsDto;
 };
 

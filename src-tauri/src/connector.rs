@@ -2,10 +2,10 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
+    env,
     fs,
-    io::{Read, Write},
-    net::{SocketAddr, TcpListener, TcpStream},
-    path::PathBuf,
+    net::TcpListener,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     thread::sleep,
     time::Duration,
@@ -26,13 +26,14 @@ pub struct StartLiveConnectorResult {
     projection_url: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MastheadHealthSummary {
     api_version: Option<i64>,
     build_sha: Option<String>,
     database_id: Option<String>,
     database_path: Option<String>,
+    data_directory: Option<String>,
     mode: Option<String>,
 }
 fn connector_port_from_env() -> u16 {
@@ -54,9 +55,11 @@ fn connector_projection_url(port: u16) -> String {
 #[tauri::command]
 pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnectorResult, String> {
     let command_label = "masthead daemon".to_string();
-    let default_probe = probe_collector_at(17373);
+    let launch = daemon_launch_target(&app)?;
+    let connector_port = launch.port;
+    let default_probe = probe_collector_at(connector_port);
     if let CollectorProbe::Compatible(health) = default_probe {
-        let base_url = connector_base_url(17373);
+        let base_url = connector_base_url(connector_port);
         return Ok(StartLiveConnectorResult {
             ok: true,
             started: false,
@@ -73,9 +76,9 @@ pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnector
     }
 
     let port = match default_probe {
-        CollectorProbe::Offline => 17373,
-        CollectorProbe::Compatible(_) => 17373,
-        CollectorProbe::Incompatible => find_available_port(17374)
+        CollectorProbe::Offline => connector_port,
+        CollectorProbe::Compatible(_) => connector_port,
+        CollectorProbe::Incompatible => find_available_port(connector_port + 1)
             .ok_or_else(|| "no available Masthead connector port found".to_string())?,
     };
     let base_url = connector_base_url(port);
@@ -104,9 +107,23 @@ pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnector
         command: command_label,
         health,
         message: "Started local Masthead collector.".to_string(),
-        base_url: base_url.clone(),
         projection_url: format!("{base_url}/projection"),
     })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpLaunchValidationResult {
+    ready: bool,
+    valid: bool,
+    command_exists: bool,
+    entry_exists: bool,
+    database_matches: bool,
+    problems: Vec<String>,
+    command_path: String,
+    entry_path: String,
+    configured_database_path: String,
+    expected_database_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -116,37 +133,21 @@ pub struct McpLaunchConfigResult {
     args: Vec<String>,
     env: BTreeMap<String, String>,
     database_path: String,
+    validation: McpLaunchValidationResult,
 }
 
 #[tauri::command]
 pub fn mcp_launch_config_command(app: AppHandle) -> Result<McpLaunchConfigResult, String> {
     let launch = mcp_launch_target(&app)?;
-    let mut env = BTreeMap::new();
-    env.insert(
-        "MASTHEAD_DATA_DIR".to_string(),
-        launch.data_directory.to_string_lossy().to_string(),
-    );
-    env.insert(
-        "MASTHEAD_DB_PATH".to_string(),
-        launch.database_path.to_string_lossy().to_string(),
-    );
-    Ok(McpLaunchConfigResult {
-        args: vec![launch.entry_path.to_string_lossy().to_string()],
-        command: launch.node_path.to_string_lossy().to_string(),
-        database_path: launch.database_path.to_string_lossy().to_string(),
-        env,
-    })
+    Ok(mcp_launch_config_result(launch))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct MastheadHealthSummary {
-    api_version: Option<i64>,
-    build_sha: Option<String>,
-    database_id: Option<String>,
-    database_path: Option<String>,
-    data_directory: Option<String>,
-    mode: Option<String>,
+#[tauri::command]
+pub fn mcp_validate_launch_config_command(app: AppHandle) -> Result<McpLaunchValidationResult, String> {
+    let launch = mcp_launch_target(&app)?;
+    Ok(validate_mcp_launch_target(&launch))
 }
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DaemonLaunchTarget {
@@ -157,7 +158,6 @@ struct DaemonLaunchTarget {
     database_path: PathBuf,
     legacy_store_path: PathBuf,
     port: u16,
-    data_directory: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,7 +231,6 @@ fn daemon_launch_target_from_paths(input: DaemonLaunchTargetInput) -> Result<Dae
             database_path,
             legacy_store_path,
             port: input.port,
-            data_directory: input.app_data_dir,
         });
     }
 
@@ -250,7 +249,6 @@ fn daemon_launch_target_from_paths(input: DaemonLaunchTargetInput) -> Result<Dae
         database_path,
         legacy_store_path,
         port: input.port,
-        data_directory: input.app_data_dir,
     })
 }
 
@@ -274,6 +272,82 @@ fn mcp_launch_target_from_paths(input: McpLaunchTargetInput) -> Result<McpLaunch
     })
 }
 
+fn mcp_launch_config_result(launch: McpLaunchTarget) -> McpLaunchConfigResult {
+    let mut launch_env = BTreeMap::new();
+    launch_env.insert(
+        "MASTHEAD_DATA_DIR".to_string(),
+        launch.data_directory.to_string_lossy().to_string(),
+    );
+    launch_env.insert(
+        "MASTHEAD_DB_PATH".to_string(),
+        launch.database_path.to_string_lossy().to_string(),
+    );
+    let validation = validate_mcp_launch_target(&launch);
+    McpLaunchConfigResult {
+        args: vec![launch.entry_path.to_string_lossy().to_string()],
+        command: launch.node_path.to_string_lossy().to_string(),
+        database_path: launch.database_path.to_string_lossy().to_string(),
+        env: launch_env,
+        validation,
+    }
+}
+
+fn validate_mcp_launch_target(launch: &McpLaunchTarget) -> McpLaunchValidationResult {
+    let command_exists = command_exists(&launch.node_path);
+    let entry_exists = launch.entry_path.is_file();
+    let database_matches = launch.database_path == active_mcp_database_path(launch);
+    let mut problems = Vec::new();
+    if !command_exists {
+        problems.push(format!("Command not found: {}", launch.node_path.display()));
+    }
+    if !entry_exists {
+        problems.push(format!("MCP entry not found: {}", launch.entry_path.display()));
+    }
+    if !database_matches {
+        problems.push(format!(
+            "MASTHEAD_DB_PATH does not match active database: {}",
+            active_mcp_database_path(launch).display()
+        ));
+    }
+    let ready = problems.is_empty();
+    let database_path = launch.database_path.to_string_lossy().to_string();
+    McpLaunchValidationResult {
+        ready,
+        valid: ready,
+        command_exists,
+        entry_exists,
+        database_matches,
+        problems,
+        command_path: launch.node_path.to_string_lossy().to_string(),
+        entry_path: launch.entry_path.to_string_lossy().to_string(),
+        configured_database_path: database_path.clone(),
+        expected_database_path: database_path,
+    }
+}
+
+fn active_mcp_database_path(launch: &McpLaunchTarget) -> PathBuf {
+    launch.database_path.clone()
+}
+
+fn command_exists(command: &Path) -> bool {
+    if command.is_absolute() || command.components().count() > 1 {
+        return command.is_file();
+    }
+    let Some(paths) = env::var_os("PATH") else {
+        return false;
+    };
+    env::split_paths(&paths).any(|directory| {
+        let candidate = directory.join(command);
+        if candidate.is_file() {
+            return true;
+        }
+        if cfg!(windows) {
+            return ["exe", "cmd", "bat"].iter().any(|extension| candidate.with_extension(extension).is_file());
+        }
+        false
+    })
+}
+
 #[derive(Debug, Clone)]
 enum CollectorProbe {
     Compatible(MastheadHealthSummary),
@@ -282,34 +356,38 @@ enum CollectorProbe {
 }
 
 fn probe_collector_at(port: u16) -> CollectorProbe {
-    let address: SocketAddr = match format!("127.0.0.1:{port}").parse() {
-        Ok(address) => address,
-        Err(_) => return CollectorProbe::Offline,
-    };
-    let mut stream = match TcpStream::connect_timeout(&address, Duration::from_millis(180)) {
-        Ok(stream) => stream,
-        Err(_) => return CollectorProbe::Offline,
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(300)));
-    let request = format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-    if stream.write_all(request.as_bytes()).is_err() {
-        return CollectorProbe::Offline;
-    };
-
-    let mut response = String::new();
-    if stream.read_to_string(&mut response).is_err() || !response.starts_with("HTTP/1.1 200") {
-        return CollectorProbe::Incompatible;
+    match crate::http_probe::get_json_http_11("127.0.0.1", port, "/health", Duration::from_millis(500)) {
+        Ok(value) => match parse_compatible_health_value(&value) {
+            Some(health) => CollectorProbe::Compatible(health),
+            None => CollectorProbe::Incompatible,
+        },
+        Err(crate::http_probe::HttpProbeError::Connect) => CollectorProbe::Offline,
+        Err(_) => CollectorProbe::Incompatible,
     }
+}
 
-    let body = response.split("\r\n\r\n").nth(1).unwrap_or_default();
-    match parse_compatible_health(body) {
-        Some(health) => CollectorProbe::Compatible(health),
-        None => CollectorProbe::Incompatible,
+fn collector_responds(port: u16, expected_data_directory: &PathBuf) -> bool {
+    match crate::http_probe::get_json_http_11("127.0.0.1", port, "/health", Duration::from_millis(500)) {
+        Ok(value) => parse_compatible_health_value_for_data_directory(&value, expected_data_directory).is_some(),
+        Err(_) => false,
     }
+}
+
+fn parse_compatible_health_value_for_data_directory(value: &Value, expected_data_directory: &PathBuf) -> Option<MastheadHealthSummary> {
+    let health = parse_compatible_health_value(value)?;
+    let actual = health.data_directory.as_ref()?;
+    if PathBuf::from(actual) != expected_data_directory.as_path() {
+        return None;
+    }
+    Some(health)
 }
 
 fn parse_compatible_health(body: &str) -> Option<MastheadHealthSummary> {
     let value: Value = serde_json::from_str(body).ok()?;
+    parse_compatible_health_value(&value)
+}
+
+fn parse_compatible_health_value(value: &Value) -> Option<MastheadHealthSummary> {
     if value.get("ok")?.as_bool()? != true {
         return None;
     }
@@ -347,6 +425,7 @@ fn parse_compatible_health(body: &str) -> Option<MastheadHealthSummary> {
         build_sha: value.get("buildSha").and_then(Value::as_str).map(ToString::to_string),
         database_id: value.pointer("/data/databaseId").and_then(Value::as_str).map(ToString::to_string),
         database_path: value.pointer("/data/databasePath").and_then(Value::as_str).map(ToString::to_string),
+        data_directory: value.pointer("/data/dataDirectory").and_then(Value::as_str).map(ToString::to_string),
         mode: value.pointer("/runtime/mode").and_then(Value::as_str).map(ToString::to_string),
     })
 }
@@ -370,18 +449,17 @@ fn find_available_port(start_port: u16) -> Option<u16> {
     None
 }
 
-fn connector_base_url(port: u16) -> String {
-    format!("http://127.0.0.1:{port}")
-}
 
 #[cfg(test)]
 mod tests {
     use super::{
-        daemon_launch_target_from_paths, mcp_launch_target_from_paths, parse_compatible_health, DaemonLaunchTargetInput,
-        McpLaunchTargetInput,
+        daemon_launch_target_from_paths, mcp_launch_config_result, mcp_launch_target_from_paths, parse_compatible_health,
+        parse_compatible_health_value, validate_mcp_launch_target, DaemonLaunchTargetInput, McpLaunchTarget,
+        McpLaunchTargetInput, DEFAULT_CONNECTOR_PORT,
     };
     use serde_json::json;
-    use std::path::PathBuf;
+    use std::{fs, path::PathBuf};
+    use tempfile::tempdir;
 
     #[test]
     fn compatible_health_parser_accepts_current_contract_and_rejects_legacy() {
@@ -576,12 +654,65 @@ mod tests {
             "data": {
                 "databaseId": "db",
                 "databasePath": "/tmp/masthead.sqlite",
+                "dataDirectory": "/tmp/masthead-data",
                 "migrationState": "ready"
             }
         });
         let parsed = parse_compatible_health(&current.to_string()).expect("compatible health");
         assert_eq!(parsed.api_version, Some(1));
         assert_eq!(parsed.database_id, Some("db".to_string()));
+        assert_eq!(parsed.data_directory, Some("/tmp/masthead-data".to_string()));
         assert_eq!(parsed.mode, Some("primary".to_string()));
+    }
+
+    #[test]
+    fn mcp_launch_config_exports_database_env_and_validation() {
+        let temp = tempdir().expect("tempdir");
+        let app_data = temp.path().join("data");
+        let entry = temp.path().join("server.js");
+        fs::create_dir_all(&app_data).expect("app data");
+        fs::write(&entry, "console.log('mcp');").expect("entry");
+
+        let target = McpLaunchTarget {
+            data_directory: app_data.clone(),
+            node_path: std::env::current_exe().expect("current exe"),
+            entry_path: entry.clone(),
+            database_path: app_data.join("masthead.sqlite"),
+        };
+        let result = mcp_launch_config_result(target);
+
+        assert_eq!(result.args, vec![entry.to_string_lossy().to_string()]);
+        assert_eq!(
+            result.env.get("MASTHEAD_DATA_DIR"),
+            Some(&app_data.to_string_lossy().to_string())
+        );
+        assert_eq!(
+            result.env.get("MASTHEAD_DB_PATH"),
+            Some(&app_data.join("masthead.sqlite").to_string_lossy().to_string())
+        );
+        assert!(result.validation.ready);
+        assert!(result.validation.valid);
+        assert!(result.validation.command_exists);
+        assert!(result.validation.entry_exists);
+        assert!(result.validation.database_matches);
+    }
+
+    #[test]
+    fn mcp_launch_validation_reports_missing_packaged_assets() {
+        let target = McpLaunchTarget {
+            data_directory: PathBuf::from("/tmp/masthead-data"),
+            node_path: PathBuf::from("/tmp/masthead-missing-node"),
+            entry_path: PathBuf::from("/tmp/masthead-missing-server.js"),
+            database_path: PathBuf::from("/tmp/masthead-data/masthead.sqlite"),
+        };
+
+        let validation = validate_mcp_launch_target(&target);
+        assert!(!validation.ready);
+        assert!(!validation.valid);
+        assert!(!validation.command_exists);
+        assert!(!validation.entry_exists);
+        assert!(validation.database_matches);
+        assert!(validation.problems.iter().any(|problem| problem.contains("Command not found")));
+        assert!(validation.problems.iter().any(|problem| problem.contains("MCP entry not found")));
     }
 }

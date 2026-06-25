@@ -1,3 +1,4 @@
+import type { McpLaunchConfigDto, McpLaunchValidationDto, McpTestConnectionDto } from "../app/mcpLaunchClient";
 import type { McpAuditRowDto, McpStatusDto, McpToolDto } from "../app/daemonClient";
 import { McpAuditTable } from "./agent-access/McpAuditTable";
 import { McpPermissions } from "./agent-access/McpPermissions";
@@ -11,18 +12,30 @@ import { StatusBadge } from "./primitives/StatusBadge";
 type AgentAccessPanelProps = {
   audit?: McpAuditRowDto[];
   error?: string;
+  launchConfig?: McpLaunchConfigDto;
+  launchValidation?: McpLaunchValidationDto;
+  launchValidationError?: string;
   loadState?: "loading" | "ready" | "error";
   onRefresh?: () => void;
+  onTestConnection?: () => Promise<McpTestConnectionDto>;
   status?: McpStatusDto;
+  testConnectionResult?: McpTestConnectionDto;
+  testConnectionState?: "idle" | "testing" | "passed" | "failed";
   tools?: McpToolDto[];
 };
 
 export function AgentAccessPanel({
   audit = [],
   error,
+  launchConfig,
+  launchValidation,
+  launchValidationError,
   loadState = "ready",
   onRefresh,
+  onTestConnection,
   status = defaultStatus,
+  testConnectionResult,
+  testConnectionState,
   tools = []
 }: AgentAccessPanelProps) {
   return (
@@ -55,7 +68,15 @@ export function AgentAccessPanel({
         label="MCP status"
       />
 
-      <McpSetup status={status} />
+      <McpSetup
+        launchConfig={launchConfig}
+        onTestConnection={onTestConnection}
+        status={status}
+        testConnectionResult={testConnectionResult}
+        testConnectionState={testConnectionState}
+        validation={launchValidation}
+        validationError={launchValidationError}
+      />
       <McpPermissions status={status} />
       <McpToolsTable tools={tools} />
       <McpAuditTable audit={audit} />
@@ -66,13 +87,6 @@ export function AgentAccessPanel({
 const defaultStatus: McpStatusDto = {
   databasePath: "Waiting for local daemon",
   globalAccessEnabled: false,
-  launchConfig: {
-    args: [],
-    command: "Masthead MCP server unavailable",
-    env: {
-      MASTHEAD_DB_PATH: "Waiting for local daemon"
-    }
-  },
   mode: "stdio",
   queryCount: 0,
   readOnly: true,
