@@ -331,13 +331,15 @@ export async function listAdapters(baseUrl = defaultLiveProjectionUrl()): Promis
   return body.adapters;
 }
 
-export async function importCodexMetadata(baseUrl = defaultLiveProjectionUrl()): Promise<{ imported: number; sources: number }> {
+export async function importCodexMetadata(
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<{ imported: number; sources: number; queued?: number; jobs?: ImportJob[] }> {
   const url = new URL(baseUrl);
   url.pathname = "/sources/codex/import-metadata";
   url.search = "";
   const response = await fetch(url.toString(), { method: "POST", headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`codex metadata import failed: ${response.status}`);
-  return response.json() as Promise<{ imported: number; sources: number }>;
+  return response.json() as Promise<{ imported: number; sources: number; queued?: number; jobs?: ImportJob[] }>;
 }
 
 export async function startImport(

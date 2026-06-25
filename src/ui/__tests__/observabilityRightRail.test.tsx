@@ -23,7 +23,8 @@ describe("ObservabilityRightRail", () => {
       />
     );
 
-    expect(html).toContain("Active Sessions");
+    expect(html).toContain("Visible sessions");
+    expect(html).toContain("16 open sessions");
     expect(html).toContain("Connected sources");
     expect(html).toContain("Session Mix");
     expect(html).toContain("24");
@@ -35,6 +36,7 @@ describe("ObservabilityRightRail", () => {
     expect(html).not.toContain("gpt-5.5");
     expect(html).not.toContain("gpt-5.4");
     expect(html).not.toContain("Demo data");
+    expect(html).not.toContain("Active Sessions");
   });
 
   test("hides for Logbook and Settings", () => {

@@ -29,11 +29,11 @@ function NowRail({ summary, sourceCount }: { summary: LiveBoardProjection["summa
           <span className="rail-icon" aria-hidden="true">
             <Icon name="sessions" size="panel" weight={iconWeights.panel} />
           </span>
-          Active Sessions
+          Visible sessions
         </p>
         <div className="metric-row">
           <span className="metric-value">{total}</span>
-          <span className="metric-delta">{active} running</span>
+          <span className="metric-delta">{active} open sessions</span>
         </div>
       </section>
 

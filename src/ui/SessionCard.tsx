@@ -16,6 +16,7 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Codex";
   const worktree = session.branchOrWorktree ?? "None";
   const sessionName = sessionHeaderName(session);
+  const headline = sessionHeadline(session);
 
   return (
     <article
@@ -23,7 +24,7 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
       data-session-id={session.sessionId}
       style={{ viewTransitionName: `session-card-${viewTransitionNamePart(session.sessionId)}` }}
       role="button"
-      aria-label={`Open ${session.copy.headline} details`}
+      aria-label={`Open ${headline} details`}
       tabIndex={0}
       onClick={() => onToggle?.(session.sessionId)}
       onKeyDown={(event) => {
@@ -43,7 +44,7 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
         </span>
       </header>
 
-      <h2>{session.copy.headline}</h2>
+      <h2>{headline}</h2>
 
       <dl className="observability-card-facts">
         <Fact icon="runtime" label="Runtime" value={harness} valueClassName="runtime-value" />
@@ -96,8 +97,8 @@ function Fact({
 function observabilityStateLabel(session: SessionCardView): string {
   if (session.primaryStatus === "blocked" || session.outcomeLabel === "blocked") return "Blocked";
   if (session.lifecycle === "idle") return "Idle";
-  if (session.lifecycle === "ended" && session.outcomeLabel === "completed") return "Complete";
-  if (session.lifecycle === "ended") return "Review";
+  if (session.lifecycle === "ended" && session.outcomeLabel === "completed") return "Turn complete";
+  if (session.lifecycle === "ended") return "Response ready";
   return "Active";
 }
 
@@ -109,6 +110,10 @@ function startedLabel(value: string): string {
 
 function sessionHeaderName(session: SessionCardView): string {
   return meaningfulSessionTitle(session.title, session.project) ?? `${session.project} session`;
+}
+
+function sessionHeadline(session: SessionCardView): string {
+  return cleanHeadline(session.copy.headline) ?? meaningfulSessionTitle(session.title, session.project) ?? `${session.project} session update`;
 }
 
 function cleanSessionName(value: string | undefined): string | undefined {
@@ -139,4 +144,25 @@ function containsSensitiveMarker(label: string): boolean {
     /\bhttps?:\/\//i.test(label) ||
     /@/.test(label)
   );
+}
+
+function cleanHeadline(value: string | undefined): string | undefined {
+  const label = value?.replace(/\s+/g, " ").trim();
+  if (!label) return undefined;
+  if (containsSensitiveMarker(label)) return undefined;
+  if (looksSerialized(label)) return undefined;
+  if (looksLikeRawCommand(label)) return undefined;
+  return label;
+}
+
+function looksSerialized(label: string): boolean {
+  return (
+    /^[{[]/.test(label) ||
+    /["'](?:type|event|payload|command|arguments|content)["']\s*:/.test(label) ||
+    /\\n|\\\"/.test(label)
+  );
+}
+
+function looksLikeRawCommand(label: string): boolean {
+  return /^(?:npm|pnpm|yarn|node|python|python3|bash|sh|zsh|git|curl|cat|sed|rg|grep)\s+/.test(label);
 }

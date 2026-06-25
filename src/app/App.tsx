@@ -360,24 +360,35 @@ export function App() {
     }
   };
 
+  const loadSourceInventory = useCallback(async (options: { showStatus?: boolean } = {}) => {
+    const [nextAdapters, nextSources, nextImports] = await Promise.all([
+      listAdapters(liveProjectionUrl),
+      listSources(liveProjectionUrl),
+      listImports(liveProjectionUrl)
+    ]);
+    setAdapters(nextAdapters);
+    setSources(nextSources);
+    setImports(nextImports);
+    if (options.showStatus) setSourcesStatus(`${nextSources.length} source${nextSources.length === 1 ? "" : "s"} detected.`);
+  }, []);
+
   const handleRefreshSources = useCallback(async () => {
     setSourcesBusy(true);
     try {
-      const [nextAdapters, nextSources, nextImports] = await Promise.all([
-        listAdapters(liveProjectionUrl),
-        listSources(liveProjectionUrl),
-        listImports(liveProjectionUrl)
-      ]);
-      setAdapters(nextAdapters);
-      setSources(nextSources);
-      setImports(nextImports);
-      setSourcesStatus(`${nextSources.length} source${nextSources.length === 1 ? "" : "s"} detected.`);
+      await loadSourceInventory({ showStatus: true });
     } catch (error) {
       setSourcesStatus(`Source refresh failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setSourcesBusy(false);
     }
-  }, []);
+  }, [loadSourceInventory]);
+
+  useEffect(() => {
+    if (liveConnection.state !== "live") return;
+    void loadSourceInventory().catch((error: unknown) => {
+      console.error("[masthead] Source inventory refresh failed", error);
+    });
+  }, [liveConnection.state, loadSourceInventory]);
 
   useEffect(() => {
     if (activeSurface !== "sources") return;
@@ -457,7 +468,12 @@ export function App() {
     setSourcesStatus("Importing Codex metadata...");
     try {
       const result = await importCodexMetadata(liveProjectionUrl);
-      setSourcesStatus(`Metadata import ready: ${result.imported} records from ${result.sources} sources.`);
+      const queued = result.queued ?? result.jobs?.length ?? 0;
+      setSourcesStatus(
+        queued > 0
+          ? `Metadata import queued: ${queued} job${queued === 1 ? "" : "s"} across ${result.sources} sources.`
+          : `Metadata import ready: ${result.imported} records from ${result.sources} sources.`
+      );
       const [nextAdapters, nextSources, nextImports] = await Promise.all([
         listAdapters(liveProjectionUrl),
         listSources(liveProjectionUrl),

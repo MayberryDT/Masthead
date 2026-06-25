@@ -107,8 +107,30 @@ describe("observability session card", () => {
       />
     );
 
-    expect(html).toContain("Complete");
+    expect(html).toContain("Turn complete");
     expect(html).not.toContain(">Active<");
+  });
+
+  test("falls back from raw serialized or command-like headlines", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          copy: {
+            headline: "{\"type\":\"response_item\",\"payload\":{\"command\":\"npm test\"}}",
+            reason: "Raw event text should not be used as card copy.",
+            source: "deterministic",
+            status: "Captured"
+          },
+          project: "Masthead",
+          title: "Import correctness"
+        })}
+        onToggle={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Import correctness");
+    expect(html).not.toContain("response_item");
+    expect(html).not.toContain("npm test");
   });
 
   test("does not render approval-pending sessions as blocked", () => {
