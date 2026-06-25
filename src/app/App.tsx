@@ -33,12 +33,11 @@ import {
 import {
   defaultFixtureMode,
   defaultLiveProjectionUrl,
-  eventsRequestUrl,
   isLiveEventsEnvelope,
   isLiveProjectionEnvelope,
   normalizeLiveBoardProjection,
-  projectionRequestUrl
 } from "./liveProjectionClient";
+import { MastheadApiClient } from "./api/MastheadApiClient";
 import { startLiveConnector } from "./connectorClient";
 import {
   addSourceExclusion,
@@ -88,6 +87,7 @@ type CardLayoutSnapshot = Map<string, DOMRect>;
 const replay = fixture as FixtureReplay;
 const liveProjectionUrl = defaultLiveProjectionUrl();
 const startsInFixtureMode = defaultFixtureMode();
+const mastheadApi = new MastheadApiClient(liveProjectionUrl);
 
 const emptyLiveBoard: LiveBoardProjection = {
   summary: {
@@ -282,14 +282,9 @@ export function App() {
     const isCurrentRequest = () => liveRequestIdRef.current === requestId;
 
     try {
-      const response = await fetch(projectionRequestUrl(liveProjectionUrl, selectedLiveSessionId), {
-        headers: { accept: "application/json" }
-      });
-      if (!response.ok) throw new Error(`projection request failed: ${response.status}`);
-      const body: unknown = await response.json();
+      const body = await mastheadApi.getLiveProjection(selectedLiveSessionId);
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
-      const eventsResponse = await fetch(eventsRequestUrl(liveProjectionUrl), { headers: { accept: "application/json" } });
-      const eventsBody: unknown = eventsResponse.ok ? await eventsResponse.json() : undefined;
+      const eventsBody = await mastheadApi.getLiveEvents().catch(() => undefined);
       if (!isCurrentRequest()) return false;
       setLiveProjection(normalizeLiveBoardProjection(body.projection, selectedSessionId));
       setShowDemoData(false);
