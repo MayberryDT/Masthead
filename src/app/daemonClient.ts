@@ -44,12 +44,75 @@ export type SourceExclusionInput = {
 };
 
 export type LogbookSearchResult = {
-  sessions: Array<{
-    sessionId: string;
-    title: string;
-    snippet?: string;
-  }>;
+  sessions: LogbookSession[];
   total: number;
+  nextCursor?: string;
+};
+
+export type LogbookSession = {
+  sessionId: string;
+  sourceSessionId: string;
+  title: string;
+  objective?: string;
+  outcome?: string;
+  project?: string;
+  runtime: string;
+  models: string[];
+  hostId: string;
+  branch?: string;
+  lifecycle: string;
+  startedAt?: string;
+  lastActivityAt: string;
+  endedAt?: string;
+  topics: string[];
+  fileCount: number;
+  toolCount: number;
+  errorCount: number;
+  snippet?: string;
+  sourceConfidence: "authoritative" | "inferred" | "heuristic";
+};
+
+export type LogbookSessionDetail = LogbookSession & {
+  repoRoot?: string;
+  worktreePath?: string;
+  durationMs?: number;
+  files: string[];
+  tools: string[];
+  sourceProvenance: {
+    hostId: string;
+    runtime: string;
+    sourceSessionId: string;
+    sourceConfidence: LogbookSession["sourceConfidence"];
+  };
+  mcpIncluded: boolean;
+};
+
+export type LogbookExcerpt = {
+  excerptId: string;
+  kind: "message" | "tool" | "checkpoint";
+  role?: string;
+  text: string;
+  observedAt: string;
+  sourceRef: unknown;
+};
+
+export type LogbookSearchFilters = {
+  q?: string;
+  runtime?: string;
+  project?: string;
+  model?: string;
+  host?: string;
+  state?: string;
+  file?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+  cursor?: string;
+};
+
+export type ProjectOption = {
+  project: string;
+  sessionCount: number;
 };
 
 export async function listSources(baseUrl = defaultLiveProjectionUrl()): Promise<SourceStatus[]> {
@@ -110,14 +173,62 @@ export async function addSourceExclusion(input: SourceExclusionInput, baseUrl = 
   if (!response.ok) throw new Error(`source exclusion failed: ${response.status}`);
 }
 
-export async function searchLogbook(query: string, baseUrl = defaultLiveProjectionUrl()): Promise<LogbookSearchResult> {
+export async function searchLogbook(
+  input: string | LogbookSearchFilters,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<LogbookSearchResult> {
   const url = new URL(baseUrl);
-  url.pathname = "/logbook/search";
+  url.pathname = "/sessions";
   url.search = "";
-  url.searchParams.set("q", query);
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
+  const filters: LogbookSearchFilters = typeof input === "string" ? { q: input } : input;
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") url.searchParams.set(key === "q" ? "q" : key, String(value));
+  }
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
   if (!response.ok) throw new Error(`logbook search failed: ${response.status}`);
   return response.json() as Promise<LogbookSearchResult>;
+}
+
+export async function getLogbookSession(
+  sessionId: string,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<LogbookSessionDetail> {
+  const url = new URL(baseUrl);
+  url.pathname = `/sessions/${encodeURIComponent(sessionId)}`;
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`session detail failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; session: LogbookSessionDetail };
+  return body.session;
+}
+
+export async function getLogbookSessionExcerpts(
+  sessionId: string,
+  input: { q?: string; limit?: number } = {},
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<LogbookExcerpt[]> {
+  const url = new URL(baseUrl);
+  url.pathname = `/sessions/${encodeURIComponent(sessionId)}/excerpts`;
+  url.search = "";
+  if (input.q) url.searchParams.set("q", input.q);
+  if (input.limit) url.searchParams.set("limit", String(input.limit));
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`session excerpts failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; excerpts: LogbookExcerpt[] };
+  return body.excerpts;
+}
+
+export async function listProjects(baseUrl = defaultLiveProjectionUrl(), options: { signal?: AbortSignal } = {}): Promise<ProjectOption[]> {
+  const url = new URL(baseUrl);
+  url.pathname = "/projects";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`projects request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; projects: ProjectOption[] };
+  return body.projects;
 }
 
 export async function listReviewDispositions(baseUrl = defaultLiveProjectionUrl()): Promise<ReviewDisposition[]> {

@@ -69,6 +69,39 @@ describe("HistoryPanel", () => {
     expect(html).toContain("Showing 1 of 1");
   });
 
+  test("renders more than six database-backed sessions and exposes detail actions", () => {
+    const opened: string[] = [];
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        loading={false}
+        query=""
+        sessions={Array.from({ length: 8 }, (_, index) => ({
+          fileCount: index,
+          hostId: "host:test",
+          lifecycle: "ended",
+          models: ["gpt-5"],
+          project: "Masthead",
+          runtime: "codex",
+          sessionId: `session-${index + 1}`,
+          sourceConfidence: "authoritative",
+          sourceSessionId: `source-session-${index + 1}`,
+          title: `Session ${index + 1}`,
+          toolCount: index + 1,
+          topics: ["session-memory"]
+        }))}
+        total={8}
+        onQueryChange={() => {}}
+        onSessionSelect={(sessionId) => opened.push(sessionId)}
+      />
+    );
+
+    expect(opened).toEqual([]);
+    expect(html).toContain("Session 1");
+    expect(html).toContain("Session 8");
+    expect(html).toContain("View details");
+    expect(html).toContain("Showing 8 of 8");
+  });
+
   test("renders no-match queries with an explicit zero result count", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:Missing" onQueryChange={() => {}} />);
 

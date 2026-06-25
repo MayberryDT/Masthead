@@ -21,6 +21,7 @@ import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
+import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
 import { migrateDatabase } from "./db/schema.ts";
 import { createSessionRepository, ingestAdapterRecord } from "./db/sessionRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "./db/sqlite.ts";
@@ -345,16 +346,47 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/logbook/search") {
-      const result = searchSessions(database, {
-        host: url.searchParams.get("host") ?? undefined,
-        limit: Number.parseInt(url.searchParams.get("limit") || "25", 10),
-        offset: Number.parseInt(url.searchParams.get("offset") || "0", 10),
-        project: url.searchParams.get("project") ?? undefined,
-        query: url.searchParams.get("q") ?? "",
-        runtime: url.searchParams.get("runtime") ?? undefined,
-        state: url.searchParams.get("state") ?? undefined
-      });
+      const result = querySessions(database, sessionQueryFromUrl(url));
       sendJson(request, response, config.allowedOrigins, 200, { ok: true, ...result });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/sessions") {
+      const result = querySessions(database, sessionQueryFromUrl(url));
+      sendJson(request, response, config.allowedOrigins, 200, { ok: true, ...result });
+      return;
+    }
+
+    const sessionExcerptsMatch = url.pathname.match(/^\/sessions\/([^/]+)\/excerpts$/);
+    if (request.method === "GET" && sessionExcerptsMatch?.[1]) {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        excerpts: getSessionExcerpts(database, decodeURIComponent(sessionExcerptsMatch[1]), {
+          limit: Number.parseInt(url.searchParams.get("limit") || "8", 10),
+          query: url.searchParams.get("q") ?? undefined
+        })
+      });
+      return;
+    }
+
+    const sessionDetailMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
+    if (request.method === "GET" && sessionDetailMatch?.[1]) {
+      const session = getSessionDetail(database, decodeURIComponent(sessionDetailMatch[1]));
+      sendJson(
+        request,
+        response,
+        config.allowedOrigins,
+        session ? 200 : 404,
+        session ? { ok: true, session } : { ok: false, error: "session not found" }
+      );
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/projects") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        projects: listProjects(database)
+      });
       return;
     }
 
@@ -785,6 +817,23 @@ async function jsonlFiles(directory: string): Promise<string[]> {
 function offsetFromSourceRecordKey(sourceRecordKey: string): number | undefined {
   const offset = Number.parseInt(sourceRecordKey.split(":").at(-1) ?? "", 10);
   return Number.isFinite(offset) ? offset : undefined;
+}
+
+function sessionQueryFromUrl(url: URL): SessionQuery {
+  return {
+    cursor: url.searchParams.get("cursor") ?? undefined,
+    dateFrom: url.searchParams.get("dateFrom") ?? undefined,
+    dateTo: url.searchParams.get("dateTo") ?? undefined,
+    file: url.searchParams.get("file") ?? undefined,
+    host: url.searchParams.get("host") ?? undefined,
+    limit: Number.parseInt(url.searchParams.get("limit") || "50", 10),
+    model: url.searchParams.get("model") ?? undefined,
+    offset: Number.parseInt(url.searchParams.get("offset") || "0", 10),
+    project: url.searchParams.get("project") ?? undefined,
+    query: url.searchParams.get("q") ?? "",
+    runtime: url.searchParams.get("runtime") ?? undefined,
+    state: url.searchParams.get("state") ?? undefined
+  };
 }
 
 function assertReviewDisposition(value: unknown): asserts value is ReviewDisposition {

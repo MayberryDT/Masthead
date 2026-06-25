@@ -18,6 +18,7 @@ import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/ob
 import { OperationsPanel } from "../ui/OperationsPanel";
 import { SessionBoard } from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
+import { SessionLibraryDetail } from "../ui/SessionLibraryDetail";
 import { SourcesPanel } from "../ui/SourcesPanel";
 import { Toolbar, type ConnectorDisplayState } from "../ui/Toolbar";
 import { filterAttentionItemsForCards, filterCards, mainScanCards, summarizeMainScanCards, type BoardFilter } from "../ui/filterBoard";
@@ -43,12 +44,16 @@ import {
 import { startLiveConnector } from "./connectorClient";
 import {
   addSourceExclusion,
+  getLogbookSession,
+  getLogbookSessionExcerpts,
   importCodexMetadata,
   listReviewDispositions,
   listSources,
   saveReviewDisposition,
   searchLogbook,
+  type LogbookExcerpt,
   type LogbookSearchResult,
+  type LogbookSessionDetail,
   type SourceStatus
 } from "./daemonClient";
 import { clearLocalData, exportedRecordCount, exportLocalData, pruneLocalData, readLocalRecords } from "./nativeStoreClient";
@@ -123,6 +128,10 @@ export function App() {
   const [sourcesStatus, setSourcesStatus] = useState<string>();
   const [logbookResult, setLogbookResult] = useState<LogbookSearchResult>();
   const [logbookLoading, setLogbookLoading] = useState(false);
+  const [selectedLogbookSessionId, setSelectedLogbookSessionId] = useState<string>();
+  const [selectedLogbookSession, setSelectedLogbookSession] = useState<LogbookSessionDetail>();
+  const [selectedLogbookExcerpts, setSelectedLogbookExcerpts] = useState<LogbookExcerpt[]>([]);
+  const [logbookDetailLoading, setLogbookDetailLoading] = useState(false);
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
   const [localDataStatus, setLocalDataStatus] = useState<{
     state: "idle" | "confirm_delete" | "confirm_prune" | "busy" | "exported" | "deleted" | "pruned" | "error";
@@ -334,23 +343,58 @@ export function App() {
 
   useEffect(() => {
     if (activeSurface !== "logbook") return;
-    let cancelled = false;
-    const loadLogbook = async () => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
       setLogbookLoading(true);
-      try {
-        const result = await searchLogbook(historyQuery, liveProjectionUrl);
-        if (!cancelled) setLogbookResult(result);
-      } catch {
-        if (!cancelled) setLogbookResult(undefined);
-      } finally {
-        if (!cancelled) setLogbookLoading(false);
-      }
-    };
-    void loadLogbook();
+      void searchLogbook({ limit: 50, q: historyQuery }, liveProjectionUrl, { signal: controller.signal })
+        .then((result) => {
+          setLogbookResult(result);
+          setSelectedLogbookSessionId(undefined);
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted) {
+            console.error("[masthead] Logbook search failed", error);
+            setLogbookResult(undefined);
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLogbookLoading(false);
+        });
+    }, 150);
     return () => {
-      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
     };
   }, [activeSurface, historyQuery]);
+
+  useEffect(() => {
+    if (activeSurface !== "logbook" || !selectedLogbookSessionId) {
+      setSelectedLogbookSession(undefined);
+      setSelectedLogbookExcerpts([]);
+      return;
+    }
+    const controller = new AbortController();
+    setLogbookDetailLoading(true);
+    void Promise.all([
+      getLogbookSession(selectedLogbookSessionId, liveProjectionUrl, { signal: controller.signal }),
+      getLogbookSessionExcerpts(selectedLogbookSessionId, { limit: 8, q: historyQuery }, liveProjectionUrl, { signal: controller.signal })
+    ])
+      .then(([session, excerpts]) => {
+        setSelectedLogbookSession(session);
+        setSelectedLogbookExcerpts(excerpts);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          console.error("[masthead] Logbook detail failed", error);
+          setSelectedLogbookSession(undefined);
+          setSelectedLogbookExcerpts([]);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLogbookDetailLoading(false);
+      });
+    return () => controller.abort();
+  }, [activeSurface, selectedLogbookSessionId, historyQuery]);
 
   const handleImportCodexMetadata = async () => {
     setSourcesBusy(true);
@@ -506,6 +550,28 @@ export function App() {
     }
   };
 
+  const handleLogbookQueryChange = (nextQuery: string) => {
+    setHistoryQuery(nextQuery);
+    setSelectedLogbookSessionId(undefined);
+  };
+
+  const handleLoadMoreLogbook = async () => {
+    if (!logbookResult?.nextCursor || logbookLoading) return;
+    setLogbookLoading(true);
+    try {
+      const nextPage = await searchLogbook({ cursor: logbookResult.nextCursor, limit: 50, q: historyQuery }, liveProjectionUrl);
+      setLogbookResult({
+        nextCursor: nextPage.nextCursor,
+        sessions: [...logbookResult.sessions, ...nextPage.sessions],
+        total: nextPage.total
+      });
+    } catch (error) {
+      console.error("[masthead] Logbook pagination failed", error);
+    } finally {
+      setLogbookLoading(false);
+    }
+  };
+
   const mainSurface =
     activeSurface === "sources" ? (
       <SourcesPanel
@@ -517,14 +583,27 @@ export function App() {
         onExcludePath={handleExcludeSourcePath}
       />
     ) : activeSurface === "logbook" ? (
-      <HistoryPanel
-        records={historyRecords}
-        query={historyQuery}
-        sessions={logbookResult?.sessions}
-        total={logbookResult?.total}
-        loading={logbookLoading}
-        onQueryChange={setHistoryQuery}
-      />
+      <>
+        <HistoryPanel
+          records={historyRecords}
+          query={historyQuery}
+          sessions={logbookResult?.sessions}
+          total={logbookResult?.total}
+          nextCursor={logbookResult?.nextCursor}
+          loading={logbookLoading}
+          onQueryChange={handleLogbookQueryChange}
+          onLoadMore={handleLoadMoreLogbook}
+          onSessionSelect={setSelectedLogbookSessionId}
+        />
+        {selectedLogbookSessionId ? (
+          <SessionLibraryDetail
+            session={selectedLogbookSession}
+            excerpts={selectedLogbookExcerpts}
+            loading={logbookDetailLoading}
+            onClose={() => setSelectedLogbookSessionId(undefined)}
+          />
+        ) : null}
+      </>
     ) : activeSurface === "settings" ? (
       <OperationsPanel
         localDataStatus={localDataStatus}

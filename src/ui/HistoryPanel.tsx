@@ -9,23 +9,50 @@ type Props = {
   sessions?: LogbookSession[];
   query: string;
   total?: number;
+  nextCursor?: string;
   loading?: boolean;
   onQueryChange: (query: string) => void;
+  onLoadMore?: () => void;
+  onSessionSelect?: (sessionId: string) => void;
 };
 
 export type LogbookSession = {
   sessionId: string;
+  sourceSessionId?: string;
   title: string;
+  objective?: string;
+  outcome?: string;
   project?: string;
   runtime?: string;
   model?: string;
+  models?: string[];
+  hostId?: string;
   host?: string;
+  branch?: string;
+  lifecycle?: string;
   state?: string;
+  startedAt?: string;
   snippet?: string;
   lastActivityAt?: string;
+  endedAt?: string;
+  topics?: string[];
+  fileCount?: number;
+  toolCount?: number;
+  errorCount?: number;
+  sourceConfidence?: "authoritative" | "inferred" | "heuristic";
 };
 
-export function HistoryPanel({ records = [], sessions, query, total, loading = false, onQueryChange }: Props) {
+export function HistoryPanel({
+  records = [],
+  sessions,
+  query,
+  total,
+  nextCursor,
+  loading = false,
+  onQueryChange,
+  onLoadMore,
+  onSessionSelect
+}: Props) {
   const filters = filtersFromQuery(query);
   const usesLogbookStore = sessions !== undefined || total !== undefined || loading;
   const result = usesLogbookStore ? undefined : searchHistory(records, filters);
@@ -33,7 +60,7 @@ export function HistoryPanel({ records = [], sessions, query, total, loading = f
   const legacySessions = result?.sessions ?? [];
   const visibleTotal = total ?? result?.sessions.length ?? visibleSessions.length;
   const recordCount = result?.recordCount ?? visibleTotal;
-  const visibleCardCount = Math.min(usesLogbookStore ? visibleSessions.length : legacySessions.length, maxVisibleHistorySessions);
+  const visibleCardCount = usesLogbookStore ? visibleSessions.length : Math.min(legacySessions.length, maxVisibleHistorySessions);
 
   return (
     <section id="history" className="history-panel surface-panel" aria-label="Logbook">
@@ -76,13 +103,18 @@ export function HistoryPanel({ records = [], sessions, query, total, loading = f
         <div className="history-results surface-card-grid">
           {usesLogbookStore
             ? visibleSessions
-                .slice(0, maxVisibleHistorySessions)
-                .map((session) => <LogbookSessionItem key={session.sessionId} session={session} />)
+                .map((session) => <LogbookSessionItem key={session.sessionId} session={session} onSessionSelect={onSessionSelect} />)
             : legacySessions
                 .slice(0, maxVisibleHistorySessions)
                 .map((session) => <LegacyHistoryItem key={session.sessionId} session={session} />)}
         </div>
       )}
+
+      {usesLogbookStore && nextCursor && onLoadMore ? (
+        <button type="button" className="surface-secondary-action" onClick={onLoadMore} disabled={loading}>
+          Load more
+        </button>
+      ) : null}
 
       <p className="toolbar-result surface-status">
         Showing {visibleCardCount} of {visibleTotal}; searching {recordCount} local records
@@ -91,7 +123,9 @@ export function HistoryPanel({ records = [], sessions, query, total, loading = f
   );
 }
 
-function LogbookSessionItem({ session }: { session: LogbookSession }) {
+function LogbookSessionItem({ session, onSessionSelect }: { session: LogbookSession; onSessionSelect?: (sessionId: string) => void }) {
+  const lifecycle = session.lifecycle ?? session.state ?? "indexed";
+  const primaryModel = session.models?.[0] ?? session.model;
   return (
     <article className={`history-item surface-data-card logbook-card metal-surface metal-card ${session.snippet ? "has-snippet" : ""}`.trim()}>
       <header className="surface-card-head">
@@ -99,7 +133,7 @@ function LogbookSessionItem({ session }: { session: LogbookSession }) {
           {session.project ?? "Masthead"}
         </span>
         <span className="card-harness">{runtimeLabel(session.runtime)}</span>
-        <span className={`state-token ${stateToneClass(session.state)}`.trim()}>{statusLabel(session.state ?? "indexed")}</span>
+        <span className={`state-token ${stateToneClass(lifecycle)}`.trim()}>{statusLabel(lifecycle)}</span>
       </header>
 
       <h2>{session.title}</h2>
@@ -107,8 +141,8 @@ function LogbookSessionItem({ session }: { session: LogbookSession }) {
 
       <dl className="surface-card-facts history-facts">
         <SurfaceFact icon="logbook" label="Session" value={shortId(session.sessionId)} />
-        <SurfaceFact icon="model" label="Model" value={session.model ?? "Not captured"} />
-        <SurfaceFact icon="source" label="Host" value={session.host ?? "Local"} />
+        <SurfaceFact icon="model" label="Model" value={primaryModel ?? "Not captured"} />
+        <SurfaceFact icon="source" label="Host" value={session.hostId ?? session.host ?? "Local"} />
         <SurfaceFact icon="lastActivity" label="Activity" value={formatActivity(session.lastActivityAt)} />
       </dl>
 
@@ -117,9 +151,11 @@ function LogbookSessionItem({ session }: { session: LogbookSession }) {
       <footer className="surface-card-footer">
         <span className="card-footer-meta">
           <Icon name="lastActivity" size="inline" weight={iconWeights.inline} />
-          Indexed
+          {formatCount(session.fileCount ?? 0, "file", "files")} / {formatCount(session.toolCount ?? 0, "tool", "tools")}
         </span>
-        <span className="timestamp">{shortId(session.sessionId)}</span>
+        <button type="button" className="surface-inline-action" onClick={() => onSessionSelect?.(session.sessionId)}>
+          View details
+        </button>
       </footer>
     </article>
   );
