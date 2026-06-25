@@ -62,3 +62,6 @@ npm run demo:hook
 `npm run dev` starts the connector and UI when no primary connector is running. In a secondary
 worktree, it starts a read-only bridge to the primary connector so UI work can be tested without
 mutating the primary store.
+
+If another Masthead daemon is already running, the dev launcher verifies its protocol and database
+identity. Incompatible daemons are not reused.

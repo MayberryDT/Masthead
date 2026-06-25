@@ -74,3 +74,8 @@ MASTHEAD_BRIDGE_PORT=17374 npm run dev
 ```
 
 Before claiming the connection is working, verify the rendered page, not just process state. A healthy secondary worktree should show live sessions and should not show `No live connection` or `No live Codex sessions yet`.
+
+For release-closeout work, use `docs/acceptance/product-release-gate.md` as the acceptance checklist.
+Keep protocol/database identity terminology consistent across docs and code:
+`MastheadHealthDto`, `MastheadApiClient`, `MastheadConnectionState`, `SourcePreflightDto`,
+`AdapterStatusDto`, `McpStatusDto`.
