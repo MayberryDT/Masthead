@@ -37,8 +37,14 @@ type ProjectFixtureOptions = {
   expandedSessionId?: string;
   selectedSessionId?: string | null;
   includeTerminalSessions?: boolean;
+  sessionEnrichments?: Map<string, LiveSessionEnrichment>;
   now?: Date;
   idleAfterMs?: number;
+};
+
+export type LiveSessionEnrichment = {
+  title?: string;
+  liveSummary?: string;
 };
 
 export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOptions = {}): LiveBoardProjection {
@@ -80,7 +86,16 @@ export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOp
       const sessionConflicts = conflicts.filter((conflict) => conflict.sessionIds.includes(session.sessionId));
       const sessionEvents = eventsBySession.get(session.sessionId) ?? [];
       const sessionSnapshots = fixture.gitSnapshots.filter((snapshot) => snapshot.sessionId === session.sessionId);
-      return toCard(session, sessionAttention, sessionConflicts, fixture.events, sessionEvents, sessionSnapshots, expandedSessionId);
+      return toCard(
+        session,
+        sessionAttention,
+        sessionConflicts,
+        fixture.events,
+        sessionEvents,
+        sessionSnapshots,
+        expandedSessionId,
+        options.sessionEnrichments?.get(session.sessionId)
+      );
     })
     .sort((a, b) => a.priorityRank - b.priorityRank || a.project.localeCompare(b.project));
   const expandedSession = cards.find((card) => card.isExpanded) ?? cards[0];
@@ -144,7 +159,8 @@ function toCard(
   events: NormalizedEvent[],
   sessionEvents: NormalizedEvent[],
   sessionSnapshots: GitSnapshot[],
-  expandedSessionId?: string
+  expandedSessionId?: string,
+  enrichment?: LiveSessionEnrichment
 ): SessionCardView {
   const indicators: SessionCardView["indicators"] = [];
   if (sessionAttention.length > 0) indicators.push("attention");
@@ -172,8 +188,9 @@ function toCard(
     ])
   );
   const startedAt = firstSessionTimestamp(session.sessionId, events);
+  const title = enrichment?.title ?? session.title;
   const workContext = deriveWorkContext({
-    title: session.title,
+    title,
     branchOrWorktree,
     events: sessionEvents,
     gitSnapshots: sessionSnapshots,
@@ -183,7 +200,7 @@ function toCard(
   const card = {
     sessionId: session.sessionId,
     project: session.project,
-    title: session.title,
+    title,
     stateLabel: labelForSession(session),
     primaryStatus: session.primaryStatus,
     lifecycle: session.lifecycle,
@@ -208,10 +225,32 @@ function toCard(
     latestFeedbackSignal: feedbackSignal
   };
 
-  return {
+  const enrichedCard = {
     ...card,
     copy: buildDeterministicSessionCopy(toSessionCopyInput(card, sessionAttention, sessionConflicts))
   };
+  return withEnrichmentCopy(enrichedCard, enrichment);
+}
+
+function withEnrichmentCopy(card: SessionCardView, enrichment: LiveSessionEnrichment | undefined): SessionCardView {
+  const headline = cleanLiveSummary(enrichment?.liveSummary) ?? cleanLiveSummary(enrichment?.title);
+  if (!headline) return card;
+  return {
+    ...card,
+    copy: {
+      ...card.copy,
+      headline,
+      reason: "This summary is persisted with the canonical Masthead session record.",
+      source: "enrichment",
+      status: card.copy.status
+    }
+  };
+}
+
+function cleanLiveSummary(value: string | undefined): string | undefined {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  if (!normalized || normalized.startsWith("{") || normalized.includes('"event"')) return undefined;
+  return normalized;
 }
 
 function toDetail(

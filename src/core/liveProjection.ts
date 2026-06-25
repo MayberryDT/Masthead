@@ -1,4 +1,4 @@
-import { projectFixture } from "./replay.ts";
+import { projectFixture, type LiveSessionEnrichment } from "./replay.ts";
 import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent } from "./types";
 
 export type LiveProjectionEnvelope = {
@@ -14,6 +14,7 @@ export type LiveProjectionEnvelope = {
 type LiveProjectionOptions = {
   expandedSessionId?: string;
   selectedSessionId?: string | null;
+  sessionEnrichments?: Map<string, LiveSessionEnrichment>;
   generatedAt?: string;
   diagnostics?: number;
 };
@@ -40,6 +41,7 @@ export function projectLiveEvents(
     diagnostics: options.diagnostics ?? 0,
     projection: projectFixture(replay, {
       expandedSessionId: options.expandedSessionId,
+      sessionEnrichments: options.sessionEnrichments,
       selectedSessionId,
       now: new Date(generatedAt)
     })

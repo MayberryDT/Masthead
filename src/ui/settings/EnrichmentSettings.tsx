@@ -25,6 +25,16 @@ export function EnrichmentSettings({ enrichment }: EnrichmentSettingsProps) {
           enrichment ? `${formatCount(enrichment.currentEnrichments)} / ${formatCount(enrichment.sessionCount)}` : "Loading"
         }
       />
+      <SettingsRow
+        label="Health"
+        value={
+          enrichment
+            ? `${formatCount(enrichment.health.complete)} complete, ${formatCount(enrichment.health.queued)} queued, ${formatCount(
+                enrichment.health.failed
+              )} failed, ${formatCount(enrichment.health.disabled)} disabled`
+            : "Loading"
+        }
+      />
     </SettingsSection>
   );
 }

@@ -32,16 +32,44 @@ export function fingerprintSessionFacts(facts: SessionFacts): string {
 }
 
 export function deterministicCapsuleFromFacts(facts: SessionFacts): SessionCapsule {
+  const title = derivedTitle(facts);
   return {
     candidateDecisions: [],
-    liveSummary: `${facts.project}: ${facts.title}`,
+    liveSummary: `${facts.project}: ${title}`,
     objective: facts.objective,
-    searchPhrases: unique([facts.project, facts.title, facts.objective, ...facts.commands, ...facts.files].filter(isString)),
+    searchPhrases: unique([facts.project, title, facts.objective, ...facts.commands, ...facts.files].filter(isString)),
     technologies: unique(facts.files.map(technologyFromPath).filter(isString)),
-    title: facts.title,
+    title,
     topics: unique([facts.project, ...facts.commands.map(firstWord), ...facts.files.map(topPathSegment)].filter(isString)),
     unresolved: []
   };
+}
+
+function derivedTitle(facts: SessionFacts): string {
+  if (isMeaningfulTitle(facts.title)) return cleanTitle(facts.title) ?? facts.title;
+  const prompt = facts.messages.map(messageTitleCandidate).find(isString);
+  return prompt ?? cleanTitle(facts.title) ?? `${facts.project} session`;
+}
+
+function messageTitleCandidate(value: string): string | undefined {
+  const cleaned = cleanTitle(value.replace(/^(user|assistant|system|tool):\s*/i, ""));
+  if (!cleaned || !isMeaningfulTitle(cleaned)) return undefined;
+  return cleaned;
+}
+
+function cleanTitle(value: string | undefined): string | undefined {
+  const cleaned = value
+    ?.replace(/\s+/g, " ")
+    .replace(/[.!?]+$/g, "")
+    .trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > 80 ? `${cleaned.slice(0, 77).trim()}...` : cleaned;
+}
+
+function isMeaningfulTitle(value: string | undefined): value is string {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized !== "codex session" && normalized !== "untitled session" && normalized !== "session";
 }
 
 function firstWord(value: string): string {

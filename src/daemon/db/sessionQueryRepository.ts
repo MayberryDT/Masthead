@@ -1,3 +1,4 @@
+import { currentSessionEnrichmentViews, type SessionEnrichmentView } from "./enrichmentViewRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type SessionListItemDto = {
@@ -19,6 +20,8 @@ export type SessionListItemDto = {
   fileCount: number;
   toolCount: number;
   errorCount: number;
+  enrichmentStatus?: "current" | "stale" | "failed" | "disabled" | "missing";
+  unresolved: string[];
   snippet?: string;
   sourceConfidence: "authoritative" | "inferred" | "heuristic";
 };
@@ -128,10 +131,11 @@ export function querySessions(db: MastheadDatabase, query: SessionQuery): Sessio
     ? rows.toSorted((left, right) => (candidateOrder.get(left.sessionId) ?? 0) - (candidateOrder.get(right.sessionId) ?? 0))
     : rows;
   const page = sortedRows.slice(offset, offset + limit);
+  const enrichments = currentSessionEnrichmentViews(db, page.map((row) => row.sessionId));
 
   return {
     nextCursor: offset + limit < sortedRows.length ? String(offset + limit) : undefined,
-    sessions: page.map((row) => rowToListItem(row, snippetBySession.get(row.sessionId))),
+    sessions: page.map((row) => rowToListItem(row, snippetBySession.get(row.sessionId), enrichments.get(row.sessionId))),
     total: sortedRows.length
   };
 }
@@ -139,7 +143,7 @@ export function querySessions(db: MastheadDatabase, query: SessionQuery): Sessio
 export function getSessionDetail(db: MastheadDatabase, sessionId: string): SessionDetailDto | undefined {
   const row = loadSessionRows(db, { limit: 1 }, [sessionId], { includeDeleted: false, includeDetailColumns: true })[0];
   if (!row) return undefined;
-  const item = rowToListItem(row);
+  const item = rowToListItem(row, undefined, currentSessionEnrichmentViews(db, [sessionId]).get(sessionId));
   const files = db
     .prepare("SELECT DISTINCT path AS value FROM file_effects WHERE session_id = ? ORDER BY path")
     .all(sessionId) as Array<{ value: string }>;
@@ -370,18 +374,20 @@ function sortOrderClause(sort: LogbookSort | undefined): string {
   return "ORDER BY sessions.last_activity_at DESC, sessions.session_id DESC";
 }
 
-function rowToListItem(row: SessionRow, snippet?: string): SessionListItemDto {
+function rowToListItem(row: SessionRow, snippet?: string, enrichment?: SessionEnrichmentView): SessionListItemDto {
+  const topics = uniqueStrings([...(enrichment?.topics ?? []), ...parseJsonArray(row.topicsJson)]);
   return {
     branch: row.branch ?? undefined,
     endedAt: row.endedAt ?? undefined,
+    enrichmentStatus: enrichment?.status ?? "missing",
     errorCount: row.errorCount,
     fileCount: row.fileCount,
     hostId: row.hostId,
     lastActivityAt: row.lastActivityAt,
     lifecycle: row.lifecycle,
     models: parseJsonArray(row.modelsJson),
-    objective: row.objective ?? undefined,
-    outcome: row.outcome ?? undefined,
+    objective: enrichment?.objective ?? row.objective ?? undefined,
+    outcome: enrichment?.outcome ?? row.outcome ?? undefined,
     project: row.project ?? undefined,
     runtime: row.runtime,
     sessionId: row.sessionId,
@@ -389,9 +395,10 @@ function rowToListItem(row: SessionRow, snippet?: string): SessionListItemDto {
     sourceConfidence: row.sourceConfidence,
     sourceSessionId: row.sourceSessionId,
     startedAt: row.startedAt ?? undefined,
-    title: row.title ?? row.objective ?? row.project ?? row.sourceSessionId,
+    title: enrichment?.title ?? row.title ?? row.objective ?? row.project ?? row.sourceSessionId,
     toolCount: row.toolCount,
-    topics: parseJsonArray(row.topicsJson)
+    topics,
+    unresolved: enrichment?.unresolved ?? []
   };
 }
 
@@ -425,6 +432,10 @@ function parseJsonArray(value: string | null): string[] {
   if (!value) return [];
   const parsed = JSON.parse(value) as unknown;
   return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter((value) => value.trim().length > 0)));
 }
 
 function parseJson(value: string): unknown {

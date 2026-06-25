@@ -435,11 +435,10 @@ describe("ingest server live projection", () => {
     expect(imported).toMatchObject({
       ok: true,
       job: {
-        importedCount: 1,
-        status: "succeeded"
+        status: "queued"
       }
     });
-    const imports = await getJson(server.baseUrl, "/imports");
+    const imports = await waitForImport(server.baseUrl, "codex-session-index");
     expect(imports.imports).toEqual([expect.objectContaining({ sourceId: "codex-session-index", status: "succeeded" })]);
   });
 
@@ -635,6 +634,19 @@ async function getJson(baseUrl: string, path: string): Promise<Record<string, an
   const response = await fetch(`${baseUrl}${path}`);
   expect(response.status).toBe(200);
   return response.json() as Promise<Record<string, any>>;
+}
+
+async function waitForImport(baseUrl: string, sourceId: string): Promise<Record<string, any>> {
+  const deadline = Date.now() + 1500;
+  let imports = await getJson(baseUrl, "/imports");
+  while (Date.now() < deadline) {
+    if (imports.imports?.some((job: { sourceId: string; status: string }) => job.sourceId === sourceId && job.status === "succeeded")) {
+      return imports;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    imports = await getJson(baseUrl, "/imports");
+  }
+  return imports;
 }
 
 function liveApprovalPayload(providerEventId: string): Record<string, unknown> {

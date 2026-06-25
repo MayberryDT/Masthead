@@ -5,6 +5,8 @@ import { adapterRecordFromCodexHook, codexHookSource } from "../adapters/codex/h
 import { discoverCodexSources } from "../adapters/codex/discovery.ts";
 import { importCodexMetadata } from "../adapters/codex/metadataImport.ts";
 import { parseCodexTranscript } from "../adapters/codex/transcriptParser.ts";
+import { createEnrichmentCoordinator } from "../enrichment/enrichmentCoordinator.ts";
+import { createOpenAIEnrichmentProvider } from "../enrichment/openAIProvider.ts";
 import type { AdapterDiagnostic } from "../adapters/types.ts";
 import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent } from "../core/ingestion.ts";
@@ -25,6 +27,7 @@ import {
 } from "./db/dataLifecycleRepository.ts";
 import { getImportJob, listImportJobs, updateImportJob, type ImportJobKind } from "./db/importJobRepository.ts";
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
+import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
@@ -95,6 +98,50 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       apiKey: config.openaiApiKey,
       model: config.openaiModel
     });
+    const enrichment = createEnrichmentCoordinator(
+      database,
+      createOpenAIEnrichmentProvider({
+        apiKey: config.openaiApiKey,
+        enabled: config.llmCopyEnabled,
+        model: config.openaiModel
+      })
+    );
+    const queuedEnrichmentSessionIds = new Set<string>();
+    let enrichmentQueueScheduled = false;
+
+  function queueSessionEnrichment(sessionId: string | undefined): void {
+    if (!sessionId) return;
+    queuedEnrichmentSessionIds.add(sessionId);
+    if (enrichmentQueueScheduled) return;
+    enrichmentQueueScheduled = true;
+    queueMicrotask(() => {
+      void flushEnrichmentQueue();
+    });
+  }
+
+  function queueSessionEnrichments(sessionIds: Iterable<string>): void {
+    for (const sessionId of sessionIds) queueSessionEnrichment(sessionId);
+  }
+
+  async function flushEnrichmentQueue(): Promise<void> {
+    enrichmentQueueScheduled = false;
+    const sessionIds = [...queuedEnrichmentSessionIds];
+    queuedEnrichmentSessionIds.clear();
+    for (const sessionId of sessionIds) {
+      try {
+        await enrichment.ensureCurrent(sessionId);
+        indexCanonicalSessionSearch(database, sessionId);
+      } catch (error) {
+        console.error("[masthead] session enrichment failed", { sessionId, error });
+      }
+    }
+    if (queuedEnrichmentSessionIds.size > 0 && !enrichmentQueueScheduled) {
+      enrichmentQueueScheduled = true;
+      queueMicrotask(() => {
+        void flushEnrichmentQueue();
+      });
+    }
+  }
 
   async function appendStoreRecord(record: StoreRecord, journal = hookRawJournal): Promise<void> {
     journal.appendStoreRecord(record);
@@ -123,13 +170,17 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const batchSize = 100;
     for (let index = 0; index < records.length && !closed; index += batchSize) {
       const batch = records.slice(index, index + batchSize);
+      const touchedSessionIds = new Set<string>();
       database.exec("BEGIN IMMEDIATE;");
       try {
         for (const record of batch) {
           if (record.recordType === "event") {
             hookRawJournal.appendStoreRecord(record);
             const sessionId = sessions.upsertLiveEvent(record.value);
-            if (sessionId) indexCanonicalSessionSearch(database, sessionId);
+            if (sessionId) {
+              indexCanonicalSessionSearch(database, sessionId);
+              touchedSessionIds.add(sessionId);
+            }
             continue;
           }
           observerRawJournal.appendStoreRecord(record);
@@ -139,6 +190,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         database.exec("ROLLBACK;");
         throw error;
       }
+      queueSessionEnrichments(touchedSessionIds);
       await yieldToEventLoop();
     }
     indexExistingCanonicalSessions();
@@ -165,6 +217,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         indexCanonicalSessionSearch(database, row.sessionId);
       }
       database.exec("COMMIT;");
+      queueSessionEnrichments(sessionRows.map((row) => row.sessionId));
     } catch (error) {
       database.exec("ROLLBACK;");
       throw error;
@@ -233,6 +286,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           runtimeVersion: record.source.runtimeVersion
         });
         if (sessionId) indexCanonicalSessionSearch(database, sessionId);
+        queueSessionEnrichment(sessionId);
         countImportedRecord(result, record, Boolean(sessionId));
       }
     }
@@ -262,6 +316,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           });
           if (sessionId) {
             indexCanonicalSessionSearch(database, sessionId);
+            queueSessionEnrichment(sessionId);
             latestOffset = nextOffset;
           }
           countImportedRecord(result, record, Boolean(sessionId));
@@ -447,6 +502,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (request.method === "GET" && url.pathname === "/projection") {
       const liveEnvelope = projectLiveEvents(state.events, gitSnapshots, {
         selectedSessionId: url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined,
+        sessionEnrichments: liveProjectionEnrichments(database),
         diagnostics: state.diagnostics.length
       });
       liveEnvelope.projection = await sessionCopyEnricher.enrichProjection(liveEnvelope.projection);
@@ -959,7 +1015,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           value: result.event
         });
         const sessionId = sessions.upsertLiveEvent(result.event);
-        if (sessionId) indexCanonicalSessionSearch(database, sessionId);
+        if (sessionId) {
+          indexCanonicalSessionSearch(database, sessionId);
+          queueSessionEnrichment(sessionId);
+        }
         const gitSnapshot = await collectGitSnapshot(result.event);
         if (gitSnapshot) await appendGitSnapshotIfChanged(gitSnapshot);
       }

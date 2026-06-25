@@ -314,7 +314,11 @@ function isCopyShape(value: unknown): value is SessionPlainCopy {
     typeof value.status === "string" &&
     "reason" in value &&
     typeof value.reason === "string" &&
-    (!("source" in value) || value.source === "deterministic" || value.source === "llm" || value.source === "fallback") &&
+    (!("source" in value) ||
+      value.source === "deterministic" ||
+      value.source === "llm" ||
+      value.source === "fallback" ||
+      value.source === "enrichment") &&
     (!("nextStep" in value) || value.nextStep === undefined || typeof value.nextStep === "string")
   );
 }

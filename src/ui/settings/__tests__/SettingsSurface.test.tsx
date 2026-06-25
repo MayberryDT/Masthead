@@ -57,6 +57,13 @@ const settings: SettingsStateDto = {
   },
   enrichment: {
     currentEnrichments: 31,
+    health: {
+      complete: 31,
+      disabled: 0,
+      failed: 0,
+      queued: 0,
+      status: "complete"
+    },
     model: "deterministic",
     provider: "Deterministic fallback",
     remoteModelEnabled: false,

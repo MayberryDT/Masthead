@@ -47,6 +47,13 @@ export type SettingsStateDto = {
     model: string;
     currentEnrichments: number;
     sessionCount: number;
+    health: {
+      complete: number;
+      queued: number;
+      failed: number;
+      disabled: number;
+      status: "complete" | "partial" | "disabled";
+    };
   };
   privacy: {
     transcriptImportEnabled: boolean;
@@ -78,6 +85,7 @@ export async function getSettingsState(db: MastheadDatabase, config: DaemonConfi
     deletionTargets: deletionTargets(db),
     enrichment: {
       currentEnrichments: dataSummary.enrichments,
+      health: enrichmentHealth(db, dataSummary.sessions),
       model: config.openaiModel ?? "deterministic",
       provider: config.llmCopyEnabled && config.openaiApiKey ? "OpenAI" : "Deterministic fallback",
       remoteModelEnabled: Boolean(config.llmCopyEnabled && config.openaiApiKey),
@@ -94,6 +102,32 @@ export async function getSettingsState(db: MastheadDatabase, config: DaemonConfi
       databasePath: config.databasePath,
       storePath: config.storePath
     }
+  };
+}
+
+function enrichmentHealth(db: MastheadDatabase, sessionCount: number): SettingsStateDto["enrichment"]["health"] {
+  const complete = (
+    db
+      .prepare(
+        `SELECT COUNT(DISTINCT session_id) AS count
+        FROM session_enrichments
+        WHERE enrichment_kind = 'session_capsule'
+          AND status = 'current'`
+      )
+      .get() as { count: number }
+  ).count;
+  const failed = (
+    db.prepare("SELECT COUNT(*) AS count FROM session_enrichments WHERE status = 'failed'").get() as { count: number }
+  ).count;
+  const disabled = (
+    db.prepare("SELECT COUNT(*) AS count FROM session_enrichments WHERE status = 'disabled'").get() as { count: number }
+  ).count;
+  return {
+    complete,
+    disabled,
+    failed,
+    queued: Math.max(0, sessionCount - complete - failed - disabled),
+    status: sessionCount === 0 || complete >= sessionCount ? "complete" : disabled >= sessionCount ? "disabled" : "partial"
   };
 }
 

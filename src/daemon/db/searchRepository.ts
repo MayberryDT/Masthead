@@ -1,3 +1,4 @@
+import { currentSessionEnrichmentView, currentSessionEnrichmentViews } from "./enrichmentViewRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type SessionSearchDocument = {
@@ -140,12 +141,13 @@ export function indexCanonicalSessionSearch(db: MastheadDatabase, sessionId: str
       FROM session_enrichments
       WHERE session_id = ?
         AND status = 'current'
-        AND enrichment_kind IN ('session_capsule', 'search_projection')`
+        AND enrichment_kind IN ('session_capsule', 'live_summary', 'search_projection')`
     )
     .all(sessionId) as EnrichmentRow[];
   const enrichmentText = enrichments.flatMap((row) => textFromEnrichment(row.contentJson));
+  const enrichmentView = currentSessionEnrichmentView(db, sessionId);
 
-  const title = session.title ?? session.objective ?? session.projectLabel ?? session.sourceSessionId;
+  const title = enrichmentView?.title ?? session.title ?? session.objective ?? session.projectLabel ?? session.sourceSessionId;
   indexSessionSearch(db, {
     capsule: joinText([session.objective, session.outcomeLabel, ...signals.map((row) => row.text), ...enrichmentText]),
     commands: joinText(toolNames.map((row) => row.text)),
@@ -211,8 +213,15 @@ function listRecentSessions(db: MastheadDatabase, limit: number, offset: number)
       LIMIT ? OFFSET ?`
     )
     .all(limit, offset) as Array<{ sessionId: string; title: string; snippet: string }>;
+  const enrichments = currentSessionEnrichmentViews(db, rows.map((row) => row.sessionId));
   const total = (db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE deleted_at IS NULL").get() as { count: number }).count;
-  return { sessions: rows, total };
+  return {
+    sessions: rows.map((row) => ({
+      ...row,
+      title: enrichments.get(row.sessionId)?.title ?? row.title
+    })),
+    total
+  };
 }
 
 function ftsQuery(query: string): string | undefined {

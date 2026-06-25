@@ -98,6 +98,8 @@ export type LogbookSession = {
   fileCount: number;
   toolCount: number;
   errorCount: number;
+  enrichmentStatus?: "current" | "stale" | "failed" | "disabled" | "missing";
+  unresolved: string[];
   snippet?: string;
   sourceConfidence: "authoritative" | "inferred" | "heuristic";
 };
@@ -263,6 +265,13 @@ export type SettingsStateDto = {
     model: string;
     currentEnrichments: number;
     sessionCount: number;
+    health: {
+      complete: number;
+      queued: number;
+      failed: number;
+      disabled: number;
+      status: "complete" | "partial" | "disabled";
+    };
   };
   privacy: {
     transcriptImportEnabled: boolean;
