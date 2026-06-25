@@ -12,6 +12,7 @@ export type DaemonConfig = {
   fixturePath: string;
   storePath: string;
   databasePath: string;
+  legacyDataDirectory?: string;
   llmCopyEnabled: boolean;
   openaiApiKey?: string;
   openaiModel?: string;
@@ -42,6 +43,7 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     fixturePath: resolve("fixtures/v0/replay-three-sessions-board.json"),
     storePath: dataPaths.legacyJournalPath,
     databasePath: dataPaths.databasePath,
+    legacyDataDirectory: env.MASTHEAD_LEGACY_DATA_DIR ? resolve(env.MASTHEAD_LEGACY_DATA_DIR) : undefined,
     llmCopyEnabled: env.MASTHEAD_LLM_COPY === "1",
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.MASTHEAD_OPENAI_MODEL

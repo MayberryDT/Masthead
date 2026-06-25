@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { adapterRecordFromCodexHook, codexHookSource } from "../adapters/codex/hookAdapter.ts";
 import { discoverCodexSources } from "../adapters/codex/discovery.ts";
 import { importCodexMetadata } from "../adapters/codex/metadataImport.ts";
@@ -39,6 +39,12 @@ import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type
 import { hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { createSessionRepository, ingestAdapterRecord } from "./db/sessionRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "./db/sqlite.ts";
+import {
+  legacyCandidatesFromDirectory,
+  legacyDataMigrationCompleted,
+  markLegacyDataMigrationCompleted,
+  maybeCopyLegacySqliteBeforeOpen
+} from "./legacyDataMigration.ts";
 import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
 import { setSourcePolicy, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
 import { queueImportJob, type ImportWorkResult } from "./import/importCoordinator.ts";
@@ -68,6 +74,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
   try {
     const store = await createFileBackedStore(config.storePath);
+    const legacyCandidates = config.legacyDataDirectory ? legacyCandidatesFromDirectory(config.legacyDataDirectory) : [];
+    const legacySqliteCandidate = legacyCandidates.find((candidate) => candidate.kind === "sqlite");
+    const legacySqliteMigration = legacySqliteCandidate
+      ? await maybeCopyLegacySqliteBeforeOpen({
+          targetDatabasePath: config.databasePath,
+          legacyDatabasePath: legacySqliteCandidate.path
+        })
+      : { copied: false, reason: "legacy_missing" as const };
+    const legacyNdjsonCandidate = legacyCandidates.find((candidate) => candidate.kind === "ndjson");
+    const legacyEventStore =
+      legacyNdjsonCandidate && resolve(legacyNdjsonCandidate.path) !== resolve(config.storePath)
+        ? await createFileBackedStore(legacyNdjsonCandidate.path)
+        : undefined;
     const database = await openMastheadDatabase(config.databasePath);
     try {
       if (hasPendingMigrations(database)) {
@@ -97,7 +116,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       runtimeKind: "codex"
     });
     const existingRecords = store.readAll();
-    indexExistingCanonicalSessions();
+    const legacyNdjsonRecords = legacyEventStore?.readAll() ?? [];
+    const legacyNdjsonMigrationKey = "legacy-events-ndjson-v1";
+    const shouldHydrateLegacyNdjson =
+      !legacySqliteMigration.copied &&
+      legacyNdjsonRecords.length > 0 &&
+      !legacyDataMigrationCompleted(database, legacyNdjsonMigrationKey);
     const state = createIngestionState(canonicalLiveEvents(database));
     const gitSnapshots = canonicalGitSnapshots(database);
     const gitSnapshotSignatures = new Map(gitSnapshots.map((snapshot) => [snapshot.sessionId, gitSnapshotSignature(snapshot)]));
@@ -166,14 +190,30 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   function startBackgroundHydration(): void {
     if (hydrationStarted) return;
     hydrationStarted = true;
-    hydrationPromise = hydrateDatabaseFromStoreRecords(existingRecords).catch((error: unknown) => {
+    hydrationPromise = (async () => {
+      await hydrateDatabaseFromStoreRecords(existingRecords);
+      if (shouldHydrateLegacyNdjson) {
+        const missingLegacyRecords = missingStoreRecords(legacyNdjsonRecords);
+        if (missingLegacyRecords.length > 0) {
+          await hydrateDatabaseFromStoreRecords(missingLegacyRecords, { skipHydratedCheck: true });
+        }
+        markLegacyDataMigrationCompleted(database, legacyNdjsonMigrationKey, {
+          source: legacyNdjsonCandidate?.path,
+          importedRecords: missingLegacyRecords.length,
+          totalRecords: legacyNdjsonRecords.length
+        });
+      }
+    })().catch((error: unknown) => {
       console.error("[masthead] background journal hydration failed", error);
     });
   }
 
-  async function hydrateDatabaseFromStoreRecords(records: StoreRecord[]): Promise<void> {
+  async function hydrateDatabaseFromStoreRecords(
+    records: StoreRecord[],
+    options: { skipHydratedCheck?: boolean } = {}
+  ): Promise<void> {
     if (records.length === 0) return;
-    if (legacyJournalHydrated(records)) {
+    if (!options.skipHydratedCheck && legacyJournalHydrated(records)) {
       indexExistingCanonicalSessions();
       return;
     }
@@ -211,6 +251,18 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   function legacyJournalHydrated(records: StoreRecord[]): boolean {
     const count = (database.prepare("SELECT COUNT(*) AS count FROM raw_events").get() as { count: number }).count;
     return count >= records.length;
+  }
+
+  function missingStoreRecords(records: StoreRecord[]): StoreRecord[] {
+    if (records.length === 0) return [];
+    const existing = new Set(
+      (
+        database.prepare("SELECT source_record_key AS sourceRecordKey FROM raw_events").all() as Array<{
+          sourceRecordKey: string;
+        }>
+      ).map((row) => row.sourceRecordKey)
+    );
+    return records.filter((record) => !existing.has(record.recordId));
   }
 
   function indexExistingCanonicalSessions(): void {
@@ -487,6 +539,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         projectionUrl: `http://${config.host}:${config.port}/projection`,
         ingestUrl: `http://${config.host}:${config.port}/ingest`,
         allowedOrigins: config.allowedOrigins,
+        data: {
+          legacyMigration: {
+            copiedSqlite: legacySqliteMigration.copied,
+            legacyPath: legacySqliteMigration.legacyPath,
+            reason: legacySqliteMigration.reason
+          }
+        },
         llmCopy: sessionCopyEnricher.status()
       });
       return;
