@@ -17,15 +17,16 @@ describe("ObservabilitySidebar", () => {
     expect(html).toContain("Alerts");
     expect(html).toContain("3");
     expect(html).toContain("Logbook");
+    expect(html).toContain("Sources");
     expect(html).toContain("Overview");
     expect(html).toContain("Analysis");
     expect(html).not.toContain("Configuration");
     expect(html).toContain("Performance");
     expect(html).toContain("Usage");
+    expect(html).toContain("Settings");
     expect(html).not.toContain("Costs");
     expect(html).not.toContain("Agents");
     expect(html).not.toContain("Environments");
-    expect(html).not.toContain("Settings");
     expect(html).not.toContain("Status");
     expect(html).not.toContain("API");
     expect(html).not.toContain("Update available");

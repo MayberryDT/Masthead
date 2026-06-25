@@ -3,18 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
-    "dev": "node scripts/masthead-live-dev.js",
+    "dev": "npm run build:daemon && node scripts/masthead-live-dev.js",
     "dev:ui": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "dev:fixture": "VITE_MASTHEAD_MODE=fixture vite --host 127.0.0.1 --port 5173 --strictPort",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && npm run build:daemon",
+    "build:daemon": "tsc -p tsconfig.daemon.json && node scripts/copy-daemon-assets.js",
+    "prepare:daemon-resources": "node scripts/prepare-daemon-resources.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest",
+    "test": "npm run build:daemon && vitest",
     "doctor": "node scripts/masthead-doctor.js",
     "dogfood": "node scripts/masthead-dogfood.js",
     "dogfood:fixture": "node scripts/masthead-dogfood.js",
     "dogfood:live": "node scripts/masthead-dogfood.js --live",
-    "ingest": "node scripts/masthead-ingest-server.js",
+    "ingest": "npm run build:daemon && node dist/daemon/src/daemon/main.js",
+    "mcp": "npm run build:daemon && node dist/daemon/src/mcp/server.js",
     "demo:hook": "node scripts/masthead-demo.js"
   },
   "dependencies": {

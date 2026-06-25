@@ -4,10 +4,13 @@
   "version": "0.1.0",
   "identifier": "ai.animas.masthead",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "MASTHEAD_DAEMON_ENTRY=../dist/daemon/src/daemon/main.js MASTHEAD_NODE_PATH=node npm run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build && npm run prepare:daemon-resources",
     "frontendDist": "../dist"
+  },
+  "bundle": {
+    "resources": ["resources/daemon/**/*"]
   },
   "app": {
     "windows": [

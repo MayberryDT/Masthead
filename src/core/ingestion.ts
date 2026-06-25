@@ -43,6 +43,13 @@ export function ingestCodexHookPayload(
   }
 
   const event = parsed.event;
+  return ingestNormalizedEvent(event, state);
+}
+
+export function ingestNormalizedEvent(
+  event: NormalizedEvent,
+  state: IngestionState = createIngestionState()
+): Exclude<IngestionResult, { status: "malformed" }> {
   if (hasSeen(state, event)) {
     return { status: "duplicate", event };
   }

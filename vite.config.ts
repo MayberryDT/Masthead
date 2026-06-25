@@ -17,7 +17,7 @@ export default defineConfig({
   }
 });
 
-const connectorCommand = "node scripts/masthead-ingest-server.js";
+const connectorCommand = "node dist/daemon/src/daemon/main.js";
 let collectorProcess: ChildProcess | undefined;
 
 function mastheadConnectorManager(): Plugin {
@@ -63,9 +63,9 @@ async function startCollectorFromDevServer(projectRoot: string) {
     };
   }
 
-  const scriptPath = join(projectRoot, "scripts", "masthead-ingest-server.js");
+  const scriptPath = join(projectRoot, "dist", "daemon", "src", "daemon", "main.js");
   if (!existsSync(scriptPath)) {
-    throw new Error(`Masthead ingest server script not found at ${scriptPath}`);
+    throw new Error(`Masthead daemon build not found at ${scriptPath}. Run npm run build:daemon first.`);
   }
 
   collectorProcess = spawn(process.execPath, [scriptPath], {

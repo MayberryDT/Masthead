@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
-import { buildLiveDevPlan, startReadOnlyConnectorBridge } from "../src/core/worktreeConnector.ts";
+import { buildLiveDevPlan, startReadOnlyConnectorBridge } from "../dist/daemon/src/core/worktreeConnector.js";
 
 const plan = await buildLiveDevPlan(process.env);
 const children = new Set();
@@ -14,7 +14,7 @@ console.log(`App:       ${plan.uiUrl}`);
 let collector;
 if (plan.connector.mode === "primary") {
   console.log(`Connector: ${plan.connector.baseUrl} (primary)`);
-  collector = start("collector", process.execPath, ["scripts/masthead-ingest-server.js"], {
+  collector = start("collector", process.execPath, ["dist/daemon/src/daemon/main.js"], {
     MASTHEAD_HOST: plan.host,
     MASTHEAD_PORT: String(plan.connector.port),
     MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins

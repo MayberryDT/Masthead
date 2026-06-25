@@ -3,23 +3,41 @@ import { searchHistory, type HistorySearchFilters, type HistorySession } from ".
 import type { StoreRecord } from "../core/store";
 
 type Props = {
-  records: StoreRecord[];
+  records?: StoreRecord[];
+  sessions?: LogbookSession[];
   query: string;
+  total?: number;
+  loading?: boolean;
   onQueryChange: (query: string) => void;
 };
 
-export function HistoryPanel({ records, query, onQueryChange }: Props) {
+export type LogbookSession = {
+  sessionId: string;
+  title: string;
+  project?: string;
+  runtime?: string;
+  model?: string;
+  host?: string;
+  state?: string;
+  snippet?: string;
+  lastActivityAt?: string;
+};
+
+export function HistoryPanel({ records = [], sessions, query, total, loading = false, onQueryChange }: Props) {
   const filters = filtersFromQuery(query);
-  const result = searchHistory(records, filters);
+  const result = sessions ? undefined : searchHistory(records, filters);
+  const visibleSessions = sessions ?? [];
+  const visibleTotal = total ?? result?.sessions.length ?? visibleSessions.length;
+  const recordCount = result?.recordCount ?? visibleTotal;
 
   return (
     <section id="history" className="history-panel" aria-label="Local history">
       <header className="section-head">
         <div>
           <p className="mono-label">History</p>
-          <h1>Local history</h1>
+          <h1>Logbook</h1>
         </div>
-        <strong>{result.sessions.length}</strong>
+        <strong>{visibleTotal}</strong>
       </header>
       <label className="search-field history-search">
         <span className="mono-label">Search history</span>
@@ -34,51 +52,96 @@ export function HistoryPanel({ records, query, onQueryChange }: Props) {
         />
       </label>
       <div className="history-results">
-        {result.sessions.slice(0, maxVisibleHistorySessions).map((session) => (
-          <article key={session.sessionId} className="history-item">
-            <header>
-              <div>
-                <p className="mono-label">
-                  {session.project} / {statusText(session.status)}
-                </p>
-                <h2>{historyHeadline(session)}</h2>
-              </div>
-              <span className="state-token">{outcomeText(session.outcome)}</span>
-            </header>
-            <dl className="history-facts">
-              <div>
-                <dt>Files</dt>
-                <dd>{formatCount(session.changedPaths.length, "file changed", "files changed")}</dd>
-              </div>
-              <div>
-                <dt>Commands</dt>
-                <dd>{formatCount(Math.max(session.commands.length, session.commandIds.length), "command observed", "commands observed")}</dd>
-              </div>
-              <div>
-                <dt>Alerts</dt>
-                <dd>{formatCount(session.alertTypes.length, "follow-up signal", "follow-up signals")}</dd>
-              </div>
-              <div>
-                <dt>Outcome</dt>
-                <dd>{outcomeText(session.outcome)}</dd>
-              </div>
-              <div>
-                <dt>Disposition</dt>
-                <dd>{formatCount(session.dispositionStatuses.length, "review label", "review labels")}</dd>
-              </div>
-              <div>
-                <dt>Records</dt>
-                <dd>{session.records.length}</dd>
-              </div>
-            </dl>
-          </article>
-        ))}
+        {loading ? <p className="toolbar-result">Loading Logbook results...</p> : null}
+        {sessions
+          ? visibleSessions.slice(0, maxVisibleHistorySessions).map((session) => <LogbookSessionItem key={session.sessionId} session={session} />)
+          : result?.sessions.slice(0, maxVisibleHistorySessions).map((session) => <LegacyHistoryItem key={session.sessionId} session={session} />)}
       </div>
       <p className="toolbar-result">
-        Showing {Math.min(result.sessions.length, maxVisibleHistorySessions)} of {result.sessions.length}; searching{" "}
-        {result.recordCount} local records
+        Showing {Math.min(visibleTotal, maxVisibleHistorySessions)} of {visibleTotal}; searching {recordCount} local records
       </p>
     </section>
+  );
+}
+
+function LogbookSessionItem({ session }: { session: LogbookSession }) {
+  return (
+    <article className="history-item">
+      <header>
+        <div>
+          <p className="mono-label">
+            {session.project ?? "Masthead"} / {session.runtime ?? "unknown"}
+          </p>
+          <h2>{session.title}</h2>
+        </div>
+        <span className="state-token">{session.state ?? "indexed"}</span>
+      </header>
+      {session.snippet ? <HighlightedSnippet snippet={session.snippet} /> : null}
+    </article>
+  );
+}
+
+function HighlightedSnippet({ snippet }: { snippet: string }) {
+  const parts = snippet.split(/(<mark>|<\/mark>)/g);
+  let highlighted = false;
+
+  return (
+    <p className="history-snippet">
+      {parts.map((part, index) => {
+        if (part === "<mark>") {
+          highlighted = true;
+          return null;
+        }
+        if (part === "</mark>") {
+          highlighted = false;
+          return null;
+        }
+        if (!part) return null;
+        return highlighted ? <mark key={index}>{part}</mark> : <span key={index}>{part}</span>;
+      })}
+    </p>
+  );
+}
+
+function LegacyHistoryItem({ session }: { session: HistorySession }) {
+  return (
+    <article className="history-item">
+      <header>
+        <div>
+          <p className="mono-label">
+            {session.project} / {statusText(session.status)}
+          </p>
+          <h2>{historyHeadline(session)}</h2>
+        </div>
+        <span className="state-token">{outcomeText(session.outcome)}</span>
+      </header>
+      <dl className="history-facts">
+        <div>
+          <dt>Files</dt>
+          <dd>{formatCount(session.changedPaths.length, "file changed", "files changed")}</dd>
+        </div>
+        <div>
+          <dt>Commands</dt>
+          <dd>{formatCount(Math.max(session.commands.length, session.commandIds.length), "command observed", "commands observed")}</dd>
+        </div>
+        <div>
+          <dt>Alerts</dt>
+          <dd>{formatCount(session.alertTypes.length, "follow-up signal", "follow-up signals")}</dd>
+        </div>
+        <div>
+          <dt>Outcome</dt>
+          <dd>{outcomeText(session.outcome)}</dd>
+        </div>
+        <div>
+          <dt>Disposition</dt>
+          <dd>{formatCount(session.dispositionStatuses.length, "review label", "review labels")}</dd>
+        </div>
+        <div>
+          <dt>Records</dt>
+          <dd>{session.records.length}</dd>
+        </div>
+      </dl>
+    </article>
   );
 }
 

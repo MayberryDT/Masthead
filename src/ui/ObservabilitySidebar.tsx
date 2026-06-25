@@ -7,9 +7,13 @@ type Props = {
   version: string;
   activeCount: number;
   alertCount?: number;
+  activeSurface?: AppSurface;
+  onSurfaceChange?: (surface: AppSurface) => void;
 };
 
-export function ObservabilitySidebar({ version, activeCount, alertCount = 3 }: Props) {
+export type AppSurface = "board" | "logbook" | "sources" | "settings";
+
+export function ObservabilitySidebar({ version, activeCount, alertCount = 3, activeSurface = "board", onSurfaceChange }: Props) {
   return (
     <div className="sidebar-shell">
       <a className="sidebar-brand" href="#overview" aria-label="Masthead overview">
@@ -22,14 +26,41 @@ export function ObservabilitySidebar({ version, activeCount, alertCount = 3 }: P
 
       <nav className="sidebar-nav" aria-label="Observability sections">
         <SidebarGroup title="Overview">
-          <SidebarLink href="#sessions" icon="sessions" label="Sessions" count={activeCount} active />
+          <SidebarLink
+            href="#sessions"
+            icon="sessions"
+            label="Sessions"
+            count={activeCount}
+            active={activeSurface === "board"}
+            onClick={() => onSurfaceChange?.("board")}
+          />
           <SidebarLink href="#top-models" icon="models" label="Models" />
           <SidebarLink href="#attention" icon="alerts" label="Alerts" count={alertCount} alertCount />
-          <SidebarLink href="#logbook" icon="logbook" label="Logbook" />
+          <SidebarLink
+            href="#logbook"
+            icon="logbook"
+            label="Logbook"
+            active={activeSurface === "logbook"}
+            onClick={() => onSurfaceChange?.("logbook")}
+          />
+          <SidebarLink
+            href="#sources"
+            icon="usage"
+            label="Sources"
+            active={activeSurface === "sources"}
+            onClick={() => onSurfaceChange?.("sources")}
+          />
         </SidebarGroup>
         <SidebarGroup title="Analysis">
           <SidebarLink href="#tokens-per-minute" icon="performance" label="Performance" />
           <SidebarLink href="#usage" icon="usage" label="Usage" />
+          <SidebarLink
+            href="#settings"
+            icon="models"
+            label="Settings"
+            active={activeSurface === "settings"}
+            onClick={() => onSurfaceChange?.("settings")}
+          />
         </SidebarGroup>
       </nav>
     </div>
@@ -51,7 +82,8 @@ function SidebarLink({
   label,
   count,
   active = false,
-  alertCount = false
+  alertCount = false,
+  onClick
 }: {
   href: string;
   icon: IconName;
@@ -59,9 +91,22 @@ function SidebarLink({
   count?: number;
   active?: boolean;
   alertCount?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <a className={`sidebar-link ${active ? "active" : ""}`} href={href} aria-current={active ? "page" : undefined}>
+    <a
+      className={`sidebar-link ${active ? "active" : ""}`}
+      href={href}
+      aria-current={active ? "page" : undefined}
+      onClick={
+        onClick
+          ? (event) => {
+              event.preventDefault();
+              onClick();
+            }
+          : undefined
+      }
+    >
       <span className="sidebar-icon" aria-hidden="true">
         <Icon name={icon} size="sidebar" weight={active ? iconWeights.sidebarSelected : iconWeights.sidebarInactive} />
       </span>

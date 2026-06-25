@@ -14,11 +14,12 @@ import { AttentionQueue } from "../ui/AttentionQueue";
 import { HistoryPanel } from "../ui/HistoryPanel";
 import { ObservabilityConsoleShell } from "../ui/ObservabilityConsoleShell";
 import { ObservabilityRightRail } from "../ui/ObservabilityRightRail";
-import { ObservabilitySidebar } from "../ui/ObservabilitySidebar";
+import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
 import { OperationsPanel } from "../ui/OperationsPanel";
 import { SessionBoard } from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
+import { SourcesPanel } from "../ui/SourcesPanel";
 import { Toolbar, type ConnectorDisplayState } from "../ui/Toolbar";
 import { filterAttentionItemsForCards, filterCards, mainScanCards, summarizeMainScanCards, type BoardFilter } from "../ui/filterBoard";
 import {
@@ -41,6 +42,14 @@ import {
   retentionRequestUrl
 } from "./liveProjectionClient";
 import { startLiveConnector } from "./connectorClient";
+import {
+  addSourceExclusion,
+  importCodexMetadata,
+  listSources,
+  searchLogbook,
+  type LogbookSearchResult,
+  type SourceStatus
+} from "./daemonClient";
 import { appendLocalRecords, clearLocalData, exportedRecordCount, exportLocalData, pruneLocalData, readLocalRecords } from "./nativeStoreClient";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
@@ -88,6 +97,7 @@ const emptyLiveBoard: LiveBoardProjection = {
 };
 
 export function App() {
+  const [activeSurface, setActiveSurface] = useState<AppSurface>("board");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [historyQuery, setHistoryQuery] = useState("");
@@ -107,6 +117,11 @@ export function App() {
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
   const [localStoreRecords, setLocalStoreRecords] = useState<StoreRecord[]>([]);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
+  const [sources, setSources] = useState<SourceStatus[]>([]);
+  const [sourcesBusy, setSourcesBusy] = useState(false);
+  const [sourcesStatus, setSourcesStatus] = useState<string>();
+  const [logbookResult, setLogbookResult] = useState<LogbookSearchResult>();
+  const [logbookLoading, setLogbookLoading] = useState(false);
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
   const [localDataStatus, setLocalDataStatus] = useState<{
     state: "idle" | "confirm_delete" | "confirm_prune" | "busy" | "exported" | "deleted" | "pruned" | "error";
@@ -297,6 +312,78 @@ export function App() {
     }
   };
 
+  const handleRefreshSources = useCallback(async () => {
+    setSourcesBusy(true);
+    try {
+      const nextSources = await listSources(liveProjectionUrl);
+      setSources(nextSources);
+      setSourcesStatus(`${nextSources.length} source${nextSources.length === 1 ? "" : "s"} detected.`);
+    } catch (error) {
+      setSourcesStatus(`Source refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSurface !== "sources") return;
+    void handleRefreshSources();
+  }, [activeSurface, handleRefreshSources]);
+
+  useEffect(() => {
+    if (activeSurface !== "logbook") return;
+    let cancelled = false;
+    const loadLogbook = async () => {
+      setLogbookLoading(true);
+      try {
+        const result = await searchLogbook(historyQuery, liveProjectionUrl);
+        if (!cancelled) setLogbookResult(result);
+      } catch {
+        if (!cancelled) setLogbookResult(undefined);
+      } finally {
+        if (!cancelled) setLogbookLoading(false);
+      }
+    };
+    void loadLogbook();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSurface, historyQuery]);
+
+  const handleImportCodexMetadata = async () => {
+    setSourcesBusy(true);
+    setSourcesStatus("Importing Codex metadata...");
+    try {
+      const result = await importCodexMetadata(liveProjectionUrl);
+      setSourcesStatus(`Metadata import ready: ${result.imported} records from ${result.sources} sources.`);
+      setSources(await listSources(liveProjectionUrl));
+    } catch (error) {
+      setSourcesStatus(`Metadata import failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
+  const handleExcludeSourcePath = async (path: string) => {
+    setSourcesBusy(true);
+    try {
+      await addSourceExclusion(
+        {
+          exclusionKind: "path",
+          pattern: path,
+          reason: "Excluded from full transcript ingestion."
+        },
+        liveProjectionUrl
+      );
+      setSourcesStatus("Source exclusion saved.");
+      setSources(await listSources(liveProjectionUrl));
+    } catch (error) {
+      setSourcesStatus(`Source exclusion failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
   const handleExportLocalData = async () => {
     setLocalDataStatus({ state: "busy", message: "Preparing local export..." });
     try {
@@ -418,6 +505,73 @@ export function App() {
     }
   };
 
+  const mainSurface =
+    activeSurface === "sources" ? (
+      <SourcesPanel
+        sources={sources}
+        busy={sourcesBusy}
+        status={sourcesStatus}
+        onRefresh={handleRefreshSources}
+        onImportCodexMetadata={handleImportCodexMetadata}
+        onExcludePath={handleExcludeSourcePath}
+      />
+    ) : activeSurface === "logbook" ? (
+      <HistoryPanel
+        records={historyRecords}
+        query={historyQuery}
+        sessions={logbookResult?.sessions}
+        total={logbookResult?.total}
+        loading={logbookLoading}
+        onQueryChange={setHistoryQuery}
+      />
+    ) : activeSurface === "settings" ? (
+      <OperationsPanel
+        localDataStatus={localDataStatus}
+        onExportLocalData={handleExportLocalData}
+        onRequestPruneLocalData={handleRequestPruneLocalData}
+        onConfirmPruneLocalData={handleConfirmPruneLocalData}
+        onRequestDeleteLocalData={handleRequestDeleteLocalData}
+        onConfirmDeleteLocalData={handleConfirmDeleteLocalData}
+      />
+    ) : (
+      <>
+        <Toolbar
+          query={query}
+          filter={filter}
+          resultCount={filteredCards.length}
+          totalCount={scanCards.length}
+          harnessFilter={harnessFilter}
+          lifecycleFilter={lifecycleFilter}
+          sortMode={sortMode}
+          activityWindow={activityWindow}
+          refreshRateMs={refreshRateMs}
+          density={density}
+          connectorState={showDemoData ? undefined : connectorDisplayState}
+          connectorBusy={connectorAction.state === "starting"}
+          onQueryChange={setQuery}
+          onFilterChange={setFilter}
+          onHarnessFilterChange={setHarnessFilter}
+          onLifecycleFilterChange={setLifecycleFilter}
+          onSortModeChange={setSortMode}
+          onActivityWindowChange={setActivityWindow}
+          onRefreshRateChange={setRefreshRateMs}
+          onConnectorAction={handleStartConnector}
+          onDensityToggle={toggleDensity}
+          searchInputRef={searchInputRef}
+        />
+        <SessionBoard
+          cards={filteredCards}
+          lanes={board.lanes}
+          variant="observability"
+          emptyTitle={emptyBoardTitle({ showDemoData, hasActiveToolbarFilters, liveConnection })}
+          emptyMessage={emptyBoardMessage({ showDemoData, hasActiveToolbarFilters, liveConnection })}
+          onOpenSession={handleOpenSession}
+          showDemoTelemetry={showDemoData}
+          density={density}
+        />
+      </>
+    );
+
   return (
     <>
       <ObservabilityConsoleShell
@@ -425,46 +579,11 @@ export function App() {
           <ObservabilitySidebar
             version={APP_VERSION_LABEL}
             activeCount={observabilitySessionTotal(visibleSummary)}
+            activeSurface={activeSurface}
+            onSurfaceChange={setActiveSurface}
           />
         }
-        main={
-          <>
-            <Toolbar
-              query={query}
-              filter={filter}
-              resultCount={filteredCards.length}
-              totalCount={scanCards.length}
-              harnessFilter={harnessFilter}
-              lifecycleFilter={lifecycleFilter}
-              sortMode={sortMode}
-              activityWindow={activityWindow}
-              refreshRateMs={refreshRateMs}
-              density={density}
-              connectorState={showDemoData ? undefined : connectorDisplayState}
-              connectorBusy={connectorAction.state === "starting"}
-              onQueryChange={setQuery}
-              onFilterChange={setFilter}
-              onHarnessFilterChange={setHarnessFilter}
-              onLifecycleFilterChange={setLifecycleFilter}
-              onSortModeChange={setSortMode}
-              onActivityWindowChange={setActivityWindow}
-              onRefreshRateChange={setRefreshRateMs}
-              onConnectorAction={handleStartConnector}
-              onDensityToggle={toggleDensity}
-              searchInputRef={searchInputRef}
-            />
-            <SessionBoard
-              cards={filteredCards}
-              lanes={board.lanes}
-              variant="observability"
-              emptyTitle={emptyBoardTitle({ showDemoData, hasActiveToolbarFilters, liveConnection })}
-              emptyMessage={emptyBoardMessage({ showDemoData, hasActiveToolbarFilters, liveConnection })}
-              onOpenSession={handleOpenSession}
-              showDemoTelemetry={showDemoData}
-              density={density}
-            />
-          </>
-        }
+        main={mainSurface}
         rightRail={
           <ObservabilityRightRail
             summary={visibleSummary}

@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": false,
+    "outDir": "dist/daemon",
+    "rootDir": ".",
+    "rewriteRelativeImportExtensions": true,
+    "sourceMap": true,
+    "types": ["node"]
+  },
+  "include": ["src/core/**/*.ts", "src/daemon/**/*.ts", "src/mcp/**/*.ts"],
+  "exclude": ["**/__tests__/**"]
+}

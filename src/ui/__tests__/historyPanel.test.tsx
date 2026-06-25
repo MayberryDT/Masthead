@@ -26,7 +26,7 @@ describe("HistoryPanel", () => {
   test("renders searchable local history without raw session metadata or unsafe actions", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:App" onQueryChange={() => {}} />);
 
-    expect(html).toContain("Local history");
+    expect(html).toContain("Logbook");
     expect(html).toContain("Search history");
     expect(html).toContain("Session needs review");
     expect(html).toContain("1 file changed");
@@ -41,10 +41,38 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("Git commit");
   });
 
+  test("renders database-backed Logbook sessions", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        loading={false}
+        query="sqlite"
+        sessions={[
+          {
+            project: "Masthead",
+            runtime: "codex",
+            sessionId: "session-1",
+            snippet: 'Import <script>alert("x")</script> Codex history into <mark>SQLite</mark>',
+            state: "unknown",
+            title: "Masthead data layer"
+          }
+        ]}
+        total={1}
+        onQueryChange={() => {}}
+      />
+    );
+
+    expect(html).toContain("Masthead data layer");
+    expect(html).toContain("Codex history into");
+    expect(html).toContain("<mark>SQLite</mark>");
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain('<script>alert("x")</script>');
+    expect(html).toContain("Showing 1 of 1");
+  });
+
   test("renders no-match queries with an explicit zero result count", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:Missing" onQueryChange={() => {}} />);
 
-    expect(html).toContain("Local history");
+    expect(html).toContain("Logbook");
     expect(html).toContain("0</strong>");
     expect(html).toContain("Showing 0 of 0; searching 0 local records");
     expect(html).not.toContain("History case");

@@ -1,0 +1,654 @@
+import { createHash } from "node:crypto";
+import { basename } from "node:path";
+import type { AdapterRecord } from "../../adapters/types.ts";
+import { redactText } from "../../core/redaction.ts";
+import type { LiveBoardProjection, NormalizedEvent } from "../../core/types.ts";
+import type { MastheadDatabase } from "./sqlite.ts";
+
+export type SessionRepositoryContext = {
+  hostId: string;
+  hostname?: string;
+  runtimeKind: string;
+  runtimeVersion?: string;
+};
+
+type SessionRepository = {
+  replaceBoardProjection(projection: LiveBoardProjection, updatedAt: string): void;
+  upsertLiveEvent(event: NormalizedEvent): string | undefined;
+  upsertMetadataRecord(record: AdapterRecord): string | undefined;
+  upsertTranscriptRecord(record: AdapterRecord): string | undefined;
+};
+
+export function createSessionRepository(db: MastheadDatabase, context: SessionRepositoryContext): SessionRepository {
+  const runtimeId = runtimeIdFor(context.runtimeKind, context.runtimeVersion);
+
+  const ensureHostRuntime = (observedAt: string): void => {
+    db.prepare(
+      `INSERT INTO hosts (host_id, hostname, first_seen_at, last_seen_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(host_id) DO UPDATE SET
+        hostname = excluded.hostname,
+        last_seen_at = excluded.last_seen_at`
+    ).run(context.hostId, context.hostname ?? null, observedAt, observedAt);
+    db.prepare(
+      `INSERT INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(runtime_id) DO UPDATE SET
+        runtime_version = excluded.runtime_version,
+        last_seen_at = excluded.last_seen_at`
+    ).run(runtimeId, context.runtimeKind, context.runtimeVersion ?? null, observedAt, observedAt);
+  };
+
+  const upsertLiveEvent = (event: NormalizedEvent): string | undefined => {
+    if (!event.sessionId) return undefined;
+    ensureHostRuntime(event.occurredAt);
+    const sourceSessionId = event.sessionId;
+    const sessionId = canonicalSessionId(context.hostId, runtimeId, sourceSessionId);
+    upsertSession(event, sessionId, sourceSessionId);
+    upsertTurn(event, sessionId);
+    upsertMessage(event, sessionId);
+    upsertToolCall(event, sessionId);
+    upsertToolResult(event, sessionId);
+    upsertFileEffect(event, sessionId);
+    upsertRuntimeSignal(event, sessionId);
+    upsertModelUsage(event, sessionId);
+    return sessionId;
+  };
+
+  const replaceBoardProjection = (projection: LiveBoardProjection, updatedAt: string): void => {
+    ensureHostRuntime(updatedAt);
+    const upsertSessionStub = db.prepare(
+      `INSERT INTO sessions (
+        session_id,
+        host_id,
+        runtime_id,
+        source_session_id,
+        project_label,
+        title,
+        lifecycle,
+        outcome_label,
+        started_at,
+        last_activity_at,
+        source_confidence,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(host_id, runtime_id, source_session_id) DO UPDATE SET
+        project_label = COALESCE(sessions.project_label, excluded.project_label),
+        title = COALESCE(sessions.title, excluded.title),
+        lifecycle = CASE
+          WHEN sessions.lifecycle = 'unknown' THEN excluded.lifecycle
+          ELSE sessions.lifecycle
+        END,
+        outcome_label = COALESCE(sessions.outcome_label, excluded.outcome_label),
+        last_activity_at = MAX(sessions.last_activity_at, excluded.last_activity_at),
+        updated_at = excluded.updated_at`
+    );
+    const upsert = db.prepare(
+      `INSERT INTO board_sessions (session_id, projection_json, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(session_id) DO UPDATE SET
+        projection_json = excluded.projection_json,
+        updated_at = excluded.updated_at`
+    );
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      for (const card of projection.cards) {
+        const sessionId = canonicalSessionId(context.hostId, runtimeId, card.sessionId);
+        upsertSessionStub.run(
+          sessionId,
+          context.hostId,
+          runtimeId,
+          card.sessionId,
+          card.project,
+          card.title,
+          card.lifecycle,
+          card.outcomeLabel ?? null,
+          card.startedAt ?? null,
+          updatedAt,
+          "inferred",
+          updatedAt,
+          updatedAt
+        );
+        upsert.run(sessionId, JSON.stringify(card), updatedAt);
+      }
+      db.exec("COMMIT;");
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
+  };
+
+  const upsertMetadataRecord = (record: AdapterRecord): string | undefined => {
+    const value = metadataValue(record.normalized.value);
+    if (!value.sessionId) return undefined;
+    const observedAt = value.observedAt ?? record.observedAt;
+    ensureHostRuntime(observedAt);
+    const sessionId = canonicalSessionId(context.hostId, runtimeId, value.sessionId);
+    db.prepare(
+      `INSERT INTO sessions (
+        session_id,
+        host_id,
+        runtime_id,
+        source_session_id,
+        project_label,
+        title,
+        lifecycle,
+        started_at,
+        last_activity_at,
+        source_confidence,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(host_id, runtime_id, source_session_id) DO UPDATE SET
+        project_label = COALESCE(sessions.project_label, excluded.project_label),
+        title = COALESCE(sessions.title, excluded.title),
+        last_activity_at = MAX(sessions.last_activity_at, excluded.last_activity_at),
+        updated_at = excluded.updated_at`
+    ).run(
+      sessionId,
+      context.hostId,
+      runtimeId,
+      value.sessionId,
+      value.project ?? null,
+      value.title ?? null,
+      "unknown",
+      observedAt,
+      observedAt,
+      record.normalized.confidence,
+      record.observedAt,
+      record.observedAt
+    );
+    return sessionId;
+  };
+
+  const upsertTranscriptRecord = (record: AdapterRecord): string | undefined => {
+    const value = transcriptValue(record.normalized.value, record.source.path);
+    if (!value.sessionId) return undefined;
+    const observedAt = value.observedAt ?? record.observedAt;
+    ensureHostRuntime(observedAt);
+    const sessionId = canonicalSessionId(context.hostId, runtimeId, value.sessionId);
+    db.prepare(
+      `INSERT INTO sessions (
+        session_id,
+        host_id,
+        runtime_id,
+        source_session_id,
+        lifecycle,
+        last_activity_at,
+        source_confidence,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(host_id, runtime_id, source_session_id) DO UPDATE SET
+        last_activity_at = MAX(sessions.last_activity_at, excluded.last_activity_at),
+        updated_at = excluded.updated_at`
+    ).run(sessionId, context.hostId, runtimeId, value.sessionId, "unknown", observedAt, record.normalized.confidence, record.observedAt, record.observedAt);
+    if (record.normalized.kind === "message" && value.role && value.text) {
+      const textRedacted = redactText(value.text);
+      db.prepare(
+        `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id, text_hash, observed_at, role) DO NOTHING`
+      ).run(
+        messageId(sessionId, record.sourceRecordKey, value.role),
+        sessionId,
+        value.role,
+        textRedacted,
+        hash(textRedacted),
+        observedAt,
+        transcriptSourceRefJson(record),
+        record.normalized.confidence
+      );
+      return sessionId;
+    }
+    if (record.normalized.kind === "tool_call") {
+      db.prepare(
+        `INSERT INTO tool_calls (tool_call_id, session_id, tool_name, arguments_redacted_json, started_at, source_ref_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tool_call_id) DO NOTHING`
+      ).run(
+        toolCallIdFromRecord(sessionId, record),
+        sessionId,
+        value.toolName ?? "tool",
+        JSON.stringify(value.arguments ?? {}),
+        observedAt,
+        transcriptSourceRefJson(record)
+      );
+      return sessionId;
+    }
+    if (record.normalized.kind === "usage") {
+      db.prepare(
+        `INSERT INTO model_usage (
+          usage_id,
+          session_id,
+          model,
+          provider,
+          input_tokens,
+          output_tokens,
+          total_tokens,
+          cost_micros,
+          observed_at,
+          source_ref_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(usage_id) DO NOTHING`
+      ).run(
+        modelUsageIdFromRecord(sessionId, record),
+        sessionId,
+        value.model ?? null,
+        value.provider ?? null,
+        value.inputTokens ?? null,
+        value.outputTokens ?? null,
+        value.totalTokens ?? null,
+        null,
+        observedAt,
+        transcriptSourceRefJson(record)
+      );
+      return sessionId;
+    }
+    return undefined;
+  };
+
+  const upsertSession = (event: NormalizedEvent, sessionId: string, sourceSessionId: string): void => {
+    const title = stringPayload(event, ["title"]) ?? (event.type === "session.started" ? event.summary : undefined);
+    const objective = stringPayload(event, ["objective"]);
+    const projectLabel = stringPayload(event, ["project"]) ?? (event.type === "session.started" ? projectLabelFromWorkspace(event) : undefined);
+    db.prepare(
+      `INSERT INTO sessions (
+        session_id,
+        host_id,
+        runtime_id,
+        source_session_id,
+        project_label,
+        repo_root,
+        worktree_path,
+        branch,
+        title,
+        objective,
+        lifecycle,
+        outcome_label,
+        started_at,
+        last_activity_at,
+        ended_at,
+        source_confidence,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(host_id, runtime_id, source_session_id) DO UPDATE SET
+        project_label = COALESCE(sessions.project_label, excluded.project_label),
+        repo_root = COALESCE(excluded.repo_root, sessions.repo_root),
+        worktree_path = COALESCE(excluded.worktree_path, sessions.worktree_path),
+        branch = COALESCE(excluded.branch, sessions.branch),
+        title = COALESCE(sessions.title, excluded.title),
+        objective = COALESCE(sessions.objective, excluded.objective),
+        lifecycle = excluded.lifecycle,
+        outcome_label = COALESCE(excluded.outcome_label, sessions.outcome_label),
+        last_activity_at = MAX(sessions.last_activity_at, excluded.last_activity_at),
+        ended_at = COALESCE(excluded.ended_at, sessions.ended_at),
+        updated_at = excluded.updated_at`
+    ).run(
+      sessionId,
+      context.hostId,
+      runtimeId,
+      sourceSessionId,
+      projectLabel ?? null,
+      event.workspace?.repoRoot ?? null,
+      event.workspace?.worktreePath ?? event.workspace?.cwd ?? null,
+      event.workspace?.branch ?? null,
+      title ?? null,
+      objective ?? null,
+      event.type === "session.completed" ? "ended" : "running",
+      event.type === "session.completed" ? "completed" : null,
+      event.type === "session.started" ? event.occurredAt : null,
+      event.occurredAt,
+      event.type === "session.completed" ? event.occurredAt : null,
+      "authoritative",
+      event.receivedAt,
+      event.receivedAt
+    );
+  };
+
+  const upsertTurn = (event: NormalizedEvent, sessionId: string): void => {
+    db.prepare(
+      `INSERT INTO turns (turn_id, session_id, source_turn_id, turn_index, role, started_at, ended_at, source_ref_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(session_id, turn_index, role, source_turn_id) DO NOTHING`
+    ).run(
+      turnId(sessionId, event.eventId),
+      sessionId,
+      event.eventId,
+      turnIndex(event),
+      roleForEvent(event),
+      event.occurredAt,
+      terminalEventTypes.has(event.type) ? event.occurredAt : null,
+      sourceRefJson(event)
+    );
+  };
+
+  const upsertMessage = (event: NormalizedEvent, sessionId: string): void => {
+    const role = messageRoleForEvent(event);
+    const text = messageTextForEvent(event);
+    if (!role || !text) return;
+    db.prepare(
+      `INSERT INTO messages (message_id, session_id, turn_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(session_id, text_hash, observed_at, role) DO NOTHING`
+    ).run(messageId(sessionId, event.eventId, role), sessionId, turnId(sessionId, event.eventId), role, text, hash(text), event.occurredAt, sourceRefJson(event), "authoritative");
+  };
+
+  const upsertToolCall = (event: NormalizedEvent, sessionId: string): void => {
+    if (event.type !== "command.started" && event.type !== "command.finished") return;
+    db.prepare(
+      `INSERT INTO tool_calls (tool_call_id, session_id, turn_id, tool_name, arguments_redacted_json, started_at, source_ref_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(tool_call_id) DO NOTHING`
+    ).run(
+      toolCallId(sessionId, event),
+      sessionId,
+      turnId(sessionId, event.eventId),
+      stringPayload(event, ["category", "toolName"]) ?? "command",
+      JSON.stringify({
+        command: stringPayload(event, ["normalizedCommand", "command"]),
+        commandId: stringPayload(event, ["commandId"])
+      }),
+      event.occurredAt,
+      sourceRefJson(event)
+    );
+  };
+
+  const upsertToolResult = (event: NormalizedEvent, sessionId: string): void => {
+    if (event.type !== "command.finished") return;
+    const exitCode = numberPayload(event, ["exitCode"]);
+    db.prepare(
+      `INSERT INTO tool_results (tool_result_id, tool_call_id, session_id, status, output_redacted, output_hash, exit_code, completed_at, source_ref_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(tool_result_id) DO NOTHING`
+    ).run(
+      toolResultId(sessionId, event),
+      toolCallId(sessionId, event),
+      sessionId,
+      exitCode === undefined ? "unknown" : exitCode === 0 ? "succeeded" : "failed",
+      null,
+      null,
+      exitCode ?? null,
+      event.occurredAt,
+      sourceRefJson(event)
+    );
+  };
+
+  const upsertFileEffect = (event: NormalizedEvent, sessionId: string): void => {
+    if (event.type !== "file.changed") return;
+    const paths = filePathsForEvent(event);
+    const insert = db.prepare(
+      `INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, staged, additions, deletions, observed_at, source_ref_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(session_id, path, effect_kind, observed_at) DO NOTHING`
+    );
+    for (const path of paths) {
+      insert.run(fileEffectId(sessionId, event, path), sessionId, path, stringPayload(event, ["effectKind", "status"]) ?? "modified", 0, null, null, event.occurredAt, sourceRefJson(event));
+    }
+  };
+
+  const upsertRuntimeSignal = (event: NormalizedEvent, sessionId: string): void => {
+    const signal = runtimeSignalForEvent(event);
+    if (!signal) return;
+    db.prepare(
+      `INSERT INTO runtime_signals (signal_id, session_id, signal_kind, severity, title, details_json, observed_at, source_ref_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(signal_id) DO NOTHING`
+    ).run(
+      runtimeSignalId(sessionId, event, signal.kind),
+      sessionId,
+      signal.kind,
+      signal.severity,
+      signal.title,
+      JSON.stringify(event.payload),
+      event.occurredAt,
+      sourceRefJson(event)
+    );
+  };
+
+  const upsertModelUsage = (event: NormalizedEvent, sessionId: string): void => {
+    const model = stringPayload(event, ["model", "modelName", "modelId"]);
+    const provider = stringPayload(event, ["provider"]);
+    const inputTokens = numberPayload(event, ["inputTokens", "promptTokens"]);
+    const outputTokens = numberPayload(event, ["outputTokens", "completionTokens"]);
+    const totalTokens = numberPayload(event, ["totalTokens"]);
+    if (!model && !provider && inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) return;
+    db.prepare(
+      `INSERT INTO model_usage (
+        usage_id,
+        session_id,
+        model,
+        provider,
+        input_tokens,
+        output_tokens,
+        total_tokens,
+        cost_micros,
+        observed_at,
+        source_ref_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(usage_id) DO NOTHING`
+    ).run(
+      modelUsageId(sessionId, event),
+      sessionId,
+      model ?? null,
+      provider ?? null,
+      inputTokens ?? null,
+      outputTokens ?? null,
+      totalTokens ?? null,
+      null,
+      event.occurredAt,
+      sourceRefJson(event)
+    );
+  };
+
+  return {
+    replaceBoardProjection,
+    upsertLiveEvent,
+    upsertMetadataRecord,
+    upsertTranscriptRecord
+  };
+}
+
+const terminalEventTypes = new Set<NormalizedEvent["type"]>(["command.finished", "file.changed", "session.completed"]);
+
+function canonicalSessionId(hostId: string, runtimeId: string, sourceSessionId: string): string {
+  return `session:${hash(`${hostId}\0${runtimeId}\0${sourceSessionId}`).slice(0, 32)}`;
+}
+
+function runtimeIdFor(runtimeKind: string, runtimeVersion: string | undefined): string {
+  return `runtime:${runtimeKind}:${hash(runtimeVersion ?? "unknown").slice(0, 16)}`;
+}
+
+function turnId(sessionId: string, eventId: string): string {
+  return `turn:${hash(`${sessionId}\0${eventId}`)}`;
+}
+
+function messageId(sessionId: string, eventId: string, role: string): string {
+  return `message:${hash(`${sessionId}\0${eventId}\0${role}`)}`;
+}
+
+function toolCallId(sessionId: string, event: NormalizedEvent): string {
+  return `tool_call:${hash(`${sessionId}\0${stringPayload(event, ["commandId"]) ?? event.eventId}`)}`;
+}
+
+function toolResultId(sessionId: string, event: NormalizedEvent): string {
+  return `tool_result:${hash(`${sessionId}\0${event.eventId}`)}`;
+}
+
+function fileEffectId(sessionId: string, event: NormalizedEvent, path: string): string {
+  return `file_effect:${hash(`${sessionId}\0${event.eventId}\0${path}`)}`;
+}
+
+function runtimeSignalId(sessionId: string, event: NormalizedEvent, kind: string): string {
+  return `signal:${hash(`${sessionId}\0${event.eventId}\0${kind}`)}`;
+}
+
+function modelUsageId(sessionId: string, event: NormalizedEvent): string {
+  return `usage:${hash(`${sessionId}\0${event.eventId}`)}`;
+}
+
+function turnIndex(event: NormalizedEvent): number {
+  return Number.parseInt(hash(event.eventId).slice(0, 12), 16);
+}
+
+function roleForEvent(event: NormalizedEvent): string {
+  if (event.type === "user.question") return "user";
+  if (event.type === "session.started") return "system";
+  if (event.type === "session.completed") return "assistant";
+  return "tool";
+}
+
+function messageRoleForEvent(event: NormalizedEvent): string | undefined {
+  if (event.type === "user.question") return "user";
+  if (event.type === "session.started") return "system";
+  if (event.type === "session.completed") return "assistant";
+  return undefined;
+}
+
+function messageTextForEvent(event: NormalizedEvent): string | undefined {
+  if (event.type === "user.question") return stringPayload(event, ["message", "question", "summary"]) ?? event.summary;
+  if (event.type === "session.started") return stringPayload(event, ["title", "objective"]) ?? event.summary;
+  if (event.type === "session.completed") return stringPayload(event, ["outcome", "summary"]) ?? event.summary;
+  return undefined;
+}
+
+function filePathsForEvent(event: NormalizedEvent): string[] {
+  const path = stringPayload(event, ["path", "filePath"]);
+  if (path) return [path];
+  const paths = event.payload.paths ?? event.payload.files;
+  return Array.isArray(paths) ? paths.filter((candidate): candidate is string => typeof candidate === "string") : [];
+}
+
+function runtimeSignalForEvent(event: NormalizedEvent): { kind: string; severity: string; title: string } | undefined {
+  if (event.type === "approval.requested") {
+    return { kind: event.type, severity: "warning", title: event.summary };
+  }
+  if (event.type === "user.question") {
+    return { kind: event.type, severity: "info", title: event.summary };
+  }
+  if (event.type === "command.finished" && numberPayload(event, ["exitCode"]) !== undefined && numberPayload(event, ["exitCode"]) !== 0) {
+    return { kind: "command.failed", severity: "error", title: event.summary };
+  }
+  return undefined;
+}
+
+function sourceRefJson(event: NormalizedEvent): string {
+  return JSON.stringify({
+    confidence: "authoritative",
+    eventId: event.eventId,
+    sourceKind: event.source.surface,
+    sourceRuntime: event.source.adapter,
+    sourceVersion: event.schemaVersion
+  });
+}
+
+function projectLabelFromWorkspace(event: NormalizedEvent): string | undefined {
+  return event.workspace?.repoRoot?.split("/").filter(Boolean).at(-1);
+}
+
+function stringPayload(event: NormalizedEvent, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = event.payload[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+function numberPayload(event: NormalizedEvent, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = event.payload[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function hash(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function metadataValue(value: unknown): {
+  observedAt?: string;
+  project?: string;
+  sessionId?: string;
+  title?: string;
+} {
+  if (typeof value !== "object" || value === null) return {};
+  const record = value as Record<string, unknown>;
+  return {
+    observedAt: stringValue(record.observedAt),
+    project: stringValue(record.project),
+    sessionId: stringValue(record.sessionId),
+    title: stringValue(record.title)
+  };
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function transcriptValue(
+  value: unknown,
+  sourcePath: string | undefined
+): {
+  arguments?: unknown;
+  inputTokens?: number;
+  model?: string;
+  observedAt?: string;
+  outputTokens?: number;
+  provider?: string;
+  role?: string;
+  sessionId?: string;
+  text?: string;
+  toolName?: string;
+  totalTokens?: number;
+} {
+  if (typeof value !== "object" || value === null) return {};
+  const record = value as Record<string, unknown>;
+  return {
+    observedAt: stringValue(record.timestamp) ?? stringValue(record.created_at) ?? stringValue(record.createdAt),
+    role: stringValue(record.role),
+    sessionId:
+      stringValue(record.session_id) ??
+      stringValue(record.sessionId) ??
+      stringValue(record.conversation_id) ??
+      stringValue(record.conversationId) ??
+      (sourcePath ? basename(sourcePath, ".jsonl") : undefined),
+    text: stringValue(record.content) ?? stringValue(record.text) ?? stringValue(record.message),
+    toolName: stringValue(record.name) ?? stringValue(record.tool_name) ?? stringValue(record.toolName),
+    arguments: record.arguments ?? record.args ?? record.input,
+    model: stringValue(record.model) ?? stringValue(record.modelName),
+    provider: stringValue(record.provider),
+    inputTokens: numberValue(record.input_tokens) ?? numberValue(record.inputTokens) ?? usageNumber(record, "input_tokens"),
+    outputTokens: numberValue(record.output_tokens) ?? numberValue(record.outputTokens) ?? usageNumber(record, "output_tokens"),
+    totalTokens: numberValue(record.total_tokens) ?? numberValue(record.totalTokens) ?? usageNumber(record, "total_tokens")
+  };
+}
+
+function usageNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const usage = record.usage;
+  return typeof usage === "object" && usage !== null ? numberValue((usage as Record<string, unknown>)[key]) : undefined;
+}
+
+function transcriptSourceRefJson(record: AdapterRecord): string {
+  return JSON.stringify([
+    {
+      ...record.normalized.sourceRef,
+      payloadHash: record.payloadHash,
+      sourceRecordKey: record.sourceRecordKey
+    }
+  ]);
+}
+
+function toolCallIdFromRecord(sessionId: string, record: AdapterRecord): string {
+  return `tool_call:${hash(`${sessionId}\0${record.sourceRecordKey}`)}`;
+}
+
+function modelUsageIdFromRecord(sessionId: string, record: AdapterRecord): string {
+  return `usage:${hash(`${sessionId}\0${record.sourceRecordKey}`)}`;
+}
