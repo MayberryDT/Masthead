@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { resolveMastheadDataPaths } from "../shared/dataPaths.ts";
 import { classifyDaemonHealth } from "../shared/protocol.ts";
 import { locateCompatibleDaemon } from "./daemonLocator.ts";
+import { readDaemonOwnershipMetadata, type DaemonOwnershipMetadata } from "./daemonOwnership.ts";
 
 export type ConnectorMode = "primary" | "bridge";
 
@@ -15,6 +17,7 @@ export type LiveDevPlan = {
         mode: "primary";
         port: number;
         baseUrl: string;
+        dataDirectory: string;
       }
     | {
         mode: "bridge";
@@ -35,6 +38,7 @@ export type LiveDevPlan = {
 export type LiveDevProbes = {
   findAvailablePort?: (host: string, startPort: number) => Promise<number>;
   getConnectorHealth?: (baseUrl: string) => Promise<Record<string, unknown> | undefined>;
+  getOwnedDaemonMetadata?: (dataDirectory: string) => Promise<DaemonOwnershipMetadata | undefined>;
   isPortAvailable?: (host: string, port: number) => Promise<boolean>;
 };
 
@@ -81,6 +85,7 @@ export async function buildLiveDevPlan(
   const requestedConnectorPort = parsePort(env.MASTHEAD_PORT, defaultConnectorPort);
   const requestedUiPort = parsePort(env.MASTHEAD_UI_PORT, defaultUiPort);
   const findPort = probes.findAvailablePort ?? findAvailablePort;
+  const getOwnedDaemon = probes.getOwnedDaemonMetadata ?? readDaemonOwnershipMetadata;
   const isAvailable = probes.isPortAvailable ?? isPortAvailable;
   const getHealth = probes.getConnectorHealth ?? getConnectorHealth;
   const uiPort = env.MASTHEAD_UI_PORT ? requestedUiPort : await findPort(host, requestedUiPort);
@@ -92,7 +97,7 @@ export async function buildLiveDevPlan(
   const connectorMode = env.MASTHEAD_CONNECTOR_MODE || "auto";
 
   if (connectorMode === "primary") {
-    return primaryPlan(host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins);
+    return primaryPlan(host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins, env);
   }
 
   if (connectorMode === "bridge") {
@@ -105,12 +110,20 @@ export async function buildLiveDevPlan(
   }
 
   if (await isAvailable(host, requestedConnectorPort)) {
-    return primaryPlan(host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins);
+    return primaryPlan(host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins, env);
   }
 
   const located = await locateCompatibleDaemon(upstreamBaseUrl, getHealth);
   if (located.compatibility.state === "compatible") {
     return bridgePlan(env, host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins, upstreamBaseUrl, findPort);
+  }
+
+  const ownedDaemon = await getOwnedDaemon(resolveMastheadDataPaths({ env }).dataDirectory);
+  if (ownedDaemon) {
+    const owned = await locateCompatibleDaemon(ownedDaemon.baseUrl, getHealth);
+    if (owned.compatibility.state === "compatible") {
+      return bridgePlan(env, host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins, ownedDaemon.baseUrl, findPort);
+    }
   }
 
   return isolatedPrimaryPlan(env, host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins, findPort);
@@ -208,7 +221,14 @@ async function bridgePlan(
   };
 }
 
-function primaryPlan(host: string, connectorPort: number, uiPort: number, uiUrl: string, allowedOrigins: string): LiveDevPlan {
+function primaryPlan(
+  host: string,
+  connectorPort: number,
+  uiPort: number,
+  uiUrl: string,
+  allowedOrigins: string,
+  env: NodeJS.ProcessEnv = process.env
+): LiveDevPlan {
   const baseUrl = `http://${host}:${connectorPort}`;
   return {
     host,
@@ -219,7 +239,8 @@ function primaryPlan(host: string, connectorPort: number, uiPort: number, uiUrl:
     connector: {
       mode: "primary",
       port: connectorPort,
-      baseUrl
+      baseUrl,
+      dataDirectory: resolveMastheadDataPaths({ env }).dataDirectory
     }
   };
 }
@@ -247,7 +268,7 @@ async function isolatedPrimaryPlan(
       baseUrl,
       incompatibleAt,
       incompatibleBaseUrl: `http://${host}:${incompatibleAt}`,
-      dataDirectory: env.MASTHEAD_DATA_DIR
+      dataDirectory: resolveMastheadDataPaths({ env }).dataDirectory
     }
   };
 }

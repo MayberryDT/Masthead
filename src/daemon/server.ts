@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { adapterRecordFromCodexHook, codexHookSource } from "../adapters/codex/hookAdapter.ts";
 import { discoverCodexSources } from "../adapters/codex/discovery.ts";
 import { importCodexMetadata } from "../adapters/codex/metadataImport.ts";
@@ -11,6 +11,7 @@ import { createOpenAIEnrichmentProvider } from "../enrichment/openAIProvider.ts"
 import type { AdapterDiagnostic } from "../adapters/types.ts";
 import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent } from "../core/ingestion.ts";
+import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
 import { projectLiveEvents } from "../core/liveProjection.ts";
 import { createOpenAISessionCopyEnricher } from "../core/openaiSessionCopy.ts";
 import { createFileBackedStore, type StoreRecord } from "../core/store.ts";
@@ -35,7 +36,7 @@ import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
 import { getLogbookSummary } from "./db/logbookSummaryRepository.ts";
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
-import { migrateDatabase } from "./db/schema.ts";
+import { hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { createSessionRepository, ingestAdapterRecord } from "./db/sessionRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "./db/sqlite.ts";
 import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
@@ -63,11 +64,16 @@ export type MastheadDaemon = {
 
 export async function createMastheadDaemon(config: DaemonConfig): Promise<MastheadDaemon> {
   await mkdir(dirname(config.storePath), { recursive: true });
-  const store = await createFileBackedStore(config.storePath);
-  const database = await openMastheadDatabase(config.databasePath);
+  const writerLock = await acquireDatabaseWriterLock(config.dataDirectory ?? dirname(config.databasePath));
 
   try {
-    migrateDatabase(database);
+    const store = await createFileBackedStore(config.storePath);
+    const database = await openMastheadDatabase(config.databasePath);
+    try {
+      if (hasPendingMigrations(database)) {
+        await backupDatabaseBeforeMigration(config.databasePath);
+      }
+      migrateDatabase(database);
 
     const hookRawJournal = createRawEventRepository(database, {
       adapter: codexHookSource.runtime,
@@ -153,6 +159,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   let closed = false;
+  let closePromise: Promise<void> | undefined;
   let hydrationStarted = false;
   let hydrationPromise: Promise<void> = Promise.resolve();
 
@@ -565,7 +572,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (request.method === "GET" && url.pathname === "/mcp/status") {
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
-        status: getMcpStatus(database, config.databasePath)
+        status: getMcpStatus(database, config.databasePath, config.dataDirectory)
       });
       return;
     }
@@ -1092,28 +1099,73 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     server,
     database,
     startBackgroundHydration,
-    close: async () => {
+    close: () => {
+      if (closePromise) return closePromise;
       closed = true;
-      await hydrationPromise;
-      await new Promise<void>((resolve) => {
+      closePromise = (async () => {
+        await hydrationPromise;
+        await new Promise<void>((resolve) => {
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
         clearInterval(sourceReconcileTimer);
         server.close(() => {
-          database.close();
-          resolve();
+          closeDatabase(database);
+          void writerLock.release().finally(resolve);
         });
       });
+      })();
+      return closePromise;
     }
   };
   } catch (error) {
     database.close();
     throw error;
   }
+  } catch (error) {
+    await writerLock.release();
+    throw error;
+  }
+}
+
+function closeDatabase(database: MastheadDatabase): void {
+  try {
+    database.close();
+  } catch (error) {
+    if (!isErrno(error, "ERR_INVALID_STATE")) throw error;
+  }
+}
+
+function isErrno(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
 function boundPort(server: Server, fallback: number): number {
   const address = server.address();
   return typeof address === "object" && address ? address.port : fallback;
+}
+
+async function backupDatabaseBeforeMigration(databasePath: string): Promise<void> {
+  try {
+    const info = await stat(databasePath);
+    if (!info.isFile() || info.size === 0) return;
+  } catch {
+    return;
+  }
+
+  const directory = dirname(databasePath);
+  const prefix = `${basename(databasePath)}.backup-`;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  await copyFile(databasePath, join(directory, `${prefix}${timestamp}`));
+
+  const backups = await Promise.all(
+    (await readdir(directory))
+      .filter((entry) => entry.startsWith(prefix))
+      .map(async (entry) => ({
+        entry,
+        mtimeMs: (await stat(join(directory, entry))).mtimeMs
+      }))
+  );
+  const staleBackups = backups.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(3);
+  await Promise.all(staleBackups.map((backup) => rm(join(directory, backup.entry), { force: true })));
 }
 
 function readBody(request: IncomingMessage): Promise<string> {

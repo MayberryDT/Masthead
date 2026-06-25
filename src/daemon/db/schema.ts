@@ -74,6 +74,22 @@ export function migrateDatabase(db: MastheadDatabase): void {
   validateCriticalTables(db);
 }
 
+export function hasPendingMigrations(db: MastheadDatabase): boolean {
+  const tables = new Set(
+    (
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{
+        name: string;
+      }>
+    ).map((row) => row.name)
+  );
+  if (!tables.has("schema_migrations")) return tables.size > 0;
+
+  const applied = new Set(
+    (db.prepare("SELECT version FROM schema_migrations").all() as Array<{ version: number }>).map((row) => row.version)
+  );
+  return migrations.some((migration) => !applied.has(migration.version));
+}
+
 export function getOrCreateDatabaseIdentity(db: MastheadDatabase): string {
   const row = db.prepare("SELECT setting_json AS value FROM app_settings WHERE setting_key = ?").get("database_identity") as
     | { value: string }

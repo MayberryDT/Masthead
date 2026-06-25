@@ -98,6 +98,34 @@ describe("Masthead worktree connector planning", () => {
     ).rejects.toThrow("no compatible Masthead connector");
   });
 
+  test("bridges to an owned compatible daemon on a non-default port", async () => {
+    const plan = await buildLiveDevPlan(
+      { MASTHEAD_DATA_DIR: "/tmp/masthead" },
+      {
+        findAvailablePort: async (_host, startPort) => (startPort === 5173 ? 5180 : 17375),
+        getConnectorHealth: async (baseUrl) => (baseUrl.endsWith(":17374") ? currentHealth : { ok: true, events: 12 }),
+        getOwnedDaemonMetadata: async () => ({
+          apiVersion: 1,
+          baseUrl: "http://127.0.0.1:17374",
+          daemonInstanceId: "owned",
+          dataDirectory: "/tmp/masthead",
+          pid: 123,
+          startedAt: "2026-06-25T00:00:00.000Z"
+        }),
+        isPortAvailable: async () => false
+      }
+    );
+
+    expect(plan).toMatchObject({
+      projectionUrl: "http://127.0.0.1:17375/projection",
+      connector: {
+        mode: "bridge",
+        port: 17375,
+        upstreamBaseUrl: "http://127.0.0.1:17374"
+      }
+    });
+  });
+
   test("accepts an upstream projection URL but stores its connector base URL", () => {
     expect(connectorBaseUrl("http://127.0.0.1:17373/projection?selectedSessionId=s1")).toBe("http://127.0.0.1:17373");
   });

@@ -68,6 +68,13 @@ describe("Masthead health API", () => {
     expect(secondHealth.data.databaseId).toBe(firstHealth.data.databaseId);
     expect(secondHealth.runtime.daemonInstanceId).not.toBe(firstHealth.runtime.daemonInstanceId);
   });
+
+  test("rejects a second writable daemon for the same data directory", async () => {
+    const harness = await createTestDaemon();
+    await listen(harness.daemon);
+
+    await expect(createMastheadDaemon(harness.config)).rejects.toThrow("database is already owned by another writable daemon");
+  });
 });
 
 async function createTestDaemon(): Promise<{

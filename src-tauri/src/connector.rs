@@ -67,6 +67,7 @@ pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnector
     Command::new(&launch.node_path)
         .arg(&launch.entry_path)
         .current_dir(&launch.cwd)
+        .env("MASTHEAD_DATA_DIR", &launch.data_directory)
         .env("MASTHEAD_DB_PATH", &launch.database_path)
         .env("MASTHEAD_STORE_PATH", &launch.legacy_store_path)
         .env("MASTHEAD_HOST", "127.0.0.1")
@@ -105,6 +106,10 @@ pub fn mcp_launch_config_command(app: AppHandle) -> Result<McpLaunchConfigResult
     let launch = mcp_launch_target(&app)?;
     let mut env = BTreeMap::new();
     env.insert(
+        "MASTHEAD_DATA_DIR".to_string(),
+        launch.data_directory.to_string_lossy().to_string(),
+    );
+    env.insert(
         "MASTHEAD_DB_PATH".to_string(),
         launch.database_path.to_string_lossy().to_string(),
     );
@@ -118,6 +123,7 @@ pub fn mcp_launch_config_command(app: AppHandle) -> Result<McpLaunchConfigResult
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DaemonLaunchTarget {
+    data_directory: PathBuf,
     node_path: PathBuf,
     entry_path: PathBuf,
     cwd: PathBuf,
@@ -127,6 +133,7 @@ struct DaemonLaunchTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct McpLaunchTarget {
+    data_directory: PathBuf,
     node_path: PathBuf,
     entry_path: PathBuf,
     database_path: PathBuf,
@@ -182,10 +189,11 @@ fn mcp_launch_target(app: &AppHandle) -> Result<McpLaunchTarget, String> {
 fn daemon_launch_target_from_paths(input: DaemonLaunchTargetInput) -> Result<DaemonLaunchTarget, String> {
     fs::create_dir_all(&input.app_data_dir).map_err(|error| error.to_string())?;
     let database_path = input.app_data_dir.join("masthead.sqlite");
-    let legacy_store_path = input.app_data_dir.join("events.ndjson");
+    let legacy_store_path = input.app_data_dir.join("legacy").join("events.ndjson");
 
     if let Some(entry_path) = input.daemon_entry {
         return Ok(DaemonLaunchTarget {
+            data_directory: input.app_data_dir,
             node_path: input.node_path.unwrap_or_else(|| PathBuf::from("node")),
             entry_path,
             cwd: input.project_dir.unwrap_or(input.current_dir),
@@ -196,6 +204,7 @@ fn daemon_launch_target_from_paths(input: DaemonLaunchTargetInput) -> Result<Dae
 
     let node_name = if cfg!(windows) { "node.exe" } else { "node" };
     Ok(DaemonLaunchTarget {
+        data_directory: input.app_data_dir.clone(),
         node_path: input.resource_dir.join("daemon").join(node_name),
         entry_path: input
             .resource_dir
@@ -215,6 +224,7 @@ fn mcp_launch_target_from_paths(input: McpLaunchTargetInput) -> Result<McpLaunch
     let database_path = input.app_data_dir.join("masthead.sqlite");
     let node_name = if cfg!(windows) { "node.exe" } else { "node" };
     Ok(McpLaunchTarget {
+        data_directory: input.app_data_dir,
         node_path: input.node_path.unwrap_or_else(|| input.resource_dir.join("daemon").join(node_name)),
         entry_path: input.mcp_entry.unwrap_or_else(|| {
             input
@@ -353,8 +363,9 @@ mod tests {
         assert_eq!(target.node_path, PathBuf::from("/tmp/node"));
         assert_eq!(target.entry_path, PathBuf::from("/tmp/masthead/dist/daemon/src/daemon/main.js"));
         assert_eq!(target.cwd, PathBuf::from("/tmp/masthead"));
+        assert_eq!(target.data_directory, PathBuf::from("/tmp/masthead-data"));
         assert_eq!(target.database_path, PathBuf::from("/tmp/masthead-data/masthead.sqlite"));
-        assert_eq!(target.legacy_store_path, PathBuf::from("/tmp/masthead-data/events.ndjson"));
+        assert_eq!(target.legacy_store_path, PathBuf::from("/tmp/masthead-data/legacy/events.ndjson"));
     }
 
     #[test]
@@ -376,8 +387,9 @@ mod tests {
             PathBuf::from("/tmp/masthead-resources/daemon/dist/src/daemon/main.js")
         );
         assert_eq!(target.cwd, PathBuf::from("/tmp/masthead-data"));
+        assert_eq!(target.data_directory, PathBuf::from("/tmp/masthead-data"));
         assert_eq!(target.database_path, PathBuf::from("/tmp/masthead-data/masthead.sqlite"));
-        assert_eq!(target.legacy_store_path, PathBuf::from("/tmp/masthead-data/events.ndjson"));
+        assert_eq!(target.legacy_store_path, PathBuf::from("/tmp/masthead-data/legacy/events.ndjson"));
     }
 
     #[test]
@@ -396,6 +408,7 @@ mod tests {
             target.entry_path,
             PathBuf::from("/tmp/masthead-resources/daemon/dist/src/mcp/server.js")
         );
+        assert_eq!(target.data_directory, PathBuf::from("/tmp/masthead-data"));
         assert_eq!(target.database_path, PathBuf::from("/tmp/masthead-data/masthead.sqlite"));
     }
 
@@ -411,6 +424,7 @@ mod tests {
 
         assert_eq!(target.node_path, PathBuf::from("/tmp/node"));
         assert_eq!(target.entry_path, PathBuf::from("/tmp/masthead/dist/daemon/src/mcp/server.js"));
+        assert_eq!(target.data_directory, PathBuf::from("/tmp/masthead-data"));
         assert_eq!(target.database_path, PathBuf::from("/tmp/masthead-data/masthead.sqlite"));
     }
 

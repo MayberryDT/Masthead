@@ -23,6 +23,7 @@ if (plan.connector.mode === "primary" || plan.connector.mode === "isolated_prima
   }
   console.log(`Connector: ${plan.connector.baseUrl} (${plan.connector.mode === "primary" ? "primary" : "isolated primary"})`);
   collector = start("collector", process.execPath, ["dist/daemon/src/daemon/main.js"], {
+    MASTHEAD_DATA_DIR: plan.connector.dataDirectory,
     MASTHEAD_HOST: plan.host,
     MASTHEAD_PORT: String(plan.connector.port),
     MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins

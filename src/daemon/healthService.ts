@@ -53,7 +53,7 @@ export function buildMastheadHealth(
       port: runtime.port()
     },
     data: {
-      dataDirectory: dirname(config.databasePath),
+      dataDirectory: config.dataDirectory ?? dirname(config.databasePath),
       databasePath: config.databasePath,
       databaseId: getOrCreateDatabaseIdentity(database),
       migrationState: "ready",

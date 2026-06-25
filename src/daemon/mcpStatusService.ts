@@ -92,14 +92,14 @@ export const MCP_TOOL_CATALOG: McpToolDto[] = [
 const allowedPermissions = ["Search session summaries", "Read bounded historical excerpts", "Read project history"];
 const blockedPermissions = ["Execute shell commands", "Mutate files or Git", "Modify harness sessions"];
 
-export function getMcpStatus(db: MastheadDatabase, databasePath: string): McpStatusDto {
+export function getMcpStatus(db: MastheadDatabase, databasePath: string, dataDirectory?: string): McpStatusDto {
   const summary = getMcpQuerySummary(db);
   const globalAccess = globalMcpAccessEnabled(db);
   return {
     databasePath,
     globalAccessEnabled: globalAccess,
     lastQueryAt: summary.lastQueryAt,
-    launchConfig: mcpLaunchConfig(databasePath),
+    launchConfig: mcpLaunchConfig(databasePath, dataDirectory),
     mode: "stdio",
     permissions: {
       allowed: allowedPermissions,
@@ -119,13 +119,14 @@ export function listMcpTools(): McpToolDto[] {
   return MCP_TOOL_CATALOG;
 }
 
-function mcpLaunchConfig(databasePath: string): McpLaunchConfigDto {
+function mcpLaunchConfig(databasePath: string, dataDirectory?: string): McpLaunchConfigDto {
   const command = process.env.MASTHEAD_MCP_COMMAND || process.env.MASTHEAD_NODE_PATH || process.execPath;
   const entryPath = process.env.MASTHEAD_MCP_ENTRY || resolve(process.cwd(), "dist/daemon/src/mcp/server.js");
   return {
     args: [entryPath],
     command,
     env: {
+      ...(dataDirectory ? { MASTHEAD_DATA_DIR: dataDirectory } : {}),
       MASTHEAD_DB_PATH: databasePath
     }
   };
