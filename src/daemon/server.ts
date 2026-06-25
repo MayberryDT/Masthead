@@ -145,6 +145,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
   async function appendStoreRecord(record: StoreRecord, journal = hookRawJournal): Promise<void> {
     journal.appendStoreRecord(record);
+    await store.append(record);
   }
 
   let closed = false;
@@ -884,6 +885,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const result = await store.pruneLocalData(policy);
         hookRawJournal.pruneStoreRecords(policy);
         observerRawJournal.pruneStoreRecords(policy);
+        state.events.length = 0;
+        state.events.push(...store.readEvents());
+        gitSnapshots.length = 0;
+        gitSnapshots.push(...store.readGitSnapshots());
+        gitSnapshotSignatures.clear();
+        for (const gitSnapshot of gitSnapshots) {
+          gitSnapshotSignatures.set(gitSnapshot.sessionId, gitSnapshotSignature(gitSnapshot));
+        }
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           result,

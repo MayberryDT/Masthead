@@ -26,6 +26,18 @@ Sessions, Logbook, Sources, Agent Access, and Settings share one visual language
 must use the information architecture best suited to its job. Do not force all surfaces into the
 live session-card composition.
 
+Surface archetypes:
+
+- Now: live cards.
+- Logbook: dense table plus inspector.
+- Sources: adapter/settings rows plus import jobs.
+- Agent Access: setup, permissions, tools, and audit tables.
+- Settings: vertical settings sections and danger zone.
+
+Shared visual language does not permit reusing fixed live-card DOM or CSS on every surface.
+Before finishing UI work, run the surface contract check and use the in-app Browser to inspect the
+affected surfaces at desktop, tablet, and narrow mobile widths.
+
 ## Browser Automation
 
 When browser automation is needed, use the Codex in-app Browser plugin with the `iab` backend first. Do not fall back to standalone Playwright, external browser-control servers, shell-launched browsers, or Computer Use for browser work unless the user explicitly approves that fallback. References to `tab.playwright` inside the Browser plugin are acceptable only after the in-app Browser runtime is connected, because that still controls the in-app Browser.

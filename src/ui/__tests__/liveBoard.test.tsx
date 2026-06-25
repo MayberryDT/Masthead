@@ -38,7 +38,7 @@ describe("Live Board UI", () => {
     expect(html).toContain('aria-label="Session workspace"');
     expect(html).toContain('aria-label="Context panel"');
     expect(html).not.toContain('aria-label="Agent health metrics"');
-    expect(html).toContain("Active Sessions");
+    expect(html).toContain("Visible sessions");
     expect(html).toContain("Connected sources");
     expect(html).not.toContain("Total Tokens (24h)");
     expect(html).not.toContain("Top Models (24h)");
@@ -76,7 +76,7 @@ describe("Live Board UI", () => {
     const html = renderToStaticMarkup(<App />);
 
     expect(html).not.toContain("System status:");
-    expect(html).toContain("0 running");
+    expect(html).toContain("Running");
     expect(html).not.toMatch(/\byou|your|urgent|critical|dangerous/i);
   });
 

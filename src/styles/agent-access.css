@@ -1,4 +1,5 @@
 .agent-access-panel {
+  box-sizing: border-box;
   display: grid;
   gap: 18px;
   min-width: 0;
@@ -7,10 +8,16 @@
 .agent-access-header-actions,
 .agent-access-actions,
 .agent-access-tabs {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+}
+
+.agent-access-header-actions {
+  justify-content: flex-end;
 }
 
 .agent-access-error {
@@ -31,6 +38,7 @@
 }
 
 .agent-access-section-head {
+  box-sizing: border-box;
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -141,6 +149,22 @@
 }
 
 @media (max-width: 760px) {
+  .agent-access-header-actions,
+  .agent-access-actions,
+  .agent-access-tabs {
+    width: auto;
+    max-width: 100%;
+  }
+
+  .agent-access-header-actions .status-badge,
+  .agent-access-header-actions .app-button,
+  .agent-access-actions .app-button,
+  .agent-access-tabs .app-button {
+    box-sizing: border-box;
+    flex: 1 1 160px;
+    min-width: 0;
+  }
+
   .agent-access-section-head {
     align-items: stretch;
     flex-direction: column;
@@ -148,5 +172,23 @@
 
   .agent-access-tabs .app-button {
     flex: 1 1 140px;
+  }
+}
+
+@media (max-width: 480px) {
+  .agent-access-section-head,
+  .agent-access-actions,
+  .agent-access-tabs,
+  .agent-access-section-head > *,
+  .agent-access-actions .app-button,
+  .agent-access-section-head .status-badge,
+  .agent-access-tabs .app-button {
+    max-width: calc(100vw - 24px);
+  }
+
+  .agent-access-actions .app-button,
+  .agent-access-tabs .app-button {
+    flex-basis: 100%;
+    width: 100%;
   }
 }

@@ -47,7 +47,7 @@ export function SourcesPanel({
             Sync all
           </AppButton>
         </div>
-        {status ? <p className="toolbar-result surface-status">{status}</p> : null}
+        {status ? <p className="sources-status surface-status">{status}</p> : null}
       </div>
 
       <StatStrip

@@ -286,6 +286,16 @@ recur across views, but each surface may use the structure that fits its job:
 - Settings should optimize exact blast-radius controls and local data policy.
 - The right rail is optional and must be contextual to the active surface.
 
+## Surface Archetypes
+
+- Now: live cards.
+- Logbook: dense table plus inspector.
+- Sources: adapter/settings rows plus import jobs.
+- Agent Access: setup, permissions, tools, and audit tables.
+- Settings: vertical settings sections and danger zone.
+
+Shared visual language does not permit reusing fixed live-card DOM or CSS on every surface.
+
 When a surface uses cards, desktop grids should prefer three columns when width allows, two columns
 on tablet, and one column on mobile. Fixed-format cards need stable dimensions so hover states,
 labels, snippets, icons, and data facts do not resize the grid. Current live-session data cards use

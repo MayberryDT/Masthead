@@ -1,19 +1,29 @@
 .sources-management {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .sources-command-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .sources-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  max-width: 100%;
+}
+
+.sources-status {
+  min-width: 0;
+  color: var(--ash);
+  font-family: var(--font-mono);
 }
 
 .adapter-list,
@@ -23,8 +33,10 @@
 }
 
 .adapter-row {
+  box-sizing: border-box;
   display: grid;
   gap: 12px;
+  min-width: 0;
   border: 1px solid rgba(92, 153, 187, 0.16);
   border-radius: 5px;
   background: rgba(7, 27, 40, 0.76);
@@ -36,6 +48,7 @@
   grid-template-columns: minmax(180px, 1fr) auto auto;
   align-items: center;
   gap: 14px;
+  min-width: 0;
 }
 
 .adapter-row-head h2 {
@@ -109,6 +122,7 @@
 
 .import-jobs-section,
 .adapter-row {
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -121,6 +135,16 @@
 
   .sources-command-row {
     flex-direction: column;
+  }
+
+  .sources-actions,
+  .sources-actions .app-button {
+    box-sizing: border-box;
+    width: 100%;
+  }
+
+  .sources-status {
+    width: 100%;
   }
 
   .adapter-row-actions {

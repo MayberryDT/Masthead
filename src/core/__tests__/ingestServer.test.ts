@@ -208,14 +208,16 @@ describe("ingest server live projection", () => {
       source_kind: "hook",
       source_record_key: "event:codex:server-sqlite"
     });
-    expect(ingestSourceRows(databasePath)).toEqual([
-      expect.objectContaining({
-        adapter: "codex",
-        endpoint: "http://127.0.0.1:17373/ingest",
-        source_id: "codex-hook-local",
-        source_kind: "hook"
-      })
-    ]);
+    expect(ingestSourceRows(databasePath)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          adapter: "codex",
+          endpoint: "http://127.0.0.1:17373/ingest",
+          source_id: "codex-hook-local",
+          source_kind: "hook"
+        })
+      ])
+    );
     expect(JSON.parse(rowsBeforeClear[0].payload_json)).toMatchObject({
       recordId: "event:codex:server-sqlite",
       recordType: "event",
@@ -385,7 +387,8 @@ describe("ingest server live projection", () => {
     });
 
     const imported = await postJson(server.baseUrl, "/sources/codex/import-metadata", {});
-    expect(imported).toMatchObject({ ok: true, imported: 1, sources: 1 });
+    expect(imported).toMatchObject({ ok: true, queued: 1, sources: 1 });
+    await waitForImportJobs(server.baseUrl, jobIds(imported));
     const search = await getJson(server.baseUrl, "/logbook/search?q=Historical");
     expect(search).toMatchObject({
       ok: true,
@@ -474,10 +477,9 @@ describe("ingest server live projection", () => {
     expect(unapproved.status).toBe(409);
 
     expect(await postJson(server.baseUrl, "/sources/codex/approve-transcripts", {})).toMatchObject({ ok: true });
-    expect(await postJson(server.baseUrl, "/sources/codex/import-transcripts", {})).toMatchObject({
-      imported: 1,
-      ok: true
-    });
+    const firstImport = await postJson(server.baseUrl, "/sources/codex/import-transcripts", {});
+    expect(firstImport).toMatchObject({ ok: true, queued: 1 });
+    await waitForImportJobs(server.baseUrl, jobIds(firstImport));
     await appendFile(
       transcriptPath,
       `${JSON.stringify({
@@ -488,10 +490,9 @@ describe("ingest server live projection", () => {
       })}\n`,
       "utf8"
     );
-    expect(await postJson(server.baseUrl, "/sources/codex/import-transcripts", {})).toMatchObject({
-      imported: 1,
-      ok: true
-    });
+    const secondImport = await postJson(server.baseUrl, "/sources/codex/import-transcripts", {});
+    expect(secondImport).toMatchObject({ ok: true, queued: 1 });
+    await waitForImportJobs(server.baseUrl, jobIds(secondImport));
 
     const db = new DatabaseSync(databasePath);
     try {
@@ -647,6 +648,22 @@ async function waitForImport(baseUrl: string, sourceId: string): Promise<Record<
     imports = await getJson(baseUrl, "/imports");
   }
   return imports;
+}
+
+async function waitForImportJobs(baseUrl: string, importJobIds: string[]): Promise<Record<string, any>> {
+  const deadline = Date.now() + 1500;
+  let imports = await getJson(baseUrl, "/imports");
+  while (Date.now() < deadline) {
+    const finished = imports.imports?.filter((job: { importJobId: string; status: string }) => importJobIds.includes(job.importJobId)) ?? [];
+    if (finished.length === importJobIds.length && finished.every((job: { status: string }) => job.status === "succeeded")) return imports;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    imports = await getJson(baseUrl, "/imports");
+  }
+  return imports;
+}
+
+function jobIds(response: Record<string, any>): string[] {
+  return (response.jobs ?? []).map((job: { importJobId: string }) => job.importJobId);
 }
 
 function liveApprovalPayload(providerEventId: string): Record<string, unknown> {

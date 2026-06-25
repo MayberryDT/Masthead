@@ -89,7 +89,7 @@ describe("data lifecycle API", () => {
 
     await postJson(baseUrl, "/ingest", liveApprovalPayload("raw-retention"));
     expect((await getJson(baseUrl, "/events")).events).toHaveLength(1);
-    expect(await readTextOrEmpty(storePath)).toBe("");
+    expect(await readTextOrEmpty(storePath)).toContain("raw-retention");
     expect(count(daemon.database, "raw_events")).toBe(1);
 
     await postJson(baseUrl, "/data/retention/default", {});

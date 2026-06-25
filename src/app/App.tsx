@@ -361,15 +361,20 @@ export function App() {
   };
 
   const loadSourceInventory = useCallback(async (options: { showStatus?: boolean } = {}) => {
-    const [nextAdapters, nextSources, nextImports] = await Promise.all([
+    const [adapterResult, sourceResult, importResult] = await Promise.allSettled([
       listAdapters(liveProjectionUrl),
       listSources(liveProjectionUrl),
       listImports(liveProjectionUrl)
     ]);
-    setAdapters(nextAdapters);
-    setSources(nextSources);
-    setImports(nextImports);
-    if (options.showStatus) setSourcesStatus(`${nextSources.length} source${nextSources.length === 1 ? "" : "s"} detected.`);
+    if (adapterResult.status === "fulfilled") setAdapters(adapterResult.value);
+    if (sourceResult.status === "fulfilled") setSources(sourceResult.value);
+    if (importResult.status === "fulfilled") setImports(importResult.value);
+    if (sourceResult.status === "rejected" && adapterResult.status === "rejected" && importResult.status === "rejected") {
+      throw sourceResult.reason;
+    }
+    if (options.showStatus && sourceResult.status === "fulfilled") {
+      setSourcesStatus(`${sourceResult.value.length} source${sourceResult.value.length === 1 ? "" : "s"} detected.`);
+    }
   }, []);
 
   const handleRefreshSources = useCallback(async () => {

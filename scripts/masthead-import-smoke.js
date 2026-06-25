@@ -33,9 +33,11 @@ try {
 
   const metadata = await postJson(server.baseUrl, "/imports", { sourceId, kind: "metadata" });
   assert(metadata.importJobId, "metadata import job id missing");
+  await waitForImportJob(server.baseUrl, metadata.importJobId);
   await postJson(server.baseUrl, "/sources/codex/approve-transcripts", {});
   const transcript = await postJson(server.baseUrl, "/imports", { sourceId, kind: "transcript" });
   assert(transcript.importJobId, "transcript import job id missing");
+  await waitForImportJob(server.baseUrl, transcript.importJobId);
 
   assertDb(databasePath, {
     minSessions: 4,
@@ -50,8 +52,10 @@ try {
   server = undefined;
 
   restarted = await startDaemon({ codexHome, databasePath, storePath });
-  await postJson(restarted.baseUrl, "/imports", { sourceId, kind: "metadata" });
-  await postJson(restarted.baseUrl, "/imports", { sourceId, kind: "transcript" });
+  const restartMetadata = await postJson(restarted.baseUrl, "/imports", { sourceId, kind: "metadata" });
+  await waitForImportJob(restarted.baseUrl, restartMetadata.importJobId);
+  const restartTranscript = await postJson(restarted.baseUrl, "/imports", { sourceId, kind: "transcript" });
+  await waitForImportJob(restarted.baseUrl, restartTranscript.importJobId);
   const afterRestart = dbCounts(databasePath, ["sessions", "messages", "tool_calls", "tool_results", "session_search"]);
   assertCountsEqual(afterRestart, beforeRestart, "expected idempotent import counts after restart");
 
@@ -159,6 +163,17 @@ async function postJson(baseUrl, path, body) {
   });
   if (!response.ok) throw new Error(`${path} returned ${response.status}: ${await response.text()}`);
   return response.json();
+}
+
+async function waitForImportJob(baseUrl, importJobId) {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const response = await getJson(baseUrl, `/imports/${importJobId}`);
+    if (response.job?.status === "succeeded") return response.job;
+    if (response.job?.status === "failed") throw new Error(`import job failed: ${response.job.failureMessage || importJobId}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for import job: ${importJobId}`);
 }
 
 function assertDb(databasePath, { minSessions, minMessages, minToolCalls }) {
