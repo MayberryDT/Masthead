@@ -108,7 +108,6 @@ export function classifyDaemonHealth(
   if (isRecord(value.data) && value.data.migrationState === "failed") {
     return { state: "degraded", reason: "migration_failed" };
   }
-
   return { state: "compatible", apiVersion: value.apiVersion };
 }
 
