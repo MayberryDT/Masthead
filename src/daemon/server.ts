@@ -41,6 +41,13 @@ import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { getMcpStatus, listMcpTools } from "./mcpStatusService.ts";
+import {
+  getCodexHookSettings,
+  getSettingsState,
+  installCodexHooks,
+  testCodexHooks,
+  uninstallCodexHooks
+} from "./settingsService.ts";
 
 export type MastheadDaemon = {
   server: Server;
@@ -481,6 +488,60 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (request.method === "GET" && url.pathname === "/mcp/audit") {
       sendJson(request, response, config.allowedOrigins, 200, {
         audit: listMcpAuditRows(database, Number.parseInt(url.searchParams.get("limit") || "50", 10)),
+        ok: true
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/settings") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        settings: await getSettingsState(database, config)
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/settings/hooks/codex") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        hooks: await getCodexHookSettings(database, config),
+        ok: true
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/settings/hooks/codex/install") {
+      try {
+        sendJson(request, response, config.allowedOrigins, 202, {
+          hooks: await installCodexHooks(database, config),
+          ok: true
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/settings/hooks/codex/uninstall") {
+      try {
+        sendJson(request, response, config.allowedOrigins, 202, {
+          hooks: await uninstallCodexHooks(database, config),
+          ok: true
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/settings/hooks/codex/test") {
+      sendJson(request, response, config.allowedOrigins, 202, {
+        hooks: await testCodexHooks(database, config),
         ok: true
       });
       return;

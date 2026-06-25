@@ -1,0 +1,153 @@
+.settings-panel {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.settings-section {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line, rgba(194, 221, 241, 0.13));
+  padding-top: 18px;
+}
+
+.settings-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.settings-section-head h2 {
+  margin: 3px 0 0;
+  color: var(--ink, #f6fbff);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.settings-section-head p {
+  max-width: 680px;
+  margin: 6px 0 0;
+  color: var(--mute, #91a8ba);
+}
+
+.settings-section-head .mono-label {
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.settings-section-body {
+  display: grid;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--line, rgba(194, 221, 241, 0.13));
+  padding: 12px 0;
+}
+
+.settings-row-copy {
+  min-width: 0;
+}
+
+.settings-row-copy > span {
+  color: var(--ink, #f6fbff);
+  font-weight: 600;
+}
+
+.settings-row-copy p {
+  margin: 4px 0 0;
+  color: var(--mute, #91a8ba);
+}
+
+.settings-row-value {
+  min-width: 0;
+  color: var(--body, #d6e4ef);
+  overflow-wrap: anywhere;
+}
+
+.settings-row-control {
+  min-width: 0;
+}
+
+.settings-inline-actions,
+.settings-delete-controls,
+.confirm-dialog-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-delete-controls input {
+  min-height: 40px;
+  min-width: 220px;
+  border: 1px solid rgba(92, 153, 187, 0.18);
+  border-radius: 3px;
+  background: #061925;
+  color: var(--ink, #f6fbff);
+  padding: 0 10px;
+}
+
+.settings-delete-controls input:focus {
+  outline: 0;
+  box-shadow:
+    0 0 0 1px rgba(116, 185, 224, 0.34),
+    0 0 0 3px rgba(46, 167, 255, 0.12);
+}
+
+.settings-error,
+.settings-status,
+.confirm-dialog {
+  border: 1px solid var(--line, rgba(194, 221, 241, 0.13));
+  border-radius: 5px;
+  background: rgba(7, 27, 40, 0.72);
+  color: var(--body, #d6e4ef);
+  margin: 0;
+  padding: 12px;
+}
+
+.settings-error,
+.settings-status.error,
+.confirm-dialog-danger {
+  border-color: rgba(255, 97, 97, 0.25);
+  background: rgba(255, 97, 97, 0.08);
+}
+
+.confirm-dialog {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.confirm-dialog h2 {
+  margin: 0;
+  color: var(--ink, #f6fbff);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.confirm-dialog p {
+  margin: 4px 0 0;
+  color: var(--body, #d6e4ef);
+}
+
+@media (max-width: 860px) {
+  .settings-row,
+  .confirm-dialog {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .settings-row-control,
+  .settings-inline-actions,
+  .settings-delete-controls,
+  .confirm-dialog-actions {
+    justify-content: flex-start;
+  }
+}

@@ -780,6 +780,10 @@ export function App() {
           deletionScopeKind={deletionScopeKind}
           deletionScopeTarget={deletionScopeTarget}
           localDataStatus={localDataStatus}
+          onCancelLocalDataAction={() => {
+            setLocalDataStatus({ state: "idle" });
+            setPendingDeletionScope(undefined);
+          }}
           onDeletionScopeKindChange={(kind) => {
             setDeletionScopeKind(kind);
             setPendingDeletionScope(undefined);

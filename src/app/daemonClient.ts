@@ -232,6 +232,55 @@ export type McpAuditRowDto = {
   failureMessage?: string;
 };
 
+export type SettingsOptionDto = {
+  value: string;
+  label: string;
+};
+
+export type CodexHookSettingsDto = {
+  configPath: string;
+  configExists: boolean;
+  installed: boolean;
+  missingEvents: string[];
+  mismatchedEvents: string[];
+  command: string;
+  endpoint: string;
+  latestBackupPath?: string;
+  lastEventAt?: string;
+  lastTest?: {
+    testedAt: string;
+    status: "passed" | "failed";
+    message: string;
+  };
+  error?: string;
+};
+
+export type SettingsStateDto = {
+  hooks: CodexHookSettingsDto;
+  enrichment: {
+    provider: string;
+    remoteModelEnabled: boolean;
+    model: string;
+    currentEnrichments: number;
+    sessionCount: number;
+  };
+  privacy: {
+    transcriptImportEnabled: boolean;
+    mcpAccessEnabled: boolean;
+    redactionEnabled: true;
+  };
+  storage: {
+    databasePath: string;
+    storePath: string;
+    dataSummary: DataSummary;
+  };
+  deletionTargets: {
+    projects: SettingsOptionDto[];
+    runtimes: SettingsOptionDto[];
+    hosts: SettingsOptionDto[];
+  };
+};
+
 export type DeleteMastheadDataScope =
   | { kind: "all" }
   | { kind: "raw_payloads" }
@@ -421,6 +470,51 @@ export async function listMcpAudit(
   if (!response.ok) throw new Error(`MCP audit request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; audit: McpAuditRowDto[] };
   return body.audit;
+}
+
+export async function getSettingsState(baseUrl = defaultLiveProjectionUrl(), options: { signal?: AbortSignal } = {}): Promise<SettingsStateDto> {
+  const url = new URL(baseUrl);
+  url.pathname = "/settings";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`settings request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; settings: SettingsStateDto };
+  return body.settings;
+}
+
+export async function getCodexHookSettings(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<CodexHookSettingsDto> {
+  const url = new URL(baseUrl);
+  url.pathname = "/settings/hooks/codex";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`Codex hook settings request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; hooks: CodexHookSettingsDto };
+  return body.hooks;
+}
+
+export async function installCodexHooks(baseUrl = defaultLiveProjectionUrl()): Promise<CodexHookSettingsDto> {
+  return postCodexHookAction(baseUrl, "/settings/hooks/codex/install");
+}
+
+export async function uninstallCodexHooks(baseUrl = defaultLiveProjectionUrl()): Promise<CodexHookSettingsDto> {
+  return postCodexHookAction(baseUrl, "/settings/hooks/codex/uninstall");
+}
+
+export async function testCodexHooks(baseUrl = defaultLiveProjectionUrl()): Promise<CodexHookSettingsDto> {
+  return postCodexHookAction(baseUrl, "/settings/hooks/codex/test");
+}
+
+async function postCodexHookAction(baseUrl: string, pathname: string): Promise<CodexHookSettingsDto> {
+  const url = new URL(baseUrl);
+  url.pathname = pathname;
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, method: "POST" });
+  if (!response.ok) throw new Error(`Codex hook action failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; hooks: CodexHookSettingsDto };
+  return body.hooks;
 }
 
 export async function getDataSummary(baseUrl = defaultLiveProjectionUrl(), scope?: DeleteMastheadDataScope): Promise<DataSummary> {

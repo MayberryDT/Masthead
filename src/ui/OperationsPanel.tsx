@@ -1,9 +1,19 @@
-import { installMastheadHookConfig, verifyMastheadHookConfig } from "../core/hookAdmin";
-import type { DataSummary } from "../app/daemonClient";
+import { useCallback, useEffect, useState } from "react";
+import {
+  getSettingsState,
+  installCodexHooks,
+  testCodexHooks,
+  uninstallCodexHooks,
+  type DataSummary,
+  type SettingsStateDto
+} from "../app/daemonClient";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { EnrichmentSettings } from "./settings/EnrichmentSettings";
+import { DangerZone } from "./settings/DangerZone";
+import { HookSettings } from "./settings/HookSettings";
+import { PrivacySettings } from "./settings/PrivacySettings";
+import { StorageSettings } from "./settings/StorageSettings";
 
-const hookCommand = "node scripts/masthead-hook.js";
-const plannedHookConfig = installMastheadHookConfig({}, { command: hookCommand });
-const hookStatus = verifyMastheadHookConfig(plannedHookConfig);
 export type DeletionScopeKind = "project" | "session" | "runtime" | "host";
 
 export type LocalDataStatus = {
@@ -25,6 +35,8 @@ type Props = {
   deletionScopeKind?: DeletionScopeKind;
   deletionScopeTarget?: string;
   localDataStatus?: LocalDataStatus;
+  settingsState?: SettingsStateDto;
+  onCancelLocalDataAction?: () => void;
   onDeletionScopeKindChange?: (kind: DeletionScopeKind) => void;
   onDeletionScopeTargetChange?: (target: string) => void;
   onExportLocalData?: () => void;
@@ -41,174 +53,124 @@ export function OperationsPanel({
   deletionScopeKind = "project",
   deletionScopeTarget = "",
   localDataStatus = { state: "idle" },
+  onCancelLocalDataAction,
+  onConfirmDeleteLocalData,
+  onConfirmPruneLocalData,
+  onConfirmScopedDelete,
   onDeletionScopeKindChange,
   onDeletionScopeTargetChange,
   onExportLocalData,
-  onRequestPruneLocalData,
-  onConfirmPruneLocalData,
-  onRequestScopedDelete,
-  onConfirmScopedDelete,
   onRequestDeleteLocalData,
-  onConfirmDeleteLocalData
+  onRequestPruneLocalData,
+  onRequestScopedDelete,
+  settingsState
 }: Props) {
-  const busy = localDataStatus.state === "busy";
-  const confirmingDelete = localDataStatus.state === "confirm_delete";
-  const confirmingPrune = localDataStatus.state === "confirm_prune";
-  const confirmingScopedDelete = localDataStatus.state === "confirm_scoped_delete";
-  const scopeLocked = busy || confirmingScopedDelete;
-  const scopedDeleteDisabled = busy || deletionScopeTarget.trim().length === 0;
+  const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
+  const [settingsError, setSettingsError] = useState<string>();
+  const [hookBusy, setHookBusy] = useState(false);
+  const effectiveSettings = settingsState ?? loadedSettings;
+  const effectiveSummary = dataSummary ?? effectiveSettings?.storage.dataSummary;
+  const busy = localDataStatus.state === "busy" || hookBusy;
+
+  const loadSettings = useCallback((signal?: AbortSignal) => {
+    if (settingsState) return;
+    void getSettingsState(undefined, { signal })
+      .then((settings) => {
+        setLoadedSettings(settings);
+        setSettingsError(undefined);
+      })
+      .catch((error: unknown) => {
+        if (signal?.aborted) return;
+        setSettingsError(error instanceof Error ? error.message : String(error));
+      });
+  }, [settingsState]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadSettings(controller.signal);
+    return () => controller.abort();
+  }, [loadSettings]);
+
+  const runHookAction = async (action: "install" | "uninstall" | "test") => {
+    setHookBusy(true);
+    try {
+      const hooks =
+        action === "install"
+          ? await installCodexHooks()
+          : action === "uninstall"
+            ? await uninstallCodexHooks()
+            : await testCodexHooks();
+      setLoadedSettings((current) => (current ? { ...current, hooks } : current));
+      setSettingsError(undefined);
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setHookBusy(false);
+    }
+  };
 
   return (
-    <section id="operations" className="operations-panel" aria-label="Masthead operations">
-      <article className="ops-card" id="local">
-        <header className="ops-head">
-          <p className="mono-label">Admin</p>
-          <h2>Codex hook</h2>
-        </header>
-        <dl className="ops-list">
-          <div>
-            <dt>Install plan</dt>
-            <dd>Add {Object.keys(plannedHookConfig.hooks).length} Masthead-managed hooks</dd>
-          </div>
-          <div>
-            <dt>Config handling</dt>
-            <dd>Backup, merge, verify, rollback</dd>
-          </div>
-          <div>
-            <dt>Hook status</dt>
-            <dd>{hookStatus.installed ? "Managed hook shape verified" : "Missing hook entries"}</dd>
-          </div>
-        </dl>
-      </article>
+    <section id="settings" className="settings-panel" aria-label="Settings">
+      {settingsError ? <p className="settings-error">{settingsError}</p> : null}
 
-      <article className="ops-card">
-        <header className="ops-head">
-          <p className="mono-label">Privacy</p>
-          <h2>Local by default</h2>
-        </header>
-        <ul className="ops-checks">
-          <li>Remote LLM off</li>
-          <li>Raw prompts off</li>
-          <li>Full diffs off</li>
-          <li>Payload preview required</li>
-          <li>Redaction before persistence</li>
-        </ul>
-      </article>
+      <HookSettings
+        busy={busy}
+        hooks={effectiveSettings?.hooks}
+        onInstall={() => void runHookAction("install")}
+        onTest={() => void runHookAction("test")}
+        onUninstall={() => void runHookAction("uninstall")}
+      />
+      <EnrichmentSettings enrichment={effectiveSettings?.enrichment} />
+      <PrivacySettings privacy={effectiveSettings?.privacy} />
+      <StorageSettings
+        busy={busy}
+        dataSummary={effectiveSummary}
+        onExport={onExportLocalData}
+        onRequestPrune={onRequestPruneLocalData}
+        settings={effectiveSettings}
+      />
+      <DangerZone
+        busy={busy}
+        deletionScopeKind={deletionScopeKind}
+        deletionScopeTarget={deletionScopeTarget}
+        onDeletionScopeKindChange={onDeletionScopeKindChange}
+        onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+        onRequestDeleteAll={onRequestDeleteLocalData}
+        onRequestScopedDelete={onRequestScopedDelete}
+        targets={effectiveSettings?.deletionTargets}
+      />
 
-      <article className="ops-card">
-        <header className="ops-head">
-          <p className="mono-label">History</p>
-          <h2>Local records</h2>
-        </header>
-        <dl className="ops-list">
-          <div>
-            <dt>Search keys</dt>
-            <dd>Project, file, command, status, branch, alert, outcome</dd>
-          </div>
-          <div>
-            <dt>Retention</dt>
-            <dd>Canonical metadata and session capsules are kept indefinitely</dd>
-          </div>
-          <div>
-            <dt>Delete raw source copies</dt>
-            <dd>Keeps normalized session metadata, summaries, and search records.</dd>
-          </div>
-          <div>
-            <dt>Delete one project</dt>
-            <dd>Removes Masthead imported records for the selected project. Original harness files are untouched.</dd>
-          </div>
-          <div>
-            <dt>Delete all Masthead data</dt>
-            <dd>Removes the canonical Masthead database, enrichments, search index, policies, and MCP audit log. Original harness files remain untouched.</dd>
-          </div>
-        </dl>
-        {dataSummary ? (
-          <dl className="ops-list ops-preview" aria-label="Data deletion preview">
-            <div>
-              <dt>Preview sessions</dt>
-              <dd>{formatCount(dataSummary.tables.sessions ?? dataSummary.sessions)}</dd>
-            </div>
-            <div>
-              <dt>Preview raw source copies</dt>
-              <dd>{formatCount(dataSummary.tables.raw_events ?? dataSummary.rawEvents)}</dd>
-            </div>
-            <div>
-              <dt>Preview search records</dt>
-              <dd>{formatCount(dataSummary.tables.session_search ?? 0)}</dd>
-            </div>
-            <div>
-              <dt>Preview MCP audit</dt>
-              <dd>{formatCount(dataSummary.tables.mcp_query_log ?? dataSummary.auditRows)}</dd>
-            </div>
-          </dl>
-        ) : null}
-        <div className="ops-scope-control" aria-label="Selective deletion">
-          <label>
-            <span className="mono-label">Selective deletion</span>
-            <select
-              aria-label="Delete scope"
-              value={deletionScopeKind}
-              disabled={scopeLocked}
-              onChange={(event) => onDeletionScopeKindChange?.(event.currentTarget.value as DeletionScopeKind)}
-            >
-              <option value="project">Project</option>
-              <option value="session">Session</option>
-              <option value="runtime">Runtime</option>
-              <option value="host">Host</option>
-            </select>
-          </label>
-          <input
-            aria-label="Delete target"
-            value={deletionScopeTarget}
-            disabled={scopeLocked}
-            placeholder={scopePlaceholder(deletionScopeKind)}
-            onChange={(event) => onDeletionScopeTargetChange?.(event.currentTarget.value)}
-          />
-          <button
-            type="button"
-            className="ghost-pill danger-pill"
-            disabled={scopedDeleteDisabled}
-            onClick={confirmingScopedDelete ? onConfirmScopedDelete : onRequestScopedDelete}
-          >
-            {confirmingScopedDelete ? "Confirm scoped delete" : "Delete selected records"}
-          </button>
-        </div>
-        <div className="ops-actions">
-          <button type="button" className="ghost-pill" disabled={busy} onClick={onExportLocalData}>
-            Export local data
-          </button>
-          <button
-            type="button"
-            className="ghost-pill"
-            disabled={busy}
-            onClick={confirmingPrune ? onConfirmPruneLocalData : onRequestPruneLocalData}
-          >
-            {confirmingPrune ? "Confirm raw copy delete" : "Delete raw source copies"}
-          </button>
-          <button
-            type="button"
-            className="ghost-pill danger-pill"
-            disabled={busy}
-            onClick={confirmingDelete ? onConfirmDeleteLocalData : onRequestDeleteLocalData}
-          >
-            {confirmingDelete ? "Confirm delete all" : "Delete all Masthead data"}
-          </button>
-        </div>
-        {localDataStatus.message ? (
-          <p className={`ops-status ${localDataStatus.state === "error" ? "error" : ""}`}>{localDataStatus.message}</p>
-        ) : null}
-      </article>
+      <ConfirmDialog
+        confirmLabel="Delete raw copies"
+        description={localDataStatus.message}
+        onCancel={onCancelLocalDataAction}
+        onConfirm={onConfirmPruneLocalData}
+        open={localDataStatus.state === "confirm_prune"}
+        title="Confirm raw source copy deletion"
+        tone="danger"
+      />
+      <ConfirmDialog
+        confirmLabel="Delete selected records"
+        description={localDataStatus.message}
+        onCancel={onCancelLocalDataAction}
+        onConfirm={onConfirmScopedDelete}
+        open={localDataStatus.state === "confirm_scoped_delete"}
+        title="Confirm scoped deletion"
+        tone="danger"
+      />
+      <ConfirmDialog
+        confirmLabel="Delete all Masthead data"
+        description={localDataStatus.message}
+        onCancel={onCancelLocalDataAction}
+        onConfirm={onConfirmDeleteLocalData}
+        open={localDataStatus.state === "confirm_delete"}
+        title="Confirm delete all Masthead data"
+        tone="danger"
+      />
+
+      {localDataStatus.message && !localDataStatus.state.startsWith("confirm") ? (
+        <p className={`settings-status ${localDataStatus.state === "error" ? "error" : ""}`}>{localDataStatus.message}</p>
+      ) : null}
     </section>
   );
-}
-
-function formatCount(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
-}
-
-function scopePlaceholder(kind: DeletionScopeKind): string {
-  if (kind === "session") return "session id";
-  if (kind === "runtime") return "runtime id or kind";
-  if (kind === "host") return "host id or hostname";
-  return "project label";
 }

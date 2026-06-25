@@ -6,12 +6,14 @@ describe("OperationsPanel", () => {
   test("renders local export and delete controls", () => {
     const html = renderToStaticMarkup(<OperationsPanel />);
 
-    expect(html).toContain("Export local data");
-    expect(html).toContain("Delete raw source copies");
+    expect(html).toContain("Export data");
+    expect(html).toContain("Delete raw copies");
     expect(html).toContain("Delete all Masthead data");
-    expect(html).toContain("Canonical metadata and session capsules are kept indefinitely");
     expect(html).toContain("Keeps normalized session metadata, summaries, and search records.");
     expect(html).toContain("Original harness files are untouched.");
+    expect(html).toContain("Codex integration");
+    expect(html).not.toContain("ops-card");
+    expect(html).not.toContain("ghost-pill");
     expect(html).not.toContain("Manual 30-day prune");
     expect(html).not.toContain("latest 500 records");
     expect(html).not.toContain("Approve request");
@@ -28,7 +30,8 @@ describe("OperationsPanel", () => {
       />
     );
 
-    expect(html).toContain("Confirm delete all");
+    expect(html).toContain("Confirm delete all Masthead data");
+    expect(html).toContain("Cancel");
     expect(html).toContain("Confirm delete all Masthead data. Original harness files remain untouched.");
   });
 
@@ -42,7 +45,8 @@ describe("OperationsPanel", () => {
       />
     );
 
-    expect(html).toContain("Confirm raw copy delete");
+    expect(html).toContain("Confirm raw source copy deletion");
+    expect(html).toContain("Delete raw copies");
     expect(html).toContain("Confirm deletion of 4 raw source copies.");
   });
 
@@ -58,16 +62,15 @@ describe("OperationsPanel", () => {
       />
     );
 
-    expect(html).toContain("Selective deletion");
+    expect(html).toContain("Delete scoped records");
     expect(html).toContain("Project");
     expect(html).toContain("Session");
     expect(html).toContain("Runtime");
     expect(html).toContain("Host");
     expect(html).toContain("Pip");
-    expect(html).toContain("Confirm scoped delete");
+    expect(html).toContain("Confirm scoped deletion");
     expect(html).toContain("Confirm scoped deletion for project Pip.");
-    expect(html).toMatch(/<select[^>]*disabled=""/);
-    expect(html).toMatch(/<input[^>]*disabled=""/);
+    expect(html).toContain("Cancel");
   });
 
   test("renders data summary preview before deletion", () => {
@@ -98,12 +101,11 @@ describe("OperationsPanel", () => {
       />
     );
 
-    expect(html).toContain("Data deletion preview");
-    expect(html).toContain("Preview sessions");
-    expect(html).toContain("Preview raw source copies");
+    expect(html).toContain("Storage");
+    expect(html).toContain("Sessions");
+    expect(html).toContain("Raw source copies");
     expect(html).toContain("5");
     expect(html).toContain("4");
-    expect(html).toContain("7");
   });
 
   test("renders local action errors without changing action labels", () => {
@@ -112,7 +114,7 @@ describe("OperationsPanel", () => {
     );
 
     expect(html).toContain("Export failed: unavailable");
-    expect(html).toContain("Export local data");
+    expect(html).toContain("Export data");
     expect(html).toContain("Delete all Masthead data");
   });
 });
