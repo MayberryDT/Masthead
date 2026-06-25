@@ -1506,6 +1506,7 @@ function sessionQueryFromUrl(url: URL): SessionQuery {
     dateTo: url.searchParams.get("dateTo") ?? undefined,
     file: url.searchParams.get("file") ?? undefined,
     host: url.searchParams.get("host") ?? undefined,
+    lifecycle: url.searchParams.get("lifecycle") ?? undefined,
     limit: Number.parseInt(url.searchParams.get("limit") || "50", 10),
     model: url.searchParams.get("model") ?? undefined,
     offset: Number.parseInt(url.searchParams.get("offset") || "0", 10),

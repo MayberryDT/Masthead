@@ -100,6 +100,107 @@ describe("session query repository", () => {
     expect(querySessions(db, { limit: 1, sort: "project" }).sessions[0]?.project).toBe("Alpha");
     db.close();
   });
+
+  test("searches seeded canonical SQLite rows and reduces with filters", async () => {
+    const db = await openTestDatabase();
+    seedQueryableSession(db, {
+      file: "auth/callback.ts",
+      lastActivityAt: "2026-06-25T12:00:00.000Z",
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Pip",
+      runtime: "codex",
+      sessionId: "session-match",
+      title: "OAuth callback repair"
+    });
+    seedQueryableSession(db, {
+      file: "auth/runtime.ts",
+      lastActivityAt: "2026-06-25T12:10:00.000Z",
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Pip",
+      runtime: "cursor",
+      sessionId: "session-runtime",
+      title: "OAuth runtime repair"
+    });
+    seedQueryableSession(db, {
+      file: "src/logbook.ts",
+      lastActivityAt: "2026-06-20T09:00:00.000Z",
+      lifecycle: "running",
+      model: "gpt-4.1",
+      project: "Masthead",
+      runtime: "codex",
+      sessionId: "session-older",
+      title: "OAuth logbook repair"
+    });
+
+    expect(sessionIds(querySessions(db, { limit: 25, query: "OAuth", sort: "oldest" }))).toEqual([
+      "session-older",
+      "session-match",
+      "session-runtime"
+    ]);
+    expect(sessionIds(querySessions(db, { limit: 25, query: "OAuth", runtime: "codex", sort: "oldest" }))).toEqual([
+      "session-older",
+      "session-match"
+    ]);
+    expect(sessionIds(querySessions(db, { limit: 25, query: "OAuth", project: "pip", sort: "oldest" }))).toEqual([
+      "session-match",
+      "session-runtime"
+    ]);
+    expect(sessionIds(querySessions(db, { limit: 25, model: "gpt-5", query: "OAuth", sort: "oldest" }))).toEqual([
+      "session-match",
+      "session-runtime"
+    ]);
+    expect(sessionIds(querySessions(db, { lifecycle: "ended", limit: 25, query: "OAuth", sort: "oldest" }))).toEqual([
+      "session-match",
+      "session-runtime"
+    ]);
+    expect(sessionIds(querySessions(db, { limit: 25, query: "OAuth", sort: "oldest", state: "ended" }))).toEqual([
+      "session-match",
+      "session-runtime"
+    ]);
+    expect(
+      sessionIds(
+        querySessions(db, {
+          dateFrom: "2026-06-25T00:00:00.000Z",
+          dateTo: "2026-06-25T12:05:00.000Z",
+          limit: 25,
+          query: "OAuth",
+          sort: "oldest"
+        })
+      )
+    ).toEqual(["session-match"]);
+    expect(
+      sessionIds(
+        querySessions(db, {
+          dateFrom: "2026-06-25",
+          dateTo: "2026-06-25",
+          limit: 25,
+          query: "OAuth",
+          sort: "oldest"
+        })
+      )
+    ).toEqual(["session-match", "session-runtime"]);
+    expect(sessionIds(querySessions(db, { file: "auth/callback", limit: 25, query: "OAuth" }))).toEqual([
+      "session-match"
+    ]);
+    expect(
+      sessionIds(
+        querySessions(db, {
+          dateFrom: "2026-06-25T00:00:00.000Z",
+          dateTo: "2026-06-25T12:05:00.000Z",
+          file: "auth/callback",
+          lifecycle: "ended",
+          limit: 25,
+          model: "gpt-5",
+          project: "pip",
+          query: "OAuth",
+          runtime: "codex"
+        })
+      )
+    ).toEqual(["session-match"]);
+    db.close();
+  });
 });
 
 async function openTestDatabase(): Promise<MastheadDatabase> {
@@ -108,4 +209,55 @@ async function openTestDatabase(): Promise<MastheadDatabase> {
   const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
   migrateDatabase(db);
   return db;
+}
+
+type QueryableSessionOptions = {
+  file: string;
+  lastActivityAt: string;
+  lifecycle: string;
+  model: string;
+  project: string;
+  runtime: string;
+  sessionId: string;
+  title: string;
+};
+
+function seedQueryableSession(db: MastheadDatabase, options: QueryableSessionOptions): void {
+  const now = "2026-06-25T12:00:00.000Z";
+  seedSession(db, options);
+  db.prepare(
+    `INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at)
+    VALUES (?, ?, ?, ?, ?)`
+  ).run(`runtime:${options.runtime}`, options.runtime, "1.0.0", now, now);
+  db.prepare(
+    `UPDATE sessions
+    SET runtime_id = ?,
+      project_label = ?,
+      lifecycle = ?,
+      last_activity_at = ?,
+      updated_at = ?
+    WHERE session_id = ?`
+  ).run(
+    `runtime:${options.runtime}`,
+    options.project,
+    options.lifecycle,
+    options.lastActivityAt,
+    options.lastActivityAt,
+    options.sessionId
+  );
+  db.prepare("UPDATE model_usage SET model = ?, observed_at = ? WHERE session_id = ?").run(
+    options.model,
+    options.lastActivityAt,
+    options.sessionId
+  );
+  db.prepare("UPDATE file_effects SET path = ?, observed_at = ? WHERE session_id = ?").run(
+    options.file,
+    options.lastActivityAt,
+    options.sessionId
+  );
+  indexCanonicalSessionSearch(db, options.sessionId);
+}
+
+function sessionIds(result: ReturnType<typeof querySessions>): string[] {
+  return result.sessions.map((session) => session.sessionId);
 }

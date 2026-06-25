@@ -9,28 +9,33 @@ type Props = {
 
 export function LogbookRow({ density, onSelect, selected = false, session }: Props) {
   const primaryModel = session.models?.[0] ?? session.model ?? "Not captured";
+  const lifecycle = session.lifecycle ?? session.state ?? "indexed";
   return (
     <tr className={`logbook-row ${density === "compact" ? "compact" : ""} ${selected ? "selected" : ""}`.trim()}>
-      <td className="logbook-date">
+      <td className="logbook-date logbook-col-date">
         <time dateTime={session.lastActivityAt}>{formatDate(session.lastActivityAt)}</time>
         <span>{formatTime(session.lastActivityAt)}</span>
       </td>
-      <td className="logbook-session-cell">
+      <td className="logbook-session-cell logbook-col-session">
         <button type="button" className="logbook-session-button" onClick={() => onSelect(session.sessionId)} aria-pressed={selected}>
           <strong>{sessionTitle(session)}</strong>
           {session.snippet ? <HighlightedSnippet snippet={session.snippet} /> : <span>{session.objective ?? session.outcome ?? session.sourceSessionId}</span>}
         </button>
       </td>
-      <td title={session.project ?? ""}>{session.project ?? "Not captured"}</td>
-      <td>{runtimeLabel(session.runtime)}</td>
-      <td title={primaryModel}>{primaryModel}</td>
-      <td>
-        <span className={`state-token ${stateToneClass(session.lifecycle ?? session.state)}`.trim()}>{statusLabel(session.lifecycle ?? session.state ?? "indexed")}</span>
+      <td className="logbook-col-project" title={session.project ?? ""}>{session.project ?? "Not captured"}</td>
+      <td className="logbook-col-runtime">{runtimeLabel(session.runtime)}</td>
+      <td className="logbook-col-model" title={primaryModel}>{primaryModel}</td>
+      <td className="logbook-col-state">
+        <span className={`state-token ${stateToneClass(lifecycle)}`.trim()}>{statusLabel(lifecycle)}</span>
       </td>
-      <td className="logbook-number">{session.fileCount ?? 0}</td>
-      <td className="logbook-number">{session.toolCount ?? 0}</td>
-      <td className={`logbook-number ${(session.errorCount ?? 0) > 0 ? "attention" : ""}`.trim()}>{session.errorCount ?? 0}</td>
-      <td>{durationLabel(session.startedAt, session.endedAt)}</td>
+      <td className="logbook-col-source logbook-desktop-column">
+        <span className="logbook-source-confidence">{statusLabel(session.sourceConfidence ?? "inferred")}</span>
+        <span>{session.hostId ?? session.host ?? session.sourceSessionId ?? "Source pending"}</span>
+      </td>
+      <td className="logbook-number logbook-col-count">{session.fileCount ?? 0}</td>
+      <td className="logbook-number logbook-col-count">{session.toolCount ?? 0}</td>
+      <td className={`logbook-number logbook-col-count ${(session.errorCount ?? 0) > 0 ? "attention" : ""}`.trim()}>{session.errorCount ?? 0}</td>
+      <td className="logbook-col-duration logbook-desktop-column">{durationLabel(session.startedAt, session.endedAt)}</td>
     </tr>
   );
 }

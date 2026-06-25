@@ -16,7 +16,7 @@ export function LogbookTable({ density, onSelect, selectedSessionId, sessions }:
         <thead>
           <tr>
             {logbookColumns.map((column) => (
-              <th key={column.key} scope="col">
+              <th key={column.key} scope="col" className={column.className}>
                 {column.label}
               </th>
             ))}

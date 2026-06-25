@@ -11,7 +11,7 @@ import type { ReviewDisposition } from "../core/store";
 import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent, SafeAction, SessionDetailView } from "../core/types";
 import { AttentionQueue } from "../ui/AttentionQueue";
 import { AppShell } from "../ui/AppShell";
-import { HistoryPanel, type LogbookLoadState } from "../ui/HistoryPanel";
+import { HistoryPanel, type LogbookFilterState, type LogbookLoadState } from "../ui/HistoryPanel";
 import { ObservabilityRightRail } from "../ui/ObservabilityRightRail";
 import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
@@ -148,6 +148,7 @@ export function App() {
   const [logbookError, setLogbookError] = useState<string>();
   const [logbookRetryKey, setLogbookRetryKey] = useState(0);
   const [logbookSort, setLogbookSort] = useState<LogbookSort>("recent");
+  const [logbookFilters, setLogbookFilters] = useState<LogbookFilterState>({});
   const [logbookDensity, setLogbookDensity] = useState<"comfortable" | "compact">("comfortable");
   const [selectedLogbookSessionId, setSelectedLogbookSessionId] = useState<string>();
   const [selectedLogbookSession, setSelectedLogbookSession] = useState<LogbookSessionDetail>();
@@ -223,6 +224,19 @@ export function App() {
     if (logbookError) return { state: "error", message: logbookError };
     return { state: "loading" };
   }, [logbookError, logbookResult]);
+  const logbookFilterOptions = useMemo(
+    () => ({
+      lifecycles: Array.from(new Set(logbookSummary?.lifecycles.map((item) => item.lifecycle).filter(Boolean) ?? [])),
+      models: Array.from(new Set(logbookSummary?.models.map((item) => item.model).filter(Boolean) ?? [])),
+      runtimes: Array.from(
+        new Set([
+          ...(logbookSummary?.runtimes.map((item) => item.runtime).filter(Boolean) ?? []),
+          ...adapters.map((adapter) => adapter.runtime).filter(Boolean)
+        ])
+      )
+    }),
+    [adapters, logbookSummary]
+  );
   const filteredAttentionItems = useMemo(
     () => filterAttentionItemsForCards(board.attentionQueue, filteredCards),
     [board.attentionQueue, filteredCards]
@@ -424,12 +438,12 @@ export function App() {
   }, [activeSurface, handleRefreshSources]);
 
   useEffect(() => {
-    if (activeSurface !== "logbook") return;
+    if (activeSurface !== "logbook" || effectiveLiveConnection.state !== "live") return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setLogbookLoading(true);
       setLogbookError(undefined);
-      void searchLogbook({ limit: 50, q: historyQuery, sort: logbookSort }, activeProjectionUrl, { signal: controller.signal })
+      void searchLogbook({ ...logbookFilters, limit: 50, q: historyQuery, sort: logbookSort }, activeProjectionUrl, { signal: controller.signal })
         .then((result) => {
           setLogbookResult(result);
           setLogbookError(undefined);
@@ -449,7 +463,7 @@ export function App() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [activeProjectionUrl, activeSurface, historyQuery, logbookRetryKey, logbookSort]);
+  }, [activeProjectionUrl, activeSurface, effectiveLiveConnection.state, historyQuery, logbookFilters, logbookRetryKey, logbookSort]);
 
   useEffect(() => {
     if (activeSurface !== "logbook") return;
@@ -832,6 +846,14 @@ export function App() {
 
   const handleLogbookQueryChange = (nextQuery: string) => {
     setHistoryQuery(nextQuery);
+    setLogbookResult(undefined);
+    setLogbookError(undefined);
+    setSelectedLogbookSessionId(undefined);
+  };
+
+  const handleLogbookFilterChange = (nextFilters: LogbookFilterState) => {
+    setLogbookFilters(nextFilters);
+    setLogbookResult(undefined);
     setLogbookError(undefined);
     setSelectedLogbookSessionId(undefined);
   };
@@ -840,7 +862,10 @@ export function App() {
     if (!logbookResult?.nextCursor || logbookLoading) return;
     setLogbookLoading(true);
     try {
-      const nextPage = await searchLogbook({ cursor: logbookResult.nextCursor, limit: 50, q: historyQuery, sort: logbookSort }, activeProjectionUrl);
+      const nextPage = await searchLogbook(
+        { ...logbookFilters, cursor: logbookResult.nextCursor, limit: 50, q: historyQuery, sort: logbookSort },
+        activeProjectionUrl
+      );
       setLogbookResult({
         nextCursor: nextPage.nextCursor,
         sessions: [...logbookResult.sessions, ...nextPage.sessions],
@@ -882,40 +907,47 @@ export function App() {
       )}</SourcesSurface>
     ) : activeSurface === "logbook" ? (
       <LogbookSurface>
-        {needsRecoveryPanel ? (
-          recoveryPanel
-        ) : (
-          <>
-            <HistoryPanel
-              records={showDemoData ? historyRecords : undefined}
-              query={historyQuery}
-              density={logbookDensity}
-              loadState={showDemoData ? undefined : logbookLoadState}
-              refreshError={logbookResult ? logbookError : undefined}
-              selectedSessionId={selectedLogbookSessionId}
-              sort={logbookSort}
-              summary={logbookSummary}
-              loading={logbookLoading}
-              onDensityToggle={() => setLogbookDensity((current) => (current === "compact" ? "comfortable" : "compact"))}
-              onQueryChange={handleLogbookQueryChange}
-              onLoadMore={handleLoadMoreLogbook}
-              onRetry={() => setLogbookRetryKey((current) => current + 1)}
-              onSessionSelect={setSelectedLogbookSessionId}
-              onSortChange={(nextSort) => {
-                setLogbookSort(nextSort);
-                setSelectedLogbookSessionId(undefined);
-              }}
+        <>
+          <HistoryPanel
+            records={showDemoData ? historyRecords : undefined}
+            adapters={adapters}
+            connectionState={connection.state.state === "offline" ? "offline" : connection.state.state === "incompatible" ? "incompatible" : effectiveLiveConnection.state === "live" ? "live" : "connecting"}
+            filterOptions={logbookFilterOptions}
+            filters={logbookFilters}
+            imports={imports}
+            importBusy={sourcesBusy}
+            query={historyQuery}
+            density={logbookDensity}
+            loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbookLoadState}
+            refreshError={logbookResult ? logbookError : undefined}
+            selectedSessionId={selectedLogbookSessionId}
+            sort={logbookSort}
+            sources={sources}
+            summary={logbookSummary}
+            loading={logbookLoading}
+            onDensityToggle={() => setLogbookDensity((current) => (current === "compact" ? "comfortable" : "compact"))}
+            onFilterChange={handleLogbookFilterChange}
+            onImportMetadata={handleImportMetadata}
+            onOpenSources={() => setActiveSurface("sources")}
+            onQueryChange={handleLogbookQueryChange}
+            onLoadMore={handleLoadMoreLogbook}
+            onRetry={() => setLogbookRetryKey((current) => current + 1)}
+            onSessionSelect={setSelectedLogbookSessionId}
+            onSortChange={(nextSort) => {
+              setLogbookSort(nextSort);
+              setLogbookResult(undefined);
+              setSelectedLogbookSessionId(undefined);
+            }}
+          />
+          {selectedLogbookSessionId ? (
+            <SessionLibraryDetail
+              session={selectedLogbookSession}
+              excerpts={selectedLogbookExcerpts}
+              loading={logbookDetailLoading}
+              onClose={() => setSelectedLogbookSessionId(undefined)}
             />
-            {selectedLogbookSessionId ? (
-              <SessionLibraryDetail
-                session={selectedLogbookSession}
-                excerpts={selectedLogbookExcerpts}
-                loading={logbookDetailLoading}
-                onClose={() => setSelectedLogbookSessionId(undefined)}
-              />
-            ) : null}
-          </>
-        )}
+          ) : null}
+        </>
       </LogbookSurface>
     ) : activeSurface === "agent_access" ? (
       needsRecoveryPanel ? (

@@ -168,6 +168,7 @@ export type LogbookSearchFilters = {
   model?: string;
   host?: string;
   state?: string;
+  lifecycle?: string;
   file?: string;
   dateFrom?: string;
   dateTo?: string;

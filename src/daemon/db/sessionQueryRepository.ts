@@ -33,6 +33,7 @@ export type SessionQuery = {
   model?: string;
   host?: string;
   state?: string;
+  lifecycle?: string;
   file?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -270,9 +271,10 @@ function loadSessionRows(
     where.push("(lower(sessions.host_id) = lower(?) OR lower(COALESCE(hosts.hostname, '')) = lower(?))");
     params.push(query.host, query.host);
   }
-  if (query.state) {
+  const lifecycle = query.lifecycle ?? query.state;
+  if (lifecycle) {
     where.push("lower(sessions.lifecycle) = lower(?)");
-    params.push(query.state);
+    params.push(lifecycle);
   }
   if (query.model) {
     where.push(
@@ -306,13 +308,15 @@ function loadSessionRows(
     const pattern = `%${query.project.toLowerCase()}%`;
     params.push(pattern, pattern);
   }
-  if (query.dateFrom) {
+  const dateFrom = normalizeDateLowerBound(query.dateFrom);
+  if (dateFrom) {
     where.push("sessions.last_activity_at >= ?");
-    params.push(query.dateFrom);
+    params.push(dateFrom);
   }
-  if (query.dateTo) {
+  const dateTo = normalizeDateUpperBound(query.dateTo);
+  if (dateTo) {
     where.push("sessions.last_activity_at <= ?");
-    params.push(query.dateTo);
+    params.push(dateTo);
   }
 
   return db
@@ -462,6 +466,20 @@ function uniqueStrings(values: string[]): string[] {
 
 function parseJson(value: string): unknown {
   return JSON.parse(value);
+}
+
+function normalizeDateLowerBound(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return isDateOnly(value) ? `${value}T00:00:00.000Z` : value;
+}
+
+function normalizeDateUpperBound(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return isDateOnly(value) ? `${value}T23:59:59.999Z` : value;
+}
+
+function isDateOnly(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function durationMs(startedAt: string | null, endedAt: string | null): number | undefined {

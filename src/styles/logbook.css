@@ -4,9 +4,9 @@
 }
 
 .logbook-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(280px, 1.8fr) repeat(7, minmax(118px, 0.7fr)) minmax(176px, 0.7fr) 40px;
   align-items: center;
-  flex-wrap: wrap;
   gap: 8px;
   border: 1px solid rgba(92, 153, 187, 0.15);
   border-radius: 5px;
@@ -15,17 +15,47 @@
 }
 
 .logbook-search {
-  flex: 1 1 420px;
   max-width: none;
 }
 
-.toolbar-select.logbook-sort {
-  width: 176px;
-  min-width: 176px;
+.toolbar-select.logbook-sort,
+.toolbar-select.logbook-filter-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.logbook-filter-input {
+  display: grid;
+  min-width: 0;
+  min-height: 40px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.logbook-filter-input span {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+}
+
+.logbook-filter-input input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  outline: 0;
+}
+
+.logbook-filter-input input::placeholder {
+  color: var(--ash);
 }
 
 .logbook-density-toggle {
-  flex: 0 0 40px;
+  width: 40px;
 }
 
 .logbook-facets {
@@ -65,7 +95,7 @@
 
 .logbook-table {
   width: 100%;
-  min-width: 1040px;
+  min-width: 1180px;
   border-collapse: collapse;
   color: var(--body);
   font-size: 13px;
@@ -185,8 +215,30 @@
   text-align: right;
 }
 
-.logbook-number.attention {
+.logbook-number.attention,
+.logbook-inspector-columns .attention {
   color: #ffaaa5;
+}
+
+.logbook-col-source {
+  min-width: 170px;
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.logbook-col-source span {
+  display: block;
+  overflow: hidden;
+  max-width: 220px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logbook-source-confidence {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
 }
 
 .logbook-skeleton {
@@ -200,6 +252,18 @@
 .logbook-skeleton span {
   height: 58px;
   background: linear-gradient(90deg, rgba(7, 27, 40, 0.62), rgba(9, 38, 58, 0.7), rgba(7, 27, 40, 0.62));
+}
+
+.logbook-empty-state {
+  display: grid;
+  gap: 10px;
+}
+
+.logbook-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
 }
 
 .logbook-inspector {
@@ -225,12 +289,13 @@
 
 .logbook-inspector-facts {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 0;
 }
 
 .logbook-inspector-facts div,
+.logbook-inspector-provenance,
 .logbook-inspector-columns section,
 .logbook-excerpt {
   border: 1px solid rgba(92, 153, 187, 0.13);
@@ -252,14 +317,21 @@
 }
 
 .logbook-inspector-copy p,
+.logbook-inspector-provenance p,
 .logbook-inspector-columns p,
 .logbook-excerpt p {
   margin: 4px 0 0;
 }
 
+.logbook-inspector-provenance p,
+.logbook-excerpt time {
+  color: var(--mute);
+  overflow-wrap: anywhere;
+}
+
 .logbook-inspector-columns {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -268,31 +340,56 @@
   gap: 8px;
 }
 
+.logbook-excerpt strong {
+  margin-right: 8px;
+  color: var(--ink);
+}
+
+@media (max-width: 1280px) {
+  .logbook-toolbar {
+    grid-template-columns: minmax(260px, 1fr) repeat(4, minmax(120px, 1fr));
+  }
+
+  .logbook-density-toggle {
+    width: 100%;
+  }
+}
+
 @media (max-width: 900px) {
   .logbook-toolbar {
+    grid-template-columns: 1fr 1fr;
     align-items: stretch;
   }
 
-  .toolbar-select.logbook-sort {
-    flex: 1 1 176px;
-    width: auto;
+  .logbook-search,
+  .logbook-file-filter {
+    grid-column: 1 / -1;
   }
 
-  .logbook-search {
-    flex-basis: 100%;
+  .logbook-desktop-column {
+    display: none;
+  }
+
+  .logbook-table {
+    min-width: 880px;
   }
 }
 
 @media (max-width: 760px) {
   .logbook-toolbar {
-    align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: 1fr;
+  }
+
+  .logbook-search,
+  .logbook-file-filter {
+    grid-column: auto;
   }
 
   .toolbar-select.logbook-sort,
+  .toolbar-select.logbook-filter-select,
+  .logbook-filter-input,
   .logbook-search,
   .logbook-density-toggle {
-    flex: 1 1 auto;
     width: 100%;
     min-width: 0;
   }

@@ -1,12 +1,13 @@
 export const logbookColumns = [
-  { key: "date", label: "DATE" },
-  { key: "session", label: "SESSION / MATCH" },
-  { key: "project", label: "PROJECT" },
-  { key: "runtime", label: "AGENT" },
-  { key: "model", label: "MODEL" },
-  { key: "state", label: "STATE" },
-  { key: "files", label: "FILES" },
-  { key: "tools", label: "TOOLS" },
-  { key: "errors", label: "ERRORS" },
-  { key: "duration", label: "DURATION" }
+  { key: "date", label: "DATE", className: "logbook-col-date" },
+  { key: "session", label: "SESSION / MATCH", className: "logbook-col-session" },
+  { key: "project", label: "PROJECT", className: "logbook-col-project" },
+  { key: "runtime", label: "AGENT", className: "logbook-col-runtime" },
+  { key: "model", label: "MODEL", className: "logbook-col-model" },
+  { key: "state", label: "STATE", className: "logbook-col-state" },
+  { key: "source", label: "SOURCE", className: "logbook-col-source logbook-desktop-column" },
+  { key: "files", label: "FILES", className: "logbook-col-count" },
+  { key: "tools", label: "TOOLS", className: "logbook-col-count" },
+  { key: "errors", label: "ERRORS", className: "logbook-col-count" },
+  { key: "duration", label: "DURATION", className: "logbook-col-duration logbook-desktop-column" }
 ] as const;
