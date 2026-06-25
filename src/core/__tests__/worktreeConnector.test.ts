@@ -71,6 +71,7 @@ describe("Masthead worktree connector planning", () => {
     "/sessions/session-1",
     "/sessions/session-1/excerpts",
     "/projects",
+    "/adapters",
     "/imports",
     "/data/summary",
     "/logbook/summary",

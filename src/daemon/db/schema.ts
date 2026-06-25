@@ -14,6 +14,11 @@ const migrations = [
     version: 2,
     name: "002_session_data_product",
     path: resolve(currentDir, "migrations/002_session_data_product.sql")
+  },
+  {
+    version: 3,
+    name: "003_session_sources",
+    path: resolve(currentDir, "migrations/003_session_sources.sql")
   }
 ];
 
@@ -24,6 +29,7 @@ const criticalTables = [
   "hosts",
   "runtimes",
   "sessions",
+  "session_sources",
   "turns",
   "messages",
   "session_enrichments",

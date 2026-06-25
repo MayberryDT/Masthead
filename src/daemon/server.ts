@@ -35,9 +35,9 @@ import { createSessionRepository, ingestAdapterRecord } from "./db/sessionReposi
 import { openMastheadDatabase, type MastheadDatabase } from "./db/sqlite.ts";
 import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
 import { setSourcePolicy, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
-import { runImportJob, type ImportWorkResult } from "./import/importCoordinator.ts";
+import { queueImportJob, runImportJob, type ImportWorkResult } from "./import/importCoordinator.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
-import { getSourceStatuses } from "./import/sourceStatusService.ts";
+import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 
 export type MastheadDaemon = {
@@ -417,6 +417,15 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/adapters") {
+      const sources = await discoverCodexSourcesAndPersist();
+      sendJson(request, response, config.allowedOrigins, 200, {
+        adapters: getAdapterStatuses(database, sources),
+        ok: true
+      });
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/sources/discover") {
       const sources = await discoverCodexSourcesAndPersist();
       sendJson(request, response, config.allowedOrigins, 202, {
@@ -530,7 +539,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           });
           return;
         }
-        const job = await runImportJob(database, { importKind: body.kind, sourceId: source.sourceId }, () =>
+        const job = queueImportJob(database, { importKind: body.kind, sourceId: source.sourceId }, () =>
           runImportWorkerForSource(body.kind as ImportJobKind, source)
         );
         sendJson(request, response, config.allowedOrigins, 202, {
@@ -575,7 +584,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "source not found" });
         return;
       }
-      const job = await runImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId }, () =>
+      const job = queueImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId }, () =>
         runImportWorkerForSource(existing.importKind, source)
       );
       sendJson(request, response, config.allowedOrigins, 202, { ok: true, importJobId: job.importJobId, job });

@@ -1,0 +1,129 @@
+.sources-management {
+  display: grid;
+  gap: 14px;
+}
+
+.sources-command-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sources-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.adapter-list,
+.import-jobs-section {
+  display: grid;
+  gap: 8px;
+}
+
+.adapter-row {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(92, 153, 187, 0.16);
+  border-radius: 5px;
+  background: rgba(7, 27, 40, 0.76);
+  padding: 14px;
+}
+
+.adapter-row-head {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.adapter-row-head h2 {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: 17px;
+}
+
+.adapter-row-head dl,
+.source-policy-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+}
+
+.adapter-row-head dt,
+.source-policy-controls dt {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.adapter-row-head dd,
+.source-policy-controls dd {
+  margin: 3px 0 0;
+  color: var(--ink);
+  font-family: var(--font-technical);
+  font-size: 12px;
+}
+
+.adapter-row-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.source-path-table,
+.import-jobs-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  overflow: hidden;
+}
+
+.source-path-table th,
+.source-path-table td,
+.import-jobs-table th,
+.import-jobs-table td {
+  border-top: 1px solid rgba(194, 221, 241, 0.1);
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.source-path-table th,
+.import-jobs-table th {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.source-path-table td:first-child,
+.import-jobs-table td:nth-child(2) {
+  max-width: 420px;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-jobs-section,
+.adapter-row {
+  overflow-x: auto;
+}
+
+@media (max-width: 760px) {
+  .sources-command-row,
+  .adapter-row-head {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .sources-command-row {
+    flex-direction: column;
+  }
+
+  .adapter-row-actions {
+    justify-content: flex-start;
+  }
+}

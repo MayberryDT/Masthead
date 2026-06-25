@@ -1,4 +1,5 @@
 import type { DiscoveredSource } from "../../adapters/types.ts";
+import { countDistinctSessionsForSource } from "../db/sessionSourceRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 
 export type SourceStatusDto = {
@@ -23,6 +24,21 @@ export type SourceStatusDto = {
   lastSync?: string;
 };
 
+export type AdapterStatusDto = {
+  runtime: string;
+  state: "connected" | "degraded" | "disabled" | "not_detected";
+  discoveredSessions: number;
+  importedSessions: number;
+  lastSyncAt?: string;
+  sourceLocations: SourceStatusDto[];
+  policies: {
+    metadataImport: boolean;
+    transcriptImport: boolean;
+    enrichment: boolean;
+    mcpAccess: boolean;
+  };
+};
+
 type SourceRow = {
   source_id: string;
   adapter: string;
@@ -43,8 +59,8 @@ export function getSourceStatuses(db: MastheadDatabase, discoveredSources: Disco
   const rows = db.prepare("SELECT source_id, adapter, source_kind, source_path, confidence FROM ingest_sources ORDER BY source_id").all() as SourceRow[];
   return rows.map((row) => {
     const counts = importCounts(db, row.source_id);
-    const importedSessions = importedSessionCount(db, row.adapter);
-    const discoveredSessions = Math.max(importedSessions, counts.importedRecords ?? 0);
+    const importedSessions = countDistinctSessionsForSource(db, row.source_id);
+    const discoveredSessions = importedSessions;
     const status = {
       confidence: row.confidence,
       discoveredSessions,
@@ -70,6 +86,38 @@ export function getSourceStatuses(db: MastheadDatabase, discoveredSources: Disco
       sessionCount: status.discoveredSessions
     };
   });
+}
+
+export function getAdapterStatuses(db: MastheadDatabase, discoveredSources: DiscoveredSource[] = []): AdapterStatusDto[] {
+  const sources = getSourceStatuses(db, discoveredSources);
+  const byRuntime = new Map<string, SourceStatusDto[]>();
+  for (const source of sources) {
+    const current = byRuntime.get(source.runtime) ?? [];
+    current.push(source);
+    byRuntime.set(source.runtime, current);
+  }
+
+  return Array.from(byRuntime.entries())
+    .map(([runtime, sourceLocations]) => {
+      const failureCount = sourceLocations.reduce((total, source) => total + source.failureCount, 0);
+      const importedSessions = sourceLocations.reduce((total, source) => total + source.importedSessions, 0);
+      const lastSyncAt = latestDate(sourceLocations.map((source) => source.lastSyncAt));
+      return {
+        discoveredSessions: importedSessions,
+        importedSessions,
+        lastSyncAt,
+        policies: {
+          enrichment: sourceLocations.some((source) => source.enrichmentEnabled),
+          mcpAccess: sourceLocations.some((source) => source.mcpEnabled),
+          metadataImport: true,
+          transcriptImport: sourceLocations.some((source) => source.transcriptImportEnabled)
+        },
+        runtime,
+        sourceLocations,
+        state: failureCount > 0 ? "degraded" : "connected"
+      } satisfies AdapterStatusDto;
+    })
+    .toSorted((left, right) => left.runtime.localeCompare(right.runtime));
 }
 
 function upsertDiscoveredSources(db: MastheadDatabase, sources: DiscoveredSource[]): void {
@@ -117,20 +165,6 @@ function importCounts(db: MastheadDatabase, sourceId: string): CountsRow {
     .get(sourceId) as CountsRow;
 }
 
-function importedSessionCount(db: MastheadDatabase, runtime: string): number {
-  return (
-    db
-      .prepare(
-        `SELECT COUNT(*) AS count
-        FROM sessions
-        JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
-        WHERE sessions.deleted_at IS NULL
-          AND runtimes.runtime_kind = ?`
-      )
-      .get(runtime) as { count: number }
-  ).count;
-}
-
 function policyEnabled(db: MastheadDatabase, sourceId: string, policyKind: string, defaultValue = false): boolean {
   const row = db
     .prepare(
@@ -143,4 +177,8 @@ function policyEnabled(db: MastheadDatabase, sourceId: string, policyKind: strin
     )
     .get(policyKind, sourceId) as { enabled: number } | undefined;
   return row ? row.enabled === 1 : defaultValue;
+}
+
+function latestDate(values: Array<string | undefined>): string | undefined {
+  return values.filter((value): value is string => Boolean(value)).toSorted().at(-1);
 }

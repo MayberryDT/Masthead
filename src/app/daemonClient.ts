@@ -24,6 +24,21 @@ export type SourceStatus = {
   confidence: "authoritative" | "inferred" | "heuristic";
 };
 
+export type AdapterStatus = {
+  runtime: string;
+  state: "connected" | "degraded" | "disabled" | "not_detected";
+  discoveredSessions: number;
+  importedSessions: number;
+  lastSyncAt?: string;
+  sourceLocations: SourceStatus[];
+  policies: {
+    metadataImport: boolean;
+    transcriptImport: boolean;
+    enrichment: boolean;
+    mcpAccess: boolean;
+  };
+};
+
 export type ImportJob = {
   importJobId: string;
   sourceId: string;
@@ -185,6 +200,16 @@ export async function listSources(baseUrl = defaultLiveProjectionUrl()): Promise
   if (!response.ok) throw new Error(`sources request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; sources: SourceStatus[] };
   return body.sources;
+}
+
+export async function listAdapters(baseUrl = defaultLiveProjectionUrl()): Promise<AdapterStatus[]> {
+  const url = new URL(baseUrl);
+  url.pathname = "/adapters";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`adapters request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; adapters: AdapterStatus[] };
+  return body.adapters;
 }
 
 export async function importCodexMetadata(baseUrl = defaultLiveProjectionUrl()): Promise<{ imported: number; sources: number }> {

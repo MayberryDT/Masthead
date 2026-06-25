@@ -50,11 +50,15 @@ import {
   getLogbookSession,
   getLogbookSessionExcerpts,
   importCodexMetadata,
+  listAdapters,
+  listImports,
   listReviewDispositions,
   listSources,
   saveReviewDisposition,
   searchLogbook,
   type LogbookExcerpt,
+  type AdapterStatus,
+  type ImportJob,
   type LogbookSearchResult,
   type LogbookSessionDetail,
   type LogbookSort,
@@ -128,6 +132,8 @@ export function App() {
   const [localStoreRecords, setLocalStoreRecords] = useState<StoreRecord[]>([]);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
   const [sources, setSources] = useState<SourceStatus[]>([]);
+  const [adapters, setAdapters] = useState<AdapterStatus[]>([]);
+  const [imports, setImports] = useState<ImportJob[]>([]);
   const [sourcesBusy, setSourcesBusy] = useState(false);
   const [sourcesStatus, setSourcesStatus] = useState<string>();
   const [logbookResult, setLogbookResult] = useState<LogbookSearchResult>();
@@ -360,8 +366,14 @@ export function App() {
   const handleRefreshSources = useCallback(async () => {
     setSourcesBusy(true);
     try {
-      const nextSources = await listSources(liveProjectionUrl);
+      const [nextAdapters, nextSources, nextImports] = await Promise.all([
+        listAdapters(liveProjectionUrl),
+        listSources(liveProjectionUrl),
+        listImports(liveProjectionUrl)
+      ]);
+      setAdapters(nextAdapters);
       setSources(nextSources);
+      setImports(nextImports);
       setSourcesStatus(`${nextSources.length} source${nextSources.length === 1 ? "" : "s"} detected.`);
     } catch (error) {
       setSourcesStatus(`Source refresh failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -449,7 +461,14 @@ export function App() {
     try {
       const result = await importCodexMetadata(liveProjectionUrl);
       setSourcesStatus(`Metadata import ready: ${result.imported} records from ${result.sources} sources.`);
-      setSources(await listSources(liveProjectionUrl));
+      const [nextAdapters, nextSources, nextImports] = await Promise.all([
+        listAdapters(liveProjectionUrl),
+        listSources(liveProjectionUrl),
+        listImports(liveProjectionUrl)
+      ]);
+      setAdapters(nextAdapters);
+      setSources(nextSources);
+      setImports(nextImports);
     } catch (error) {
       setSourcesStatus(`Metadata import failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -469,7 +488,9 @@ export function App() {
         liveProjectionUrl
       );
       setSourcesStatus("Source exclusion saved.");
-      setSources(await listSources(liveProjectionUrl));
+      const [nextAdapters, nextSources] = await Promise.all([listAdapters(liveProjectionUrl), listSources(liveProjectionUrl)]);
+      setAdapters(nextAdapters);
+      setSources(nextSources);
     } catch (error) {
       setSourcesStatus(`Source exclusion failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -710,6 +731,8 @@ export function App() {
       <SourcesSurface>
         <SourcesPanel
           sources={sources}
+          adapters={adapters}
+          imports={imports}
           busy={sourcesBusy}
           status={sourcesStatus}
           onRefresh={handleRefreshSources}

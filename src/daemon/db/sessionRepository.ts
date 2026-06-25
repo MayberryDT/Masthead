@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import type { AdapterRecord } from "../../adapters/types.ts";
 import { redactText } from "../../core/redaction.ts";
 import type { LiveBoardProjection, NormalizedEvent } from "../../core/types.ts";
+import { upsertSessionSource } from "./sessionSourceRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type SessionRepositoryContext = {
@@ -526,6 +527,14 @@ export function ingestAdapterRecord(db: MastheadDatabase, record: AdapterRecord,
       record.normalized.kind === "event" || record.normalized.kind === "session"
         ? repository.upsertMetadataRecord(record)
         : repository.upsertTranscriptRecord(record);
+    if (sessionId) {
+      upsertSessionSource(db, {
+        importedRecordCount: 1,
+        observedAt: record.observedAt,
+        sessionId,
+        sourceId: record.source.sourceId
+      });
+    }
     if (context.cursor) upsertAdapterCursor(db, record, context.cursor);
     db.exec("COMMIT;");
   } catch (error) {

@@ -8,6 +8,7 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "./styles/primitives.css";
 import "./styles/logbook.css";
+import "./styles/sources.css";
 import "./styles/masthead.css";
 
 createRoot(document.getElementById("root") as HTMLElement).render(
