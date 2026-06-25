@@ -63,6 +63,41 @@ describe("Masthead worktree connector planning", () => {
     expect(plan.allowedOrigins).toContain("http://localhost:5180");
   });
 
+  test("starts an isolated primary when the default port has a legacy daemon", async () => {
+    const plan = await buildLiveDevPlan(
+      {},
+      {
+        findAvailablePort: async (_host, startPort) => (startPort === 5173 ? 5180 : 17374),
+        getConnectorHealth: async () => ({ ok: true, events: 12 }),
+        isPortAvailable: async () => false
+      }
+    );
+
+    expect(plan).toMatchObject({
+      projectionUrl: "http://127.0.0.1:17374/projection",
+      uiPort: 5180,
+      connector: {
+        mode: "isolated_primary",
+        port: 17374,
+        baseUrl: "http://127.0.0.1:17374",
+        incompatibleAt: 17373
+      }
+    });
+  });
+
+  test("explicit bridge mode rejects an incompatible upstream", async () => {
+    await expect(
+      buildLiveDevPlan(
+        { MASTHEAD_CONNECTOR_MODE: "bridge" },
+        {
+          findAvailablePort: async (_host, startPort) => startPort,
+          getConnectorHealth: async () => ({ ok: true, events: 12 }),
+          isPortAvailable: async () => false
+        }
+      )
+    ).rejects.toThrow("no compatible Masthead connector");
+  });
+
   test("accepts an upstream projection URL but stores its connector base URL", () => {
     expect(connectorBaseUrl("http://127.0.0.1:17373/projection?selectedSessionId=s1")).toBe("http://127.0.0.1:17373");
   });

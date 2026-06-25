@@ -2,12 +2,23 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 
 export const LOCAL_CONNECTOR_COMMAND = "npm run dev";
 
+export type MastheadHealthSummary = {
+  apiVersion?: number;
+  buildSha?: string;
+  databaseId?: string;
+  databasePath?: string;
+  mode?: string;
+};
+
 export type ConnectorStartResult =
   | {
       ok: true;
       started: boolean;
+      baseUrl: string;
       command: string;
+      health: MastheadHealthSummary;
       message: string;
+      projectionUrl: string;
     }
   | {
       ok: false;
@@ -53,15 +64,22 @@ async function startViaDevServer(): Promise<ConnectorStartResult | undefined> {
 
 function isConnectorStartSuccess(value: unknown): value is Extract<ConnectorStartResult, { ok: true }> {
   if (typeof value !== "object" || value === null) return false;
-  return (
+    return (
     "ok" in value &&
     value.ok === true &&
     "started" in value &&
     typeof value.started === "boolean" &&
+    "baseUrl" in value &&
+    typeof value.baseUrl === "string" &&
     "command" in value &&
     typeof value.command === "string" &&
+    "health" in value &&
+    typeof value.health === "object" &&
+    value.health !== null &&
     "message" in value &&
-    typeof value.message === "string"
+    typeof value.message === "string" &&
+    "projectionUrl" in value &&
+    typeof value.projectionUrl === "string"
   );
 }
 

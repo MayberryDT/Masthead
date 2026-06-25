@@ -1,11 +1,13 @@
 use serde::Serialize;
+use serde_json::Value;
 use std::{
     collections::BTreeMap,
     fs,
     io::{Read, Write},
-    net::{SocketAddr, TcpStream},
+    net::{SocketAddr, TcpListener, TcpStream},
     path::PathBuf,
     process::{Command, Stdio},
+    thread::sleep,
     time::Duration,
 };
 use tauri::{AppHandle, Manager};
@@ -15,19 +17,37 @@ use tauri::{AppHandle, Manager};
 pub struct StartLiveConnectorResult {
     ok: bool,
     started: bool,
+    base_url: String,
     command: String,
+    health: MastheadHealthSummary,
     message: String,
+    projection_url: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MastheadHealthSummary {
+    api_version: Option<i64>,
+    build_sha: Option<String>,
+    database_id: Option<String>,
+    database_path: Option<String>,
+    mode: Option<String>,
 }
 
 #[tauri::command]
 pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnectorResult, String> {
     let command_label = "masthead daemon".to_string();
-    if collector_responds() {
+    let default_probe = probe_collector_at(17373);
+    if let CollectorProbe::Compatible(health) = default_probe {
+        let base_url = connector_base_url(17373);
         return Ok(StartLiveConnectorResult {
             ok: true,
             started: false,
+            base_url: base_url.clone(),
             command: command_label,
+            health,
             message: "Local Masthead collector is already running.".to_string(),
+            projection_url: format!("{base_url}/projection"),
         });
     }
 
@@ -36,22 +56,38 @@ pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnector
         return Err(format!("Masthead daemon entry not found at {}", launch.entry_path.display()));
     }
 
+    let port = match default_probe {
+        CollectorProbe::Offline => 17373,
+        CollectorProbe::Compatible(_) => 17373,
+        CollectorProbe::Incompatible => find_available_port(17374)
+            .ok_or_else(|| "no available Masthead connector port found".to_string())?,
+    };
+    let base_url = connector_base_url(port);
+
     Command::new(&launch.node_path)
         .arg(&launch.entry_path)
         .current_dir(&launch.cwd)
         .env("MASTHEAD_DB_PATH", &launch.database_path)
         .env("MASTHEAD_STORE_PATH", &launch.legacy_store_path)
+        .env("MASTHEAD_HOST", "127.0.0.1")
+        .env("MASTHEAD_PORT", port.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("failed to start Masthead collector: {error}"))?;
 
+    let health = wait_for_compatible_collector(port)
+        .ok_or_else(|| format!("started Masthead collector but it did not become compatible at {base_url}/health"))?;
+
     Ok(StartLiveConnectorResult {
         ok: true,
         started: true,
+        base_url: base_url.clone(),
         command: command_label,
+        health,
         message: "Started local Masthead collector.".to_string(),
+        projection_url: format!("{base_url}/projection"),
     })
 }
 
@@ -193,28 +229,113 @@ fn mcp_launch_target_from_paths(input: McpLaunchTargetInput) -> Result<McpLaunch
     })
 }
 
-fn collector_responds() -> bool {
-    let address: SocketAddr = match "127.0.0.1:17373".parse() {
+#[derive(Debug, Clone)]
+enum CollectorProbe {
+    Compatible(MastheadHealthSummary),
+    Incompatible,
+    Offline,
+}
+
+fn probe_collector_at(port: u16) -> CollectorProbe {
+    let address: SocketAddr = match format!("127.0.0.1:{port}").parse() {
         Ok(address) => address,
-        Err(_) => return false,
+        Err(_) => return CollectorProbe::Offline,
     };
     let mut stream = match TcpStream::connect_timeout(&address, Duration::from_millis(180)) {
         Ok(stream) => stream,
-        Err(_) => return false,
+        Err(_) => return CollectorProbe::Offline,
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(300)));
-    let request = b"GET /health HTTP/1.1\r\nHost: 127.0.0.1:17373\r\nConnection: close\r\n\r\n";
-    if stream.write_all(request).is_err() {
-        return false;
-    }
+    let request = format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return CollectorProbe::Offline;
+    };
 
     let mut response = String::new();
-    stream.read_to_string(&mut response).is_ok() && response.starts_with("HTTP/1.1 200")
+    if stream.read_to_string(&mut response).is_err() || !response.starts_with("HTTP/1.1 200") {
+        return CollectorProbe::Incompatible;
+    }
+
+    let body = response.split("\r\n\r\n").nth(1).unwrap_or_default();
+    match parse_compatible_health(body) {
+        Some(health) => CollectorProbe::Compatible(health),
+        None => CollectorProbe::Incompatible,
+    }
+}
+
+fn parse_compatible_health(body: &str) -> Option<MastheadHealthSummary> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    if value.get("ok")?.as_bool()? != true {
+        return None;
+    }
+    if value.get("product")?.as_str()? != "masthead" {
+        return None;
+    }
+    let api_version = value.get("apiVersion")?.as_i64()?;
+    if api_version < 1 {
+        return None;
+    }
+    let capabilities = value.get("capabilities")?.as_array()?;
+    for capability in [
+        "live_projection",
+        "canonical_sessions",
+        "logbook_search",
+        "source_discovery",
+        "adapter_inventory",
+        "mcp_status",
+        "settings",
+    ] {
+        if !capabilities.iter().any(|value| value.as_str() == Some(capability)) {
+            return None;
+        }
+    }
+    if value
+        .pointer("/data/migrationState")
+        .and_then(Value::as_str)
+        .is_some_and(|state| state == "failed")
+    {
+        return None;
+    }
+
+    Some(MastheadHealthSummary {
+        api_version: Some(api_version),
+        build_sha: value.get("buildSha").and_then(Value::as_str).map(ToString::to_string),
+        database_id: value.pointer("/data/databaseId").and_then(Value::as_str).map(ToString::to_string),
+        database_path: value.pointer("/data/databasePath").and_then(Value::as_str).map(ToString::to_string),
+        mode: value.pointer("/runtime/mode").and_then(Value::as_str).map(ToString::to_string),
+    })
+}
+
+fn wait_for_compatible_collector(port: u16) -> Option<MastheadHealthSummary> {
+    for _ in 0..30 {
+        if let CollectorProbe::Compatible(health) = probe_collector_at(port) {
+            return Some(health);
+        }
+        sleep(Duration::from_millis(150));
+    }
+    None
+}
+
+fn find_available_port(start_port: u16) -> Option<u16> {
+    for port in start_port..=u16::MAX {
+        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return Some(port);
+        }
+    }
+    None
+}
+
+fn connector_base_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{daemon_launch_target_from_paths, mcp_launch_target_from_paths, DaemonLaunchTargetInput, McpLaunchTargetInput};
+    use super::{
+        daemon_launch_target_from_paths, mcp_launch_target_from_paths, parse_compatible_health, DaemonLaunchTargetInput,
+        McpLaunchTargetInput,
+    };
+    use serde_json::json;
     use std::path::PathBuf;
 
     #[test]
@@ -291,5 +412,41 @@ mod tests {
         assert_eq!(target.node_path, PathBuf::from("/tmp/node"));
         assert_eq!(target.entry_path, PathBuf::from("/tmp/masthead/dist/daemon/src/mcp/server.js"));
         assert_eq!(target.database_path, PathBuf::from("/tmp/masthead-data/masthead.sqlite"));
+    }
+
+    #[test]
+    fn compatible_health_requires_masthead_protocol_identity() {
+        let legacy = json!({
+            "ok": true,
+            "events": 18,
+            "diagnostics": 0,
+            "gitSnapshots": 18
+        });
+        assert!(parse_compatible_health(&legacy.to_string()).is_none());
+
+        let current = json!({
+            "ok": true,
+            "product": "masthead",
+            "apiVersion": 1,
+            "capabilities": [
+                "live_projection",
+                "canonical_sessions",
+                "logbook_search",
+                "source_discovery",
+                "adapter_inventory",
+                "mcp_status",
+                "settings"
+            ],
+            "runtime": { "mode": "primary" },
+            "data": {
+                "databaseId": "db",
+                "databasePath": "/tmp/masthead.sqlite",
+                "migrationState": "ready"
+            }
+        });
+        let parsed = parse_compatible_health(&current.to_string()).expect("compatible health");
+        assert_eq!(parsed.api_version, Some(1));
+        assert_eq!(parsed.database_id, Some("db".to_string()));
+        assert_eq!(parsed.mode, Some("primary".to_string()));
     }
 }

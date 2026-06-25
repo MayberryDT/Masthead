@@ -13,8 +13,11 @@ describe("connector client", () => {
       return {
         ok: true,
         started: true,
+        baseUrl: "http://127.0.0.1:17374",
         command: "node scripts/masthead-ingest-server.js",
-        message: "Started local Masthead collector."
+        health: { apiVersion: 1, mode: "primary" },
+        message: "Started local Masthead collector.",
+        projectionUrl: "http://127.0.0.1:17374/projection"
       };
     });
 
@@ -46,8 +49,11 @@ describe("connector client", () => {
         JSON.stringify({
           ok: true,
           started: true,
+          baseUrl: "http://127.0.0.1:17374",
           command: "node scripts/masthead-ingest-server.js",
-          message: "Started local Masthead collector."
+          health: { apiVersion: 1, mode: "primary" },
+          message: "Started local Masthead collector.",
+          projectionUrl: "http://127.0.0.1:17374/projection"
         }),
         {
           status: 202,

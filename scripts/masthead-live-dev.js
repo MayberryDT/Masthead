@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { removeDaemonOwnershipMetadata, writeDaemonOwnershipMetadata } from "../dist/daemon/src/core/daemonOwnership.js";
 import { buildLiveDevPlan, startReadOnlyConnectorBridge } from "../dist/daemon/src/core/worktreeConnector.js";
+import { classifyDaemonHealth } from "../dist/daemon/src/shared/protocol.js";
 
 const plan = await buildLiveDevPlan(process.env);
 const children = new Set();
@@ -12,15 +14,22 @@ console.log("Starting Masthead live app");
 console.log(`App:       ${plan.uiUrl}`);
 
 let collector;
-if (plan.connector.mode === "primary") {
-  console.log(`Connector: ${plan.connector.baseUrl} (primary)`);
+let activeHealth;
+let ownershipPath;
+if (plan.connector.mode === "primary" || plan.connector.mode === "isolated_primary") {
+  if (plan.connector.mode === "isolated_primary") {
+    console.warn(`Found incompatible Masthead daemon at ${plan.connector.incompatibleBaseUrl}`);
+    console.warn("Starting current daemon on an isolated port.");
+  }
+  console.log(`Connector: ${plan.connector.baseUrl} (${plan.connector.mode === "primary" ? "primary" : "isolated primary"})`);
   collector = start("collector", process.execPath, ["dist/daemon/src/daemon/main.js"], {
     MASTHEAD_HOST: plan.host,
     MASTHEAD_PORT: String(plan.connector.port),
     MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins
   });
 
-  await waitForHealth(`${plan.connector.baseUrl}/health`, 8_000);
+  activeHealth = await waitForHealth(`${plan.connector.baseUrl}/health`, 8_000);
+  ownershipPath = await writeOwnership(plan.connector.baseUrl, activeHealth);
 } else {
   console.log(`Connector: ${plan.connector.baseUrl} (read-only worktree bridge)`);
   console.log(`Upstream:  ${plan.connector.upstreamBaseUrl}`);
@@ -31,8 +40,10 @@ if (plan.connector.mode === "primary") {
     upstreamBaseUrl: plan.connector.upstreamBaseUrl
   });
   bridges.add(bridge);
-  await waitForHealth(`${bridge.baseUrl}/health`, 8_000);
+  activeHealth = await waitForHealth(`${bridge.baseUrl}/health`, 8_000);
 }
+
+printStartupIdentity(plan, activeHealth);
 
 const viteBin = resolve("node_modules/vite/bin/vite.js");
 start("ui", process.execPath, [viteBin, "--host", plan.host, "--port", String(plan.uiPort), "--strictPort"], {
@@ -73,13 +84,43 @@ async function waitForHealth(url, timeoutMs) {
     if (collector && collector.exitCode !== null) break;
     try {
       const response = await fetch(url, { headers: { accept: "application/json" } });
-      if (response.ok) return;
+      if (response.ok) {
+        const health = await response.json();
+        if (classifyDaemonHealth(health).state === "compatible") return health;
+      }
     } catch {
       // Retry until the collector finishes binding.
     }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
   }
   throw new Error(`Masthead collector did not become healthy at ${url}.`);
+}
+
+async function writeOwnership(baseUrl, health) {
+  const dataDirectory = health?.data?.dataDirectory;
+  const daemonInstanceId = health?.runtime?.daemonInstanceId;
+  if (!dataDirectory || !daemonInstanceId) return undefined;
+  return writeDaemonOwnershipMetadata(dataDirectory, {
+    daemonInstanceId,
+    pid: collector.pid,
+    baseUrl,
+    apiVersion: health.apiVersion,
+    buildSha: health.buildSha,
+    dataDirectory,
+    startedAt: health.runtime.startedAt
+  });
+}
+
+function printStartupIdentity(plan, health) {
+  console.log("Runtime identity");
+  console.log(`UI:        ${plan.uiUrl}`);
+  console.log(`Daemon:    ${plan.connector.baseUrl}`);
+  console.log(`Mode:      ${health?.runtime?.mode ?? plan.connector.mode}`);
+  console.log(`API:       ${health?.apiVersion ?? "unknown"}`);
+  console.log(`Build SHA: ${health?.buildSha ?? "unknown"}`);
+  console.log(`Database:  ${health?.data?.databasePath ?? "unknown"}`);
+  console.log(`DB ID:     ${health?.data?.databaseId ?? "unknown"}`);
+  console.log(`Source root: ${process.env.MASTHEAD_CODEX_HOME ?? "default"}`);
 }
 
 function writePrefixed(label, chunk) {
@@ -97,5 +138,6 @@ function stopAll(exitCode = 0) {
   for (const bridge of bridges) {
     void bridge.close();
   }
+  void removeDaemonOwnershipMetadata(ownershipPath);
   setTimeout(() => process.exit(exitCode), 250).unref();
 }

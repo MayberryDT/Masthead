@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { classifyDaemonHealth } from "../shared/protocol.ts";
+import { locateCompatibleDaemon } from "./daemonLocator.ts";
 
 export type ConnectorMode = "primary" | "bridge";
 
@@ -20,6 +21,14 @@ export type LiveDevPlan = {
         port: number;
         baseUrl: string;
         upstreamBaseUrl: string;
+      }
+    | {
+        mode: "isolated_primary";
+        port: number;
+        baseUrl: string;
+        incompatibleAt: number;
+        incompatibleBaseUrl: string;
+        dataDirectory?: string;
       };
 };
 
@@ -99,8 +108,12 @@ export async function buildLiveDevPlan(
     return primaryPlan(host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins);
   }
 
-  await requireHealthyConnector(upstreamBaseUrl, getHealth);
-  return bridgePlan(env, host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins, upstreamBaseUrl, findPort);
+  const located = await locateCompatibleDaemon(upstreamBaseUrl, getHealth);
+  if (located.compatibility.state === "compatible") {
+    return bridgePlan(env, host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins, upstreamBaseUrl, findPort);
+  }
+
+  return isolatedPrimaryPlan(env, host, requestedConnectorPort, uiPort, uiUrl, allowedOrigins, findPort);
 }
 
 export async function startReadOnlyConnectorBridge(options: {
@@ -207,6 +220,34 @@ function primaryPlan(host: string, connectorPort: number, uiPort: number, uiUrl:
       mode: "primary",
       port: connectorPort,
       baseUrl
+    }
+  };
+}
+
+async function isolatedPrimaryPlan(
+  env: NodeJS.ProcessEnv,
+  host: string,
+  incompatibleAt: number,
+  uiPort: number,
+  uiUrl: string,
+  allowedOrigins: string,
+  findPort: (host: string, startPort: number) => Promise<number>
+): Promise<LiveDevPlan> {
+  const connectorPort = await findPort(host, incompatibleAt + 1);
+  const baseUrl = `http://${host}:${connectorPort}`;
+  return {
+    host,
+    uiPort,
+    uiUrl,
+    allowedOrigins,
+    projectionUrl: `${baseUrl}/projection`,
+    connector: {
+      mode: "isolated_primary",
+      port: connectorPort,
+      baseUrl,
+      incompatibleAt,
+      incompatibleBaseUrl: `http://${host}:${incompatibleAt}`,
+      dataDirectory: env.MASTHEAD_DATA_DIR
     }
   };
 }
