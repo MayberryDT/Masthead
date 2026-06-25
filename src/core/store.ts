@@ -132,7 +132,7 @@ export function createInMemoryStore(initialRecords: StoreRecord[] = []): AppendO
 }
 
 export async function createFileBackedStore(filePath: string): Promise<AppendOnlyStore> {
-  const records = await readExistingRecords(filePath);
+  const records = await readStoreRecords(filePath);
   const memory = createInMemoryStore(records);
   const appendRecord = async (record: StoreRecord): Promise<void> => {
     await mkdir(dirname(filePath), { recursive: true });
@@ -195,7 +195,7 @@ export async function createFileBackedStore(filePath: string): Promise<AppendOnl
   };
 }
 
-async function readExistingRecords(filePath: string): Promise<StoreRecord[]> {
+export async function readStoreRecords(filePath: string): Promise<StoreRecord[]> {
   try {
     const contents = await readFile(filePath, "utf8");
     return contents
