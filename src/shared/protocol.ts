@@ -1,0 +1,75 @@
+export const MASTHEAD_API_VERSION = 1;
+export const MASTHEAD_MIN_CLIENT_API_VERSION = 1;
+export const MASTHEAD_PRODUCT = "masthead";
+
+export type MastheadCapability =
+  | "live_projection"
+  | "canonical_sessions"
+  | "logbook_search"
+  | "source_discovery"
+  | "adapter_inventory"
+  | "import_jobs"
+  | "mcp_status"
+  | "settings"
+  | "data_lifecycle";
+
+export const REQUIRED_CLIENT_CAPABILITIES: MastheadCapability[] = [
+  "live_projection",
+  "canonical_sessions",
+  "logbook_search",
+  "source_discovery",
+  "adapter_inventory",
+  "mcp_status",
+  "settings"
+];
+
+export type DaemonCompatibility =
+  | { state: "compatible"; apiVersion: number }
+  | { state: "incompatible"; reason: "missing_protocol_identity" }
+  | { state: "incompatible"; reason: "wrong_product"; product: unknown }
+  | { state: "incompatible"; reason: "unsupported_api_version"; apiVersion: unknown; requiredApiVersion: number }
+  | { state: "incompatible"; reason: "missing_capabilities"; missingCapabilities: MastheadCapability[] }
+  | { state: "malformed"; reason: "not_an_object" | "health_not_ok" };
+
+export function classifyDaemonHealth(
+  value: unknown,
+  requiredApiVersion = MASTHEAD_API_VERSION,
+  requiredCapabilities = REQUIRED_CLIENT_CAPABILITIES
+): DaemonCompatibility {
+  if (!isRecord(value)) {
+    return { state: "malformed", reason: "not_an_object" };
+  }
+
+  if (value.ok !== true) {
+    return { state: "malformed", reason: "health_not_ok" };
+  }
+
+  if (!("product" in value) || !("apiVersion" in value)) {
+    return { state: "incompatible", reason: "missing_protocol_identity" };
+  }
+
+  if (value.product !== MASTHEAD_PRODUCT) {
+    return { state: "incompatible", reason: "wrong_product", product: value.product };
+  }
+
+  if (typeof value.apiVersion !== "number" || value.apiVersion < requiredApiVersion) {
+    return {
+      state: "incompatible",
+      reason: "unsupported_api_version",
+      apiVersion: value.apiVersion,
+      requiredApiVersion
+    };
+  }
+
+  const capabilities = new Set(Array.isArray(value.capabilities) ? value.capabilities : []);
+  const missingCapabilities = requiredCapabilities.filter((capability) => !capabilities.has(capability));
+  if (missingCapabilities.length > 0) {
+    return { state: "incompatible", reason: "missing_capabilities", missingCapabilities };
+  }
+
+  return { state: "compatible", apiVersion: value.apiVersion };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}

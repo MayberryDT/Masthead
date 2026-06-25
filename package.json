@@ -13,6 +13,8 @@
     "build": "tsc --noEmit && vite build && npm run build:daemon",
     "build:daemon": "tsc -p tsconfig.daemon.json && node scripts/copy-daemon-assets.js",
     "prepare:daemon-resources": "node scripts/prepare-daemon-resources.js",
+    "probe": "node scripts/masthead-endpoint-matrix.js",
+    "probe:local": "node scripts/masthead-endpoint-matrix.js http://127.0.0.1:17373",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:daemon && vitest",
     "check:product-contract": "node scripts/masthead-product-contract.js",

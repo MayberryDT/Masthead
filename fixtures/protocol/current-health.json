@@ -1,0 +1,40 @@
+{
+  "ok": true,
+  "product": "masthead",
+  "apiVersion": 1,
+  "schemaVersion": 1,
+  "buildVersion": "0.1.0",
+  "buildSha": "development",
+  "capabilities": [
+    "live_projection",
+    "canonical_sessions",
+    "logbook_search",
+    "source_discovery",
+    "adapter_inventory",
+    "import_jobs",
+    "mcp_status",
+    "settings",
+    "data_lifecycle"
+  ],
+  "runtime": {
+    "daemonInstanceId": "fixture-daemon",
+    "startedAt": "2026-06-25T00:00:00.000Z",
+    "mode": "primary",
+    "writable": true,
+    "host": "127.0.0.1",
+    "port": 17373
+  },
+  "data": {
+    "dataDirectory": "/tmp/masthead-fixture",
+    "databasePath": "/tmp/masthead-fixture/masthead.sqlite",
+    "databaseId": "fixture-database",
+    "migrationState": "ready",
+    "sessions": 0,
+    "sources": 0
+  },
+  "live": {
+    "events": 0,
+    "diagnostics": 0,
+    "gitSnapshots": 0
+  }
+}
