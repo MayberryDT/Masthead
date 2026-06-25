@@ -796,6 +796,46 @@ main {
   gap: 8px;
 }
 
+.ops-scope-control {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.5fr) minmax(180px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  border-top: 1px solid var(--modal-line);
+  padding-top: 12px;
+}
+
+.ops-scope-control label {
+  display: grid;
+  gap: 6px;
+}
+
+.ops-scope-control select,
+.ops-scope-control input {
+  min-height: 40px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-elevated);
+  color: var(--body);
+  padding: 0 11px;
+  font: inherit;
+  transition-property: background-color, border-color, color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.ops-scope-control input {
+  font-family: var(--font-mono);
+}
+
+.ops-scope-control select:focus,
+.ops-scope-control input:focus {
+  outline: 0;
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
 .toolbar-result {
   flex: 0 0 100%;
   color: var(--ash);
@@ -2092,6 +2132,10 @@ main {
   .surface-panel-stats,
   .surface-panel-stats.sources-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ops-scope-control {
+    grid-template-columns: 1fr;
   }
 
   .surface-stat {

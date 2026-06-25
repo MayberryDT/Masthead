@@ -6,7 +6,7 @@ type Props = {
 
 export function SettingsSurface({ children }: Props) {
   return (
-    <section className="app-surface settings-surface" aria-label="Settings">
+    <section className="app-surface settings-surface surface-panel" aria-label="Settings">
       {children}
     </section>
   );

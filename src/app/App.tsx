@@ -15,7 +15,7 @@ import { HistoryPanel } from "../ui/HistoryPanel";
 import { ObservabilityRightRail } from "../ui/ObservabilityRightRail";
 import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
-import { OperationsPanel } from "../ui/OperationsPanel";
+import { OperationsPanel, type DeletionScopeKind } from "../ui/OperationsPanel";
 import { SessionBoard } from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
 import { SessionLibraryDetail } from "../ui/SessionLibraryDetail";
@@ -33,17 +33,19 @@ import {
 import {
   defaultFixtureMode,
   defaultLiveProjectionUrl,
-  clearRequestUrl,
   eventsRequestUrl,
   isLiveEventsEnvelope,
   isLiveProjectionEnvelope,
   normalizeLiveBoardProjection,
-  projectionRequestUrl,
-  retentionRequestUrl
+  projectionRequestUrl
 } from "./liveProjectionClient";
 import { startLiveConnector } from "./connectorClient";
 import {
   addSourceExclusion,
+  applyDefaultRetention as applyDefaultDataRetention,
+  deleteMastheadData as deleteCanonicalMastheadData,
+  exportMastheadData,
+  getDataSummary,
   getLogbookSession,
   getLogbookSessionExcerpts,
   importCodexMetadata,
@@ -54,9 +56,11 @@ import {
   type LogbookExcerpt,
   type LogbookSearchResult,
   type LogbookSessionDetail,
-  type SourceStatus
+  type SourceStatus,
+  type DataSummary,
+  type DeleteMastheadDataScope
 } from "./daemonClient";
-import { clearLocalData, exportedRecordCount, exportLocalData, pruneLocalData, readLocalRecords } from "./nativeStoreClient";
+import { exportedRecordCount, exportLocalData, readLocalRecords } from "./nativeStoreClient";
 import { AgentAccessSurface } from "./surfaces/AgentAccessSurface";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
@@ -77,14 +81,6 @@ type CardLayoutSnapshot = Map<string, DOMRect>;
 const replay = fixture as FixtureReplay;
 const liveProjectionUrl = defaultLiveProjectionUrl();
 const startsInFixtureMode = defaultFixtureMode();
-const retentionWindowDays = 30;
-const retentionKeepLatest = 500;
-const retentionRecordTypes: Array<StoreRecord["recordType"]> = [
-  "event",
-  "git_snapshot",
-  "attention_item",
-  "conflict_card"
-];
 
 const emptyLiveBoard: LiveBoardProjection = {
   summary: {
@@ -139,9 +135,22 @@ export function App() {
   const [logbookDetailLoading, setLogbookDetailLoading] = useState(false);
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
   const [localDataStatus, setLocalDataStatus] = useState<{
-    state: "idle" | "confirm_delete" | "confirm_prune" | "busy" | "exported" | "deleted" | "pruned" | "error";
+    state:
+      | "idle"
+      | "confirm_delete"
+      | "confirm_prune"
+      | "confirm_scoped_delete"
+      | "busy"
+      | "exported"
+      | "deleted"
+      | "pruned"
+      | "error";
     message?: string;
   }>({ state: "idle" });
+  const [dataSummary, setDataSummary] = useState<DataSummary>();
+  const [deletionScopeKind, setDeletionScopeKind] = useState<DeletionScopeKind>("project");
+  const [deletionScopeTarget, setDeletionScopeTarget] = useState("");
+  const [pendingDeletionScope, setPendingDeletionScope] = useState<DeleteMastheadDataScope>();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const liveRequestIdRef = useRef(0);
   const fixtureBoard = useMemo(() => buildObservabilityDemoBoard(selectedSessionId), [selectedSessionId]);
@@ -438,8 +447,9 @@ export function App() {
   const handleExportLocalData = async () => {
     setLocalDataStatus({ state: "busy", message: "Preparing local export..." });
     try {
-      const exported = await exportLocalData();
-      const count = exportedRecordCount(exported);
+      const canonicalExport = liveConnection.state === "live" ? await exportMastheadData(liveProjectionUrl) : undefined;
+      const exported = canonicalExport ? JSON.stringify(canonicalExport, null, 2) : await exportLocalData();
+      const count = canonicalExport ? exportedSessionCount(canonicalExport) : exportedRecordCount(exported);
       downloadTextFile(`masthead-export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, exported);
       setLocalDataStatus({
         state: "exported",
@@ -453,41 +463,62 @@ export function App() {
     }
   };
 
-  const handleRequestDeleteLocalData = () => {
-    setLocalDataStatus({
-      state: "confirm_delete",
-      message: "Confirm deletion to remove Masthead app-store and live collector history."
-    });
+  const loadDataDeletionPreview = async (scope?: DeleteMastheadDataScope): Promise<DataSummary> => {
+    const summary = await getDataSummary(liveProjectionUrl, scope);
+    setDataSummary(summary);
+    return summary;
   };
 
-  const handleRequestPruneLocalData = () => {
-    setLocalDataStatus({
-      state: "confirm_prune",
-      message: `Confirm retention to prune Masthead-local history older than ${retentionWindowDays} days.`
-    });
+  const handleRequestDeleteLocalData = async () => {
+    setLocalDataStatus({ state: "busy", message: "Preparing delete-all preview..." });
+    try {
+      const summary = await loadDataDeletionPreview();
+      setLocalDataStatus({
+        state: "confirm_delete",
+        message: `Confirm delete all Masthead data: ${formatCount(summary.sessions)} sessions, ${formatCount(
+          summary.rawEvents
+        )} raw source copies, ${formatCount(summary.enrichments)} enrichments, and ${formatCount(
+          summary.auditRows
+        )} MCP audit rows. Original Codex/Hermes/etc. session files remain untouched.`
+      });
+    } catch (error) {
+      setLocalDataStatus({
+        state: "error",
+        message: `Delete preview failed: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+  };
+
+  const handleRequestPruneLocalData = async () => {
+    setLocalDataStatus({ state: "busy", message: "Preparing raw source copy preview..." });
+    try {
+      const summary = await loadDataDeletionPreview();
+      setLocalDataStatus({
+        state: "confirm_prune",
+        message: `Confirm deletion of ${formatCount(
+          summary.rawEvents
+        )} raw source copies. Normalized session metadata, summaries, and search records stay available.`
+      });
+    } catch (error) {
+      setLocalDataStatus({
+        state: "error",
+        message: `Raw source copy preview failed: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
   };
 
   const handleConfirmPruneLocalData = async () => {
-    const policy = {
-      cutoffAt: new Date(Date.now() - retentionWindowDays * 24 * 60 * 60 * 1000).toISOString(),
-      keepLatest: retentionKeepLatest,
-      recordTypes: retentionRecordTypes,
-      keepUnresolvedAttention: true
-    };
-
-    setLocalDataStatus({ state: "busy", message: "Applying Masthead-local retention..." });
+    setLocalDataStatus({ state: "busy", message: "Deleting raw source copies..." });
     try {
-      const liveRemovedRecords = liveProjection ? await pruneLiveCollectorData(policy) : undefined;
-      const result = await pruneLocalData(policy);
-      const records = await readLocalRecords();
+      const response = await applyDefaultDataRetention(liveProjectionUrl);
       const dispositions = await listReviewDispositions(liveProjectionUrl);
-      setLocalStoreRecords(records);
       setReviewDispositions(dispositions);
-      const liveMessage =
-        liveRemovedRecords === undefined ? "" : ` Live collector pruned ${liveRemovedRecords} records.`;
+      setDataSummary(response.summary);
       setLocalDataStatus({
         state: "pruned",
-        message: `Pruned ${result.removedRecords} app-store records older than ${retentionWindowDays} days.${liveMessage} External state untouched.`
+        message: `Deleted ${formatCount(
+          response.result.rawEvents ?? 0
+        )} raw source copies. Normalized sessions, summaries, and search records kept. Original harness files untouched.`
       });
     } catch (error) {
       setLocalDataStatus({
@@ -497,22 +528,84 @@ export function App() {
     }
   };
 
-  const handleConfirmDeleteLocalData = async () => {
-    setLocalDataStatus({ state: "busy", message: "Deleting Masthead-local data..." });
+  const selectedDeletionScope = (): DeleteMastheadDataScope | undefined => {
+    const target = deletionScopeTarget.trim();
+    if (!target) return undefined;
+    if (deletionScopeKind === "session") return { kind: "session", sessionId: target };
+    if (deletionScopeKind === "runtime") return { kind: "runtime", runtime: target };
+    if (deletionScopeKind === "host") return { kind: "host", host: target };
+    return { kind: "project", project: target };
+  };
+
+  const handleRequestScopedDelete = async () => {
+    const scope = selectedDeletionScope();
+    if (!scope) {
+      setLocalDataStatus({ state: "error", message: "Choose a deletion scope and target before deleting records." });
+      return;
+    }
+    setLocalDataStatus({ state: "busy", message: "Preparing scoped deletion preview..." });
     try {
-      const liveRemovedRecords = liveConnection.state === "live" ? await clearLiveCollectorData() : undefined;
-      const result = await clearLocalData();
+      const summary = await loadDataDeletionPreview(scope);
+      setPendingDeletionScope(scope);
+      setLocalDataStatus({
+        state: "confirm_scoped_delete",
+        message: `Confirm scoped deletion for ${scopeLabel(scope)}: ${formatCount(
+          summary.sessions
+        )} sessions, ${formatCount(summary.messages)} searchable messages, and ${formatCount(
+          summary.enrichments
+        )} enrichments. Original harness files are untouched.`
+      });
+    } catch (error) {
+      setLocalDataStatus({
+        state: "error",
+        message: `Scoped delete preview failed: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+  };
+
+  const handleConfirmScopedDelete = async () => {
+    const scope = pendingDeletionScope ?? selectedDeletionScope();
+    if (!scope) {
+      setLocalDataStatus({ state: "error", message: "Choose a deletion scope and target before deleting records." });
+      return;
+    }
+    setLocalDataStatus({ state: "busy", message: `Deleting Masthead records for ${scopeLabel(scope)}...` });
+    try {
+      const response = await deleteCanonicalMastheadData(scope, liveProjectionUrl);
+      setDataSummary(response.summary);
+      setPendingDeletionScope(undefined);
+      setLocalDataStatus({
+        state: "deleted",
+        message: `Deleted ${formatCount(response.result.sessions ?? 0)} sessions for ${scopeLabel(
+          scope
+        )}. Original harness files remain untouched.`
+      });
+    } catch (error) {
+      setLocalDataStatus({
+        state: "error",
+        message: `Scoped delete failed: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+  };
+
+  const handleConfirmDeleteLocalData = async () => {
+    setLocalDataStatus({ state: "busy", message: "Deleting canonical Masthead data..." });
+    try {
+      const response = await deleteCanonicalMastheadData({ kind: "all" }, liveProjectionUrl);
       setLocalStoreRecords([]);
       setReviewDispositions([]);
+      setDataSummary(response.summary);
       setLiveProjection(emptyLiveBoard);
       setLiveEvents([]);
       setLiveGitSnapshots([]);
       setSessionActionStatus(undefined);
-      const liveMessage =
-        liveRemovedRecords === undefined ? "" : ` Live collector deleted ${liveRemovedRecords} records.`;
       setLocalDataStatus({
         state: "deleted",
-        message: `Deleted ${result.removedRecords} app-store records.${liveMessage} Codex transcripts and repositories untouched.`
+        message: `Deleted ${formatCount(response.result.sessions ?? 0)} sessions, ${formatCount(
+          response.result.rawEvents ?? 0
+        )} raw source copies, ${formatCount(response.result.enrichments ?? 0)} enrichments, and ${formatCount(
+          response.result.auditRows ?? 0
+        )} MCP audit rows. Original Codex/Hermes/etc. session files remain untouched.`
       });
     } catch (error) {
       setLocalDataStatus({
@@ -616,10 +709,23 @@ export function App() {
     ) : activeSurface === "settings" ? (
       <SettingsSurface>
         <OperationsPanel
+          dataSummary={dataSummary}
+          deletionScopeKind={deletionScopeKind}
+          deletionScopeTarget={deletionScopeTarget}
           localDataStatus={localDataStatus}
+          onDeletionScopeKindChange={(kind) => {
+            setDeletionScopeKind(kind);
+            setPendingDeletionScope(undefined);
+          }}
+          onDeletionScopeTargetChange={(target) => {
+            setDeletionScopeTarget(target);
+            setPendingDeletionScope(undefined);
+          }}
           onExportLocalData={handleExportLocalData}
           onRequestPruneLocalData={handleRequestPruneLocalData}
           onConfirmPruneLocalData={handleConfirmPruneLocalData}
+          onRequestScopedDelete={handleRequestScopedDelete}
+          onConfirmScopedDelete={handleConfirmScopedDelete}
           onRequestDeleteLocalData={handleRequestDeleteLocalData}
           onConfirmDeleteLocalData={handleConfirmDeleteLocalData}
         />
@@ -796,37 +902,23 @@ function emptyBoardMessage({
   return "Now will switch to live sessions when the local collector responds.";
 }
 
-async function pruneLiveCollectorData(policy: {
-  cutoffAt: string;
-  keepLatest: number;
-  recordTypes: Array<StoreRecord["recordType"]>;
-  keepUnresolvedAttention: boolean;
-}): Promise<number | undefined> {
-  const response = await fetch(retentionRequestUrl(liveProjectionUrl), {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ policy })
-  });
-  if (!response.ok) throw new Error(`live collector retention failed: ${response.status}`);
-  const body: unknown = await response.json();
-  return prunedRecordCount(body);
+function exportedSessionCount(value: unknown): number | undefined {
+  if (typeof value !== "object" || value === null || !("sessions" in value)) return undefined;
+  const sessions = value.sessions;
+  return Array.isArray(sessions) ? sessions.length : undefined;
 }
 
-async function clearLiveCollectorData(): Promise<number | undefined> {
-  const response = await fetch(clearRequestUrl(liveProjectionUrl), {
-    method: "POST",
-    headers: { accept: "application/json" }
-  });
-  if (!response.ok) throw new Error(`live collector clear failed: ${response.status}`);
-  const body: unknown = await response.json();
-  return prunedRecordCount(body);
+function formatCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
-function prunedRecordCount(value: unknown): number | undefined {
-  if (typeof value !== "object" || value === null || !("result" in value)) return undefined;
-  const result = value.result;
-  if (typeof result !== "object" || result === null || !("removedRecords" in result)) return undefined;
-  return typeof result.removedRecords === "number" ? result.removedRecords : undefined;
+function scopeLabel(scope: DeleteMastheadDataScope): string {
+  if (scope.kind === "session") return `session ${scope.sessionId}`;
+  if (scope.kind === "runtime") return `runtime ${scope.runtime}`;
+  if (scope.kind === "host") return `host ${scope.host}`;
+  if (scope.kind === "project") return `project ${scope.project}`;
+  if (scope.kind === "raw_payloads") return "raw source copies";
+  return "all Masthead data";
 }
 
 function reasonForAction(action: Extract<SafeAction, "snooze" | "dismiss" | "mark_reviewed" | "mark_expected">): string {

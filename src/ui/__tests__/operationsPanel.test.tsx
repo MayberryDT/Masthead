@@ -7,11 +7,13 @@ describe("OperationsPanel", () => {
     const html = renderToStaticMarkup(<OperationsPanel />);
 
     expect(html).toContain("Export local data");
-    expect(html).toContain("Apply retention");
-    expect(html).toContain("Delete Masthead data");
-    expect(html).toContain("Manual 30-day prune");
-    expect(html).toContain("Pinned records and unresolved attention stay until delete");
-    expect(html).toContain("Clears Masthead app-store and live collector history only");
+    expect(html).toContain("Delete raw source copies");
+    expect(html).toContain("Delete all Masthead data");
+    expect(html).toContain("Canonical metadata and session capsules are kept indefinitely");
+    expect(html).toContain("Keeps normalized session metadata, summaries, and search records.");
+    expect(html).toContain("Original harness files are untouched.");
+    expect(html).not.toContain("Manual 30-day prune");
+    expect(html).not.toContain("latest 500 records");
     expect(html).not.toContain("Approve request");
     expect(html).not.toContain("Run command");
   });
@@ -21,13 +23,13 @@ describe("OperationsPanel", () => {
       <OperationsPanel
         localDataStatus={{
           state: "confirm_delete",
-          message: "Confirm deletion to remove Masthead app-store and live collector history."
+          message: "Confirm delete all Masthead data. Original harness files remain untouched."
         }}
       />
     );
 
-    expect(html).toContain("Confirm delete");
-    expect(html).toContain("Confirm deletion to remove Masthead app-store and live collector history.");
+    expect(html).toContain("Confirm delete all");
+    expect(html).toContain("Confirm delete all Masthead data. Original harness files remain untouched.");
   });
 
   test("renders explicit retention confirmation state", () => {
@@ -35,13 +37,73 @@ describe("OperationsPanel", () => {
       <OperationsPanel
         localDataStatus={{
           state: "confirm_prune",
-          message: "Confirm retention to prune Masthead-local history older than 30 days."
+          message: "Confirm deletion of 4 raw source copies. Normalized session metadata, summaries, and search records stay available."
         }}
       />
     );
 
-    expect(html).toContain("Confirm retention");
-    expect(html).toContain("Confirm retention to prune Masthead-local history older than 30 days.");
+    expect(html).toContain("Confirm raw copy delete");
+    expect(html).toContain("Confirm deletion of 4 raw source copies.");
+  });
+
+  test("renders selective deletion controls for scoped records", () => {
+    const html = renderToStaticMarkup(
+      <OperationsPanel
+        deletionScopeKind="project"
+        deletionScopeTarget="Pip"
+        localDataStatus={{
+          state: "confirm_scoped_delete",
+          message: "Confirm scoped deletion for project Pip."
+        }}
+      />
+    );
+
+    expect(html).toContain("Selective deletion");
+    expect(html).toContain("Project");
+    expect(html).toContain("Session");
+    expect(html).toContain("Runtime");
+    expect(html).toContain("Host");
+    expect(html).toContain("Pip");
+    expect(html).toContain("Confirm scoped delete");
+    expect(html).toContain("Confirm scoped deletion for project Pip.");
+    expect(html).toMatch(/<select[^>]*disabled=""/);
+    expect(html).toMatch(/<input[^>]*disabled=""/);
+  });
+
+  test("renders data summary preview before deletion", () => {
+    const html = renderToStaticMarkup(
+      <OperationsPanel
+        dataSummary={{
+          auditRows: 2,
+          enrichments: 1,
+          messages: 3,
+          rawEvents: 4,
+          sessions: 5,
+          sources: 1,
+          storageClasses: {
+            audit_logs: { description: "MCP query audit records.", records: 2, retention: "configurable" },
+            canonical_metadata: { description: "Sessions and capsules.", records: 6, retention: "indefinite" },
+            derived_indexes: { description: "Indexes.", records: 7, retention: "rebuildable" },
+            large_outputs: { description: "Outputs.", records: 0, retention: "short_configurable" },
+            raw_payloads: { description: "Raw payloads.", records: 4, retention: "configurable" },
+            searchable_messages: { description: "Messages.", records: 3, retention: "indefinite_configurable" }
+          },
+          tables: {
+            mcp_query_log: 2,
+            raw_events: 4,
+            session_search: 7,
+            sessions: 5
+          }
+        }}
+      />
+    );
+
+    expect(html).toContain("Data deletion preview");
+    expect(html).toContain("Preview sessions");
+    expect(html).toContain("Preview raw source copies");
+    expect(html).toContain("5");
+    expect(html).toContain("4");
+    expect(html).toContain("7");
   });
 
   test("renders local action errors without changing action labels", () => {
@@ -51,6 +113,6 @@ describe("OperationsPanel", () => {
 
     expect(html).toContain("Export failed: unavailable");
     expect(html).toContain("Export local data");
-    expect(html).toContain("Delete Masthead data");
+    expect(html).toContain("Delete all Masthead data");
   });
 });

@@ -60,6 +60,7 @@ export type AppendOnlyStore = {
   append(record: StoreRecord): Promise<void>;
   appendMany(records: StoreRecord[]): Promise<void>;
   clearLocalData(): Promise<ClearLocalDataResult>;
+  deleteRecords(predicate: (record: StoreRecord) => boolean): Promise<PruneLocalDataResult>;
   pruneLocalData(policy: RetentionPolicy): Promise<PruneLocalDataResult>;
   exportRecords(): StoreExport;
   readAll(): StoreRecord[];
@@ -85,6 +86,14 @@ export function createInMemoryStore(initialRecords: StoreRecord[] = []): AppendO
       const removedRecords = records.length;
       records.length = 0;
       return { removedRecords, touchedExternalState: false };
+    },
+    async deleteRecords(predicate) {
+      const removedRecords = records.filter(predicate);
+      const removedRecordIds = new Set(removedRecords.map((record) => record.recordId));
+      const retainedRecords = records.filter((record) => !removedRecordIds.has(record.recordId));
+      records.length = 0;
+      records.push(...retainedRecords);
+      return retentionPruneResult(removedRecords, retainedRecords.length);
     },
     async pruneLocalData(policy) {
       const { retainedRecords, removedRecords } = applyRetentionPolicy(records, policy);
@@ -146,6 +155,21 @@ export async function createFileBackedStore(filePath: string): Promise<AppendOnl
       await writeFile(filePath, "", "utf8");
       await memory.clearLocalData();
       return { removedRecords, touchedExternalState: false };
+    },
+    async deleteRecords(predicate) {
+      const records = memory.readAll();
+      const removedRecords = records.filter(predicate);
+      const removedRecordIds = new Set(removedRecords.map((record) => record.recordId));
+      const retainedRecords = records.filter((record) => !removedRecordIds.has(record.recordId));
+      await mkdir(dirname(filePath), { recursive: true });
+      await writeFile(
+        filePath,
+        retainedRecords.length > 0 ? `${retainedRecords.map((record) => JSON.stringify(record)).join("\n")}\n` : "",
+        "utf8"
+      );
+      await memory.clearLocalData();
+      await memory.appendMany(retainedRecords);
+      return retentionPruneResult(removedRecords, retainedRecords.length);
     },
     async pruneLocalData(policy) {
       const { retainedRecords, removedRecords } = applyRetentionPolicy(memory.readAll(), policy);

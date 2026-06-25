@@ -115,6 +115,52 @@ export type ProjectOption = {
   sessionCount: number;
 };
 
+export type RetentionClass =
+  | "canonical_metadata"
+  | "searchable_messages"
+  | "raw_payloads"
+  | "large_outputs"
+  | "derived_indexes"
+  | "audit_logs";
+
+export type RetentionClassSummary = {
+  records: number;
+  retention: "indefinite" | "indefinite_configurable" | "configurable" | "short_configurable" | "rebuildable";
+  description: string;
+};
+
+export type DataSummary = {
+  sessions: number;
+  rawEvents: number;
+  messages: number;
+  enrichments: number;
+  sources: number;
+  auditRows: number;
+  tables: Record<string, number>;
+  storageClasses: Record<RetentionClass, RetentionClassSummary>;
+};
+
+export type DeleteMastheadDataScope =
+  | { kind: "all" }
+  | { kind: "raw_payloads" }
+  | { kind: "session"; sessionId: string }
+  | { kind: "project"; project: string }
+  | { kind: "runtime"; runtime: string }
+  | { kind: "host"; host: string };
+
+export type DataLifecycleResult = {
+  sessions: number;
+  rawEvents: number;
+  enrichments: number;
+  auditRows: number;
+};
+
+export type DataLifecycleResponse = {
+  preview: DataSummary;
+  summary: DataSummary;
+  result: Partial<DataLifecycleResult> & { rawEvents?: number };
+};
+
 export async function listSources(baseUrl = defaultLiveProjectionUrl()): Promise<SourceStatus[]> {
   const url = new URL(baseUrl);
   url.pathname = "/sources";
@@ -229,6 +275,59 @@ export async function listProjects(baseUrl = defaultLiveProjectionUrl(), options
   if (!response.ok) throw new Error(`projects request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; projects: ProjectOption[] };
   return body.projects;
+}
+
+export async function getDataSummary(baseUrl = defaultLiveProjectionUrl(), scope?: DeleteMastheadDataScope): Promise<DataSummary> {
+  const url = dataUrl(baseUrl, "/data/summary");
+  if (scope) addScopeSearchParams(url, scope);
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`data summary request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; summary: DataSummary };
+  return body.summary;
+}
+
+export async function applyDefaultRetention(baseUrl = defaultLiveProjectionUrl()): Promise<DataLifecycleResponse> {
+  const response = await fetch(dataUrl(baseUrl, "/data/retention/default").toString(), {
+    headers: { accept: "application/json" },
+    method: "POST"
+  });
+  if (!response.ok) throw new Error(`default retention failed: ${response.status}`);
+  return response.json() as Promise<DataLifecycleResponse>;
+}
+
+export async function deleteMastheadData(
+  scope: DeleteMastheadDataScope = { kind: "all" },
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<DataLifecycleResponse> {
+  const response = await fetch(dataUrl(baseUrl, "/data/delete").toString(), {
+    body: JSON.stringify({ scope }),
+    headers: { accept: "application/json", "content-type": "application/json" },
+    method: "POST"
+  });
+  if (!response.ok) throw new Error(`data delete failed: ${response.status}`);
+  return response.json() as Promise<DataLifecycleResponse>;
+}
+
+export async function exportMastheadData(baseUrl = defaultLiveProjectionUrl()): Promise<unknown> {
+  const response = await fetch(dataUrl(baseUrl, "/data/export").toString(), { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`data export failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; export: unknown };
+  return body.export;
+}
+
+function dataUrl(baseUrl: string, pathname: string): URL {
+  const url = new URL(baseUrl);
+  url.pathname = pathname;
+  url.search = "";
+  return url;
+}
+
+function addScopeSearchParams(url: URL, scope: DeleteMastheadDataScope): void {
+  url.searchParams.set("kind", scope.kind);
+  if (scope.kind === "session") url.searchParams.set("sessionId", scope.sessionId);
+  if (scope.kind === "project") url.searchParams.set("project", scope.project);
+  if (scope.kind === "runtime") url.searchParams.set("runtime", scope.runtime);
+  if (scope.kind === "host") url.searchParams.set("host", scope.host);
 }
 
 export async function listReviewDispositions(baseUrl = defaultLiveProjectionUrl()): Promise<ReviewDisposition[]> {

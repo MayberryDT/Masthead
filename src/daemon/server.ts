@@ -15,7 +15,14 @@ import type { ReviewDisposition } from "../core/store.ts";
 import type { CodexHookDiagnostic } from "../core/codexAdapter.ts";
 import type { GitSnapshot, NormalizedEvent } from "../core/types.ts";
 import type { DaemonConfig } from "./config.ts";
-import { deleteAllMastheadData, exportSessionGraph, getDataSummary } from "./db/dataLifecycleRepository.ts";
+import {
+  applyDefaultRetention,
+  deleteAllMastheadData,
+  deleteMastheadData,
+  exportSessionGraph,
+  getDataSummary,
+  type DeleteMastheadDataScope
+} from "./db/dataLifecycleRepository.ts";
 import { getImportJob, listImportJobs, updateImportJob, type ImportJobKind } from "./db/importJobRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
@@ -266,6 +273,90 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (importKind === "metadata") return importMetadataSources([source]);
     if (importKind === "transcript") return importTranscriptSources([source]);
     return Promise.resolve(emptyImportResult());
+  }
+
+  async function clearRawSourceCopies(): Promise<{ removedRecords: number; touchedExternalState: false }> {
+    const result = await store.deleteRecords(isRawSourceStoreRecord);
+    hookRawJournal.pruneStoreRecords(rawSourceRetentionPolicy);
+    observerRawJournal.pruneStoreRecords(rawSourceRetentionPolicy);
+    state.events.length = 0;
+    gitSnapshots.length = 0;
+    gitSnapshotSignatures.clear();
+    return { removedRecords: result.removedRecords, touchedExternalState: false };
+  }
+
+  async function clearLiveStateForScope(
+    scope: Exclude<DeleteMastheadDataScope, { kind: "all" } | { kind: "raw_payloads" }>,
+    sourceSessionIds: Set<string>
+  ): Promise<{ removedRecords: number; touchedExternalState: false }> {
+    const result = await store.deleteRecords((record) => storeRecordMatchesDeleteScope(record, scope, sourceSessionIds));
+    deleteRawEventsForStoreRecordIds(result.removedRecordIds);
+    const retainedEvents = state.events.filter((event) => !eventMatchesDeleteScope(event, scope, sourceSessionIds));
+    state.events.length = 0;
+    state.events.push(...retainedEvents);
+    const retainedGitSnapshots = gitSnapshots.filter((snapshot) => !sourceSessionIds.has(snapshot.sessionId));
+    gitSnapshots.length = 0;
+    gitSnapshots.push(...retainedGitSnapshots);
+    gitSnapshotSignatures.clear();
+    for (const gitSnapshot of gitSnapshots) {
+      gitSnapshotSignatures.set(gitSnapshot.sessionId, gitSnapshotSignature(gitSnapshot));
+    }
+    return { removedRecords: result.removedRecords, touchedExternalState: false };
+  }
+
+  function sourceSessionIdsForScope(
+    scope: Exclude<DeleteMastheadDataScope, { kind: "all" } | { kind: "raw_payloads" }>
+  ): Set<string> {
+    if (scope.kind === "session") {
+      return new Set(
+        (
+          database
+            .prepare("SELECT source_session_id FROM sessions WHERE session_id = ? OR source_session_id = ?")
+            .all(scope.sessionId, scope.sessionId) as Array<{ source_session_id: string }>
+        ).map((row) => row.source_session_id)
+      );
+    }
+    if (scope.kind === "project") {
+      return new Set(
+        (
+          database
+            .prepare("SELECT source_session_id FROM sessions WHERE project_label = ?")
+            .all(scope.project) as Array<{ source_session_id: string }>
+        ).map((row) => row.source_session_id)
+      );
+    }
+    if (scope.kind === "runtime") {
+      return new Set(
+        (
+          database
+            .prepare(
+              `SELECT sessions.source_session_id AS source_session_id
+              FROM sessions
+              JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+              WHERE runtimes.runtime_id = ? OR runtimes.runtime_kind = ?`
+            )
+            .all(scope.runtime, scope.runtime) as Array<{ source_session_id: string }>
+        ).map((row) => row.source_session_id)
+      );
+    }
+    return new Set(
+      (
+        database
+          .prepare(
+            `SELECT sessions.source_session_id AS source_session_id
+            FROM sessions
+            JOIN hosts ON hosts.host_id = sessions.host_id
+            WHERE hosts.host_id = ? OR hosts.hostname = ?`
+          )
+          .all(scope.host, scope.host) as Array<{ source_session_id: string }>
+      ).map((row) => row.source_session_id)
+    );
+  }
+
+  function deleteRawEventsForStoreRecordIds(recordIds: string[]): void {
+    if (recordIds.length === 0) return;
+    const placeholders = recordIds.map(() => "?").join(", ");
+    database.prepare(`DELETE FROM raw_events WHERE source_record_key IN (${placeholders})`).run(...recordIds);
   }
 
   const server = createServer(async (request, response) => {
@@ -528,9 +619,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/data/summary") {
+      let scope: DeleteMastheadDataScope;
+      try {
+        scope = deleteScopeFromUrl(url);
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        return;
+      }
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
-        summary: getDataSummary(database)
+        summary: getDataSummary(database, scope)
       });
       return;
     }
@@ -545,14 +646,47 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/data/delete") {
       try {
-        const result = deleteAllMastheadData(database);
-        const legacy = await clearInMemoryAndLegacyStore();
+        const body = await readBody(request);
+        const scope = deleteScopeFromBody(body ? JSON.parse(body) : {});
+        const preview = getDataSummary(database, scope);
+        const sourceSessionIds =
+          scope.kind === "all" || scope.kind === "raw_payloads" ? undefined : sourceSessionIdsForScope(scope);
+        const result = deleteMastheadData(database, scope);
+        const legacy =
+          scope.kind === "all"
+            ? await clearInMemoryAndLegacyStore()
+            : scope.kind === "raw_payloads"
+              ? await clearRawSourceCopies()
+              : await clearLiveStateForScope(scope, sourceSessionIds ?? new Set());
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
+          preview,
           result,
           legacy,
+          summary: getDataSummary(database),
           events: state.events.length,
           gitSnapshots: gitSnapshots.length
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, isDeleteScopeClientError(error) ? 400 : 500, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/data/retention/default") {
+      try {
+        const preview = getDataSummary(database);
+        const result = applyDefaultRetention(database);
+        const legacy = await clearRawSourceCopies();
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          legacy,
+          preview,
+          result,
+          summary: getDataSummary(database)
         });
       } catch (error) {
         sendJson(request, response, config.allowedOrigins, 500, {
@@ -778,6 +912,44 @@ function readBody(request: IncomingMessage): Promise<string> {
   });
 }
 
+const rawSourceRetentionPolicy = {
+  keepLatest: 0,
+  keepUnresolvedAttention: false,
+  recordTypes: ["event", "git_snapshot", "attention_item", "conflict_card"] as Array<StoreRecord["recordType"]>
+};
+
+function isRawSourceStoreRecord(record: StoreRecord): boolean {
+  return rawSourceRetentionPolicy.recordTypes.includes(record.recordType);
+}
+
+function storeRecordMatchesDeleteScope(
+  record: StoreRecord,
+  scope: Exclude<DeleteMastheadDataScope, { kind: "all" } | { kind: "raw_payloads" }>,
+  sourceSessionIds: Set<string>
+): boolean {
+  if (record.recordType === "event") return eventMatchesDeleteScope(record.value, scope, sourceSessionIds);
+  if (record.recordType === "git_snapshot") return sourceSessionIds.has(record.value.sessionId);
+  if (scope.kind === "session") return record.recordId.includes(scope.sessionId);
+  return false;
+}
+
+function eventMatchesDeleteScope(
+  event: NormalizedEvent,
+  scope: Exclude<DeleteMastheadDataScope, { kind: "all" } | { kind: "raw_payloads" }>,
+  sourceSessionIds: Set<string>
+): boolean {
+  if (event.sessionId && sourceSessionIds.has(event.sessionId)) return true;
+  if (scope.kind === "session") return event.sessionId === scope.sessionId;
+  if (scope.kind === "project") return stringPayload(event, "project") === scope.project;
+  if (scope.kind === "runtime") return event.source.adapter === scope.runtime;
+  return false;
+}
+
+function stringPayload(event: NormalizedEvent, key: string): string | undefined {
+  const value = event.payload[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 function toCodexHookDiagnostic(diagnostic: AdapterDiagnostic | undefined, receivedAt: string): CodexHookDiagnostic {
   return {
     code: diagnostic?.code === "malformed_json" ? "malformed_json" : "invalid_payload",
@@ -854,6 +1026,50 @@ function assertReviewDisposition(value: unknown): asserts value is ReviewDisposi
   if (typeof record.recordedAt !== "string" || Number.isNaN(Date.parse(record.recordedAt))) {
     throw new Error("recordedAt must be an ISO timestamp.");
   }
+}
+
+function deleteScopeFromBody(value: unknown): DeleteMastheadDataScope {
+  const body = objectRecord(value);
+  const scope = objectRecord(body.scope ?? body);
+  const kind = typeof scope.kind === "string" ? scope.kind : "all";
+
+  if (kind === "all") return { kind };
+  if (kind === "raw_payloads" || kind === "raw_payloads_only") return { kind: "raw_payloads" };
+  if (kind === "session") return { kind, sessionId: requiredString(scope.sessionId, "sessionId") };
+  if (kind === "project") return { kind, project: requiredString(scope.project, "project") };
+  if (kind === "runtime") return { kind, runtime: requiredString(scope.runtime, "runtime") };
+  if (kind === "host") return { kind, host: requiredString(scope.host ?? scope.hostId, "host") };
+  throw clientError(`Unsupported delete scope: ${kind}`);
+}
+
+function deleteScopeFromUrl(url: URL): DeleteMastheadDataScope {
+  const kind = url.searchParams.get("kind") ?? "all";
+  if (kind === "all") return { kind };
+  if (kind === "raw_payloads" || kind === "raw_payloads_only") return { kind: "raw_payloads" };
+  if (kind === "session") return { kind, sessionId: requiredString(url.searchParams.get("sessionId"), "sessionId") };
+  if (kind === "project") return { kind, project: requiredString(url.searchParams.get("project"), "project") };
+  if (kind === "runtime") return { kind, runtime: requiredString(url.searchParams.get("runtime"), "runtime") };
+  if (kind === "host") return { kind, host: requiredString(url.searchParams.get("host") ?? url.searchParams.get("hostId"), "host") };
+  throw clientError(`Unsupported delete scope: ${kind}`);
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== "string" || !value.trim()) throw clientError(`${name} is required`);
+  return value;
+}
+
+function clientError(message: string): Error {
+  const error = new Error(message);
+  error.name = "ClientInputError";
+  return error;
+}
+
+function isDeleteScopeClientError(error: unknown): boolean {
+  return error instanceof SyntaxError || (error instanceof Error && error.name === "ClientInputError");
 }
 
 function isImportJobKind(value: unknown): value is ImportJobKind {
