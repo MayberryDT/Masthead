@@ -172,6 +172,7 @@ export function App() {
   const [deletionScopeKind, setDeletionScopeKind] = useState<DeletionScopeKind>("project");
   const [deletionScopeTarget, setDeletionScopeTarget] = useState("");
   const [pendingDeletionScope, setPendingDeletionScope] = useState<DeleteMastheadDataScope>();
+  const [pendingDeletionDatabaseId, setPendingDeletionDatabaseId] = useState<string>();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const liveRequestIdRef = useRef(0);
   const fixtureBoard = useMemo(() => buildObservabilityDemoBoard(selectedSessionId), [selectedSessionId]);
@@ -252,6 +253,10 @@ export function App() {
     if (connection.state.state === "probing") return { state: "connecting" };
     return liveConnection;
   }, [connection.state, liveConnection]);
+  const activeDatabaseId =
+    connection.state.state === "ready" || connection.state.state === "read_only" ? connection.state.health.data?.databaseId : undefined;
+  const writeBlockedMessage =
+    "This Masthead connection is read-only. Start the local writable collector before changing settings or deleting data.";
   const connectorDisplayState = connectorStateForToolbar(effectiveLiveConnection, connectorAction);
   const toggleDensity = useCallback(() => {
     const updateDensity = () => setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
@@ -660,16 +665,21 @@ export function App() {
     }
   };
 
-  const loadDataDeletionPreview = async (scope?: DeleteMastheadDataScope): Promise<DataSummary> => {
-    const summary = await getDataSummary(activeProjectionUrl, scope);
+  const loadDataDeletionPreview = async (scope?: DeleteMastheadDataScope, databaseId = activeDatabaseId): Promise<DataSummary> => {
+    const summary = await getDataSummary(activeProjectionUrl, scope, { databaseId });
     setDataSummary(summary);
     return summary;
   };
 
   const handleRequestDeleteLocalData = async () => {
+    if (!connection.writable) {
+      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      return;
+    }
     setLocalDataStatus({ state: "busy", message: "Preparing delete-all preview..." });
     try {
-      const summary = await loadDataDeletionPreview();
+      const summary = await loadDataDeletionPreview(undefined, activeDatabaseId);
+      setPendingDeletionDatabaseId(activeDatabaseId);
       setLocalDataStatus({
         state: "confirm_delete",
         message: `Confirm delete all Masthead data: ${formatCount(summary.sessions)} sessions, ${formatCount(
@@ -687,9 +697,14 @@ export function App() {
   };
 
   const handleRequestPruneLocalData = async () => {
+    if (!connection.writable) {
+      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      return;
+    }
     setLocalDataStatus({ state: "busy", message: "Preparing raw source copy preview..." });
     try {
-      const summary = await loadDataDeletionPreview();
+      const summary = await loadDataDeletionPreview(undefined, activeDatabaseId);
+      setPendingDeletionDatabaseId(activeDatabaseId);
       setLocalDataStatus({
         state: "confirm_prune",
         message: `Confirm deletion of ${formatCount(
@@ -705,12 +720,17 @@ export function App() {
   };
 
   const handleConfirmPruneLocalData = async () => {
+    if (!connection.writable) {
+      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      return;
+    }
     setLocalDataStatus({ state: "busy", message: "Deleting raw source copies..." });
     try {
-      const response = await applyDefaultDataRetention(activeProjectionUrl);
+      const response = await applyDefaultDataRetention(activeProjectionUrl, { databaseId: pendingDeletionDatabaseId ?? activeDatabaseId });
       const dispositions = await listReviewDispositions(activeProjectionUrl);
       setReviewDispositions(dispositions);
       setDataSummary(response.summary);
+      setPendingDeletionDatabaseId(undefined);
       setLocalDataStatus({
         state: "pruned",
         message: `Deleted ${formatCount(
@@ -735,6 +755,10 @@ export function App() {
   };
 
   const handleRequestScopedDelete = async () => {
+    if (!connection.writable) {
+      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      return;
+    }
     const scope = selectedDeletionScope();
     if (!scope) {
       setLocalDataStatus({ state: "error", message: "Choose a deletion scope and target before deleting records." });
@@ -742,8 +766,9 @@ export function App() {
     }
     setLocalDataStatus({ state: "busy", message: "Preparing scoped deletion preview..." });
     try {
-      const summary = await loadDataDeletionPreview(scope);
+      const summary = await loadDataDeletionPreview(scope, activeDatabaseId);
       setPendingDeletionScope(scope);
+      setPendingDeletionDatabaseId(activeDatabaseId);
       setLocalDataStatus({
         state: "confirm_scoped_delete",
         message: `Confirm scoped deletion for ${scopeLabel(scope)}: ${formatCount(
@@ -761,6 +786,10 @@ export function App() {
   };
 
   const handleConfirmScopedDelete = async () => {
+    if (!connection.writable) {
+      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      return;
+    }
     const scope = pendingDeletionScope ?? selectedDeletionScope();
     if (!scope) {
       setLocalDataStatus({ state: "error", message: "Choose a deletion scope and target before deleting records." });
@@ -768,9 +797,10 @@ export function App() {
     }
     setLocalDataStatus({ state: "busy", message: `Deleting Masthead records for ${scopeLabel(scope)}...` });
     try {
-      const response = await deleteCanonicalMastheadData(scope, activeProjectionUrl);
+      const response = await deleteCanonicalMastheadData(scope, activeProjectionUrl, { databaseId: pendingDeletionDatabaseId ?? activeDatabaseId });
       setDataSummary(response.summary);
       setPendingDeletionScope(undefined);
+      setPendingDeletionDatabaseId(undefined);
       setLocalDataStatus({
         state: "deleted",
         message: `Deleted ${formatCount(response.result.sessions ?? 0)} sessions for ${scopeLabel(
@@ -786,15 +816,20 @@ export function App() {
   };
 
   const handleConfirmDeleteLocalData = async () => {
+    if (!connection.writable) {
+      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      return;
+    }
     setLocalDataStatus({ state: "busy", message: "Deleting canonical Masthead data..." });
     try {
-      const response = await deleteCanonicalMastheadData({ kind: "all" }, activeProjectionUrl);
+      const response = await deleteCanonicalMastheadData({ kind: "all" }, activeProjectionUrl, { databaseId: pendingDeletionDatabaseId ?? activeDatabaseId });
       setReviewDispositions([]);
       setDataSummary(response.summary);
       setLiveProjection(emptyLiveBoard);
       setLiveEvents([]);
       setLiveGitSnapshots([]);
       setSessionActionStatus(undefined);
+      setPendingDeletionDatabaseId(undefined);
       setLocalDataStatus({
         state: "deleted",
         message: `Deleted ${formatCount(response.result.sessions ?? 0)} sessions, ${formatCount(
@@ -968,14 +1003,17 @@ export function App() {
             onCancelLocalDataAction={() => {
               setLocalDataStatus({ state: "idle" });
               setPendingDeletionScope(undefined);
+              setPendingDeletionDatabaseId(undefined);
             }}
             onDeletionScopeKindChange={(kind) => {
               setDeletionScopeKind(kind);
               setPendingDeletionScope(undefined);
+              setPendingDeletionDatabaseId(undefined);
             }}
             onDeletionScopeTargetChange={(target) => {
               setDeletionScopeTarget(target);
               setPendingDeletionScope(undefined);
+              setPendingDeletionDatabaseId(undefined);
             }}
             onExportLocalData={handleExportLocalData}
             onRequestPruneLocalData={handleRequestPruneLocalData}
@@ -984,6 +1022,7 @@ export function App() {
             onConfirmScopedDelete={handleConfirmScopedDelete}
             onRequestDeleteLocalData={handleRequestDeleteLocalData}
             onConfirmDeleteLocalData={handleConfirmDeleteLocalData}
+            readOnly={!connection.writable}
           />
         )}
       </SettingsSurface>

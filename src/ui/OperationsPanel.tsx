@@ -1,3 +1,4 @@
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import {
   getSettingsState,
@@ -36,6 +37,7 @@ type Props = {
   deletionScopeTarget?: string;
   localDataStatus?: LocalDataStatus;
   settingsState?: SettingsStateDto;
+  readOnly?: boolean;
   onCancelLocalDataAction?: () => void;
   onDeletionScopeKindChange?: (kind: DeletionScopeKind) => void;
   onDeletionScopeTargetChange?: (target: string) => void;
@@ -63,25 +65,30 @@ export function OperationsPanel({
   onRequestDeleteLocalData,
   onRequestPruneLocalData,
   onRequestScopedDelete,
+  readOnly = false,
   settingsState
 }: Props) {
   const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
   const [settingsError, setSettingsError] = useState<string>();
   const [hookBusy, setHookBusy] = useState(false);
+  const [settingsLoadState, setSettingsLoadState] = useState<"loading" | "ready" | "error">(settingsState ? "ready" : "loading");
   const effectiveSettings = settingsState ?? loadedSettings;
   const effectiveSummary = dataSummary ?? effectiveSettings?.storage.dataSummary;
   const busy = localDataStatus.state === "busy" || hookBusy;
 
   const loadSettings = useCallback((signal?: AbortSignal) => {
     if (settingsState) return;
+    setSettingsLoadState("loading");
     void getSettingsState(undefined, { signal })
       .then((settings) => {
         setLoadedSettings(settings);
         setSettingsError(undefined);
+        setSettingsLoadState("ready");
       })
       .catch((error: unknown) => {
         if (signal?.aborted) return;
         setSettingsError(error instanceof Error ? error.message : String(error));
+        setSettingsLoadState("error");
       });
   }, [settingsState]);
 
@@ -92,6 +99,10 @@ export function OperationsPanel({
   }, [loadSettings]);
 
   const runHookAction = async (action: "install" | "uninstall" | "test") => {
+    if (readOnly) {
+      setSettingsError("This Masthead connection is read-only. Start the local writable collector before changing hook settings.");
+      return;
+    }
     setHookBusy(true);
     try {
       const hooks =
@@ -109,38 +120,71 @@ export function OperationsPanel({
     }
   };
 
+  const openDataDirectory = async () => {
+    const dataDirectory = effectiveSettings?.storage.dataDirectory ?? effectiveSettings?.data.dataDirectory;
+    if (!dataDirectory) return;
+    try {
+      await tauriInvoke("open_data_directory_command", { path: dataDirectory });
+      setSettingsError(undefined);
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const writesDisabled = busy || readOnly;
+  const showSettingsSections = Boolean(effectiveSettings) || settingsLoadState !== "error";
+
   return (
     <section id="settings" className="settings-panel" aria-label="Settings">
       {settingsError ? <p className="settings-error">{settingsError}</p> : null}
+      {readOnly ? (
+        <p className="settings-status error">Read-only connection: destructive data changes and hook writes are disabled.</p>
+      ) : null}
+      {settingsLoadState === "error" && !effectiveSettings ? (
+        <div className="settings-recovery" role="alert">
+          <h2>Settings unavailable</h2>
+          <p>{settingsError ?? "Masthead settings could not be loaded."}</p>
+          <button type="button" className="app-button app-button-primary metal-control" onClick={() => loadSettings()}>
+            Retry settings
+          </button>
+        </div>
+      ) : null}
 
-      <HookSettings
-        busy={busy}
-        hooks={effectiveSettings?.hooks}
-        onInstall={() => void runHookAction("install")}
-        onTest={() => void runHookAction("test")}
-        onUninstall={() => void runHookAction("uninstall")}
-      />
-      <EnrichmentSettings enrichment={effectiveSettings?.enrichment} />
-      <PrivacySettings privacy={effectiveSettings?.privacy} />
-      <StorageSettings
-        busy={busy}
-        dataSummary={effectiveSummary}
-        onExport={onExportLocalData}
-        onRequestPrune={onRequestPruneLocalData}
-        settings={effectiveSettings}
-      />
-      <DangerZone
-        busy={busy}
-        deletionScopeKind={deletionScopeKind}
-        deletionScopeTarget={deletionScopeTarget}
-        onDeletionScopeKindChange={onDeletionScopeKindChange}
-        onDeletionScopeTargetChange={onDeletionScopeTargetChange}
-        onRequestDeleteAll={onRequestDeleteLocalData}
-        onRequestScopedDelete={onRequestScopedDelete}
-        targets={effectiveSettings?.deletionTargets}
-      />
+      {showSettingsSections ? (
+        <>
+          <HookSettings
+            busy={writesDisabled}
+            hooks={effectiveSettings?.hooks}
+            onInstall={() => void runHookAction("install")}
+            onTest={() => void runHookAction("test")}
+            onUninstall={() => void runHookAction("uninstall")}
+          />
+          <EnrichmentSettings enrichment={effectiveSettings?.enrichment} />
+          <PrivacySettings privacy={effectiveSettings?.privacy} />
+          <StorageSettings
+            busy={busy}
+            dataSummary={effectiveSummary}
+            onOpenDataDirectory={openDataDirectory}
+            onExport={onExportLocalData}
+            onRequestPrune={onRequestPruneLocalData}
+            settings={effectiveSettings}
+            writeDisabled={writesDisabled}
+          />
+          <DangerZone
+            busy={writesDisabled}
+            deletionScopeKind={deletionScopeKind}
+            deletionScopeTarget={deletionScopeTarget}
+            onDeletionScopeKindChange={onDeletionScopeKindChange}
+            onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+            onRequestDeleteAll={onRequestDeleteLocalData}
+            onRequestScopedDelete={onRequestScopedDelete}
+            targets={effectiveSettings?.deletionTargets}
+          />
+        </>
+      ) : null}
 
       <ConfirmDialog
+        busy={writesDisabled}
         confirmLabel="Delete raw copies"
         description={localDataStatus.message}
         onCancel={onCancelLocalDataAction}
@@ -150,6 +194,7 @@ export function OperationsPanel({
         tone="danger"
       />
       <ConfirmDialog
+        busy={writesDisabled}
         confirmLabel="Delete selected records"
         description={localDataStatus.message}
         onCancel={onCancelLocalDataAction}
@@ -159,6 +204,7 @@ export function OperationsPanel({
         tone="danger"
       />
       <ConfirmDialog
+        busy={writesDisabled}
         confirmLabel="Delete all Masthead data"
         description={localDataStatus.message}
         onCancel={onCancelLocalDataAction}

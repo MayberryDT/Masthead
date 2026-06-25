@@ -39,12 +39,8 @@ import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type
 import { hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { createSessionRepository, ingestAdapterRecord } from "./db/sessionRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "./db/sqlite.ts";
-import {
-  legacyCandidatesFromDirectory,
-  legacyDataMigrationCompleted,
-  markLegacyDataMigrationCompleted,
-  maybeCopyLegacySqliteBeforeOpen
-} from "./legacyDataMigration.ts";
+import { legacyCandidatesFromDirectory, maybeCopyLegacySqliteBeforeOpen } from "./legacyDataMigration.ts";
+import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
 import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
 import { setSourcePolicy, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
 import { cancelImportJob, queueImportJob, type ImportJobControls, type ImportWorkResult } from "./import/importCoordinator.ts";
@@ -58,6 +54,7 @@ import {
   getCodexHookSettings,
   getSettingsState,
   installCodexHooks,
+  settingsRuntimeIdentity,
   testCodexHooks,
   uninstallCodexHooks
 } from "./settingsService.ts";
@@ -116,13 +113,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       hostname: config.host,
       runtimeKind: "codex"
     });
-    const existingRecords = store.readAll();
-    const legacyNdjsonRecords = legacyEventStore?.readAll() ?? [];
-    const legacyNdjsonMigrationKey = "legacy-events-ndjson-v1";
-    const shouldHydrateLegacyNdjson =
-      !legacySqliteMigration.copied &&
-      legacyNdjsonRecords.length > 0 &&
-      !legacyDataMigrationCompleted(database, legacyNdjsonMigrationKey);
     const state = createIngestionState(canonicalLiveEvents(database));
     const gitSnapshots = canonicalGitSnapshots(database);
     const gitSnapshotSignatures = new Map(gitSnapshots.map((snapshot) => [snapshot.sessionId, gitSnapshotSignature(snapshot)]));
@@ -178,9 +168,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
   }
 
-  async function appendStoreRecord(record: StoreRecord, journal = hookRawJournal): Promise<void> {
-    journal.appendStoreRecord(record);
-    await store.append(record);
+  function appendStoreRecordToRawJournal(record: StoreRecord): void {
+    if (record.recordType === "event") {
+      hookRawJournal.appendStoreRecord(record);
+      return;
+    }
+    observerRawJournal.appendStoreRecord(record);
   }
 
   let closed = false;
@@ -192,78 +185,23 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (hydrationStarted) return;
     hydrationStarted = true;
     hydrationPromise = (async () => {
-      await hydrateDatabaseFromStoreRecords(existingRecords);
-      if (shouldHydrateLegacyNdjson) {
-        const missingLegacyRecords = missingStoreRecords(legacyNdjsonRecords);
-        if (missingLegacyRecords.length > 0) {
-          await hydrateDatabaseFromStoreRecords(missingLegacyRecords, { skipHydratedCheck: true });
-        }
-        markLegacyDataMigrationCompleted(database, legacyNdjsonMigrationKey, {
-          source: legacyNdjsonCandidate?.path,
-          importedRecords: missingLegacyRecords.length,
-          totalRecords: legacyNdjsonRecords.length
-        });
-      }
+      await migrateLegacyJournalOnce({
+        appendStoreRecord: appendStoreRecordToRawJournal,
+        database,
+        indexSession: (sessionId) => indexCanonicalSessionSearch(database, sessionId),
+        legacyStorePath: legacyNdjsonCandidate?.path,
+        onTouchedSessions: queueSessionEnrichments,
+        shouldStop: () => closed,
+        sqliteCopied: legacySqliteMigration.copied,
+        storePath: config.storePath,
+        upsertLiveEvent: (event) => sessions.upsertLiveEvent(event),
+        yieldToEventLoop
+      });
+      indexExistingCanonicalSessions();
+      rebuildLiveStateFromCanonical();
     })().catch((error: unknown) => {
       console.error("[masthead] background journal hydration failed", error);
     });
-  }
-
-  async function hydrateDatabaseFromStoreRecords(
-    records: StoreRecord[],
-    options: { skipHydratedCheck?: boolean } = {}
-  ): Promise<void> {
-    if (records.length === 0) return;
-    if (!options.skipHydratedCheck && legacyJournalHydrated(records)) {
-      indexExistingCanonicalSessions();
-      return;
-    }
-
-    const batchSize = 100;
-    for (let index = 0; index < records.length && !closed; index += batchSize) {
-      const batch = records.slice(index, index + batchSize);
-      const touchedSessionIds = new Set<string>();
-      database.exec("BEGIN IMMEDIATE;");
-      try {
-        for (const record of batch) {
-          if (record.recordType === "event") {
-            hookRawJournal.appendStoreRecord(record);
-            const sessionId = sessions.upsertLiveEvent(record.value);
-            if (sessionId) {
-              indexCanonicalSessionSearch(database, sessionId);
-              touchedSessionIds.add(sessionId);
-            }
-            continue;
-          }
-          observerRawJournal.appendStoreRecord(record);
-        }
-        database.exec("COMMIT;");
-      } catch (error) {
-        database.exec("ROLLBACK;");
-        throw error;
-      }
-      queueSessionEnrichments(touchedSessionIds);
-      await yieldToEventLoop();
-    }
-    indexExistingCanonicalSessions();
-    rebuildLiveStateFromCanonical();
-  }
-
-  function legacyJournalHydrated(records: StoreRecord[]): boolean {
-    const count = (database.prepare("SELECT COUNT(*) AS count FROM raw_events").get() as { count: number }).count;
-    return count >= records.length;
-  }
-
-  function missingStoreRecords(records: StoreRecord[]): StoreRecord[] {
-    if (records.length === 0) return [];
-    const existing = new Set(
-      (
-        database.prepare("SELECT source_record_key AS sourceRecordKey FROM raw_events").all() as Array<{
-          sourceRecordKey: string;
-        }>
-      ).map((row) => row.sourceRecordKey)
-    );
-    return records.filter((record) => !existing.has(record.recordId));
   }
 
   function indexExistingCanonicalSessions(): void {
@@ -318,15 +256,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     gitSnapshotSignatures.set(gitSnapshot.sessionId, signature);
     gitSnapshots.push(gitSnapshot);
-    await appendStoreRecord(
-      {
-        recordId: `git_snapshot:${gitSnapshot.snapshotId}`,
-        recordType: "git_snapshot",
-        observedAt: gitSnapshot.observedAt,
-        value: gitSnapshot
-      },
-      observerRawJournal
-    );
+    appendStoreRecordToRawJournal({
+      recordId: `git_snapshot:${gitSnapshot.snapshotId}`,
+      recordType: "git_snapshot",
+      observedAt: gitSnapshot.observedAt,
+      value: gitSnapshot
+    });
     return true;
   }
 
@@ -603,8 +538,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         ingestUrl: `http://${config.host}:${config.port}/ingest`,
         allowedOrigins: config.allowedOrigins,
         data: {
-          dataDirectory: dirname(config.databasePath),
-          databasePath: config.databasePath,
+          ...health.data,
           legacyMigration: {
             copiedSqlite: legacySqliteMigration.copied,
             legacyPath: legacySqliteMigration.legacyPath,
@@ -809,8 +743,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "POST" && url.pathname === "/settings/hooks/codex/test") {
+      const hookTestEndpoint = `http://${request.headers.host ?? `${config.host}:${config.port}`}/ingest`;
       sendJson(request, response, config.allowedOrigins, 202, {
-        hooks: await testCodexHooks(database, config),
+        hooks: await testCodexHooks(database, config, { endpoint: hookTestEndpoint }),
         ok: true
       });
       return;
@@ -993,6 +928,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       let scope: DeleteMastheadDataScope;
       try {
         scope = deleteScopeFromUrl(url);
+        assertDatabaseIdMatches(url.searchParams.get("databaseId"), config);
       } catch (error) {
         sendJson(request, response, config.allowedOrigins, 400, {
           ok: false,
@@ -1018,7 +954,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (request.method === "POST" && url.pathname === "/data/delete") {
       try {
         const body = await readBody(request);
-        const scope = deleteScopeFromBody(body ? JSON.parse(body) : {});
+        const parsed = body ? JSON.parse(body) : {};
+        assertDatabaseIdMatches(stringRecordValue(objectRecord(parsed), "databaseId"), config);
+        const scope = deleteScopeFromBody(parsed);
         const preview = getDataSummary(database, scope);
         const sourceSessionIds =
           scope.kind === "all" || scope.kind === "raw_payloads" ? undefined : sourceSessionIdsForScope(scope);
@@ -1049,6 +987,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/data/retention/default") {
       try {
+        const body = await readBody(request);
+        const parsed = body ? JSON.parse(body) : {};
+        assertDatabaseIdMatches(stringRecordValue(objectRecord(parsed), "databaseId"), config);
         const preview = getDataSummary(database);
         const result = applyDefaultRetention(database);
         const legacy = await clearRawSourceCopies();
@@ -1060,7 +1001,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           summary: getDataSummary(database)
         });
       } catch (error) {
-        sendJson(request, response, config.allowedOrigins, 500, {
+        sendJson(request, response, config.allowedOrigins, isDeleteScopeClientError(error) ? 400 : 500, {
           ok: false,
           error: error instanceof Error ? error.message : String(error)
         });
@@ -1261,12 +1202,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const result = ingestNormalizedEvent(event, state);
 
       if (result.status === "accepted") {
-        await appendStoreRecord({
-          recordId: `event:${result.event.eventId}`,
-          recordType: "event",
-          observedAt: result.event.occurredAt,
-          value: result.event
-        });
         const sessionId = sessions.upsertLiveEvent(result.event);
         if (sessionId) {
           indexCanonicalSessionSearch(database, sessionId);
@@ -1626,6 +1561,14 @@ function deleteScopeFromUrl(url: URL): DeleteMastheadDataScope {
   if (kind === "runtime") return { kind, runtime: requiredString(url.searchParams.get("runtime"), "runtime") };
   if (kind === "host") return { kind, host: requiredString(url.searchParams.get("host") ?? url.searchParams.get("hostId"), "host") };
   throw clientError(`Unsupported delete scope: ${kind}`);
+}
+
+function assertDatabaseIdMatches(value: string | null | undefined, config: DaemonConfig): void {
+  if (!value) return;
+  const currentDatabaseId = settingsRuntimeIdentity(config).data.databaseId;
+  if (value !== currentDatabaseId) {
+    throw clientError("Masthead database changed. Refresh settings before deleting data.");
+  }
 }
 
 function objectRecord(value: unknown): Record<string, unknown> {

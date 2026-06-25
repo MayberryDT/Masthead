@@ -1,6 +1,7 @@
 pub mod connector;
 mod http_probe;
 pub mod native_store;
+pub mod system_actions;
 
 use tauri::{menu::MenuBuilder, tray::TrayIconBuilder, Manager};
 
@@ -36,6 +37,7 @@ pub fn run() {
             connector::mcp_launch_config_command,
             connector::mcp_validate_launch_config_command,
             connector::start_live_connector_command,
+            system_actions::open_data_directory_command,
             native_store::append_store_records_command,
             native_store::read_store_records_command,
             native_store::clear_local_data_command,

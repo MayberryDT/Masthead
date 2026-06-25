@@ -285,7 +285,26 @@ export type CodexHookSettingsDto = {
   error?: string;
 };
 
-export type SettingsStateDto = {
+export type SettingsRuntimeIdentityDto = {
+  product: "masthead";
+  apiVersion: 1;
+  runtime: {
+    mode: "primary";
+    writable: true;
+    host: string;
+    port: number;
+  };
+  data: {
+    databaseId: string;
+    databasePath: string;
+    dataDirectory: string;
+    migrationState: "ready";
+    storePath: string;
+  };
+  capabilities: string[];
+};
+
+export type SettingsStateDto = SettingsRuntimeIdentityDto & {
   hooks: CodexHookSettingsDto;
   enrichment: {
     provider: string;
@@ -308,6 +327,7 @@ export type SettingsStateDto = {
   };
   storage: {
     databasePath: string;
+    dataDirectory: string;
     storePath: string;
     dataSummary: DataSummary;
   };
@@ -611,18 +631,27 @@ async function postCodexHookAction(baseUrl: string, pathname: string): Promise<C
   return body.hooks;
 }
 
-export async function getDataSummary(baseUrl = defaultLiveProjectionUrl(), scope?: DeleteMastheadDataScope): Promise<DataSummary> {
+export async function getDataSummary(
+  baseUrl = defaultLiveProjectionUrl(),
+  scope?: DeleteMastheadDataScope,
+  options: { databaseId?: string } = {}
+): Promise<DataSummary> {
   const url = dataUrl(baseUrl, "/data/summary");
   if (scope) addScopeSearchParams(url, scope);
+  if (options.databaseId) url.searchParams.set("databaseId", options.databaseId);
   const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`data summary request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; summary: DataSummary };
   return body.summary;
 }
 
-export async function applyDefaultRetention(baseUrl = defaultLiveProjectionUrl()): Promise<DataLifecycleResponse> {
+export async function applyDefaultRetention(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { databaseId?: string } = {}
+): Promise<DataLifecycleResponse> {
   const response = await fetch(dataUrl(baseUrl, "/data/retention/default").toString(), {
-    headers: { accept: "application/json" },
+    body: JSON.stringify({ databaseId: options.databaseId }),
+    headers: { accept: "application/json", "content-type": "application/json" },
     method: "POST"
   });
   if (!response.ok) throw new Error(`default retention failed: ${response.status}`);
@@ -631,10 +660,11 @@ export async function applyDefaultRetention(baseUrl = defaultLiveProjectionUrl()
 
 export async function deleteMastheadData(
   scope: DeleteMastheadDataScope = { kind: "all" },
-  baseUrl = defaultLiveProjectionUrl()
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { databaseId?: string } = {}
 ): Promise<DataLifecycleResponse> {
   const response = await fetch(dataUrl(baseUrl, "/data/delete").toString(), {
-    body: JSON.stringify({ scope }),
+    body: JSON.stringify({ databaseId: options.databaseId, scope }),
     headers: { accept: "application/json", "content-type": "application/json" },
     method: "POST"
   });

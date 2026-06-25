@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -39,7 +40,26 @@ export type CodexHookSettingsDto = {
   error?: string;
 };
 
-export type SettingsStateDto = {
+export type SettingsRuntimeIdentityDto = {
+  product: "masthead";
+  apiVersion: 1;
+  runtime: {
+    mode: "primary";
+    writable: true;
+    host: string;
+    port: number;
+  };
+  data: {
+    databaseId: string;
+    databasePath: string;
+    dataDirectory: string;
+    migrationState: "ready";
+    storePath: string;
+  };
+  capabilities: string[];
+};
+
+export type SettingsStateDto = SettingsRuntimeIdentityDto & {
   hooks: CodexHookSettingsDto;
   enrichment: {
     provider: string;
@@ -62,6 +82,7 @@ export type SettingsStateDto = {
   };
   storage: {
     databasePath: string;
+    dataDirectory: string;
     storePath: string;
     dataSummary: DataSummary;
   };
@@ -79,9 +100,42 @@ type HooksConfigRead = {
 
 const hookLastTestKey = "codex_hook_last_test";
 
+export function settingsRuntimeIdentity(config: DaemonConfig): SettingsRuntimeIdentityDto {
+  const databasePath = resolve(config.databasePath);
+  const dataDirectory = dirname(databasePath);
+  return {
+    apiVersion: 1,
+    capabilities: [
+      "live_projection",
+      "canonical_sessions",
+      "logbook_search",
+      "source_discovery",
+      "adapter_inventory",
+      "mcp_status",
+      "settings"
+    ],
+    data: {
+      databaseId: databaseIdForPath(databasePath),
+      databasePath,
+      dataDirectory,
+      migrationState: "ready",
+      storePath: resolve(config.storePath)
+    },
+    product: "masthead",
+    runtime: {
+      host: config.host,
+      mode: "primary",
+      port: config.port,
+      writable: true
+    }
+  };
+}
+
 export async function getSettingsState(db: MastheadDatabase, config: DaemonConfig): Promise<SettingsStateDto> {
   const dataSummary = getDataSummary(db);
+  const identity = settingsRuntimeIdentity(config);
   return {
+    ...identity,
     deletionTargets: deletionTargets(db),
     enrichment: {
       currentEnrichments: dataSummary.enrichments,
@@ -98,9 +152,10 @@ export async function getSettingsState(db: MastheadDatabase, config: DaemonConfi
       transcriptImportEnabled: sourcePolicyEnabled(db, "transcript_import")
     },
     storage: {
+      dataDirectory: identity.data.dataDirectory,
       dataSummary,
-      databasePath: config.databasePath,
-      storePath: config.storePath
+      databasePath: identity.data.databasePath,
+      storePath: identity.data.storePath
     }
   };
 }
@@ -187,13 +242,24 @@ export async function uninstallCodexHooks(db: MastheadDatabase, config: DaemonCo
   return getCodexHookSettings(db, config);
 }
 
-export async function testCodexHooks(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {
+export async function testCodexHooks(
+  db: MastheadDatabase,
+  config: DaemonConfig,
+  options: { endpoint?: string } = {}
+): Promise<CodexHookSettingsDto> {
   const settings = await getCodexHookSettings(db, config);
-  const lastTest: HookLastTestDto = {
-    message: settings.installed ? "Codex hooks file contains the expected Masthead hook command." : "Masthead hook entries are not fully installed.",
-    status: settings.installed ? "passed" : "failed",
-    testedAt: new Date().toISOString()
-  };
+  let lastTest: HookLastTestDto;
+
+  if (!settings.installed) {
+    lastTest = {
+      message: "Masthead hook entries are not fully installed, so the round-trip test was not run.",
+      status: "failed",
+      testedAt: new Date().toISOString()
+    };
+  } else {
+    lastTest = await runHookRoundTrip(config, options.endpoint);
+  }
+
   writeHookLastTest(db, lastTest);
   return getCodexHookSettings(db, config);
 }
@@ -335,9 +401,54 @@ function readHookLastTest(db: MastheadDatabase): HookLastTestDto | undefined {
   }
 }
 
+async function runHookRoundTrip(config: DaemonConfig, endpoint = ingestEndpoint(config)): Promise<HookLastTestDto> {
+  const testedAt = new Date().toISOString();
+  const sourceEventId = `masthead-settings-hook-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    const response = await fetch(endpoint, {
+      body: JSON.stringify({
+        cwd: process.cwd(),
+        event: "session_started",
+        provider_event_id: sourceEventId,
+        session_id: `masthead-hook-test-${sourceEventId}`,
+        source: "masthead-settings",
+        timestamp: testedAt
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    });
+    const body = (await response.json().catch(() => undefined)) as { status?: string } | undefined;
+    if (!response.ok) {
+      return {
+        message: `Hook round-trip failed: ingest endpoint returned ${response.status}.`,
+        status: "failed",
+        testedAt
+      };
+    }
+    return {
+      message:
+        body?.status === "accepted"
+          ? "Hook round-trip passed: Masthead accepted a synthetic Codex lifecycle event."
+          : `Hook round-trip reached Masthead, but ingest reported ${body?.status ?? "an unknown status"}.`,
+      status: body?.status === "accepted" ? "passed" : "failed",
+      testedAt
+    };
+  } catch (error) {
+    return {
+      message: `Hook round-trip failed: ${error instanceof Error ? error.message : String(error)}`,
+      status: "failed",
+      testedAt
+    };
+  }
+}
+
 function latestRawHookEventAt(db: MastheadDatabase): string | undefined {
   const row = db.prepare("SELECT MAX(observed_at) AS observedAt FROM raw_events").get() as { observedAt: string | null };
   return row.observedAt ?? undefined;
+}
+
+function databaseIdForPath(databasePath: string): string {
+  return `sqlite:${createHash("sha256").update(resolve(databasePath)).digest("hex").slice(0, 16)}`;
 }
 
 function backupStamp(): string {

@@ -50,6 +50,15 @@ describe("Settings surface", () => {
 });
 
 const settings: SettingsStateDto = {
+  apiVersion: 1,
+  capabilities: ["settings"],
+  data: {
+    databaseId: "sqlite:test",
+    databasePath: "/home/tyler/.local/share/masthead/masthead.sqlite",
+    dataDirectory: "/home/tyler/.local/share/masthead",
+    migrationState: "ready",
+    storePath: "/home/tyler/.local/share/masthead/events.ndjson"
+  },
   deletionTargets: {
     hosts: [{ label: "Veelox", value: "Veelox" }],
     projects: [{ label: "Masthead", value: "Masthead" }],
@@ -80,6 +89,13 @@ const settings: SettingsStateDto = {
     missingEvents: [],
     mismatchedEvents: []
   },
+  product: "masthead",
+  runtime: {
+    host: "127.0.0.1",
+    mode: "primary",
+    port: 17373,
+    writable: true
+  },
   privacy: {
     mcpAccessEnabled: true,
     redactionEnabled: true,
@@ -109,6 +125,7 @@ const settings: SettingsStateDto = {
       }
     },
     databasePath: "/home/tyler/.local/share/masthead/masthead.sqlite",
+    dataDirectory: "/home/tyler/.local/share/masthead",
     storePath: "/home/tyler/.local/share/masthead/events.ndjson"
   }
 };

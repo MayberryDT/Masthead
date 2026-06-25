@@ -168,7 +168,8 @@ export function classifyMastheadHealth(value: unknown): MastheadHealthDto {
     runtime: runtime
       ? {
           mode: typeof runtime.mode === "string" ? runtime.mode : undefined,
-          writable: typeof runtime.writable === "boolean" ? runtime.writable : undefined
+          writable:
+            health.readOnly === true ? false : typeof runtime.writable === "boolean" ? runtime.writable : undefined
         }
       : undefined,
     data: data

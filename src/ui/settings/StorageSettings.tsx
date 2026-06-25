@@ -7,23 +7,29 @@ type StorageSettingsProps = {
   dataSummary?: DataSummary;
   settings?: SettingsStateDto;
   busy?: boolean;
+  writeDisabled?: boolean;
   onExport?: () => void;
+  onOpenDataDirectory?: () => void;
   onRequestPrune?: () => void;
 };
 
-export function StorageSettings({ busy = false, dataSummary, onExport, onRequestPrune, settings }: StorageSettingsProps) {
+export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDataDirectory, onRequestPrune, settings, writeDisabled = busy }: StorageSettingsProps) {
   const summary = dataSummary ?? settings?.storage.dataSummary;
   return (
     <SettingsSection eyebrow="Storage" title="Storage">
       <SettingsRow
-        control={<AppButton variant="quiet">Open folder</AppButton>}
+        control={
+          <AppButton disabled={!settings?.storage.dataDirectory} onClick={onOpenDataDirectory} variant="quiet">
+            Open folder
+          </AppButton>
+        }
         label="Database"
         value={settings?.storage.databasePath ?? "Loading"}
       />
       <SettingsRow label="Sessions" value={summary ? formatCount(summary.sessions) : "Loading"} />
       <SettingsRow
         control={
-          <AppButton disabled={busy || !summary} onClick={onRequestPrune} variant="danger">
+          <AppButton disabled={writeDisabled || !summary} onClick={onRequestPrune} variant="danger">
             Delete raw copies
           </AppButton>
         }

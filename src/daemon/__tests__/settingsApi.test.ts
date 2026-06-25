@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../config.ts";
@@ -24,6 +24,7 @@ describe("settings API", () => {
     const baseUrl = await listen(daemon);
 
     const state = await getJson(baseUrl, "/settings");
+    const settings = state.settings as Record<string, any>;
 
     expect(state).toMatchObject({
       ok: true,
@@ -36,15 +37,44 @@ describe("settings API", () => {
           mcpAccessEnabled: true,
           redactionEnabled: true
         },
+        runtime: {
+          mode: "primary",
+          writable: true
+        },
         storage: {
           databasePath,
+          dataDirectory: dirname(databasePath),
           storePath
         }
       }
     });
+    expect(settings.data).toMatchObject({
+      databasePath,
+      dataDirectory: dirname(databasePath),
+      migrationState: "ready",
+      storePath
+    });
+    expect(settings.data.databaseId).toMatch(/^sqlite:[a-f0-9]{16}$/);
     expect(state.settings.deletionTargets.projects).toEqual([{ label: "Masthead", value: "Masthead" }]);
     expect(state.settings.deletionTargets.runtimes).toEqual([{ label: "codex", value: "codex" }]);
     expect(state.settings.deletionTargets.hosts).toEqual([{ label: "masthead-test-host", value: "masthead-test-host" }]);
+  });
+
+  test("rejects stale database identity on destructive previews and confirms", async () => {
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    const preview = await fetch(`${baseUrl}/data/summary?databaseId=sqlite:stale`, { headers: { accept: "application/json" } });
+    expect(preview.status).toBe(400);
+    expect(await preview.text()).toContain("Masthead database changed");
+
+    const confirm = await fetch(`${baseUrl}/data/delete`, {
+      body: JSON.stringify({ databaseId: "sqlite:stale", scope: { kind: "all" } }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+    expect(confirm.status).toBe(400);
+    expect(await confirm.text()).toContain("Masthead database changed");
   });
 
   test("installs, tests, and uninstalls the real Codex hooks file", async () => {
@@ -68,6 +98,7 @@ describe("settings API", () => {
 
     const tested = await postJson(baseUrl, "/settings/hooks/codex/test");
     expect(tested.hooks.lastTest).toMatchObject({
+      message: "Hook round-trip passed: Masthead accepted a synthetic Codex lifecycle event.",
       status: "passed"
     });
 
