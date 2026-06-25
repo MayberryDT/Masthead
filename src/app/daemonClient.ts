@@ -171,6 +171,67 @@ export type DataSummary = {
   storageClasses: Record<RetentionClass, RetentionClassSummary>;
 };
 
+export type McpLaunchConfigDto = {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+};
+
+export type McpExclusionDto = {
+  exclusionKind: "source" | "project" | "path";
+  pattern: string;
+  reason: string;
+  createdAt: string;
+};
+
+export type McpSourcePolicyDto = {
+  sourceId: string;
+  runtime: string;
+  path?: string;
+  enabled: boolean;
+  policySource: "source" | "global" | "default";
+};
+
+export type McpPermissionsDto = {
+  globalAccessEnabled: boolean;
+  allowed: string[];
+  blocked: string[];
+  exclusions: McpExclusionDto[];
+  sourcePolicies: McpSourcePolicyDto[];
+};
+
+export type McpStatusDto = {
+  ready: boolean;
+  databasePath: string;
+  mode: "stdio";
+  readOnly: true;
+  toolCount: number;
+  queryCount: number;
+  lastQueryAt?: string;
+  globalAccessEnabled: boolean;
+  launchConfig: McpLaunchConfigDto;
+  permissions?: McpPermissionsDto;
+};
+
+export type McpToolDto = {
+  name: string;
+  purpose: string;
+  arguments: string;
+  dataReturned: string;
+  permission: "Read only";
+};
+
+export type McpAuditRowDto = {
+  mcpQueryId: string;
+  toolName: string;
+  requestedAt: string;
+  resultCount: number;
+  boundedBytes?: number;
+  sessionIds: string[];
+  status: "succeeded" | "failed" | "denied";
+  failureMessage?: string;
+};
+
 export type DeleteMastheadDataScope =
   | { kind: "all" }
   | { kind: "raw_payloads" }
@@ -326,6 +387,40 @@ export async function listProjects(baseUrl = defaultLiveProjectionUrl(), options
   if (!response.ok) throw new Error(`projects request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; projects: ProjectOption[] };
   return body.projects;
+}
+
+export async function getMcpStatus(baseUrl = defaultLiveProjectionUrl(), options: { signal?: AbortSignal } = {}): Promise<McpStatusDto> {
+  const url = new URL(baseUrl);
+  url.pathname = "/mcp/status";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`MCP status request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; status: McpStatusDto };
+  return body.status;
+}
+
+export async function listMcpTools(baseUrl = defaultLiveProjectionUrl(), options: { signal?: AbortSignal } = {}): Promise<McpToolDto[]> {
+  const url = new URL(baseUrl);
+  url.pathname = "/mcp/tools";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`MCP tools request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; tools: McpToolDto[] };
+  return body.tools;
+}
+
+export async function listMcpAudit(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { limit?: number; signal?: AbortSignal } = {}
+): Promise<McpAuditRowDto[]> {
+  const url = new URL(baseUrl);
+  url.pathname = "/mcp/audit";
+  url.search = "";
+  url.searchParams.set("limit", String(options.limit ?? 50));
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`MCP audit request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; audit: McpAuditRowDto[] };
+  return body.audit;
 }
 
 export async function getDataSummary(baseUrl = defaultLiveProjectionUrl(), scope?: DeleteMastheadDataScope): Promise<DataSummary> {

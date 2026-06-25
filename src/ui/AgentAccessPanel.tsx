@@ -1,56 +1,81 @@
-const exposedTools = [
-  "search_sessions",
-  "get_session",
-  "get_session_excerpt",
-  "list_project_sessions",
-  "get_project_history",
-  "get_masthead_coverage"
-];
+import type { McpAuditRowDto, McpStatusDto, McpToolDto } from "../app/daemonClient";
+import { McpAuditTable } from "./agent-access/McpAuditTable";
+import { McpPermissions } from "./agent-access/McpPermissions";
+import { McpSetup } from "./agent-access/McpSetup";
+import { McpToolsTable } from "./agent-access/McpToolsTable";
+import { AppButton } from "./primitives/AppButton";
+import { PageHeader } from "./primitives/PageHeader";
+import { StatStrip } from "./primitives/StatStrip";
+import { StatusBadge } from "./primitives/StatusBadge";
 
-export function AgentAccessPanel() {
-  const command = "npm run mcp";
+type AgentAccessPanelProps = {
+  audit?: McpAuditRowDto[];
+  error?: string;
+  loadState?: "loading" | "ready" | "error";
+  onRefresh?: () => void;
+  status?: McpStatusDto;
+  tools?: McpToolDto[];
+};
+
+export function AgentAccessPanel({
+  audit = [],
+  error,
+  loadState = "ready",
+  onRefresh,
+  status = defaultStatus,
+  tools = []
+}: AgentAccessPanelProps) {
   return (
     <section className="agent-access-panel surface-panel" aria-label="Agent Access">
-      <header className="surface-panel-head metal-surface">
-        <div>
-          <p className="mono-label">Agent Access</p>
-          <h1>Read-only session retrieval</h1>
-        </div>
-        <strong className="surface-count">MCP</strong>
-      </header>
+      <PageHeader
+        description="Give existing agents read-only access to Masthead history through the local MCP server."
+        eyebrow="Agent Access"
+        title="Read-only session retrieval"
+        trailing={
+          <div className="agent-access-header-actions">
+            <StatusBadge tone={status.ready ? "active" : "warning"}>{status.ready ? "MCP server ready" : "MCP server unavailable"}</StatusBadge>
+            {onRefresh ? (
+              <AppButton onClick={onRefresh} variant="quiet">
+                Refresh
+              </AppButton>
+            ) : null}
+          </div>
+        }
+      />
 
-      <div className="surface-card-grid">
-        <article className="surface-data-card surface-fixed-card metal-surface metal-card">
-          <p className="mono-label">Stdio command</p>
-          <h2>Local MCP server</h2>
-          <pre className="setup-snippet">{command}</pre>
-          <p className="surface-status">Runs against Masthead's local SQLite session graph.</p>
-        </article>
-        <article className="surface-data-card surface-fixed-card metal-surface metal-card">
-          <p className="mono-label">Guarantees</p>
-          <h2>Local-only and read-only</h2>
-          <ul className="agent-access-list">
-            <li>No shell, Git, file, harness, or session mutation tools.</li>
-            <li>Historical transcript text is labeled as untrusted evidence.</li>
-            <li>MCP exclusions are enforced before sessions leave Masthead.</li>
-          </ul>
-        </article>
-        <article className="surface-data-card surface-fixed-card metal-surface metal-card">
-          <p className="mono-label">Tools</p>
-          <h2>Exposed retrieval tools</h2>
-          <ul className="agent-access-list">
-            {exposedTools.map((tool) => (
-              <li key={tool}>{tool}</li>
-            ))}
-          </ul>
-        </article>
-        <article className="surface-data-card surface-fixed-card metal-surface metal-card">
-          <p className="mono-label">Audit</p>
-          <h2>Recent MCP queries</h2>
-          <p className="surface-status">Query audit rows are stored locally in `mcp_query_log`.</p>
-          <p className="surface-status">Excluded projects and sessions are omitted from retrieval responses.</p>
-        </article>
-      </div>
+      {loadState === "error" ? <p className="agent-access-error">{error ?? "MCP status could not be loaded."}</p> : null}
+
+      <StatStrip
+        items={[
+          { label: "MCP server", value: status.ready ? "Ready" : "Unavailable" },
+          { label: "Database", value: status.databasePath },
+          { label: "Mode", value: `${status.mode} / ${status.readOnly ? "read-only" : "write-enabled"}` },
+          { label: "Queries", value: `${status.queryCount} total` }
+        ]}
+        label="MCP status"
+      />
+
+      <McpSetup status={status} />
+      <McpPermissions status={status} />
+      <McpToolsTable tools={tools} />
+      <McpAuditTable audit={audit} />
     </section>
   );
 }
+
+const defaultStatus: McpStatusDto = {
+  databasePath: "Waiting for local daemon",
+  globalAccessEnabled: false,
+  launchConfig: {
+    args: [],
+    command: "Masthead MCP server unavailable",
+    env: {
+      MASTHEAD_DB_PATH: "Waiting for local daemon"
+    }
+  },
+  mode: "stdio",
+  queryCount: 0,
+  readOnly: true,
+  ready: false,
+  toolCount: 0
+};

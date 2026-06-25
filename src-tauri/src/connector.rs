@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::{
+    collections::BTreeMap,
     fs,
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
@@ -54,6 +55,31 @@ pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnector
     })
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpLaunchConfigResult {
+    command: String,
+    args: Vec<String>,
+    env: BTreeMap<String, String>,
+    database_path: String,
+}
+
+#[tauri::command]
+pub fn mcp_launch_config_command(app: AppHandle) -> Result<McpLaunchConfigResult, String> {
+    let launch = mcp_launch_target(&app)?;
+    let mut env = BTreeMap::new();
+    env.insert(
+        "MASTHEAD_DB_PATH".to_string(),
+        launch.database_path.to_string_lossy().to_string(),
+    );
+    Ok(McpLaunchConfigResult {
+        args: vec![launch.entry_path.to_string_lossy().to_string()],
+        command: launch.node_path.to_string_lossy().to_string(),
+        database_path: launch.database_path.to_string_lossy().to_string(),
+        env,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DaemonLaunchTarget {
     node_path: PathBuf,
@@ -61,6 +87,13 @@ struct DaemonLaunchTarget {
     cwd: PathBuf,
     database_path: PathBuf,
     legacy_store_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct McpLaunchTarget {
+    node_path: PathBuf,
+    entry_path: PathBuf,
+    database_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +104,14 @@ struct DaemonLaunchTargetInput {
     daemon_entry: Option<PathBuf>,
     node_path: Option<PathBuf>,
     project_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct McpLaunchTargetInput {
+    app_data_dir: PathBuf,
+    resource_dir: PathBuf,
+    mcp_entry: Option<PathBuf>,
+    node_path: Option<PathBuf>,
 }
 
 fn daemon_launch_target(app: &AppHandle) -> Result<DaemonLaunchTarget, String> {
@@ -86,6 +127,19 @@ fn daemon_launch_target(app: &AppHandle) -> Result<DaemonLaunchTarget, String> {
         daemon_entry: std::env::var("MASTHEAD_DAEMON_ENTRY").ok().map(PathBuf::from),
         node_path: std::env::var("MASTHEAD_NODE_PATH").ok().map(PathBuf::from),
         project_dir: std::env::var("MASTHEAD_PROJECT_DIR").ok().map(PathBuf::from),
+    })
+}
+
+fn mcp_launch_target(app: &AppHandle) -> Result<McpLaunchTarget, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    fs::create_dir_all(&app_data_dir).map_err(|error| error.to_string())?;
+    let resource_dir = app.path().resource_dir().map_err(|error| error.to_string())?;
+
+    mcp_launch_target_from_paths(McpLaunchTargetInput {
+        app_data_dir,
+        resource_dir,
+        mcp_entry: std::env::var("MASTHEAD_MCP_ENTRY").ok().map(PathBuf::from),
+        node_path: std::env::var("MASTHEAD_NODE_PATH").ok().map(PathBuf::from),
     })
 }
 
@@ -120,6 +174,25 @@ fn daemon_launch_target_from_paths(input: DaemonLaunchTargetInput) -> Result<Dae
     })
 }
 
+fn mcp_launch_target_from_paths(input: McpLaunchTargetInput) -> Result<McpLaunchTarget, String> {
+    fs::create_dir_all(&input.app_data_dir).map_err(|error| error.to_string())?;
+    let database_path = input.app_data_dir.join("masthead.sqlite");
+    let node_name = if cfg!(windows) { "node.exe" } else { "node" };
+    Ok(McpLaunchTarget {
+        node_path: input.node_path.unwrap_or_else(|| input.resource_dir.join("daemon").join(node_name)),
+        entry_path: input.mcp_entry.unwrap_or_else(|| {
+            input
+                .resource_dir
+                .join("daemon")
+                .join("dist")
+                .join("src")
+                .join("mcp")
+                .join("server.js")
+        }),
+        database_path,
+    })
+}
+
 fn collector_responds() -> bool {
     let address: SocketAddr = match "127.0.0.1:17373".parse() {
         Ok(address) => address,
@@ -141,7 +214,7 @@ fn collector_responds() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{daemon_launch_target_from_paths, DaemonLaunchTargetInput};
+    use super::{daemon_launch_target_from_paths, mcp_launch_target_from_paths, DaemonLaunchTargetInput, McpLaunchTargetInput};
     use std::path::PathBuf;
 
     #[test]
@@ -184,5 +257,39 @@ mod tests {
         assert_eq!(target.cwd, PathBuf::from("/tmp/masthead-data"));
         assert_eq!(target.database_path, PathBuf::from("/tmp/masthead-data/masthead.sqlite"));
         assert_eq!(target.legacy_store_path, PathBuf::from("/tmp/masthead-data/events.ndjson"));
+    }
+
+    #[test]
+    fn packaged_mcp_target_uses_resource_bundle_and_app_data_database() {
+        let target = mcp_launch_target_from_paths(McpLaunchTargetInput {
+            app_data_dir: PathBuf::from("/tmp/masthead-data"),
+            resource_dir: PathBuf::from("/tmp/masthead-resources"),
+            mcp_entry: None,
+            node_path: None,
+        })
+        .expect("mcp target");
+
+        let node_name = if cfg!(windows) { "node.exe" } else { "node" };
+        assert_eq!(target.node_path, PathBuf::from("/tmp/masthead-resources/daemon").join(node_name));
+        assert_eq!(
+            target.entry_path,
+            PathBuf::from("/tmp/masthead-resources/daemon/dist/src/mcp/server.js")
+        );
+        assert_eq!(target.database_path, PathBuf::from("/tmp/masthead-data/masthead.sqlite"));
+    }
+
+    #[test]
+    fn development_mcp_target_uses_env_entry_without_project_script() {
+        let target = mcp_launch_target_from_paths(McpLaunchTargetInput {
+            app_data_dir: PathBuf::from("/tmp/masthead-data"),
+            resource_dir: PathBuf::from("/tmp/masthead-resources"),
+            mcp_entry: Some(PathBuf::from("/tmp/masthead/dist/daemon/src/mcp/server.js")),
+            node_path: Some(PathBuf::from("/tmp/node")),
+        })
+        .expect("mcp target");
+
+        assert_eq!(target.node_path, PathBuf::from("/tmp/node"));
+        assert_eq!(target.entry_path, PathBuf::from("/tmp/masthead/dist/daemon/src/mcp/server.js"));
+        assert_eq!(target.database_path, PathBuf::from("/tmp/masthead-data/masthead.sqlite"));
     }
 }

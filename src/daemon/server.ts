@@ -24,6 +24,7 @@ import {
   type DeleteMastheadDataScope
 } from "./db/dataLifecycleRepository.ts";
 import { getImportJob, listImportJobs, updateImportJob, type ImportJobKind } from "./db/importJobRepository.ts";
+import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
@@ -39,6 +40,7 @@ import { queueImportJob, runImportJob, type ImportWorkResult } from "./import/im
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
+import { getMcpStatus, listMcpTools } from "./mcpStatusService.ts";
 
 export type MastheadDaemon = {
   server: Server;
@@ -457,6 +459,30 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (request.method === "GET" && url.pathname === "/logbook/search") {
       const result = querySessions(database, sessionQueryFromUrl(url));
       sendJson(request, response, config.allowedOrigins, 200, { ok: true, ...result });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/mcp/status") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        status: getMcpStatus(database, config.databasePath)
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/mcp/tools") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        tools: listMcpTools()
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/mcp/audit") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        audit: listMcpAuditRows(database, Number.parseInt(url.searchParams.get("limit") || "50", 10)),
+        ok: true
+      });
       return;
     }
 
