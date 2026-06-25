@@ -1,12 +1,30 @@
 # Masthead Agent Instructions
 
+## Product Identity
+
+Masthead is a local-first, harness-neutral session data layer and session manager. Do not describe
+or design it primarily as a live monitoring console, supervision tower, analytics dashboard, or task
+manager.
+
+The product hierarchy is:
+
+1. canonical session database,
+2. Logbook and search,
+3. read-only MCP access,
+4. live Now view,
+5. source/import administration.
+
+Observability is a view over continuously collected session data.
+
 ## Design Source Of Truth
 
 Read `design.md` before Masthead UI work. It is the single master design source for this repo and follows Google's DESIGN.md structure while preserving this project's lowercase filename.
 
 `prd.md` remains the product/source-of-scope document. Historical files under `docs/superpowers/plans/` are implementation history, not current visual direction. Do not resurrect the old Raycast-inspired design file or use archived screenshots as the current design contract unless Tyler explicitly asks for that.
 
-The main visual invariant is that Sessions, Logbook, and Sources share the same center-workspace system: operator heading, compact toolbar, meaningful stats when useful, and fixed-format evidence cards. Do not rebuild Logbook or Sources as flat utility lists or generic analytics dashboards.
+Sessions, Logbook, Sources, Agent Access, and Settings share one visual language, but each surface
+must use the information architecture best suited to its job. Do not force all surfaces into the
+live session-card composition.
 
 ## Browser Automation
 

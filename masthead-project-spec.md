@@ -1,4 +1,8 @@
 # Masthead Project Spec
+
+> Historical document. Current product scope is defined by `prd.md`; current visual direction is
+> defined by `design.md`.
+
 ## Local Coding-Agent Control Tower Product Requirements and Technical Design Specification
 
 **Status:** Draft v0.1  

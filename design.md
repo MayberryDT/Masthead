@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: Masthead
-description: Local-first operator board for supervising parallel coding-agent sessions. The UI is a dense developer console that routes attention, exposes evidence, and stays quiet when work is healthy.
+description: Local-first session data product for importing, searching, enriching, and reusing AI-agent session history. The UI is a dense developer console that keeps live work, historical records, sources, and agent access evidence-forward.
 colors:
   primary: "#031019"
   secondary: "#071b28"
@@ -216,19 +216,35 @@ Product requirements live in `prd.md`. Historical implementation plans under `do
 
 ## Overview
 
-Masthead is a local-first operator board for supervising parallel coding-agent work. It should feel like a native developer console built for continuous second-monitor use: dense, calm, readable, and evidence-forward.
+Masthead is a local-first session data product for people who use multiple AI-agent harnesses.
+The interface makes one private session graph useful in four ways: live awareness, historical
+retrieval, source management, and agent access.
 
-The UI has one job: help the developer answer what is happening, what needs attention, and what may collide. It is not a marketing site, KPI dashboard, analytics product, task manager, employee monitor, chat client, or token-spend console.
+The visual system remains a dense, calm developer console. Shared chrome, typography, color,
+spacing, and evidence patterns unify the application; individual surfaces may use different
+compositions when their jobs differ. Logbook is not required to imitate the live card board.
+Sources is not required to imitate Logbook.
 
-The center workspace is the product. Sessions, Logbook, and Sources must share one visual language: a headed operator surface, a compact search or control band, status/stat tiles when useful, and a grid of fixed-format data cards. Healthy background work should stay visually quiet. Attention, conflicts, failed verification, stale data, and inferred states should be prominent only when they change what the developer should do next.
+The UI helps the developer answer what is happening now, what happened before, where the data came
+from, and what an existing agent can safely retrieve. It is not a marketing site, KPI dashboard,
+analytics product, task manager, employee monitor, chat client, or token-spend console.
 
-Masthead should look specific to coding-agent supervision. Every card should expose concrete evidence such as session state, project, branch, command, source path, changed files, timestamp, outcome, or confidence. Decorative charts, generic metric blocks, oversized hero text, and empty visual ornament are failures.
+The center workspace is the product. Now, Logbook, Sources, Agent Access, and Settings must share
+one visual language: a headed surface, compact controls, restrained stats when useful, and
+evidence-forward records. Healthy background work should stay visually quiet. Attention, conflicts,
+failed verification, stale data, and inferred states should be prominent only when they change what
+the developer should do next.
+
+Masthead should look specific to local agent-session memory. Every repeated record should expose
+concrete evidence such as session state, project, branch, command, source path, changed files,
+timestamp, outcome, provenance, or confidence. Decorative charts, generic metric blocks, oversized
+hero text, and empty visual ornament are failures.
 
 ## Colors
 
 The palette is a near-black blue operator console with restrained semantic color. The background should read as a deep local-machine workspace, not a purple SaaS dashboard, beige productivity app, or bright analytics interface.
 
-- **Canvas (`#031019`):** Full app background and the base of the observability console.
+- **Canvas (`#031019`):** Full app background and the base of the session manager.
 - **Sidebar and toolbar blues (`#041522`, `#051724`):** Persistent navigation and control chrome. These surfaces should recede behind the center board.
 - **Surface metal (`#071b28`):** Cards, data panels, and repeated operational surfaces.
 - **Raised control (`#081d2a`):** Buttons, inputs, filters, and select triggers.
@@ -254,25 +270,30 @@ Text must wrap deliberately. Long project names, source paths, branches, and sni
 
 ## Layout
 
-The primary layout is an observability console:
+The primary layout is a session manager:
 
 - Left sidebar: navigation and product identity.
-- Center workspace: the active operator board.
-- Right rail when present: supporting telemetry, status, and secondary evidence.
+- Center workspace: the active product surface.
+- Right rail when present: contextual support, status, and secondary evidence.
 
-The center workspace is a grid system, not a stack of generic panels. Sessions, Logbook, and Sources should all use the same middle-section contract:
+The center workspace is organized, not a stack of generic panels. Shared surface elements should
+recur across views, but each surface may use the structure that fits its job:
 
-1. A `surface-panel-head` with the view name and a compact count or status token.
-2. A toolbar band for search, filters, and small action controls.
-3. Optional stat tiles only when they explain the current data set.
-4. A `surface-card-grid` of fixed-format cards.
-5. A quiet empty state that still looks like part of the console.
+- Now may use cards and state lanes.
+- Logbook should optimize scanning, filtering, and opening historical records.
+- Sources should optimize import progress and adapter diagnosis.
+- Agent Access should optimize setup, permission boundaries, and auditability.
+- Settings should optimize exact blast-radius controls and local data policy.
+- The right rail is optional and must be contextual to the active surface.
 
-Desktop card grids should prefer three columns when width allows, two columns on tablet, and one column on mobile. Cards need stable dimensions so hover states, labels, snippets, icons, and data facts do not resize the grid. Current data cards use 238px height on desktop and 268px on narrow mobile.
+When a surface uses cards, desktop grids should prefer three columns when width allows, two columns
+on tablet, and one column on mobile. Fixed-format cards need stable dimensions so hover states,
+labels, snippets, icons, and data facts do not resize the grid. Current live-session data cards use
+238px height on desktop and 268px on narrow mobile.
 
 Do not put cards inside other cards. Do not wrap whole page sections in floating cards. Use full-width bands or unframed layouts for sections, and reserve cards for repeated data items, modals, and genuinely framed tools.
 
-Mobile should be a usable operator board, not a crushed desktop screenshot. Collapse rails, keep controls at least 40px tall, reduce card columns to one, and preserve the evidence hierarchy.
+Mobile should be a usable session manager, not a crushed desktop screenshot. Collapse rails, keep controls at least 40px tall, reduce card columns to one when cards are used, and preserve the evidence hierarchy.
 
 ## Elevation & Depth
 
@@ -305,19 +326,19 @@ Buttons and inputs should maintain a minimum 40px hit area. Smaller inline butto
 
 ### Session Cards
 
-Session cards are the reference pattern for the middle workspace. A card must show state, project or task identity, meaningful timing, and evidence of recent activity. Healthy cards stay quiet. Attention, conflicts, approvals, failed commands, stale verification, and review-needed states should be visually scannable from the board without opening the modal.
+Session cards are the reference pattern for the Now workspace. A card must show state, project or task identity, meaningful timing, and evidence of recent activity. Healthy cards stay quiet. Attention, conflicts, approvals, failed commands, stale verification, and review-needed states should be visually scannable from the live surface without opening the modal.
 
 Clicking a card opens the detail modal. The card itself should not become a miniature dashboard. Keep it focused on the decision a developer can make from the board.
 
 ### Logbook
 
-The Logbook is not an old utility list. It should look like the Sessions middle section translated to history search. Use the same `surface-panel`, `surface-panel-toolbar`, `surface-card-grid`, and `surface-data-card` system.
+The Logbook is not an old utility list. It should optimize scanning, filtering, pagination, and opening durable session records while retaining the shared surface language.
 
 Each Logbook card should answer: what happened, where, when, what state it ended in, and what evidence or snippet makes it reviewable. Snippets belong in constrained evidence blocks, not free-floating paragraphs.
 
 ### Sources
 
-Sources is not a settings table. It should look like an operator inventory for local data sources. Use the same center-surface system as Sessions and Logbook.
+Sources is not a settings table. It should look like an inventory for local data sources and import jobs, with progress and adapter health easier to scan than decorative status cards.
 
 Each source card should show source identity, health, event volume, freshness, capture policy, and any action that affects local observation. Exclude or retention controls should be compact and plainly scoped.
 
@@ -378,7 +399,7 @@ Do not animate evidence values just because they changed. Use motion for spatial
 Do:
 
 - Read this file before UI work.
-- Use the rendered Sessions middle section as the visual reference for Logbook and Sources.
+- Use shared surface chrome, typography, controls, and evidence patterns across Now, Logbook, Sources, Agent Access, and Settings.
 - Keep Masthead dense, local, evidence-forward, and state-first.
 - Make healthy work quiet and attention states unmistakable.
 - Use fixed card dimensions and responsive grid tracks.
@@ -390,7 +411,7 @@ Don't:
 
 - Recreate the deleted Raycast-inspired design file.
 - Treat archived plan files or old screenshots as current design authority.
-- Build Logbook or Sources as flat old-style utility lists.
+- Force Logbook, Sources, Agent Access, or Settings into the live session-card composition.
 - Use generic SaaS analytics patterns, hero sections, decorative KPI cards, token dashboards, or marketing copy.
 - Add cards inside cards or floating page-section cards.
 - Add decorative blobs, one-note purple gradients, beige productivity palettes, or bright dashboard themes.
@@ -409,4 +430,4 @@ Any UI change that touches the visual system should pass these gates before bein
 5. Confirm no `No live connection` state appears when a healthy connector or bridge is expected.
 6. Confirm dropdowns, layout changes, card hover/press states, and modals visibly transition.
 7. Confirm all text fits, wraps, clamps, or ellipsizes inside its container.
-8. Confirm Logbook and Sources use the same middle-section surface system as Sessions.
+8. Confirm Logbook, Sources, Agent Access, and Settings use the shared visual language without being forced into the Now card composition.

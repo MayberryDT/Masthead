@@ -1,42 +1,55 @@
 # Masthead PRD
 
-## Problem Statement
+## Product Definition
 
-Developers who use coding agents increasingly run several sessions at the same time. Each session may edit files, run commands, wait for approval, fail tests, touch shared resources, or finish with changes that still need review. The bottleneck is no longer only code generation. The bottleneck is supervision.
+Masthead is a local-first, harness-neutral data layer and session manager for AI agents.
 
-The current workflow forces the developer to open individual agent threads, terminals, diffs, and project folders to answer basic questions:
+Agent runtimes already create valuable local session history: prompts, responses, tool calls,
+files, models, decisions, failures, and outcomes. That data is fragmented across harnesses and
+normally becomes difficult to find or reuse once a session ends.
 
-- Which session needs attention right now?
-- Which session is still making meaningful progress?
-- Which session is blocked, failing, or waiting for approval?
-- Which files, branches, worktrees, commands, tests, and commits are tied to each session?
-- Which parallel sessions are likely to collide?
-- Which completed work is actually reviewable, verified, and useful?
+Masthead discovers that history, imports it into a canonical local session graph, continuously
+syncs new activity, enriches sessions into compact human- and agent-readable records, and exposes
+the result through:
 
-Existing agent dashboards and observability tools already cover activity feeds, token usage, timelines, status badges, and basic session inventory. Masthead should not compete primarily as another generic "see all sessions" dashboard. Its reason to exist is to route attention, catch coding-agent collisions early, and connect agent activity to concrete outcomes.
+1. **Now** — a glanceable live view of current sessions.
+2. **Logbook** — a durable searchable library of past sessions.
+3. **Sources** — runtime discovery, import, sync, and adapter health.
+4. **Agent Access** — read-only MCP access for the user’s existing agents.
 
-Masthead must be especially careful because it observes sensitive local development state: source paths, prompts, command output, diffs, credentials, local process state, and repo metadata can all contain private information. The product must be local-first, evidence-first, and conservative about control.
+Live observability is a view over the data layer. It is not Masthead’s category.
 
-## Solution
+## Dream Outcome
 
-Masthead is a local-first desktop control tower for parallel AI-assisted development. It gives one dense, session-based view of local coding-agent work, starting with Codex on one developer machine.
+After Masthead is installed, every supported agent session becomes durable, organized context.
 
-The first useful vertical slice should prove one complete loop:
+The user no longer needs to remember which harness, model, machine, project directory, or date
+contained an important piece of work. A person can find it in Logbook, and any MCP-compatible
+agent can retrieve it with evidence.
 
-1. Detect live Codex sessions.
-2. Derive a trustworthy session state.
-3. Identify which session needs attention.
-4. Independently observe Git changes.
-5. Detect an exact same-file conflict across active sessions.
-6. Present clear evidence so the user can act without opening every agent thread.
+Masthead turns context the user already paid to create into memory every agent can reuse.
 
-The product starts Codex-first because that is the current workflow and because a strong vertical adapter is more useful than shallow support for many runtimes. The core model must still stay adapter-neutral so Masthead can later support Claude Code, Hermes, OpenClaw, Pi, Kilo Code, OpenCode, Gemini CLI, Cursor-style agents, Copilot agents, Aider, OpenHands, SWE-agent-style harnesses, and other popular coding-agent runtimes.
+## Product Boundary
 
-The default screen is not a landing page. It is a live operator board built around session cards. Compact cards show the minimum useful state for each session. Cards expand to show evidence, timeline, changed files, commands, conflicts, outcome details, and safe local actions. When there are many sessions, the board should support up to four compact cards per row on large screens. When there are only a few sessions, cards can expand or occupy more room. Healthy sessions stay visually quiet. Attention, conflict, stalled, failed, approval, and review states become prominent because they affect what the developer should do next.
+The first useful vertical slice should prove one complete Codex loop:
 
-The "Needs attention" layer should be broader than deterministic alerts alone. Masthead may use an LLM to produce contextual queue items, summaries, and suggested next steps, but every LLM-created item must be grounded in inspectable evidence. P0 immediate-decision alerts require deterministic evidence. LLM output must be labeled as inferred, validated against a schema, and shown beside the underlying facts.
+1. Detect existing Codex history.
+2. Import canonical session metadata and transcript records.
+3. Show imported sessions in Logbook.
+4. Enrich sessions into durable capsules.
+5. Retrieve the same sessions through read-only MCP with source evidence.
+6. Continue syncing new Codex activity into Now and Logbook without duplication.
 
-V0 observes before it controls. It may open the relevant Codex thread, file, folder, terminal, or read-only diff. It may let the user snooze, dismiss, mark expected, mark reviewed, or record a local outcome. It must not approve agent actions, stop sessions, launch agents, run shell commands, mutate Git, push code, drive browsers, or change Codex configuration except through explicit onboarding/admin hook install and uninstall flows.
+Masthead does not become an agent or orchestrator. It does not create a task backlog, launch
+agents, approve actions, mutate Git, run shell commands, drive browsers, or expose write-capable
+MCP tools. It organizes local session data the user already created and makes that history useful
+to humans and existing agents.
+
+The product starts Codex-first because that is the current workflow and because a complete adapter
+loop is more useful than shallow support for many runtimes. The core model must still stay
+adapter-neutral so Masthead can later support Claude Code, Hermes, OpenClaw, Pi, Kilo Code,
+OpenCode, Gemini CLI, Cursor-style agents, Copilot agents, Aider, OpenHands,
+SWE-agent-style harnesses, and other popular agent runtimes.
 
 ### MVP Definition of Done
 
@@ -60,12 +73,25 @@ The first build is done when Masthead can be dogfooded against real local Codex 
 
 ### Non-Negotiable Product Invariants
 
-- **Evidence before claims:** Masthead may summarize agent work, but it must show the evidence behind attention, conflict, and outcome judgments.
-- **Local by default:** Core functionality must work without remote services. Remote LLM use is opt-in, redacted, scoped, previewable, and auditable.
-- **Observe before control:** V0 navigates and records local dispositions. It does not act on behalf of the user in Codex, Git, shell, browser, or remote systems.
-- **Adapter-neutral core:** Codex is the first adapter, not the product model. The core vocabulary remains portable to other coding-agent runtimes.
-- **Uncertainty is visible:** When attribution is weak, shared, or inferred, the UI must say so plainly.
-- **Quiet when healthy:** Healthy background work should stay visible but subordinate to waiting, failing, conflicting, high-risk, and review-needed work.
+- **Canonical local ownership:** Masthead’s SQLite session graph is the source of truth for
+  Masthead interfaces after import.
+- **Harness-neutral identity:** Session identity is `host + runtime + source session ID`.
+- **Raw, normalized, derived separation:** Historical evidence and model enrichment are never
+  silently conflated.
+- **Read-only agent access:** MCP retrieves history but cannot mutate sessions, files, Git, shell,
+  or harness state.
+- **Durable by default:** Canonical session metadata and capsules are not subject to short
+  observability retention.
+- **Live is one view:** The Now surface must not dictate the composition of Logbook, Sources,
+  Agent Access, or Settings.
+- **Original-harness provenance:** Every session preserves enough source identity to inspect or
+  resume work in the originating harness when possible.
+- **Evidence before claims:** Masthead may summarize agent work, but it must show the evidence
+  behind attention, conflict, retrieval, and outcome judgments.
+- **Local by default:** Core functionality must work without remote services. Remote LLM use is
+  opt-in, redacted, scoped, previewable, and auditable.
+- **Uncertainty is visible:** When attribution is weak, shared, or inferred, the UI must say so
+  plainly.
 
 ## User Stories
 
@@ -157,7 +183,7 @@ The first build is done when Masthead can be dogfooded against real local Codex 
 86. As a solo developer, I want safe local workflow actions such as mark reviewed, mark expected, mark false positive, snooze, abandon, or supersede, so that Masthead supports triage without mutating the source tools.
 87. As a solo developer, I want clear blast-radius language on actions, so that I can distinguish opening evidence from changing Codex, Git, or local state.
 88. As a solo developer, I want no automatic approvals, shell execution, Git mutation, or agent launching in V0, so that the first release keeps trust boundaries narrow.
-89. As a solo developer, I want the UI to feel like an operator board rather than analytics software, so that the product matches real supervision work.
+89. As a solo developer, I want the UI to feel like a focused session manager rather than analytics software, so that the product matches real supervision work.
 90. As a solo developer, I want a dark, dense, hairline-bordered visual system with restrained typography, so that Masthead feels like a native developer console.
 91. As a solo developer, I want functional state indicators rather than decorative charts, so that every visual element earns its space.
 92. As a solo developer, I want state color to be sparse and meaningful, so that attention and conflict signals are not diluted.
@@ -172,7 +198,7 @@ The first build is done when Masthead can be dogfooded against real local Codex 
 
 ## Implementation Decisions
 
-- **Product boundary:** Build Masthead as a local-first desktop control tower, not a coding agent, chat client, CI system, project manager, PR manager, hosted observability service, or employee analytics product.
+- **Product boundary:** Build Masthead as a local-first session data layer and session manager, not a coding agent, chat client, CI system, project manager, PR manager, hosted monitoring service, or employee analytics product.
 
 - **First adapter:** Implement Codex first. The core state model must remain adapter-neutral, but the initial product quality should be proven through a complete Codex vertical slice before adding other runtimes.
 
@@ -397,7 +423,7 @@ The first dogfood release should not be called ready until these gates pass:
 
 - Mobile app, multi-machine fleet management, remote access, and hosted collaboration are out of scope.
 
-- A landing page or marketing-first app screen is out of scope for the product UI. The first screen is the operator board.
+- A landing page or marketing-first app screen is out of scope for the product UI. The first screen is the working session surface.
 
 ## Further Notes
 
