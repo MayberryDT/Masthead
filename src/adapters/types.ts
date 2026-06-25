@@ -53,7 +53,16 @@ export type AdapterRecord = {
 };
 
 export type NormalizedAdapterPayload = {
-  kind: "event" | "message" | "tool_call" | "tool_result" | "usage" | "relationship" | "checkpoint";
+  kind:
+    | "session"
+    | "event"
+    | "message"
+    | "tool_call"
+    | "tool_result"
+    | "runtime_signal"
+    | "usage"
+    | "relationship"
+    | "checkpoint";
   confidence: SourceConfidence;
   sourceRef: {
     sourceKind: SourceKind;

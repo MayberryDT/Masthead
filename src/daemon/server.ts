@@ -21,7 +21,7 @@ import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDisp
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
 import { migrateDatabase } from "./db/schema.ts";
-import { createSessionRepository } from "./db/sessionRepository.ts";
+import { createSessionRepository, ingestAdapterRecord } from "./db/sessionRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "./db/sqlite.ts";
 import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
@@ -407,7 +407,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       let imported = 0;
       for (const source of sources) {
         for await (const record of importCodexMetadata(source)) {
-          const sessionId = sessions.upsertMetadataRecord(record);
+          const { sessionId } = ingestAdapterRecord(database, record, {
+            hostId: `host:${config.host}`,
+            hostname: config.host,
+            runtimeKind: "codex",
+            runtimeVersion: record.source.runtimeVersion
+          });
           if (sessionId) {
             imported += 1;
             indexCanonicalSessionSearch(database, sessionId);
@@ -475,10 +480,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           const cursor = readCursor(database, transcriptSource.sourceId, transcriptSource.path);
           let latestOffset = cursor?.byteOffset ?? 0;
           for await (const record of parseCodexTranscript(transcriptSource, cursor)) {
-            const sessionId = sessions.upsertTranscriptRecord(record);
+            const nextOffset = offsetFromSourceRecordKey(record.sourceRecordKey) ?? latestOffset;
+            const { sessionId } = ingestAdapterRecord(database, record, {
+              cursor: {
+                byteOffset: nextOffset
+              },
+              hostId: `host:${config.host}`,
+              hostname: config.host,
+              runtimeKind: "codex",
+              runtimeVersion: record.source.runtimeVersion
+            });
             if (sessionId) {
               indexCanonicalSessionSearch(database, sessionId);
-              latestOffset = offsetFromSourceRecordKey(record.sourceRecordKey) ?? latestOffset;
+              latestOffset = nextOffset;
               imported += 1;
             }
           }

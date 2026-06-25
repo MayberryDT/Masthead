@@ -12,6 +12,18 @@ export type SessionRepositoryContext = {
   runtimeVersion?: string;
 };
 
+export type AdapterIngestionContext = SessionRepositoryContext & {
+  cursor?: {
+    byteOffset: number;
+    modifiedAt?: string;
+    contentFingerprint?: string;
+  };
+};
+
+export type AdapterIngestionResult = {
+  sessionId?: string;
+};
+
 type SessionRepository = {
   replaceBoardProjection(projection: LiveBoardProjection, updatedAt: string): void;
   upsertLiveEvent(event: NormalizedEvent): string | undefined;
@@ -246,6 +258,57 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
       );
       return sessionId;
     }
+    if (record.normalized.kind === "tool_result") {
+      const outputRedacted = value.output ? redactText(value.output) : null;
+      db.prepare(
+        `INSERT INTO tool_results (tool_result_id, tool_call_id, session_id, status, output_redacted, output_hash, exit_code, completed_at, source_ref_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tool_result_id) DO NOTHING`
+      ).run(
+        toolResultIdFromRecord(sessionId, record),
+        toolCallIdFromRecord(sessionId, record),
+        sessionId,
+        value.status ?? (value.exitCode === undefined || value.exitCode === 0 ? "succeeded" : "failed"),
+        outputRedacted,
+        outputRedacted ? hash(outputRedacted) : null,
+        value.exitCode ?? null,
+        observedAt,
+        transcriptSourceRefJson(record)
+      );
+      return sessionId;
+    }
+    if (record.normalized.kind === "runtime_signal") {
+      db.prepare(
+        `INSERT INTO runtime_signals (signal_id, session_id, signal_kind, severity, title, details_json, observed_at, source_ref_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(signal_id) DO NOTHING`
+      ).run(
+        transcriptSignalIdFromRecord(sessionId, record),
+        sessionId,
+        value.signalKind ?? "runtime_signal",
+        value.severity ?? null,
+        value.message ?? value.summary ?? "Runtime signal",
+        JSON.stringify(record.normalized.value),
+        observedAt,
+        transcriptSourceRefJson(record)
+      );
+      return sessionId;
+    }
+    if (record.normalized.kind === "checkpoint") {
+      db.prepare(
+        `INSERT INTO checkpoints (checkpoint_id, session_id, checkpoint_kind, summary, observed_at, source_ref_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(checkpoint_id) DO NOTHING`
+      ).run(
+        transcriptCheckpointIdFromRecord(sessionId, record, value.checkpointId),
+        sessionId,
+        value.checkpointKind ?? "compacted",
+        value.summary ?? "Checkpoint",
+        observedAt,
+        transcriptSourceRefJson(record)
+      );
+      return sessionId;
+    }
     return undefined;
   };
 
@@ -451,6 +514,28 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
   };
 }
 
+export function ingestAdapterRecord(db: MastheadDatabase, record: AdapterRecord, context: AdapterIngestionContext): AdapterIngestionResult {
+  const repository = createSessionRepository(db, context);
+  let sessionId: string | undefined;
+
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    upsertAdapterSource(db, record);
+    insertRawAdapterRecord(db, record);
+    sessionId =
+      record.normalized.kind === "event" || record.normalized.kind === "session"
+        ? repository.upsertMetadataRecord(record)
+        : repository.upsertTranscriptRecord(record);
+    if (context.cursor) upsertAdapterCursor(db, record, context.cursor);
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+
+  return { sessionId };
+}
+
 const terminalEventTypes = new Set<NormalizedEvent["type"]>(["command.finished", "file.changed", "session.completed"]);
 
 function canonicalSessionId(hostId: string, runtimeId: string, sourceSessionId: string): string {
@@ -568,6 +653,103 @@ function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function upsertAdapterSource(db: MastheadDatabase, record: AdapterRecord): void {
+  const now = record.observedAt;
+  db.prepare(
+    `INSERT INTO ingest_sources (
+      source_id,
+      adapter,
+      source_kind,
+      source_path,
+      endpoint,
+      schema_version,
+      runtime_version,
+      confidence,
+      discovered_at,
+      last_seen_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source_id) DO UPDATE SET
+      source_path = COALESCE(excluded.source_path, ingest_sources.source_path),
+      endpoint = COALESCE(excluded.endpoint, ingest_sources.endpoint),
+      schema_version = COALESCE(excluded.schema_version, ingest_sources.schema_version),
+      runtime_version = COALESCE(excluded.runtime_version, ingest_sources.runtime_version),
+      confidence = excluded.confidence,
+      last_seen_at = excluded.last_seen_at`
+  ).run(
+    record.source.sourceId,
+    record.source.runtime,
+    record.source.sourceKind,
+    record.source.path ?? null,
+    record.source.endpoint ?? null,
+    record.source.schemaVersion ?? null,
+    record.source.runtimeVersion ?? null,
+    record.source.confidence,
+    now,
+    now
+  );
+}
+
+function insertRawAdapterRecord(db: MastheadDatabase, record: AdapterRecord): void {
+  db.prepare(
+    `INSERT INTO raw_events (
+      raw_event_id,
+      source_id,
+      source_record_key,
+      observed_at,
+      received_at,
+      source_kind,
+      source_path,
+      payload_hash,
+      payload_json,
+      adapter_diagnostics_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source_id, source_record_key) DO NOTHING`
+  ).run(
+    `raw:${hash(`${record.source.sourceId}\0${record.sourceRecordKey}`)}`,
+    record.source.sourceId,
+    record.sourceRecordKey,
+    record.observedAt,
+    new Date().toISOString(),
+    record.source.sourceKind,
+    record.source.path ?? record.normalized.sourceRef.sourcePath ?? null,
+    record.payloadHash,
+    JSON.stringify(record.payload),
+    record.diagnostics.length > 0 ? JSON.stringify(record.diagnostics) : null
+  );
+}
+
+function upsertAdapterCursor(
+  db: MastheadDatabase,
+  record: AdapterRecord,
+  cursor: NonNullable<AdapterIngestionContext["cursor"]>
+): void {
+  const sourcePath = record.source.path ?? record.normalized.sourceRef.sourcePath;
+  db.prepare(
+    `INSERT INTO ingest_cursors (
+      cursor_id,
+      source_id,
+      source_path,
+      byte_offset,
+      modified_at,
+      content_fingerprint,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source_id, source_path) DO UPDATE SET
+      byte_offset = excluded.byte_offset,
+      modified_at = excluded.modified_at,
+      content_fingerprint = excluded.content_fingerprint,
+      updated_at = excluded.updated_at`
+  ).run(
+    `cursor:${hash(`${record.source.sourceId}\0${sourcePath ?? ""}`)}`,
+    record.source.sourceId,
+    sourcePath ?? null,
+    cursor.byteOffset,
+    cursor.modifiedAt ?? null,
+    cursor.contentFingerprint ?? null,
+    new Date().toISOString()
+  );
+}
+
 function metadataValue(value: unknown): {
   observedAt?: string;
   project?: string;
@@ -604,6 +786,16 @@ function transcriptValue(
   provider?: string;
   role?: string;
   sessionId?: string;
+  callId?: string;
+  checkpointId?: string;
+  checkpointKind?: string;
+  exitCode?: number;
+  message?: string;
+  output?: string;
+  severity?: string;
+  signalKind?: string;
+  status?: string;
+  summary?: string;
   text?: string;
   toolName?: string;
   totalTokens?: number;
@@ -622,6 +814,16 @@ function transcriptValue(
     text: stringValue(record.content) ?? stringValue(record.text) ?? stringValue(record.message),
     toolName: stringValue(record.name) ?? stringValue(record.tool_name) ?? stringValue(record.toolName),
     arguments: record.arguments ?? record.args ?? record.input,
+    callId: stringValue(record.callId) ?? stringValue(record.call_id),
+    checkpointId: stringValue(record.checkpointId) ?? stringValue(record.checkpoint_id),
+    checkpointKind: stringValue(record.checkpointKind) ?? stringValue(record.checkpoint_kind),
+    exitCode: numberValue(record.exitCode) ?? numberValue(record.exit_code),
+    message: stringValue(record.message) ?? stringValue(record.title),
+    output: stringValue(record.output) ?? stringValue(record.content),
+    severity: stringValue(record.severity) ?? stringValue(record.level),
+    signalKind: stringValue(record.signalKind) ?? stringValue(record.signal_kind),
+    status: stringValue(record.status),
+    summary: stringValue(record.summary) ?? stringValue(record.text),
     model: stringValue(record.model) ?? stringValue(record.modelName),
     provider: stringValue(record.provider),
     inputTokens: numberValue(record.input_tokens) ?? numberValue(record.inputTokens) ?? usageNumber(record, "input_tokens"),
@@ -646,7 +848,20 @@ function transcriptSourceRefJson(record: AdapterRecord): string {
 }
 
 function toolCallIdFromRecord(sessionId: string, record: AdapterRecord): string {
-  return `tool_call:${hash(`${sessionId}\0${record.sourceRecordKey}`)}`;
+  const value = transcriptValue(record.normalized.value, record.source.path);
+  return `tool_call:${hash(`${sessionId}\0${value.callId ?? record.sourceRecordKey}`)}`;
+}
+
+function toolResultIdFromRecord(sessionId: string, record: AdapterRecord): string {
+  return `tool_result:${hash(`${sessionId}\0${record.sourceRecordKey}`)}`;
+}
+
+function transcriptSignalIdFromRecord(sessionId: string, record: AdapterRecord): string {
+  return `signal:${hash(`${sessionId}\0${record.sourceRecordKey}`)}`;
+}
+
+function transcriptCheckpointIdFromRecord(sessionId: string, record: AdapterRecord, checkpointId: string | undefined): string {
+  return `checkpoint:${hash(`${sessionId}\0${checkpointId ?? record.sourceRecordKey}`)}`;
 }
 
 function modelUsageIdFromRecord(sessionId: string, record: AdapterRecord): string {

@@ -1,0 +1,3 @@
+{"timestamp":"2026-06-25T12:20:00.000Z","type":"session_meta","payload":{"id":"session-compacted","cwd":"/workspace/masthead","model":"gpt-5-codex"}}
+{"timestamp":"2026-06-25T12:20:10.000Z","type":"compacted","payload":{"summary":"Earlier adapter exploration was compacted into a checkpoint.","checkpoint_id":"checkpoint-1"}}
+{"timestamp":"2026-06-25T12:20:11.000Z","type":"token_count","payload":{"input_tokens":1234,"output_tokens":456,"total_tokens":1690,"model":"gpt-5-codex"}}

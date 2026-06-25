@@ -6,7 +6,7 @@ import { projectLiveEvents } from "../../../core/liveProjection.ts";
 import type { NormalizedEvent } from "../../../core/types.ts";
 import type { AdapterRecord } from "../../../adapters/types.ts";
 import { migrateDatabase } from "../schema.ts";
-import { createSessionRepository } from "../sessionRepository.ts";
+import { createSessionRepository, ingestAdapterRecord } from "../sessionRepository.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
 
 const tempDirs: string[] = [];
@@ -192,6 +192,91 @@ describe("session repository", () => {
 
     expect(db.prepare("SELECT tool_name FROM tool_calls").all()).toEqual([{ tool_name: "bash" }]);
     expect(db.prepare("SELECT model, output_tokens FROM model_usage").all()).toEqual([{ model: "gpt-5.5", output_tokens: 12 }]);
+    db.close();
+  });
+
+  test("upserts transcript tool results, runtime signals, and checkpoints", async () => {
+    const db = await openMigratedDatabase();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "codex",
+      runtimeVersion: "local-jsonl"
+    });
+    const toolRecord = transcriptRecord("tool_call", {
+      callId: "call-1",
+      name: "shell",
+      session_id: "historical-session",
+      timestamp: "2026-06-24T12:11:00.000Z"
+    });
+    const resultRecord = transcriptRecord("tool_result", {
+      callId: "call-1",
+      output: "adapter tests passed",
+      session_id: "historical-session",
+      timestamp: "2026-06-24T12:11:05.000Z"
+    });
+    const signalRecord = transcriptRecord("runtime_signal", {
+      message: "Recorded the passing adapter test.",
+      severity: "info",
+      session_id: "historical-session",
+      signalKind: "event_msg",
+      timestamp: "2026-06-24T12:12:00.000Z"
+    });
+    const checkpointRecord = transcriptRecord("checkpoint", {
+      checkpointId: "checkpoint-1",
+      session_id: "historical-session",
+      summary: "Earlier parser work was compacted.",
+      timestamp: "2026-06-24T12:13:00.000Z"
+    });
+
+    repository.upsertTranscriptRecord(toolRecord);
+    repository.upsertTranscriptRecord(resultRecord);
+    repository.upsertTranscriptRecord(signalRecord);
+    repository.upsertTranscriptRecord(checkpointRecord);
+
+    expect(db.prepare("SELECT status, output_redacted FROM tool_results").all()).toEqual([
+      { output_redacted: "adapter tests passed", status: "succeeded" }
+    ]);
+    expect(db.prepare("SELECT signal_kind, severity, title FROM runtime_signals").all()).toEqual([
+      { severity: "info", signal_kind: "event_msg", title: "Recorded the passing adapter test." }
+    ]);
+    expect(db.prepare("SELECT checkpoint_kind, summary FROM checkpoints").all()).toEqual([
+      { checkpoint_kind: "compacted", summary: "Earlier parser work was compacted." }
+    ]);
+    db.close();
+  });
+
+  test("ingests adapter records as raw and normalized data transactionally", async () => {
+    const db = await openMigratedDatabase();
+    const record = transcriptMessageRecord({
+      content: "Historical context is reusable.",
+      role: "user",
+      session_id: "historical-session",
+      timestamp: "2026-06-24T12:10:00.000Z"
+    });
+
+    const result = ingestAdapterRecord(db, record, {
+      cursor: {
+        byteOffset: 128,
+        contentFingerprint: "128:1234",
+        modifiedAt: "2026-06-24T12:11:00.000Z"
+      },
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "codex",
+      runtimeVersion: "local-jsonl"
+    });
+
+    expect(result.sessionId).toBeDefined();
+    expect(db.prepare("SELECT source_record_key, payload_hash FROM raw_events").all()).toEqual([
+      { payload_hash: "transcript-hash", source_record_key: "/tmp/historical-session.jsonl:128" }
+    ]);
+    expect(db.prepare("SELECT role, text_redacted FROM messages").all()).toEqual([
+      { role: "user", text_redacted: "Historical context is reusable." }
+    ]);
+    expect(db.prepare("SELECT byte_offset, content_fingerprint FROM ingest_cursors").all()).toEqual([
+      { byte_offset: 128, content_fingerprint: "128:1234" }
+    ]);
     db.close();
   });
 });
