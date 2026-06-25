@@ -15,7 +15,7 @@ describe("connector client", () => {
         started: true,
         baseUrl: "http://127.0.0.1:17374",
         command: "node scripts/masthead-ingest-server.js",
-        health: { apiVersion: 1, mode: "primary" },
+        health: { apiVersion: 1, databaseId: "db", mode: "primary" },
         message: "Started local Masthead collector.",
         projectionUrl: "http://127.0.0.1:17374/projection"
       };
@@ -53,7 +53,7 @@ describe("connector client", () => {
           started: true,
           baseUrl: "http://127.0.0.1:17374",
           command: "node scripts/masthead-ingest-server.js",
-          health: { apiVersion: 1, mode: "primary" },
+          health: { apiVersion: 1, databaseId: "db", mode: "primary" },
           message: "Started local Masthead collector.",
           projectionUrl: "http://127.0.0.1:17374/projection"
         }),

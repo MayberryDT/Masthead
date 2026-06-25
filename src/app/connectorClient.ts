@@ -8,6 +8,7 @@ export type MastheadHealthSummary = {
   databaseId?: string;
   databasePath?: string;
   mode?: string;
+  data?: { databaseId?: string };
 };
 
 export type ConnectorStartResult =
@@ -18,7 +19,6 @@ export type ConnectorStartResult =
       command: string;
       health: MastheadHealthSummary;
       message: string;
-
       projectionUrl: string;
     }
   | {
@@ -65,7 +65,7 @@ async function startViaDevServer(): Promise<ConnectorStartResult | undefined> {
 
 function isConnectorStartSuccess(value: unknown): value is Extract<ConnectorStartResult, { ok: true }> {
   if (typeof value !== "object" || value === null) return false;
-    return (
+  return (
     "ok" in value &&
     value.ok === true &&
     "started" in value &&
@@ -77,12 +77,20 @@ function isConnectorStartSuccess(value: unknown): value is Extract<ConnectorStar
     "health" in value &&
     typeof value.health === "object" &&
     value.health !== null &&
+    "apiVersion" in value.health &&
+    typeof value.health.apiVersion === "number" &&
+    hasDatabaseId(value.health) &&
     "message" in value &&
     typeof value.message === "string" &&
-
     "projectionUrl" in value &&
     typeof value.projectionUrl === "string"
   );
+}
+
+function hasDatabaseId(health: object): boolean {
+  if ("databaseId" in health && typeof health.databaseId === "string") return true;
+  const data = "data" in health ? health.data : undefined;
+  return typeof data === "object" && data !== null && "databaseId" in data && typeof data.databaseId === "string";
 }
 
 function canUseTauri(): boolean {
