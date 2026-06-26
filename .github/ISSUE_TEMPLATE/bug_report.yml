@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible Masthead bug with sanitized diagnostics.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: input
+    id: masthead-version
+    attributes:
+      label: Masthead version
+      description: Use package version, commit SHA, or build label.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: Include distribution/version when relevant.
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node version
+      description: Run `node --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: install-mode
+    attributes:
+      label: Install mode
+      options:
+        - npm run dev
+        - npm run dev:desktop
+        - packaged app
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: doctor-output
+    attributes:
+      label: Doctor output
+      description: Paste sanitized `npm run doctor` output.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: logs-attached
+    attributes:
+      label: Logs attached
+      options:
+        - label: I attached only sanitized logs or diagnostics.
+          required: false
+  - type: checkboxes
+    id: local-data-sensitivity
+    attributes:
+      label: Local data sensitivity confirmation
+      options:
+        - label: I did not attach raw transcripts, local SQLite databases, secrets, shell history, private screenshots, or unredacted source files.
+          required: true

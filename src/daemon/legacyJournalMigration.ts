@@ -23,6 +23,7 @@ export type LegacyJournalMigrationOptions = {
   shouldStop?: () => boolean;
   sqliteCopied?: boolean;
   storePath: string;
+  targetDatabaseId?: string;
   upsertLiveEvent: (event: NormalizedEvent) => string | undefined;
   yieldToEventLoop?: () => Promise<void>;
 };
@@ -56,18 +57,27 @@ export async function migrateLegacyJournalOnce(options: LegacyJournalMigrationOp
     return { importedRecords: 0, reason: "empty", sources, totalRecords: 0 };
   }
 
+  const totalInputRecords = primaryRecords.length + (sources[1] ? markerRecords.length : 0);
+  const importedRecords = primaryMissing.length + (sources[1] ? markerMissing.length : 0);
+  const skippedRecords = Math.max(0, totalInputRecords - importedRecords);
   markLegacyDataMigrationCompleted(options.database, LEGACY_JOURNAL_MIGRATION_KEY, {
-    importedRecords: markerMissing.length,
+    completedAt: new Date().toISOString(),
+    copiedRecords: 0,
+    importedRecords,
+    migrationKey: LEGACY_JOURNAL_MIGRATION_KEY,
+    reason: "completed",
+    skippedRecords,
     source: markerSource,
     sources,
+    targetDatabaseId: options.targetDatabaseId,
     totalRecords
   });
 
   return {
-    importedRecords: primaryMissing.length + markerMissing.length,
+    importedRecords,
     reason: "completed",
     sources,
-    totalRecords: primaryRecords.length + (sources[1] ? markerRecords.length : 0)
+    totalRecords: totalInputRecords
   };
 }
 

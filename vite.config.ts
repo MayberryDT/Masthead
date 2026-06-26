@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { defineConfig } from "vitest/config";
 import type { Plugin } from "vite";
 import pkg from "./package.json" with { type: "json" };
+import { REQUIRED_CLIENT_CAPABILITIES } from "./src/shared/protocol";
 
 export default defineConfig({
   define: {
@@ -120,9 +121,7 @@ export function isCompatibleMastheadHealth(body: unknown): body is Record<string
   const record = body as Record<string, unknown>;
   if (record.ok !== true || record.product !== "masthead" || record.apiVersion !== 1) return false;
   const capabilities = Array.isArray(record.capabilities) ? record.capabilities : [];
-  if (!["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings"].every((capability) =>
-    capabilities.includes(capability)
-  )) {
+  if (!REQUIRED_CLIENT_CAPABILITIES.every((capability) => capabilities.includes(capability))) {
     return false;
   }
   const data = typeof record.data === "object" && record.data !== null ? (record.data as Record<string, unknown>) : undefined;

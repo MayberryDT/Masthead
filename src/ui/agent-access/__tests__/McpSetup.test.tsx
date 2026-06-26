@@ -48,6 +48,8 @@ describe("McpSetup", () => {
     expect(buttonByText(container, "Copy configuration").disabled).toBe(true);
     expect(container.textContent).toContain("Configured command does not exist.");
     expect(container.textContent).toContain("MASTHEAD_DB_PATH points at");
+    expect(container.textContent).toContain("Launch configuration is hidden");
+    expect(container.textContent).not.toContain("[mcp_servers.masthead]");
 
     await act(async () => root.unmount());
   });

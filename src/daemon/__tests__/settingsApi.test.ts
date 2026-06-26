@@ -37,6 +37,7 @@ describe("settings API", () => {
           mcpAccessEnabled: true,
           redactionEnabled: true
         },
+        schemaVersion: expect.any(Number),
         runtime: {
           mode: "primary",
           writable: true
@@ -54,7 +55,8 @@ describe("settings API", () => {
       migrationState: "ready",
       storePath
     });
-    expect(settings.data.databaseId).toMatch(/^sqlite:[a-f0-9]{16}$/);
+    const health = await getJson(baseUrl, "/health");
+    expect(settings.data.databaseId).toBe(health.data.databaseId);
     expect(state.settings.deletionTargets.projects).toEqual([{ label: "Masthead", value: "Masthead" }]);
     expect(state.settings.deletionTargets.runtimes).toEqual([{ label: "codex", value: "codex" }]);
     expect(state.settings.deletionTargets.hosts).toEqual([{ label: "masthead-test-host", value: "masthead-test-host" }]);
@@ -63,6 +65,11 @@ describe("settings API", () => {
   test("rejects stale database identity on destructive previews and confirms", async () => {
     const { daemon } = await createTestHarness();
     const baseUrl = await listen(daemon);
+    const settings = await getJson(baseUrl, "/settings");
+    const currentDatabaseId = settings.settings.data.databaseId;
+
+    const currentPreview = await fetch(`${baseUrl}/data/summary?databaseId=${encodeURIComponent(currentDatabaseId)}`, { headers: { accept: "application/json" } });
+    expect(currentPreview.status).toBe(200);
 
     const preview = await fetch(`${baseUrl}/data/summary?databaseId=sqlite:stale`, { headers: { accept: "application/json" } });
     expect(preview.status).toBe(400);

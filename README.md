@@ -1,67 +1,120 @@
 # Masthead
 
-**Every agent session. Searchable, reusable, local.**
+Masthead is a local-first, harness-neutral session data layer and session manager
+for AI-agent work. It discovers local harness history, imports it into a
+canonical SQLite session graph, makes it searchable in Logbook, and exposes
+bounded historical context to existing agents through read-only MCP tools.
 
-Masthead imports and continuously indexes session history from AI-agent harnesses. It turns
-scattered local transcripts into a searchable Logbook, shows live sessions in plain English, and
-exposes historical context to the user’s existing agents through a read-only MCP server.
+Masthead starts Codex-first because one complete adapter loop is more useful
+than shallow support for many runtimes. The core model remains adapter-neutral.
+Live Now is a view over collected session data, not the product category.
 
-Masthead starts with Codex and is designed for harness-neutral adapters.
+## Stable Today
 
-## Product Surfaces
+- Canonical local SQLite ownership for Masthead-owned sessions, source state,
+  import jobs, search records, settings, and MCP audit rows.
+- Codex source discovery and imports for metadata and reviewed transcript
+  history.
+- Logbook search and session detail APIs backed by the canonical store.
+- Read-only local MCP access for search, bounded session retrieval, project
+  history, and coverage counts.
+- `npm run dev` launcher that starts either a writable daemon or a read-only
+  worktree bridge as needed.
+- Product, surface, endpoint-matrix, doctor, smoke, build, and test gates.
 
-- **Now:** glanceable live status for active sessions and attention states.
-- **Logbook:** searchable durable library of imported session history.
-- **Sources:** runtime discovery, import progress, sync state, adapter health, and source policy.
-- **Agent Access:** read-only MCP setup, permissions, exposed tools, and retrieval audit.
-- **Settings:** local storage, privacy, retention, export, and deletion controls.
+## Experimental
 
-## Privacy Boundary
+- Additional source adapters beyond Codex.
+- Transcript import breadth and exclusion policy tuning.
+- Optional remote enrichment. It is off by default and must stay scoped,
+  redacted, previewable, and auditable when enabled.
+- Packaged desktop release flow and longer release-smoke automation.
 
-Masthead is local-first. The canonical session graph, search records, source policies, enrichment
-state, and MCP audit log live in the local Masthead database. Source harness files and project repos
-remain owned by their original tools.
+## Install
 
-The default product boundary is read-only toward external tools: Masthead imports and retrieves
-history, but normal app and MCP surfaces must not approve agent actions, mutate Git, run shell
-commands, edit project files, or launch agents. Remote model enrichment is optional and must be
-redacted, scoped, previewable, and auditable when enabled.
-
-## Development
-
-Install dependencies:
+Masthead requires Node 24.15 or newer.
 
 ```bash
 npm install
 ```
 
-Run the harness-neutral live launcher:
+## Run
+
+Use the harness-neutral launcher from this checkout or any Masthead worktree:
 
 ```bash
 npm run dev
 ```
 
-Useful scripts:
+The launcher starts the daemon on `127.0.0.1:17373` and the UI on the first
+available Vite port starting at `5173`. If another compatible primary daemon is
+already running, a secondary worktree starts a read-only bridge instead of
+opening the primary database for writes.
+
+Useful overrides:
 
 ```bash
-npm run dev:ui
-npm run dev:fixture
-npm run build
-npm run build:daemon
-npm run typecheck
-npm test -- --run
-npm run doctor
-npm run dogfood
-npm run dogfood:fixture
-npm run dogfood:live
-npm run ingest
-npm run mcp
-npm run demo:hook
+MASTHEAD_UI_PORT=5180 npm run dev
+MASTHEAD_CONNECTOR_MODE=primary npm run dev
+MASTHEAD_CONNECTOR_MODE=bridge MASTHEAD_UPSTREAM_URL=http://127.0.0.1:17373 npm run dev
+MASTHEAD_BRIDGE_PORT=17374 npm run dev
 ```
 
-`npm run dev` starts the connector and UI when no primary connector is running. In a secondary
-worktree, it starts a read-only bridge to the primary connector so UI work can be tested without
-mutating the primary store.
+## Verify
 
-If another Masthead daemon is already running, the dev launcher verifies its protocol and database
-identity. Incompatible daemons are not reused.
+Fast product checks:
+
+```bash
+npm run check:product-contract
+npm run verify:no-citations
+npm run doctor
+```
+
+Full local gate:
+
+```bash
+npm run verify
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+`npm run doctor` checks the active daemon contract, source/import readiness,
+Logbook state, MCP status/tools, and local data summary. `npm run verify` runs
+the product and surface contracts, typecheck, Vitest, build, endpoint matrix,
+and smoke suite.
+
+## Data Path
+
+`MASTHEAD_DATA_DIR` owns the runtime directory for a writable daemon. By
+default, development data is stored under:
+
+```text
+Linux:   ~/.local/share/masthead-dev
+macOS:   ~/Library/Application Support/Masthead Dev
+Windows: %LOCALAPPDATA%/Masthead Dev
+```
+
+Inside that directory, `masthead.sqlite` is the canonical Masthead store.
+Legacy NDJSON files are migration or compatibility inputs, not the runtime
+source of truth. Source harness files and Git repositories remain owned by
+their original tools.
+
+See [docs/architecture/data-paths.md](docs/architecture/data-paths.md).
+
+## MCP Boundary
+
+The launch MCP server is read-only. It can search sessions, return bounded
+session evidence, list project history, and report coverage. It cannot mutate
+files, Git, shell state, harness sessions, source imports, settings, or
+Masthead data.
+
+See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md).
+
+## Start Here
+
+- First run: [docs/tutorials/first-run-codex-import.md](docs/tutorials/first-run-codex-import.md)
+- Import existing Codex history: [docs/how-to/import-codex-history.md](docs/how-to/import-codex-history.md)
+- Reset local Masthead data: [docs/how-to/reset-local-data.md](docs/how-to/reset-local-data.md)
+- Daemon API reference: [docs/reference/daemon-api.md](docs/reference/daemon-api.md)
+- Configuration reference: [docs/reference/configuration.md](docs/reference/configuration.md)
+- Release gates: [docs/release-gates.md](docs/release-gates.md)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)

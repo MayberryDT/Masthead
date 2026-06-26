@@ -1,0 +1,55 @@
+name: Feature request
+description: Propose a scoped Masthead feature or adapter improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What local session-data workflow should Masthead improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the smallest useful behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Primary surface
+      options:
+        - Now
+        - Logbook
+        - Sources
+        - Agent Access
+        - Settings
+        - Daemon/API
+        - MCP
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Product boundaries
+      options:
+        - label: This keeps Masthead local-first.
+          required: true
+        - label: This keeps the core model harness-neutral.
+          required: true
+        - label: This does not require write-capable MCP tools.
+          required: true
+        - label: This treats remote enrichment as optional and scoped.
+          required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

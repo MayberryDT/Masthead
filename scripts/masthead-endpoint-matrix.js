@@ -8,8 +8,10 @@ const REQUIRED_CAPABILITIES = [
   "logbook_search",
   "source_discovery",
   "adapter_inventory",
+  "import_jobs",
   "mcp_status",
-  "settings"
+  "settings",
+  "data_lifecycle"
 ];
 
 export const READ_ONLY_ENDPOINTS = [

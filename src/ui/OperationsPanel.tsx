@@ -34,6 +34,7 @@ export type LocalDataStatus = {
 };
 
 type Props = {
+  baseUrl?: string;
   dataSummary?: DataSummary;
   deletionScopeKind?: DeletionScopeKind;
   deletionScopeTarget?: string;
@@ -56,6 +57,7 @@ type Props = {
 };
 
 export function OperationsPanel({
+  baseUrl,
   connection,
   dataSummary,
   deletionScopeKind = "project",
@@ -87,7 +89,7 @@ export function OperationsPanel({
   const loadSettings = useCallback((signal?: AbortSignal) => {
     if (settingsState) return;
     setSettingsLoadState("loading");
-    void getSettingsState(undefined, { signal })
+    void getSettingsState(baseUrl, { signal })
       .then((settings) => {
         setLoadedSettings(settings);
         setSettingsError(undefined);
@@ -98,7 +100,7 @@ export function OperationsPanel({
         setSettingsError(error instanceof Error ? error.message : String(error));
         setSettingsLoadState("error");
       });
-  }, [settingsState]);
+  }, [baseUrl, settingsState]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -115,10 +117,10 @@ export function OperationsPanel({
     try {
       const hooks =
         action === "install"
-          ? await installCodexHooks()
+          ? await installCodexHooks(baseUrl)
           : action === "uninstall"
-            ? await uninstallCodexHooks()
-            : await testCodexHooks();
+            ? await uninstallCodexHooks(baseUrl)
+            : await testCodexHooks(baseUrl);
       setLoadedSettings((current) => (current ? { ...current, hooks } : current));
       setSettingsError(undefined);
     } catch (error) {
@@ -183,6 +185,8 @@ export function OperationsPanel({
           />
           <DangerZone
             busy={writesDisabled}
+            databaseId={effectiveSettings?.data.databaseId}
+            databasePath={effectiveSettings?.data.databasePath}
             deletionScopeKind={deletionScopeKind}
             deletionScopeTarget={deletionScopeTarget}
             onDeletionScopeKindChange={onDeletionScopeKindChange}

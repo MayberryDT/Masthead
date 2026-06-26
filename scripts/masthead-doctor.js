@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawn } from "node:child_process";
 import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -13,8 +14,10 @@ const REQUIRED_CAPABILITIES = [
   "logbook_search",
   "source_discovery",
   "adapter_inventory",
+  "import_jobs",
   "mcp_status",
-  "settings"
+  "settings",
+  "data_lifecycle"
 ];
 const PRODUCT_ENDPOINTS = [
   "/adapters",
@@ -39,6 +42,7 @@ const baseUrl = normalizeBaseUrl(process.env.MASTHEAD_BASE_URL || process.env.MA
 const hookConfigPath = resolve(process.env.MASTHEAD_CODEX_HOOKS || join(homedir(), ".codex/hooks.json"));
 const jsonOutput = process.argv.includes("--json");
 const strictHooks = process.env.MASTHEAD_DOCTOR_STRICT_HOOKS === "1";
+let mcpRequestId = 0;
 
 const checks = [];
 let health;
@@ -52,8 +56,12 @@ health = protocol.health;
 checks.push(checkDatabaseIdentity(health));
 checks.push(await checkEndpoints());
 checks.push(await checkSources());
+checks.push(await checkImports());
 checks.push(await checkMcp());
+checks.push(await checkMcpStdio());
 checks.push(await checkLogbook());
+checks.push(await checkSettings());
+checks.push(await checkDestructivePreviewSafety());
 checks.push(await checkHooks());
 
 const report = {
@@ -266,21 +274,99 @@ async function checkMcp() {
   }
 }
 
+async function checkMcpStdio() {
+  const data = isRecord(health?.data) ? health.data : {};
+  const databasePath = stringValue(data.databasePath);
+  if (!databasePath) {
+    return {
+      id: "mcp-stdio",
+      label: "mcp stdio",
+      status: "fail",
+      message: "Health did not expose a database path for MCP stdio verification.",
+      details: { baseUrl }
+    };
+  }
+
+  let child;
+  try {
+    child = spawn(process.execPath, ["dist/daemon/src/mcp/server.js"], {
+      cwd: process.cwd(),
+      env: { ...process.env, MASTHEAD_DB_PATH: databasePath },
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    const initialized = await mcpRpc(child, "initialize", {});
+    const serverInfo = isRecord(initialized.result?.serverInfo) ? initialized.result.serverInfo : {};
+    assert(serverInfo.name === "masthead", "initialize did not return Masthead server identity");
+
+    const tools = await mcpRpc(child, "tools/list", {});
+    const toolEntries = Array.isArray(tools.result?.tools) ? tools.result.tools : [];
+    const toolNames = toolEntries.map((tool) => tool.name).filter((name) => typeof name === "string").sort();
+    const missingTools = EXPECTED_MCP_TOOLS.filter((tool) => !toolNames.includes(tool));
+    assert(missingTools.length === 0 && toolNames.length === EXPECTED_MCP_TOOLS.length, `tool catalog mismatch: ${toolNames.join(", ")}`);
+
+    const coverage = await mcpToolCall(child, "get_masthead_coverage", {});
+    assert(numberValue(coverage.sessions) !== undefined, "coverage tool did not return a sessions count");
+
+    return {
+      id: "mcp-stdio",
+      label: "mcp stdio",
+      status: "ok",
+      message: `MCP stdio initialized, listed ${toolNames.length} tools, and served coverage.`,
+      details: {
+        databasePath,
+        toolNames,
+        coverageSessions: coverage.sessions,
+        protocolVersion: initialized.result?.protocolVersion,
+        serverInfo
+      }
+    };
+  } catch (error) {
+    return {
+      id: "mcp-stdio",
+      label: "mcp stdio",
+      status: "fail",
+      message: errorMessage(error),
+      details: { databasePath }
+    };
+  } finally {
+    if (child) await stopChild(child);
+  }
+}
+
+async function checkImports() {
+  try {
+    const body = await getJson("/imports");
+    const jobs = Array.isArray(body.jobs) ? body.jobs : [];
+    return {
+      id: "imports",
+      label: "imports",
+      status: "ok",
+      message: `Import endpoint responded with ${jobs.length} job${jobs.length === 1 ? "" : "s"}.`,
+      details: { jobs: jobs.length }
+    };
+  } catch (error) {
+    return { id: "imports", label: "imports", status: "fail", message: errorMessage(error), details: { baseUrl } };
+  }
+}
+
 async function checkLogbook() {
   try {
-    const body = await getJson("/logbook/summary");
+    const [summaryBody, searchBody] = await Promise.all([getJson("/logbook/summary"), getJson("/sessions?limit=1")]);
+    const body = summaryBody;
     const summary = isRecord(body.summary) ? body.summary : {};
+    const sessionRows = Array.isArray(searchBody.sessions) ? searchBody.sessions : [];
     const sessions = numberValue(summary.sessions) ?? 0;
     return {
       id: "logbook",
       label: "logbook",
       status: sessions === 0 ? "warn" : "ok",
-      message: sessions === 0 ? "Logbook has zero sessions." : `Logbook has ${sessions} sessions.`,
+      message: sessions === 0 ? "Logbook has zero sessions." : `Logbook has ${sessions} sessions and search returned ${sessionRows.length}.`,
       details: {
         sessions,
         projects: summary.projects,
         messages: summary.messages,
-        toolCalls: summary.toolCalls
+        toolCalls: summary.toolCalls,
+        searchRows: sessionRows.length
       }
     };
   } catch (error) {
@@ -288,8 +374,69 @@ async function checkLogbook() {
   }
 }
 
+async function checkSettings() {
+  try {
+    const body = await getJson("/settings");
+    const settings = isRecord(body.settings) ? body.settings : {};
+    const data = isRecord(settings.data) ? settings.data : {};
+    const runtime = isRecord(settings.runtime) ? settings.runtime : {};
+    const hooks = isRecord(settings.hooks) ? settings.hooks : {};
+    const storage = isRecord(settings.storage) ? settings.storage : {};
+    const privacy = isRecord(settings.privacy) ? settings.privacy : {};
+    const enrichment = isRecord(settings.enrichment) ? settings.enrichment : {};
+    const deletionTargets = isRecord(settings.deletionTargets) ? settings.deletionTargets : {};
+    const missing = [];
+    if (settings.product !== "masthead") missing.push("product");
+    if (settings.apiVersion !== 1) missing.push("apiVersion");
+    if (numberValue(settings.schemaVersion) === undefined) missing.push("schemaVersion");
+    if (!stringValue(data.databaseId)) missing.push("data.databaseId");
+    if (!stringValue(data.databasePath)) missing.push("data.databasePath");
+    if (!stringValue(data.dataDirectory)) missing.push("data.dataDirectory");
+    if (!stringValue(runtime.mode)) missing.push("runtime.mode");
+    if (!isRecord(storage.dataSummary)) missing.push("storage.dataSummary");
+    if (!isRecord(hooks) || !("installed" in hooks)) missing.push("hooks");
+    if (!isRecord(privacy) || !("mcpAccessEnabled" in privacy)) missing.push("privacy");
+    if (!isRecord(enrichment) || !("provider" in enrichment)) missing.push("enrichment");
+    if (!isRecord(deletionTargets)) missing.push("deletionTargets");
+
+    return {
+      id: "settings-contract",
+      label: "settings contract",
+      status: missing.length === 0 ? "ok" : "fail",
+      message: missing.length === 0 ? "Settings endpoint exposes runtime, storage, privacy, hooks, and deletion state." : `Settings missing ${missing.join(", ")}.`,
+      details: {
+        databaseId: data.databaseId,
+        databasePath: data.databasePath,
+        runtimeMode: runtime.mode,
+        schemaVersion: settings.schemaVersion,
+        missing
+      }
+    };
+  } catch (error) {
+    return { id: "settings-contract", label: "settings contract", status: "fail", message: errorMessage(error), details: { baseUrl } };
+  }
+}
+
+async function checkDestructivePreviewSafety() {
+  try {
+    const response = await fetch(new URL("/data/summary?databaseId=sqlite:stale-doctor-check", baseUrl), { headers: { accept: "application/json" } });
+    const body = await response.text();
+    const ok = response.status === 400 && body.includes("Masthead database changed");
+    return {
+      id: "destructive-preview-safety",
+      label: "destructive preview safety",
+      status: ok ? "ok" : "fail",
+      message: ok ? "Stale database identity is rejected before destructive previews." : `Expected stale database preview to return 400; got ${response.status}.`,
+      details: { status: response.status }
+    };
+  } catch (error) {
+    return { id: "destructive-preview-safety", label: "destructive preview safety", status: "fail", message: errorMessage(error), details: { baseUrl } };
+  }
+}
+
 async function checkHooks() {
   try {
+    const daemonHooks = await getJson("/settings/hooks/codex").catch(() => undefined);
     const raw = await readFile(hookConfigPath, "utf8");
     const parsed = JSON.parse(raw);
     const verified = verifyHookConfig(parsed, expectedHookOptions());
@@ -304,7 +451,14 @@ async function checkHooks() {
       message: ok
         ? `installed in ${hookConfigPath}`
         : `missing ${verified.missingEvents.join(", ") || "none"}; mismatched ${verified.mismatchedEvents.join(", ") || "none"}; mode ${mode.toString(8)}`,
-      details: { hookConfigPath, strict: strictHooks, ...verified, mode: mode.toString(8), privateMode }
+      details: {
+        hookConfigPath,
+        strict: strictHooks,
+        ...verified,
+        daemonInstalled: isRecord(daemonHooks?.hooks) ? daemonHooks.hooks.installed : undefined,
+        mode: mode.toString(8),
+        privateMode
+      }
     };
   } catch (error) {
     return {
@@ -359,6 +513,76 @@ function matchesExpectedHook(handler, expected) {
   return true;
 }
 
+function mcpRpc(child, method, params) {
+  mcpRequestId += 1;
+  return sendMcpLine(child, { jsonrpc: "2.0", id: mcpRequestId, method, params });
+}
+
+async function mcpToolCall(child, name, args) {
+  const response = await mcpRpc(child, "tools/call", { name, arguments: args });
+  const text = response.result?.content?.[0]?.text;
+  assert(typeof text === "string", `${name} returned no text content`);
+  return JSON.parse(text);
+}
+
+function sendMcpLine(child, payload) {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => settle(reject, new Error(`MCP timeout waiting for ${payload.method}; stderr=${stderr}`)), 8_000);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      child.stdout.off("data", onStdout);
+      child.stderr.off("data", onStderr);
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+    const onStdout = (chunk) => {
+      output += chunk.toString();
+      const newlineIndex = output.indexOf("\n");
+      if (newlineIndex === -1) return;
+      const line = output.slice(0, newlineIndex).trim();
+      if (!line) return;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.error) throw new Error(parsed.error.message || `MCP error for ${payload.method}`);
+        settle(resolve, parsed);
+      } catch (error) {
+        settle(reject, error);
+      }
+    };
+    const onStderr = (chunk) => {
+      stderr += chunk.toString();
+    };
+    const onError = (error) => settle(reject, error);
+    const onExit = (code) => settle(reject, new Error(`MCP server exited ${code}; stderr=${stderr}`));
+    child.stdout.on("data", onStdout);
+    child.stderr.on("data", onStderr);
+    child.on("error", onError);
+    child.on("exit", onExit);
+    child.stdin.write(`${JSON.stringify(payload)}\n`);
+  });
+}
+
+async function stopChild(child) {
+  if (child.exitCode !== null) return;
+  child.kill("SIGINT");
+  await new Promise((resolve) => {
+    const timeout = setTimeout(resolve, 2_000);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
 function normalizeBaseUrl(value) {
   const url = new URL(value);
   if (url.pathname === "/health") url.pathname = "/";
@@ -385,6 +609,10 @@ function arrayStrings(value) {
 
 function numberValue(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function stringValue(value) {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function errorMessage(error) {

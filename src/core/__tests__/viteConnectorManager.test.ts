@@ -11,8 +11,10 @@ const compatibleHealth = {
     "logbook_search",
     "source_discovery",
     "adapter_inventory",
+    "import_jobs",
     "mcp_status",
-    "settings"
+    "settings",
+    "data_lifecycle"
   ],
   data: {
     databaseId: "db",

@@ -19,8 +19,10 @@ export const REQUIRED_CLIENT_CAPABILITIES: MastheadCapability[] = [
   "logbook_search",
   "source_discovery",
   "adapter_inventory",
+  "import_jobs",
   "mcp_status",
-  "settings"
+  "settings",
+  "data_lifecycle"
 ];
 
 export type MastheadRuntimeMode = "primary" | "read_only_bridge";

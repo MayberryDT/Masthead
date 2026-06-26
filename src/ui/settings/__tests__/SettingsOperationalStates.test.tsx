@@ -84,6 +84,7 @@ describe("Settings operational states", () => {
 const settings: SettingsStateDto = {
   apiVersion: 1,
   capabilities: ["settings"],
+  schemaVersion: 5,
   data: {
     databaseId: "sqlite:test",
     databasePath: "/tmp/masthead/masthead.sqlite",
