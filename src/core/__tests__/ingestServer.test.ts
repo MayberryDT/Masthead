@@ -587,6 +587,7 @@ async function startServer(
     cwd: projectRoot,
     env: {
       ...process.env,
+      MASTHEAD_DATA_DIR: dirname(storePath),
       MASTHEAD_PORT: "0",
       MASTHEAD_DB_PATH: join(dirname(storePath), "masthead.sqlite"),
       MASTHEAD_STORE_PATH: storePath,

@@ -6,7 +6,7 @@
 // Blocks commit/push if citations would leak.
 
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 
 const FLAG = process.env.VITE_MASTHEAD_DEV_CITATIONS;
 if (FLAG === '1') {
@@ -17,10 +17,10 @@ if (FLAG === '1') {
 const markerRegex = /data-ui-cite=/i;
 let files = [];
 try {
-  const staged = execSync('git diff --cached --name-only --diff-filter=ACM', { encoding: 'utf8' }).trim();
-  files = staged ? staged.split('\n') : [];
+  const tracked = execSync('git ls-files src', { encoding: 'utf8' }).trim();
+  files = tracked ? tracked.split('\n') : [];
 } catch {
-  files = ['src'];
+  files = collectSourceFiles('src');
 }
 
 let found = false;
@@ -28,6 +28,7 @@ for (const f of files) {
   if (!f.startsWith('src/') && !f.includes('src')) continue;
   if (f.endsWith('/DevCite.tsx')) continue; // exclude the reusable helper itself
   if (!existsSync(f)) continue;
+  if (!statSync(f).isFile()) continue;
   const content = readFileSync(f, 'utf8');
   if (markerRegex.test(content)) {
     console.error(`BLOCKED: Temporary citation marker (data-ui-cite=) found in ${f}. Remove the DevCite wrapper before commit.`);
@@ -37,3 +38,17 @@ for (const f of files) {
 
 if (found) process.exit(1);
 console.log('No dev citations active or present. OK to commit/push.');
+
+function collectSourceFiles(dir) {
+  if (!existsSync(dir)) return [];
+  const files = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...collectSourceFiles(path));
+    } else if (/\.(css|jsx?|tsx?)$/i.test(entry.name)) {
+      files.push(path);
+    }
+  }
+  return files;
+}

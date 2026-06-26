@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const fixtureDir = resolve("fixtures/adapters/codex");
@@ -108,6 +108,7 @@ async function startDaemon({ codexHome, databasePath, storePath }) {
       ...process.env,
       MASTHEAD_ALLOWED_ORIGINS: "http://127.0.0.1:5173",
       MASTHEAD_CODEX_HOME: codexHome,
+      MASTHEAD_DATA_DIR: dirname(databasePath),
       MASTHEAD_DB_PATH: databasePath,
       MASTHEAD_GIT_REFRESH_MS: "0",
       MASTHEAD_PORT: "0",
