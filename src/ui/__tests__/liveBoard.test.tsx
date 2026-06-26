@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { App } from "../../app/App";
+import { MastheadConnectionProvider } from "../../app/connection/MastheadConnectionProvider";
 import type { AttentionItem, SessionDetailView } from "../../core/types";
 import { AttentionQueue } from "../AttentionQueue";
 import { BriefingStrip } from "../BriefingStrip";
@@ -26,9 +27,17 @@ const forbiddenPrimaryDashboardText = [
   "Work is progressing"
 ];
 
+
+function renderApp(): string {
+  return renderToStaticMarkup(
+    <MastheadConnectionProvider>
+      <App />
+    </MastheadConnectionProvider>
+  );
+}
 describe("Live Board UI", () => {
   test("renders final observability shell without prototype dashboard panels", () => {
-    const html = renderToStaticMarkup(<App />);
+    const html = renderApp();
 
     expect(html).toContain("Masthead");
     expect(html).not.toContain("System status:");
@@ -51,7 +60,7 @@ describe("Live Board UI", () => {
     expect(html).toContain("All Lifecycles");
     expect(html).toContain("Last 24 hours");
     expect(html).toContain("10s");
-    expect(html).toContain("Recently Started");
+    expect(html).toContain("Recent Activity");
     expect(html).not.toContain("Live ingestion");
     expect(html).not.toContain("Demo");
     expect(html).not.toContain("Offline");
@@ -73,7 +82,7 @@ describe("Live Board UI", () => {
   });
 
   test("renders calm single-line headline without direct-address language", () => {
-    const html = renderToStaticMarkup(<App />);
+    const html = renderApp();
 
     expect(html).not.toContain("System status:");
     expect(html).toContain("Running");

@@ -250,6 +250,7 @@ describe("session repository", () => {
     const db = await openMigratedDatabase();
     const record = transcriptMessageRecord({
       content: "Historical context is reusable.",
+      cwd: "/workspace/masthead",
       role: "user",
       session_id: "historical-session",
       timestamp: "2026-06-24T12:10:00.000Z"
@@ -274,6 +275,7 @@ describe("session repository", () => {
     expect(db.prepare("SELECT role, text_redacted FROM messages").all()).toEqual([
       { role: "user", text_redacted: "Historical context is reusable." }
     ]);
+    expect(db.prepare("SELECT project_label FROM sessions").get()).toEqual({ project_label: "masthead" });
     expect(db.prepare("SELECT byte_offset, content_fingerprint FROM ingest_cursors").all()).toEqual([
       { byte_offset: 128, content_fingerprint: "128:1234" }
     ]);

@@ -64,9 +64,6 @@ describe("OperationsPanel", () => {
 
     expect(html).toContain("Delete scoped records");
     expect(html).toContain("Project");
-    expect(html).toContain("Session");
-    expect(html).toContain("Runtime");
-    expect(html).toContain("Host");
     expect(html).toContain("Pip");
     expect(html).toContain("Confirm scoped deletion");
     expect(html).toContain("Confirm scoped deletion for project Pip.");

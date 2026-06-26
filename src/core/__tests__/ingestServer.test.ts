@@ -335,7 +335,18 @@ describe("ingest server live projection", () => {
     const firstServer = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
     servers.push(firstServer.child);
 
-    await postJson(firstServer.baseUrl, "/ingest", liveApprovalPayload("server-legacy-journal"));
+    const accepted = await postJson(firstServer.baseUrl, "/ingest", liveApprovalPayload("server-legacy-journal"));
+    const acceptedEvent = accepted.event as { eventId: string; occurredAt: string };
+    await appendFile(
+      storePath,
+      `${JSON.stringify({
+        recordId: `event:${acceptedEvent.eventId}`,
+        recordType: "event",
+        observedAt: acceptedEvent.occurredAt,
+        value: accepted.event
+      })}\n`,
+      "utf8"
+    );
     await stopServer(firstServer.child);
     servers.length = 0;
     await rm(databasePath, { force: true });
@@ -345,7 +356,7 @@ describe("ingest server live projection", () => {
     const restartedServer = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
     servers.push(restartedServer.child);
 
-    const projection = await getJson(restartedServer.baseUrl, "/projection?expandedSessionId=server-live");
+    const projection = await waitForProjectionCard(restartedServer.baseUrl, "/projection?expandedSessionId=server-live");
     expect(projection.projection.cards[0]).toMatchObject({
       sessionId: "server-live",
       title: "Server live projection"
@@ -635,6 +646,17 @@ async function getJson(baseUrl: string, path: string): Promise<Record<string, an
   const response = await fetch(`${baseUrl}${path}`);
   expect(response.status).toBe(200);
   return response.json() as Promise<Record<string, any>>;
+}
+
+async function waitForProjectionCard(baseUrl: string, path: string): Promise<Record<string, any>> {
+  const deadline = Date.now() + 1500;
+  let projection = await getJson(baseUrl, path);
+  while (Date.now() < deadline) {
+    if (projection.projection?.cards?.[0]) return projection;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    projection = await getJson(baseUrl, path);
+  }
+  return projection;
 }
 
 async function waitForImport(baseUrl: string, sourceId: string): Promise<Record<string, any>> {

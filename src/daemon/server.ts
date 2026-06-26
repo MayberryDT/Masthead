@@ -266,11 +266,32 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   async function clearInMemoryAndLegacyStore(): Promise<{ removedRecords: number; touchedExternalState: boolean }> {
-    const result = await store.clearLocalData();
+    const legacy = await store.clearLocalData();
+    const hook = hookRawJournal.clearStoreRecords();
+    const observer = observerRawJournal.clearStoreRecords();
     state.events.length = 0;
     gitSnapshots.length = 0;
     gitSnapshotSignatures.clear();
-    return result;
+    return {
+      removedRecords: legacy.removedRecords + hook.removedRecords + observer.removedRecords,
+      touchedExternalState: false
+    };
+  }
+
+  function refreshVolatileStateFromRawRecords(): void {
+    const records = [
+      ...store.readAll(),
+      ...hookRawJournal.pageStoreRecords({ limit: 500 }).records,
+      ...observerRawJournal.pageStoreRecords({ limit: 500 }).records
+    ];
+    state.events.length = 0;
+    state.events.push(...records.filter((record) => record.recordType === "event").map((record) => record.value as NormalizedEvent));
+    gitSnapshots.length = 0;
+    gitSnapshots.push(...records.filter((record) => record.recordType === "git_snapshot").map((record) => record.value as GitSnapshot));
+    gitSnapshotSignatures.clear();
+    for (const gitSnapshot of gitSnapshots) {
+      gitSnapshotSignatures.set(gitSnapshot.sessionId, gitSnapshotSignature(gitSnapshot));
+    }
   }
 
   async function refreshKnownGitSnapshots(): Promise<number> {
@@ -1016,17 +1037,29 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const body = await readBody(request);
         const parsed = body ? JSON.parse(body) : {};
         const policy = parsed.policy ?? parsed;
-        const result = await store.pruneLocalData(policy);
-        hookRawJournal.pruneStoreRecords(policy);
-        observerRawJournal.pruneStoreRecords(policy);
-        state.events.length = 0;
-        state.events.push(...store.readEvents());
-        gitSnapshots.length = 0;
-        gitSnapshots.push(...store.readGitSnapshots());
-        gitSnapshotSignatures.clear();
-        for (const gitSnapshot of gitSnapshots) {
-          gitSnapshotSignatures.set(gitSnapshot.sessionId, gitSnapshotSignature(gitSnapshot));
-        }
+        const legacy = await store.pruneLocalData(policy);
+        const hook = hookRawJournal.pruneStoreRecords(policy);
+        const observer = observerRawJournal.pruneStoreRecords(policy);
+        const result = {
+          removedRecords: legacy.removedRecords + hook.removedRecords + observer.removedRecords,
+          removedRecordIds: [...legacy.removedRecordIds, ...hook.removedRecordIds, ...observer.removedRecordIds],
+          removedByType: {
+            attention_item:
+              (legacy.removedByType.attention_item ?? 0) + (hook.removedByType.attention_item ?? 0) + (observer.removedByType.attention_item ?? 0),
+            conflict_card:
+              (legacy.removedByType.conflict_card ?? 0) + (hook.removedByType.conflict_card ?? 0) + (observer.removedByType.conflict_card ?? 0),
+            event: (legacy.removedByType.event ?? 0) + (hook.removedByType.event ?? 0) + (observer.removedByType.event ?? 0),
+            git_snapshot:
+              (legacy.removedByType.git_snapshot ?? 0) + (hook.removedByType.git_snapshot ?? 0) + (observer.removedByType.git_snapshot ?? 0),
+            review_disposition:
+              (legacy.removedByType.review_disposition ?? 0) +
+              (hook.removedByType.review_disposition ?? 0) +
+              (observer.removedByType.review_disposition ?? 0)
+          },
+          retainedRecords: legacy.retainedRecords + hook.retainedRecords + observer.retainedRecords,
+          touchedExternalState: false
+        };
+        refreshVolatileStateFromRawRecords();
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           result,
@@ -1044,8 +1077,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/clear") {
       try {
-        const canonical = deleteAllMastheadData(database);
         const result = await clearInMemoryAndLegacyStore();
+        const canonical = deleteAllMastheadData(database);
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           result,
@@ -1209,6 +1242,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           indexCanonicalSessionSearch(database, sessionId);
           queueSessionEnrichment(sessionId);
         }
+        appendStoreRecordToRawJournal({
+          recordId: `event:${result.event.eventId}`,
+          recordType: "event",
+          observedAt: result.event.occurredAt,
+          value: result.event
+        });
         const gitSnapshot = await collectGitSnapshot(result.event);
         if (gitSnapshot) await appendGitSnapshotIfChanged(gitSnapshot);
       }

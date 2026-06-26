@@ -190,16 +190,18 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
         host_id,
         runtime_id,
         source_session_id,
+        project_label,
         lifecycle,
         last_activity_at,
         source_confidence,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(host_id, runtime_id, source_session_id) DO UPDATE SET
+        project_label = COALESCE(sessions.project_label, excluded.project_label),
         last_activity_at = MAX(sessions.last_activity_at, excluded.last_activity_at),
         updated_at = excluded.updated_at`
-    ).run(sessionId, context.hostId, runtimeId, value.sessionId, "unknown", observedAt, record.normalized.confidence, record.observedAt, record.observedAt);
+    ).run(sessionId, context.hostId, runtimeId, value.sessionId, value.project ?? null, "unknown", observedAt, record.normalized.confidence, record.observedAt, record.observedAt);
     if (record.normalized.kind === "message" && value.role && value.text) {
       const textRedacted = redactText(value.text);
       db.prepare(
@@ -781,7 +783,7 @@ function metadataValue(value: unknown): {
   const record = value as Record<string, unknown>;
   return {
     observedAt: stringValue(record.observedAt),
-    project: stringValue(record.project),
+    project: stringValue(record.project) ?? projectLabelFromPath(stringValue(record.cwd) ?? stringValue(record.repoRoot) ?? stringValue(record.repo_root)),
     sessionId: stringValue(record.sessionId),
     title: stringValue(record.title)
   };
@@ -789,6 +791,10 @@ function metadataValue(value: unknown): {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function projectLabelFromPath(path: string | undefined): string | undefined {
+  return path ? basename(path) : undefined;
 }
 
 function numberValue(value: unknown): number | undefined {
@@ -803,6 +809,7 @@ function transcriptValue(
   inputTokens?: number;
   model?: string;
   observedAt?: string;
+  project?: string;
   outputTokens?: number;
   provider?: string;
   role?: string;
@@ -832,6 +839,7 @@ function transcriptValue(
       stringValue(record.conversation_id) ??
       stringValue(record.conversationId) ??
       (sourcePath ? basename(sourcePath, ".jsonl") : undefined),
+    project: stringValue(record.project) ?? projectLabelFromPath(stringValue(record.cwd) ?? stringValue(record.repoRoot) ?? stringValue(record.repo_root)),
     text: stringValue(record.content) ?? stringValue(record.text) ?? stringValue(record.message),
     toolName: stringValue(record.name) ?? stringValue(record.tool_name) ?? stringValue(record.toolName),
     arguments: record.arguments ?? record.args ?? record.input,

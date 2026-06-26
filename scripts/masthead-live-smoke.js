@@ -34,7 +34,7 @@ try {
   assert(events.events?.length === 1, "events endpoint should return one accepted event");
 
   const logbook = await getJson(server.baseUrl, "/logbook/search?q=Live%20smoke");
-  assert(logbook.sessions?.some((session) => session.sessionId === "live-smoke-session"), "logbook search missing live smoke session");
+  assert(logbook.sessions?.some((session) => session.title === "Live smoke approval"), "logbook search missing live smoke session");
 
   const data = await getJson(server.baseUrl, "/data/summary");
   assert(data.summary?.sessions >= 1, "data summary missing canonical session");
@@ -68,7 +68,7 @@ function assertDatabase(databasePath) {
   const db = new DatabaseSync(databasePath);
   try {
     const sessions = db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE source_session_id = ?").get("live-smoke-session").count;
-    const signals = db.prepare("SELECT COUNT(*) AS count FROM runtime_signals WHERE source_session_id = ?").get("live-smoke-session").count;
+    const signals = db.prepare("SELECT COUNT(*) AS count FROM runtime_signals JOIN sessions USING (session_id) WHERE sessions.source_session_id = ?").get("live-smoke-session").count;
     const rawEvents = db.prepare("SELECT COUNT(*) AS count FROM raw_events WHERE source_record_key = ?").get("event:codex:live-smoke-approval").count;
     assert(sessions === 1, `expected one canonical session row, got ${sessions}`);
     assert(signals >= 1, "expected at least one runtime signal row");
