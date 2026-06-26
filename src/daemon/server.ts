@@ -71,6 +71,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   const writerLock = await acquireDatabaseWriterLock(config.dataDirectory ?? dirname(config.databasePath));
 
   try {
+    // Legacy compatibility store. Do not add new product writes here.
+    // Canonical session data must be written to SQLite/raw_events/session graph.
     const store = await createFileBackedStore(config.storePath);
     const legacyCandidates = config.legacyDataDirectory ? legacyCandidatesFromDirectory(config.legacyDataDirectory) : [];
     const legacySqliteCandidate = legacyCandidates.find((candidate) => candidate.kind === "sqlite");
@@ -265,7 +267,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return true;
   }
 
-  async function clearInMemoryAndLegacyStore(): Promise<{ removedRecords: number; touchedExternalState: boolean }> {
+  async function clearVolatileAndLegacyCompatibilityState(): Promise<{ removedRecords: number; touchedExternalState: boolean }> {
     const legacy = await store.clearLocalData();
     const hook = hookRawJournal.clearStoreRecords();
     const observer = observerRawJournal.clearStoreRecords();
@@ -986,7 +988,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const result = deleteMastheadData(database, scope);
         const legacy =
           scope.kind === "all"
-            ? await clearInMemoryAndLegacyStore()
+            ? await clearVolatileAndLegacyCompatibilityState()
             : scope.kind === "raw_payloads"
               ? await clearRawSourceCopies()
               : await clearLiveStateForScope(scope, sourceSessionIds ?? new Set());
@@ -1077,7 +1079,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/clear") {
       try {
-        const result = await clearInMemoryAndLegacyStore();
+        const result = await clearVolatileAndLegacyCompatibilityState();
         const canonical = deleteAllMastheadData(database);
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,

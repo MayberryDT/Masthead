@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 describe("canonical store ownership", () => {
-  test("live ingest writes canonical rows without creating fresh legacy ndjson", async () => {
+  test("accepted live ingest writes canonical rows without appending new NDJSON product records", async () => {
     const { daemon, storePath } = await createTestHarness("masthead-canonical-live-");
     const baseUrl = await listen(daemon);
 
@@ -27,6 +27,7 @@ describe("canonical store ownership", () => {
 
     expect(result).toMatchObject({ ok: true, status: "accepted" });
     expect(countRows(daemon.database, "sessions")).toBe(1);
+    expect(countRows(daemon.database, "raw_events")).toBe(1);
     await expect(access(storePath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 

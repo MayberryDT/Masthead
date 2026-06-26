@@ -31,6 +31,10 @@
 - [ ] Open folder works in Tauri.
 - [ ] Delete preview includes database ID.
 
+## Data ownership
+- [ ] SQLite is the canonical product store.
+- [ ] Legacy NDJSON is migration/compatibility only and receives no new product writes.
+
 ## Verification
 - [ ] npm run verify passes.
 - [ ] cargo tests pass.

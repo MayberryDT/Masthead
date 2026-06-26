@@ -80,6 +80,7 @@ function legacyJournalSources(storePath: string, legacyStorePath: string | undef
 async function readUniqueStoreRecords(source: string): Promise<StoreRecord[]> {
   const records: StoreRecord[] = [];
   const seenRecordIds = new Set<string>();
+  // Legacy NDJSON is migration/compatibility input only. New product records belong in SQLite.
   for (const record of (await createFileBackedStore(source)).readAll()) {
     if (seenRecordIds.has(record.recordId)) continue;
     seenRecordIds.add(record.recordId);
