@@ -43,6 +43,8 @@ describe("Settings surface", () => {
 
     expect(html).toContain("Danger zone");
     expect(html).toContain("Confirm delete all Masthead data");
+    expect(html).toContain("sqlite:test");
+    expect(html).toContain("API 1 / schema 5");
     expect(html).toContain("31 sessions");
     expect(html).toContain("7,657 raw source copies");
     expect(html).toContain("Cancel");
@@ -52,6 +54,7 @@ describe("Settings surface", () => {
 const settings: SettingsStateDto = {
   apiVersion: 1,
   capabilities: ["settings"],
+  schemaVersion: 5,
   data: {
     databaseId: "sqlite:test",
     databasePath: "/home/tyler/.local/share/masthead/masthead.sqlite",

@@ -288,6 +288,7 @@ export type CodexHookSettingsDto = {
 export type SettingsRuntimeIdentityDto = {
   product: "masthead";
   apiVersion: 1;
+  schemaVersion: number;
   runtime: {
     mode: "primary";
     writable: true;

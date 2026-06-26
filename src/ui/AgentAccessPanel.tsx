@@ -63,7 +63,9 @@ export function AgentAccessPanel({
           { label: "MCP server", value: status.ready ? "Ready" : "Unavailable" },
           { label: "Database", value: status.databasePath },
           { label: "Mode", value: `${status.mode} / ${status.readOnly ? "read-only" : "write-enabled"}` },
-          { label: "Queries", value: `${status.queryCount} total` }
+          { label: "Tools", value: `${status.toolCount} read-only` },
+          { label: "Access", value: status.globalAccessEnabled ? "Enabled" : "Disabled" },
+          { label: "Queries", value: status.lastQueryAt ? `${status.queryCount} total / ${formatDateTime(status.lastQueryAt)}` : `${status.queryCount} total` }
         ]}
         label="MCP status"
       />
@@ -93,3 +95,10 @@ const defaultStatus: McpStatusDto = {
   ready: false,
   toolCount: 0
 };
+
+function formatDateTime(value: string): string {
+  return new Date(value).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
+}

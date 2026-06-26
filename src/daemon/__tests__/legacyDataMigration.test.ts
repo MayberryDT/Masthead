@@ -109,7 +109,15 @@ describe("legacy data migration", () => {
     const marker = daemon.database
       .prepare("SELECT details_json FROM legacy_migrations WHERE migration_key = ?")
       .get("legacy-events-ndjson-v1") as { details_json: string };
-    expect(JSON.parse(marker.details_json)).toMatchObject({ importedRecords: 1, totalRecords: 2, source: legacyStorePath });
+    expect(JSON.parse(marker.details_json)).toMatchObject({
+      importedRecords: 2,
+      migrationKey: "legacy-events-ndjson-v1",
+      reason: "completed",
+      skippedRecords: 1,
+      source: legacyStorePath,
+      targetDatabaseId: expect.any(String),
+      totalRecords: 2
+    });
   });
 });
 

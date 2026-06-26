@@ -1,6 +1,41 @@
 # Masthead Release Gates
 
-This document tracks the current implementation against the PRD MVP Definition of Done and product invariants.
+This document tracks the current implementation against the PRD MVP Definition of Done and product invariants. It is the release closeout guide for the local-first, harness-neutral session data layer.
+
+## Launch Closeout Flow
+
+Run these from the Masthead checkout being released:
+
+```bash
+npm run check:product-contract
+npm run verify:no-citations
+npm run doctor
+npm run verify
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run dogfood:fixture
+npm run dogfood:live
+```
+
+Before claiming a release candidate is healthy, verify the rendered app or `doctor` output against the same daemon database identity that the UI and MCP launch config use. A compatible `/health` response is the compatibility oracle: it must identify Masthead, the daemon API version, runtime mode, data directory, database path, database ID, migration state, capabilities, and read/write state.
+
+Release docs must preserve these launch boundaries:
+
+- Codex is the first supported adapter.
+- The core session graph remains adapter-neutral.
+- MCP is read-only for launch.
+- Local SQLite is canonical for Masthead-owned product data.
+- Remote enrichment is optional, scoped, redacted, previewable, and auditable.
+- Live Now is a view over collected session data, not the product category.
+
+## CI And Security Gates
+
+`.github/workflows/ci.yml` is the required fast verification workflow. It runs `npm ci`, `npm run verify`, installs the Linux Tauri dependencies, and runs `cargo test --manifest-path src-tauri/Cargo.toml` on Node 24.15.0.
+
+`.github/workflows/security.yml` runs CodeQL for the TypeScript/JavaScript surface and dependency review on pull requests. `.github/dependabot.yml` keeps npm and GitHub Actions dependencies visible through weekly update PRs.
+
+`.github/workflows/release-smoke.yml` is a manual or tag-triggered release-candidate check. It repeats the full verification path and adds `npm run dogfood:fixture`. Real `npm run dogfood:live` remains a human acceptance step because it depends on local Codex data.
+
+The current workflow policy uses official GitHub action version tags such as `actions/checkout@v4`, `actions/setup-node@v4`, and `github/codeql-action/*@v4`. A future hardening pass may pin third-party actions to full commit SHAs; do not mix tag and SHA pinning silently in one PR.
 
 ## Current Status
 

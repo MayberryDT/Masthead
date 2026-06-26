@@ -17,6 +17,9 @@ describe("AgentAccessPanel", () => {
     );
 
     expect(html).toContain("MCP server");
+    expect(html).toContain("2 read-only");
+    expect(html).toContain("Access");
+    expect(html).toContain("Enabled");
     expect(html).toContain("MASTHEAD_DB_PATH");
     expect(html).toContain("Search session summaries");
     expect(html).toContain("search_sessions");
@@ -35,6 +38,7 @@ describe("AgentAccessPanel", () => {
 const status: McpStatusDto = {
   databasePath: "/home/tyler/.local/share/masthead/masthead.sqlite",
   globalAccessEnabled: true,
+  lastQueryAt: "2026-06-25T12:00:00.000Z",
   mode: "stdio",
   queryCount: 1,
   readOnly: true,

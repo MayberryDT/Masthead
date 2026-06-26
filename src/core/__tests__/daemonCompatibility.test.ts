@@ -42,7 +42,16 @@ describe("daemon compatibility", () => {
     expect(classifyDaemonHealth({ ...currentHealth, capabilities: ["live_projection"] })).toMatchObject({
       state: "incompatible",
       reason: "missing_capabilities",
-      missingCapabilities: ["canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings"]
+      missingCapabilities: [
+        "canonical_sessions",
+        "logbook_search",
+        "source_discovery",
+        "adapter_inventory",
+        "import_jobs",
+        "mcp_status",
+        "settings",
+        "data_lifecycle"
+      ]
     });
   });
 

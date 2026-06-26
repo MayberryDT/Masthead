@@ -41,6 +41,7 @@ export function McpSetup({
   const config = useMemo(() => clientConfig(selectedClient, effectiveLaunchConfig), [selectedClient, effectiveLaunchConfig]);
   const configProblems = validationProblems(launchConfig, validation, validationError);
   const canCopyConfig = Boolean(launchConfig && validation?.valid);
+  const canDisplayConfig = canCopyConfig;
   const visibleTestConnectionResult = testConnectionResult ?? localTestConnectionResult;
   const visibleTestConnectionState = testConnectionState ?? localTestConnectionState;
 
@@ -92,7 +93,13 @@ export function McpSetup({
         ))}
       </div>
 
-      <CodeBlock code={config} label={`${clients.find((client) => client.id === selectedClient)?.label ?? "Client"} configuration`} />
+      {canDisplayConfig ? (
+        <CodeBlock code={config} label={`${clients.find((client) => client.id === selectedClient)?.label ?? "Client"} configuration`} />
+      ) : (
+        <p className="agent-access-problems" role="status">
+          Launch configuration is hidden until the daemon validates the command, entry file, and active database path.
+        </p>
+      )}
 
       <div className="agent-access-checks" aria-label="MCP launch config validation">
         <ValidationCheck label="Command" ok={validation?.commandExists} value={effectiveLaunchConfig.command} />

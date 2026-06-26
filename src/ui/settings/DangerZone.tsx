@@ -7,6 +7,8 @@ import type { DeletionScopeKind } from "../OperationsPanel";
 
 type DangerZoneProps = {
   busy?: boolean;
+  databaseId?: string;
+  databasePath?: string;
   deletionScopeKind: DeletionScopeKind;
   deletionScopeTarget: string;
   targets?: {
@@ -29,6 +31,8 @@ const scopeOptions: Array<{ label: string; value: DeletionScopeKind }> = [
 
 export function DangerZone({
   busy = false,
+  databaseId,
+  databasePath,
   deletionScopeKind,
   deletionScopeTarget,
   onDeletionScopeKindChange,
@@ -45,6 +49,11 @@ export function DangerZone({
       eyebrow="Danger zone"
       title="Danger zone"
     >
+      <SettingsRow
+        description={databasePath ?? "Waiting for the active Masthead database path."}
+        label="Target database"
+        value={databaseId ?? "Loading"}
+      />
       <SettingsRow
         control={
           <div className="settings-delete-controls">

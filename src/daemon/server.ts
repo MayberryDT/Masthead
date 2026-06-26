@@ -36,9 +36,15 @@ import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
 import { getLogbookSummary } from "./db/logbookSummaryRepository.ts";
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
-import { hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
+import { getOrCreateDatabaseIdentity, hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { createSessionRepository, ingestAdapterRecord } from "./db/sessionRepository.ts";
-import { openMastheadDatabase, type MastheadDatabase } from "./db/sqlite.ts";
+import {
+  checkpointMastheadDatabase,
+  openMastheadDatabase,
+  optimizeMastheadDatabase,
+  quickCheckMastheadDatabase,
+  type MastheadDatabase
+} from "./db/sqlite.ts";
 import { legacyCandidatesFromDirectory, maybeCopyLegacySqliteBeforeOpen } from "./legacyDataMigration.ts";
 import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
 import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
@@ -89,10 +95,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         : undefined;
     const database = await openMastheadDatabase(config.databasePath);
     try {
-      if (hasPendingMigrations(database)) {
+      const pendingMigrations = hasPendingMigrations(database);
+      if (pendingMigrations) {
         await backupDatabaseBeforeMigration(config.databasePath);
       }
       migrateDatabase(database);
+      if (pendingMigrations) quickCheckMastheadDatabase(database);
+      const databaseIdentity = getOrCreateDatabaseIdentity(database);
 
     const hookRawJournal = createRawEventRepository(database, {
       adapter: codexHookSource.runtime,
@@ -196,11 +205,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         shouldStop: () => closed,
         sqliteCopied: legacySqliteMigration.copied,
         storePath: config.storePath,
+        targetDatabaseId: databaseIdentity,
         upsertLiveEvent: (event) => sessions.upsertLiveEvent(event),
         yieldToEventLoop
       });
       indexExistingCanonicalSessions();
       rebuildLiveStateFromCanonical();
+      optimizeMastheadDatabase(database);
     })().catch((error: unknown) => {
       console.error("[masthead] background journal hydration failed", error);
     });
@@ -953,7 +964,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       let scope: DeleteMastheadDataScope;
       try {
         scope = deleteScopeFromUrl(url);
-        assertDatabaseIdMatches(url.searchParams.get("databaseId"), config);
+        assertDatabaseIdMatches(url.searchParams.get("databaseId"), database, config);
       } catch (error) {
         sendJson(request, response, config.allowedOrigins, 400, {
           ok: false,
@@ -980,7 +991,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       try {
         const body = await readBody(request);
         const parsed = body ? JSON.parse(body) : {};
-        assertDatabaseIdMatches(stringRecordValue(objectRecord(parsed), "databaseId"), config);
+        assertDatabaseIdMatches(stringRecordValue(objectRecord(parsed), "databaseId"), database, config);
         const scope = deleteScopeFromBody(parsed);
         const preview = getDataSummary(database, scope);
         const sourceSessionIds =
@@ -1014,7 +1025,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       try {
         const body = await readBody(request);
         const parsed = body ? JSON.parse(body) : {};
-        assertDatabaseIdMatches(stringRecordValue(objectRecord(parsed), "databaseId"), config);
+        assertDatabaseIdMatches(stringRecordValue(objectRecord(parsed), "databaseId"), database, config);
         const preview = getDataSummary(database);
         const result = applyDefaultRetention(database);
         const legacy = await clearRawSourceCopies();
@@ -1299,8 +1310,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
         clearInterval(sourceReconcileTimer);
         server.close(() => {
-          closeDatabase(database);
-          void writerLock.release().finally(resolve);
+          try {
+            checkpointMastheadDatabase(database);
+          } catch (error) {
+            console.error("[masthead] WAL checkpoint failed during shutdown", error);
+          } finally {
+            closeDatabase(database);
+            void writerLock.release().finally(resolve);
+          }
         });
       });
       })();
@@ -1607,9 +1624,9 @@ function deleteScopeFromUrl(url: URL): DeleteMastheadDataScope {
   throw clientError(`Unsupported delete scope: ${kind}`);
 }
 
-function assertDatabaseIdMatches(value: string | null | undefined, config: DaemonConfig): void {
+function assertDatabaseIdMatches(value: string | null | undefined, database: MastheadDatabase, config: DaemonConfig): void {
   if (!value) return;
-  const currentDatabaseId = settingsRuntimeIdentity(config).data.databaseId;
+  const currentDatabaseId = settingsRuntimeIdentity(config, database).data.databaseId;
   if (value !== currentDatabaseId) {
     throw clientError("Masthead database changed. Refresh settings before deleting data.");
   }

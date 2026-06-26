@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -10,6 +9,7 @@ import {
 } from "../core/hookAdmin.ts";
 import { getDataSummary, type DataSummary } from "./db/dataLifecycleRepository.ts";
 import { globalMcpAccessEnabled } from "./db/mcpQueryRepository.ts";
+import { CURRENT_SCHEMA_VERSION, getOrCreateDatabaseIdentity } from "./db/schema.ts";
 import { listProjects } from "./db/sessionQueryRepository.ts";
 import { sourcePolicyEnabled } from "./db/sourcePolicyRepository.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
@@ -43,6 +43,7 @@ export type CodexHookSettingsDto = {
 export type SettingsRuntimeIdentityDto = {
   product: "masthead";
   apiVersion: 1;
+  schemaVersion: number;
   runtime: {
     mode: "primary";
     writable: true;
@@ -100,7 +101,7 @@ type HooksConfigRead = {
 
 const hookLastTestKey = "codex_hook_last_test";
 
-export function settingsRuntimeIdentity(config: DaemonConfig): SettingsRuntimeIdentityDto {
+export function settingsRuntimeIdentity(config: DaemonConfig, db: MastheadDatabase): SettingsRuntimeIdentityDto {
   const databasePath = resolve(config.databasePath);
   const dataDirectory = dirname(databasePath);
   return {
@@ -111,11 +112,14 @@ export function settingsRuntimeIdentity(config: DaemonConfig): SettingsRuntimeId
       "logbook_search",
       "source_discovery",
       "adapter_inventory",
+      "import_jobs",
       "mcp_status",
-      "settings"
+      "settings",
+      "data_lifecycle"
     ],
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     data: {
-      databaseId: databaseIdForPath(databasePath),
+      databaseId: getOrCreateDatabaseIdentity(db),
       databasePath,
       dataDirectory,
       migrationState: "ready",
@@ -133,7 +137,7 @@ export function settingsRuntimeIdentity(config: DaemonConfig): SettingsRuntimeId
 
 export async function getSettingsState(db: MastheadDatabase, config: DaemonConfig): Promise<SettingsStateDto> {
   const dataSummary = getDataSummary(db);
-  const identity = settingsRuntimeIdentity(config);
+  const identity = settingsRuntimeIdentity(config, db);
   return {
     ...identity,
     deletionTargets: deletionTargets(db),
@@ -445,10 +449,6 @@ async function runHookRoundTrip(config: DaemonConfig, endpoint = ingestEndpoint(
 function latestRawHookEventAt(db: MastheadDatabase): string | undefined {
   const row = db.prepare("SELECT MAX(observed_at) AS observedAt FROM raw_events").get() as { observedAt: string | null };
   return row.observedAt ?? undefined;
-}
-
-function databaseIdForPath(databasePath: string): string {
-  return `sqlite:${createHash("sha256").update(resolve(databasePath)).digest("hex").slice(0, 16)}`;
 }
 
 function backupStamp(): string {

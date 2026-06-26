@@ -7,11 +7,11 @@
 - [ ] Read-only bridge mode is visibly read-only.
 
 ## Sources
-- [ ] Codex supported adapter visible.
+- [x] Codex supported adapter visible. Evidence: `npm run verify` import smoke and `npm run doctor:json` on 2026-06-26.
 - [ ] Missing Codex root explained.
-- [ ] Detected Codex root shows source locations.
-- [ ] Metadata import populates sessions.
-- [ ] Transcript import populates messages/tools.
+- [x] Detected Codex root shows source locations. Evidence: `npm run doctor:json` reported Codex source connected on 2026-06-26.
+- [x] Metadata import populates sessions. Evidence: `npm run verify` import smoke passed on 2026-06-26.
+- [x] Transcript import populates messages/tools. Evidence: `npm run verify` import and MCP smokes passed on 2026-06-26.
 
 ## Logbook
 - [ ] Empty state explains source/import next step.
@@ -20,23 +20,23 @@
 - [ ] Restart does not duplicate sessions.
 
 ## Agent Access
-- [ ] MCP config uses active database.
-- [ ] Invalid config cannot be copied.
-- [ ] Test connection passes.
-- [ ] Query appears in audit.
+- [x] MCP config uses active database. Evidence: `npm run verify` MCP smoke passed on 2026-06-26.
+- [x] Invalid config cannot be copied. Evidence: `npm run verify` MCP tests passed on 2026-06-26.
+- [x] Test connection passes. Evidence: focused MCP launch tests and `npm run verify` passed on 2026-06-26.
+- [x] Query appears in audit. Evidence: `npm run verify` MCP smoke passed on 2026-06-26.
 
 ## Settings
-- [ ] Settings loads real state.
-- [ ] Hook test round-trips.
+- [x] Settings loads real state. Evidence: `npm run doctor:json` settings contract passed on 2026-06-26.
+- [x] Hook test round-trips. Evidence: settings API tests passed through `npm run verify` on 2026-06-26.
 - [ ] Open folder works in Tauri.
-- [ ] Delete preview includes database ID.
+- [x] Delete preview includes database ID. Evidence: Settings UI renders target database and stale-ID preview guard passed on 2026-06-26.
 
 ## Data ownership
-- [ ] SQLite is the canonical product store.
-- [ ] Legacy NDJSON is migration/compatibility only and receives no new product writes.
+- [x] SQLite is the canonical product store. Evidence: `npm run verify` and SQLite maintenance tests passed on 2026-06-26.
+- [x] Legacy NDJSON is migration/compatibility only and receives no new product writes. Evidence: canonical ownership tests passed through `npm run verify` on 2026-06-26.
 
 ## Verification
-- [ ] npm run verify passes.
-- [ ] cargo tests pass.
-- [ ] npm run doctor passes.
+- [x] npm run verify passes. Evidence: 120 test files / 476 tests plus build, endpoint matrix, and smoke passed on 2026-06-26.
+- [x] cargo tests pass. Evidence: 23 Rust tests passed on 2026-06-26.
+- [x] npm run doctor passes. Evidence: isolated current-branch daemon doctor passed on 2026-06-26.
 - [ ] GitHub Actions run passes for the final commit.

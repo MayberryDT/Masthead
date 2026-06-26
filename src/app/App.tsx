@@ -996,6 +996,7 @@ export function App() {
     ) : activeSurface === "settings" ? (
       <SettingsSurface>
         <OperationsPanel
+            baseUrl={activeProjectionUrl}
             connection={connection.state}
             onReconnect={connection.refresh}
             onStartConnector={handleStartConnector}
