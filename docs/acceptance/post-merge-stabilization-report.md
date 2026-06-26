@@ -2,15 +2,15 @@
 
 ## Final commit
 
-- Commit: 4c7cd696858183089c2e6492c86bb8d2fb756866
+- Commit: branch head containing this report
 - Branch: codex/post-merge-stabilization
-- Date: 2026-06-26T07:24:16-06:00
+- Date: 2026-06-26T07:31:23-06:00
 
 ## Verification
 
 | Command | Result |
 |---|---|
-| npm run verify | PASS |
+| npm run verify | PASS after raising the required Node runtime to 24.15.0 |
 | cargo test --manifest-path src-tauri/Cargo.toml | PASS |
 | npm run doctor:json | FAIL against default `http://127.0.0.1:17373` because that port is currently a legacy daemon without Masthead protocol identity |
 | MASTHEAD_BASE_URL=http://127.0.0.1:39983 npm run doctor:json | PASS against a compatible temporary daemon, with WARN for empty Logbook and missing Codex source |
@@ -29,7 +29,7 @@
 | Settings | PASS | `/settings` endpoint responds in endpoint matrix and doctor checks. |
 | Enrichment | PASS | Included in `npm run verify` test suite. |
 | Legacy store transition | PASS | SQLite is canonical; legacy NDJSON is migration/compatibility input and live ingest does not append new NDJSON product records. |
-| CI | WARN | Final report commit still needs a remote GitHub Actions result after push. Earlier Task 2 proved branch push triggers CI. |
+| CI | PENDING | Branch CI is configured to run on every branch push. The previous branch-head run failed because GitHub Actions used Node 22.13.0, whose `node:sqlite` runtime did not provide FTS5; this report includes the Node 24.15.0 runtime floor and workflow update. Verify the exact result from GitHub Actions for the branch head containing this report. |
 
 ## Remaining work
 

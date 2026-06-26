@@ -74,15 +74,15 @@ if (jsonOutput) {
 process.exitCode = report.ok ? 0 : 1;
 
 async function checkNodeRuntime() {
-  const minimum = [22, 13, 0];
+  const minimum = [24, 15, 0];
   const current = process.versions.node.split(".").map((part) => Number.parseInt(part, 10));
   const ok = compareVersions(current, minimum) >= 0;
   return {
     id: "node-runtime",
     label: "node runtime",
     status: ok ? "ok" : "fail",
-    message: ok ? `Node ${process.versions.node}` : `Node ${process.versions.node}; expected >= 22.13.0`,
-    details: { current: process.versions.node, minimum: "22.13.0" }
+    message: ok ? `Node ${process.versions.node}` : `Node ${process.versions.node}; expected >= 24.15.0`,
+    details: { current: process.versions.node, minimum: "24.15.0" }
   };
 }
 

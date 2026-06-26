@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=24.15.0"
   },
   "scripts": {
     "dev": "npm run version:sync && npm run build:daemon && node scripts/masthead-live-dev.js",
