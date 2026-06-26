@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { AppSelect } from "../AppSelect";
 
 describe("AppSelect", () => {
-  test("renders the Now dropdown structure as a reusable primitive", () => {
+  test("renders the closed Now dropdown trigger as a reusable primitive", () => {
     const html = renderToStaticMarkup(
       <AppSelect
         label="Harnesses"
@@ -21,11 +21,9 @@ describe("AppSelect", () => {
     expect(html).toContain('class="toolbar-select-trigger"');
     expect(html).toContain('aria-haspopup="listbox"');
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('role="listbox"');
-    expect(html).toContain('role="option"');
-    expect(html).toContain('aria-selected="true"');
+    expect(html).not.toContain('role="listbox"');
+    expect(html).not.toContain('role="option"');
     expect(html).toContain("All Harnesses");
-    expect(html).toContain("Codex");
   });
 
   test("preserves width modifier classes for toolbar parity", () => {

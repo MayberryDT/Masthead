@@ -20,7 +20,8 @@ import { SessionBoard } from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
 import { SessionLibraryDetail } from "../ui/SessionLibraryDetail";
 import { SourcesPanel } from "../ui/SourcesPanel";
-import { Toolbar, type ConnectorDisplayState } from "../ui/Toolbar";
+import { Toolbar } from "../ui/Toolbar";
+import type { CollapsibleSearchHandle } from "../ui/primitives/CollapsibleSearch";
 import { filterAttentionItemsForCards, filterCards, mainScanCards, summarizeMainScanCards, type BoardFilter } from "../ui/filterBoard";
 import {
   activityWindowMs,
@@ -53,6 +54,7 @@ import {
   getLogbookSessionExcerpts,
   importAdapterMetadata,
   importAdapterTranscripts,
+  listProjects,
   listAdapters,
   listImports,
   listReviewDispositions,
@@ -148,8 +150,8 @@ export function App() {
   const [logbookError, setLogbookError] = useState<string>();
   const [logbookRetryKey, setLogbookRetryKey] = useState(0);
   const [logbookSort, setLogbookSort] = useState<LogbookSort>("recent");
+  const [logbookProjectOptions, setLogbookProjectOptions] = useState<string[]>([]);
   const [logbookFilters, setLogbookFilters] = useState<LogbookFilterState>({});
-  const [logbookDensity, setLogbookDensity] = useState<"comfortable" | "compact">("comfortable");
   const [selectedLogbookSessionId, setSelectedLogbookSessionId] = useState<string>();
   const [selectedLogbookSession, setSelectedLogbookSession] = useState<LogbookSessionDetail>();
   const [selectedLogbookExcerpts, setSelectedLogbookExcerpts] = useState<LogbookExcerpt[]>([]);
@@ -173,7 +175,7 @@ export function App() {
   const [deletionScopeTarget, setDeletionScopeTarget] = useState("");
   const [pendingDeletionScope, setPendingDeletionScope] = useState<DeleteMastheadDataScope>();
   const [pendingDeletionDatabaseId, setPendingDeletionDatabaseId] = useState<string>();
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<CollapsibleSearchHandle | null>(null);
   const liveRequestIdRef = useRef(0);
   const fixtureBoard = useMemo(() => buildObservabilityDemoBoard(selectedSessionId), [selectedSessionId]);
   const baseBoard = showDemoData ? fixtureBoard : liveProjection ?? emptyLiveBoard;
@@ -227,8 +229,8 @@ export function App() {
   }, [logbookError, logbookResult]);
   const logbookFilterOptions = useMemo(
     () => ({
-      lifecycles: Array.from(new Set(logbookSummary?.lifecycles.map((item) => item.lifecycle).filter(Boolean) ?? [])),
       models: Array.from(new Set(logbookSummary?.models.map((item) => item.model).filter(Boolean) ?? [])),
+      projects: logbookProjectOptions,
       runtimes: Array.from(
         new Set([
           ...(logbookSummary?.runtimes.map((item) => item.runtime).filter(Boolean) ?? []),
@@ -236,7 +238,7 @@ export function App() {
         ])
       )
     }),
-    [adapters, logbookSummary]
+    [adapters, logbookProjectOptions, logbookSummary]
   );
   const filteredAttentionItems = useMemo(
     () => filterAttentionItemsForCards(board.attentionQueue, filteredCards),
@@ -257,7 +259,6 @@ export function App() {
     connection.state.state === "ready" || connection.state.state === "read_only" ? connection.state.health.data?.databaseId : undefined;
   const writeBlockedMessage =
     "This Masthead connection is read-only. Start the local writable collector before changing settings or deleting data.";
-  const connectorDisplayState = connectorStateForToolbar(effectiveLiveConnection, connectorAction);
   const toggleDensity = useCallback(() => {
     const updateDensity = () => setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
 
@@ -469,14 +470,16 @@ export function App() {
       window.clearTimeout(timer);
     };
   }, [activeProjectionUrl, activeSurface, effectiveLiveConnection.state, historyQuery, logbookFilters, logbookRetryKey, logbookSort]);
-
   useEffect(() => {
     if (activeSurface !== "logbook") return;
     const controller = new AbortController();
-    void getLogbookSummary(activeProjectionUrl, { signal: controller.signal })
-      .then((summary) => setLogbookSummary(summary))
+    void Promise.all([getLogbookSummary(activeProjectionUrl, { signal: controller.signal }), listProjects(activeProjectionUrl, { signal: controller.signal })])
+      .then(([summary, projects]) => {
+        setLogbookSummary(summary);
+        setLogbookProjectOptions(projects.map((project) => project.project));
+      })
       .catch((error: unknown) => {
-        if (!controller.signal.aborted) console.error("[masthead] Logbook summary failed", error);
+        if (!controller.signal.aborted) console.error("[masthead] Logbook metadata failed", error);
       });
     return () => controller.abort();
   }, [activeProjectionUrl, activeSurface, logbookRetryKey]);
@@ -952,15 +955,13 @@ export function App() {
             imports={imports}
             importBusy={sourcesBusy}
             query={historyQuery}
-            density={logbookDensity}
+            density="compact"
             loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbookLoadState}
             refreshError={logbookResult ? logbookError : undefined}
             selectedSessionId={selectedLogbookSessionId}
             sort={logbookSort}
             sources={sources}
             summary={logbookSummary}
-            loading={logbookLoading}
-            onDensityToggle={() => setLogbookDensity((current) => (current === "compact" ? "comfortable" : "compact"))}
             onFilterChange={handleLogbookFilterChange}
             onImportMetadata={handleImportMetadata}
             onOpenSources={() => setActiveSurface("sources")}
@@ -994,8 +995,10 @@ export function App() {
       )
     ) : activeSurface === "settings" ? (
       <SettingsSurface>
-        {needsRecoveryPanel ? recoveryPanel : (
-          <OperationsPanel
+        <OperationsPanel
+            connection={connection.state}
+            onReconnect={connection.refresh}
+            onStartConnector={handleStartConnector}
             dataSummary={dataSummary}
             deletionScopeKind={deletionScopeKind}
             deletionScopeTarget={deletionScopeTarget}
@@ -1024,7 +1027,6 @@ export function App() {
             onConfirmDeleteLocalData={handleConfirmDeleteLocalData}
             readOnly={!connection.writable}
           />
-        )}
       </SettingsSurface>
     ) : (
       <NowSurface
@@ -1040,8 +1042,6 @@ export function App() {
             activityWindow={activityWindow}
             refreshRateMs={refreshRateMs}
             density={density}
-            connectorState={showDemoData ? undefined : connectorDisplayState}
-            connectorBusy={connectorAction.state === "starting"}
             onQueryChange={setQuery}
             onFilterChange={setFilter}
             onHarnessFilterChange={setHarnessFilter}
@@ -1049,7 +1049,6 @@ export function App() {
             onSortModeChange={setSortMode}
             onActivityWindowChange={setActivityWindow}
             onRefreshRateChange={setRefreshRateMs}
-            onConnectorAction={handleStartConnector}
             onDensityToggle={toggleDensity}
             searchInputRef={searchInputRef}
           />
@@ -1156,15 +1155,6 @@ function animateCardLayoutFrom(previousLayout: CardLayoutSnapshot): void {
   });
 }
 
-function connectorStateForToolbar(
-  liveConnection: ConnectionState,
-  connectorAction: ConnectorActionState
-): ConnectorDisplayState {
-  if (connectorAction.state === "starting") return "connecting";
-  if (liveConnection.state === "live") return "connected";
-  if (liveConnection.state === "connecting") return "connecting";
-  return "disconnected";
-}
 
 function emptyBoardTitle({
   showDemoData,

@@ -4,8 +4,12 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { defineConfig } from "vitest/config";
 import type { Plugin } from "vite";
+import pkg from "./package.json" with { type: "json" };
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [mastheadConnectorManager()],
   server: {
     watch: {

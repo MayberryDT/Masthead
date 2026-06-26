@@ -33,12 +33,12 @@ describe("AppButton", () => {
 
   test("preserves disabled state and caller class names", () => {
     const html = renderToStaticMarkup(
-      <AppButton disabled className="toolbar-connector-button disconnected">
-        Reconnect
+      <AppButton disabled className="settings-inline-action">
+        Retry
       </AppButton>
     );
 
     expect(html).toContain("disabled");
-    expect(html).toContain("toolbar-connector-button disconnected");
+    expect(html).toContain("settings-inline-action");
   });
 });

@@ -5,6 +5,7 @@ type ConnectionRecoveryPanelProps = {
   connection: MastheadConnectionState;
   onRetry: () => void;
   onStart: () => void;
+  retryLabel?: string;
 };
 
 type RecoveryCopy = {
@@ -17,7 +18,7 @@ type RecoveryCopy = {
   retryLabel: string;
 };
 
-export function ConnectionRecoveryPanel({ connection, onRetry, onStart }: ConnectionRecoveryPanelProps) {
+export function ConnectionRecoveryPanel({ connection, onRetry, onStart, retryLabel }: ConnectionRecoveryPanelProps) {
   const copy = recoveryCopy(connection);
   const message = messageFrom(connection);
   return (
@@ -44,7 +45,7 @@ export function ConnectionRecoveryPanel({ connection, onRetry, onStart }: Connec
           </AppButton>
         ) : null}
         <AppButton variant="quiet" onClick={onRetry}>
-          {copy.retryLabel}
+          {retryLabel ?? copy.retryLabel}
         </AppButton>
       </div>
     </section>

@@ -10,7 +10,9 @@
     "frontendDist": "../dist"
   },
   "bundle": {
-    "resources": ["resources/daemon/**/*"]
+    "resources": [
+      "resources/daemon/**/*"
+    ]
   },
   "app": {
     "windows": [

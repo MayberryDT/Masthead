@@ -4,18 +4,63 @@
 }
 
 .logbook-toolbar {
+  position: relative;
+  z-index: 5;
   display: grid;
-  grid-template-columns: minmax(280px, 1.8fr) repeat(7, minmax(118px, 0.7fr)) minmax(176px, 0.7fr) 40px;
+  grid-template-columns: minmax(0, 1fr) 96px minmax(0, 180px) minmax(0, 180px);
   align-items: center;
   gap: 8px;
+  justify-content: stretch;
+  overflow: visible;
   border: 1px solid rgba(92, 153, 187, 0.15);
   border-radius: 5px;
   background: var(--toolbar-bg);
   padding: 12px;
 }
 
+.logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) {
+  grid-template-columns: minmax(280px, 1fr) 96px minmax(0, 180px) minmax(0, 180px);
+}
+
 .logbook-search {
-  max-width: none;
+  width: 40px;
+  min-width: 40px;
+}
+
+.logbook-search.expanded {
+  width: 100%;
+}
+
+.logbook-toolbar .collapsible-search-input.search-field {
+  display: flex;
+  min-width: 0;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(63, 118, 150, 0.18);
+  border-radius: 3px;
+  background: var(--control-bg);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.38),
+    inset 0 -1px 0 rgba(190, 225, 245, 0.025);
+  color: #9eb6c8;
+  padding: 0 8px 0 12px;
+}
+
+.logbook-toolbar .collapsible-search-input.search-field input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 38px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.logbook-toolbar .collapsible-search-input.search-field .search-input-action {
+  flex: 0 0 32px;
+  margin-left: auto;
 }
 
 .toolbar-select.logbook-sort,
@@ -24,40 +69,169 @@
   min-width: 0;
 }
 
-.logbook-filter-input {
+.toolbar-select.logbook-combobox-filter {
+  width: 100%;
+  min-width: 0;
+}
+
+.logbook-filter-toggle {
+  min-width: 96px;
+  width: 96px;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.logbook-filter-toggle.active {
+  border-color: rgba(46, 167, 255, 0.32);
+  background: #0a314b;
+  color: #eaf7ff;
+}
+
+.logbook-filter-drawer {
+  grid-column: 1 / -1;
   display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(0, max-content) minmax(220px, 1fr);
+  gap: 8px;
+  max-height: 0;
+  overflow: hidden;
+  border-top: 1px solid transparent;
+  padding-top: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    max-height 250ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 150ms ease-out,
+    transform 250ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding-top 250ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 250ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 250ms;
+}
+
+.logbook-toolbar.filters-open .logbook-filter-drawer {
+  max-height: 320px;
+  border-top-color: rgba(194, 221, 241, 0.1);
+  padding-top: 10px;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+  transition:
+    max-height 250ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 150ms ease-out,
+    transform 250ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding-top 250ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 250ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s;
+}
+
+.logbook-filter-group {
+  box-sizing: border-box;
   min-width: 0;
   min-height: 40px;
+  border: 1px solid rgba(92, 153, 187, 0.18);
+  border-radius: 3px;
+  background: var(--control-bg);
+  color: var(--ink);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.logbook-filter-group:focus-within {
+  border-color: rgba(116, 185, 224, 0.38);
+  background: #071f2f;
+  box-shadow:
+    inset 0 1px 0 rgba(190, 225, 245, 0.06),
+    0 0 0 1px rgba(46, 167, 255, 0.08);
+}
+
+.logbook-date-range {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+  justify-content: start;
+  align-items: center;
+  column-gap: 6px;
+  padding: 0 8px;
+  min-width: 0;
+}
+
+.logbook-filter-label,
+.logbook-date-range label span {
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.logbook-date-range label,
+.logbook-file-filter {
+  display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  padding: 0 10px;
+  gap: 3px;
+  min-width: 0;
 }
 
-.logbook-filter-input span {
-  color: var(--mute);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  text-transform: uppercase;
+.logbook-file-filter {
+  padding: 0 8px;
 }
 
-.logbook-filter-input input {
+.logbook-date-range input,
+.logbook-file-filter input {
   min-width: 0;
   border: 0;
   background: transparent;
   color: var(--ink);
+  color-scheme: dark;
   font: inherit;
+  outline: 0;
+  padding: 0;
+}
+.logbook-date-range input {
+  color: var(--mute);
+}
+
+.logbook-date-range input[type="date"] {
+  inline-size: auto;
+  min-inline-size: 0;
+  max-inline-size: none;
+  justify-self: start;
+}
+
+@supports selector(input::-webkit-calendar-picker-indicator) {
+  .logbook-date-range input[type="date"] {
+    padding-right: 18px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23f6fbff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right center;
+    background-size: 14px 14px;
+  }
+
+  .logbook-date-range input::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    margin: 0;
+    opacity: 0;
+    padding: 0;
+    width: 18px;
+  }
+}
+
+.logbook-date-range input:focus-visible,
+.logbook-file-filter input:focus-visible {
   outline: 0;
 }
 
-.logbook-filter-input input::placeholder {
+
+.logbook-file-filter input::placeholder {
   color: var(--ash);
 }
-
-.logbook-density-toggle {
-  width: 40px;
-}
-
 .logbook-facets {
   display: flex;
   flex-wrap: wrap;
@@ -347,22 +521,49 @@
 
 @media (max-width: 1280px) {
   .logbook-toolbar {
-    grid-template-columns: minmax(260px, 1fr) repeat(4, minmax(120px, 1fr));
+    grid-template-columns: minmax(0, 1fr) 96px minmax(0, 170px) minmax(0, 170px);
   }
 
-  .logbook-density-toggle {
-    width: 100%;
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) {
+    grid-template-columns: minmax(260px, 1fr) 96px minmax(0, 140px) minmax(0, 140px);
+  }
+  .logbook-filter-drawer {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 900px) {
   .logbook-toolbar {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr) minmax(0, 1fr);
     align-items: stretch;
   }
 
-  .logbook-search,
-  .logbook-file-filter {
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) {
+    grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-toggle {
+    grid-column: 2;
+  }
+
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-select {
+    grid-column: 3;
+  }
+
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-sort {
+    grid-column: 4;
+  }
+  .logbook-filter-toggle,
+  .toolbar-select.logbook-sort {
+    width: 100%;
+  }
+
+  .logbook-search.expanded,
+  .logbook-search.closing {
+    grid-column: 1 / -1;
+  }
+
+  .logbook-date-range {
     grid-column: 1 / -1;
   }
 
@@ -376,22 +577,48 @@
 }
 
 @media (max-width: 760px) {
-  .logbook-toolbar {
+  .logbook-toolbar,
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing),
+  .logbook-filter-drawer {
     grid-template-columns: 1fr;
   }
 
-  .logbook-search,
-  .logbook-file-filter {
-    grid-column: auto;
+  .logbook-toolbar.filters-open .logbook-filter-drawer {
+    max-height: 520px;
   }
 
   .toolbar-select.logbook-sort,
   .toolbar-select.logbook-filter-select,
-  .logbook-filter-input,
   .logbook-search,
-  .logbook-density-toggle {
+  .logbook-filter-toggle,
+  .logbook-combobox-filter {
     width: 100%;
     min-width: 0;
+  }
+
+  .logbook-search.expanded,
+  .logbook-search.closing {
+    grid-column: auto;
+  }
+
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-toggle,
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-select,
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-sort {
+    grid-column: auto;
+  }
+
+  .logbook-date-range {
+    grid-template-columns: 1fr;
+    row-gap: 6px;
+  }
+
+  .logbook-date-range label {
+    grid-template-columns: 1fr;
+    row-gap: 2px;
+  }
+
+  .logbook-date-range input[type="date"] {
+    inline-size: 100%;
   }
 
   .logbook-inspector-facts,
@@ -403,5 +630,8 @@
 @media (prefers-reduced-motion: reduce) {
   .logbook-row {
     transition-duration: 1ms;
+  }
+  .logbook-filter-drawer {
+    transition: none;
   }
 }

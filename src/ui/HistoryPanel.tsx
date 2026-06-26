@@ -12,9 +12,7 @@ import { LogbookFacets } from "./logbook/LogbookFacets";
 import { LogbookTable } from "./logbook/LogbookTable";
 import { LogbookToolbar } from "./logbook/LogbookToolbar";
 import { AppButton } from "./primitives/AppButton";
-import { PageHeader } from "./primitives/PageHeader";
 import { StatStrip, type StatStripItem } from "./primitives/StatStrip";
-import { StatusBadge } from "./primitives/StatusBadge";
 
 type Props = {
   records?: StoreRecord[];
@@ -36,7 +34,6 @@ type Props = {
   imports?: ImportJob[];
   connectionState?: "live" | "offline" | "incompatible" | "connecting";
   importBusy?: boolean;
-  onDensityToggle?: () => void;
   onFilterChange?: (filters: LogbookFilterState) => void;
   onImportMetadata?: (runtime: string) => void;
   onLoadMore?: () => void;
@@ -83,7 +80,7 @@ export type LogbookFilterState = Pick<LogbookSearchFilters, "runtime" | "project
 export type LogbookFilterOptions = {
   runtimes?: string[];
   models?: string[];
-  lifecycles?: string[];
+  projects?: string[];
 };
 
 type EmptyReason = "no_sessions" | "sources_detected_not_imported" | "import_running" | "query_no_results" | "incompatible" | "offline";
@@ -105,7 +102,7 @@ type SourceImportSummary = {
 export function HistoryPanel({
   adapters = [],
   connectionState = "live",
-  density = "comfortable",
+  density = "compact",
   filterOptions,
   filters = {},
   importBusy = false,
@@ -113,7 +110,6 @@ export function HistoryPanel({
   loadState,
   loading = false,
   nextCursor,
-  onDensityToggle,
   onFilterChange,
   onImportMetadata,
   onLoadMore,
@@ -180,20 +176,12 @@ export function HistoryPanel({
 
   return (
     <section id="history" className="history-panel logbook-panel surface-panel" aria-label="Logbook">
-      <PageHeader
-        eyebrow="Logbook"
-        title="Session library"
-        description="Search and inspect durable agent-session history."
-        trailing={<StatusBadge tone={errorState ? "danger" : "info"}>{formatCount(visibleTotal)} sessions</StatusBadge>}
-      />
 
       <LogbookToolbar
-        density={density}
         filters={filters}
         filterOptions={filterOptions}
         query={query}
         sort={sort}
-        onDensityToggle={onDensityToggle ?? (() => undefined)}
         onFilterChange={onFilterChange ?? (() => undefined)}
         onQueryChange={onQueryChange}
         onSortChange={onSortChange ?? (() => undefined)}
@@ -395,7 +383,6 @@ function activeFilterFacets(
   addFilterFacet("runtime", "Runtime");
   addFilterFacet("project", "Project");
   addFilterFacet("model", "Model");
-  addFilterFacet("state", "Lifecycle");
   addFilterFacet("dateFrom", "From");
   addFilterFacet("dateTo", "To");
   addFilterFacet("file", "File");

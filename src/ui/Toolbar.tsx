@@ -2,7 +2,7 @@ import type { BoardFilter } from "./filterBoard";
 import type { RefObject } from "react";
 import { AppButton } from "./primitives/AppButton";
 import { AppSelect } from "./primitives/AppSelect";
-import { SearchInput } from "./primitives/SearchInput";
+import { CollapsibleSearch, type CollapsibleSearchHandle } from "./primitives/CollapsibleSearch";
 import { Icon } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
 import {
@@ -18,7 +18,6 @@ import {
   type SortMode
 } from "./toolbarOptions";
 
-export type ConnectorDisplayState = "connected" | "connecting" | "disconnected";
 
 type Props = {
   query: string;
@@ -31,8 +30,6 @@ type Props = {
   activityWindow: ActivityWindow;
   refreshRateMs: number;
   density: CardDensity;
-  connectorState?: ConnectorDisplayState;
-  connectorBusy?: boolean;
   onQueryChange: (query: string) => void;
   onFilterChange: (filter: BoardFilter) => void;
   onHarnessFilterChange: (filter: HarnessFilter) => void;
@@ -40,9 +37,8 @@ type Props = {
   onSortModeChange: (mode: SortMode) => void;
   onActivityWindowChange: (window: ActivityWindow) => void;
   onRefreshRateChange: (rateMs: number) => void;
-  onConnectorAction?: () => void;
   onDensityToggle: () => void;
-  searchInputRef?: RefObject<HTMLInputElement | null>;
+  searchInputRef?: RefObject<CollapsibleSearchHandle | null>;
 };
 
 export function Toolbar({
@@ -56,8 +52,6 @@ export function Toolbar({
   activityWindow,
   refreshRateMs,
   density,
-  connectorState,
-  connectorBusy = false,
   onQueryChange,
   onFilterChange: _onFilterChange,
   onHarnessFilterChange,
@@ -65,18 +59,17 @@ export function Toolbar({
   onSortModeChange,
   onActivityWindowChange,
   onRefreshRateChange,
-  onConnectorAction,
   onDensityToggle,
   searchInputRef
 }: Props) {
-  const connectorLabel = connectorButtonLabel(connectorState, connectorBusy);
-  const connectorDisabled = connectorState !== "disconnected" || connectorBusy || !onConnectorAction;
   const toggleLayoutLabel = density === "compact" ? "Comfortable grid" : "Compact grid";
 
   return (
     <section className="board-toolbar observability-toolbar metal-toolbar" aria-label="Now controls">
-      <SearchInput
+      <CollapsibleSearch
         ref={searchInputRef}
+        label="Search sessions"
+        containerClassName="now-search"
         placeholder="Filter sessions..."
         value={query}
         onChange={(event) => onQueryChange(event.currentTarget.value)}
@@ -132,24 +125,7 @@ export function Toolbar({
           <Icon name="changeLayout" size="toolbar" weight={iconWeights.toolbar} />
         </AppButton>
       </div>
-      <div className="toolbar-actions">
-        {connectorState ? (
-          <AppButton
-            className={`toolbar-connector-button ${connectorState}`}
-            disabled={connectorDisabled}
-            onClick={onConnectorAction}
-          >
-            {connectorLabel}
-          </AppButton>
-        ) : null}
-      </div>
     </section>
   );
 }
 
-function connectorButtonLabel(state: ConnectorDisplayState | undefined, busy: boolean): string {
-  if (busy) return "Reconnecting";
-  if (state === "connected") return "Connected";
-  if (state === "connecting") return "Connecting";
-  return "Reconnect";
-}

@@ -8,12 +8,14 @@ import {
   type DataSummary,
   type SettingsStateDto
 } from "../app/daemonClient";
+import type { MastheadConnectionState } from "../app/connection/MastheadConnectionProvider";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EnrichmentSettings } from "./settings/EnrichmentSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { HookSettings } from "./settings/HookSettings";
 import { PrivacySettings } from "./settings/PrivacySettings";
 import { StorageSettings } from "./settings/StorageSettings";
+import { ConnectionRecoveryPanel } from "./ConnectionRecoveryPanel";
 
 export type DeletionScopeKind = "project" | "session" | "runtime" | "host";
 
@@ -38,6 +40,9 @@ type Props = {
   localDataStatus?: LocalDataStatus;
   settingsState?: SettingsStateDto;
   readOnly?: boolean;
+  connection?: MastheadConnectionState;
+  onReconnect?: () => void;
+  onStartConnector?: () => void;
   onCancelLocalDataAction?: () => void;
   onDeletionScopeKindChange?: (kind: DeletionScopeKind) => void;
   onDeletionScopeTargetChange?: (target: string) => void;
@@ -51,6 +56,7 @@ type Props = {
 };
 
 export function OperationsPanel({
+  connection,
   dataSummary,
   deletionScopeKind = "project",
   deletionScopeTarget = "",
@@ -62,9 +68,11 @@ export function OperationsPanel({
   onDeletionScopeKindChange,
   onDeletionScopeTargetChange,
   onExportLocalData,
+  onReconnect,
   onRequestDeleteLocalData,
   onRequestPruneLocalData,
   onRequestScopedDelete,
+  onStartConnector,
   readOnly = false,
   settingsState
 }: Props) {
@@ -136,6 +144,9 @@ export function OperationsPanel({
 
   return (
     <section id="settings" className="settings-panel" aria-label="Settings">
+      {connection && onReconnect && onStartConnector ? (
+        <ConnectionRecoveryPanel connection={connection} onRetry={onReconnect} onStart={onStartConnector} retryLabel="Reconnect" />
+      ) : null}
       {settingsError ? <p className="settings-error">{settingsError}</p> : null}
       {readOnly ? (
         <p className="settings-status error">Read-only connection: destructive data changes and hook writes are disabled.</p>

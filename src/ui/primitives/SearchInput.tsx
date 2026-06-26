@@ -1,4 +1,4 @@
-import { forwardRef, type InputHTMLAttributes, type KeyboardEvent } from "react";
+import { forwardRef, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "../icons/Icon";
 import { iconWeights } from "../icons/icon-tokens";
 
@@ -7,10 +7,11 @@ type SearchInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "si
   density?: "regular" | "compact";
   onClear?: () => void;
   shortcutHint?: string;
+  trailingAction?: ReactNode;
 };
 
 export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(function SearchInput(
-  { className = "", containerClassName = "", density = "regular", onClear, onKeyDown, shortcutHint, ...props },
+  { className = "", containerClassName = "", density = "regular", onClear, onKeyDown, shortcutHint, trailingAction, ...props },
   ref
 ) {
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -23,6 +24,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
       <Icon name="search" size="toolbar" weight={iconWeights.toolbar} className="search-icon" />
       <input ref={ref} type="search" className={className} onKeyDown={handleKeyDown} {...props} />
       {shortcutHint ? <span className="search-input-shortcut">{shortcutHint}</span> : null}
+      {trailingAction}
     </label>
   );
 });

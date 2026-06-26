@@ -28,6 +28,8 @@ describe("HistoryPanel", () => {
 
     expect(html).toContain("Logbook");
     expect(html).toContain("Search all session history");
+    expect(html).not.toContain("Session library");
+    expect(html).not.toContain("Search and inspect durable agent-session history.");
     expect(html).toContain("SESSION / MATCH");
     expect(html).toContain("Session needs review");
     expect(html).toContain("Showing 1 of 1; searching");
@@ -113,6 +115,7 @@ describe("HistoryPanel", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:Missing" onQueryChange={() => {}} />);
 
     expect(html).toContain("Logbook");
+    expect(html).not.toContain("Session library");
     expect(html).toContain("<dd>0</dd>");
     expect(html).toContain("Showing 0 of 0; searching 0 local records");
     expect(html).not.toContain("History case");
@@ -131,8 +134,6 @@ describe("HistoryPanel", () => {
     expect(html).toContain("Logbook could not read the Masthead session database.");
     expect(html).toContain("logbook search failed: 405");
     expect(html).not.toContain("Session needs review");
-    expect(html).not.toContain("Mode");
-    expect(html).not.toContain("Local");
   });
 });
 

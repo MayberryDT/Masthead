@@ -1,10 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { ObservabilitySidebar } from "../ObservabilitySidebar";
+import { APP_VERSION_LABEL } from "../../app/version";
 
 describe("product navigation", () => {
   test("shows only product surfaces that exist", () => {
-    const html = renderToStaticMarkup(<ObservabilitySidebar version="v0.1.0" activeCount={2} />);
+    const html = renderToStaticMarkup(<ObservabilitySidebar version={APP_VERSION_LABEL} activeCount={2} />);
 
     expect(html).toContain("Now");
     expect(html).toContain("Logbook");

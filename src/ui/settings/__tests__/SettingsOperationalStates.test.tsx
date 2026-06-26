@@ -40,6 +40,31 @@ describe("Settings operational states", () => {
     expect(html.match(/<button[^>]*>Export data<\/button>/)?.[0]).not.toContain("disabled");
   });
 
+  test("shows connection status and reconnect action inside Settings", () => {
+    const html = renderToStaticMarkup(
+      <OperationsPanel
+        connection={{
+          state: "ready",
+          baseUrl: "http://127.0.0.1:17374",
+          health: {
+            ok: true,
+            product: "masthead",
+            apiVersion: 1,
+            runtime: { writable: true }
+          },
+          writable: true
+        }}
+        onReconnect={() => undefined}
+        onStartConnector={() => undefined}
+        settingsState={settings}
+      />
+    );
+
+    expect(html).toContain("Connection ready");
+    expect(html).toContain("Masthead daemon is ready");
+    expect(html).toContain("Reconnect");
+  });
+
   test("shows a recoverable failure state when runtime settings cannot be loaded", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("settings offline"))));
     container = document.createElement("div");

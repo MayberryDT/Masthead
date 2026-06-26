@@ -1,13 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { ObservabilitySidebar } from "../ObservabilitySidebar";
+import { APP_VERSION_LABEL } from "../../app/version";
 
 describe("ObservabilitySidebar", () => {
   test("renders Masthead identity and session product nav", () => {
-    const html = renderToStaticMarkup(<ObservabilitySidebar version="v0.1.0" activeCount={24} />);
+    const html = renderToStaticMarkup(<ObservabilitySidebar version={APP_VERSION_LABEL} activeCount={24} />);
 
     expect(html).toContain("Masthead");
-    expect(html).toContain("v0.1.0");
+    expect(html).toContain(APP_VERSION_LABEL);
     expect(html).toContain("Now");
     expect(html).toContain("24");
     expect(html).not.toContain("Traces");

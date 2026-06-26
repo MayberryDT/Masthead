@@ -79,3 +79,49 @@ For release-closeout work, use `docs/acceptance/product-release-gate.md` as the 
 Keep protocol/database identity terminology consistent across docs and code:
 `MastheadHealthDto`, `MastheadApiClient`, `MastheadConnectionState`, `SourcePreflightDto`,
 `AdapterStatusDto`, `McpStatusDto`.
+
+## Version System
+
+`package.json` is the single source of truth for the app version (currently 0.1.0+).
+
+### Bumping
+
+Use the provided npm scripts (they run `npm version <kind> --no-git-tag-version && npm run version:sync`):
+
+```bash
+npm run version:bump:patch
+npm run version:bump:minor
+npm run version:bump:major
+```
+
+`version:sync` propagates the version from `package.json` to `src-tauri/tauri.conf.json` (top-level) and `src-tauri/Cargo.toml` ([package]), and ensures the Vite build constant is fresh.
+
+All launch/build entrypoints (`dev`, `dev:ui`, `dev:desktop`, `dev:fixture`, `build`, `build:desktop`) run the sync step first.
+
+The injected value is available at runtime via `src/app/version.ts` (`APP_VERSION` / `APP_VERSION_LABEL`) and is passed to `ObservabilitySidebar`.
+
+## UI Citation Protocol (Visual Work Only)
+
+When doing visual/UI polish work, temporarily wrap the affected JSX with the centralized helper so both you and the agent have a clear, labeled reference:
+
+```tsx
+<DevCite name="SessionCard">
+  {/* the component or section being worked on */}
+</DevCite>
+```
+
+### Behavior
+- Only renders a bright colored box + label in dev when `VITE_MASTHEAD_DEV_CITATIONS=1`.
+- Derives a deterministic bright color from the `name` (different components get different colors automatically).
+- Uses `data-ui-cite` + CSS (`.dev-cite`, `.dev-cite-label`) for the overlay.
+- Completely inert (no output, no styles) when the flag is off or in production builds.
+
+### Workflow
+
+1. Set the flag for your dev session: `VITE_MASTHEAD_DEV_CITATIONS=1 npm run dev:ui`
+2. Add `<DevCite name="ExactComponentOrSection">` wrappers only around the parts you are visually changing.
+3. Use unique, descriptive names (e.g. "SessionCard", "LogbookRow", "SourcesToolbar").
+4. When done with the visual change, **remove the wrappers** (trivial delete).
+5. Hooks for enforcement are installed automatically when you run `npm install` (via the `prepare` script). Before any commit, push, merge, or PR the pre-commit/pre-push hooks + `npm run verify:no-citations` will block if the flag is on or if `data-ui-cite=` markers remain in source (the helper module itself is excluded from the check).
+
+The mechanism is purely runtime + dev-only. No build-time stripping or permanent source changes are required. The hooks simply enforce that you cleaned up before leaving the branch.
