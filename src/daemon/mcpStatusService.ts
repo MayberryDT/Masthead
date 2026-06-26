@@ -44,6 +44,8 @@ export type McpTestConnectionDto = {
     version?: string;
   };
   protocolVersion?: string;
+  toolCount?: number;
+  toolNames?: string[];
   message: string;
   problems?: string[];
   stderr?: string;
@@ -125,6 +127,14 @@ export const MCP_TOOL_CATALOG: McpToolDto[] = [
 const allowedPermissions = ["Search session summaries", "Read bounded historical excerpts", "Read project history"];
 const blockedPermissions = ["Execute shell commands", "Mutate files or Git", "Modify harness sessions"];
 const testConnectionTimeoutMs = 2_500;
+const expectedMcpToolNames = [
+  "get_masthead_coverage",
+  "get_project_history",
+  "get_session",
+  "get_session_excerpt",
+  "list_project_sessions",
+  "search_sessions"
+];
 
 export function getMcpStatus(db: MastheadDatabase, databasePath: string, dataDirectory?: string): McpStatusDto {
   const summary = getMcpQuerySummary(db);
@@ -241,44 +251,94 @@ export async function testMcpConnection(
     stderr += chunk.toString("utf8");
   };
   child.stderr.on("data", onStderr);
-  child.stdin.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
+  child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
 
   type ProbeResult = Omit<McpTestConnectionDto, "attemptedAt" | "testedAt" | "validation" | "status">;
   const readResponse = async (): Promise<ProbeResult> => {
+    let initialized:
+      | {
+          protocolVersion?: string;
+          serverInfo?: { name?: string; version?: string };
+        }
+      | undefined;
+
     for await (const chunk of child.stdout) {
       stdoutBuffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-      const newlineIndex = stdoutBuffer.indexOf("\n");
-      if (newlineIndex === -1) continue;
-      const line = stdoutBuffer.slice(0, newlineIndex).trim();
-      if (!line) continue;
-      try {
-        const response = JSON.parse(line) as {
-          result?: { protocolVersion?: string; serverInfo?: { name?: string; version?: string } };
-          error?: { message?: string };
-        };
-        if (response.result?.serverInfo?.name === "masthead") {
+      let newlineIndex = stdoutBuffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = stdoutBuffer.slice(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        newlineIndex = stdoutBuffer.indexOf("\n");
+        if (!line) continue;
+        try {
+          const response = JSON.parse(line) as {
+            result?: {
+              protocolVersion?: string;
+              serverInfo?: { name?: string; version?: string };
+              tools?: Array<{ name?: unknown }>;
+            };
+            error?: { message?: string };
+          };
+
+          if (!initialized) {
+            if (response.result?.serverInfo?.name !== "masthead") {
+              return {
+                ok: false,
+                message: response.error?.message || "MCP server returned an unexpected initialize response.",
+                stderr: stderr.trim() || undefined
+              };
+            }
+            initialized = {
+              protocolVersion: response.result.protocolVersion,
+              serverInfo: response.result.serverInfo
+            };
+            child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }) + "\n");
+            child.stdin.end();
+            continue;
+          }
+
+          const toolNames = Array.isArray(response.result?.tools)
+            ? response.result.tools.map((tool) => tool.name).filter((name): name is string => typeof name === "string").sort()
+            : [];
+          const missingTools = expectedMcpToolNames.filter((name) => !toolNames.includes(name));
+          if (missingTools.length > 0) {
+            return {
+              ok: false,
+              message: `MCP server tools/list missing tools: ${missingTools.join(", ")}`,
+              protocolVersion: initialized.protocolVersion,
+              serverInfo: initialized.serverInfo,
+              stderr: stderr.trim() || undefined,
+              toolCount: toolNames.length,
+              toolNames
+            };
+          }
           return {
             ok: true,
-            message: "MCP server initialized successfully.",
-            protocolVersion: response.result.protocolVersion,
-            serverInfo: response.result.serverInfo,
+            message: `MCP server initialized and returned ${toolNames.length} tools.`,
+            protocolVersion: initialized.protocolVersion,
+            serverInfo: initialized.serverInfo,
+            stderr: stderr.trim() || undefined,
+            toolCount: toolNames.length,
+            toolNames
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            message: `MCP server returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+            protocolVersion: initialized?.protocolVersion,
+            serverInfo: initialized?.serverInfo,
             stderr: stderr.trim() || undefined
           };
         }
-        return {
-          ok: false,
-          message: response.error?.message || "MCP server returned an unexpected initialize response.",
-          stderr: stderr.trim() || undefined
-        };
-      } catch (error) {
-        return {
-          ok: false,
-          message: `MCP server returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
-          stderr: stderr.trim() || undefined
-        };
       }
     }
-    return { ok: false, message: "MCP server stdout closed before initialize response.", stderr: stderr.trim() || undefined };
+    return {
+      ok: false,
+      message: initialized ? "MCP server stdout closed before tools/list response." : "MCP server stdout closed before initialize response.",
+      protocolVersion: initialized?.protocolVersion,
+      serverInfo: initialized?.serverInfo,
+      stderr: stderr.trim() || undefined
+    };
   };
 
   const exitResult = once(child, "exit").then(([code, signal]) => ({
