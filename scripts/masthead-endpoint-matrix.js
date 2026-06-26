@@ -20,11 +20,11 @@ export const READ_ONLY_ENDPOINTS = [
   { method: "GET", path: "/adapters", label: "adapter status" },
   { method: "GET", path: "/sources", label: "source discovery" },
   { method: "GET", path: "/sessions", label: "session search" },
-  { method: "GET", path: "/sessions/session-1", label: "session detail" },
+  { method: "GET", path: "/sessions/session-1", label: "session detail", allowNotFound: true },
   { method: "GET", path: "/sessions/session-1/excerpts?limit=8", label: "session excerpts" },
   { method: "GET", path: "/projects", label: "project list" },
   { method: "GET", path: "/imports", label: "import jobs" },
-  { method: "GET", path: "/imports/import-1", label: "import detail" },
+  { method: "GET", path: "/imports/import-1", label: "import detail", allowNotFound: true },
   { method: "GET", path: "/data/summary", label: "data summary" },
   { method: "GET", path: "/mcp/status", label: "mcp status" },
   { method: "GET", path: "/mcp/launch-config", label: "mcp launch config" },
@@ -139,7 +139,7 @@ async function probeLiveDaemon(baseUrl) {
       path: entry.path,
       status: result.status,
       contentType: formatContentType(result.contentType),
-      contract: classifyEndpoint(entry.path, result)
+      contract: classifyEndpoint(entry, result)
     });
   }
 
@@ -172,10 +172,11 @@ async function probeEndpoint(baseUrl, path) {
   }
 }
 
-function classifyEndpoint(path, result) {
+function classifyEndpoint(entry, result) {
   if (result.status === "ERR") return "offline";
+  if (result.status === "404" && entry.allowNotFound) return "present-empty";
   if (result.status === "404") return "missing";
-  if (path === "/health") return classifyHealth(result.body);
+  if (entry.path === "/health") return classifyHealth(result.body);
   if (Number(result.status) >= 200 && Number(result.status) < 300) return "present";
   return "unexpected";
 }

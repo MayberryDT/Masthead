@@ -4,7 +4,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import currentHealth from "../../../../fixtures/protocol/current-health.json";
 import type { SettingsStateDto } from "../../../app/daemonClient";
+import type { MastheadHealthDto } from "../../../shared/protocol";
 import { OperationsPanel } from "../../OperationsPanel";
 
 let root: Root | undefined;
@@ -46,12 +48,7 @@ describe("Settings operational states", () => {
         connection={{
           state: "ready",
           baseUrl: "http://127.0.0.1:17374",
-          health: {
-            ok: true,
-            product: "masthead",
-            apiVersion: 1,
-            runtime: { writable: true }
-          },
+          health: currentHealth as MastheadHealthDto,
           writable: true
         }}
         onReconnect={() => undefined}

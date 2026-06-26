@@ -47,17 +47,12 @@ fn connector_base_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-fn connector_projection_url(port: u16) -> String {
-    format!("{}/projection", connector_base_url(port))
-}
-
-
 #[tauri::command]
 pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnectorResult, String> {
     let command_label = "masthead daemon".to_string();
     let launch = daemon_launch_target(&app)?;
     let connector_port = launch.port;
-    let default_probe = probe_collector_at(connector_port);
+    let default_probe = probe_collector_at_for_data_directory(connector_port, &launch.data_directory);
     if let CollectorProbe::Compatible(health) = default_probe {
         let base_url = connector_base_url(connector_port);
         return Ok(StartLiveConnectorResult {
@@ -97,7 +92,7 @@ pub fn start_live_connector_command(app: AppHandle) -> Result<StartLiveConnector
         .spawn()
         .map_err(|error| format!("failed to start Masthead collector: {error}"))?;
 
-    let health = wait_for_compatible_collector(port)
+    let health = wait_for_compatible_collector_for_data_directory(port, &launch.data_directory)
         .ok_or_else(|| format!("started Masthead collector but it did not become compatible at {base_url}/health"))?;
 
     Ok(StartLiveConnectorResult {
@@ -355,21 +350,14 @@ enum CollectorProbe {
     Offline,
 }
 
-fn probe_collector_at(port: u16) -> CollectorProbe {
+fn probe_collector_at_for_data_directory(port: u16, expected_data_directory: &PathBuf) -> CollectorProbe {
     match crate::http_probe::get_json_http_11("127.0.0.1", port, "/health", Duration::from_millis(500)) {
-        Ok(value) => match parse_compatible_health_value(&value) {
+        Ok(value) => match parse_compatible_health_value_for_data_directory(&value, expected_data_directory) {
             Some(health) => CollectorProbe::Compatible(health),
             None => CollectorProbe::Incompatible,
         },
         Err(crate::http_probe::HttpProbeError::Connect) => CollectorProbe::Offline,
         Err(_) => CollectorProbe::Incompatible,
-    }
-}
-
-fn collector_responds(port: u16, expected_data_directory: &PathBuf) -> bool {
-    match crate::http_probe::get_json_http_11("127.0.0.1", port, "/health", Duration::from_millis(500)) {
-        Ok(value) => parse_compatible_health_value_for_data_directory(&value, expected_data_directory).is_some(),
-        Err(_) => false,
     }
 }
 
@@ -382,6 +370,7 @@ fn parse_compatible_health_value_for_data_directory(value: &Value, expected_data
     Some(health)
 }
 
+#[cfg(test)]
 fn parse_compatible_health(body: &str) -> Option<MastheadHealthSummary> {
     let value: Value = serde_json::from_str(body).ok()?;
     parse_compatible_health_value(&value)
@@ -430,9 +419,9 @@ fn parse_compatible_health_value(value: &Value) -> Option<MastheadHealthSummary>
     })
 }
 
-fn wait_for_compatible_collector(port: u16) -> Option<MastheadHealthSummary> {
+fn wait_for_compatible_collector_for_data_directory(port: u16, expected_data_directory: &PathBuf) -> Option<MastheadHealthSummary> {
     for _ in 0..30 {
-        if let CollectorProbe::Compatible(health) = probe_collector_at(port) {
+        if let CollectorProbe::Compatible(health) = probe_collector_at_for_data_directory(port, expected_data_directory) {
             return Some(health);
         }
         sleep(Duration::from_millis(150));
@@ -522,6 +511,34 @@ mod tests {
 
         assert!(super::parse_compatible_health_value_for_data_directory(&current, &PathBuf::from("/tmp/masthead-data")).is_some());
         assert!(super::parse_compatible_health_value_for_data_directory(&current, &PathBuf::from("/tmp/other-masthead")).is_none());
+    }
+
+    #[test]
+    fn data_directory_matching_accepts_expected_directory() {
+        let value = json!({
+            "ok": true,
+            "product": "masthead",
+            "apiVersion": 1,
+            "capabilities": [
+                "live_projection",
+                "canonical_sessions",
+                "logbook_search",
+                "source_discovery",
+                "adapter_inventory",
+                "mcp_status",
+                "settings"
+            ],
+            "runtime": { "mode": "primary" },
+            "data": {
+                "databaseId": "db",
+                "databasePath": "/tmp/masthead-data/masthead.sqlite",
+                "dataDirectory": "/tmp/masthead-data",
+                "migrationState": "ready"
+            }
+        });
+
+        assert!(super::parse_compatible_health_value_for_data_directory(&value, &PathBuf::from("/tmp/masthead-data")).is_some());
+        assert!(super::parse_compatible_health_value_for_data_directory(&value, &PathBuf::from("/tmp/other")).is_none());
     }
 
     #[test]

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import currentHealth from "../../../fixtures/protocol/current-health.json";
 import legacyHealth from "../../../fixtures/protocol/legacy-health.json";
 import { MastheadApiClient } from "../api/MastheadApiClient";
+import { MastheadApiError } from "../api/MastheadApiError";
 
 describe("MastheadApiClient", () => {
   afterEach(() => {
@@ -34,6 +35,21 @@ describe("MastheadApiClient", () => {
       "missing_protocol_identity"
     );
     expect(calls).toEqual(["http://127.0.0.1:17373/health"]);
+  });
+
+  test("includes compatibility details when health is incompatible", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse({ ...currentHealth, apiVersion: 2 }));
+
+    await expect(new MastheadApiClient("http://127.0.0.1:17373").getHealth()).rejects.toMatchObject({
+      kind: "incompatible",
+      compatibility: {
+        state: "incompatible",
+        reason: "unsupported_api_version",
+        apiVersion: 2,
+        requiredApiVersion: 1
+      },
+      url: "http://127.0.0.1:17373/health"
+    } satisfies Partial<MastheadApiError>);
   });
 });
 

@@ -75,10 +75,23 @@ describe("MCP status API", () => {
     await writeFile(
       testEntry,
       [
+        "const tools = ['get_masthead_coverage','get_project_history','get_session','get_session_excerpt','list_project_sessions','search_sessions'];",
+        "let buffer = '';",
         "process.stdin.setEncoding('utf8');",
         "process.stdin.on('data', (chunk) => {",
-        "  const request = JSON.parse(String(chunk).trim());",
-        "  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', serverInfo: { name: 'masthead', version: 'api-test' } } }) + '\\n');",
+        "  buffer += String(chunk);",
+        "  let index = buffer.indexOf('\\n');",
+        "  while (index !== -1) {",
+        "    const line = buffer.slice(0, index).trim();",
+        "    buffer = buffer.slice(index + 1);",
+        "    index = buffer.indexOf('\\n');",
+        "    if (!line) continue;",
+        "    const request = JSON.parse(line);",
+        "    const result = request.method === 'tools/list'",
+        "      ? { tools: tools.map((name) => ({ name })) }",
+        "      : { protocolVersion: '2024-11-05', serverInfo: { name: 'masthead', version: 'api-test' } };",
+        "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');",
+        "  }",
         "});"
       ].join("\n")
     );
@@ -89,6 +102,8 @@ describe("MCP status API", () => {
       ok: true,
       status: "passed",
       serverInfo: { name: "masthead", version: "api-test" },
+      toolCount: 6,
+      toolNames: expect.arrayContaining(["search_sessions"]),
       validation: {
         commandExists: true,
         databaseMatches: true,

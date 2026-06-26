@@ -31,6 +31,13 @@ describe("daemon compatibility", () => {
     });
   });
 
+  test("rejects a newer API version until an explicit compatibility window exists", () => {
+    expect(classifyDaemonHealth({ ...currentHealth, apiVersion: 2 })).toMatchObject({
+      state: "incompatible",
+      reason: "unsupported_api_version"
+    });
+  });
+
   test("rejects missing required capabilities", () => {
     expect(classifyDaemonHealth({ ...currentHealth, capabilities: ["live_projection"] })).toMatchObject({
       state: "incompatible",
@@ -43,6 +50,20 @@ describe("daemon compatibility", () => {
     expect(classifyDaemonHealth({ ...currentHealth, data: { ...currentHealth.data, migrationState: "failed" } })).toMatchObject({
       state: "degraded",
       reason: "migration_failed"
+    });
+  });
+
+  test("rejects missing runtime identity fields", () => {
+    expect(classifyDaemonHealth({ ...currentHealth, runtime: { ...currentHealth.runtime, daemonInstanceId: undefined } })).toMatchObject({
+      state: "malformed",
+      reason: "missing_required_fields"
+    });
+  });
+
+  test("rejects missing database identity fields", () => {
+    expect(classifyDaemonHealth({ ...currentHealth, data: { ...currentHealth.data, databaseId: "" } })).toMatchObject({
+      state: "malformed",
+      reason: "missing_required_fields"
     });
   });
 });

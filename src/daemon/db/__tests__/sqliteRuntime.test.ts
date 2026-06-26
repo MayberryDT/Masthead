@@ -11,6 +11,6 @@ describe("SQLite runtime metadata", () => {
       };
     };
 
-    expect(packageJson.engines?.node).toBe(">=22.13.0");
+    expect(packageJson.engines?.node).toBe(">=24.15.0");
   });
 });

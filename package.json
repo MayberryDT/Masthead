@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=24.15.0"
   },
   "scripts": {
     "dev": "npm run version:sync && npm run build:daemon && node scripts/masthead-live-dev.js",
@@ -28,7 +28,7 @@
     "test": "npm run build:daemon && vitest",
     "check:product-contract": "node scripts/masthead-product-contract.js",
     "check:surface-contract": "node scripts/masthead-surface-contract.js",
-    "check:endpoint-matrix": "npm run build:daemon && node scripts/masthead-endpoint-matrix.js",
+    "check:endpoint-matrix": "npm run build:daemon && node scripts/masthead-endpoint-matrix-smoke.js",
     "smoke": "npm run smoke:live && npm run smoke:compatibility && npm run smoke:import && npm run smoke:mcp",
     "smoke:live": "npm run build:daemon && node scripts/masthead-live-smoke.js",
     "smoke:compatibility": "npm run build:daemon && node scripts/masthead-compatibility-smoke.js",

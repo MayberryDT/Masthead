@@ -15,7 +15,7 @@ pub fn run() {
                 .build()?;
 
             TrayIconBuilder::with_id("main")
-                .icon(tauri::include_image!("./icons/32x32.png"))
+                .icon(tauri::include_image!("./icons/icon.png"))
                 .menu(&menu)
                 .tooltip("Masthead")
                 .show_menu_on_left_click(true)
