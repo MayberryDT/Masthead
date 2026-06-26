@@ -67,7 +67,7 @@ export type DaemonCompatibility =
   | { state: "incompatible"; reason: "wrong_product"; product: unknown }
   | { state: "incompatible"; reason: "unsupported_api_version"; apiVersion: unknown; requiredApiVersion: number }
   | { state: "incompatible"; reason: "missing_capabilities"; missingCapabilities: MastheadCapability[] }
-  | { state: "malformed"; reason: "not_an_object" | "health_not_ok" };
+  | { state: "malformed"; reason: "not_an_object" | "health_not_ok" | "missing_required_fields" };
 
 export function classifyDaemonHealth(
   value: unknown,
@@ -90,7 +90,7 @@ export function classifyDaemonHealth(
     return { state: "incompatible", reason: "wrong_product", product: value.product };
   }
 
-  if (typeof value.apiVersion !== "number" || value.apiVersion < requiredApiVersion) {
+  if (typeof value.apiVersion !== "number" || value.apiVersion !== requiredApiVersion) {
     return {
       state: "incompatible",
       reason: "unsupported_api_version",
@@ -105,7 +105,27 @@ export function classifyDaemonHealth(
     return { state: "incompatible", reason: "missing_capabilities", missingCapabilities };
   }
 
-  if (isRecord(value.data) && value.data.migrationState === "failed") {
+  const runtime = isRecord(value.runtime) ? value.runtime : undefined;
+  const data = isRecord(value.data) ? value.data : undefined;
+
+  if (
+    !runtime ||
+    !stringValue(runtime.daemonInstanceId) ||
+    !stringValue(runtime.startedAt) ||
+    !["primary", "read_only_bridge"].includes(String(runtime.mode)) ||
+    booleanValue(runtime.writable) === undefined ||
+    !stringValue(runtime.host) ||
+    numberValue(runtime.port) === undefined ||
+    !data ||
+    !stringValue(data.dataDirectory) ||
+    !stringValue(data.databasePath) ||
+    !stringValue(data.databaseId) ||
+    !["ready", "migrating", "failed"].includes(String(data.migrationState))
+  ) {
+    return { state: "malformed", reason: "missing_required_fields" };
+  }
+
+  if (data.migrationState === "failed") {
     return { state: "degraded", reason: "migration_failed" };
   }
 
@@ -114,4 +134,16 @@ export function classifyDaemonHealth(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
