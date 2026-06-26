@@ -31,7 +31,7 @@ Release docs must preserve these launch boundaries:
 
 `.github/workflows/ci.yml` is the required fast verification workflow. It runs `npm ci`, `npm run verify`, installs the Linux Tauri dependencies, and runs `cargo test --manifest-path src-tauri/Cargo.toml` on Node 24.15.0.
 
-`.github/workflows/security.yml` runs CodeQL for the TypeScript/JavaScript surface and dependency review on pull requests. `.github/dependabot.yml` keeps npm and GitHub Actions dependencies visible through weekly update PRs.
+`.github/workflows/security.yml` runs CodeQL for the TypeScript/JavaScript surface, including GitHub Actions workflow extraction, and dependency review on pull requests. This private repository currently lacks GitHub Advanced Security, so CodeQL analysis runs without uploading SARIF to GitHub code scanning. `.github/dependabot.yml` keeps npm and GitHub Actions dependencies visible through weekly update PRs.
 
 `.github/workflows/release-smoke.yml` is a manual or tag-triggered release-candidate check. It repeats the full verification path and adds `npm run dogfood:fixture`. Real `npm run dogfood:live` remains a human acceptance step because it depends on local Codex data.
 
