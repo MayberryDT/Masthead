@@ -248,7 +248,14 @@ describe("observability session card", () => {
       });
 
       expect(headlines[0]?.className).toContain("is-headline-typing");
+      expect(headlines[0]?.textContent).toBe("");
       expect(headlines[1]?.textContent).toContain("Second old headline");
+
+      await act(async () => {
+        vi.advanceTimersByTime(16);
+      });
+
+      expect(headlines[0]?.textContent).toBe("F");
 
       await act(async () => {
         vi.advanceTimersByTime(80);
@@ -264,6 +271,100 @@ describe("observability session card", () => {
       expect(headlines[1]?.textContent).toContain("Second updated headline");
     } finally {
       await act(async () => root.unmount());
+      vi.useRealTimers();
+    }
+  });
+
+  test("keeps typing after a same-text board refresh clears the transient stagger index", async () => {
+    vi.useFakeTimers();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const original = session({
+      sessionId: "session-1",
+      copy: { ...session().copy, headline: "Old board headline" }
+    });
+    const updated = { ...original, copy: { ...original.copy, headline: "Updated board headline" } };
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[original]} variant="observability" />);
+      });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[updated]} variant="observability" />);
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(16);
+      });
+
+      const headline = container.querySelector<HTMLElement>(".card-headline");
+      expect(headline?.textContent).toBe("U");
+      expect(headline?.querySelector(".card-headline-cursor")).not.toBeNull();
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[updated]} variant="observability" />);
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(64);
+      });
+
+      expect(headline?.textContent).toBe("Updat");
+      expect(headline?.className).toContain("is-headline-typing");
+
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      expect(headline?.textContent).toContain("Updated board headline");
+      expect(headline?.className).not.toContain("is-headline-typing");
+      expect(headline?.querySelector(".card-headline-cursor")).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not render an idle headline cursor or animate when reduced motion is requested", async () => {
+    vi.useFakeTimers();
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }));
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const original = session({
+      sessionId: "session-1",
+      copy: { ...session().copy, headline: "Old reduced headline" }
+    });
+    const updated = { ...original, copy: { ...original.copy, headline: "Updated reduced headline" } };
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[original]} variant="observability" />);
+      });
+
+      expect(container.querySelector(".card-headline-cursor")).toBeNull();
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[updated]} variant="observability" />);
+      });
+
+      const headline = container.querySelector<HTMLElement>(".card-headline");
+      expect(headline?.textContent).toContain("Updated reduced headline");
+      expect(headline?.className).not.toContain("is-headline-typing");
+      expect(container.querySelector(".card-headline-cursor")).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      window.matchMedia = originalMatchMedia;
       vi.useRealTimers();
     }
   });
