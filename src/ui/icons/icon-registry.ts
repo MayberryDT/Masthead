@@ -4,6 +4,10 @@ import {
   Brain,
   CalendarBlank,
   CaretDown,
+  CaretDoubleLeft,
+  CaretDoubleRight,
+  CaretLeft,
+  CaretRight,
   ChartLineUp,
   CirclesThree,
   Clock,
@@ -60,6 +64,10 @@ export const iconRegistry = {
   blocked: LockSimple,
 
   selectChevron: CaretDown,
+  pageFirst: CaretDoubleLeft,
+  pagePrevious: CaretLeft,
+  pageNext: CaretRight,
+  pageLast: CaretDoubleRight,
   trendUp: TrendUp,
   close: X,
   arrowRight: ArrowRight

@@ -289,6 +289,7 @@ export type LogbookSearchFilters = {
   dateTo?: string;
   limit?: number;
   cursor?: string;
+  offset?: number;
   sort?: LogbookSort;
 };
 

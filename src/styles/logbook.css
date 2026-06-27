@@ -1,8 +1,9 @@
 .logbook-panel {
   display: grid;
-  grid-auto-rows: max-content;
-  align-content: start;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 12px;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -10,7 +11,7 @@
   position: relative;
   z-index: 5;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px minmax(0, 180px) minmax(0, 180px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 96px) minmax(0, 96px) minmax(0, 170px) minmax(0, 170px);
   align-items: center;
   gap: 8px;
   justify-content: stretch;
@@ -27,7 +28,7 @@
 }
 
 .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) {
-  grid-template-columns: minmax(280px, 1fr) 96px minmax(0, 180px) minmax(0, 180px);
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 96px) minmax(0, 96px) minmax(0, 160px) minmax(0, 160px);
 }
 
 .logbook-search {
@@ -82,9 +83,27 @@
   min-width: 0;
 }
 
+.logbook-date-filter {
+  position: relative;
+  min-width: 0;
+}
+
+.logbook-date-trigger {
+  width: 100%;
+  min-width: 0;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.logbook-date-filter.active .logbook-date-trigger {
+  border-color: rgba(46, 167, 255, 0.32);
+  background: #0a314b;
+  color: #eaf7ff;
+}
+
 .logbook-filter-toggle {
   min-width: 96px;
-  width: 96px;
+  width: 100%;
   transition:
     background-color 160ms ease,
     border-color 160ms ease,
@@ -102,7 +121,7 @@
 .logbook-filter-drawer {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(0, max-content) minmax(220px, 1fr);
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(220px, 1fr);
   gap: 8px;
   max-height: 0;
   overflow: hidden;
@@ -138,6 +157,75 @@
     visibility 0s;
 }
 
+.logbook-date-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  display: grid;
+  width: 260px;
+  gap: 8px;
+  border: 1px solid rgba(92, 153, 187, 0.22);
+  border-radius: 5px;
+  background: #071b28;
+  box-shadow:
+    0 12px 26px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(190, 225, 245, 0.05);
+  padding: 10px;
+}
+
+.logbook-date-popover[hidden] {
+  display: none;
+}
+
+.logbook-date-popover label {
+  display: grid;
+  gap: 4px;
+}
+
+.logbook-date-popover label span,
+.logbook-date-clear {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.logbook-date-popover input {
+  min-height: 38px;
+  border: 1px solid rgba(92, 153, 187, 0.18);
+  border-radius: 3px;
+  background: var(--control-bg);
+  color: var(--ink);
+  color-scheme: dark;
+  font: inherit;
+  padding: 0 9px;
+}
+
+.logbook-date-popover input:focus-visible {
+  outline: 0;
+  border-color: rgba(116, 185, 224, 0.38);
+  box-shadow: 0 0 0 1px rgba(46, 167, 255, 0.08);
+}
+
+.logbook-date-clear {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--body);
+  cursor: pointer;
+  justify-self: start;
+  padding: 0 2px;
+}
+
+.logbook-date-clear:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.logbook-date-clear:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
 .logbook-filter-group {
   box-sizing: border-box;
   min-width: 0;
@@ -160,25 +248,13 @@
     0 0 0 1px rgba(46, 167, 255, 0.08);
 }
 
-.logbook-date-range {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
-  justify-content: start;
-  align-items: center;
-  column-gap: 6px;
-  padding: 0 8px;
-  min-width: 0;
-}
-
-.logbook-filter-label,
-.logbook-date-range label span {
+.logbook-filter-label {
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 600;
 }
 
-.logbook-date-range label,
 .logbook-file-filter {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -191,7 +267,6 @@
   padding: 0 8px;
 }
 
-.logbook-date-range input,
 .logbook-file-filter input {
   min-width: 0;
   border: 0;
@@ -202,36 +277,7 @@
   outline: 0;
   padding: 0;
 }
-.logbook-date-range input {
-  color: var(--mute);
-}
 
-.logbook-date-range input[type="date"] {
-  inline-size: auto;
-  min-inline-size: 0;
-  max-inline-size: none;
-  justify-self: start;
-}
-
-@supports selector(input::-webkit-calendar-picker-indicator) {
-  .logbook-date-range input[type="date"] {
-    padding-right: 18px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23f6fbff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right center;
-    background-size: 14px 14px;
-  }
-
-  .logbook-date-range input::-webkit-calendar-picker-indicator {
-    cursor: pointer;
-    margin: 0;
-    opacity: 0;
-    padding: 0;
-    width: 18px;
-  }
-}
-
-.logbook-date-range input:focus-visible,
 .logbook-file-filter input:focus-visible {
   outline: 0;
 }
@@ -269,14 +315,17 @@
 }
 
 .logbook-table-wrap {
+  grid-row: 4;
   overflow: auto;
+  min-height: 0;
   border: 1px solid rgba(92, 153, 187, 0.16);
   border-radius: 5px;
   background: #081d2b;
   box-shadow:
     0 0 0 1px rgba(92, 153, 187, 0.08),
     0 2px 8px rgba(0, 0, 0, 0.12);
-  max-height: min(58vh, 620px);
+  height: auto;
+  max-height: none;
 }
 
 .logbook-table {
@@ -428,6 +477,7 @@
 }
 
 .logbook-skeleton {
+  grid-row: 4;
   display: grid;
   gap: 1px;
   overflow: hidden;
@@ -438,6 +488,76 @@
 .logbook-skeleton span {
   height: 58px;
   background: rgba(8, 29, 43, 0.82);
+}
+
+.logbook-footer {
+  grid-row: 5;
+  display: grid;
+  gap: 6px;
+}
+
+.logbook-panel > .empty-session-state {
+  grid-row: 4;
+}
+
+.logbook-pagination {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid rgba(92, 153, 187, 0.14);
+  border-radius: 5px;
+  background: rgba(6, 25, 37, 0.72);
+  padding: 4px 6px 4px 10px;
+}
+
+.logbook-pagination-range,
+.logbook-pagination-page {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.logbook-pagination-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.logbook-page-button {
+  display: inline-flex;
+  width: 40px;
+  min-width: 40px;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(92, 153, 187, 0.16);
+  border-radius: 3px;
+  background: var(--control-raised);
+  color: var(--body);
+  cursor: pointer;
+  padding: 0;
+  transition-property: background-color, border-color, color, transform;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.logbook-page-button:hover:not(:disabled) {
+  border-color: rgba(196, 226, 248, 0.22);
+  background: var(--control-raised-hover);
+  color: var(--ink);
+}
+
+.logbook-page-button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.logbook-page-button:disabled {
+  cursor: default;
+  opacity: 0.42;
 }
 
 .logbook-empty-state {
@@ -582,38 +702,43 @@
 
 @media (max-width: 1280px) {
   .logbook-toolbar {
-    grid-template-columns: minmax(0, 1fr) 96px minmax(0, 170px) minmax(0, 170px);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 92px) minmax(0, 96px) minmax(0, 150px) minmax(0, 150px);
   }
 
   .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) {
-    grid-template-columns: minmax(260px, 1fr) 96px minmax(0, 140px) minmax(0, 140px);
+    grid-template-columns: minmax(260px, 1fr) minmax(0, 92px) minmax(0, 96px) minmax(0, 132px) minmax(0, 132px);
   }
   .logbook-filter-drawer {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 900px) {
   .logbook-toolbar {
-    grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 92px 96px minmax(0, 1fr) minmax(0, 1fr);
     align-items: stretch;
   }
 
   .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) {
-    grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 92px 96px minmax(0, 1fr) minmax(0, 1fr);
   }
 
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-toggle {
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-date-filter {
     grid-column: 2;
   }
 
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-select {
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-toggle {
     grid-column: 3;
   }
 
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-sort {
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-select {
     grid-column: 4;
   }
+
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-sort {
+    grid-column: 5;
+  }
+  .logbook-date-filter,
   .logbook-filter-toggle,
   .toolbar-select.logbook-sort {
     width: 100%;
@@ -621,10 +746,6 @@
 
   .logbook-search.expanded,
   .logbook-search.closing {
-    grid-column: 1 / -1;
-  }
-
-  .logbook-date-range {
     grid-column: 1 / -1;
   }
 
@@ -638,6 +759,16 @@
 }
 
 @media (max-width: 760px) {
+  .logbook-panel {
+    grid-template-rows: auto auto auto minmax(220px, 1fr) auto;
+    height: auto;
+    min-height: 100%;
+  }
+
+  .logbook-table-wrap {
+    height: clamp(220px, 42vh, 320px);
+  }
+
   .logbook-toolbar,
   .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing),
   .logbook-filter-drawer {
@@ -651,6 +782,7 @@
   .toolbar-select.logbook-sort,
   .toolbar-select.logbook-filter-select,
   .logbook-search,
+  .logbook-date-filter,
   .logbook-filter-toggle,
   .logbook-combobox-filter {
     width: 100%;
@@ -662,29 +794,31 @@
     grid-column: auto;
   }
 
+  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-date-filter,
   .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-toggle,
   .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-select,
   .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-sort {
     grid-column: auto;
   }
 
-  .logbook-date-range {
-    grid-template-columns: 1fr;
-    row-gap: 6px;
-  }
-
-  .logbook-date-range label {
-    grid-template-columns: 1fr;
-    row-gap: 2px;
-  }
-
-  .logbook-date-range input[type="date"] {
+  .logbook-date-popover {
+    position: static;
     inline-size: 100%;
+    width: auto;
   }
 
   .logbook-inspector-facts,
   .logbook-inspector-columns {
     grid-template-columns: 1fr;
+  }
+
+  .logbook-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .logbook-pagination-controls {
+    justify-content: space-between;
   }
 }
 
@@ -694,5 +828,8 @@
   }
   .logbook-filter-drawer {
     transition: none;
+  }
+  .logbook-page-button {
+    transition-duration: 1ms;
   }
 }

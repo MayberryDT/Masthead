@@ -111,6 +111,37 @@ describe("HistoryPanel", () => {
     expect(html).toContain("Showing 8 of 8");
   });
 
+  test("renders page controls for canonical Logbook pages instead of load more", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        loadState={{
+          state: "ready",
+          sessions: Array.from({ length: 100 }, (_, index) => ({
+            project: "Masthead",
+            runtime: "codex",
+            sessionId: `session-${index + 1}`,
+            title: `Session ${index + 1}`
+          })),
+          total: 250
+        }}
+        loading={false}
+        pageIndex={1}
+        pageSize={100}
+        query=""
+        onPageChange={() => undefined}
+        onQueryChange={() => {}}
+      />
+    );
+
+    expect(html).toContain('aria-label="First page"');
+    expect(html).toContain('aria-label="Previous page"');
+    expect(html).toContain('aria-label="Next page"');
+    expect(html).toContain('aria-label="Last page"');
+    expect(html).toContain("Page 2 of 3");
+    expect(html).toContain("Showing 101-200 of 250");
+    expect(html).not.toContain("Load more");
+  });
+
   test("renders no-match queries with an explicit zero result count", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:Missing" onQueryChange={() => {}} />);
 
