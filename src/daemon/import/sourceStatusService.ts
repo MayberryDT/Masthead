@@ -40,7 +40,10 @@ export type AdapterStatusDto = {
   importedSessions: number;
   lastSyncAt?: string;
   diagnostics: AdapterDiagnostic[];
+  failureCount: number;
   sourceLocations: SourceStatusDto[];
+  sourceLocationCount: number;
+  queuedRecords: number;
   policies: {
     metadataImport: boolean;
     transcriptImport: boolean;
@@ -58,10 +61,19 @@ type SourceRow = {
 };
 
 type CountsRow = {
-  importedRecords: number | null;
-  queuedRecords: number | null;
-  failureCount: number | null;
+  failureCount: number;
+  importedRecords: number;
   lastSyncAt: string | null;
+  queuedRecords: number;
+};
+
+type ImportHealthRow = {
+  failure_count: number;
+  import_kind: string;
+  imported_count: number;
+  queued_count: number;
+  status: string;
+  updated_at: string;
 };
 
 export function getSourceStatuses(db: MastheadDatabase, discoveredSources: DiscoveredSource[] = []): SourceStatusDto[] {
@@ -131,9 +143,10 @@ export function getAdapterStatuses(db: MastheadDatabase, input: AdapterStatusInp
     const importedSessions = sourceLocations.reduce((total, source) => total + source.importedSessions, 0);
     const lastSyncAt = latestDate(sourceLocations.map((source) => source.lastSyncAt));
     const preflight = preflights.find((result) => result.runtime === adapter.runtime);
-    const diagnostics = [...(preflight?.diagnostics ?? [])];
+    const diagnostics = groupDiagnostics(preflight?.diagnostics ?? []);
     if (failureCount > 0) {
       diagnostics.push({
+        count: failureCount,
         code: "adapter_import_failures",
         message: `${failureCount} import failure${failureCount === 1 ? "" : "s"} recorded for ${adapter.name}.`,
         observedAt: lastSyncAt ?? new Date().toISOString(),
@@ -155,6 +168,7 @@ export function getAdapterStatuses(db: MastheadDatabase, input: AdapterStatusInp
       diagnostics,
       discoveredCount,
       discoveredSessions: discoveredCount,
+      failureCount,
       implementationState: adapter.implementationState,
       importedCount: importedSessions,
       importedSessions,
@@ -170,6 +184,8 @@ export function getAdapterStatuses(db: MastheadDatabase, input: AdapterStatusInp
       },
       runtime: adapter.runtime,
       sourceLocations,
+      sourceLocationCount: sourceLocations.length,
+      queuedRecords: sourceLocations.reduce((total, source) => total + source.queuedRecords, 0),
       state
     } satisfies AdapterStatusDto;
   });
@@ -178,6 +194,24 @@ export function getAdapterStatuses(db: MastheadDatabase, input: AdapterStatusInp
 function normalizeAdapterStatusInput(input: AdapterStatusInput): { sources: DiscoveredSource[]; preflights: SourcePreflightResult[] } {
   if (Array.isArray(input)) return { preflights: [], sources: input };
   return { preflights: input.preflights ?? [], sources: input.sources ?? [] };
+}
+
+function groupDiagnostics(diagnostics: AdapterDiagnostic[]): AdapterDiagnostic[] {
+  const groups = new Map<string, AdapterDiagnostic>();
+  for (const diagnostic of diagnostics) {
+    const key = [diagnostic.code, diagnostic.message, diagnostic.severity].join("\0");
+    const current = groups.get(key);
+    if (!current) {
+      groups.set(key, { ...diagnostic, count: diagnostic.count ?? 1 });
+      continue;
+    }
+    groups.set(key, {
+      ...current,
+      count: (current.count ?? 1) + (diagnostic.count ?? 1),
+      observedAt: latestDate([current.observedAt, diagnostic.observedAt]) ?? diagnostic.observedAt
+    });
+  }
+  return Array.from(groups.values());
 }
 
 function upsertDiscoveredSources(db: MastheadDatabase, sources: DiscoveredSource[]): void {
@@ -212,17 +246,40 @@ function upsertDiscoveredSources(db: MastheadDatabase, sources: DiscoveredSource
 }
 
 function importCounts(db: MastheadDatabase, sourceId: string): CountsRow {
-  return db
+  const rows = db
     .prepare(
-      `SELECT
-        COALESCE(SUM(imported_count), 0) AS importedRecords,
-        COALESCE(SUM(queued_count), 0) AS queuedRecords,
-        COALESCE(SUM(failure_count), 0) AS failureCount,
-        MAX(updated_at) AS lastSyncAt
+      `SELECT import_kind, status, imported_count, queued_count, failure_count, updated_at
       FROM import_jobs
-      WHERE source_id = ?`
+      WHERE source_id = ?
+      ORDER BY updated_at DESC, import_job_id DESC`
     )
-    .get(sourceId) as CountsRow;
+    .all(sourceId) as ImportHealthRow[];
+  const latestTerminalByKind = new Map<string, ImportHealthRow>();
+  let queuedRecords = 0;
+  let lastSyncAt: string | null = null;
+  for (const row of rows) {
+    lastSyncAt = latestDate([lastSyncAt ?? undefined, row.updated_at]) ?? null;
+    if (row.status === "queued" || row.status === "running" || row.status === "cancelling") {
+      queuedRecords += row.queued_count;
+      continue;
+    }
+    if (!latestTerminalByKind.has(row.import_kind)) {
+      latestTerminalByKind.set(row.import_kind, row);
+    }
+  }
+  let importedRecords = 0;
+  let failureCount = 0;
+  for (const row of latestTerminalByKind.values()) {
+    importedRecords += row.imported_count;
+    queuedRecords += row.queued_count;
+    failureCount += row.failure_count;
+  }
+  return {
+    failureCount,
+    importedRecords,
+    lastSyncAt,
+    queuedRecords
+  };
 }
 
 function policyEnabled(db: MastheadDatabase, sourceId: string, policyKind: string, defaultValue = false): boolean {

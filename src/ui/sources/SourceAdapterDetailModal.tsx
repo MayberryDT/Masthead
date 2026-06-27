@@ -20,11 +20,15 @@ type Props = {
   adapter: AdapterStatus;
   busy: boolean;
   checked?: boolean;
+  locationError?: string;
+  locationLoading?: boolean;
+  locationTotal?: number;
   onClose: () => void;
   onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
+  onLoadMoreLocations?: () => void;
   onSyncAdapter?: (runtime: string) => void;
   onToggleSelected?: (runtime: string, checked: boolean) => void;
 };
@@ -33,11 +37,15 @@ export function SourceAdapterDetailModal({
   adapter,
   busy,
   checked = false,
+  locationError,
+  locationLoading = false,
+  locationTotal,
   onClose,
   onEnableTranscriptImport,
   onExcludePath,
   onImportMetadata,
   onImportTranscripts,
+  onLoadMoreLocations,
   onSyncAdapter,
   onToggleSelected
 }: Props) {
@@ -51,6 +59,7 @@ export function SourceAdapterDetailModal({
   const titleId = `${view.runtime}-source-detail-title`;
   const discoveredCount = view.discoveredCount ?? view.discoveredSessions;
   const importedCount = view.importedCount ?? view.importedSessions;
+  const sourceLocationCount = locationTotal ?? view.sourceLocationCount ?? view.sourceLocations.length;
   const modalClassName = [
     "session-detail-modal",
     "source-detail-modal",
@@ -118,7 +127,7 @@ export function SourceAdapterDetailModal({
             <span>{stateLabel(state)}</span>
             <span>{discoveredCount} discovered</span>
             <span>{importedCount} imported</span>
-            <span>{view.sourceLocations.length} locations</span>
+            <span>{sourceLocationCount} locations</span>
             <span>{formatLastSync(view.lastSyncAt)}</span>
           </div>
           <div className="modal-title-row">
@@ -194,15 +203,21 @@ export function SourceAdapterDetailModal({
               state={state}
             />
 
-            {view.sourceLocations.length > 0 ? (
+            {locationLoading || locationError || view.sourceLocations.length > 0 ? (
               <section className="detail-section source-detail-section" aria-label={`${label} source locations`}>
                 <div className="source-detail-section-head">
                   <div>
                     <p className="mono-label">Source locations</p>
-                    <h3>{view.sourceLocations.length} known locations</h3>
+                    <h3>{locationLoading && view.sourceLocations.length === 0 ? "Loading locations" : `${view.sourceLocations.length} of ${sourceLocationCount} known locations`}</h3>
                   </div>
+                  {view.sourceLocations.length < sourceLocationCount ? (
+                    <AppButton variant="quiet" disabled={busy || locationLoading || !onLoadMoreLocations} onClick={onLoadMoreLocations}>
+                      Load more
+                    </AppButton>
+                  ) : null}
                 </div>
-                <SourcePathTable sources={view.sourceLocations} busy={busy} onExcludePath={onExcludePath} />
+                {locationError ? <p className="surface-status">{locationError}</p> : null}
+                {view.sourceLocations.length > 0 ? <SourcePathTable sources={view.sourceLocations} busy={busy} onExcludePath={onExcludePath} /> : null}
               </section>
             ) : null}
           </div>

@@ -34,11 +34,13 @@ export type SourceStatus = {
 
 export type SourceDiagnostic = {
   code: string;
+  count?: number;
   message: string;
   severity: "info" | "warning" | "error";
   observedAt?: string;
   details?: string;
   path?: string;
+  sampleSourceIds?: string[];
 };
 
 export type AdapterStatus = {
@@ -54,6 +56,9 @@ export type AdapterStatus = {
   lastSyncAt?: string;
   checkedPaths?: string[];
   diagnostics?: SourceDiagnostic[];
+  failureCount?: number;
+  sourceLocationCount?: number;
+  queuedRecords?: number;
   sourceLocations: SourceStatus[];
   policies: {
     metadataImport: boolean;
@@ -79,6 +84,20 @@ export type ImportJob = {
   progressCurrent?: number;
   progressTotal?: number;
   progressPercent?: number;
+};
+
+export type ImportJobPage = {
+  imports: ImportJob[];
+  limit: number;
+  offset: number;
+  total: number;
+};
+
+export type SourceStatusPage = {
+  limit: number;
+  offset: number;
+  sources: SourceStatus[];
+  total: number;
 };
 
 export type AdapterImportActionResult = {
@@ -486,14 +505,39 @@ export async function listSources(baseUrl = defaultLiveProjectionUrl()): Promise
   return body.sources;
 }
 
-export async function listAdapters(baseUrl = defaultLiveProjectionUrl()): Promise<AdapterStatus[]> {
+export async function listAdapters(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { includeLocations?: boolean } = {}
+): Promise<AdapterStatus[]> {
   const url = new URL(baseUrl);
   url.pathname = "/adapters";
   url.search = "";
+  if (options.includeLocations !== undefined) url.searchParams.set("includeLocations", String(options.includeLocations));
   const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`adapters request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; adapters: AdapterStatus[] };
   return body.adapters;
+}
+
+export async function listAdapterSources(
+  runtime: string,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
+): Promise<SourceStatusPage> {
+  const url = new URL(baseUrl);
+  url.pathname = `/adapters/${encodeURIComponent(runtime)}/sources`;
+  url.search = "";
+  if (options.limit !== undefined) url.searchParams.set("limit", String(options.limit));
+  if (options.offset !== undefined) url.searchParams.set("offset", String(options.offset));
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`adapter sources request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; limit: number; offset: number; sources: SourceStatus[]; total: number };
+  return {
+    limit: body.limit,
+    offset: body.offset,
+    sources: body.sources,
+    total: body.total
+  };
 }
 
 export async function scanSources(baseUrl = defaultLiveProjectionUrl()): Promise<SourceScanResult> {
@@ -573,15 +617,32 @@ export async function startImport(
 
 export async function listImports(
   baseUrl = defaultLiveProjectionUrl(),
-  options: { signal?: AbortSignal } = {}
-): Promise<ImportJob[]> {
+  options: {
+    adapterId?: string;
+    limit?: number;
+    offset?: number;
+    signal?: AbortSignal;
+    sourceId?: string;
+    status?: ImportJob["status"] | "active";
+  } = {}
+): Promise<ImportJobPage> {
   const url = new URL(baseUrl);
   url.pathname = "/imports";
   url.search = "";
+  if (options.limit !== undefined) url.searchParams.set("limit", String(options.limit));
+  if (options.offset !== undefined) url.searchParams.set("offset", String(options.offset));
+  if (options.adapterId) url.searchParams.set("adapterId", options.adapterId);
+  if (options.sourceId) url.searchParams.set("sourceId", options.sourceId);
+  if (options.status) url.searchParams.set("status", options.status);
   const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
   if (!response.ok) throw new Error(`imports request failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; imports: ImportJob[] };
-  return body.imports;
+  const body = (await response.json()) as { ok: true; imports: ImportJob[]; limit?: number; offset?: number; total?: number };
+  return {
+    imports: body.imports,
+    limit: body.limit ?? body.imports.length,
+    offset: body.offset ?? 0,
+    total: body.total ?? body.imports.length
+  };
 }
 
 export async function cancelImport(importJobId: string, baseUrl = defaultLiveProjectionUrl()): Promise<ImportJob> {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AdapterStatus } from "../../app/daemonClient";
+import type { AdapterStatus, SourceStatus, SourceStatusPage } from "../../app/daemonClient";
 import { AdapterRow } from "./AdapterRow";
 import { SourceAdapterDetailModal } from "./SourceAdapterDetailModal";
 
@@ -10,6 +10,7 @@ type Props = {
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
+  onLoadAdapterSources?: (runtime: string, page: { limit: number; offset: number }) => Promise<SourceStatusPage>;
   onToggleSelected?: (runtime: string, checked: boolean) => void;
   onSyncAdapter?: (runtime: string) => void;
   selectedRuntimes?: Set<string>;
@@ -22,17 +23,78 @@ export function AdapterList({
   onExcludePath,
   onImportMetadata,
   onImportTranscripts,
+  onLoadAdapterSources,
   onSyncAdapter,
   onToggleSelected,
   selectedRuntimes
 }: Props) {
   const [openRuntime, setOpenRuntime] = useState<string | undefined>(undefined);
+  const [adapterSources, setAdapterSources] = useState<Record<string, { error?: string; loading: boolean; sources: SourceStatus[]; total: number }>>({});
   const openAdapter = adapters.find((adapter) => adapter.runtime === openRuntime);
+  const openAdapterSources = openRuntime ? adapterSources[openRuntime] : undefined;
+  const openAdapterWithSources =
+    openAdapter && openAdapterSources
+      ? { ...openAdapter, sourceLocations: openAdapterSources.sources, sourceLocationCount: openAdapterSources.total }
+      : openAdapter;
 
   useEffect(() => {
     if (!openRuntime) return;
     if (!adapters.some((adapter) => adapter.runtime === openRuntime)) setOpenRuntime(undefined);
   }, [adapters, openRuntime]);
+
+  useEffect(() => {
+    if (!openRuntime || !openAdapter || !onLoadAdapterSources || openAdapter.sourceLocations.length > 0) return;
+    const current = adapterSources[openRuntime];
+    if (current?.loading || current?.sources.length) return;
+    setAdapterSources((state) => ({ ...state, [openRuntime]: { loading: true, sources: [], total: openAdapter.sourceLocationCount ?? 0 } }));
+    void onLoadAdapterSources(openRuntime, { limit: 100, offset: 0 })
+      .then((page) => {
+        setAdapterSources((state) => ({
+          ...state,
+          [openRuntime]: { loading: false, sources: page.sources, total: page.total }
+        }));
+      })
+      .catch((error: unknown) => {
+        setAdapterSources((state) => ({
+          ...state,
+          [openRuntime]: {
+            error: error instanceof Error ? error.message : String(error),
+            loading: false,
+            sources: [],
+            total: openAdapter.sourceLocationCount ?? 0
+          }
+        }));
+      });
+  }, [adapterSources, onLoadAdapterSources, openAdapter, openRuntime]);
+
+  const handleLoadMoreSources = (runtime: string) => {
+    if (!onLoadAdapterSources) return;
+    const current = adapterSources[runtime];
+    if (!current || current.loading || current.sources.length >= current.total) return;
+    setAdapterSources((state) => ({ ...state, [runtime]: { ...current, loading: true } }));
+    void onLoadAdapterSources(runtime, { limit: 100, offset: current.sources.length })
+      .then((page) => {
+        setAdapterSources((state) => {
+          const latest = state[runtime] ?? current;
+          const byId = new Map(latest.sources.map((source) => [source.sourceId, source]));
+          for (const source of page.sources) byId.set(source.sourceId, source);
+          return {
+            ...state,
+            [runtime]: { loading: false, sources: Array.from(byId.values()), total: page.total }
+          };
+        });
+      })
+      .catch((error: unknown) => {
+        setAdapterSources((state) => ({
+          ...state,
+          [runtime]: {
+            ...current,
+            error: error instanceof Error ? error.message : String(error),
+            loading: false
+          }
+        }));
+      });
+  };
 
   if (adapters.length === 0) {
     return (
@@ -62,16 +124,20 @@ export function AdapterList({
           />
         ))}
       </div>
-      {openAdapter ? (
+      {openAdapterWithSources ? (
         <SourceAdapterDetailModal
-          adapter={openAdapter}
+          adapter={openAdapterWithSources}
           busy={busy}
-          checked={selectedRuntimes?.has(openAdapter.runtime) ?? false}
+          checked={selectedRuntimes?.has(openAdapterWithSources.runtime) ?? false}
+          locationError={openAdapterSources?.error}
+          locationLoading={openAdapterSources?.loading}
+          locationTotal={openAdapterSources?.total ?? openAdapterWithSources.sourceLocationCount}
           onClose={() => setOpenRuntime(undefined)}
           onEnableTranscriptImport={onEnableTranscriptImport}
           onExcludePath={onExcludePath}
           onImportMetadata={onImportMetadata}
           onImportTranscripts={onImportTranscripts}
+          onLoadMoreLocations={() => handleLoadMoreSources(openAdapterWithSources.runtime)}
           onSyncAdapter={onSyncAdapter}
           onToggleSelected={onToggleSelected}
         />

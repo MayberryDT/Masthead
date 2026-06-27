@@ -26,7 +26,7 @@ import {
   getDataSummary,
   type DeleteMastheadDataScope
 } from "./db/dataLifecycleRepository.ts";
-import { getImportJob, listImportJobs, type ImportJobKind } from "./db/importJobRepository.ts";
+import { getImportJob, listImportJobPage, listImportJobs, type ImportJobKind, type ImportJobListStatus } from "./db/importJobRepository.ts";
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
@@ -697,9 +697,46 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/adapters") {
+      const includeLocations = url.searchParams.get("includeLocations") !== "false";
+      const adapters = getAdapterStatuses(database).map((adapter) =>
+        includeLocations
+          ? adapter
+          : {
+              ...adapter,
+              sourceLocations: []
+            }
+      );
       sendJson(request, response, config.allowedOrigins, 200, {
-        adapters: getAdapterStatuses(database),
+        adapters,
         ok: true
+      });
+      return;
+    }
+
+    const adapterSourcesMatch = url.pathname.match(/^\/adapters\/([^/]+)\/sources$/);
+    if (request.method === "GET" && adapterSourcesMatch) {
+      const runtime = decodeURIComponent(adapterSourcesMatch[1] ?? "");
+      const limit = parseBoundedInteger(url.searchParams.get("limit"), 100, 1, 500);
+      const offset = parseBoundedInteger(url.searchParams.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
+      if (!isRuntimeKind(runtime)) {
+        sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_adapter" });
+        return;
+      }
+      if (!limit.ok) {
+        sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_limit" });
+        return;
+      }
+      if (!offset.ok) {
+        sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_offset" });
+        return;
+      }
+      const sources = getSourceStatuses(database).filter((source) => source.runtime === runtime);
+      sendJson(request, response, config.allowedOrigins, 200, {
+        limit: limit.value,
+        offset: offset.value,
+        ok: true,
+        sources: sources.slice(offset.value, offset.value + limit.value),
+        total: sources.length
       });
       return;
     }
@@ -973,9 +1010,38 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/imports") {
+      const limit = parseBoundedInteger(url.searchParams.get("limit"), 50, 1, 200);
+      const offset = parseBoundedInteger(url.searchParams.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
+      const adapterId = url.searchParams.get("adapterId");
+      const status = url.searchParams.get("status");
+      if (!limit.ok) {
+        sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_limit" });
+        return;
+      }
+      if (!offset.ok) {
+        sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_offset" });
+        return;
+      }
+      if (adapterId && !RUNTIME_KINDS.includes(adapterId as RuntimeKind)) {
+        sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_adapter" });
+        return;
+      }
+      if (status && !isImportJobListStatus(status)) {
+        sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_status" });
+        return;
+      }
+      const page = listImportJobPage(database, {
+        adapterId: adapterId ? (adapterId as RuntimeKind) : undefined,
+        limit: limit.value,
+        offset: offset.value,
+        sourceId: url.searchParams.get("sourceId") ?? undefined,
+        status: status ? (status as ImportJobListStatus) : undefined
+      });
       sendJson(request, response, config.allowedOrigins, 200, {
+        ...page,
+        jobs: page.jobs,
         ok: true,
-        imports: listImportJobs(database)
+        imports: page.jobs
       });
       return;
     }
@@ -1919,6 +1985,22 @@ function isDeleteScopeClientError(error: unknown): boolean {
 
 function isImportJobKind(value: unknown): value is ImportJobKind {
   return value === "metadata" || value === "transcript" || value === "enrichment";
+}
+
+function isImportJobListStatus(value: unknown): value is ImportJobListStatus {
+  return value === "active" || value === "queued" || value === "running" || value === "succeeded" || value === "failed" || value === "cancelled" || value === "cancelling";
+}
+
+function parseBoundedInteger(
+  value: string | null,
+  defaultValue: number,
+  min: number,
+  max: number
+): { ok: true; value: number } | { ok: false } {
+  if (value === null || value === "") return { ok: true, value: defaultValue };
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return { ok: false };
+  return { ok: true, value: parsed };
 }
 
 function isRuntimeKind(value: unknown): value is RuntimeKind {

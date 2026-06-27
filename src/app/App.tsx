@@ -53,6 +53,7 @@ import {
   getLogbookSessionExcerpts,
   getSessionDossier,
   getSessionTranscript,
+  listAdapterSources,
   getUsageStats,
   importAdapterMetadata,
   importAdapterTranscripts,
@@ -70,6 +71,7 @@ import {
   type LogbookExcerpt,
   type AdapterStatus,
   type ImportJob,
+  type ImportJobPage,
   type LogbookSearchResult,
   type LogbookSessionDetail,
   type LogbookSort,
@@ -92,6 +94,7 @@ import { SourcesSurface } from "./surfaces/SourcesSurface";
 import { UsageSurface } from "./surfaces/UsageSurface";
 import { UsagePanel } from "../ui/usage/UsagePanel";
 import { APP_VERSION_LABEL } from "./version";
+import { shouldRefreshSourceInventory } from "./sourceInventoryRefresh";
 import type { ConnectionState } from "../ui/ConnectionStatus";
 
 type ConnectorActionState =
@@ -102,6 +105,7 @@ type ConnectorActionState =
   | { state: "error"; message?: string };
 
 type CardLayoutSnapshot = Map<string, DOMRect>;
+type ImportPageState = Pick<ImportJobPage, "limit" | "offset" | "total">;
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
@@ -127,6 +131,18 @@ const emptyLiveBoard: LiveBoardProjection = {
   attentionQueue: [],
   conflicts: []
 };
+
+function isActiveImport(job: ImportJob): boolean {
+  return job.status === "queued" || job.status === "running" || job.status === "cancelling";
+}
+
+function mergeImportRows(activeImports: ImportJob[], historyImports: ImportJob[]): ImportJob[] {
+  const rows = new Map<string, ImportJob>();
+  for (const job of [...activeImports, ...historyImports]) {
+    if (!rows.has(job.importJobId)) rows.set(job.importJobId, job);
+  }
+  return Array.from(rows.values());
+}
 
 
 export function App() {
@@ -165,6 +181,7 @@ export function App() {
   const [sources, setSources] = useState<SourceStatus[]>([]);
   const [adapters, setAdapters] = useState<AdapterStatus[]>([]);
   const [imports, setImports] = useState<ImportJob[]>([]);
+  const [importPage, setImportPage] = useState<ImportPageState>({ limit: 50, offset: 0, total: 0 });
   const [sourcesBusy, setSourcesBusy] = useState(false);
   const [sourcesStatus, setSourcesStatus] = useState<string>();
   const [logbookResult, setLogbookResult] = useState<LogbookSearchResult>();
@@ -181,6 +198,9 @@ export function App() {
   const [sidebarUsageStats, setSidebarUsageStats] = useState<UsageStatsDto>();
   const [sidebarUsageLoading, setSidebarUsageLoading] = useState(false);
   const [sidebarUsageError, setSidebarUsageError] = useState<string>();
+  const sourceInventoryLoadedAtRef = useRef<number | undefined>(undefined);
+  const sourceInventoryLoadedForUrlRef = useRef<string | undefined>(undefined);
+  const sourceInventoryLoadInFlightRef = useRef(false);
   const [logbookProjectOptions, setLogbookProjectOptions] = useState<string[]>([]);
   const [logbookFilters, setLogbookFilters] = useState<LogbookFilterState>({});
   const [selectedLogbookSessionId, setSelectedLogbookSessionId] = useState<string>();
@@ -579,27 +599,52 @@ export function App() {
     }
   };
 
-  const loadSourceInventory = useCallback(async (options: { showStatus?: boolean } = {}) => {
-    const [adapterResult, sourceResult, importResult] = await Promise.allSettled([
-      listAdapters(activeProjectionUrl),
-      listSources(activeProjectionUrl),
-      listImports(activeProjectionUrl)
-    ]);
-    if (adapterResult.status === "fulfilled") setAdapters(adapterResult.value);
-    if (sourceResult.status === "fulfilled") setSources(sourceResult.value);
-    if (importResult.status === "fulfilled") setImports(importResult.value);
-    if (sourceResult.status === "rejected" && adapterResult.status === "rejected" && importResult.status === "rejected") {
-      throw sourceResult.reason;
+  const loadSourceInventory = useCallback(async (options: { appendImports?: boolean; importOffset?: number; showStatus?: boolean } = {}) => {
+    sourceInventoryLoadInFlightRef.current = true;
+    try {
+      const importLimit = importPage.limit;
+      const importOffset = options.importOffset ?? 0;
+      const [adapterResult, sourceResult, importResult, activeImportResult] = await Promise.allSettled([
+        listAdapters(activeProjectionUrl, { includeLocations: false }),
+        listSources(activeProjectionUrl),
+        listImports(activeProjectionUrl, { limit: importLimit, offset: importOffset }),
+        listImports(activeProjectionUrl, { limit: 50, offset: 0, status: "active" })
+      ]);
+      if (adapterResult.status === "fulfilled") setAdapters(adapterResult.value);
+      if (sourceResult.status === "fulfilled") setSources(sourceResult.value);
+      if (importResult.status === "fulfilled") {
+        const activeImports = activeImportResult.status === "fulfilled" ? activeImportResult.value.imports : [];
+        setImports((current) =>
+          mergeImportRows(activeImports, options.appendImports ? [...current.filter((job) => !isActiveImport(job)), ...importResult.value.imports] : importResult.value.imports)
+        );
+        setImportPage({
+          limit: importResult.value.limit,
+          offset: importResult.value.offset,
+          total: Math.max(importResult.value.total, activeImports.length + importResult.value.imports.length)
+        });
+      }
+      if (sourceResult.status === "rejected" && adapterResult.status === "rejected" && importResult.status === "rejected") {
+        throw sourceResult.reason;
+      }
+      if (adapterResult.status === "fulfilled" || sourceResult.status === "fulfilled" || importResult.status === "fulfilled") {
+        sourceInventoryLoadedAtRef.current = Date.now();
+        sourceInventoryLoadedForUrlRef.current = activeProjectionUrl;
+      }
+      if (options.showStatus && sourceResult.status === "fulfilled") {
+        setSourcesStatus(`${sourceResult.value.length} source${sourceResult.value.length === 1 ? "" : "s"} detected.`);
+      }
+      return {
+        adapters: adapterResult.status === "fulfilled" ? adapterResult.value : undefined,
+        imports:
+          importResult.status === "fulfilled"
+            ? mergeImportRows(activeImportResult.status === "fulfilled" ? activeImportResult.value.imports : [], importResult.value.imports)
+            : undefined,
+        sources: sourceResult.status === "fulfilled" ? sourceResult.value : undefined
+      };
+    } finally {
+      sourceInventoryLoadInFlightRef.current = false;
     }
-    if (options.showStatus && sourceResult.status === "fulfilled") {
-      setSourcesStatus(`${sourceResult.value.length} source${sourceResult.value.length === 1 ? "" : "s"} detected.`);
-    }
-    return {
-      adapters: adapterResult.status === "fulfilled" ? adapterResult.value : undefined,
-      imports: importResult.status === "fulfilled" ? importResult.value : undefined,
-      sources: sourceResult.status === "fulfilled" ? sourceResult.value : undefined
-    };
-  }, [activeProjectionUrl]);
+  }, [activeProjectionUrl, importPage.limit]);
 
   const handleRefreshSources = useCallback(async () => {
     setSourcesBusy(true);
@@ -611,6 +656,21 @@ export function App() {
       setSourcesBusy(false);
     }
   }, [loadSourceInventory]);
+
+  const handleLoadMoreImports = useCallback(async (page: { limit: number; offset: number }) => {
+    setSourcesBusy(true);
+    try {
+      await loadSourceInventory({ appendImports: true, importOffset: page.offset });
+    } catch (error) {
+      setSourcesStatus(`Import history load failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  }, [loadSourceInventory]);
+
+  const handleLoadAdapterSources = useCallback(async (runtime: string, page: { limit: number; offset: number }) => {
+    return listAdapterSources(runtime, activeProjectionUrl, page);
+  }, [activeProjectionUrl]);
 
   const handleScanSources = useCallback(async () => {
     setSourcesBusy(true);
@@ -636,8 +696,11 @@ export function App() {
 
   useEffect(() => {
     if (activeSurface !== "sources") return;
+    if (sourceInventoryLoadInFlightRef.current) return;
+    const lastLoadedAt = sourceInventoryLoadedForUrlRef.current === activeProjectionUrl ? sourceInventoryLoadedAtRef.current : undefined;
+    if (!shouldRefreshSourceInventory({ activeSurface, lastLoadedAt, now: Date.now() })) return;
     void handleRefreshSources();
-  }, [activeSurface, handleRefreshSources]);
+  }, [activeProjectionUrl, activeSurface, handleRefreshSources]);
 
   useEffect(() => {
     if (activeSurface !== "logbook" || effectiveLiveConnection.state !== "live") return;
@@ -1259,6 +1322,9 @@ export function App() {
           sources={sources}
           adapters={adapters}
           imports={imports}
+          importLimit={importPage.limit}
+          importOffset={importPage.offset}
+          importTotal={importPage.total}
           busy={sourcesBusy}
           status={sourcesStatus}
           onCancelImport={handleCancelImport}
@@ -1267,6 +1333,8 @@ export function App() {
           onExcludePath={handleExcludeSourcePath}
           onImportMetadata={handleImportMetadata}
           onImportTranscripts={handleImportTranscripts}
+          onLoadAdapterSources={handleLoadAdapterSources}
+          onLoadMoreImports={handleLoadMoreImports}
           onPollImports={handlePollActiveImports}
           onRefresh={handleRefreshSources}
           onRetryImport={handleRetryImport}
