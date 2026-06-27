@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { SourcesPanel } from "../SourcesPanel";
 
 describe("SourcesPanel", () => {
-  test("renders detected paths and import progress without raw transcript text", () => {
+  test("renders source cards and import progress without raw transcript text", () => {
     const html = renderToStaticMarkup(
       <SourcesPanel
         adapters={[
@@ -59,13 +59,14 @@ describe("SourcesPanel", () => {
     );
 
     expect(html).toContain("Codex");
-    expect(html).toContain("/home/tyler/.codex/sessions");
     expect(html).toContain("742");
+    expect(html).toContain("source-adapter-grid");
+    expect(html).toContain("adapter-card");
+    expect(html).toContain("Details");
     expect(html).toContain("IMPORT JOBS");
     expect(html).toContain("running");
     expect(html).toContain("Metadata import ready");
-    expect(html).not.toContain("surface-card-grid");
-    expect(html).not.toContain("source-card");
+    expect(html).not.toContain("/home/tyler/.codex/sessions");
     expect(html).not.toContain("hello from transcript");
   });
 });

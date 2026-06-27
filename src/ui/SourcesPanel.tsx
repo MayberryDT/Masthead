@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AdapterStatus, ImportJob, SourceStatus } from "../app/daemonClient";
 import { AppButton } from "./primitives/AppButton";
-import { StatStrip } from "./primitives/StatStrip";
 import { AdapterList } from "./sources/AdapterList";
 import { ImportJobsTable } from "./sources/ImportJobsTable";
 
@@ -66,34 +65,55 @@ export function SourcesPanel({
 
   return (
     <section id="sources" className="sources-panel sources-management surface-panel" aria-label="Session sources">
-      <div className="sources-command-row">
-        <div className="sources-actions">
-          <AppButton type="button" onClick={onRefresh} disabled={busy}>
-            Discover sources
-          </AppButton>
+      <div className="sources-action-bar">
+        <div className="sources-action-group">
           <AppButton type="button" onClick={onScan ?? onRefresh} disabled={busy}>
             Scan this computer
           </AppButton>
-          <AppButton type="button" variant="primary" onClick={() => onConnectSelected?.(selectedList)} disabled={busy || !onConnectSelected || selectedList.length === 0}>
+          <AppButton type="button" onClick={onRefresh} disabled={busy}>
+            Discover sources
+          </AppButton>
+          <AppButton
+            type="button"
+            variant="primary"
+            onClick={() => onConnectSelected?.(selectedList)}
+            disabled={busy || !onConnectSelected || selectedList.length === 0}
+          >
             Connect selected
           </AppButton>
-          <AppButton type="button" variant="quiet" onClick={() => selectedList.forEach((runtime) => onSyncAdapter?.(runtime))} disabled={busy || !onSyncAdapter || selectedList.length === 0}>
+          <AppButton
+            type="button"
+            variant="quiet"
+            onClick={() => selectedList.forEach((runtime) => onSyncAdapter?.(runtime))}
+            disabled={busy || !onSyncAdapter || selectedList.length === 0}
+          >
             Sync connected
           </AppButton>
         </div>
+        <dl className="sources-action-summary" aria-label="Source summary">
+          <div>
+            <dt>Adapters</dt>
+            <dd>{adapterRows.length}</dd>
+          </div>
+          <div>
+            <dt>Selected</dt>
+            <dd>{selectedList.length}</dd>
+          </div>
+          <div>
+            <dt>Sessions</dt>
+            <dd>{totals.sessions}</dd>
+          </div>
+          <div>
+            <dt>Queued</dt>
+            <dd>{totals.queued}</dd>
+          </div>
+          <div>
+            <dt>Issues</dt>
+            <dd>{totals.failures}</dd>
+          </div>
+        </dl>
         {status ? <p className="sources-status surface-status">{status}</p> : null}
       </div>
-
-      <StatStrip
-        label="Source summary"
-        items={[
-          { label: "Adapters", value: String(adapterRows.length) },
-          { label: "Sessions", value: String(totals.sessions) },
-          { label: "Imported", value: String(totals.imported) },
-          { label: "Queued", value: String(totals.queued) },
-          { label: "Failures", value: String(totals.failures) }
-        ]}
-      />
 
       <AdapterList
         adapters={adapterRows}

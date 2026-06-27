@@ -14,35 +14,37 @@ export function ImportJobsTable({ busy = false, imports, onCancelImport, onRetry
   return (
     <section className="import-jobs-section" aria-label="Import jobs">
       <p className="mono-label">IMPORT JOBS</p>
-      <table className="import-jobs-table">
-        <thead>
-          <tr>
-            <th>Started</th>
-            <th>Source</th>
-            <th>Type</th>
-            <th>Progress</th>
-            <th>Current path</th>
-            <th>Status</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {imports.map((job) => (
-            <tr key={job.importJobId}>
-              <td>{formatTime(job.updatedAt)}</td>
-              <td title={job.sourceId}>{job.sourceId}</td>
-              <td>{job.importKind}</td>
-              <td>{formatProgress(job)}</td>
-              <td title={job.currentPath}>{job.currentPath ?? "—"}</td>
-              <td>
-                <StatusBadge tone={statusTone(job.status)}>{job.status}</StatusBadge>
-                {job.failureMessage ? <p className="surface-status import-job-failure">{job.failureMessage}</p> : null}
-              </td>
-              <td>{jobAction(job, { busy, onCancelImport, onRetryImport })}</td>
+      <div className="import-jobs-table-frame">
+        <table className="import-jobs-table">
+          <thead>
+            <tr>
+              <th>Started</th>
+              <th>Source</th>
+              <th>Type</th>
+              <th>Progress</th>
+              <th>Current path</th>
+              <th>Status</th>
+              <th>Action</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {imports.map((job) => (
+              <tr key={job.importJobId}>
+                <td>{formatTime(job.updatedAt)}</td>
+                <td>{job.sourceId}</td>
+                <td>{job.importKind}</td>
+                <td>{formatProgress(job)}</td>
+                <td>{job.currentPath ?? "—"}</td>
+                <td>
+                  <StatusBadge tone={statusTone(job.status)}>{job.status}</StatusBadge>
+                  {job.failureMessage ? <p className="surface-status import-job-failure">{job.failureMessage}</p> : null}
+                </td>
+                <td>{jobAction(job, { busy, onCancelImport, onRetryImport })}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

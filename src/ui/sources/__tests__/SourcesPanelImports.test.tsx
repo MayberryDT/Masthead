@@ -41,6 +41,10 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Discover sources").click();
       buttonByText(container, "Scan this computer").click();
       buttonByText(container, "Connect selected").click();
+      buttonByText(container, "Details").click();
+    });
+
+    await act(async () => {
       buttonByText(container, "Import metadata").click();
       buttonByText(container, "Enable transcript import").click();
       buttonByText(container, "Sync").click();
@@ -73,6 +77,10 @@ describe("SourcesPanel import controls", () => {
           sources={[]}
         />
       );
+    });
+
+    await act(async () => {
+      buttonByText(container, "Details").click();
     });
 
     await act(async () => {
