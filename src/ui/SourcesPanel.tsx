@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AdapterStatus, ImportJob, SourceStatus } from "../app/daemonClient";
+import type { AdapterStatus, ImportJob, SourceStatus, SourceStatusPage } from "../app/daemonClient";
 import { AppButton } from "./primitives/AppButton";
 import { AdapterList } from "./sources/AdapterList";
 import { ImportJobsTable } from "./sources/ImportJobsTable";
@@ -7,6 +7,9 @@ import { ImportJobsTable } from "./sources/ImportJobsTable";
 type Props = {
   adapters?: AdapterStatus[];
   imports?: ImportJob[];
+  importLimit?: number;
+  importOffset?: number;
+  importTotal?: number;
   sources: SourceStatus[];
   busy: boolean;
   status?: string;
@@ -15,6 +18,8 @@ type Props = {
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
+  onLoadAdapterSources?: (runtime: string, page: { limit: number; offset: number }) => Promise<SourceStatusPage>;
+  onLoadMoreImports?: (page: { limit: number; offset: number }) => void;
   onPollImports?: () => void;
   onConnectSelected?: (runtimes: string[]) => void;
   onRefresh: () => void;
@@ -27,11 +32,16 @@ export function SourcesPanel({
   adapters,
   busy,
   imports = [],
+  importLimit,
+  importOffset,
+  importTotal,
   onCancelImport,
   onEnableTranscriptImport,
   onExcludePath,
   onImportMetadata,
   onImportTranscripts,
+  onLoadAdapterSources,
+  onLoadMoreImports,
   onPollImports,
   onConnectSelected,
   onRefresh,
@@ -122,6 +132,7 @@ export function SourcesPanel({
         onExcludePath={onExcludePath}
         onImportMetadata={onImportMetadata}
         onImportTranscripts={onImportTranscripts}
+        onLoadAdapterSources={onLoadAdapterSources}
         onToggleSelected={(runtime, checked) => {
           setSelectedRuntimes((current) => {
             const next = new Set(current);
@@ -133,7 +144,16 @@ export function SourcesPanel({
         onSyncAdapter={onSyncAdapter}
         selectedRuntimes={selectedRuntimes}
       />
-      <ImportJobsTable busy={busy} imports={imports} onCancelImport={onCancelImport} onRetryImport={onRetryImport} />
+      <ImportJobsTable
+        busy={busy}
+        imports={imports}
+        limit={importLimit}
+        offset={importOffset}
+        onCancelImport={onCancelImport}
+        onLoadMore={onLoadMoreImports}
+        onRetryImport={onRetryImport}
+        total={importTotal}
+      />
     </section>
   );
 }
@@ -162,24 +182,26 @@ function adaptersFromSources(sources: SourceStatus[]): AdapterStatus[] {
 }
 
 type AdapterTotalsStatus = AdapterStatus & {
-  diagnostics?: { severity?: string }[];
+  diagnostics?: { count?: number; severity?: string }[];
+  failureCount?: number;
   importedCount?: number;
+  queuedRecords?: number;
 };
 
 function sourceTotals(adapters: AdapterStatus[]) {
   return adapters.reduce(
     (totals, adapter) => {
       const row = adapter as AdapterTotalsStatus;
-      const sourceFailures = row.sourceLocations.reduce(
+      const sourceFailures = row.failureCount ?? row.sourceLocations.reduce(
         (sourceTotal, source) => sourceTotal + (source.failureCount ?? source.failures ?? 0),
         0
       );
-      const diagnosticFailures = row.diagnostics?.filter((diagnostic) => diagnostic.severity === "error").length ?? 0;
+      const diagnosticFailures = row.diagnostics?.filter((diagnostic) => diagnostic.severity === "error").reduce((count, diagnostic) => count + (diagnostic.count ?? 1), 0) ?? 0;
       const importedRecords = row.sourceLocations.reduce(
         (sourceTotal, source) => sourceTotal + (source.importedRecords ?? source.importedCount ?? 0),
         0
       );
-      const queuedRecords = row.sourceLocations.reduce(
+      const queuedRecords = row.queuedRecords ?? row.sourceLocations.reduce(
         (sourceTotal, source) => sourceTotal + (source.queuedRecords ?? source.queuedCount ?? 0),
         0
       );

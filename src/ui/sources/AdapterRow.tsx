@@ -16,6 +16,8 @@ export type AdapterRowModel = Omit<AdapterStatus, "state" | "sourceLocations"> &
   discoveredCount?: number;
   implementationState?: string;
   importedCount?: number;
+  failureCount?: number;
+  sourceLocationCount?: number;
   sourceLocations: SourceLocationWithDiagnostics[];
   state: AdapterVisualState;
 };
@@ -39,12 +41,12 @@ export function AdapterRow({
   const state = adapterState(view);
   const discoveredCount = view.discoveredCount ?? view.discoveredSessions;
   const importedCount = view.importedCount ?? view.importedSessions;
-  const sourceCount = view.sourceLocations.length;
+  const sourceCount = view.sourceLocationCount ?? view.sourceLocations.length;
   const diagnosticCount = [
     ...(view.diagnostics ?? []),
     ...view.sourceLocations.flatMap((source) => source.diagnostics ?? [])
-  ].filter((diagnostic) => diagnostic.message || diagnostic.code || diagnostic.details).length;
-  const failureCount = view.sourceLocations.reduce(
+  ].reduce((count, diagnostic) => count + (diagnostic.message || diagnostic.code || diagnostic.details ? diagnostic.count ?? 1 : 0), 0);
+  const failureCount = view.failureCount ?? view.sourceLocations.reduce(
     (total, source) => total + (source.failureCount ?? source.failures ?? 0),
     0
   );

@@ -3,6 +3,7 @@ import { StatusBadge, type StatusBadgeTone } from "../primitives/StatusBadge";
 
 export type SourceDiagnostic = {
   code?: string;
+  count?: number;
   details?: string;
   message?: string;
   path?: string;
@@ -79,7 +80,7 @@ export function SourceDiagnosticPanel({
             <li key={`${diagnostic.code ?? diagnostic.message ?? "diagnostic"}-${index}`}>
               <StatusBadge tone={diagnosticTone(diagnostic.severity)}>{diagnostic.severity ?? "warning"}</StatusBadge>
               <div>
-                <strong>{diagnostic.message ?? diagnostic.code ?? "Adapter diagnostic"}</strong>
+                <strong>{diagnosticLabel(diagnostic)}</strong>
                 {diagnostic.details || diagnostic.path || diagnostic.code ? (
                   <p>
                     {[diagnostic.code, diagnostic.path, diagnostic.details].filter(Boolean).join(" · ")}
@@ -98,6 +99,11 @@ function collectDiagnostics(diagnostics: SourceDiagnostic[] | undefined, sources
   return [...(diagnostics ?? []), ...sources.flatMap((source) => source.diagnostics ?? [])].filter(
     (diagnostic) => diagnostic.message || diagnostic.code || diagnostic.details
   );
+}
+
+function diagnosticLabel(diagnostic: SourceDiagnostic): string {
+  const label = diagnostic.message ?? diagnostic.code ?? "Adapter diagnostic";
+  return diagnostic.count && diagnostic.count > 1 ? `${label} (${diagnostic.count})` : label;
 }
 
 function collectCheckedPaths(checkedPaths: string[] | undefined, sources: SourceDiagnosticSource[]): string[] {

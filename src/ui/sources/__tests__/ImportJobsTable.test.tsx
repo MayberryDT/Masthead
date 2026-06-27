@@ -75,6 +75,34 @@ describe("ImportJobsTable", () => {
 
     await act(async () => root.unmount());
   });
+
+  test("renders page metadata and invokes pagination callback", async () => {
+    const onLoadMore = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <ImportJobsTable
+          imports={[importJob({ importJobId: "newest-job" }), importJob({ importJobId: "older-job" })]}
+          limit={2}
+          offset={0}
+          total={3}
+          onLoadMore={onLoadMore}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain("Showing 2 of 3 import jobs");
+
+    await act(async () => {
+      buttonByText(container, "Load more").click();
+    });
+
+    expect(onLoadMore).toHaveBeenCalledWith({ limit: 2, offset: 2 });
+
+    await act(async () => root.unmount());
+  });
 });
 
 function importJob(overrides: Partial<ImportJob> = {}): ImportJob {

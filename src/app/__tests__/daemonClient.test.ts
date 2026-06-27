@@ -1,11 +1,45 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { getSessionTranscript, listReviewDispositions, saveReviewDisposition } from "../daemonClient";
+import { getSessionTranscript, listImports, listReviewDispositions, saveReviewDisposition } from "../daemonClient";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("daemon client review dispositions", () => {
+  test("loads paged import jobs from the daemon", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          imports: [{ importJobId: "job-1", sourceId: "codex-sessions" }],
+          limit: 25,
+          offset: 50,
+          total: 100
+        })
+      )
+    );
+
+    await expect(
+      listImports("http://127.0.0.1:17373/projection", {
+        adapterId: "codex",
+        limit: 25,
+        offset: 50,
+        sourceId: "codex-sessions",
+        status: "active"
+      })
+    ).resolves.toMatchObject({
+      imports: [{ importJobId: "job-1", sourceId: "codex-sessions" }],
+      limit: 25,
+      offset: 50,
+      total: 100
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:17373/imports?limit=25&offset=50&adapterId=codex&sourceId=codex-sessions&status=active",
+      { headers: { accept: "application/json" }, signal: undefined }
+    );
+  });
+
   test("loads paginated session transcripts from the daemon", async () => {
     vi.stubGlobal(
       "fetch",

@@ -92,9 +92,11 @@ export type NormalizedAdapterPayload = {
 
 export type AdapterDiagnostic = {
   code: string;
+  count?: number;
   message: string;
   severity: "info" | "warning" | "error";
   observedAt: string;
+  sampleSourceIds?: string[];
   details?: string;
 };
 

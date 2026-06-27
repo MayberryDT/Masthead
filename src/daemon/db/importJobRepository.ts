@@ -1,8 +1,10 @@
 import { stableRecordId } from "../identity.ts";
+import type { RuntimeKind } from "../../adapters/types.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type ImportJobKind = "metadata" | "transcript" | "enrichment";
 export type ImportJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "cancelling";
+export type ImportJobListStatus = ImportJobStatus | "active";
 
 export type ImportJobDto = {
   importJobId: string;
@@ -35,6 +37,21 @@ type ImportJobRow = {
   updated_at: string;
   current_path: string | null;
   failure_message: string | null;
+};
+
+export type ListImportJobsOptions = {
+  adapterId?: RuntimeKind;
+  limit?: number;
+  offset?: number;
+  sourceId?: string;
+  status?: ImportJobListStatus;
+};
+
+export type ImportJobPage = {
+  jobs: ImportJobDto[];
+  limit: number;
+  offset: number;
+  total: number;
 };
 
 export function createImportJob(
@@ -110,6 +127,48 @@ export function getImportJob(db: MastheadDatabase, importJobId: string): ImportJ
 export function listImportJobs(db: MastheadDatabase): ImportJobDto[] {
   const rows = db.prepare("SELECT * FROM import_jobs ORDER BY updated_at DESC, import_job_id DESC").all() as ImportJobRow[];
   return rows.map(importJobFromRow);
+}
+
+export function listImportJobPage(db: MastheadDatabase, options: ListImportJobsOptions = {}): ImportJobPage {
+  const limit = options.limit ?? 50;
+  const offset = options.offset ?? 0;
+  const { joins, params, where } = importJobFilters(options);
+  const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const totalRow = db.prepare(`SELECT COUNT(*) AS total FROM import_jobs ${joins} ${whereSql}`).get(...params) as
+    | { total: number }
+    | undefined;
+  const rows = db
+    .prepare(`SELECT import_jobs.* FROM import_jobs ${joins} ${whereSql} ORDER BY updated_at DESC, import_job_id DESC LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset) as ImportJobRow[];
+  return {
+    jobs: rows.map(importJobFromRow),
+    limit,
+    offset,
+    total: totalRow?.total ?? 0
+  };
+}
+
+type SqlParam = string | number | bigint | Buffer | null;
+
+function importJobFilters(options: ListImportJobsOptions): { joins: string; params: SqlParam[]; where: string[] } {
+  const params: SqlParam[] = [];
+  const where: string[] = [];
+  const joins = options.adapterId ? "INNER JOIN ingest_sources ON ingest_sources.source_id = import_jobs.source_id" : "";
+  if (options.adapterId) {
+    where.push("ingest_sources.adapter = ?");
+    params.push(options.adapterId);
+  }
+  if (options.sourceId) {
+    where.push("import_jobs.source_id = ?");
+    params.push(options.sourceId);
+  }
+  if (options.status === "active") {
+    where.push("import_jobs.status IN ('queued', 'running', 'cancelling')");
+  } else if (options.status) {
+    where.push("import_jobs.status = ?");
+    params.push(options.status);
+  }
+  return { joins, params, where };
 }
 
 function importJobFromRow(row: ImportJobRow): ImportJobDto {
