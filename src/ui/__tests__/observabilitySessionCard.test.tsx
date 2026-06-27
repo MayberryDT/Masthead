@@ -7,6 +7,7 @@ import { describe, expect, test, vi } from "vitest";
 import type { SessionCardView } from "../../core/types";
 import { SessionCard } from "../SessionCard";
 import { SessionBoard } from "../SessionBoard";
+import { stateClassName } from "../format";
 import { sessionDemoTelemetry } from "../observabilityDemo";
 
 describe("observability session card", () => {
@@ -175,6 +176,59 @@ describe("observability session card", () => {
 
     expect(html).toContain("Turn complete");
     expect(html).not.toContain(">Active<");
+  });
+
+  test("does not render failed running cards as blocked", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          lifecycle: "running",
+          primaryStatus: "failed",
+          stateLabel: "Failed",
+          indicators: ["attention"]
+        })}
+        onToggle={() => undefined}
+      />
+    );
+
+    expect(html).toContain(">Active<");
+    expect(html).not.toContain(">Blocked<");
+    expect(html).not.toContain("needs-attention");
+  });
+
+  test("does not render conflict-only running cards as blocked", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          lifecycle: "running",
+          primaryStatus: "editing",
+          stateLabel: "Running",
+          indicators: ["attention", "conflict"],
+          attentionReason: "Same tracked path changed by 2 active sessions"
+        })}
+        onToggle={() => undefined}
+      />
+    );
+
+    expect(html).toContain(">Active<");
+    expect(html).not.toContain(">Blocked<");
+    expect(html).not.toContain("needs-attention");
+  });
+
+  test("maps only real blockers to the blocked color class", () => {
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "editing", indicators: [] }))).toBe("running");
+    expect(stateClassName(session({ lifecycle: "idle", primaryStatus: "stalled", indicators: [] }))).toBe("stalled");
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "blocked", indicators: ["attention"] }))).toBe("needs-attention");
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "waiting_for_user", indicators: ["attention"] }))).toBe(
+      "needs-attention"
+    );
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "waiting_for_approval", indicators: ["attention"] }))).toBe(
+      "needs-attention"
+    );
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "editing", indicators: ["attention", "conflict"] }))).toBe(
+      "running"
+    );
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "failed", indicators: ["attention"] }))).toBe("running");
   });
 
   test("marks newly created cards for entry animation", () => {
@@ -391,7 +445,7 @@ describe("observability session card", () => {
     expect(html).not.toContain("npm test");
   });
 
-  test("does not render approval-pending sessions as blocked", () => {
+  test("renders approval-pending sessions as blocked", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
@@ -404,9 +458,9 @@ describe("observability session card", () => {
       />
     );
 
-    expect(html).toContain(">Active<");
-    expect(html).not.toContain("Blocked");
-    expect(html).not.toContain("needs-attention");
+    expect(html).toContain(">Blocked<");
+    expect(html).toContain("needs-attention");
+    expect(html).not.toContain(">Active<");
   });
 
   test("does not apply demo harness or model values to live observability cards", () => {

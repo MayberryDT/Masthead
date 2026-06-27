@@ -28,9 +28,41 @@ describe("SessionInspector", () => {
     expect(html).toContain("1 timeline events");
     expect(html).toContain("Open Codex");
   });
+
+  test("does not render conflict-only running attention as a blocked token", () => {
+    const html = renderToStaticMarkup(
+      <SessionInspector
+        session={session({
+          indicators: ["attention", "conflict"],
+          primaryStatus: "editing",
+          lifecycle: "running",
+          attentionItems: [
+            {
+              itemId: "attention-1",
+              sessionId: "session-1",
+              project: "Masthead",
+              type: "conflict",
+              severity: "P1",
+              title: "Same tracked path changed by 2 active sessions",
+              createdAt: "2026-06-23T02:04:00.000Z",
+              affectedPaths: ["src/shared.ts"],
+              affectedCommandIds: [],
+              evidence: [],
+              support: "deterministic",
+              suggestedNextAction: "Review the overlapping diff."
+            }
+          ]
+        })}
+      />
+    );
+
+    expect(html).toContain(">Active<");
+    expect(html).not.toContain(">Blocked<");
+    expect(html).not.toContain("state-token attention");
+  });
 });
 
-function session(): SessionDetailView {
+function session(overrides: Partial<SessionDetailView> = {}): SessionDetailView {
   return {
     sessionId: "session-1",
     project: "Masthead",
@@ -79,6 +111,7 @@ function session(): SessionDetailView {
     attentionItems: [],
     timeline: [
       { eventId: "event-1", type: "file.changed", occurredAt: "2026-06-23T02:04:00.000Z", summary: "File changed" }
-    ]
+    ],
+    ...overrides
   };
 }

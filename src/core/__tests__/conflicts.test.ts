@@ -65,13 +65,52 @@ describe("conflict engine", () => {
     expect(conflicts).toHaveLength(0);
   });
 
-  test("marks same working-directory attribution as degraded", () => {
+  test("uses only the latest snapshot per session when detecting exact file overlap", () => {
+    const conflicts = detectConflicts([
+      snapshot("auth", "/repo/.git", "/repo-auth", "src/shared.ts", {
+        snapshotId: "auth-old",
+        observedAt: "2026-06-23T02:00:00.000Z"
+      }),
+      snapshot("auth", "/repo/.git", "/repo-auth", "src/other.ts", {
+        snapshotId: "auth-latest",
+        observedAt: "2026-06-23T02:05:00.000Z"
+      }),
+      snapshot("middleware", "/repo/.git", "/repo-middleware", "src/shared.ts", {
+        snapshotId: "middleware-latest",
+        observedAt: "2026-06-23T02:06:00.000Z"
+      })
+    ]);
+
+    expect(conflicts).toEqual([]);
+  });
+
+  test("detects exact file overlap from latest snapshots", () => {
+    const conflicts = detectConflicts([
+      snapshot("auth", "/repo/.git", "/repo-auth", "src/old.ts", {
+        snapshotId: "auth-old",
+        observedAt: "2026-06-23T02:00:00.000Z"
+      }),
+      snapshot("auth", "/repo/.git", "/repo-auth", "src/shared.ts", {
+        snapshotId: "auth-latest",
+        observedAt: "2026-06-23T02:05:00.000Z"
+      }),
+      snapshot("middleware", "/repo/.git", "/repo-middleware", "src/shared.ts", {
+        snapshotId: "middleware-latest",
+        observedAt: "2026-06-23T02:06:00.000Z"
+      })
+    ]);
+
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]?.sharedPaths).toEqual(["src/shared.ts"]);
+  });
+
+  test("does not hard-conflict same working-directory attribution", () => {
     const conflicts = detectConflicts([
       snapshot("auth", "/repo/.git", "/repo", "src/lib/auth/session.ts"),
       snapshot("middleware", "/repo/.git", "/repo", "src/lib/auth/session.ts")
     ]);
 
-    expect(conflicts[0]?.attribution).toBe("degraded");
+    expect(conflicts).toEqual([]);
   });
 
   test("detects shared local resource collisions from explicit session evidence", () => {

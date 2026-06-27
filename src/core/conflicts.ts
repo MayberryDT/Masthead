@@ -4,7 +4,7 @@ import type { ConflictCard, EvidenceRef, GitSnapshot, NormalizedEvent } from "./
 export function detectConflicts(snapshots: GitSnapshot[]): ConflictCard[] {
   const pathIndex = new Map<string, GitSnapshot[]>();
 
-  for (const snapshot of snapshots) {
+  for (const snapshot of latestSnapshotsBySession(snapshots)) {
     for (const changedPath of snapshot.changedPaths) {
       if (changedPath.sensitivity === "sensitive_path_only") continue;
       const key = `${snapshot.gitCommonDir}::${changedPath.path}`;
@@ -19,6 +19,8 @@ export function detectConflicts(snapshots: GitSnapshot[]): ConflictCard[] {
 
     const [gitCommonDir, sharedPath] = key.split("::");
     const worktreePaths = [...new Set(matches.map((snapshot) => snapshot.worktreePath))];
+    if (worktreePaths.length < 2) continue;
+
     const evidence: EvidenceRef[] = matches.map((snapshot) => ({
       id: snapshot.snapshotId,
       kind: "git_snapshot",
@@ -36,13 +38,24 @@ export function detectConflicts(snapshots: GitSnapshot[]): ConflictCard[] {
         worktreePaths
       },
       sharedPaths: [sharedPath],
-      attribution: worktreePaths.length === 1 ? "degraded" : "direct",
+      attribution: "direct",
       title: `Same tracked path changed by ${uniqueSessionIds.length} active sessions`,
       evidence
     });
   }
 
   return conflicts;
+}
+
+function latestSnapshotsBySession(snapshots: GitSnapshot[]): GitSnapshot[] {
+  const latest = new Map<string, GitSnapshot>();
+  for (const snapshot of snapshots) {
+    const previous = latest.get(snapshot.sessionId);
+    if (!previous || snapshot.observedAt > previous.observedAt) {
+      latest.set(snapshot.sessionId, snapshot);
+    }
+  }
+  return [...latest.values()];
 }
 
 type SharedResourceConflictOptions = {

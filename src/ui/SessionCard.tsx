@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { SessionCardView } from "../core/types";
-import { stateClassName } from "./format";
+import { isBlockedSessionCard, stateClassName } from "./format";
 import { Icon, type IconName } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
 import type { DemoSessionTelemetry } from "./observabilityDemo";
@@ -16,6 +16,7 @@ type Props = {
 
 export function SessionCard({ session, onToggle, demoTelemetry, isNew = false, newCardIndex = 0, headlineUpdateIndex }: Props) {
   const className = stateClassName(session);
+  const isBlocked = isBlockedSessionCard(session);
   const model = demoTelemetry?.model.value ?? session.model ?? "Not captured";
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Codex";
   const worktree = session.branchOrWorktree ?? "None";
@@ -47,7 +48,7 @@ export function SessionCard({ session, onToggle, demoTelemetry, isNew = false, n
           {sessionName}
         </span>
         <span className="card-harness">{harness}</span>
-        <span className={`state-token ${className === "needs-attention" || className === "conflict" ? "attention" : ""}`}>
+        <span className={`state-token ${isBlocked ? "attention" : ""}`}>
           {observabilityStateLabel(session)}
         </span>
       </header>
@@ -176,7 +177,7 @@ function Fact({
 }
 
 function observabilityStateLabel(session: SessionCardView): string {
-  if (session.primaryStatus === "blocked" || session.outcomeLabel === "blocked") return "Blocked";
+  if (isBlockedSessionCard(session)) return "Blocked";
   if (session.lifecycle === "idle") return "Idle";
   if (session.lifecycle === "ended" && session.outcomeLabel === "completed") return "Turn complete";
   if (session.lifecycle === "ended") return "Response ready";

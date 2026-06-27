@@ -1,5 +1,5 @@
 import type { SafeAction, SessionDetailView } from "../core/types";
-import { stateClassName, statusTokenLabel } from "./format";
+import { isBlockedSessionCard, stateClassName, statusTokenLabel } from "./format";
 
 // Legacy live inspector. New detail surfaces should use SessionDossier.
 type Props = {
@@ -32,7 +32,7 @@ export function SessionInspector({ session, onAction, actionStatus, compactHeade
             </p>
             <h2>{session.copy.headline}</h2>
           </div>
-          <span className={`state-token ${session.indicators.includes("attention") ? "attention" : ""}`}>
+          <span className={`state-token ${isBlockedSessionCard(session) ? "attention" : ""}`}>
             {statusTokenLabel(session)}
           </span>
         </header>

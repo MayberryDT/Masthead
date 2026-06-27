@@ -174,6 +174,78 @@ describe("Live Board projection", () => {
     expect(board.lanes?.find((lane) => lane.laneId === "needs_action")?.sessionIds).toEqual([]);
   });
 
+  test("does not mark same-worktree duplicate snapshots as conflict attention", () => {
+    const board = projectFixture({
+      events: [
+        event("a-start", "session-a", "session.started", "2026-06-23T02:00:00.000Z"),
+        event("b-start", "session-b", "session.started", "2026-06-23T02:00:01.000Z")
+      ],
+      gitSnapshots: [
+        {
+          snapshotId: "snapshot-a",
+          sessionId: "session-a",
+          repoRoot: "/workspace/app",
+          worktreePath: "/workspace/app",
+          gitCommonDir: "/workspace/app/.git",
+          branch: "agent/session-a",
+          headSha: "abc123",
+          changedPaths: [
+            {
+              path: "src/shared.ts",
+              status: "modified",
+              staged: false,
+              additions: 1,
+              deletions: 0,
+              sensitivity: "metadata"
+            }
+          ],
+          observedAt: "2026-06-23T02:04:00.000Z"
+        },
+        {
+          snapshotId: "snapshot-b",
+          sessionId: "session-b",
+          repoRoot: "/workspace/app",
+          worktreePath: "/workspace/app",
+          gitCommonDir: "/workspace/app/.git",
+          branch: "agent/session-b",
+          headSha: "abc123",
+          changedPaths: [
+            {
+              path: "src/shared.ts",
+              status: "modified",
+              staged: false,
+              additions: 1,
+              deletions: 0,
+              sensitivity: "metadata"
+            }
+          ],
+          observedAt: "2026-06-23T02:04:01.000Z"
+        }
+      ]
+    });
+
+    expect(board.conflicts).toEqual([]);
+    expect(board.attentionQueue.some((item) => item.type === "conflict")).toBe(false);
+    expect(board.cards).toHaveLength(2);
+    expect(board.cards.every((card) => card.lifecycle === "running")).toBe(true);
+    expect(board.cards.every((card) => !card.indicators.includes("conflict"))).toBe(true);
+  });
+
+  test("keeps different-worktree exact file overlap as conflict attention", () => {
+    const board = projectFixture({
+      events: [
+        event("a-start", "session-a", "session.started", "2026-06-23T02:00:00.000Z"),
+        event("b-start", "session-b", "session.started", "2026-06-23T02:00:01.000Z")
+      ],
+      gitSnapshots: [snapshot("snapshot-a", "session-a", "src/shared.ts"), snapshot("snapshot-b", "session-b", "src/shared.ts")]
+    });
+
+    expect(board.conflicts).toHaveLength(1);
+    expect(board.attentionQueue.filter((item) => item.type === "conflict")).toHaveLength(2);
+    expect(board.cards.every((card) => card.lifecycle === "running")).toBe(true);
+    expect(board.cards.every((card) => card.indicators.includes("conflict"))).toBe(true);
+  });
+
   test("routes ended failed sessions that need follow-up to Needs action", () => {
     const board = projectFixture({
       events: [

@@ -128,6 +128,36 @@ describe("board card filtering", () => {
     ).toEqual(["blocked"]);
   });
 
+  test("does not count conflict-only or failed cards as blocked", () => {
+    const cards = [
+      { ...baseCard, sessionId: "active", lifecycle: "running", primaryStatus: "editing", indicators: [] },
+      {
+        ...baseCard,
+        sessionId: "conflict-only",
+        lifecycle: "running",
+        primaryStatus: "editing",
+        indicators: ["attention", "conflict"],
+        attentionReason: "Same tracked path changed by 2 active sessions"
+      },
+      { ...baseCard, sessionId: "failed", lifecycle: "running", primaryStatus: "failed", indicators: ["attention"] },
+      { ...baseCard, sessionId: "blocked", lifecycle: "running", primaryStatus: "blocked", indicators: ["attention"] },
+      { ...baseCard, sessionId: "approval", lifecycle: "running", primaryStatus: "waiting_for_approval", indicators: ["attention"] }
+    ] satisfies SessionCardView[];
+
+    expect(
+      filterCards(cards, { query: "", filter: "all", harness: "all", lifecycle: "blocked", sort: "recent_activity" }).map(
+        (card) => card.sessionId
+      )
+    ).toEqual(["approval", "blocked"]);
+
+    expect(summarizeMainScanCards(cards)).toMatchObject({
+      running: 3,
+      active: 3,
+      needsAction: 2,
+      needsAttention: 2
+    });
+  });
+
   test("filters cards by harness dropdown without inventing non-Codex harnesses", () => {
     const cards = [
       { ...baseCard, sessionId: "codex", harness: "Codex" },
@@ -264,11 +294,11 @@ describe("board card filtering", () => {
     ] satisfies SessionCardView[];
 
     expect(summarizeMainScanCards(cards)).toMatchObject({
-      running: 2,
-      active: 2,
+      running: 1,
+      active: 1,
       idle: 1,
-      needsAction: 1,
-      needsAttention: 1
+      needsAction: 2,
+      needsAttention: 2
     });
   });
 });
