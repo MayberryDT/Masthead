@@ -77,9 +77,29 @@ describe("session repository", () => {
       ])
     );
     expect(db.prepare("SELECT model, output_tokens FROM model_usage").all()).toEqual([
-      { model: "gpt-5.5", output_tokens: null },
       { model: "gpt-5.5", output_tokens: 32 }
     ]);
+    db.close();
+  });
+
+  test("does not create model usage rows for model-only live hook events", async () => {
+    const db = await openMigratedDatabase();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "codex",
+      runtimeVersion: "codex-test"
+    });
+
+    repository.upsertLiveEvent(
+      liveEvent("start", "session.started", {
+        model: "gpt-5.5",
+        project: "Masthead",
+        title: "Build durable data layer"
+      })
+    );
+
+    expect(db.prepare("SELECT COUNT(*) AS count FROM model_usage").get()).toEqual({ count: 0 });
     db.close();
   });
 

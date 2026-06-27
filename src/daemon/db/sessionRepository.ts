@@ -496,7 +496,8 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
     const inputTokens = numberPayload(event, ["inputTokens", "promptTokens"]);
     const outputTokens = numberPayload(event, ["outputTokens", "completionTokens"]);
     const totalTokens = numberPayload(event, ["totalTokens"]);
-    if (!model && !provider && inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) return;
+    const hasTokenNumbers = inputTokens !== undefined || outputTokens !== undefined || totalTokens !== undefined;
+    if (!hasTokenNumbers) return;
     db.prepare(
       `INSERT INTO model_usage (
         usage_id,

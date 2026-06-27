@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { AdapterMaturity } from "../adapters/capabilities.ts";
 import { adapterRecordFromCodexHook, codexHookSource } from "../adapters/codex/hookAdapter.ts";
 import { adapterForRuntime } from "../adapters/registry.ts";
@@ -79,6 +79,7 @@ export type MastheadDaemon = {
 export async function createMastheadDaemon(config: DaemonConfig): Promise<MastheadDaemon> {
   await mkdir(dirname(config.storePath), { recursive: true });
   const writerLock = await acquireDatabaseWriterLock(config.dataDirectory ?? dirname(config.databasePath));
+  const hookTranscriptCatchups = new Map<string, Promise<void>>();
 
   try {
     // Legacy compatibility store. Do not add new product writes here.
@@ -487,6 +488,44 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       queueImportJob(database, { importKind: "transcript", sourceId: source.sourceId }, (controls) => importTranscriptSources([source], controls))
     );
     return { jobs, sources: sources.length };
+  }
+
+  function scheduleHookTranscriptCatchup(event: NormalizedEvent): void {
+    const key = stringFromPayload(event.payload, ["transcriptPath", "transcript_path"]) ?? event.eventId;
+    const previous = hookTranscriptCatchups.get(key) ?? Promise.resolve();
+    const next = previous
+      .catch(() => undefined)
+      .then(
+        () =>
+          new Promise<void>((resolve) => {
+            setImmediate(resolve);
+          })
+      )
+      .then(() => importHookTranscriptIfApproved(event))
+      .finally(() => {
+        if (hookTranscriptCatchups.get(key) === next) hookTranscriptCatchups.delete(key);
+      });
+    hookTranscriptCatchups.set(key, next);
+    next.catch(() => {
+      // importHookTranscriptIfApproved records diagnostics; this prevents unhandled rejections.
+    });
+  }
+
+  async function importHookTranscriptIfApproved(event: NormalizedEvent): Promise<void> {
+    if (!transcriptImportApproved(database)) return;
+
+    try {
+      const source = await transcriptSourceFromHookEvent(event, config.codexHomeDir);
+      if (!source?.path || sourceIsExcluded(database, source.path)) return;
+      await importTranscriptSources([source]);
+    } catch (error) {
+      state.diagnostics.push({
+        code: "invalid_payload",
+        details: error instanceof Error ? error.message : String(error),
+        message: "Codex hook transcript catch-up failed; live hook ingestion was kept.",
+        receivedAt: new Date().toISOString()
+      });
+    }
   }
 
   function approveTranscriptImports(): void {
@@ -1379,6 +1418,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         if (sessionId) {
           indexCanonicalSessionSearch(database, sessionId);
           queueSessionEnrichment(sessionId);
+          scheduleHookTranscriptCatchup(result.event);
         }
         appendStoreRecordToRawJournal({
           recordId: `event:${result.event.eventId}`,
@@ -1598,16 +1638,56 @@ function toCodexHookDiagnostic(diagnostic: AdapterDiagnostic | undefined, receiv
 
 async function transcriptSources(source: DiscoveredSource): Promise<DiscoveredSource[]> {
   if (!source.path) return [];
-  const info = await stat(source.path);
+  const sourcePath = source.path;
+  const info = await stat(sourcePath);
   if (!info.isDirectory()) return [source];
-  const files = await jsonlFiles(source.path);
+  const files = await jsonlFiles(sourcePath);
   return files.map((file) => ({
     ...source,
     path: file,
     runtimeVersion: "file",
     schemaVersion: source.runtime === "codex" ? "codex-transcript-jsonl" : source.schemaVersion,
-    sourceId: `${source.sourceId}:${file.slice(source.path?.length ?? 0)}`
+    sourceId: `${source.sourceId}:${relative(sourcePath, file).replaceAll("\\", "/")}`
   }));
+}
+
+async function transcriptSourceFromHookEvent(event: NormalizedEvent, homeDir: string): Promise<DiscoveredSource | undefined> {
+  const transcriptPath = stringFromPayload(event.payload, ["transcriptPath", "transcript_path"]);
+  if (!transcriptPath || !transcriptPath.endsWith(".jsonl") || !isAbsolute(transcriptPath)) return undefined;
+
+  const codexRoot = join(homeDir, ".codex");
+  const roots = [
+    { id: "sessions", path: join(codexRoot, "sessions") },
+    { id: "archived-sessions", path: join(codexRoot, "archived_sessions") }
+  ];
+
+  for (const root of roots) {
+    const relativePath = relative(root.path, transcriptPath).replaceAll("\\", "/");
+    if (!relativePath || relativePath.startsWith("../") || relativePath === ".." || isAbsolute(relativePath)) continue;
+    const rootRealPath = await realpath(root.path);
+    const transcriptRealPath = await realpath(transcriptPath);
+    const realRelativePath = relative(rootRealPath, transcriptRealPath).replaceAll("\\", "/");
+    if (!realRelativePath || realRelativePath.startsWith("../") || realRelativePath === ".." || isAbsolute(realRelativePath)) continue;
+    return {
+      confidence: "authoritative",
+      path: transcriptPath,
+      runtime: "codex",
+      runtimeVersion: "file",
+      schemaVersion: "codex-transcript-jsonl",
+      sourceId: `codex-${root.id}:${relativePath}`,
+      sourceKind: "jsonl"
+    };
+  }
+
+  return undefined;
+}
+
+function stringFromPayload(payload: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
 }
 
 async function jsonlFiles(directory: string): Promise<string[]> {

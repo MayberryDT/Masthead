@@ -7,6 +7,7 @@ import { describe, expect, test, vi } from "vitest";
 import type { SessionCardView } from "../../core/types";
 import { SessionCard } from "../SessionCard";
 import { SessionBoard } from "../SessionBoard";
+import { stateClassName } from "../format";
 import { sessionDemoTelemetry } from "../observabilityDemo";
 
 describe("observability session card", () => {
@@ -175,6 +176,31 @@ describe("observability session card", () => {
 
     expect(html).toContain("Turn complete");
     expect(html).not.toContain(">Active<");
+  });
+
+  test("does not render blocked-tone running cards as active", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          lifecycle: "running",
+          primaryStatus: "failed",
+          stateLabel: "Failed",
+          indicators: ["attention"]
+        })}
+        onToggle={() => undefined}
+      />
+    );
+
+    expect(html).toContain("needs-attention");
+    expect(html).toContain(">Blocked<");
+    expect(html).not.toContain(">Active<");
+  });
+
+  test("maps active, idle, and blocked cards to the status color classes", () => {
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "editing", indicators: [] }))).toBe("running");
+    expect(stateClassName(session({ lifecycle: "idle", primaryStatus: "stalled", indicators: [] }))).toBe("stalled");
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "blocked", indicators: ["attention"] }))).toBe("needs-attention");
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "failed", indicators: ["attention"] }))).toBe("needs-attention");
   });
 
   test("marks newly created cards for entry animation", () => {

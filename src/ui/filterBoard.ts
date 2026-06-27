@@ -1,4 +1,5 @@
 import type { AttentionItem, LiveBoardProjection, SessionCardView } from "../core/types";
+import { isBlockedSessionCard } from "./format";
 import type { HarnessFilter, LifecycleFilter, SortMode } from "./toolbarOptions";
 
 export type BoardFilter = "all" | "needs_attention" | "conflicts";
@@ -104,9 +105,7 @@ function matchesLifecycle(card: SessionCardView, lifecycle: LifecycleFilter): bo
 }
 
 function isBlockedScanCard(card: SessionCardView): boolean {
-  if (card.primaryStatus === "blocked" || card.outcomeLabel === "blocked") return true;
-  if (card.primaryStatus === "failed" || card.primaryStatus === "possibly_looping") return true;
-  return card.indicators.includes("conflict");
+  return isBlockedSessionCard(card);
 }
 
 function scanCardForMainView(card: SessionCardView, now: Date, activityWindowMs: number): SessionCardView[] {
