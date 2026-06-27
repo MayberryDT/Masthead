@@ -1,4 +1,4 @@
-import { writeFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { writeFile, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -142,6 +142,244 @@ describe("progressive Codex imports", () => {
       outputTokens: 5,
       totalTokens: 25
     });
+  });
+
+  test("imports token counts from approved hook transcriptPath during live ingestion", async () => {
+    const { daemon, codexRoot } = await createTestHarness();
+    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "live-token-session.jsonl");
+    await writeJsonl(transcriptPath, [
+      {
+        type: "session_meta",
+        timestamp: "2026-06-25T12:00:00.000Z",
+        payload: {
+          session_id: "live-token-session",
+          cwd: "/home/tyler/Documents/Masthead",
+          model: "gpt-5"
+        }
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-06-25T12:01:00.000Z",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 30,
+              output_tokens: 7,
+              total_tokens: 37
+            }
+          }
+        }
+      }
+    ]);
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    await ingestHook(baseUrl, {
+      event: "session_started",
+      model: "gpt-5",
+      session_id: "live-token-session",
+      timestamp: "2026-06-25T12:00:00.000Z",
+      transcriptPath
+    });
+
+    await waitFor(() => tokenTotals(daemon.database).totalTokens === 37);
+    expect(countRows(daemon.database, "sessions")).toBe(1);
+    expect(tokenTotals(daemon.database)).toEqual({
+      inputTokens: 30,
+      outputTokens: 7,
+      totalTokens: 37
+    });
+    expect(
+      daemon.database
+        .prepare("SELECT source_id, source_path, source_session_id, model FROM ingest_cursors WHERE source_path = ?")
+        .get(transcriptPath)
+    ).toEqual({
+      model: "gpt-5",
+      source_id: "codex-sessions:2026/06/25/live-token-session.jsonl",
+      source_path: transcriptPath,
+      source_session_id: "live-token-session"
+    });
+  });
+
+  test("tails the same hook transcriptPath without duplicating earlier token rows", async () => {
+    const { daemon, codexRoot } = await createTestHarness();
+    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "tail-token-session.jsonl");
+    await writeJsonl(transcriptPath, [
+      {
+        type: "session_meta",
+        timestamp: "2026-06-25T12:00:00.000Z",
+        payload: {
+          session_id: "tail-token-session",
+          cwd: "/home/tyler/Documents/Masthead",
+          model: "gpt-5"
+        }
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-06-25T12:01:00.000Z",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 10,
+              output_tokens: 2,
+              total_tokens: 12
+            }
+          }
+        }
+      }
+    ]);
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    await ingestHook(baseUrl, {
+      event: "session_started",
+      model: "gpt-5",
+      provider_event_id: "tail-token-session-start-1",
+      session_id: "tail-token-session",
+      timestamp: "2026-06-25T12:00:00.000Z",
+      title: "Tail token session",
+      transcriptPath
+    });
+    await waitFor(() => tokenTotals(daemon.database).totalTokens === 12);
+
+    const original = await readFile(transcriptPath, "utf8");
+    await writeFile(
+      transcriptPath,
+      `${original}${JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-06-25T12:02:00.000Z",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 20,
+              output_tokens: 5,
+              total_tokens: 25
+            }
+          }
+        }
+      })}\n`,
+      "utf8"
+    );
+
+    await ingestHook(baseUrl, {
+      event: "session_started",
+      model: "gpt-5",
+      provider_event_id: "tail-token-session-start-2",
+      session_id: "tail-token-session",
+      timestamp: "2026-06-25T12:02:01.000Z",
+      title: "Tail token session updated",
+      transcriptPath
+    });
+
+    await waitFor(() => tokenTotals(daemon.database).totalTokens === 37);
+    expect(countWhere(daemon.database, "model_usage", "total_tokens IS NOT NULL")).toBe(2);
+  });
+
+  test("does not import hook transcriptPath before transcript import approval", async () => {
+    const { daemon, codexRoot } = await createTestHarness();
+    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "unapproved-token-session.jsonl");
+    await writeJsonl(transcriptPath, [
+      {
+        type: "session_meta",
+        timestamp: "2026-06-25T12:00:00.000Z",
+        payload: { session_id: "unapproved-token-session", model: "gpt-5" }
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-06-25T12:01:00.000Z",
+        payload: {
+          type: "token_count",
+          info: { last_token_usage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 } }
+        }
+      }
+    ]);
+    const baseUrl = await listen(daemon);
+
+    await ingestHook(baseUrl, {
+      event: "session_started",
+      model: "gpt-5",
+      session_id: "unapproved-token-session",
+      timestamp: "2026-06-25T12:00:00.000Z",
+      transcriptPath
+    });
+
+    await yieldToEventLoop();
+    expect(countRows(daemon.database, "sessions")).toBe(1);
+    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+  });
+
+  test("keeps hook ingestion accepted when approved transcriptPath is missing", async () => {
+    const { daemon, codexRoot } = await createTestHarness();
+    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "missing-token-session.jsonl");
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    await ingestHook(baseUrl, {
+      event: "session_started",
+      model: "gpt-5",
+      session_id: "missing-token-session",
+      timestamp: "2026-06-25T12:00:00.000Z",
+      transcriptPath
+    });
+
+    expect(countRows(daemon.database, "sessions")).toBe(1);
+    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+  });
+
+  test("keeps hook ingestion accepted when approved hook has no transcriptPath", async () => {
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    await ingestHook(baseUrl, {
+      event: "session_started",
+      model: "gpt-5",
+      session_id: "no-transcript-path-session",
+      timestamp: "2026-06-25T12:00:00.000Z"
+    });
+
+    expect(countRows(daemon.database, "sessions")).toBe(1);
+    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+  });
+
+  test("does not import hook transcriptPath symlinks that escape the Codex sessions tree", async () => {
+    const { daemon, codexRoot, tempDir } = await createTestHarness();
+    const outsideTranscriptPath = join(tempDir, "outside-transcript.jsonl");
+    await writeJsonl(outsideTranscriptPath, [
+      {
+        type: "session_meta",
+        timestamp: "2026-06-25T12:00:00.000Z",
+        payload: { session_id: "escaped-token-session", model: "gpt-5" }
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-06-25T12:01:00.000Z",
+        payload: {
+          type: "token_count",
+          info: { last_token_usage: { input_tokens: 8, output_tokens: 5, total_tokens: 13 } }
+        }
+      }
+    ]);
+    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "escaped-token-session.jsonl");
+    await mkdir(dirname(transcriptPath), { recursive: true });
+    await symlink(outsideTranscriptPath, transcriptPath);
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    await ingestHook(baseUrl, {
+      event: "session_started",
+      model: "gpt-5",
+      session_id: "escaped-token-session",
+      timestamp: "2026-06-25T12:00:00.000Z",
+      transcriptPath
+    });
+
+    await yieldToEventLoop();
+    expect(countRows(daemon.database, "sessions")).toBe(1);
+    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 
   test("imports useful transcript rows and serves them through the transcript endpoint", async () => {

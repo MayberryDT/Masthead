@@ -8,6 +8,7 @@ import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 
 const tempDirs: string[] = [];
 const now = new Date("2026-06-26T15:00:00.000Z");
+const todayStart = localDayStart(now).toISOString();
 
 afterEach(async () => {
   await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
@@ -18,7 +19,7 @@ describe("usage stats repository", () => {
   test("creates stable usage windows", () => {
     expect(usageRangeForWindow("today", now)).toEqual({
       bucket: "hour",
-      from: "2026-06-26T06:00:00.000Z",
+      from: todayStart,
       to: "2026-06-26T15:00:00.000Z"
     });
     expect(usageRangeForWindow("24h", now)).toEqual({
@@ -41,7 +42,7 @@ describe("usage stats repository", () => {
     expect(stats.window).toBe("today");
     expect(stats.generatedAt).toBe("2026-06-26T15:00:00.000Z");
     expect(stats.range).toEqual({
-      from: "2026-06-26T06:00:00.000Z",
+      from: todayStart,
       to: "2026-06-26T15:00:00.000Z"
     });
     expect(stats.totals).toMatchObject({
@@ -54,12 +55,12 @@ describe("usage stats repository", () => {
       projects: 2,
       runtimes: 2,
       sessions: 2,
-      tokenCoverageSessions: 2,
-      tokenRows: 2,
+      tokenCoverageSessions: 1,
+      tokenRows: 1,
       toolCalls: 3,
       totalTokens: 150
     });
-    expect(stats.totals.tokensPerMinute).toBeCloseTo(150 / 540);
+    expect(stats.totals.tokensPerMinute).toBeCloseTo(150 / minutesBetween(todayStart, now.toISOString()));
     expect(stats.byModel).toEqual([
       {
         inputTokens: 100,
@@ -68,14 +69,6 @@ describe("usage stats repository", () => {
         provider: "openai",
         sessions: 1,
         totalTokens: 150
-      },
-      {
-        inputTokens: 0,
-        model: "Unknown model",
-        provider: "openai",
-        outputTokens: 0,
-        sessions: 1,
-        totalTokens: 0
       }
     ]);
     expect(stats.byProject).toEqual([
@@ -138,8 +131,8 @@ describe("usage stats repository", () => {
       currentEnrichments: 3,
       importedSessions: 3,
       mcpQueries: 3,
-      sessionsWithTokenUsage: 3,
-      sessionsWithoutTokenUsage: 0,
+      sessionsWithTokenUsage: 2,
+      sessionsWithoutTokenUsage: 1,
       sources: 2
     });
     db.close();
@@ -153,7 +146,7 @@ describe("usage stats repository", () => {
     expect(rolling.range.from).toBe("2026-06-25T15:00:00.000Z");
     expect(rolling.totals).toMatchObject({
       sessions: 3,
-      tokenRows: 3,
+      tokenRows: 2,
       totalTokens: 210
     });
     expect(rolling.totals.tokensPerMinute).toBeCloseTo(210 / 1440);
@@ -163,7 +156,7 @@ describe("usage stats repository", () => {
     expect(all.range).toEqual({ to: "2026-06-26T15:00:00.000Z" });
     expect(all.totals).toMatchObject({
       sessions: 3,
-      tokenRows: 3,
+      tokenRows: 2,
       totalTokens: 210
     });
     expect(all.totals.tokensPerMinute).toBeUndefined();
@@ -287,6 +280,7 @@ function seedUsageFixture(db: MastheadDatabase): void {
 
   insertUsage(db, "usage-a", "session-today-a", "gpt-5", "openai", 100, 50, 150, "2026-06-26T14:08:00.000Z");
   insertUsage(db, "usage-b", "session-today-b", null, "openai", null, null, null, "2026-06-26T10:08:00.000Z");
+  insertUsage(db, "usage-model-only", "session-today-b", "gpt-5-model-only", "openai", null, null, null, "2026-06-26T10:09:00.000Z");
   insertUsage(db, "usage-c", "session-yesterday", "gpt-4.1", "openai", 40, 20, 60, "2026-06-25T16:38:00.000Z");
   insertUsage(db, "usage-deleted", "session-deleted", "gpt-deleted", "openai", 900, 90, 990, "2026-06-26T14:28:00.000Z");
 
@@ -436,4 +430,14 @@ function insertMcpQuery(db: MastheadDatabase, mcpQueryId: string, requestedAt: s
       mcp_query_id, tool_name, requested_at, result_count, session_ids_json, status
     ) VALUES (?, ?, ?, ?, ?, ?)`
   ).run(mcpQueryId, "session_search", requestedAt, 1, "[]", "succeeded");
+}
+
+function localDayStart(value: Date): Date {
+  const start = new Date(value);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function minutesBetween(from: string, to: string): number {
+  return Math.max(1, (Date.parse(to) - Date.parse(from)) / 60_000);
 }

@@ -103,6 +103,10 @@ type CountRow = { count: number };
 type UsageByModelRow = UsageByModelDto & { provider: string };
 type ActivityMetric = Exclude<keyof UsageActivityPointDto, "bucketStart">;
 
+const TOKEN_VALUE_PRESENT_SQL =
+  "(model_usage.total_tokens IS NOT NULL OR model_usage.input_tokens IS NOT NULL OR model_usage.output_tokens IS NOT NULL)";
+const TOKEN_TOTAL_SQL = "COALESCE(model_usage.total_tokens, COALESCE(model_usage.input_tokens, 0) + COALESCE(model_usage.output_tokens, 0))";
+
 export function getSessionTokenTotals(db: MastheadDatabase, sessionIds: string[]): Map<string, number> {
   const uniqueSessionIds = [...new Set(sessionIds.filter(Boolean))];
   if (uniqueSessionIds.length === 0) return new Map();
@@ -110,16 +114,12 @@ export function getSessionTokenTotals(db: MastheadDatabase, sessionIds: string[]
   const rows = db
     .prepare(
       `SELECT COALESCE(sessions.source_session_id, sessions.session_id) AS sessionId,
-        COALESCE(SUM(COALESCE(model_usage.total_tokens, COALESCE(model_usage.input_tokens, 0) + COALESCE(model_usage.output_tokens, 0))), 0) AS totalTokens
+        COALESCE(SUM(${TOKEN_TOTAL_SQL}), 0) AS totalTokens
       FROM sessions
       JOIN model_usage ON model_usage.session_id = sessions.session_id
       WHERE sessions.deleted_at IS NULL
         AND (sessions.source_session_id IN (${placeholders}) OR sessions.session_id IN (${placeholders}))
-        AND (
-          model_usage.total_tokens IS NOT NULL
-          OR model_usage.input_tokens IS NOT NULL
-          OR model_usage.output_tokens IS NOT NULL
-        )
+        AND ${TOKEN_VALUE_PRESENT_SQL}
       GROUP BY COALESCE(sessions.source_session_id, sessions.session_id)`
     )
     .all(...uniqueSessionIds, ...uniqueSessionIds) as Array<{ sessionId: string; totalTokens: number }>;
@@ -215,6 +215,7 @@ function countModels(db: MastheadDatabase, range: UsageRange): number {
       WHERE sessions.deleted_at IS NULL
         AND model_usage.model IS NOT NULL
         AND trim(model_usage.model) <> ''
+        AND ${TOKEN_VALUE_PRESENT_SQL}
         AND (? IS NULL OR model_usage.observed_at >= ?)
         AND model_usage.observed_at <= ?`
     )
@@ -227,12 +228,13 @@ function getTokenTotals(db: MastheadDatabase, range: UsageRange): TokenTotalsRow
     .prepare(
       `SELECT COUNT(*) AS tokenRows,
         COUNT(DISTINCT model_usage.session_id) AS tokenCoverageSessions,
-        COALESCE(SUM(COALESCE(input_tokens, 0)), 0) AS inputTokens,
-        COALESCE(SUM(COALESCE(output_tokens, 0)), 0) AS outputTokens,
-        COALESCE(SUM(COALESCE(total_tokens, 0)), 0) AS totalTokens
+        COALESCE(SUM(COALESCE(model_usage.input_tokens, 0)), 0) AS inputTokens,
+        COALESCE(SUM(COALESCE(model_usage.output_tokens, 0)), 0) AS outputTokens,
+        COALESCE(SUM(${TOKEN_TOTAL_SQL}), 0) AS totalTokens
       FROM model_usage
       JOIN sessions ON sessions.session_id = model_usage.session_id
       WHERE sessions.deleted_at IS NULL
+        AND ${TOKEN_VALUE_PRESENT_SQL}
         AND (? IS NULL OR model_usage.observed_at >= ?)
         AND model_usage.observed_at <= ?`
     )
@@ -251,12 +253,13 @@ function getUsageByModel(db: MastheadDatabase, range: UsageRange): UsageByModelD
       `SELECT COALESCE(NULLIF(trim(model_usage.model), ''), 'Unknown model') AS model,
         COALESCE(NULLIF(trim(model_usage.provider), ''), '') AS provider,
         COUNT(DISTINCT model_usage.session_id) AS sessions,
-        COALESCE(SUM(COALESCE(input_tokens, 0)), 0) AS inputTokens,
-        COALESCE(SUM(COALESCE(output_tokens, 0)), 0) AS outputTokens,
-        COALESCE(SUM(COALESCE(total_tokens, 0)), 0) AS totalTokens
+        COALESCE(SUM(COALESCE(model_usage.input_tokens, 0)), 0) AS inputTokens,
+        COALESCE(SUM(COALESCE(model_usage.output_tokens, 0)), 0) AS outputTokens,
+        COALESCE(SUM(${TOKEN_TOTAL_SQL}), 0) AS totalTokens
       FROM model_usage
       JOIN sessions ON sessions.session_id = model_usage.session_id
       WHERE sessions.deleted_at IS NULL
+        AND ${TOKEN_VALUE_PRESENT_SQL}
         AND (? IS NULL OR model_usage.observed_at >= ?)
         AND model_usage.observed_at <= ?
       GROUP BY COALESCE(NULLIF(trim(model_usage.model), ''), 'Unknown model'), COALESCE(NULLIF(trim(model_usage.provider), ''), '')
@@ -308,11 +311,12 @@ function getUsageByProject(db: MastheadDatabase, range: UsageRange): UsageByProj
         GROUP BY session_id
       ),
       token_counts AS (
-        SELECT session_id, COALESCE(SUM(COALESCE(total_tokens, 0)), 0) AS totalTokens
-        FROM model_usage
-        WHERE (? IS NULL OR observed_at >= ?)
-          AND observed_at <= ?
-        GROUP BY session_id
+        SELECT model_usage.session_id, COALESCE(SUM(${TOKEN_TOTAL_SQL}), 0) AS totalTokens
+        FROM model_usage AS model_usage
+        WHERE ${TOKEN_VALUE_PRESENT_SQL}
+          AND (? IS NULL OR model_usage.observed_at >= ?)
+          AND model_usage.observed_at <= ?
+        GROUP BY model_usage.session_id
       )
       SELECT scoped_sessions.project AS project,
         COUNT(*) AS sessions,
@@ -366,11 +370,12 @@ function getUsageByRuntime(db: MastheadDatabase, range: UsageRange): UsageByRunt
         GROUP BY session_id
       ),
       token_counts AS (
-        SELECT session_id, COALESCE(SUM(COALESCE(total_tokens, 0)), 0) AS totalTokens
-        FROM model_usage
-        WHERE (? IS NULL OR observed_at >= ?)
-          AND observed_at <= ?
-        GROUP BY session_id
+        SELECT model_usage.session_id, COALESCE(SUM(${TOKEN_TOTAL_SQL}), 0) AS totalTokens
+        FROM model_usage AS model_usage
+        WHERE ${TOKEN_VALUE_PRESENT_SQL}
+          AND (? IS NULL OR model_usage.observed_at >= ?)
+          AND model_usage.observed_at <= ?
+        GROUP BY model_usage.session_id
       )
       SELECT scoped_sessions.runtime AS runtime,
         COUNT(*) AS sessions,
@@ -430,8 +435,8 @@ function getUsageActivity(db: MastheadDatabase, range: UsageRange): UsageActivit
     "observed_at",
     range,
     "totalTokens",
-    "COALESCE(SUM(COALESCE(total_tokens, 0)), 0)",
-    "sessions.deleted_at IS NULL"
+    `COALESCE(SUM(${TOKEN_TOTAL_SQL}), 0)`,
+    `sessions.deleted_at IS NULL AND ${TOKEN_VALUE_PRESENT_SQL}`
   );
 
   return [...buckets.values()].sort((left, right) => left.bucketStart.localeCompare(right.bucketStart));
@@ -482,7 +487,8 @@ function getUsageCoverage(db: MastheadDatabase): UsageCoverageDto {
         `SELECT COUNT(DISTINCT model_usage.session_id) AS count
         FROM model_usage
         JOIN sessions ON sessions.session_id = model_usage.session_id
-        WHERE sessions.deleted_at IS NULL`
+        WHERE sessions.deleted_at IS NULL
+          AND ${TOKEN_VALUE_PRESENT_SQL}`
       )
       .get() as CountRow
   ).count;
