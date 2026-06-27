@@ -522,13 +522,23 @@ describe("ingest server live projection", () => {
   test("collects live Git snapshots and projects exact-file conflicts", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
-    const repoPath = join(tempDir, "repo");
-    await createDirtyRepo(repoPath);
+    const seedRepoPath = join(tempDir, "repo-seed");
+    const repoPath = join(tempDir, "repo-a");
+    const secondWorktreePath = join(tempDir, "repo-b");
+    await createCleanRepo(seedRepoPath);
+    await git(seedRepoPath, ["worktree", "add", "-b", "session-git-a", repoPath]);
+    await git(seedRepoPath, ["worktree", "add", "-b", "session-git-b", secondWorktreePath]);
+    await writeFile(join(repoPath, "src/shared.ts"), "export const value = 2;\n", "utf8");
+    await writeFile(join(secondWorktreePath, "src/shared.ts"), "export const value = 3;\n", "utf8");
     const server = await startServer(join(tempDir, "events.ndjson"));
     servers.push(server.child);
 
     await postJson(server.baseUrl, "/ingest", liveSessionPayload("server-git-a", "session-git-a", repoPath));
-    const accepted = await postJson(server.baseUrl, "/ingest", liveSessionPayload("server-git-b", "session-git-b", repoPath));
+    const accepted = await postJson(
+      server.baseUrl,
+      "/ingest",
+      liveSessionPayload("server-git-b", "session-git-b", secondWorktreePath, "session-git-b")
+    );
     expect(accepted.gitSnapshots).toBe(2);
 
     const projection = await getJson(server.baseUrl, "/projection?expandedSessionId=session-git-a");
@@ -538,7 +548,7 @@ describe("ingest server live projection", () => {
     expect(projection.projection.conflicts[0]).toMatchObject({
       type: "exact_file_overlap",
       severity: "high",
-      attribution: "degraded",
+      attribution: "direct",
       sharedPaths: ["src/shared.ts"],
       sessionIds: ["session-git-a", "session-git-b"]
     });
@@ -707,7 +717,7 @@ function liveApprovalPayload(providerEventId: string): Record<string, unknown> {
   };
 }
 
-function liveSessionPayload(providerEventId: string, sessionId: string, repoPath: string): Record<string, unknown> {
+function liveSessionPayload(providerEventId: string, sessionId: string, repoPath: string, branch = "master"): Record<string, unknown> {
   return {
     provider_event_id: providerEventId,
     event: "session_started",
@@ -715,8 +725,7 @@ function liveSessionPayload(providerEventId: string, sessionId: string, repoPath
     timestamp: "2026-06-23T03:35:00.000Z",
     cwd: repoPath,
     repo_root: repoPath,
-    git_common_dir: join(repoPath, ".git"),
-    branch: "master",
+    branch,
     project: "Masthead",
     title: `Live Git ${sessionId}`
   };
