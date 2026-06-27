@@ -8,36 +8,26 @@
 }
 
 .logbook-toolbar {
-  position: relative;
-  z-index: 5;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 96px) minmax(0, 96px) minmax(0, 170px) minmax(0, 170px);
-  align-items: center;
-  gap: 8px;
+  margin-block-end: 0;
+}
+
+.logbook-toolbar-row {
+  flex: 1 1 0;
   justify-content: stretch;
-  overflow: visible;
-  border: 1px solid rgba(92, 153, 187, 0.15);
-  border-radius: 5px;
-  background: var(--toolbar-bg);
-  box-shadow:
-    0 1px 1px rgba(0, 0, 0, 0.24),
-    0 6px 14px rgba(0, 0, 0, 0.12),
-    inset 0 1px 0 rgba(190, 225, 245, 0.042),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.48);
-  padding: 10px;
 }
 
-.logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) {
-  grid-template-columns: minmax(280px, 1fr) minmax(0, 96px) minmax(0, 96px) minmax(0, 160px) minmax(0, 160px);
+.logbook-toolbar .logbook-search.expanded {
+  flex: 0 1 clamp(280px, 34%, 420px);
+  width: clamp(280px, 34%, 420px);
+  max-width: clamp(280px, 34%, 420px);
 }
 
-.logbook-search {
-  width: 40px;
-  min-width: 40px;
-}
-
-.logbook-search.expanded {
+.logbook-toolbar-row .toolbar-select,
+.logbook-date-filter,
+.logbook-file-popover-filter {
+  flex: 1 1 0;
   width: 100%;
+  min-width: 0;
 }
 
 .logbook-toolbar .collapsible-search-input.search-field {
@@ -83,19 +73,22 @@
   min-width: 0;
 }
 
-.logbook-date-filter {
+.logbook-date-filter,
+.logbook-file-popover-filter {
   position: relative;
   min-width: 0;
 }
 
-.logbook-date-trigger {
+.logbook-date-trigger,
+.logbook-file-trigger {
   width: 100%;
   min-width: 0;
   gap: 6px;
   white-space: nowrap;
 }
 
-.logbook-date-filter.active .logbook-date-trigger {
+.logbook-date-filter.active .logbook-date-trigger,
+.logbook-file-popover-filter.active .logbook-file-trigger {
   border-color: rgba(46, 167, 255, 0.32);
   background: #0a314b;
   color: #eaf7ff;
@@ -174,23 +167,45 @@
   padding: 10px;
 }
 
-.logbook-date-popover[hidden] {
+.logbook-file-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  width: 300px;
+  max-width: calc(100vw - 24px);
+  gap: 8px;
+  border: 1px solid rgba(92, 153, 187, 0.22);
+  border-radius: 5px;
+  background: #071b28;
+  box-shadow:
+    0 12px 26px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(190, 225, 245, 0.05);
+  padding: 10px;
+}
+
+.logbook-date-popover[hidden],
+.logbook-file-popover[hidden] {
   display: none;
 }
 
-.logbook-date-popover label {
+.logbook-date-popover label,
+.logbook-file-popover label {
   display: grid;
   gap: 4px;
 }
 
 .logbook-date-popover label span,
+.logbook-file-popover label span,
 .logbook-date-clear {
   color: var(--mute);
   font-family: var(--font-mono);
   font-size: 11px;
 }
 
-.logbook-date-popover input {
+.logbook-date-popover input,
+.logbook-file-popover input {
   min-height: 38px;
   border: 1px solid rgba(92, 153, 187, 0.18);
   border-radius: 3px;
@@ -201,7 +216,8 @@
   padding: 0 9px;
 }
 
-.logbook-date-popover input:focus-visible {
+.logbook-date-popover input:focus-visible,
+.logbook-file-popover input:focus-visible {
   outline: 0;
   border-color: rgba(116, 185, 224, 0.38);
   box-shadow: 0 0 0 1px rgba(46, 167, 255, 0.08);
@@ -316,6 +332,7 @@
 
 .logbook-table-wrap {
   grid-row: 4;
+  position: relative;
   overflow: auto;
   min-height: 0;
   border: 1px solid rgba(92, 153, 187, 0.16);
@@ -328,12 +345,60 @@
   max-height: none;
 }
 
+.logbook-table-wrap.is-refreshing {
+  border-color: rgba(116, 185, 224, 0.24);
+  box-shadow:
+    0 0 0 1px rgba(46, 167, 255, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
 .logbook-table {
   width: 100%;
   min-width: 1180px;
   border-collapse: collapse;
   color: var(--body);
   font-size: 13px;
+}
+
+.logbook-table-outgoing {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.logbook-table-current {
+  position: relative;
+  z-index: 0;
+}
+
+.logbook-table-wrap.is-switching .logbook-table-outgoing {
+  animation: logbook-table-out 160ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.logbook-table-wrap.is-switching .logbook-table-current {
+  animation: logbook-table-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes logbook-table-out {
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+    filter: blur(3px);
+  }
+}
+
+@keyframes logbook-table-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
 }
 
 .logbook-table thead {
@@ -701,52 +766,27 @@
 }
 
 @media (max-width: 1280px) {
-  .logbook-toolbar {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 92px) minmax(0, 96px) minmax(0, 150px) minmax(0, 150px);
-  }
-
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) {
-    grid-template-columns: minmax(260px, 1fr) minmax(0, 92px) minmax(0, 96px) minmax(0, 132px) minmax(0, 132px);
-  }
   .logbook-filter-drawer {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 900px) {
-  .logbook-toolbar {
-    grid-template-columns: minmax(0, 1fr) 92px 96px minmax(0, 1fr) minmax(0, 1fr);
-    align-items: stretch;
+@media (max-width: 1040px) {
+  .logbook-toolbar .logbook-search.expanded {
+    flex: 0 1 clamp(120px, 24vw, 240px);
+    width: clamp(120px, 24vw, 240px);
+    max-width: clamp(120px, 24vw, 240px);
   }
 
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) {
-    grid-template-columns: minmax(0, 1fr) 92px 96px minmax(0, 1fr) minmax(0, 1fr);
+  .logbook-date-trigger,
+  .logbook-file-trigger {
+    justify-content: center;
+    padding-inline: 0;
   }
 
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-date-filter {
-    grid-column: 2;
-  }
-
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-toggle {
-    grid-column: 3;
-  }
-
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-select {
-    grid-column: 4;
-  }
-
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-sort {
-    grid-column: 5;
-  }
-  .logbook-date-filter,
-  .logbook-filter-toggle,
-  .toolbar-select.logbook-sort {
-    width: 100%;
-  }
-
-  .logbook-search.expanded,
-  .logbook-search.closing {
-    grid-column: 1 / -1;
+  .logbook-date-trigger span,
+  .logbook-file-trigger span {
+    display: none;
   }
 
   .logbook-desktop-column {
@@ -770,9 +810,8 @@
   }
 
   .logbook-toolbar,
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing),
-  .logbook-filter-drawer {
-    grid-template-columns: 1fr;
+  .logbook-toolbar-row {
+    flex-wrap: wrap;
   }
 
   .logbook-toolbar.filters-open .logbook-filter-drawer {
@@ -783,25 +822,14 @@
   .toolbar-select.logbook-filter-select,
   .logbook-search,
   .logbook-date-filter,
-  .logbook-filter-toggle,
+  .logbook-file-popover-filter,
   .logbook-combobox-filter {
     width: 100%;
     min-width: 0;
   }
 
-  .logbook-search.expanded,
-  .logbook-search.closing {
-    grid-column: auto;
-  }
-
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-date-filter,
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-toggle,
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-filter-select,
-  .logbook-toolbar:has(.logbook-search.expanded, .logbook-search.closing) .logbook-sort {
-    grid-column: auto;
-  }
-
-  .logbook-date-popover {
+  .logbook-date-popover,
+  .logbook-file-popover {
     position: static;
     inline-size: 100%;
     width: auto;
@@ -825,6 +853,10 @@
 @media (prefers-reduced-motion: reduce) {
   .logbook-row {
     transition-duration: 1ms;
+  }
+  .logbook-table-wrap.is-switching .logbook-table-current,
+  .logbook-table-wrap.is-switching .logbook-table-outgoing {
+    animation: none;
   }
   .logbook-filter-drawer {
     transition: none;

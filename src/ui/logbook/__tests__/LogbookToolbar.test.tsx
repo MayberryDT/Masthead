@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe("LogbookToolbar", () => {
-  test("renders compact Logbook controls with advanced filters in the drawer", () => {
+  test("renders Logbook filters as primary toolbar controls", () => {
     const html = renderToStaticMarkup(
       <LogbookToolbar
         filterOptions={{ projects: ["Masthead"], models: ["gpt-5"], runtimes: ["codex", "claude"] }}
@@ -37,25 +37,29 @@ describe("LogbookToolbar", () => {
     expect(html).toContain("Search all session history");
     expect(html).toContain("Search sessions");
     expect(html.indexOf("Date 2")).toBeLessThan(html.indexOf("Runtime filter"));
-    expect(html.indexOf("Filters 3")).toBeLessThan(html.indexOf("Runtime filter"));
     expect(html).toContain("Date 2");
-    expect(html).toContain("Filters 3");
+    expect(html).toContain("File 1");
+    expect(html).toContain("Runtime filter");
     expect(html).toContain("Project filter");
     expect(html).toContain("Model filter");
+    expect(html).toContain("Open file filter");
     expect(html).toContain("Masthead");
     expect(html).toContain("gpt-5");
     expect(html).toContain("2026-06-01");
     expect(html).toContain("2026-06-25");
-    expect(html).toContain("Filter changed files");
+    expect(html).toContain("Changed file path");
     expect(html).toContain("Files changed");
     expect(html.indexOf("Search sessions")).toBeLessThan(html.indexOf("Date 2"));
+    expect(html.indexOf("Project filter")).toBeLessThan(html.indexOf("Model filter"));
     expect(html.indexOf("Runtime filter")).toBeLessThan(html.indexOf("Files changed"));
+    expect(html.indexOf("Files changed")).toBeLessThan(html.indexOf("Open file filter"));
+    expect(html).not.toContain("Filters");
     expect(html).not.toContain("Lifecycle filter");
     expect(html).not.toContain("Compact rows");
     expect(html).not.toContain("<select");
   });
 
-  test("keeps advanced filters collapsed by default without active filters", () => {
+  test("keeps secondary Logbook filters visible without active filters", () => {
     const html = renderToStaticMarkup(
       <LogbookToolbar
         filterOptions={{ projects: ["Masthead"], models: ["gpt-5"], runtimes: ["codex"] }}
@@ -68,10 +72,12 @@ describe("LogbookToolbar", () => {
       />
     );
 
-    expect(html).toContain('class="logbook-toolbar"');
-    expect(html).toContain('aria-hidden="true"');
-    expect(html).toContain("Filters");
-    expect(html).not.toContain("Filters 1");
+    expect(html).toContain('class="logbook-toolbar observability-toolbar metal-toolbar"');
+    expect(html).toContain("Project filter");
+    expect(html).toContain("Model filter");
+    expect(html).toContain("Open file filter");
+    expect(html).not.toContain("Filters");
+    expect(html).not.toContain("File 1");
   });
 
   test("opens a compact date popover and updates typed date filters", async () => {

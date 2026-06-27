@@ -1258,7 +1258,7 @@ export function App() {
   const handleLogbookPageChange = (nextPageIndex: number) => {
     if (nextPageIndex === logbookPageIndex || logbookLoading) return;
     setLogbookPageIndex(nextPageIndex);
-    setLogbookResult(undefined);
+    setLogbookLoading(true);
     setLogbookError(undefined);
     setSelectedLogbookSessionId(undefined);
   };

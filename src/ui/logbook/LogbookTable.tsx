@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { LogbookSession } from "../HistoryPanel";
 import { logbookColumns } from "./logbookColumns";
 import { LogbookRow } from "./LogbookRow";
@@ -6,34 +7,113 @@ type Props = {
   density: "comfortable" | "compact";
   sessions: LogbookSession[];
   selectedSessionId?: string;
+  updating?: boolean;
   onSelect: (sessionId: string) => void;
 };
 
-export function LogbookTable({ density, onSelect, selectedSessionId, sessions }: Props) {
+export function LogbookTable({ density, onSelect, selectedSessionId, sessions, updating = false }: Props) {
+  const incomingSignature = useMemo(() => sessions.map((session) => session.sessionId).join("|"), [sessions]);
+  const [displayedSessions, setDisplayedSessions] = useState(sessions);
+  const [outgoingSessions, setOutgoingSessions] = useState<LogbookSession[]>();
+  const [swapState, setSwapState] = useState<"idle" | "switching">("idle");
+  const displayedRef = useRef(displayedSessions);
+  const signatureRef = useRef(incomingSignature);
+
+  useEffect(() => {
+    displayedRef.current = displayedSessions;
+  }, [displayedSessions]);
+
+  useEffect(() => {
+    if (incomingSignature === signatureRef.current) return undefined;
+
+    signatureRef.current = incomingSignature;
+    const previousSessions = displayedRef.current;
+
+    if (prefersReducedMotion() || previousSessions.length === 0) {
+      setDisplayedSessions(sessions);
+      setOutgoingSessions(undefined);
+      setSwapState("idle");
+      return undefined;
+    }
+
+    setOutgoingSessions(previousSessions);
+    setDisplayedSessions(sessions);
+    setSwapState("switching");
+
+    const timer = window.setTimeout(() => {
+      setOutgoingSessions(undefined);
+      setSwapState("idle");
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [incomingSignature, sessions]);
+
+  const wrapClassName = ["logbook-table-wrap", updating ? "is-refreshing" : "", swapState === "switching" ? "is-switching" : ""].filter(Boolean).join(" ");
+
   return (
-    <div className="logbook-table-wrap">
-      <table className={`logbook-table ${density === "compact" ? "compact" : ""}`.trim()}>
-        <thead>
-          <tr>
-            {logbookColumns.map((column) => (
-              <th key={column.key} scope="col" className={column.className}>
-                {column.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sessions.map((session) => (
-            <LogbookRow
-              key={session.sessionId}
-              density={density}
-              session={session}
-              selected={session.sessionId === selectedSessionId}
-              onSelect={onSelect}
-            />
-          ))}
-        </tbody>
-      </table>
+    <div className={wrapClassName} aria-busy={updating ? "true" : undefined}>
+      {outgoingSessions ? (
+        <LogbookTableLayer
+          ariaHidden
+          className="logbook-table-outgoing"
+          density={density}
+          sessions={outgoingSessions}
+          selectedSessionId={selectedSessionId}
+          onSelect={onSelect}
+        />
+      ) : null}
+      <LogbookTableLayer
+        className="logbook-table-current"
+        density={density}
+        sessions={displayedSessions}
+        selectedSessionId={selectedSessionId}
+        onSelect={onSelect}
+      />
     </div>
   );
+}
+
+function LogbookTableLayer({
+  ariaHidden,
+  className,
+  density,
+  onSelect,
+  selectedSessionId,
+  sessions
+}: {
+  ariaHidden?: boolean;
+  className: string;
+  density: "comfortable" | "compact";
+  sessions: LogbookSession[];
+  selectedSessionId?: string;
+  onSelect: (sessionId: string) => void;
+}) {
+  return (
+    <table aria-hidden={ariaHidden} className={`logbook-table ${density === "compact" ? "compact" : ""} ${className}`.trim()}>
+      <thead>
+        <tr>
+          {logbookColumns.map((column) => (
+            <th key={column.key} scope="col" className={column.className}>
+              {column.label}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {sessions.map((session) => (
+          <LogbookRow
+            key={session.sessionId}
+            density={density}
+            session={session}
+            selected={session.sessionId === selectedSessionId}
+            onSelect={onSelect}
+          />
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }

@@ -14,6 +14,8 @@ import {
   ClockCounterClockwise,
   Cpu,
   Database,
+  FileMagnifyingGlass,
+  FolderOpen,
   Gauge,
   GearSix,
   GitBranch,
@@ -48,6 +50,8 @@ export const iconRegistry = {
   lifecycle: CirclesThree,
   recentActivity: ClockCounterClockwise,
   timeRange: CalendarBlank,
+  project: FolderOpen,
+  fileSearch: FileMagnifyingGlass,
   refreshInterval: Timer,
   changeLayout: SquaresFour,
 

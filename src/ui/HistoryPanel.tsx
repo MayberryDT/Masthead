@@ -211,6 +211,7 @@ export function HistoryPanel({
           density={density}
           sessions={tableSessions}
           selectedSessionId={selectedSessionId}
+          updating={isLoading}
           onSelect={(sessionId) => onSessionSelect?.(sessionId)}
         />
       )}
