@@ -12,7 +12,6 @@ import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent, 
 import { AttentionQueue } from "../ui/AttentionQueue";
 import { AppShell } from "../ui/AppShell";
 import { HistoryPanel, type LogbookFilterState, type LogbookLoadState } from "../ui/HistoryPanel";
-import { ObservabilityRightRail } from "../ui/ObservabilityRightRail";
 import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
 import { OperationsPanel, type DeletionScopeKind } from "../ui/OperationsPanel";
@@ -52,6 +51,9 @@ import {
   getLogbookSummary,
   getLogbookSession,
   getLogbookSessionExcerpts,
+  getSessionDossier,
+  getSessionTranscript,
+  getUsageStats,
   importAdapterMetadata,
   importAdapterTranscripts,
   listProjects,
@@ -70,16 +72,23 @@ import {
   type LogbookSessionDetail,
   type LogbookSort,
   type LogbookSummary,
+  type SessionTranscriptKindFilter,
+  type SessionTranscriptResult,
+  type UsageStatsDto,
+  type UsageWindow,
   type SourceStatus,
   type DataSummary,
   type DeleteMastheadDataScope
 } from "./daemonClient";
+import type { SessionDossierDto } from "../shared/sessionDossier";
 import { exportedRecordCount, exportLocalData } from "./nativeStoreClient";
 import { AgentAccessSurface } from "./surfaces/AgentAccessSurface";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
 import { SourcesSurface } from "./surfaces/SourcesSurface";
+import { UsageSurface } from "./surfaces/UsageSurface";
+import { UsagePanel } from "../ui/usage/UsagePanel";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
 
@@ -130,6 +139,17 @@ export function App() {
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [boardDossierRetryKey, setBoardDossierRetryKey] = useState(0);
+  const [selectedBoardDossier, setSelectedBoardDossier] = useState<SessionDossierDto>();
+  const [selectedBoardDossierLoading, setSelectedBoardDossierLoading] = useState(false);
+  const [selectedBoardDossierError, setSelectedBoardDossierError] = useState<string>();
+  const [boardTranscriptRetryKey, setBoardTranscriptRetryKey] = useState(0);
+  const [selectedBoardTranscript, setSelectedBoardTranscript] = useState<SessionTranscriptResult>();
+  const [selectedBoardTranscriptLoading, setSelectedBoardTranscriptLoading] = useState(false);
+  const [selectedBoardTranscriptError, setSelectedBoardTranscriptError] = useState<string>();
+  const [selectedBoardTranscriptFilter, setSelectedBoardTranscriptFilter] = useState<SessionTranscriptKindFilter>("all");
+  const [selectedBoardTranscriptQuery, setSelectedBoardTranscriptQuery] = useState("");
+  const [selectedBoardTranscriptDebouncedQuery, setSelectedBoardTranscriptDebouncedQuery] = useState("");
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
   const [liveConnection, setLiveConnection] = useState<ConnectionState>({ state: "connecting" });
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
@@ -150,12 +170,30 @@ export function App() {
   const [logbookError, setLogbookError] = useState<string>();
   const [logbookRetryKey, setLogbookRetryKey] = useState(0);
   const [logbookSort, setLogbookSort] = useState<LogbookSort>("recent");
+  const [usageWindow, setUsageWindow] = useState<UsageWindow>("today");
+  const [usageStats, setUsageStats] = useState<UsageStatsDto>();
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState<string>();
+  const [sidebarUsageStats, setSidebarUsageStats] = useState<UsageStatsDto>();
+  const [sidebarUsageLoading, setSidebarUsageLoading] = useState(false);
+  const [sidebarUsageError, setSidebarUsageError] = useState<string>();
   const [logbookProjectOptions, setLogbookProjectOptions] = useState<string[]>([]);
   const [logbookFilters, setLogbookFilters] = useState<LogbookFilterState>({});
   const [selectedLogbookSessionId, setSelectedLogbookSessionId] = useState<string>();
   const [selectedLogbookSession, setSelectedLogbookSession] = useState<LogbookSessionDetail>();
   const [selectedLogbookExcerpts, setSelectedLogbookExcerpts] = useState<LogbookExcerpt[]>([]);
   const [logbookDetailLoading, setLogbookDetailLoading] = useState(false);
+  const [logbookDossierRetryKey, setLogbookDossierRetryKey] = useState(0);
+  const [selectedLogbookDossier, setSelectedLogbookDossier] = useState<SessionDossierDto>();
+  const [selectedLogbookDossierLoading, setSelectedLogbookDossierLoading] = useState(false);
+  const [selectedLogbookDossierError, setSelectedLogbookDossierError] = useState<string>();
+  const [logbookTranscriptRetryKey, setLogbookTranscriptRetryKey] = useState(0);
+  const [selectedLogbookTranscript, setSelectedLogbookTranscript] = useState<SessionTranscriptResult>();
+  const [selectedLogbookTranscriptLoading, setSelectedLogbookTranscriptLoading] = useState(false);
+  const [selectedLogbookTranscriptError, setSelectedLogbookTranscriptError] = useState<string>();
+  const [selectedLogbookTranscriptFilter, setSelectedLogbookTranscriptFilter] = useState<SessionTranscriptKindFilter>("all");
+  const [selectedLogbookTranscriptQuery, setSelectedLogbookTranscriptQuery] = useState("");
+  const [selectedLogbookTranscriptDebouncedQuery, setSelectedLogbookTranscriptDebouncedQuery] = useState("");
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
   const [localDataStatus, setLocalDataStatus] = useState<{
     state:
@@ -248,6 +286,7 @@ export function App() {
     board.selectedSession && filteredCards.some((card) => card.sessionId === board.selectedSession?.sessionId)
       ? board.selectedSession
       : undefined;
+  const selectedBoardCanonicalSessionId = filteredSelectedSession?.canonicalSessionId;
   const effectiveLiveConnection = useMemo<ConnectionState>(() => {
     if (connection.state.state === "offline" || connection.state.state === "incompatible") {
       return { state: "offline", error: "error" in connection.state ? connection.state.error : "Masthead daemon unavailable" };
@@ -259,6 +298,89 @@ export function App() {
     connection.state.state === "ready" || connection.state.state === "read_only" ? connection.state.health.data?.databaseId : undefined;
   const writeBlockedMessage =
     "This Masthead connection is read-only. Start the local writable collector before changing settings or deleting data.";
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setSelectedBoardTranscriptDebouncedQuery(selectedBoardTranscriptQuery), 200);
+    return () => window.clearTimeout(timeout);
+  }, [selectedBoardTranscriptQuery]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setSelectedLogbookTranscriptDebouncedQuery(selectedLogbookTranscriptQuery), 200);
+    return () => window.clearTimeout(timeout);
+  }, [selectedLogbookTranscriptQuery]);
+
+  useEffect(() => {
+    if (!detailModalOpen || showDemoData || !selectedBoardCanonicalSessionId) {
+      setSelectedBoardDossier(undefined);
+      setSelectedBoardDossierError(undefined);
+      setSelectedBoardDossierLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setSelectedBoardDossierLoading(true);
+    setSelectedBoardDossierError(undefined);
+    void getSessionDossier(selectedBoardCanonicalSessionId, activeProjectionUrl, { signal: controller.signal })
+      .then((dossier) => {
+        setSelectedBoardDossier(dossier);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setSelectedBoardDossier(undefined);
+          setSelectedBoardDossierError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSelectedBoardDossierLoading(false);
+      });
+    return () => controller.abort();
+  }, [activeProjectionUrl, boardDossierRetryKey, detailModalOpen, selectedBoardCanonicalSessionId, showDemoData]);
+
+  useEffect(() => {
+    if (!detailModalOpen || showDemoData || !selectedBoardCanonicalSessionId) {
+      setSelectedBoardTranscript(undefined);
+      setSelectedBoardTranscriptError(undefined);
+      setSelectedBoardTranscriptLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setSelectedBoardTranscript(undefined);
+    setSelectedBoardTranscriptLoading(true);
+    setSelectedBoardTranscriptError(undefined);
+    void getSessionTranscript(
+      selectedBoardCanonicalSessionId,
+      {
+        kind: selectedBoardTranscriptFilter,
+        limit: 100,
+        q: selectedBoardTranscriptDebouncedQuery
+      },
+      activeProjectionUrl,
+      { signal: controller.signal }
+    )
+      .then((transcript) => {
+        setSelectedBoardTranscript(transcript);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setSelectedBoardTranscript(undefined);
+          setSelectedBoardTranscriptError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSelectedBoardTranscriptLoading(false);
+      });
+    return () => controller.abort();
+  }, [
+    activeProjectionUrl,
+    boardTranscriptRetryKey,
+    detailModalOpen,
+    selectedBoardCanonicalSessionId,
+    selectedBoardTranscriptDebouncedQuery,
+    selectedBoardTranscriptFilter,
+    showDemoData
+  ]);
+
   const toggleDensity = useCallback(() => {
     const updateDensity = () => setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
 
@@ -351,6 +473,41 @@ export function App() {
     }
   }, [activeProjectionUrl, selectedSessionId]);
 
+  const loadSidebarUsageStats = useCallback(async (options: { signal?: AbortSignal } = {}) => {
+    setSidebarUsageLoading(true);
+    setSidebarUsageError(undefined);
+    try {
+      const stats = await getUsageStats(activeProjectionUrl, { window: "today", signal: options.signal });
+      setSidebarUsageStats(stats);
+      if (usageWindow === "today") setUsageStats(stats);
+    } catch (error) {
+      if (!options.signal?.aborted) {
+        setSidebarUsageError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (!options.signal?.aborted) setSidebarUsageLoading(false);
+    }
+  }, [activeProjectionUrl, usageWindow]);
+
+  const loadUsageStats = useCallback(async (window: UsageWindow = usageWindow, options: { signal?: AbortSignal } = {}) => {
+    setUsageLoading(true);
+    setUsageError(undefined);
+    try {
+      const stats = await getUsageStats(activeProjectionUrl, { window, signal: options.signal });
+      setUsageStats(stats);
+      if (window === "today") {
+        setSidebarUsageStats(stats);
+        setSidebarUsageError(undefined);
+      }
+    } catch (error) {
+      if (!options.signal?.aborted) {
+        setUsageError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (!options.signal?.aborted) setUsageLoading(false);
+    }
+  }, [activeProjectionUrl, usageWindow]);
+
   useEffect(() => {
     let cancelled = false;
     let timeoutId: number | undefined;
@@ -367,6 +524,26 @@ export function App() {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [loadLiveProjection, refreshRateMs]);
+
+  useEffect(() => {
+    if (effectiveLiveConnection.state !== "live") return;
+    const controller = new AbortController();
+    void loadSidebarUsageStats({ signal: controller.signal });
+    const interval = window.setInterval(() => {
+      void loadSidebarUsageStats();
+    }, 60_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [effectiveLiveConnection.state, loadSidebarUsageStats, logbookRetryKey]);
+
+  useEffect(() => {
+    if (activeSurface !== "usage" || effectiveLiveConnection.state !== "live") return;
+    const controller = new AbortController();
+    void loadUsageStats(usageWindow, { signal: controller.signal });
+    return () => controller.abort();
+  }, [activeSurface, effectiveLiveConnection.state, loadUsageStats, logbookRetryKey, usageWindow]);
 
   const handleOpenSession = (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -512,6 +689,75 @@ export function App() {
       });
     return () => controller.abort();
   }, [activeProjectionUrl, activeSurface, selectedLogbookSessionId, historyQuery]);
+
+  useEffect(() => {
+    if (activeSurface !== "logbook" || !selectedLogbookSessionId) {
+      setSelectedLogbookDossier(undefined);
+      setSelectedLogbookDossierError(undefined);
+      setSelectedLogbookDossierLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setSelectedLogbookDossierLoading(true);
+    setSelectedLogbookDossierError(undefined);
+    void getSessionDossier(selectedLogbookSessionId, activeProjectionUrl, { signal: controller.signal })
+      .then((dossier) => {
+        setSelectedLogbookDossier(dossier);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setSelectedLogbookDossier(undefined);
+          setSelectedLogbookDossierError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSelectedLogbookDossierLoading(false);
+      });
+    return () => controller.abort();
+  }, [activeProjectionUrl, activeSurface, logbookDossierRetryKey, selectedLogbookSessionId]);
+
+  useEffect(() => {
+    if (activeSurface !== "logbook" || !selectedLogbookSessionId) {
+      setSelectedLogbookTranscript(undefined);
+      setSelectedLogbookTranscriptError(undefined);
+      setSelectedLogbookTranscriptLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setSelectedLogbookTranscript(undefined);
+    setSelectedLogbookTranscriptLoading(true);
+    setSelectedLogbookTranscriptError(undefined);
+    void getSessionTranscript(
+      selectedLogbookSessionId,
+      {
+        kind: selectedLogbookTranscriptFilter,
+        limit: 100,
+        q: selectedLogbookTranscriptDebouncedQuery
+      },
+      activeProjectionUrl,
+      { signal: controller.signal }
+    )
+      .then((transcript) => {
+        setSelectedLogbookTranscript(transcript);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setSelectedLogbookTranscript(undefined);
+          setSelectedLogbookTranscriptError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSelectedLogbookTranscriptLoading(false);
+      });
+    return () => controller.abort();
+  }, [
+    activeProjectionUrl,
+    activeSurface,
+    logbookTranscriptRetryKey,
+    selectedLogbookSessionId,
+    selectedLogbookTranscriptDebouncedQuery,
+    selectedLogbookTranscriptFilter
+  ]);
 
   const handlePollActiveImports = useCallback(async () => {
     const activeImportIds = new Set(
@@ -917,6 +1163,52 @@ export function App() {
     }
   };
 
+  const handleLoadMoreBoardTranscript = async () => {
+    if (!selectedBoardCanonicalSessionId || !selectedBoardTranscript?.nextCursor || selectedBoardTranscriptLoading) return;
+    setSelectedBoardTranscriptLoading(true);
+    setSelectedBoardTranscriptError(undefined);
+    try {
+      const next = await getSessionTranscript(
+        selectedBoardCanonicalSessionId,
+        {
+          cursor: selectedBoardTranscript.nextCursor,
+          kind: selectedBoardTranscriptFilter,
+          limit: 100,
+          q: selectedBoardTranscriptDebouncedQuery
+        },
+        activeProjectionUrl
+      );
+      setSelectedBoardTranscript((current) => (current ? { ...next, items: [...current.items, ...next.items] } : next));
+    } catch (error) {
+      setSelectedBoardTranscriptError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSelectedBoardTranscriptLoading(false);
+    }
+  };
+
+  const handleLoadMoreLogbookTranscript = async () => {
+    if (!selectedLogbookSessionId || !selectedLogbookTranscript?.nextCursor || selectedLogbookTranscriptLoading) return;
+    setSelectedLogbookTranscriptLoading(true);
+    setSelectedLogbookTranscriptError(undefined);
+    try {
+      const next = await getSessionTranscript(
+        selectedLogbookSessionId,
+        {
+          cursor: selectedLogbookTranscript.nextCursor,
+          kind: selectedLogbookTranscriptFilter,
+          limit: 100,
+          q: selectedLogbookTranscriptDebouncedQuery
+        },
+        activeProjectionUrl
+      );
+      setSelectedLogbookTranscript((current) => (current ? { ...next, items: [...current.items, ...next.items] } : next));
+    } catch (error) {
+      setSelectedLogbookTranscriptError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSelectedLogbookTranscriptLoading(false);
+    }
+  };
+
   const needsRecoveryPanel = connection.state.state === "offline" || connection.state.state === "incompatible";
   const recoveryPanel = (
     <ConnectionRecoveryPanel connection={connection.state} onRetry={connection.refresh} onStart={handleStartConnector} />
@@ -980,11 +1272,40 @@ export function App() {
               session={selectedLogbookSession}
               excerpts={selectedLogbookExcerpts}
               loading={logbookDetailLoading}
+              dossier={selectedLogbookDossier}
+              dossierLoading={selectedLogbookDossierLoading}
+              dossierError={selectedLogbookDossierError}
+              onRetryDossier={() => setLogbookDossierRetryKey((current) => current + 1)}
+              transcript={selectedLogbookTranscript}
+              transcriptLoading={selectedLogbookTranscriptLoading}
+              transcriptError={selectedLogbookTranscriptError}
+              transcriptFilter={selectedLogbookTranscriptFilter}
+              transcriptQuery={selectedLogbookTranscriptQuery}
+              onTranscriptFilterChange={setSelectedLogbookTranscriptFilter}
+              onTranscriptQueryChange={setSelectedLogbookTranscriptQuery}
+              onTranscriptLoadMore={() => void handleLoadMoreLogbookTranscript()}
+              onRetryTranscript={() => setLogbookTranscriptRetryKey((current) => current + 1)}
+              onOpenSources={() => setActiveSurface("sources")}
               onClose={() => setSelectedLogbookSessionId(undefined)}
             />
           ) : null}
         </>
       </LogbookSurface>
+    ) : activeSurface === "usage" ? (
+      <UsageSurface>
+        {needsRecoveryPanel ? (
+          recoveryPanel
+        ) : (
+          <UsagePanel
+            stats={usageStats}
+            window={usageWindow}
+            loading={usageLoading}
+            error={usageError}
+            onWindowChange={setUsageWindow}
+            onRetry={() => void loadUsageStats(usageWindow)}
+          />
+        )}
+      </UsageSurface>
     ) : activeSurface === "agent_access" ? (
       needsRecoveryPanel ? (
         <section className="app-surface agent-access-surface surface-panel" aria-label="Agent Access">
@@ -1077,19 +1398,13 @@ export function App() {
             version={APP_VERSION_LABEL}
             activeCount={observabilitySessionTotal(visibleSummary)}
             activeSurface={activeSurface}
+            usageStats={sidebarUsageStats}
+            usageLoading={sidebarUsageLoading}
+            usageError={sidebarUsageError}
             onSurfaceChange={setActiveSurface}
           />
         }
         main={mainSurface}
-        rightRail={
-          activeSurface === "logbook" || activeSurface === "settings" ? undefined : (
-            <ObservabilityRightRail
-              summary={visibleSummary}
-              activeSurface={activeSurface}
-              sourceCount={sources.length}
-            />
-          )
-        }
       />
 
       {detailModalOpen && filteredSelectedSession ? (
@@ -1097,6 +1412,23 @@ export function App() {
           session={filteredSelectedSession}
           onClose={() => setDetailModalOpen(false)}
           onAction={handleSessionAction}
+          dossier={selectedBoardDossier}
+          dossierLoading={selectedBoardDossierLoading}
+          dossierError={selectedBoardDossierError}
+          onRetryDossier={() => setBoardDossierRetryKey((current) => current + 1)}
+          transcript={selectedBoardTranscript}
+          transcriptLoading={selectedBoardTranscriptLoading}
+          transcriptError={selectedBoardTranscriptError}
+          transcriptFilter={selectedBoardTranscriptFilter}
+          transcriptQuery={selectedBoardTranscriptQuery}
+          onTranscriptFilterChange={setSelectedBoardTranscriptFilter}
+          onTranscriptQueryChange={setSelectedBoardTranscriptQuery}
+          onTranscriptLoadMore={() => void handleLoadMoreBoardTranscript()}
+          onRetryTranscript={() => setBoardTranscriptRetryKey((current) => current + 1)}
+          onOpenSources={() => {
+            setDetailModalOpen(false);
+            setActiveSurface("sources");
+          }}
           actionStatus={
             sessionActionStatus && sessionActionStatus.sessionId === filteredSelectedSession.sessionId
               ? sessionActionStatus.message
@@ -1186,7 +1518,7 @@ function emptyBoardMessage({
   if (showDemoData) return "Demo replay is available only when fixture data exists.";
   if (liveConnection.state === "live") return "New activity from connected sources will appear here.";
   if (liveConnection.state === "offline") return "Use the Connector panel to start or check the local collector.";
-  return "Now will switch to live sessions when the local collector responds.";
+  return "Board will switch to live sessions when the local collector responds.";
 }
 
 function exportedSessionCount(value: unknown): number | undefined {
@@ -1210,10 +1542,10 @@ function scopeLabel(scope: DeleteMastheadDataScope): string {
 
 function reasonForAction(action: Extract<SafeAction, "snooze" | "dismiss" | "mark_reviewed" | "mark_expected">): string {
   const reasons = {
-    snooze: "Snoozed from Masthead Now.",
-    dismiss: "Dismissed from Masthead Now.",
-    mark_reviewed: "Marked reviewed from Masthead Now.",
-    mark_expected: "Marked expected from Masthead Now."
+    snooze: "Snoozed from Masthead Board.",
+    dismiss: "Dismissed from Masthead Board.",
+    mark_reviewed: "Marked reviewed from Masthead Board.",
+    mark_expected: "Marked expected from Masthead Board."
   };
   return reasons[action];
 }

@@ -5,12 +5,14 @@ type SettingsSectionProps = {
   title: string;
   description?: string;
   children: ReactNode;
+  className?: string;
   danger?: boolean;
 };
 
-export function SettingsSection({ children, danger = false, description, eyebrow, title }: SettingsSectionProps) {
+export function SettingsSection({ children, className = "", danger = false, description, eyebrow, title }: SettingsSectionProps) {
+  const sectionClassName = ["settings-section", danger ? "settings-section-danger" : "", className].filter(Boolean).join(" ");
   return (
-    <section className={`settings-section ${danger ? "settings-section-danger" : ""}`.trim()} aria-labelledby={sectionId(title)}>
+    <section className={sectionClassName} aria-labelledby={sectionId(title)}>
       <header className="settings-section-head">
         <div>
           <p className="mono-label">{eyebrow}</p>

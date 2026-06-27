@@ -114,6 +114,7 @@ export function settingsRuntimeIdentity(config: DaemonConfig, db: MastheadDataba
       "adapter_inventory",
       "import_jobs",
       "mcp_status",
+      "usage_stats",
       "settings",
       "data_lifecycle"
     ],

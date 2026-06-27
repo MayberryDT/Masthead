@@ -16,6 +16,7 @@ const REQUIRED_CAPABILITIES = [
   "adapter_inventory",
   "import_jobs",
   "mcp_status",
+  "usage_stats",
   "settings",
   "data_lifecycle"
 ];
@@ -24,6 +25,7 @@ const PRODUCT_ENDPOINTS = [
   "/sources",
   "/sessions",
   "/logbook/summary",
+  "/usage/summary?window=today",
   "/mcp/status",
   "/mcp/tools",
   "/settings",
@@ -60,6 +62,7 @@ checks.push(await checkImports());
 checks.push(await checkMcp());
 checks.push(await checkMcpStdio());
 checks.push(await checkLogbook());
+checks.push(await checkUsage());
 checks.push(await checkSettings());
 checks.push(await checkDestructivePreviewSafety());
 checks.push(await checkHooks());
@@ -356,12 +359,53 @@ async function checkLogbook() {
     const summary = isRecord(body.summary) ? body.summary : {};
     const sessionRows = Array.isArray(searchBody.sessions) ? searchBody.sessions : [];
     const sessions = numberValue(summary.sessions) ?? 0;
+    let dossierStatus = "skipped";
+    let dossierError;
+    let transcriptStatus = "skipped";
+    let transcriptError;
+    let transcriptMessages;
+    const firstSessionId = isRecord(sessionRows[0]) && typeof sessionRows[0].sessionId === "string" ? sessionRows[0].sessionId : undefined;
+    if (firstSessionId) {
+      try {
+        const dossierBody = await getJson(`/sessions/${encodeURIComponent(firstSessionId)}/dossier`);
+        dossierStatus = isRecord(dossierBody.dossier) ? "ok" : "invalid";
+      } catch (error) {
+        dossierStatus = "fail";
+        dossierError = errorMessage(error);
+      }
+      try {
+        const transcriptBody = await getJson(`/sessions/${encodeURIComponent(firstSessionId)}/transcript?limit=1`);
+        const coverage = isRecord(transcriptBody.coverage) ? transcriptBody.coverage : {};
+        transcriptMessages = numberValue(coverage.messages);
+        transcriptStatus = Array.isArray(transcriptBody.items) && isRecord(transcriptBody.coverage) ? "ok" : "invalid";
+      } catch (error) {
+        transcriptStatus = "fail";
+        transcriptError = errorMessage(error);
+      }
+    }
+    const status =
+      dossierStatus === "fail" || dossierStatus === "invalid" || transcriptStatus === "fail" || transcriptStatus === "invalid"
+        ? "fail"
+        : sessions === 0 || transcriptMessages === 0
+          ? "warn"
+          : "ok";
     return {
       id: "logbook",
       label: "logbook",
-      status: sessions === 0 ? "warn" : "ok",
-      message: sessions === 0 ? "Logbook has zero sessions." : `Logbook has ${sessions} sessions and search returned ${sessionRows.length}.`,
+      status,
+      message:
+        sessions === 0
+          ? "Logbook has zero sessions."
+          : dossierStatus === "ok" && transcriptStatus === "ok"
+            ? `Logbook has ${sessions} sessions, a canonical dossier, and transcript coverage.`
+            : `Logbook has ${sessions} sessions and search returned ${sessionRows.length}; dossier ${dossierStatus}.`,
       details: {
+        dossierError,
+        dossierStatus,
+        firstSessionId,
+        transcriptError,
+        transcriptMessages,
+        transcriptStatus,
         sessions,
         projects: summary.projects,
         messages: summary.messages,
@@ -371,6 +415,50 @@ async function checkLogbook() {
     };
   } catch (error) {
     return { id: "logbook", label: "logbook", status: "fail", message: errorMessage(error), details: { baseUrl } };
+  }
+}
+
+async function checkUsage() {
+  try {
+    const body = await getJson("/usage/summary?window=today");
+    const usage = isRecord(body.usage) ? body.usage : {};
+    const totals = isRecord(usage.totals) ? usage.totals : {};
+    const missing = [];
+    if (usage.window !== "today") missing.push("window");
+    if (!isRecord(usage.range)) missing.push("range");
+    if (numberValue(totals.sessions) === undefined) missing.push("totals.sessions");
+    if (numberValue(totals.totalTokens) === undefined) missing.push("totals.totalTokens");
+    if (!Array.isArray(usage.byModel)) missing.push("byModel");
+    if (!Array.isArray(usage.byProject)) missing.push("byProject");
+    if (!Array.isArray(usage.byRuntime)) missing.push("byRuntime");
+    if (!Array.isArray(usage.activity)) missing.push("activity");
+    if (!isRecord(usage.coverage)) missing.push("coverage");
+
+    const sessions = numberValue(totals.sessions) ?? 0;
+    const totalTokens = numberValue(totals.totalTokens) ?? 0;
+    return {
+      id: "usage-summary",
+      label: "usage summary",
+      status: missing.length > 0 ? "fail" : sessions === 0 || totalTokens === 0 ? "warn" : "ok",
+      message:
+        missing.length > 0
+          ? `Usage summary missing ${missing.join(", ")}.`
+          : sessions === 0
+            ? "Usage summary has zero sessions today."
+            : totalTokens === 0
+              ? `Usage summary has ${sessions} session${sessions === 1 ? "" : "s"} today but zero total tokens.`
+              : `Usage summary has ${sessions} session${sessions === 1 ? "" : "s"} and ${totalTokens} tokens today.`,
+      details: {
+        sessions,
+        totalTokens,
+        tokenRows: totals.tokenRows,
+        toolCalls: totals.toolCalls,
+        mcpQueries: totals.mcpQueries,
+        missing
+      }
+    };
+  } catch (error) {
+    return { id: "usage-summary", label: "usage summary", status: "fail", message: errorMessage(error), details: { baseUrl } };
   }
 }
 

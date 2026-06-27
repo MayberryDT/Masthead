@@ -25,7 +25,7 @@ Release docs must preserve these launch boundaries:
 - MCP is read-only for launch.
 - Local SQLite is canonical for Masthead-owned product data.
 - Remote enrichment is optional, scoped, redacted, previewable, and auditable.
-- Live Now is a view over collected session data, not the product category.
+- Board is a live view over collected session data, not the product category.
 
 ## CI And Security Gates
 
@@ -75,6 +75,7 @@ Real local Codex dogfooding has now been run in this environment: the Masthead-m
 | Local history, unresolved alerts, and review dispositions survive restart | Implemented for current slice | File-backed live ingestion and native SQLite store persist records; restart persistence is black-box tested for live hook events and native `review_disposition` records. The UI hydrates stored review dispositions on startup, applies them to fixture/live projections, and exposes a local history panel with project, session, file/path, command/cmd, status, branch, alert, conflict, outcome, and disposition filters. |
 | Review dispositions never hide newer session activity | Implemented for current slice | Session/card dispositions are freshness-checked against card activity and attention creation time. Stale dispositions remain visible only as modal review history; visible attention, summary counts, and lifecycle lanes are rebuilt after review actions. |
 | Complete local data deletion removes Masthead-local history without touching Codex, Git, source files, or external services | Partial | Core/file store and native SQLite clear operations return `touchedExternalState: false`. UI export/delete controls now call native commands with two-step delete confirmation, reject any native clear result that claims external mutation, and clear hydrated review dispositions from the board. |
+| Canonical session details are available from Board and Logbook without source-app control | Implemented for current slice | Board cards carry canonical session ids, `GET /sessions/:sessionId/dossier` serves read-only canonical identity/narrative/files/tools/verification/timeline/reuse/usage data, `GET /sessions/:sessionId/transcript` serves paginated canonical transcript rows, the worktree bridge forwards the read routes, and the shared modal body hides unsupported source-opening actions. |
 | Fixture replay and dogfood tests cover MVP scenarios without private credentials | Implemented for current slice | Fixture/dogfood cover the core supervision loop without private credentials. Live dogfood now covers real Codex hook trust, three real sessions, live Git snapshots, exact-file conflict, degraded attribution, and explicit failed-command metadata. |
 
 ## Product Invariants
@@ -107,6 +108,7 @@ Real local Codex dogfooding has now been run in this environment: the Masthead-m
 - LLM attention evidence validation lives in `src/core/llmAttention.ts`.
 - Deterministic and optional OpenAI-backed session copy lives in `src/core/sessionCopy.ts` and `src/core/openaiSessionCopy.ts`.
 - React Live Board UI, live projection client, and local export/delete/review action wiring live under `src/app/`, `src/ui/`, and `src/styles/`.
+- Canonical session dossier repository, shared DTOs, API route, and UI body live in `src/daemon/db/sessionDossierRepository.ts`, `src/shared/sessionDossier.ts`, `src/daemon/server.ts`, and `src/ui/session-dossier/`.
 - Sanitized replay fixture lives in `fixtures/v0/replay-three-sessions-board.json`.
 - Native shell sources and icon live under `src-tauri/`.
 

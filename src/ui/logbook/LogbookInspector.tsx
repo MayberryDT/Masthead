@@ -1,28 +1,33 @@
 import type { LogbookExcerpt, LogbookSessionDetail } from "../../app/daemonClient";
 import type { ReactNode } from "react";
+import { Icon } from "../icons/Icon";
+import { iconWeights } from "../icons/icon-tokens";
 import { StatusBadge } from "../primitives/StatusBadge";
 
 type Props = {
   excerpts: LogbookExcerpt[];
+  compactHeader?: boolean;
   loading?: boolean;
   session?: LogbookSessionDetail;
   onClose: () => void;
 };
 
-export function LogbookInspector({ excerpts, loading = false, onClose, session }: Props) {
+export function LogbookInspector({ compactHeader = false, excerpts, loading = false, onClose, session }: Props) {
   if (!session && !loading) return null;
 
   return (
     <aside className="logbook-inspector metal-surface" aria-label="Session detail">
-      <header>
-        <div>
-          <p className="mono-label">Session detail</p>
-          <h2>{session?.title ?? "Loading session"}</h2>
-        </div>
-        <button type="button" className="surface-inline-action" onClick={onClose}>
-          Close
-        </button>
-      </header>
+      {compactHeader ? null : (
+        <header>
+          <div>
+            <p className="mono-label">Session detail</p>
+            <h2>{session?.title ?? "Loading session"}</h2>
+          </div>
+          <button type="button" className="surface-inline-action logbook-inspector-close" aria-label="Close session detail" onClick={onClose}>
+            <Icon name="close" size="toolbar" weight={iconWeights.toolbar} />
+          </button>
+        </header>
+      )}
 
       {session ? (
         <>

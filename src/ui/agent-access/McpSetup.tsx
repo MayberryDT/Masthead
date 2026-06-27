@@ -68,7 +68,7 @@ export function McpSetup({
   }
 
   return (
-    <section className="agent-access-section" aria-labelledby="mcp-setup-title">
+    <section className="agent-access-section agent-access-setup-section" aria-labelledby="mcp-setup-title">
       <div className="agent-access-section-head">
         <div>
           <p className="mono-label">Set up a client</p>

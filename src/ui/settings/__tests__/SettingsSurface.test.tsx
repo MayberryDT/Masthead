@@ -18,6 +18,9 @@ describe("Settings surface", () => {
     );
 
     expect(html).toContain("Codex integration");
+    expect(html).toContain("settings-layout");
+    expect(html).toContain("settings-section-wide");
+    expect(html).toContain("settings-section-danger");
     expect(html).toContain("Lifecycle hooks");
     expect(html).toContain("Installed");
     expect(html).toContain("Deterministic fallback");

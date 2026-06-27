@@ -162,17 +162,19 @@
 .stat-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
-  border: 1px solid var(--line, rgba(194, 221, 241, 0.13));
-  border-radius: 5px;
-  background: rgba(7, 27, 40, 0.7);
+  border-radius: 6px;
+  background: #081d2b;
+  box-shadow:
+    0 0 0 1px rgba(92, 153, 187, 0.16),
+    0 2px 8px rgba(0, 0, 0, 0.12);
   margin: 0;
   overflow: hidden;
 }
 
 .stat-strip div {
   min-width: 0;
-  border-right: 1px solid var(--line, rgba(194, 221, 241, 0.13));
-  padding: 10px 12px;
+  border-right: 1px solid rgba(194, 221, 241, 0.08);
+  padding: 8px 10px;
 }
 
 .stat-strip div:last-child {
@@ -182,17 +184,18 @@
 .stat-strip dt {
   color: var(--mute, #91a8ba);
   font-family: "IBM Plex Mono", monospace;
-  font-size: 11px;
-  line-height: 1.3;
+  font-size: 10.5px;
+  line-height: 1.1;
 }
 
 .stat-strip dd {
   margin: 3px 0 0;
   color: var(--ink, #f6fbff);
   font-family: "IBM Plex Mono", monospace;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  line-height: 1.3;
+  line-height: 1;
 }
 
 .code-block {

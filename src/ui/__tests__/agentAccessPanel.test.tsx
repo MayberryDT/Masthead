@@ -17,6 +17,11 @@ describe("AgentAccessPanel", () => {
     );
 
     expect(html).toContain("MCP server");
+    expect(html).toContain("agent-access-layout");
+    expect(html).toContain("agent-access-setup-section");
+    expect(html).toContain("agent-access-policy-section");
+    expect(html).toContain("agent-access-tools-section");
+    expect(html).toContain("agent-access-audit-section");
     expect(html).toContain("2 read-only");
     expect(html).toContain("Access");
     expect(html).toContain("Enabled");

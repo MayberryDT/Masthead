@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { EvidenceRef } from "../core/types";
 import type { SessionCapsule, SessionTitleSource } from "./types";
+import { draftNarrativeFromFacts } from "./sessionNarrativeDraft.ts";
+import type { SessionNarrativeFacts } from "./sessionNarrativeFacts.ts";
 export type { SessionTitleSource } from "./types";
 
 export type SessionFacts = {
@@ -13,9 +15,10 @@ export type SessionFacts = {
   commands: string[];
   files: string[];
   evidence: EvidenceRef[];
+  narrative?: SessionNarrativeFacts;
 };
 
-export const SESSION_CAPSULE_PROMPT_VERSION = "session-capsule-v1";
+export const SESSION_CAPSULE_PROMPT_VERSION = "session-capsule-v2";
 
 export function fingerprintSessionFacts(facts: SessionFacts): string {
   return createHash("sha256")
@@ -25,6 +28,7 @@ export function fingerprintSessionFacts(facts: SessionFacts): string {
         files: facts.files,
         messages: facts.messages,
         objective: facts.objective,
+        narrative: facts.narrative,
         project: facts.project,
         sessionId: facts.sessionId,
         sourceSessionId: facts.sourceSessionId,
@@ -35,6 +39,10 @@ export function fingerprintSessionFacts(facts: SessionFacts): string {
 }
 
 export function deterministicCapsuleFromFacts(facts: SessionFacts): SessionCapsule {
+  if (facts.narrative) {
+    return capsuleFromNarrativeFacts(facts);
+  }
+
   const titleSelection = selectSessionTitle(facts);
   const capsule = {
     candidateDecisions: [],
@@ -48,6 +56,30 @@ export function deterministicCapsuleFromFacts(facts: SessionFacts): SessionCapsu
     unresolved: []
   } satisfies SessionCapsule;
   return capsule;
+}
+
+function capsuleFromNarrativeFacts(facts: SessionFacts): SessionCapsule {
+  const draft = draftNarrativeFromFacts(facts.narrative as SessionNarrativeFacts);
+  return {
+    action: draft.action,
+    candidateDecisions: [],
+    commandsSummary: draft.commandsSummary,
+    filesChangedSummary: draft.filesChangedSummary,
+    liveSummary: draft.liveSummary,
+    objective: facts.objective,
+    object: draft.object,
+    outcome: draft.outcome,
+    searchPhrases: unique([...draft.searchPhrases, facts.objective, facts.project].filter(isString)),
+    searchSummary: draft.searchSummary,
+    subject: draft.subject,
+    technologies: unique(draft.technologies),
+    title: draft.title,
+    titleSource: "deterministic",
+    topics: unique(draft.topics),
+    unresolved: [],
+    validationWarnings: draft.validationWarnings,
+    verificationSummary: draft.verificationSummary
+  };
 }
 
 export function selectSessionTitle(facts: SessionFacts): { title: string; source: SessionTitleSource } {

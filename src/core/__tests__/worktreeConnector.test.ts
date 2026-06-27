@@ -135,6 +135,8 @@ describe("Masthead worktree connector planning", () => {
     "/sessions",
     "/sessions/session-1",
     "/sessions/session-1/excerpts",
+    "/sessions/session-1/dossier",
+    "/sessions/session-1/transcript",
     "/projects",
     "/adapters",
     "/imports",

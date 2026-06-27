@@ -97,6 +97,154 @@ describe("progressive Codex imports", () => {
     expect(countRows(daemon.database, "messages")).toBe(1);
   });
 
+  test("imports transcript token counts onto existing hook sessions", async () => {
+    const { daemon, codexRoot } = await createTestHarness();
+    await writeJsonl(join(codexRoot, "sessions", "2026", "06", "25", "session.jsonl"), [
+      {
+        type: "session_meta",
+        timestamp: "2026-06-25T12:00:00.000Z",
+        payload: {
+          session_id: "shared-session",
+          cwd: "/home/tyler/Documents/Masthead",
+          model: "gpt-5"
+        }
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-06-25T12:01:00.000Z",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 20,
+              output_tokens: 5,
+              total_tokens: 25
+            }
+          }
+        }
+      }
+    ]);
+    const baseUrl = await listen(daemon);
+    await ingestHook(baseUrl, {
+      event: "session_started",
+      model: "gpt-5",
+      session_id: "shared-session",
+      timestamp: "2026-06-25T12:00:00.000Z"
+    });
+
+    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    const imported = await postJson(baseUrl, "/adapters/codex/import-transcripts");
+
+    await waitFor(() => getImportJob(daemon.database, imported.jobs[0].importJobId)?.status === "succeeded");
+    expect(countRows(daemon.database, "sessions")).toBe(1);
+    expect(tokenTotals(daemon.database)).toMatchObject({
+      inputTokens: 20,
+      outputTokens: 5,
+      totalTokens: 25
+    });
+  });
+
+  test("imports useful transcript rows and serves them through the transcript endpoint", async () => {
+    const { daemon, codexRoot } = await createTestHarness();
+    await writeJsonl(join(codexRoot, "sessions", "2026", "06", "25", "useful-session.jsonl"), [
+      {
+        type: "session_meta",
+        timestamp: "2026-06-25T12:00:00.000Z",
+        payload: {
+          session_id: "useful-session",
+          cwd: "/home/tyler/Documents/Masthead",
+          model: "gpt-5"
+        }
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-06-25T12:01:00.000Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Show me the real session conversation." }]
+        }
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-06-25T12:02:00.000Z",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "I added the transcript-first detail view." }]
+        }
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-06-25T12:03:00.000Z",
+        payload: {
+          type: "function_call",
+          call_id: "call-1",
+          name: "shell",
+          arguments: "{\"cmd\":\"npm test\"}"
+        }
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-06-25T12:04:00.000Z",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-1",
+          output: "Tests passed."
+        }
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-06-25T12:05:00.000Z",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 100,
+              output_tokens: 25,
+              total_tokens: 125
+            }
+          }
+        }
+      },
+      {
+        type: "checkpoint",
+        timestamp: "2026-06-25T12:06:00.000Z",
+        payload: {
+          checkpoint_id: "checkpoint-1",
+          summary: "Transcript detail implementation checkpoint."
+        }
+      }
+    ]);
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    const imported = await postJson(baseUrl, "/adapters/codex/import-transcripts");
+
+    await waitFor(() => getImportJob(daemon.database, imported.jobs[0].importJobId)?.status === "succeeded");
+    const sessionId = sessionIdFor(daemon.database, "useful-session");
+    expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'user'", sessionId)).toBeGreaterThan(0);
+    expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId)).toBeGreaterThan(0);
+    expect(countWhere(daemon.database, "tool_calls", "session_id = ?", sessionId)).toBeGreaterThan(0);
+    expect(countWhere(daemon.database, "tool_results", "session_id = ?", sessionId)).toBeGreaterThan(0);
+    expect(countWhere(daemon.database, "model_usage", "session_id = ?", sessionId)).toBeGreaterThan(0);
+    expect(countWhere(daemon.database, "checkpoints", "session_id = ?", sessionId)).toBeGreaterThan(0);
+
+    const transcript = await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
+
+    expect(transcript).toMatchObject({
+      ok: true,
+      coverage: {
+        assistantMessages: 1,
+        hasUsableTranscript: true,
+        userMessages: 1
+      }
+    });
+    expect(transcript.items.map((item) => item.text)).toEqual(
+      expect.arrayContaining(["Show me the real session conversation.", "I added the transcript-first detail view."])
+    );
+  });
+
   test("cancels import jobs through the backend status endpoint", async () => {
     const { daemon } = await createTestHarness();
     seedSource(daemon, "codex-session-index");
@@ -156,6 +304,15 @@ async function postJson(baseUrl: string, path: string): Promise<ImportActionResp
   return { ...body, jobs: Array.isArray(body.jobs) ? (body.jobs as ImportJobDto[]) : [] };
 }
 
+async function ingestHook(baseUrl: string, body: Record<string, unknown>): Promise<void> {
+  const response = await fetch(`${baseUrl}/ingest`, {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST"
+  });
+  expect(response.status).toBe(202);
+}
+
 async function waitFor(predicate: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 300; attempt += 1) {
     if (predicate()) return;
@@ -173,6 +330,36 @@ function yieldToEventLoop(): Promise<void> {
 function countRows(database: MastheadDaemon["database"], table: string): number {
   const row = database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
   return row.count;
+}
+
+function countWhere(database: MastheadDaemon["database"], table: string, where: string, ...values: Array<string | number | null>): number {
+  const row = database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`).get(...values) as { count: number };
+  return row.count;
+}
+
+function sessionIdFor(database: MastheadDaemon["database"], sourceSessionId: string): string {
+  const row = database.prepare("SELECT session_id AS sessionId FROM sessions WHERE source_session_id = ?").get(sourceSessionId) as
+    | { sessionId: string }
+    | undefined;
+  expect(row).toBeDefined();
+  return row?.sessionId ?? "";
+}
+
+async function getJson(baseUrl: string, path: string): Promise<{ ok?: boolean; coverage?: Record<string, unknown>; items: Array<{ text: string }> }> {
+  const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" } });
+  expect(response.status).toBe(200);
+  return (await response.json()) as { ok?: boolean; coverage?: Record<string, unknown>; items: Array<{ text: string }> };
+}
+
+function tokenTotals(database: MastheadDaemon["database"]): { inputTokens: number; outputTokens: number; totalTokens: number } {
+  return database
+    .prepare(
+      `SELECT COALESCE(SUM(COALESCE(input_tokens, 0)), 0) AS inputTokens,
+        COALESCE(SUM(COALESCE(output_tokens, 0)), 0) AS outputTokens,
+        COALESCE(SUM(COALESCE(total_tokens, 0)), 0) AS totalTokens
+      FROM model_usage`
+    )
+    .get() as { inputTokens: number; outputTokens: number; totalTokens: number };
 }
 
 function seedSource(daemon: MastheadDaemon, sourceId: string): void {

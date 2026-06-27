@@ -111,6 +111,13 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
     try {
       for (const card of projection.cards) {
         const sessionId = canonicalSessionId(context.hostId, runtimeId, card.sessionId);
+        const canonicalCard = {
+          ...card,
+          canonicalSessionId: sessionId,
+          hostId: context.hostId,
+          runtime: context.runtimeKind,
+          sourceSessionId: card.sourceSessionId ?? card.sessionId
+        };
         upsertSessionStub.run(
           sessionId,
           context.hostId,
@@ -126,7 +133,7 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
           updatedAt,
           updatedAt
         );
-        upsert.run(sessionId, JSON.stringify(card), updatedAt);
+        upsert.run(sessionId, JSON.stringify(canonicalCard), updatedAt);
       }
       db.exec("COMMIT;");
     } catch (error) {
@@ -249,7 +256,13 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
           observed_at,
           source_ref_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(usage_id) DO NOTHING`
+        ON CONFLICT(usage_id) DO UPDATE SET
+          model = COALESCE(model_usage.model, excluded.model),
+          provider = COALESCE(model_usage.provider, excluded.provider),
+          input_tokens = COALESCE(model_usage.input_tokens, excluded.input_tokens),
+          output_tokens = COALESCE(model_usage.output_tokens, excluded.output_tokens),
+          total_tokens = COALESCE(model_usage.total_tokens, excluded.total_tokens),
+          cost_micros = COALESCE(model_usage.cost_micros, excluded.cost_micros)`
       ).run(
         modelUsageIdFromRecord(sessionId, record),
         sessionId,
@@ -497,7 +510,13 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
         observed_at,
         source_ref_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(usage_id) DO NOTHING`
+      ON CONFLICT(usage_id) DO UPDATE SET
+        model = COALESCE(model_usage.model, excluded.model),
+        provider = COALESCE(model_usage.provider, excluded.provider),
+        input_tokens = COALESCE(model_usage.input_tokens, excluded.input_tokens),
+        output_tokens = COALESCE(model_usage.output_tokens, excluded.output_tokens),
+        total_tokens = COALESCE(model_usage.total_tokens, excluded.total_tokens),
+        cost_micros = COALESCE(model_usage.cost_micros, excluded.cost_micros)`
     ).run(
       modelUsageId(sessionId, event),
       sessionId,
@@ -552,11 +571,11 @@ export function ingestAdapterRecord(db: MastheadDatabase, record: AdapterRecord,
 
 const terminalEventTypes = new Set<NormalizedEvent["type"]>(["command.finished", "file.changed", "session.completed"]);
 
-function canonicalSessionId(hostId: string, runtimeId: string, sourceSessionId: string): string {
+export function canonicalSessionId(hostId: string, runtimeId: string, sourceSessionId: string): string {
   return `session:${hash(`${hostId}\0${runtimeId}\0${sourceSessionId}`).slice(0, 32)}`;
 }
 
-function runtimeIdFor(runtimeKind: string, runtimeVersion: string | undefined): string {
+export function runtimeIdFor(runtimeKind: string, runtimeVersion: string | undefined): string {
   return `runtime:${runtimeKind}:${hash(runtimeVersion ?? "unknown").slice(0, 16)}`;
 }
 

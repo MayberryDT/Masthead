@@ -1,18 +1,31 @@
 import type { ReactNode } from "react";
+import type { UsageStatsDto } from "../app/daemonClient";
 import sailLogoUrl from "./assets/masthead-logo-sail.png";
 import { Icon, type IconName } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
+import { SidebarUsageStats } from "./SidebarUsageStats";
 
 type Props = {
   version: string;
   activeCount: number;
   activeSurface?: AppSurface;
+  usageStats?: UsageStatsDto;
+  usageLoading?: boolean;
+  usageError?: string;
   onSurfaceChange?: (surface: AppSurface) => void;
 };
 
-export type AppSurface = "now" | "logbook" | "sources" | "agent_access" | "settings";
+export type AppSurface = "now" | "logbook" | "sources" | "usage" | "agent_access" | "settings";
 
-export function ObservabilitySidebar({ version, activeCount, activeSurface = "now", onSurfaceChange }: Props) {
+export function ObservabilitySidebar({
+  version,
+  activeCount,
+  activeSurface = "now",
+  usageStats,
+  usageLoading,
+  usageError,
+  onSurfaceChange
+}: Props) {
   return (
     <div className="sidebar-shell">
       <a className="sidebar-brand" href="#overview" aria-label="Masthead overview">
@@ -26,9 +39,9 @@ export function ObservabilitySidebar({ version, activeCount, activeSurface = "no
       <nav className="sidebar-nav" aria-label="Masthead sections">
         <SidebarGroup title="Workspace">
           <SidebarLink
-            href="#now"
+            href="#board"
             icon="sessions"
-            label="Now"
+            label="Board"
             count={activeCount}
             active={activeSurface === "now"}
             onClick={() => onSurfaceChange?.("now")}
@@ -42,27 +55,35 @@ export function ObservabilitySidebar({ version, activeCount, activeSurface = "no
           />
           <SidebarLink
             href="#sources"
-            icon="usage"
+            icon="sources"
             label="Sources"
             active={activeSurface === "sources"}
             onClick={() => onSurfaceChange?.("sources")}
           />
           <SidebarLink
+            href="#usage"
+            icon="usage"
+            label="Usage"
+            active={activeSurface === "usage"}
+            onClick={() => onSurfaceChange?.("usage")}
+          />
+          <SidebarLink
             href="#agent-access"
-            icon="models"
+            icon="agentAccess"
             label="Agent Access"
             active={activeSurface === "agent_access"}
             onClick={() => onSurfaceChange?.("agent_access")}
           />
           <SidebarLink
             href="#settings"
-            icon="models"
+            icon="settings"
             label="Settings"
             active={activeSurface === "settings"}
             onClick={() => onSurfaceChange?.("settings")}
           />
         </SidebarGroup>
       </nav>
+      <SidebarUsageStats stats={usageStats} loading={usageLoading} error={usageError} />
     </div>
   );
 }

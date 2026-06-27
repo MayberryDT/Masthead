@@ -105,7 +105,10 @@ describe("session repository", () => {
     expect(boardRows[0].session_id).toBe(sessionId);
     expect(boardRows[0].updated_at).toBe("2026-06-24T15:05:00.000Z");
     expect(JSON.parse(boardRows[0].projection_json)).toMatchObject({
+      canonicalSessionId: sessionId,
+      hostId: "host:test",
       title: "Board materialized state",
+      sourceSessionId: "live-session",
       sessionId: "live-session"
     });
     db.close();
@@ -192,6 +195,36 @@ describe("session repository", () => {
 
     expect(db.prepare("SELECT tool_name FROM tool_calls").all()).toEqual([{ tool_name: "bash" }]);
     expect(db.prepare("SELECT model, output_tokens FROM model_usage").all()).toEqual([{ model: "gpt-5.5", output_tokens: 12 }]);
+    db.close();
+  });
+
+  test("fills missing transcript usage fields when a source record is reparsed", async () => {
+    const db = await openMigratedDatabase();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "codex",
+      runtimeVersion: "local-jsonl"
+    });
+    const sparseUsageRecord = transcriptRecord("usage", {
+      session_id: "historical-session",
+      timestamp: "2026-06-24T12:12:00.000Z"
+    });
+    const enrichedUsageRecord = transcriptRecord("usage", {
+      input_tokens: 30,
+      model: "gpt-5.5",
+      output_tokens: 12,
+      session_id: "historical-session",
+      timestamp: "2026-06-24T12:12:00.000Z",
+      total_tokens: 42
+    });
+
+    repository.upsertTranscriptRecord(sparseUsageRecord);
+    repository.upsertTranscriptRecord(enrichedUsageRecord);
+
+    expect(db.prepare("SELECT model, input_tokens, output_tokens, total_tokens FROM model_usage").all()).toEqual([
+      { input_tokens: 30, model: "gpt-5.5", output_tokens: 12, total_tokens: 42 }
+    ]);
     db.close();
   });
 

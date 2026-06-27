@@ -10,6 +10,7 @@ const REQUIRED_CAPABILITIES = [
   "adapter_inventory",
   "import_jobs",
   "mcp_status",
+  "usage_stats",
   "settings",
   "data_lifecycle"
 ];
@@ -24,10 +25,13 @@ export const READ_ONLY_ENDPOINTS = [
   { method: "GET", path: "/sessions", label: "session search" },
   { method: "GET", path: "/sessions/session-1", label: "session detail", allowNotFound: true },
   { method: "GET", path: "/sessions/session-1/excerpts?limit=8", label: "session excerpts" },
+  { method: "GET", path: "/sessions/session-1/dossier", label: "session dossier", allowNotFound: true },
+  { method: "GET", path: "/sessions/session-1/transcript?limit=8", label: "session transcript", allowNotFound: true },
   { method: "GET", path: "/projects", label: "project list" },
   { method: "GET", path: "/imports", label: "import jobs" },
   { method: "GET", path: "/imports/import-1", label: "import detail", allowNotFound: true },
   { method: "GET", path: "/data/summary", label: "data summary" },
+  { method: "GET", path: "/usage/summary?window=today", label: "usage summary" },
   { method: "GET", path: "/mcp/status", label: "mcp status" },
   { method: "GET", path: "/mcp/launch-config", label: "mcp launch config" },
   { method: "GET", path: "/mcp/tools", label: "mcp tool metadata" },

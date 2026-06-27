@@ -1,6 +1,7 @@
 import type { SafeAction, SessionDetailView } from "../core/types";
 import { stateClassName, statusTokenLabel } from "./format";
 
+// Legacy live inspector. New detail surfaces should use SessionDossier.
 type Props = {
   session?: SessionDetailView;
   onAction?: (action: SafeAction, session: SessionDetailView) => void;

@@ -7,7 +7,7 @@ type McpAuditTableProps = {
 
 export function McpAuditTable({ audit }: McpAuditTableProps) {
   return (
-    <section className="agent-access-section" aria-labelledby="mcp-audit-title">
+    <section className="agent-access-section agent-access-audit-section" aria-labelledby="mcp-audit-title">
       <div className="agent-access-section-head">
         <div>
           <p className="mono-label">Recent queries</p>

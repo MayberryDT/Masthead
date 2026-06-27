@@ -1,7 +1,35 @@
 .agent-access-panel {
   box-sizing: border-box;
   display: grid;
-  gap: 18px;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.agent-access-command-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(92, 153, 187, 0.15);
+  border-radius: 5px;
+  background: var(--toolbar-bg);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.24),
+    0 6px 14px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(190, 225, 245, 0.042),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.48);
+  padding: 10px;
+}
+
+.agent-access-layout {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -30,11 +58,41 @@
 }
 
 .agent-access-section {
+  position: relative;
   display: grid;
-  gap: 14px;
+  align-content: start;
+  gap: 12px;
+  grid-column: span 6;
   min-width: 0;
-  border-top: 1px solid var(--line, rgba(194, 221, 241, 0.13));
-  padding-top: 18px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #081d2b;
+  box-shadow:
+    0 0 0 1px rgba(92, 153, 187, 0.16),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+  padding: 14px;
+}
+
+.agent-access-setup-section {
+  grid-column: span 7;
+}
+
+.agent-access-policy-section {
+  grid-column: span 5;
+}
+
+.agent-access-tools-section,
+.agent-access-audit-section {
+  grid-column: span 6;
+}
+
+.agent-access-section::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--blue, #2ea7ff);
+  opacity: 0.72;
 }
 
 .agent-access-section-head {
@@ -47,9 +105,9 @@
 }
 
 .agent-access-section-head h2 {
-  margin: 3px 0 0;
+  margin: 2px 0 0;
   color: var(--ink, #f6fbff);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: 0;
@@ -67,17 +125,17 @@
 
 .agent-access-checks {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
 .agent-access-check,
 .agent-access-problems,
 .agent-access-test-evidence {
-  border: 1px solid var(--line, rgba(194, 221, 241, 0.13));
+  border: 1px solid rgba(92, 153, 187, 0.13);
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.03);
-  padding: 10px 12px;
+  background: rgba(6, 25, 37, 0.58);
+  padding: 9px 10px;
 }
 
 .agent-access-check {
@@ -161,17 +219,20 @@
 }
 
 .agent-access-settings {
-  border-top: 1px solid var(--line, rgba(194, 221, 241, 0.13));
+  border-top: 1px solid rgba(194, 221, 241, 0.08);
 }
 
 .agent-access-table-wrap {
   min-width: 0;
-  overflow-x: auto;
+  max-height: min(34vh, 320px);
+  overflow: auto;
+  scrollbar-color: rgba(145, 168, 186, 0.32) transparent;
+  scrollbar-width: thin;
 }
 
 .agent-access-table {
   width: 100%;
-  min-width: 760px;
+  min-width: 680px;
   border-collapse: collapse;
   color: var(--body, #d6e4ef);
   font-size: 12px;
@@ -181,7 +242,7 @@
 .agent-access-table th,
 .agent-access-table td {
   border-bottom: 1px solid var(--line, rgba(194, 221, 241, 0.13));
-  padding: 10px 8px;
+  padding: 8px;
   text-align: left;
   vertical-align: top;
 }
@@ -208,7 +269,32 @@
   overflow-wrap: anywhere;
 }
 
+@media (max-width: 900px) {
+  .agent-access-setup-section,
+  .agent-access-policy-section,
+  .agent-access-tools-section,
+  .agent-access-audit-section {
+    grid-column: span 12;
+  }
+
+  .agent-access-table-wrap {
+    max-height: 280px;
+  }
+}
+
 @media (max-width: 760px) {
+  .agent-access-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-access-section,
+  .agent-access-setup-section,
+  .agent-access-policy-section,
+  .agent-access-tools-section,
+  .agent-access-audit-section {
+    grid-column: 1;
+  }
+
   .agent-access-header-actions,
   .agent-access-actions,
   .agent-access-tabs {

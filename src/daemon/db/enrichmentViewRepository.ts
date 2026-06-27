@@ -5,9 +5,14 @@ export type SessionEnrichmentView = {
   sessionId: string;
   status: SessionEnrichmentStatus;
   title?: string;
+  titleSource?: string;
   objective?: string;
   outcome?: string;
   liveSummary?: string;
+  searchSummary?: string;
+  filesChangedSummary?: string;
+  commandsSummary?: string;
+  verificationSummary?: string;
   topics: string[];
   unresolved: string[];
   searchText?: string;
@@ -105,13 +110,18 @@ function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichment
   const searchProjection = contentForKind<{ searchText?: string }>(rows, "search_projection");
   return {
     liveSummary: liveSummary?.text ?? capsule?.liveSummary,
+    commandsSummary: capsule?.commandsSummary,
+    filesChangedSummary: capsule?.filesChangedSummary,
     objective: capsule?.objective,
     outcome: capsule?.outcome,
+    searchSummary: capsule?.searchSummary,
     searchText: searchProjection?.searchText,
     sessionId,
     status: "current",
     title: capsule?.title,
+    titleSource: capsule?.titleSource,
     topics: capsule?.topics ?? [],
+    verificationSummary: capsule?.verificationSummary,
     unresolved: capsule?.unresolved?.map((claim) => claim.text).filter(Boolean) ?? []
   };
 }

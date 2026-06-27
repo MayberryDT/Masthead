@@ -62,6 +62,94 @@ describe("codex transcript parser", () => {
       session_id: "session-1"
     });
   });
+
+  test("normalizes Codex event token counts from last usage payloads", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "codex-transcript-"));
+    tempDirs.push(tempDir);
+    const file = join(tempDir, "session.jsonl");
+    await writeFile(
+      file,
+      `${JSON.stringify({
+        payload: {
+          info: {
+            last_token_usage: {
+              input_tokens: 203_577,
+              output_tokens: 67,
+              total_tokens: 203_644
+            },
+            total_token_usage: {
+              input_tokens: 11_292_912,
+              output_tokens: 49_872,
+              total_tokens: 11_342_784
+            }
+          },
+          type: "token_count"
+        },
+        timestamp: "2026-06-26T20:23:21.794Z",
+        type: "event_msg"
+      })}\n`,
+      "utf8"
+    );
+
+    const records = await collect(parseCodexTranscript(source(file), { ...cursorContext(file), model: "gpt-5.5", sourceSessionId: "session-token" }));
+
+    expect(records).toHaveLength(1);
+    expect(records[0].normalized.kind).toBe("usage");
+    expect(records[0].normalized.value).toMatchObject({
+      inputTokens: 203_577,
+      model: "gpt-5.5",
+      outputTokens: 67,
+      sessionId: "session-token",
+      totalTokens: 203_644
+    });
+  });
+
+  test("carries model context from Codex turn context into token counts", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "codex-transcript-"));
+    tempDirs.push(tempDir);
+    const file = join(tempDir, "session.jsonl");
+    await writeFile(
+      file,
+      `${JSON.stringify({
+        payload: {
+          id: "session-turn-context"
+        },
+        timestamp: "2026-06-26T20:22:00.000Z",
+        type: "session_meta"
+      })}\n${JSON.stringify({
+        payload: {
+          cwd: "/home/tyler/Documents/Masthead",
+          model: "gpt-5.5"
+        },
+        timestamp: "2026-06-26T20:22:10.000Z",
+        type: "turn_context"
+      })}\n${JSON.stringify({
+        payload: {
+          info: {
+            last_token_usage: {
+              input_tokens: 30,
+              output_tokens: 7,
+              total_tokens: 37
+            }
+          },
+          type: "token_count"
+        },
+        timestamp: "2026-06-26T20:22:20.000Z",
+        type: "event_msg"
+      })}\n`,
+      "utf8"
+    );
+
+    const records = await collect(parseCodexTranscript(source(file)));
+
+    expect(records.map((record) => record.normalized.kind)).toEqual(["session", "event", "usage"]);
+    expect(records[2].normalized.value).toMatchObject({
+      inputTokens: 30,
+      model: "gpt-5.5",
+      sessionId: "session-turn-context",
+      totalTokens: 37
+    });
+  });
 });
 
 function source(path: string): DiscoveredSource {
@@ -73,6 +161,15 @@ function source(path: string): DiscoveredSource {
     schemaVersion: "codex-transcript-jsonl",
     sourceId: "codex-session",
     sourceKind: "jsonl"
+  };
+}
+
+function cursorContext(path: string): IngestCursor {
+  return {
+    byteOffset: 0,
+    cursorId: "cursor:token",
+    sourceId: "codex-session",
+    sourcePath: path
   };
 }
 

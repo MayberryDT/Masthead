@@ -1,6 +1,7 @@
 import type { EvidenceRef } from "../core/types.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 import type { SessionFacts } from "./sessionCompiler.ts";
+import { buildSessionNarrativeFacts } from "./sessionNarrativeFacts.ts";
 
 type SessionRow = {
   session_id: string;
@@ -49,6 +50,7 @@ export function buildSessionFacts(db: MastheadDatabase, sessionId: string): Sess
     evidence: evidenceRefs(sessionId, [...messages, ...commands, ...files, ...checkpoints]),
     files: files.map((row) => row.text),
     messages: [...messages, ...checkpoints].map((row) => row.text),
+    narrative: buildSessionNarrativeFacts(db, sessionId),
     objective: session.objective ?? undefined,
     project: session.project_label ?? session.source_session_id,
     sessionId,

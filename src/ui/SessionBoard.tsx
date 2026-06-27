@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef } from "react";
 import type { LifecycleLaneView, SessionCardView } from "../core/types";
 import type { CardDensity } from "./toolbarOptions";
 import { sessionDemoTelemetry } from "./observabilityDemo";
@@ -24,6 +25,37 @@ export function SessionBoard({
   showDemoTelemetry = false,
   density = "comfortable"
 }: Props) {
+  const seenSessionIdsRef = useRef<Set<string> | null>(null);
+  const headlineSignaturesRef = useRef<Map<string, string> | null>(null);
+  const newSessionOrder = useMemo(() => {
+    const seenSessionIds = seenSessionIdsRef.current;
+    if (!seenSessionIds) return new Map<string, number>();
+
+    const newSessionIds = cards.map((card) => card.sessionId).filter((sessionId) => !seenSessionIds.has(sessionId));
+    return new Map(newSessionIds.map((sessionId, index) => [sessionId, index]));
+  }, [cards]);
+  const headlineUpdateOrder = useMemo(() => {
+    const previousSignatures = headlineSignaturesRef.current;
+    if (!previousSignatures) return new Map<string, number>();
+
+    const updatedSessionIds = cards
+      .filter((card) => previousSignatures.has(card.sessionId) && previousSignatures.get(card.sessionId) !== headlineUpdateSignature(card))
+      .map((card) => card.sessionId);
+    return new Map(updatedSessionIds.map((sessionId, index) => [sessionId, index]));
+  }, [cards]);
+
+  useEffect(() => {
+    if (!seenSessionIdsRef.current) {
+      seenSessionIdsRef.current = new Set(cards.map((card) => card.sessionId));
+    }
+
+    for (const card of cards) {
+      seenSessionIdsRef.current.add(card.sessionId);
+    }
+
+    headlineSignaturesRef.current = new Map(cards.map((card) => [card.sessionId, headlineUpdateSignature(card)]));
+  }, [cards]);
+
   if (variant === "observability") {
     return (
       <section id="sessions" className="session-board observability-session-board" aria-label="Session cards">
@@ -41,6 +73,9 @@ export function SessionBoard({
                 session={card}
                 onToggle={onOpenSession}
                 demoTelemetry={showDemoTelemetry ? sessionDemoTelemetry(card.sessionId, index) : undefined}
+                isNew={newSessionOrder.has(card.sessionId)}
+                newCardIndex={newSessionOrder.get(card.sessionId)}
+                headlineUpdateIndex={headlineUpdateOrder.get(card.sessionId)}
               />
             ))}
           </div>
@@ -86,7 +121,16 @@ export function SessionBoard({
               ) : (
                 lane.sessionIds.map((sessionId) => {
                   const card = cardsById.get(sessionId);
-                  return card ? <SessionCard key={sessionId} session={card} onToggle={onOpenSession} /> : null;
+                  return card ? (
+                    <SessionCard
+                      key={sessionId}
+                      session={card}
+                      onToggle={onOpenSession}
+                      isNew={newSessionOrder.has(sessionId)}
+                      newCardIndex={newSessionOrder.get(sessionId)}
+                      headlineUpdateIndex={headlineUpdateOrder.get(sessionId)}
+                    />
+                  ) : null;
                 })
               )}
             </div>
@@ -97,6 +141,9 @@ export function SessionBoard({
   );
 }
 
+function headlineUpdateSignature(card: SessionCardView): string {
+  return [card.copy.headline, card.title, card.project].join("\u0000");
+}
 
 function laneDescription(laneId: LifecycleLaneView["laneId"]): string {
   const descriptions: Record<LifecycleLaneView["laneId"], string> = {

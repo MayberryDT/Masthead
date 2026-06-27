@@ -9,20 +9,21 @@ describe("ObservabilitySidebar", () => {
 
     expect(html).toContain("Masthead");
     expect(html).toContain(APP_VERSION_LABEL);
-    expect(html).toContain("Now");
+    expect(html).toContain("Board");
+    expect(html).not.toContain("Now");
     expect(html).toContain("24");
     expect(html).not.toContain("Traces");
     expect(html).not.toContain("Models");
     expect(html).not.toContain("Alerts");
     expect(html).toContain("Logbook");
     expect(html).toContain("Sources");
+    expect(html).toContain("Usage");
     expect(html).toContain("Agent Access");
     expect(html).toContain("Workspace");
     expect(html).not.toContain("Overview");
     expect(html).not.toContain("Analysis");
     expect(html).not.toContain("Configuration");
     expect(html).not.toContain("Performance");
-    expect(html).not.toContain("Usage");
     expect(html).toContain("Settings");
     expect(html).not.toContain("Costs");
     expect(html).not.toContain("Agents");

@@ -7,13 +7,13 @@ describe("product navigation", () => {
   test("shows only product surfaces that exist", () => {
     const html = renderToStaticMarkup(<ObservabilitySidebar version={APP_VERSION_LABEL} activeCount={2} />);
 
-    expect(html).toContain("Now");
+    expect(html).toContain("Board");
     expect(html).toContain("Logbook");
     expect(html).toContain("Sources");
+    expect(html).toContain("Usage");
     expect(html).toContain("Agent Access");
     expect(html).toContain("Settings");
     expect(html).not.toContain("Performance");
-    expect(html).not.toContain("Usage");
     expect(html).not.toContain("Models");
     expect(html).not.toContain("Alerts");
   });

@@ -1,11 +1,60 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { listReviewDispositions, saveReviewDisposition } from "../daemonClient";
+import { getSessionTranscript, listReviewDispositions, saveReviewDisposition } from "../daemonClient";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("daemon client review dispositions", () => {
+  test("loads paginated session transcripts from the daemon", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          coverage: {
+            assistantMessages: 1,
+            checkpoints: 0,
+            fileEffects: 0,
+            hasUsableTranscript: true,
+            lowValueItems: 0,
+            messages: 2,
+            runtimeSignals: 0,
+            toolCalls: 0,
+            toolResults: 0,
+            userMessages: 1
+          },
+          items: [{ itemId: "message:1", kind: "message", label: "user", role: "user", text: "hello" }],
+          nextCursor: "100",
+          total: 101
+        })
+      )
+    );
+
+    await expect(
+      getSessionTranscript(
+        "session 1",
+        { cursor: "50", kind: "assistant", limit: 25, q: "sqlite" },
+        "http://127.0.0.1:17373/projection"
+      )
+    ).resolves.toMatchObject({
+      nextCursor: "100",
+      total: 101
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:17373/sessions/session%201/transcript?cursor=50&limit=25&kind=assistant&q=sqlite",
+      { headers: { accept: "application/json" }, signal: undefined }
+    );
+  });
+
+  test("throws when session transcript loading fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => failedResponse(503)));
+
+    await expect(getSessionTranscript("session-1", {}, "http://127.0.0.1:17373/projection")).rejects.toThrow(
+      "session transcript failed: 503"
+    );
+  });
+
   test("loads review dispositions from the daemon", async () => {
     vi.stubGlobal(
       "fetch",
@@ -53,5 +102,13 @@ function response(body: unknown): Response {
     json: async () => body,
     ok: true,
     status: 200
+  } as Response;
+}
+
+function failedResponse(status: number): Response {
+  return {
+    json: async () => ({ ok: false }),
+    ok: false,
+    status
   } as Response;
 }

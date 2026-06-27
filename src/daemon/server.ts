@@ -17,7 +17,7 @@ import { createOpenAISessionCopyEnricher } from "../core/openaiSessionCopy.ts";
 import { createFileBackedStore, type StoreRecord } from "../core/store.ts";
 import type { ReviewDisposition } from "../core/store.ts";
 import type { CodexHookDiagnostic } from "../core/codexAdapter.ts";
-import type { GitSnapshot, NormalizedEvent } from "../core/types.ts";
+import type { GitSnapshot, LiveBoardProjection, NormalizedEvent, SessionCardView } from "../core/types.ts";
 import type { DaemonConfig } from "./config.ts";
 import {
   applyDefaultRetention,
@@ -31,13 +31,16 @@ import { getImportJob, listImportJobs, type ImportJobKind } from "./db/importJob
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
+import { getSessionDossier } from "./db/sessionDossierRepository.ts";
+import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
 import { getLogbookSummary } from "./db/logbookSummaryRepository.ts";
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
 import { getOrCreateDatabaseIdentity, hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
-import { createSessionRepository, ingestAdapterRecord } from "./db/sessionRepository.ts";
+import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor } from "./db/sessionRepository.ts";
+import { getSessionTokenTotals, getUsageStats, type UsageWindow } from "./db/usageStatsRepository.ts";
 import {
   checkpointMastheadDatabase,
   openMastheadDatabase,
@@ -344,8 +347,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const { sessionId } = ingestAdapterRecord(database, record, {
           hostId: `host:${config.host}`,
           hostname: config.host,
-          runtimeKind: "codex",
-          runtimeVersion: record.source.runtimeVersion
+          runtimeKind: "codex"
         });
         if (sessionId) indexCanonicalSessionSearch(database, sessionId);
         queueSessionEnrichment(sessionId);
@@ -393,8 +395,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             },
             hostId: `host:${config.host}`,
             hostname: config.host,
-            runtimeKind: "codex",
-            runtimeVersion: record.source.runtimeVersion
+            runtimeKind: "codex"
           });
           if (sessionId) {
             indexCanonicalSessionSearch(database, sessionId);
@@ -644,6 +645,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         diagnostics: state.diagnostics.length
       });
       liveEnvelope.projection = await sessionCopyEnricher.enrichProjection(liveEnvelope.projection);
+      liveEnvelope.projection = attachCanonicalCardIds(liveEnvelope.projection, {
+        hostId: `host:${config.host}`,
+        runtimeKind: "codex"
+      });
+      liveEnvelope.projection = withSessionTokenTotals(database, liveEnvelope.projection);
       sessions.replaceBoardProjection(liveEnvelope.projection, liveEnvelope.generatedAt);
       sendJson(request, response, config.allowedOrigins, 200, liveEnvelope);
       return;
@@ -653,6 +659,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
         summary: getLogbookSummary(database)
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/usage/summary") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        usage: getUsageStats(database, usageWindowFromUrl(url))
       });
       return;
     }
@@ -800,6 +814,34 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         excerpts: getSessionExcerpts(database, decodeURIComponent(sessionExcerptsMatch[1]), {
           limit: Number.parseInt(url.searchParams.get("limit") || "8", 10),
           query: url.searchParams.get("q") ?? undefined
+        })
+      });
+      return;
+    }
+
+    const sessionDossierMatch = url.pathname.match(/^\/sessions\/([^/]+)\/dossier$/);
+    if (request.method === "GET" && sessionDossierMatch?.[1]) {
+      const dossier = getSessionDossier(database, decodeURIComponent(sessionDossierMatch[1]));
+      sendJson(
+        request,
+        response,
+        config.allowedOrigins,
+        dossier ? 200 : 404,
+        dossier ? { ok: true, dossier } : { ok: false, error: "session not found" }
+      );
+      return;
+    }
+
+    const sessionTranscriptMatch = url.pathname.match(/^\/sessions\/([^/]+)\/transcript$/);
+    if (request.method === "GET" && sessionTranscriptMatch?.[1]) {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        ...getSessionTranscript(database, {
+          cursor: url.searchParams.get("cursor") ?? undefined,
+          kind: transcriptKindFromUrl(url),
+          limit: Number.parseInt(url.searchParams.get("limit") || "100", 10),
+          q: url.searchParams.get("q") ?? undefined,
+          sessionId: decodeURIComponent(sessionTranscriptMatch[1])
         })
       });
       return;
@@ -1545,6 +1587,54 @@ function cursorContextFromRecord(record: { normalized: { value: unknown } }, fal
   };
 }
 
+function withSessionTokenTotals(db: MastheadDatabase, projection: LiveBoardProjection): LiveBoardProjection {
+  const sessionIds = [
+    ...projection.cards.map((card) => card.sessionId),
+    projection.expandedSession?.sessionId,
+    projection.selectedSession?.sessionId
+  ].filter((sessionId): sessionId is string => Boolean(sessionId));
+  const tokenTotals = getSessionTokenTotals(db, sessionIds);
+  if (tokenTotals.size === 0) return projection;
+
+  const withTokens = <T extends SessionCardView | undefined>(session: T): T => {
+    if (!session) return session;
+    const totalTokens = tokenTotals.get(session.sessionId);
+    if (totalTokens === undefined) return session;
+    return { ...session, totalTokens };
+  };
+
+  return {
+    ...projection,
+    cards: projection.cards.map((card) => withTokens(card)),
+    expandedSession: withTokens(projection.expandedSession),
+    selectedSession: withTokens(projection.selectedSession)
+  };
+}
+
+function attachCanonicalCardIds(
+  projection: LiveBoardProjection,
+  context: { hostId: string; runtimeKind: string; runtimeVersion?: string }
+): LiveBoardProjection {
+  const runtimeId = runtimeIdFor(context.runtimeKind, context.runtimeVersion);
+  const withIdentity = <T extends SessionCardView | undefined>(session: T): T => {
+    if (!session) return session;
+    return {
+      ...session,
+      canonicalSessionId: session.canonicalSessionId ?? canonicalSessionId(context.hostId, runtimeId, session.sourceSessionId ?? session.sessionId),
+      hostId: session.hostId ?? context.hostId,
+      runtime: session.runtime ?? context.runtimeKind,
+      sourceSessionId: session.sourceSessionId ?? session.sessionId
+    };
+  };
+
+  return {
+    ...projection,
+    cards: projection.cards.map((card) => withIdentity(card)),
+    expandedSession: withIdentity(projection.expandedSession),
+    selectedSession: withIdentity(projection.selectedSession)
+  };
+}
+
 function sessionQueryFromUrl(url: URL): SessionQuery {
   return {
     cursor: url.searchParams.get("cursor") ?? undefined,
@@ -1577,6 +1667,27 @@ function logbookSortFromUrl(value: string | null): SessionQuery["sort"] {
     return value;
   }
   return undefined;
+}
+
+function transcriptKindFromUrl(url: URL): SessionTranscriptKindFilter {
+  const value = url.searchParams.get("kind");
+  if (
+    value === "user" ||
+    value === "assistant" ||
+    value === "tools" ||
+    value === "checkpoints" ||
+    value === "files" ||
+    value === "signals"
+  ) {
+    return value;
+  }
+  return "all";
+}
+
+function usageWindowFromUrl(url: URL): UsageWindow {
+  const value = url.searchParams.get("window");
+  if (value === "24h" || value === "7d" || value === "30d" || value === "all") return value;
+  return "today";
 }
 
 function assertReviewDisposition(value: unknown): asserts value is ReviewDisposition {

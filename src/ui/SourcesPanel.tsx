@@ -1,9 +1,7 @@
 import { useEffect } from "react";
 import type { AdapterStatus, ImportJob, SourceStatus } from "../app/daemonClient";
 import { AppButton } from "./primitives/AppButton";
-import { PageHeader } from "./primitives/PageHeader";
 import { StatStrip } from "./primitives/StatStrip";
-import { StatusBadge } from "./primitives/StatusBadge";
 import { AdapterList } from "./sources/AdapterList";
 import { ImportJobsTable } from "./sources/ImportJobsTable";
 
@@ -55,12 +53,6 @@ export function SourcesPanel({
 
   return (
     <section id="sources" className="sources-panel sources-management surface-panel" aria-label="Session sources">
-      <PageHeader
-        eyebrow="Sources"
-        title="Connected runtimes and local history stores"
-        trailing={<StatusBadge tone={adapterRows.length > 0 ? "active" : "neutral"}>{adapterRows.length} adapters</StatusBadge>}
-      />
-
       <div className="sources-command-row">
         <div className="sources-actions">
           <AppButton type="button" onClick={onRefresh} disabled={busy}>

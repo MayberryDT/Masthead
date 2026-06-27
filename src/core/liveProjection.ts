@@ -66,8 +66,7 @@ function normalizeLiveSessionEnrichments(
 function selectLiveTitle(enrichment: LiveSessionEnrichment): string | undefined {
   const title = cleanTitle(enrichment.title);
   if (isUsableLiveTitle(title)) return title;
-  const liveSummary = cleanTitle(enrichment.liveSummary);
-  return isUsableLiveTitle(liveSummary) ? liveSummary : undefined;
+  return undefined;
 }
 
 function cleanTitle(value: string | undefined): string | undefined {

@@ -172,6 +172,25 @@ function normalizeCodexRecord(raw: Record<string, unknown>, observedAt: string, 
     return normalizeResponseItem(payload, observedAt, context);
   }
 
+  if (rawType === "turn_context") {
+    const value = payload ?? raw;
+    context.cwd = stringField(value, ["cwd", "project", "repo_root", "repoRoot"]) ?? context.cwd;
+    context.model = stringField(value, ["model", "modelName"]) ?? context.model;
+    return {
+      confidence: "inferred",
+      kind: "event",
+      value: withSessionContext({ ...value, timestamp: observedAt }, context)
+    };
+  }
+
+  if (rawType === "token_count" || (rawType === "event_msg" && payload && stringField(payload, ["type"]) === "token_count")) {
+    return {
+      confidence: "inferred",
+      kind: "usage",
+      value: withSessionContext(tokenCountValue(payload ?? raw, observedAt, context), context)
+    };
+  }
+
   if (rawType === "event_msg") {
     const value = payload ?? raw;
     return {
@@ -203,14 +222,6 @@ function normalizeCodexRecord(raw: Record<string, unknown>, observedAt: string, 
         },
         context
       )
-    };
-  }
-
-  if (rawType === "token_count") {
-    return {
-      confidence: "inferred",
-      kind: "usage",
-      value: withSessionContext(tokenCountValue(payload ?? raw, observedAt, context), context)
     };
   }
 
@@ -358,9 +369,10 @@ function textFromContent(content: unknown): string | undefined {
 }
 
 function tokenCountValue(value: Record<string, unknown>, observedAt: string, context: CodexParseContext): Record<string, unknown> {
-  const inputTokens = numberField(value, ["input_tokens", "inputTokens"]);
-  const outputTokens = numberField(value, ["output_tokens", "outputTokens"]);
-  const totalTokens = numberField(value, ["total_tokens", "totalTokens"]) ?? sum(inputTokens, outputTokens);
+  const tokenUsage = tokenUsagePayload(value);
+  const inputTokens = numberField(tokenUsage, ["input_tokens", "inputTokens"]);
+  const outputTokens = numberField(tokenUsage, ["output_tokens", "outputTokens"]);
+  const totalTokens = numberField(tokenUsage, ["total_tokens", "totalTokens"]) ?? sum(inputTokens, outputTokens);
   return {
     input_tokens: inputTokens,
     inputTokens,
@@ -371,6 +383,18 @@ function tokenCountValue(value: Record<string, unknown>, observedAt: string, con
     total_tokens: totalTokens,
     totalTokens
   };
+}
+
+function tokenUsagePayload(value: Record<string, unknown>): Record<string, unknown> {
+  const info = value.info;
+  if (isRecord(info)) {
+    if (isRecord(info.last_token_usage)) return info.last_token_usage;
+    if (isRecord(info.total_token_usage)) return info.total_token_usage;
+  }
+  if (isRecord(value.last_token_usage)) return value.last_token_usage;
+  if (isRecord(value.total_token_usage)) return value.total_token_usage;
+  if (isRecord(value.usage)) return value.usage;
+  return value;
 }
 
 function withSessionContext(value: Record<string, unknown>, context: CodexParseContext): Record<string, unknown> {

@@ -164,7 +164,7 @@ export function OperationsPanel({
       ) : null}
 
       {showSettingsSections ? (
-        <>
+        <div className="settings-layout">
           <HookSettings
             busy={writesDisabled}
             hooks={effectiveSettings?.hooks}
@@ -195,7 +195,7 @@ export function OperationsPanel({
             onRequestScopedDelete={onRequestScopedDelete}
             targets={effectiveSettings?.deletionTargets}
           />
-        </>
+        </div>
       ) : null}
 
       <ConfirmDialog

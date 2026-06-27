@@ -7,7 +7,7 @@ type McpToolsTableProps = {
 
 export function McpToolsTable({ tools }: McpToolsTableProps) {
   return (
-    <section className="agent-access-section" aria-labelledby="mcp-tools-title">
+    <section className="agent-access-section agent-access-tools-section" aria-labelledby="mcp-tools-title">
       <div className="agent-access-section-head">
         <div>
           <p className="mono-label">Tools</p>

@@ -27,6 +27,8 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
     options.findIndex((option) => option.value === value)
   );
   const selected = options[selectedIndex];
+  const selectedLabel = selected?.label ?? label;
+  const triggerLabel = `${label}: ${selectedLabel}`;
   const listboxId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -206,7 +208,7 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
         ref={triggerRef}
         type="button"
         className="toolbar-select-trigger"
-        aria-label={label}
+        aria-label={triggerLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
@@ -214,7 +216,7 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
         onKeyDown={onTriggerKeyDown}
       >
         <Icon name={icon} size="toolbar" weight={iconWeights.toolbar} className="toolbar-select-leading-icon" />
-        <span>{selected?.label ?? label}</span>
+        <span>{selectedLabel}</span>
         <Icon name="selectChevron" size="inline" weight={iconWeights.inline} className="toolbar-select-chevron" />
       </button>
 

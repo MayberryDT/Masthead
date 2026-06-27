@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 export type AppButtonVariant = "default" | "primary" | "danger" | "quiet" | "icon";
 
@@ -7,10 +7,13 @@ type AppButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: AppButtonVariant;
 };
 
-export function AppButton({ children, className = "", type = "button", variant = "default", ...props }: AppButtonProps) {
+export const AppButton = forwardRef<HTMLButtonElement, AppButtonProps>(function AppButton(
+  { children, className = "", type = "button", variant = "default", ...props },
+  ref
+) {
   return (
-    <button type={type} className={`app-button app-button-${variant} metal-control ${className}`.trim()} {...props}>
+    <button ref={ref} type={type} className={`app-button app-button-${variant} metal-control ${className}`.trim()} {...props}>
       {children}
     </button>
   );
-}
+});

@@ -12,7 +12,7 @@ const defaultBlocked = ["Execute shell commands", "Mutate files or Git", "Modify
 export function McpPermissions({ status }: McpPermissionsProps) {
   const permissions = normalizedPermissions(status);
   return (
-    <section className="agent-access-section" aria-labelledby="mcp-permissions-title">
+    <section className="agent-access-section agent-access-policy-section" aria-labelledby="mcp-permissions-title">
       <div className="agent-access-section-head">
         <div>
           <p className="mono-label">Permissions</p>

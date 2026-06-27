@@ -10,6 +10,7 @@ export type MastheadCapability =
   | "adapter_inventory"
   | "import_jobs"
   | "mcp_status"
+  | "usage_stats"
   | "settings"
   | "data_lifecycle";
 
@@ -21,6 +22,7 @@ export const REQUIRED_CLIENT_CAPABILITIES: MastheadCapability[] = [
   "adapter_inventory",
   "import_jobs",
   "mcp_status",
+  "usage_stats",
   "settings",
   "data_lifecycle"
 ];

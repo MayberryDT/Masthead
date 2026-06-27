@@ -7,7 +7,7 @@ type Props = {
 
 export function NowSurface({ toolbar, board }: Props) {
   return (
-    <section className="app-surface now-surface" aria-label="Now">
+    <section id="board" className="app-surface now-surface" aria-label="Board">
       {toolbar}
       {board}
     </section>

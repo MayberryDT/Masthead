@@ -13,6 +13,7 @@ const compatibleHealth = {
     "adapter_inventory",
     "import_jobs",
     "mcp_status",
+    "usage_stats",
     "settings",
     "data_lifecycle"
   ],

@@ -16,6 +16,9 @@ Live Now is a view over collected session data, not the product category.
 - Codex source discovery and imports for metadata and reviewed transcript
   history.
 - Logbook search and session detail APIs backed by the canonical store.
+- Shared Board and Logbook session dossier backed by canonical identity,
+  coverage diagnostics, transcript rows, files, tools, verification, timeline,
+  usage, and provenance.
 - Read-only local MCP access for search, bounded session retrieval, project
   history, and coverage counts.
 - `npm run dev` launcher that starts either a writable daemon or a read-only
@@ -115,6 +118,7 @@ See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md).
 - Import existing Codex history: [docs/how-to/import-codex-history.md](docs/how-to/import-codex-history.md)
 - Reset local Masthead data: [docs/how-to/reset-local-data.md](docs/how-to/reset-local-data.md)
 - Daemon API reference: [docs/reference/daemon-api.md](docs/reference/daemon-api.md)
+- Session dossier reference: [docs/reference/session-dossier.md](docs/reference/session-dossier.md)
 - Configuration reference: [docs/reference/configuration.md](docs/reference/configuration.md)
 - Release gates: [docs/release-gates.md](docs/release-gates.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)

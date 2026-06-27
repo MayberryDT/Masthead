@@ -81,7 +81,7 @@ describe("session title quality", () => {
     db.close();
   });
 
-  test("Now projection prefers liveSummary when an enrichment title is generic", () => {
+  test("Now projection keeps liveSummary in headline when an enrichment title is generic", () => {
     const started = normalizeCodexHookPayload(
       {
         provider_event_id: "title-quality-start",
@@ -102,7 +102,7 @@ describe("session title quality", () => {
       ])
     });
 
-    expect(envelope.projection.cards[0]?.title).toBe("Title quality work is active now.");
+    expect(envelope.projection.cards[0]?.title).toBe("Masthead Codex session");
     expect(envelope.projection.cards[0]?.copy.headline).toBe("Title quality work is active now.");
   });
 

@@ -62,6 +62,7 @@ const staticReadOnlyBridgePaths = new Set([
   "/projects",
   "/imports",
   "/data/summary",
+  "/usage/summary",
   "/mcp/status",
   "/mcp/launch-config",
   "/mcp/tools",
@@ -76,7 +77,7 @@ export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathn
   if (method === "POST" && (pathname === "/mcp/launch-config/validate" || pathname === "/mcp/test-connection")) return true;
   if (method !== "GET") return false;
   if (staticReadOnlyBridgePaths.has(pathname)) return true;
-  return /^\/sessions\/[^/]+(?:\/excerpts)?$/.test(pathname) || /^\/imports\/[^/]+$/.test(pathname);
+  return /^\/sessions\/[^/]+(?:\/excerpts|\/dossier|\/transcript)?$/.test(pathname) || /^\/imports\/[^/]+$/.test(pathname);
 }
 
 export async function buildLiveDevPlan(

@@ -1,33 +1,66 @@
 .settings-panel {
   display: grid;
-  gap: 18px;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
   min-width: 0;
 }
 
 .settings-section {
+  position: relative;
   display: grid;
-  gap: 12px;
-  border-top: 1px solid var(--line, rgba(194, 221, 241, 0.13));
-  padding-top: 18px;
+  align-content: start;
+  gap: 10px;
+  grid-column: span 4;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #081d2b;
+  box-shadow:
+    0 0 0 1px rgba(92, 153, 187, 0.16),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+  padding: 14px;
 }
 
-.settings-section:first-of-type {
-  border-top: 0;
-  padding-top: 0;
+.settings-section-wide {
+  grid-column: span 7;
+}
+
+.settings-section-danger {
+  grid-column: span 5;
+}
+
+.settings-section::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--blue, #2ea7ff);
+  opacity: 0.72;
 }
 
 .settings-section-head h2 {
-  margin: 3px 0 0;
+  margin: 2px 0 0;
   color: var(--ink, #f6fbff);
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.2;
 }
 
 .settings-section-head p {
   max-width: 680px;
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--mute, #91a8ba);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .settings-section-head .mono-label {
@@ -41,35 +74,46 @@
 
 .settings-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
-  border-bottom: 1px solid var(--line, rgba(194, 221, 241, 0.13));
-  padding: 12px 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px 12px;
+  border-bottom: 1px solid rgba(194, 221, 241, 0.08);
+  padding: 8px 0;
 }
 
 .settings-row-copy {
+  grid-column: 1;
   min-width: 0;
 }
 
 .settings-row-copy > span {
   color: var(--ink, #f6fbff);
+  font-size: 13px;
   font-weight: 600;
 }
 
 .settings-row-copy p {
-  margin: 4px 0 0;
+  margin: 3px 0 0;
   color: var(--mute, #91a8ba);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .settings-row-value {
+  grid-column: 2;
   min-width: 0;
+  max-width: min(100%, 280px);
   color: var(--body, #d6e4ef);
+  font-size: 12px;
+  justify-self: end;
+  text-align: right;
   overflow-wrap: anywhere;
 }
 
 .settings-row-control {
+  grid-column: 1 / -1;
   min-width: 0;
+  justify-self: stretch;
 }
 
 .settings-inline-actions,
@@ -82,9 +126,29 @@
   gap: 8px;
 }
 
+.settings-row-control > .app-button,
+.settings-inline-actions .app-button {
+  min-width: 0;
+}
+
+.settings-delete-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  justify-content: stretch;
+  width: 100%;
+}
+
+.settings-delete-controls .toolbar-select,
+.settings-delete-controls .app-button,
 .settings-delete-controls input {
-  min-height: 40px;
-  min-width: 220px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
+.settings-delete-controls input {
+  min-height: 36px;
+  min-width: 0;
   border: 1px solid rgba(92, 153, 187, 0.18);
   border-radius: 3px;
   background: #061925;
@@ -102,12 +166,15 @@
 .settings-error,
 .settings-status,
 .confirm-dialog {
-  border: 1px solid var(--line, rgba(194, 221, 241, 0.13));
-  border-radius: 5px;
-  background: rgba(7, 27, 40, 0.72);
+  border: 1px solid rgba(92, 153, 187, 0.16);
+  border-radius: 6px;
+  background: #081d2b;
+  box-shadow:
+    0 0 0 1px rgba(92, 153, 187, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.12);
   color: var(--body, #d6e4ef);
   margin: 0;
-  padding: 12px;
+  padding: 10px 12px;
 }
 
 .settings-error,
@@ -137,6 +204,16 @@
 }
 
 @media (max-width: 860px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-section,
+  .settings-section-wide,
+  .settings-section-danger {
+    grid-column: 1;
+  }
+
   .settings-row,
   .confirm-dialog {
     align-items: stretch;
@@ -145,9 +222,21 @@
   }
 
   .settings-row-control,
+  .settings-row-value,
   .settings-inline-actions,
   .settings-delete-controls,
   .confirm-dialog-actions {
     justify-content: flex-start;
+    justify-self: stretch;
+    max-width: none;
+    text-align: left;
+  }
+}
+
+@media (min-width: 861px) and (max-width: 1180px) {
+  .settings-section,
+  .settings-section-wide,
+  .settings-section-danger {
+    grid-column: span 6;
   }
 }

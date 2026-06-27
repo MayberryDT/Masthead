@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { SessionCardView } from "../core/types";
 import { stateClassName } from "./format";
 import { Icon, type IconName } from "./icons/Icon";
@@ -8,21 +9,28 @@ type Props = {
   session: SessionCardView;
   onToggle?: (sessionId: string) => void;
   demoTelemetry?: DemoSessionTelemetry;
+  isNew?: boolean;
+  newCardIndex?: number;
+  headlineUpdateIndex?: number;
 };
 
-export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
+export function SessionCard({ session, onToggle, demoTelemetry, isNew = false, newCardIndex = 0, headlineUpdateIndex }: Props) {
   const className = stateClassName(session);
   const model = demoTelemetry?.model.value ?? session.model ?? "Not captured";
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Codex";
   const worktree = session.branchOrWorktree ?? "None";
-  const sessionName = sessionHeaderName(session);
   const headline = sessionHeadline(session);
+  const sessionName = sessionHeaderName(session);
+  const style = {
+    viewTransitionName: `session-card-${viewTransitionNamePart(session.sessionId)}`,
+    "--new-card-index": Math.min(newCardIndex, 4)
+  } as CSSProperties & { "--new-card-index": number };
 
   return (
     <article
-      className={`session-card metal-surface metal-card ${className}`}
+      className={`session-card metal-surface metal-card ${className}${isNew ? " is-new-card" : ""}`}
       data-session-id={session.sessionId}
-      style={{ viewTransitionName: `session-card-${viewTransitionNamePart(session.sessionId)}` }}
+      style={style}
       role="button"
       aria-label={`Open ${headline} details`}
       tabIndex={0}
@@ -44,11 +52,11 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
         </span>
       </header>
 
-      <h2>{headline}</h2>
+      <AnimatedHeadline isNew={isNew} staggerIndex={headlineUpdateIndex} text={headline} />
 
       <dl className="observability-card-facts">
         <Fact icon="runtime" label="Runtime" value={harness} valueClassName="runtime-value" />
-        <Fact icon="lastActivity" label="Duration" value={session.durationLabel} />
+        <Fact icon="lastActivity" label="Tokens" value={tokenLabel(session.totalTokens)} />
         <Fact icon="model" label="Model" value={model} valueClassName="model-name" />
         <Fact icon="worktree" label="Worktree" value={worktree} valueClassName="worktree-name" />
       </dl>
@@ -61,11 +69,75 @@ export function SessionCard({ session, onToggle, demoTelemetry }: Props) {
           Last activity <span className="timestamp">{session.lastActivityLabel}</span>
         </span>
         <span>
-          Started <span className="timestamp">{startedLabel(session.startedAt ?? session.lastActivity)}</span>
+          Duration <span className="timestamp">{session.durationLabel}</span>
         </span>
       </footer>
     </article>
   );
+}
+
+function AnimatedHeadline({ isNew, staggerIndex, text }: { isNew: boolean; staggerIndex?: number; text: string }) {
+  const [visibleText, setVisibleText] = useState(text);
+  const [isTyping, setIsTyping] = useState(false);
+  const mountedRef = useRef(false);
+  const previousTextRef = useRef(text);
+
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      previousTextRef.current = text;
+      setVisibleText(text);
+      return;
+    }
+
+    if (previousTextRef.current === text) return;
+    const oldText = previousTextRef.current;
+    previousTextRef.current = text;
+
+    if (isNew || staggerIndex === undefined || prefersReducedMotion()) {
+      setIsTyping(false);
+      setVisibleText(text);
+      return;
+    }
+
+    setVisibleText(oldText);
+    const characters = Array.from(text);
+    const startDelay = Math.min(staggerIndex, 8) * 75;
+    const characterDelay = text.length > 72 ? 11 : 16;
+    let characterIndex = 0;
+    let intervalId: number | undefined;
+    const timeoutId = window.setTimeout(() => {
+      setIsTyping(true);
+      setVisibleText("");
+      intervalId = window.setInterval(() => {
+        characterIndex += 1;
+        setVisibleText(characters.slice(0, characterIndex).join(""));
+        if (characterIndex >= characters.length) {
+          if (intervalId !== undefined) window.clearInterval(intervalId);
+          intervalId = undefined;
+          setIsTyping(false);
+        }
+      }, characterDelay);
+    }, startDelay);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      if (intervalId !== undefined) window.clearInterval(intervalId);
+    };
+  }, [isNew, staggerIndex, text]);
+
+  return (
+    <h2 className={`card-headline ${isTyping ? "is-headline-typing" : ""}`.trim()} aria-label={text}>
+      <span className="card-headline-text" aria-hidden="true">
+        {visibleText}
+      </span>
+      <span className="card-headline-cursor" aria-hidden="true" />
+    </h2>
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
 function viewTransitionNamePart(value: string): string {
@@ -108,8 +180,19 @@ function startedLabel(value: string): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function tokenLabel(value: number | undefined): string {
+  if (value === undefined) return "-";
+  return new Intl.NumberFormat("en-US", {
+    notation: value >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: value >= 10_000 ? 1 : 0
+  }).format(value);
+}
+
 function sessionHeaderName(session: SessionCardView): string {
-  return meaningfulSessionTitle(session.title, session.project) ?? `${session.project} session`;
+  const project = cleanProjectName(session.project);
+  const context = meaningfulWorkContext(session.workContext?.label, project);
+  if (context) return `${project} · ${context}`;
+  return `${project} · ${startedLabel(session.startedAt ?? session.lastActivity)}`;
 }
 
 function sessionHeadline(session: SessionCardView): string {
@@ -120,7 +203,7 @@ function cleanSessionName(value: string | undefined): string | undefined {
   const label = value?.replace(/\s+/g, " ").trim();
   if (!label) return undefined;
   if (/^unknown project$/i.test(label)) return undefined;
-  if (/^[a-f0-9-]{12,}$/i.test(label)) return undefined;
+  if (/^[a-f0-9-]{12,}(?:\s+session)?$/i.test(label)) return undefined;
   return label;
 }
 
@@ -130,7 +213,14 @@ function meaningfulSessionTitle(value: string | undefined, project: string): str
 
   const normalizedLabel = label.toLowerCase();
   const normalizedProject = project.trim().toLowerCase();
-  if (normalizedLabel === "codex session" || normalizedLabel === "untitled session" || normalizedLabel === "session") return undefined;
+  if (
+    normalizedLabel === "codex session" ||
+    normalizedLabel === "codex hook event" ||
+    normalizedLabel === "untitled session" ||
+    normalizedLabel === "session"
+  ) {
+    return undefined;
+  }
   if (normalizedProject && normalizedLabel === `${normalizedProject} codex session`) return undefined;
   if (containsSensitiveMarker(label)) return undefined;
 
@@ -165,4 +255,20 @@ function looksSerialized(label: string): boolean {
 
 function looksLikeRawCommand(label: string): boolean {
   return /^(?:npm|pnpm|yarn|node|python|python3|bash|sh|zsh|git|curl|cat|sed|rg|grep)\s+/.test(label);
+}
+
+function cleanProjectName(value: string): string {
+  const label = value.replace(/\s+/g, " ").trim();
+  if (!label || /^unknown project$/i.test(label)) return "Session";
+  return label;
+}
+
+function meaningfulWorkContext(value: string | undefined, project: string): string | undefined {
+  const label = value?.replace(/\s+/g, " ").trim();
+  if (!label) return undefined;
+  const normalized = label.toLowerCase();
+  if (["session work", "work", "unknown", "generic"].includes(normalized)) return undefined;
+  if (normalized === project.toLowerCase()) return undefined;
+  if (containsSensitiveMarker(label)) return undefined;
+  return label;
 }

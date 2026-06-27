@@ -22,11 +22,14 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /sessions` searches canonical sessions. Query params include `q`, `project`, `runtime`, `host`, `model`, `state`, date filters, and `limit`.
 - `GET /sessions/:sessionId` returns one session detail.
 - `GET /sessions/:sessionId/excerpts` returns bounded excerpts, with optional `q` and `limit`.
+- `GET /sessions/:sessionId/dossier` returns the canonical session dossier used by Board and Logbook detail views.
+- `GET /sessions/:sessionId/transcript` returns paginated canonical transcript items from messages, tools, checkpoints, runtime signals, and file effects. Query params include `cursor`, `limit`, `kind=all|user|assistant|tools|checkpoints|files|signals`, and `q`.
 - `GET /projects` lists known projects.
 - `GET /imports` lists import jobs.
 - `GET /imports/:importJobId` returns one import job.
 - `GET /data/summary` returns Masthead-owned data counts for a scope.
 - `GET /data/export` exports the local session graph.
+- `GET /usage/summary?window=today|24h|7d|30d|all` returns canonical usage totals, token aggregates, model/project/runtime breakdowns, activity buckets, and source coverage. It does not estimate cost.
 - `GET /mcp/status` returns MCP readiness, permissions, and audit summary.
 - `GET /mcp/launch-config` returns the stdio launch config for the active database.
 - `GET /mcp/tools` lists read-only MCP tool metadata.

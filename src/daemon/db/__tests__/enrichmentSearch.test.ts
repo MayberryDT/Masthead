@@ -37,7 +37,10 @@ describe("enrichment search", () => {
     upsertSessionEnrichment(db, {
       content: {
         candidateDecisions: [],
+        commandsSummary: "tools-list test",
+        filesChangedSummary: "Agent Access Panel, mcp Status Service",
         objective: "Fix OAuth callback handling",
+        searchSummary: "Masthead session for MCP launch config validation. Verification: tools-list test passed.",
         searchPhrases: ["OAuth callback", "authentication return path"],
         technologies: ["TypeScript"],
         title: "OAuth callback repair",
@@ -57,6 +60,9 @@ describe("enrichment search", () => {
     indexCanonicalSessionSearch(db, "session-1");
 
     expect(searchSessions(db, { query: "authentication", limit: 10 }).sessions).toEqual([
+      expect.objectContaining({ sessionId: "session-1" })
+    ]);
+    expect(searchSessions(db, { query: "tools-list", limit: 10 }).sessions).toEqual([
       expect.objectContaining({ sessionId: "session-1" })
     ]);
     db.close();

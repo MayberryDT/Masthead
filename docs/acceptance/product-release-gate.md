@@ -19,6 +19,21 @@
 - [ ] Row inspector shows provenance.
 - [ ] Restart does not duplicate sessions.
 
+## Session dossier
+- [x] Board detail loads canonical dossier when available. Evidence: Board cards carry canonical IDs and `npm run doctor:json` loaded a real canonical dossier on 2026-06-26.
+- [x] Logbook detail uses the same dossier component. Evidence: `SessionLibraryDetail` and `SessionDetailModal` both render `SessionDossier`; focused UI tests passed on 2026-06-26.
+- [x] Dossier shows files, tools, verification, excerpts, timeline, provenance, token usage, and MCP reuse status. Evidence: `SessionDossier.test.tsx` and `sessionDossierRepository.test.ts` passed on 2026-06-26.
+- [x] Dossier has live-only fallback. Evidence: `SessionDossier.test.tsx` covers live-only fallback on 2026-06-26.
+- [x] Unsupported source-opening actions are hidden. Evidence: `SessionDossier.test.tsx` verifies source-opening actions are omitted on 2026-06-26.
+
+## Session transcript detail
+- [x] Board detail shows a transcript section. Evidence: `SessionDetailModal` passes transcript props into shared `SessionDossier`; focused UI/type checks passed on 2026-06-27.
+- [x] Logbook detail shows the same transcript section. Evidence: `SessionLibraryDetail` passes transcript props into shared `SessionDossier`; focused UI/type checks passed on 2026-06-27.
+- [x] Hook-only sessions show a coverage warning. Evidence: `SessionDossier.test.tsx` covers hook-only coverage warning and sparse transcript copy on 2026-06-27.
+- [x] Repeated low-value hook events are collapsed. Evidence: `SessionDossier.test.tsx` covers grouped low-value transcript rows on 2026-06-27.
+- [x] Detail view does not show raw JSON in primary content. Evidence: transcript DTO exposes text, labels, status, and source refs separately; UI renders text rows, not raw JSON.
+- [x] Sparse sessions route user to Sources for transcript import. Evidence: `DossierCoverageBanner` renders the transcript import CTA when coverage includes `transcript_missing`.
+
 ## Agent Access
 - [x] MCP config uses active database. Evidence: `npm run verify` MCP smoke passed on 2026-06-26.
 - [x] Invalid config cannot be copied. Evidence: `npm run verify` MCP tests passed on 2026-06-26.
@@ -36,7 +51,7 @@
 - [x] Legacy NDJSON is migration/compatibility only and receives no new product writes. Evidence: canonical ownership tests passed through `npm run verify` on 2026-06-26.
 
 ## Verification
-- [x] npm run verify passes. Evidence: 120 test files / 476 tests plus build, endpoint matrix, and smoke passed on 2026-06-26.
+- [x] npm run verify passes. Evidence: 129 test files / 519 tests plus build, endpoint matrix, and smoke passed on 2026-06-26.
 - [x] cargo tests pass. Evidence: 23 Rust tests passed on 2026-06-26.
 - [x] npm run doctor passes. Evidence: isolated current-branch daemon doctor passed on 2026-06-26.
 - [ ] GitHub Actions run passes for the final commit.

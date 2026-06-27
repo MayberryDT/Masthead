@@ -17,7 +17,7 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
   const summary = dataSummary ?? settings?.storage.dataSummary;
   const storageClasses = summary ? Object.entries(summary.storageClasses) : [];
   return (
-    <SettingsSection eyebrow="Storage" title="Storage">
+    <SettingsSection className="settings-section-wide" eyebrow="Storage" title="Storage">
       <SettingsRow
         control={
           <AppButton disabled={!settings?.storage.dataDirectory} onClick={onOpenDataDirectory} variant="quiet">

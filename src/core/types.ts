@@ -264,6 +264,10 @@ export type SessionPlainCopy = {
 
 export type SessionCardView = {
   sessionId: string;
+  canonicalSessionId?: string;
+  sourceSessionId?: string;
+  hostId?: string;
+  runtime?: string;
   project: string;
   title: string;
   copy: SessionPlainCopy;
@@ -274,6 +278,7 @@ export type SessionCardView = {
   endReason?: SessionEndReason;
   priorityRank: number;
   durationLabel: string;
+  totalTokens?: number;
   branchOrWorktree?: string;
   model?: string;
   thinkingLevel?: string;

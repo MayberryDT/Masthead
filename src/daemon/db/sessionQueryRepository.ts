@@ -435,7 +435,7 @@ function bestSessionTitle(row: SessionRow, enrichment?: SessionEnrichmentView): 
     sessionId: row.sessionId,
     sourceSessionId: row.sourceSessionId
   };
-  const candidates = [enrichment?.title, enrichment?.liveSummary, row.title, row.objective];
+  const candidates = [enrichment?.title, row.objective, row.title, enrichment?.liveSummary];
   for (const candidate of candidates) {
     const cleaned = cleanDisplayTitle(candidate);
     if (isMeaningfulSessionTitle(cleaned, titleFacts)) return cleaned;

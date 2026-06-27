@@ -1,5 +1,11 @@
 import { defaultLiveProjectionUrl } from "./liveProjectionClient";
 import type { ReviewDisposition } from "../core/store";
+import type { SessionDossierDto } from "../shared/sessionDossier";
+import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
+
+export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
+
+export type SessionTranscriptKindFilter = "all" | "user" | "assistant" | "tools" | "checkpoints" | "files" | "signals";
 
 export type SourceStatus = {
   sourceId: string;
@@ -110,6 +116,85 @@ export type LogbookSummary = {
   fileEffects: number;
   earliestActivityAt?: string;
   latestActivityAt?: string;
+};
+
+export type UsageWindow = "today" | "24h" | "7d" | "30d" | "all";
+
+export type UsageTotalsDto = {
+  sessions: number;
+  projects: number;
+  runtimes: number;
+  models: number;
+  messages: number;
+  toolCalls: number;
+  fileEffects: number;
+  mcpQueries: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  tokenRows: number;
+  tokenCoverageSessions: number;
+  tokensPerMinute?: number;
+};
+
+export type UsageByModelDto = {
+  model: string;
+  provider?: string;
+  sessions: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
+export type UsageByProjectDto = {
+  project: string;
+  sessions: number;
+  messages: number;
+  toolCalls: number;
+  fileEffects: number;
+  totalTokens: number;
+};
+
+export type UsageByRuntimeDto = {
+  runtime: string;
+  sessions: number;
+  messages: number;
+  toolCalls: number;
+  fileEffects: number;
+  totalTokens: number;
+};
+
+export type UsageActivityPointDto = {
+  bucketStart: string;
+  sessions: number;
+  messages: number;
+  toolCalls: number;
+  fileEffects: number;
+  totalTokens: number;
+};
+
+export type UsageCoverageDto = {
+  sources: number;
+  importedSessions: number;
+  sessionsWithTokenUsage: number;
+  sessionsWithoutTokenUsage: number;
+  currentEnrichments: number;
+  mcpQueries: number;
+};
+
+export type UsageStatsDto = {
+  window: UsageWindow;
+  generatedAt: string;
+  range: {
+    from?: string;
+    to: string;
+  };
+  totals: UsageTotalsDto;
+  byModel: UsageByModelDto[];
+  byProject: UsageByProjectDto[];
+  byRuntime: UsageByRuntimeDto[];
+  activity: UsageActivityPointDto[];
+  coverage: UsageCoverageDto;
 };
 
 export type LogbookSession = {
@@ -512,6 +597,20 @@ export async function getLogbookSummary(baseUrl = defaultLiveProjectionUrl(), op
   return body.summary;
 }
 
+export async function getUsageStats(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { window?: UsageWindow; signal?: AbortSignal } = {}
+): Promise<UsageStatsDto> {
+  const url = new URL(baseUrl);
+  url.pathname = "/usage/summary";
+  url.search = "";
+  url.searchParams.set("window", options.window ?? "today");
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`usage summary failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; usage: UsageStatsDto };
+  return body.usage;
+}
+
 export async function getLogbookSession(
   sessionId: string,
   baseUrl = defaultLiveProjectionUrl(),
@@ -541,6 +640,49 @@ export async function getLogbookSessionExcerpts(
   if (!response.ok) throw new Error(`session excerpts failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; excerpts: LogbookExcerpt[] };
   return body.excerpts;
+}
+
+export async function getSessionDossier(
+  sessionId: string,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<SessionDossierDto> {
+  const url = new URL(baseUrl);
+  url.pathname = `/sessions/${encodeURIComponent(sessionId)}/dossier`;
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`session dossier failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; dossier: SessionDossierDto };
+  return body.dossier;
+}
+
+export async function getSessionTranscript(
+  sessionId: string,
+  input: {
+    cursor?: string;
+    limit?: number;
+    kind?: SessionTranscriptKindFilter;
+    q?: string;
+  } = {},
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<SessionTranscriptResult> {
+  const url = new URL(baseUrl);
+  url.pathname = `/sessions/${encodeURIComponent(sessionId)}/transcript`;
+  url.search = "";
+  if (input.cursor) url.searchParams.set("cursor", input.cursor);
+  if (input.limit) url.searchParams.set("limit", String(input.limit));
+  if (input.kind) url.searchParams.set("kind", input.kind);
+  if (input.q) url.searchParams.set("q", input.q);
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`session transcript failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true } & SessionTranscriptResult;
+  return {
+    coverage: body.coverage,
+    items: body.items,
+    nextCursor: body.nextCursor,
+    total: body.total
+  };
 }
 
 export async function listProjects(baseUrl = defaultLiveProjectionUrl(), options: { signal?: AbortSignal } = {}): Promise<ProjectOption[]> {

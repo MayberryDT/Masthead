@@ -65,7 +65,7 @@ export function Toolbar({
   const toggleLayoutLabel = density === "compact" ? "Comfortable grid" : "Compact grid";
 
   return (
-    <section className="board-toolbar observability-toolbar metal-toolbar" aria-label="Now controls">
+    <section className="board-toolbar observability-toolbar metal-toolbar" aria-label="Board controls">
       <CollapsibleSearch
         ref={searchInputRef}
         label="Search sessions"
@@ -119,7 +119,6 @@ export function Toolbar({
           className={`toolbar-icon-button layout-toggle ${density === "compact" ? "active" : ""}`}
           aria-label={toggleLayoutLabel}
           aria-pressed={density === "compact"}
-          title={toggleLayoutLabel}
           onClick={onDensityToggle}
         >
           <Icon name="changeLayout" size="toolbar" weight={iconWeights.toolbar} />
@@ -128,4 +127,3 @@ export function Toolbar({
     </section>
   );
 }
-

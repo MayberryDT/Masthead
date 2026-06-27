@@ -45,15 +45,11 @@ describe("Live Board UI", () => {
     expect(html).toContain('aria-label="Masthead session manager"');
     expect(html).toContain('aria-label="Primary navigation"');
     expect(html).toContain('aria-label="Session workspace"');
-    expect(html).toContain('aria-label="Context panel"');
+    expect(html).toContain('aria-label="Board controls"');
     expect(html).not.toContain('aria-label="Agent health metrics"');
-    expect(html).toContain("Visible sessions");
-    expect(html).toContain("Connected sources");
     expect(html).not.toContain("Total Tokens (24h)");
     expect(html).not.toContain("Top Models (24h)");
     expect(html).not.toContain("Tokens / Min");
-    expect(html).toContain("Session Mix");
-    expect(html).toContain("Connected sources");
     expect(html).not.toContain("Resource Utilization");
     expect(html).not.toContain("Recent Errors");
     expect(html).toContain("All Harnesses");
@@ -68,7 +64,7 @@ describe("Live Board UI", () => {
     expect(html).not.toContain('aria-label="Filters"');
     expect(html).not.toContain("History");
     expect(html).not.toContain("Ended to review");
-    expect(html).toContain("Now will switch to live sessions when the local collector responds.");
+    expect(html).toContain("Board will switch to live sessions when the local collector responds.");
     expect(html).not.toContain("Fix Google OAuth callback");
     expect(html).not.toContain("Approve request");
     expect(html).not.toContain("Run command");
@@ -85,7 +81,7 @@ describe("Live Board UI", () => {
     const html = renderApp();
 
     expect(html).not.toContain("System status:");
-    expect(html).toContain("Running");
+    expect(html).toContain("Connecting to Masthead collector");
     expect(html).not.toMatch(/\byou|your|urgent|critical|dangerous/i);
   });
 
@@ -306,20 +302,20 @@ describe("Live Board UI", () => {
     expect(html).toContain("modal-scroll-frame");
     expect(html).toContain("modal-session-meta");
     expect(html).toContain("Thinking Extra High");
-    expect(html).toContain("Session brief");
-    expect(html).toContain("Evidence health");
+    expect(html).toContain("Canonical details unavailable");
+    expect(html).toContain("Session dossier");
+    expect(html).toContain("Overview");
+    expect(html).toContain("Review actions");
     expect(html).toContain("Still running");
     expect(html).toContain("Review shared edits");
     expect(html).toContain("This session is active with overlapping work to inspect.");
-    expect(html).toContain("Attribution degraded");
-    expect(html).toContain("Session: shared workspace");
-    expect(html).toContain("Conflict: degraded");
-    expect(html).toContain("Latest agent feedback");
+    expect(html).toContain("Confidence");
+    expect(html).toContain("shared_workspace");
     expect(html).toContain("Implementation is complete, but auth tests are still failing.");
-    expect(html.indexOf("Current activity")).toBeLessThan(html.indexOf("Latest agent feedback"));
     expect(html).not.toContain("Approve request");
     expect(html).not.toContain("Run command");
     expect(html).not.toContain("Git commit");
+    expect(html).not.toContain("Open source");
   });
 
   test("session cards do not fall back to raw titles when next step is absent", () => {

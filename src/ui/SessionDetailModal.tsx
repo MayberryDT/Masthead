@@ -1,17 +1,52 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import type { SessionTranscriptKindFilter, SessionTranscriptResult } from "../app/daemonClient";
 import type { SafeAction, SessionDetailView } from "../core/types";
+import type { SessionDossierDto } from "../shared/sessionDossier";
 import { Icon } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
-import { SessionInspector } from "./SessionInspector";
+import { SessionDossier } from "./session-dossier/SessionDossier";
 
 type Props = {
   session: SessionDetailView;
   onClose: () => void;
   onAction?: (action: SafeAction, session: SessionDetailView) => void;
   actionStatus?: string;
+  dossier?: SessionDossierDto;
+  dossierLoading?: boolean;
+  dossierError?: string;
+  onRetryDossier?: () => void;
+  transcript?: SessionTranscriptResult;
+  transcriptLoading?: boolean;
+  transcriptError?: string;
+  transcriptFilter?: SessionTranscriptKindFilter;
+  transcriptQuery?: string;
+  onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
+  onTranscriptQueryChange?: (query: string) => void;
+  onTranscriptLoadMore?: () => void;
+  onRetryTranscript?: () => void;
+  onOpenSources?: () => void;
 };
 
-export function SessionDetailModal({ session, onClose, onAction, actionStatus }: Props) {
+export function SessionDetailModal({
+  actionStatus,
+  dossier,
+  dossierError,
+  dossierLoading,
+  onAction,
+  onClose,
+  onOpenSources,
+  onRetryDossier,
+  onRetryTranscript,
+  onTranscriptFilterChange,
+  onTranscriptLoadMore,
+  onTranscriptQueryChange,
+  transcript,
+  transcriptError,
+  transcriptFilter,
+  transcriptLoading,
+  transcriptQuery,
+  session
+}: Props) {
   const modalRef = useRef<HTMLElement>(null);
   const closeTimeoutRef = useRef<number | undefined>(undefined);
   const closeFrameRef = useRef<number | undefined>(undefined);
@@ -100,7 +135,25 @@ export function SessionDetailModal({ session, onClose, onAction, actionStatus }:
           </div>
         </header>
         <div className="modal-scroll-frame">
-          <SessionInspector session={session} onAction={onAction} actionStatus={actionStatus} compactHeader />
+          <SessionDossier
+            live={session}
+            dossier={dossier}
+            loading={dossierLoading}
+            error={dossierError}
+            onRetry={onRetryDossier}
+            transcript={transcript}
+            transcriptLoading={transcriptLoading}
+            transcriptError={transcriptError}
+            transcriptFilter={transcriptFilter}
+            transcriptQuery={transcriptQuery}
+            onTranscriptFilterChange={onTranscriptFilterChange}
+            onTranscriptQueryChange={onTranscriptQueryChange}
+            onTranscriptLoadMore={onTranscriptLoadMore}
+            onTranscriptRetry={onRetryTranscript}
+            onOpenSources={onOpenSources}
+            onAction={onAction}
+            actionStatus={actionStatus}
+          />
         </div>
       </article>
     </div>

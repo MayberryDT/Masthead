@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { AppSelect } from "../AppSelect";
 
 describe("AppSelect", () => {
-  test("renders the closed Now dropdown trigger as a reusable primitive", () => {
+  test("renders the closed Board dropdown trigger as a reusable primitive", () => {
     const html = renderToStaticMarkup(
       <AppSelect
         label="Harnesses"
