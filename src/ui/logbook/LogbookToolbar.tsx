@@ -5,6 +5,8 @@ import { AppButton } from "../primitives/AppButton";
 import { AppSelect } from "../primitives/AppSelect";
 import { CollapsibleSearch } from "../primitives/CollapsibleSearch";
 import { FilterableSelect } from "../primitives/FilterableSelect";
+import { Icon } from "../icons/Icon";
+import { iconWeights } from "../icons/icon-tokens";
 
 type Props = {
   query: string;
@@ -30,9 +32,14 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
   const runtimeOptions = [{ value: "", label: "All runtimes" }, ...optionRows(filterOptions?.runtimes)];
   const projectOptions = optionRows(filterOptions?.projects, filters.project);
   const modelOptions = optionRows(filterOptions?.models, filters.model);
-  const activeAdvancedFilterCount = [filters.project, filters.model, filters.dateFrom, filters.dateTo, filters.file].filter(Boolean).length;
+  const activeAdvancedFilterCount = [filters.project, filters.model, filters.file].filter(Boolean).length;
+  const activeDateFilterCount = [filters.dateFrom, filters.dateTo].filter(Boolean).length;
   const [filtersOpen, setFiltersOpen] = useState(activeAdvancedFilterCount > 0);
+  const [dateOpen, setDateOpen] = useState(false);
   const filterDrawerId = useId();
+  const datePopoverId = useId();
+  const updateDateFrom = (value: string) => onFilterChange?.({ ...filters, dateFrom: value || undefined });
+  const updateDateTo = (value: string) => onFilterChange?.({ ...filters, dateTo: value || undefined });
 
   useEffect(() => {
     if (activeAdvancedFilterCount > 0) setFiltersOpen(true);
@@ -48,6 +55,47 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
         onChange={(event) => onQueryChange(event.currentTarget.value)}
         onClear={() => onQueryChange("")}
       />
+      <div className={`logbook-date-filter ${activeDateFilterCount > 0 ? "active" : ""}`.trim()}>
+        <AppButton
+          variant="default"
+          className="logbook-date-trigger"
+          aria-controls={datePopoverId}
+          aria-expanded={dateOpen}
+          aria-label="Open date filter"
+          onClick={() => setDateOpen((current) => !current)}
+        >
+          <Icon name="timeRange" size="toolbar" weight={iconWeights.toolbar} />
+          Date{activeDateFilterCount > 0 ? ` ${activeDateFilterCount}` : ""}
+        </AppButton>
+        <div id={datePopoverId} className="logbook-date-popover" aria-hidden={!dateOpen} hidden={!dateOpen}>
+          <label>
+            <span>From</span>
+            <input
+              aria-label="From date"
+              type="date"
+              value={filters.dateFrom ?? ""}
+              onInput={(event) => updateDateFrom(event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            <span>To</span>
+            <input
+              aria-label="To date"
+              type="date"
+              value={filters.dateTo ?? ""}
+              onInput={(event) => updateDateTo(event.currentTarget.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="logbook-date-clear"
+            disabled={activeDateFilterCount === 0}
+            onClick={() => onFilterChange?.({ ...filters, dateFrom: undefined, dateTo: undefined })}
+          >
+            Clear
+          </button>
+        </div>
+      </div>
       <AppButton
         variant="default"
         className={`logbook-filter-toggle ${filtersOpen ? "active" : ""}`.trim()}
@@ -89,17 +137,6 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
           onChange={(value) => onFilterChange?.({ ...filters, model: value })}
           disabled={!filtersOpen}
         />
-        <div className="logbook-filter-group logbook-date-range" role="group" aria-label="Date range">
-          <span className="logbook-filter-label">Date</span>
-          <label>
-            <span>From</span>
-            <input type="date" tabIndex={filtersOpen ? 0 : -1} value={filters.dateFrom ?? ""} onChange={(event) => onFilterChange?.({ ...filters, dateFrom: event.currentTarget.value || undefined })} />
-          </label>
-          <label>
-            <span>To</span>
-            <input type="date" tabIndex={filtersOpen ? 0 : -1} value={filters.dateTo ?? ""} onChange={(event) => onFilterChange?.({ ...filters, dateTo: event.currentTarget.value || undefined })} />
-          </label>
-        </div>
         <label className="logbook-filter-group logbook-file-filter">
           <span className="logbook-filter-label">File</span>
           <input tabIndex={filtersOpen ? 0 : -1} value={filters.file ?? ""} placeholder="Filter changed files..." onChange={(event) => onFilterChange?.({ ...filters, file: event.currentTarget.value || undefined })} />

@@ -105,6 +105,7 @@ type CardLayoutSnapshot = Map<string, DOMRect>;
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
+const LOGBOOK_PAGE_SIZE = 100;
 
 const emptyLiveBoard: LiveBoardProjection = {
   summary: {
@@ -172,6 +173,7 @@ export function App() {
   const [logbookError, setLogbookError] = useState<string>();
   const [logbookRetryKey, setLogbookRetryKey] = useState(0);
   const [logbookSort, setLogbookSort] = useState<LogbookSort>("recent");
+  const [logbookPageIndex, setLogbookPageIndex] = useState(0);
   const [usageWindow, setUsageWindow] = useState<UsageWindow>("today");
   const [usageStats, setUsageStats] = useState<UsageStatsDto>();
   const [usageLoading, setUsageLoading] = useState(false);
@@ -643,7 +645,11 @@ export function App() {
     const timer = window.setTimeout(() => {
       setLogbookLoading(true);
       setLogbookError(undefined);
-      void searchLogbook({ ...logbookFilters, limit: 50, q: historyQuery, sort: logbookSort }, activeProjectionUrl, { signal: controller.signal })
+      void searchLogbook(
+        { ...logbookFilters, limit: LOGBOOK_PAGE_SIZE, offset: logbookPageIndex * LOGBOOK_PAGE_SIZE, q: historyQuery, sort: logbookSort },
+        activeProjectionUrl,
+        { signal: controller.signal }
+      )
         .then((result) => {
           setLogbookResult(result);
           setLogbookError(undefined);
@@ -663,7 +669,7 @@ export function App() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [activeProjectionUrl, activeSurface, effectiveLiveConnection.state, historyQuery, logbookFilters, logbookRetryKey, logbookSort]);
+  }, [activeProjectionUrl, activeSurface, effectiveLiveConnection.state, historyQuery, logbookFilters, logbookPageIndex, logbookRetryKey, logbookSort]);
   useEffect(() => {
     if (activeSurface !== "logbook") return;
     const controller = new AbortController();
@@ -1172,6 +1178,7 @@ export function App() {
 
   const handleLogbookQueryChange = (nextQuery: string) => {
     setHistoryQuery(nextQuery);
+    setLogbookPageIndex(0);
     setLogbookResult(undefined);
     setLogbookError(undefined);
     setSelectedLogbookSessionId(undefined);
@@ -1179,30 +1186,18 @@ export function App() {
 
   const handleLogbookFilterChange = (nextFilters: LogbookFilterState) => {
     setLogbookFilters(nextFilters);
+    setLogbookPageIndex(0);
     setLogbookResult(undefined);
     setLogbookError(undefined);
     setSelectedLogbookSessionId(undefined);
   };
 
-  const handleLoadMoreLogbook = async () => {
-    if (!logbookResult?.nextCursor || logbookLoading) return;
-    setLogbookLoading(true);
-    try {
-      const nextPage = await searchLogbook(
-        { ...logbookFilters, cursor: logbookResult.nextCursor, limit: 50, q: historyQuery, sort: logbookSort },
-        activeProjectionUrl
-      );
-      setLogbookResult({
-        nextCursor: nextPage.nextCursor,
-        sessions: [...logbookResult.sessions, ...nextPage.sessions],
-        total: nextPage.total
-      });
-    } catch (error) {
-      console.error("[masthead] Logbook pagination failed", error);
-      setLogbookError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setLogbookLoading(false);
-    }
+  const handleLogbookPageChange = (nextPageIndex: number) => {
+    if (nextPageIndex === logbookPageIndex || logbookLoading) return;
+    setLogbookPageIndex(nextPageIndex);
+    setLogbookResult(undefined);
+    setLogbookError(undefined);
+    setSelectedLogbookSessionId(undefined);
   };
 
   const handleLoadMoreBoardTranscript = async () => {
@@ -1290,6 +1285,8 @@ export function App() {
             filters={logbookFilters}
             imports={imports}
             importBusy={sourcesBusy}
+            pageIndex={logbookPageIndex}
+            pageSize={LOGBOOK_PAGE_SIZE}
             query={historyQuery}
             density="compact"
             loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbookLoadState}
@@ -1302,11 +1299,12 @@ export function App() {
             onImportMetadata={handleImportMetadata}
             onOpenSources={() => setActiveSurface("sources")}
             onQueryChange={handleLogbookQueryChange}
-            onLoadMore={handleLoadMoreLogbook}
+            onPageChange={handleLogbookPageChange}
             onRetry={() => setLogbookRetryKey((current) => current + 1)}
             onSessionSelect={setSelectedLogbookSessionId}
             onSortChange={(nextSort) => {
               setLogbookSort(nextSort);
+              setLogbookPageIndex(0);
               setLogbookResult(undefined);
               setSelectedLogbookSessionId(undefined);
             }}

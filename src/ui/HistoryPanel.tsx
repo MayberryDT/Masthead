@@ -11,6 +11,8 @@ import type {
 import { LogbookFacets } from "./logbook/LogbookFacets";
 import { LogbookTable } from "./logbook/LogbookTable";
 import { LogbookToolbar } from "./logbook/LogbookToolbar";
+import { Icon } from "./icons/Icon";
+import { iconWeights } from "./icons/icon-tokens";
 import { AppButton } from "./primitives/AppButton";
 import { StatStrip, type StatStripItem } from "./primitives/StatStrip";
 
@@ -36,12 +38,14 @@ type Props = {
   importBusy?: boolean;
   onFilterChange?: (filters: LogbookFilterState) => void;
   onImportMetadata?: (runtime: string) => void;
-  onLoadMore?: () => void;
   onOpenSources?: () => void;
+  onPageChange?: (pageIndex: number) => void;
   onQueryChange: (query: string) => void;
   onRetry?: () => void;
   onSessionSelect?: (sessionId: string) => void;
   onSortChange?: (sort: LogbookSort) => void;
+  pageIndex?: number;
+  pageSize?: number;
 };
 
 export type LogbookLoadState =
@@ -112,12 +116,14 @@ export function HistoryPanel({
   nextCursor,
   onFilterChange,
   onImportMetadata,
-  onLoadMore,
   onOpenSources,
+  onPageChange,
   onQueryChange,
   onRetry,
   onSessionSelect,
   onSortChange,
+  pageIndex = 0,
+  pageSize = 100,
   query,
   records = [],
   refreshError,
@@ -146,8 +152,10 @@ export function HistoryPanel({
   const tableSessions = usesLogbookStore ? canonicalSessions : legacySessions.map(legacyToLogbookSession);
   const visibleTotal = readyState?.total ?? result?.sessions.length ?? tableSessions.length;
   const recordCount = result?.recordCount ?? visibleTotal;
-  const visibleNextCursor = readyState?.nextCursor ?? nextCursor;
   const isLoading = loading || loadingState;
+  const totalPages = Math.max(1, Math.ceil(visibleTotal / pageSize));
+  const visiblePageIndex = Math.min(Math.max(0, pageIndex), totalPages - 1);
+  const showPagination = usesLogbookStore && Boolean(onPageChange) && visibleTotal > pageSize;
   const sourceSummary = sourceImportSummary(sources, adapters);
   const activeFilters = activeFilterFacets(query, filters, sort, onQueryChange, onFilterChange, onSortChange);
   const hasActiveFilters = activeFilters.length > 0;
@@ -207,19 +215,80 @@ export function HistoryPanel({
         />
       )}
 
-      {usesLogbookStore && visibleNextCursor && onLoadMore ? (
-        <button type="button" className="surface-secondary-action" onClick={onLoadMore} disabled={isLoading}>
-          Load more
-        </button>
-      ) : null}
-
       {errorState ? null : (
-        <p className="toolbar-result surface-status">
-          Showing {tableSessions.length} of {visibleTotal}; searching {recordCount} {usesLogbookStore ? "canonical sessions" : "local records"}
-        </p>
+        <div className={`logbook-footer ${showPagination ? "has-pagination" : ""}`.trim()}>
+          {showPagination ? (
+            <LogbookPagination
+              disabled={isLoading}
+              pageIndex={visiblePageIndex}
+              pageSize={pageSize}
+              total={visibleTotal}
+              visibleCount={tableSessions.length}
+              onPageChange={onPageChange ?? (() => undefined)}
+            />
+          ) : null}
+          <p className="toolbar-result surface-status">
+            {showPagination
+              ? `Showing ${pageRangeLabel(visiblePageIndex, pageSize, tableSessions.length, visibleTotal)}; searching ${formatCount(recordCount)} ${usesLogbookStore ? "canonical sessions" : "local records"}`
+              : `Showing ${tableSessions.length} of ${visibleTotal}; searching ${recordCount} ${usesLogbookStore ? "canonical sessions" : "local records"}`}
+          </p>
+        </div>
       )}
     </section>
   );
+}
+
+function LogbookPagination({
+  disabled,
+  onPageChange,
+  pageIndex,
+  pageSize,
+  total,
+  visibleCount
+}: {
+  disabled: boolean;
+  onPageChange: (pageIndex: number) => void;
+  pageIndex: number;
+  pageSize: number;
+  total: number;
+  visibleCount: number;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const isFirst = pageIndex <= 0;
+  const isLast = pageIndex >= totalPages - 1;
+  const goToPage = (nextPageIndex: number) => {
+    onPageChange(Math.min(Math.max(0, nextPageIndex), totalPages - 1));
+  };
+
+  return (
+    <nav className="logbook-pagination" aria-label="Logbook pagination">
+      <span className="logbook-pagination-range">{pageRangeLabel(pageIndex, pageSize, visibleCount, total)}</span>
+      <div className="logbook-pagination-controls">
+        <button type="button" className="logbook-page-button" aria-label="First page" disabled={disabled || isFirst} onClick={() => goToPage(0)}>
+          <Icon name="pageFirst" size="toolbar" weight={iconWeights.toolbar} />
+        </button>
+        <button type="button" className="logbook-page-button" aria-label="Previous page" disabled={disabled || isFirst} onClick={() => goToPage(pageIndex - 1)}>
+          <Icon name="pagePrevious" size="toolbar" weight={iconWeights.toolbar} />
+        </button>
+        <span className="logbook-pagination-page">
+          Page {pageIndex + 1} of {totalPages}
+        </span>
+        <button type="button" className="logbook-page-button" aria-label="Next page" disabled={disabled || isLast} onClick={() => goToPage(pageIndex + 1)}>
+          <Icon name="pageNext" size="toolbar" weight={iconWeights.toolbar} />
+        </button>
+        <button type="button" className="logbook-page-button" aria-label="Last page" disabled={disabled || isLast} onClick={() => goToPage(totalPages - 1)}>
+          <Icon name="pageLast" size="toolbar" weight={iconWeights.toolbar} />
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+function pageRangeLabel(pageIndex: number, pageSize: number, visibleCount: number, total: number): string {
+  if (total === 0 || visibleCount === 0) return "0 of 0";
+  const start = pageIndex * pageSize + 1;
+  const end = Math.min(total, start + visibleCount - 1);
+  return `${formatCount(start)}-${formatCount(end)} of ${formatCount(total)}`;
 }
 
 function CanonicalErrorPanel({ message, onRetry }: { message: string; onRetry?: () => void }) {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { SessionCardView } from "../core/types";
-import { stateClassName } from "./format";
+import { isBlockedSessionCard, stateClassName } from "./format";
 import { Icon, type IconName } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
 import type { DemoSessionTelemetry } from "./observabilityDemo";
@@ -176,7 +176,7 @@ function Fact({
 }
 
 function observabilityStateLabel(session: SessionCardView): string {
-  if (session.primaryStatus === "blocked" || session.outcomeLabel === "blocked") return "Blocked";
+  if (isBlockedSessionCard(session)) return "Blocked";
   if (session.lifecycle === "idle") return "Idle";
   if (session.lifecycle === "ended" && session.outcomeLabel === "completed") return "Turn complete";
   if (session.lifecycle === "ended") return "Response ready";

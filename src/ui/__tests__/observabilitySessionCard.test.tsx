@@ -177,6 +177,24 @@ describe("observability session card", () => {
     expect(html).not.toContain(">Active<");
   });
 
+  test("does not render blocked-tone running cards as active", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          lifecycle: "running",
+          primaryStatus: "failed",
+          stateLabel: "Failed",
+          indicators: ["attention"]
+        })}
+        onToggle={() => undefined}
+      />
+    );
+
+    expect(html).toContain("needs-attention");
+    expect(html).toContain(">Blocked<");
+    expect(html).not.toContain(">Active<");
+  });
+
   test("marks newly created cards for entry animation", () => {
     const html = renderToStaticMarkup(<SessionCard session={session()} isNew newCardIndex={2} onToggle={() => undefined} />);
 

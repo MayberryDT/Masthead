@@ -1,14 +1,19 @@
 import type { SessionCardView } from "../core/types";
 
-export function stateClassName(session: SessionCardView): string {
-  if (session.indicators.includes("conflict")) return "conflict";
-  if (
+export function isBlockedSessionCard(session: SessionCardView): boolean {
+  return (
     session.primaryStatus === "blocked" ||
     session.primaryStatus === "failed" ||
     session.primaryStatus === "possibly_looping" ||
     session.outcomeLabel === "blocked" ||
-    session.outcomeLabel === "failed"
-  ) {
+    session.outcomeLabel === "failed" ||
+    session.indicators.includes("conflict")
+  );
+}
+
+export function stateClassName(session: SessionCardView): string {
+  if (session.indicators.includes("conflict")) return "conflict";
+  if (isBlockedSessionCard(session)) {
     return "needs-attention";
   }
   if (session.lifecycle === "ended" && session.outcomeLabel === "completed") return "complete";
@@ -18,7 +23,7 @@ export function stateClassName(session: SessionCardView): string {
 }
 
 export function statusTokenLabel(session: SessionCardView): string {
-  if (session.primaryStatus === "blocked") return "Blocked";
+  if (isBlockedSessionCard(session)) return "Blocked";
   if (session.indicators.includes("conflict")) return "Conflict";
   if (session.indicators.includes("risk")) return "High risk";
   if (session.lifecycle === "running") return "Active";
