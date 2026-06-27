@@ -263,6 +263,183 @@ describe("observability session card", () => {
     await act(async () => root.unmount());
   });
 
+  test("animates existing cards when their visible order changes", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const animations: Array<{ sessionId: string; keyframes: Keyframe[] | PropertyIndexedKeyframes | null }> = [];
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const sessionId = this.dataset.sessionId;
+      if (!sessionId) return originalGetBoundingClientRect.call(this);
+      const siblings = Array.from(this.parentElement?.querySelectorAll<HTMLElement>(".session-card[data-session-id]") ?? []);
+      const index = Math.max(0, siblings.indexOf(this));
+      return testRect(0, index * 240);
+    };
+    HTMLElement.prototype.animate = vi.fn(function (
+      this: HTMLElement,
+      keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
+      _options?: number | KeyframeAnimationOptions
+    ) {
+      const sessionId = this.dataset.sessionId;
+      if (sessionId) animations.push({ sessionId, keyframes });
+      return { addEventListener: vi.fn() } as unknown as Animation;
+    });
+
+    try {
+      const first = session({ sessionId: "session-1", title: "First session" });
+      const second = session({ sessionId: "session-2", title: "Second session" });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[first, second]} variant="observability" />);
+      });
+
+      expect(animations).toEqual([]);
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[second, first]} variant="observability" />);
+      });
+
+      expect(animations.map((animation) => animation.sessionId).sort()).toEqual(["session-1", "session-2"]);
+      expect(JSON.stringify(animations.find((animation) => animation.sessionId === "session-2")?.keyframes)).toContain(
+        "translate(0px, 240px)"
+      );
+      expect(JSON.stringify(animations.find((animation) => animation.sessionId === "session-1")?.keyframes)).toContain(
+        "translate(0px, -240px)"
+      );
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.animate = originalAnimate;
+    }
+  });
+
+  test("falls back to inline transform animation when Element.animate is unavailable", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const sessionId = this.dataset.sessionId;
+      if (!sessionId) return originalGetBoundingClientRect.call(this);
+      const siblings = Array.from(this.parentElement?.querySelectorAll<HTMLElement>(".session-card[data-session-id]") ?? []);
+      const index = Math.max(0, siblings.indexOf(this));
+      return testRect(0, index * 240);
+    };
+    (HTMLElement.prototype as { animate?: HTMLElement["animate"] }).animate = undefined;
+    window.requestAnimationFrame = vi.fn(() => 1);
+
+    try {
+      const first = session({ sessionId: "session-1", title: "First session" });
+      const second = session({ sessionId: "session-2", title: "Second session" });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[first, second]} variant="observability" />);
+      });
+      await act(async () => {
+        root.render(<SessionBoard cards={[second, first]} variant="observability" />);
+      });
+
+      const movedCard = container.querySelector<HTMLElement>('[data-session-id="session-2"]');
+      expect(movedCard?.className).toContain("is-layout-animating");
+      expect(movedCard?.style.transform).toContain("translate(0px, 240px)");
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.animate = originalAnimate;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+    }
+  });
+
+  test("does not animate same-order headline refreshes as card moves", async () => {
+    const originalAnimate = HTMLElement.prototype.animate;
+    const animations: string[] = [];
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    HTMLElement.prototype.animate = vi.fn(function (this: HTMLElement) {
+      const sessionId = this.dataset.sessionId;
+      if (sessionId) animations.push(sessionId);
+      return { addEventListener: vi.fn() } as unknown as Animation;
+    });
+
+    try {
+      const first = session({ sessionId: "session-1", copy: { ...session().copy, headline: "First headline" } });
+      const second = session({ sessionId: "session-2", copy: { ...session().copy, headline: "Second headline" } });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[first, second]} variant="observability" />);
+      });
+
+      await act(async () => {
+        root.render(
+          <SessionBoard
+            cards={[
+              { ...first, copy: { ...first.copy, headline: "First headline refreshed" } },
+              { ...second, copy: { ...second.copy, headline: "Second headline refreshed" } }
+            ]}
+            variant="observability"
+          />
+        );
+      });
+
+      expect(animations).toEqual([]);
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.animate = originalAnimate;
+    }
+  });
+
+  test("skips reorder animation when reduced motion is requested", async () => {
+    const originalAnimate = HTMLElement.prototype.animate;
+    const originalMatchMedia = window.matchMedia;
+    const animate = vi.fn(function () {
+      return { addEventListener: vi.fn() } as unknown as Animation;
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    HTMLElement.prototype.animate = animate;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockReturnValue({
+        matches: true,
+        media: "(prefers-reduced-motion: reduce)",
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn()
+      })
+    });
+
+    try {
+      const first = session({ sessionId: "session-1", title: "First session" });
+      const second = session({ sessionId: "session-2", title: "Second session" });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[first, second]} variant="observability" />);
+      });
+      await act(async () => {
+        root.render(<SessionBoard cards={[second, first]} variant="observability" />);
+      });
+
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.animate = originalAnimate;
+      Object.defineProperty(window, "matchMedia", {
+        configurable: true,
+        writable: true,
+        value: originalMatchMedia
+      });
+    }
+  });
+
   test("stagger-types changed headlines on existing cards", async () => {
     vi.useFakeTimers();
     const container = document.createElement("div");
@@ -555,4 +732,20 @@ function session(overrides: Partial<SessionCardView> = {}): SessionCardView {
     isExpanded: false,
     ...overrides
   };
+}
+
+function testRect(left: number, top: number): DOMRect {
+  const width = 320;
+  const height = 218;
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    toJSON: () => ({})
+  } as DOMRect;
 }
