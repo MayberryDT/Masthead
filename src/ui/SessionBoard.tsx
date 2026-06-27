@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LifecycleLaneView, SessionCardView } from "../core/types";
 import type { CardDensity } from "./toolbarOptions";
 import { sessionDemoTelemetry } from "./observabilityDemo";
 import { SessionCard } from "./SessionCard";
+
+type CardLayoutSnapshot = Map<string, DOMRect>;
 
 type Props = {
   cards: SessionCardView[];
@@ -66,7 +68,7 @@ export function SessionBoard({
             <p>{emptyMessage}</p>
           </div>
         ) : (
-          <div className={`observability-card-grid ${density === "compact" ? "compact" : ""}`.trim()}>
+          <ObservabilityCardGrid cards={cards} density={density}>
             {cards.map((card, index) => (
               <SessionCard
                 key={card.sessionId}
@@ -78,7 +80,7 @@ export function SessionBoard({
                 headlineUpdateIndex={headlineUpdateOrder.get(card.sessionId)}
               />
             ))}
-          </div>
+          </ObservabilityCardGrid>
         )}
       </section>
     );
@@ -139,6 +141,119 @@ export function SessionBoard({
       )}
     </section>
   );
+}
+
+function ObservabilityCardGrid({
+  cards,
+  children,
+  density
+}: {
+  cards: SessionCardView[];
+  children: ReactNode;
+  density: CardDensity;
+}) {
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const previousLayoutRef = useRef<CardLayoutSnapshot | null>(null);
+  const previousOrderSignatureRef = useRef<string | null>(null);
+  const orderSignature = cards.map((card) => card.sessionId).join("\u0000");
+
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+
+    const previousLayout = previousLayoutRef.current;
+    const previousOrderSignature = previousOrderSignatureRef.current;
+    const nextLayout = captureCardLayout(grid);
+
+    previousLayoutRef.current = nextLayout;
+    previousOrderSignatureRef.current = orderSignature;
+
+    if (!previousLayout || previousOrderSignature === null || previousOrderSignature === orderSignature || prefersReducedMotion()) {
+      return;
+    }
+
+    animateCardLayoutFrom(grid, previousLayout);
+  });
+
+  return (
+    <div ref={gridRef} className={`observability-card-grid ${density === "compact" ? "compact" : ""}`.trim()}>
+      {children}
+    </div>
+  );
+}
+
+function captureCardLayout(container: HTMLElement): CardLayoutSnapshot {
+  const rects: CardLayoutSnapshot = new Map();
+  container.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card) => {
+    const sessionId = card.dataset.sessionId;
+    if (sessionId) rects.set(sessionId, card.getBoundingClientRect());
+  });
+  return rects;
+}
+
+function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayoutSnapshot): void {
+  container.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card) => {
+    const sessionId = card.dataset.sessionId;
+    const previousRect = sessionId ? previousLayout.get(sessionId) : undefined;
+    if (!previousRect) return;
+
+    const nextRect = card.getBoundingClientRect();
+    const deltaX = previousRect.left - nextRect.left;
+    const deltaY = previousRect.top - nextRect.top;
+    const scaleX = previousRect.width / Math.max(nextRect.width, 1);
+    const scaleY = previousRect.height / Math.max(nextRect.height, 1);
+    const moved = Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5;
+    const resized = Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01;
+    if (!moved && !resized) return;
+
+    const transform = `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`;
+    card.classList.add("is-layout-animating");
+    if (typeof card.animate !== "function") {
+      animateCardLayoutWithInlineStyle(card, transform);
+      return;
+    }
+
+    const animation = card.animate(
+      [
+        { transform },
+        { transform: "translate(0, 0) scale(1, 1)" }
+      ],
+      {
+        duration: 300,
+        easing: "cubic-bezier(0.22, 1, 0.36, 1)"
+      }
+    );
+    const cleanup = () => card.classList.remove("is-layout-animating");
+    animation.addEventListener("finish", cleanup, { once: true });
+    animation.addEventListener("cancel", cleanup, { once: true });
+  });
+}
+
+function animateCardLayoutWithInlineStyle(card: HTMLElement, transform: string): void {
+  const previousTransition = card.style.transition;
+  const previousTransform = card.style.transform;
+  const previousTransformOrigin = card.style.transformOrigin;
+
+  card.style.transition = "none";
+  card.style.transformOrigin = "top left";
+  card.style.transform = transform;
+  void card.offsetWidth;
+
+  window.requestAnimationFrame(() => {
+    card.style.transition = "transform 300ms cubic-bezier(0.22, 1, 0.36, 1)";
+    card.style.transform = "translate(0, 0) scale(1, 1)";
+
+    window.setTimeout(() => {
+      card.style.transition = previousTransition;
+      card.style.transform = previousTransform;
+      card.style.transformOrigin = previousTransformOrigin;
+      card.classList.remove("is-layout-animating");
+    }, 320);
+  });
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
 function headlineUpdateSignature(card: SessionCardView): string {
