@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import type { AdapterMaturity } from "../adapters/capabilities.ts";
 import { adapterRecordFromCodexHook, codexHookSource } from "../adapters/codex/hookAdapter.ts";
 import { adapterForRuntime } from "../adapters/registry.ts";
 import { createEnrichmentCoordinator } from "../enrichment/enrichmentCoordinator.ts";
@@ -339,6 +340,26 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return latestScan;
   }
 
+  function cachedSourceScanResult(): SourceScanResult {
+    const generatedAt = latestScan?.generatedAt ?? new Date().toISOString();
+    return {
+      adapters: getAdapterStatuses(database)
+        .filter((adapter) => adapter.runtime !== "gemini_cli")
+        .map((adapter) => ({
+          checkedPaths: [],
+          diagnostics: adapter.diagnostics,
+          discoveredSessions: adapter.discoveredSessions,
+          label: adapter.label,
+          maturity: adapter.maturity as AdapterMaturity,
+          runtime: adapter.runtime,
+          sources: [],
+          state: adapter.state === "disabled" ? "degraded" : adapter.state
+        })),
+      generatedAt,
+      scanId: latestScan?.scanId ?? "scan:cached"
+    };
+  }
+
   async function discoverAllSourcesAndPersist(): Promise<DiscoveredSource[]> {
     const snapshot = await discoverSourceSnapshotAndPersist();
     return snapshot.sources;
@@ -629,18 +650,16 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/sources") {
-      const sources = await discoverAllSourcesAndPersist();
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
-        sources: getSourceStatuses(database, sources)
+        sources: getSourceStatuses(database)
       });
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/adapters") {
-      const snapshot = await discoverSourceSnapshotAndPersist();
       sendJson(request, response, config.allowedOrigins, 200, {
-        adapters: getAdapterStatuses(database, snapshot),
+        adapters: getAdapterStatuses(database),
         ok: true
       });
       return;
@@ -665,7 +684,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/sources/scan/latest") {
-      const scan = latestScan ?? (await scanSourcesAndPersist());
+      const scan = latestScan ?? cachedSourceScanResult();
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
         scan
@@ -1390,19 +1409,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           void refreshKnownGitSnapshots();
         }, config.gitRefreshMs).unref()
       : undefined;
-  const sourceReconcileTimer = setInterval(() => {
-    if (closed) return;
-    void discoverAllSourcesAndPersist().catch((error: unknown) => {
-      console.error("[masthead] source reconciliation failed", error);
-    });
-  }, 60_000).unref();
-  queueMicrotask(() => {
-    if (closed) return;
-    void discoverAllSourcesAndPersist().catch((error: unknown) => {
-      console.error("[masthead] source reconciliation failed", error);
-    });
-  });
-
   return {
     server,
     database,
@@ -1414,7 +1420,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         await hydrationPromise;
         await new Promise<void>((resolve) => {
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
-        clearInterval(sourceReconcileTimer);
         server.close(() => {
           try {
             checkpointMastheadDatabase(database);

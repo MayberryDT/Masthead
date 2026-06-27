@@ -1,5 +1,5 @@
 import { readdir, stat, readFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import type { AdapterRecord, DiscoveredSource, DiscoveryContext, IngestCursor, RuntimeKind, SessionAdapter, SourceInventory } from "../types.ts";
 import type { AdapterPathCandidate } from "../pathTypes.ts";
 import {
@@ -270,16 +270,39 @@ async function candidateFiles(directory: string, maxDepth: number, contentKind: 
   const files: string[] = [];
   for (const entry of entries) {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) files.push(...(await candidateFiles(path, maxDepth - 1, contentKind)));
-    else if (entry.isFile() && matchesKind(entry.name, contentKind)) files.push(path);
+    if (entry.isDirectory()) {
+      if (!shouldSkipDirectory(entry.name)) files.push(...(await candidateFiles(path, maxDepth - 1, contentKind)));
+    } else if (entry.isFile() && matchesKind(path, contentKind)) {
+      files.push(path);
+    }
   }
   return files;
 }
 
-function matchesKind(name: string, contentKind: AdapterPathCandidate["contentKind"]): boolean {
+function shouldSkipDirectory(name: string): boolean {
+  return new Set([".cache", ".git", ".next", ".turbo", "build", "dist", "node_modules", "target", "vendor"]).has(name);
+}
+
+function matchesKind(path: string, contentKind: AdapterPathCandidate["contentKind"]): boolean {
+  const name = basename(path);
+  const lowerPath = path.toLowerCase();
+  const lowerName = name.toLowerCase();
   if (contentKind === "sqlite-file") return name.endsWith(".sqlite") || name.endsWith(".db") || name === "state.vscdb";
-  if (contentKind === "jsonl-tree" || contentKind === "jsonl-file") return name.endsWith(".jsonl") || name.endsWith(".json");
-  return name.endsWith(".jsonl") || name.endsWith(".json") || name.endsWith(".db") || name.endsWith(".sqlite") || name.endsWith(".md") || name.includes("history");
+  if (contentKind === "jsonl-tree" || contentKind === "jsonl-file") {
+    if (lowerName.endsWith(".jsonl")) return true;
+    if (!lowerName.endsWith(".json")) return false;
+    if (lowerName === "package.json" || lowerName === "tsconfig.json" || lowerName === "workspace.json") return false;
+    return /session|conversation|chat|history|transcript|message|run|event|diff|composer/.test(lowerPath);
+  }
+  if (contentKind === "markdown-files") return lowerName.endsWith(".md") || lowerName.endsWith(".markdown");
+  return (
+    lowerName.endsWith(".jsonl") ||
+    (lowerName.endsWith(".json") && lowerName !== "package.json") ||
+    lowerName.endsWith(".db") ||
+    lowerName.endsWith(".sqlite") ||
+    lowerName.endsWith(".md") ||
+    lowerName.includes("history")
+  );
 }
 
 function adapterRecord(source: DiscoveredSource, sourceRecordKey: string, observedAt: string, payload: unknown, normalized: AdapterRecord["normalized"]): AdapterRecord {

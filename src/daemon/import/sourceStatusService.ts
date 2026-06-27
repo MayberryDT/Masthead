@@ -67,7 +67,7 @@ type CountsRow = {
 export function getSourceStatuses(db: MastheadDatabase, discoveredSources: DiscoveredSource[] = []): SourceStatusDto[] {
   upsertDiscoveredSources(db, discoveredSources);
   const rows = db.prepare("SELECT source_id, adapter, source_kind, source_path, confidence FROM ingest_sources ORDER BY source_id").all() as SourceRow[];
-  return rows.map((row) => {
+  return rows.filter(isVisibleSourceRow).map((row) => {
     const counts = importCounts(db, row.source_id);
     const importedSessions = countDistinctSessionsForSource(db, row.source_id);
     const discoveredSessions = importedSessions;
@@ -96,6 +96,16 @@ export function getSourceStatuses(db: MastheadDatabase, discoveredSources: Disco
       sessionCount: status.discoveredSessions
     };
   });
+}
+
+function isVisibleSourceRow(row: SourceRow): boolean {
+  const path = row.source_path;
+  if (!path) return true;
+  const lower = path.toLowerCase();
+  if (lower.includes("/node_modules/") || lower.includes("\\node_modules\\")) return false;
+  if (lower.includes("/.git/") || lower.includes("\\.git\\")) return false;
+  if (lower.endsWith("/package.json") || lower.endsWith("\\package.json")) return false;
+  return true;
 }
 
 export type AdapterStatusInput =
