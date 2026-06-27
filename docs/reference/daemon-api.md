@@ -19,6 +19,7 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /projection` returns the live Now projection from collected session data.
 - `GET /sources` discovers and returns source statuses.
 - `GET /adapters` returns adapter statuses.
+- `GET /sources/scan/latest` returns the latest multi-adapter scan result, or runs a bounded scan if none is cached.
 - `GET /sessions` searches canonical sessions. Query params include `q`, `project`, `runtime`, `host`, `model`, `state`, date filters, and `limit`.
 - `GET /sessions/:sessionId` returns one session detail.
 - `GET /sessions/:sessionId/excerpts` returns bounded excerpts, with optional `q` and `limit`.
@@ -43,10 +44,12 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 
 - `POST /ingest` accepts Codex hook payloads.
 - `POST /sources/discover` refreshes source discovery.
+- `POST /sources/scan` scans known local agent-history locations for all active adapters. It is read-only and allowed through the worktree bridge.
+- `POST /sources/connect` connects selected scan results and queues metadata/enrichment jobs. Transcript import requires explicit approval.
 - `POST /sources/codex/import-metadata` queues Codex metadata import.
 - `POST /sources/codex/approve-transcripts` records transcript import approval.
 - `POST /sources/codex/import-transcripts` queues Codex transcript import after approval.
-- `POST /adapters/codex/import-metadata`, `/approve-transcripts`, `/import-transcripts`, and `/sync` are adapter-shaped equivalents.
+- `POST /adapters/:runtime/import-metadata`, `/approve-transcripts`, `/import-transcripts`, and `/sync` queue adapter-shaped source work for active runtimes.
 - `POST /imports` queues an import for `{ "sourceId": "...", "kind": "metadata" | "transcript" }`.
 - `POST /imports/:importJobId/cancel` cancels an import job.
 - `POST /imports/:importJobId/retry` queues a retry.

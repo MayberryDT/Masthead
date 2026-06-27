@@ -8,7 +8,9 @@ type Props = {
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
+  onToggleSelected?: (runtime: string, checked: boolean) => void;
   onSyncAdapter?: (runtime: string) => void;
+  selectedRuntimes?: Set<string>;
 };
 
 export function AdapterList({
@@ -18,7 +20,9 @@ export function AdapterList({
   onExcludePath,
   onImportMetadata,
   onImportTranscripts,
-  onSyncAdapter
+  onSyncAdapter,
+  onToggleSelected,
+  selectedRuntimes
 }: Props) {
   if (adapters.length === 0) {
     return (
@@ -38,10 +42,12 @@ export function AdapterList({
           key={adapter.runtime}
           adapter={adapter}
           busy={busy}
+          checked={selectedRuntimes?.has(adapter.runtime) ?? false}
           onEnableTranscriptImport={onEnableTranscriptImport}
           onExcludePath={onExcludePath}
           onImportMetadata={onImportMetadata}
           onImportTranscripts={onImportTranscripts}
+          onToggleSelected={onToggleSelected}
           onSyncAdapter={onSyncAdapter}
         />
       ))}

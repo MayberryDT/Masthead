@@ -58,7 +58,7 @@ describe("AdapterRow", () => {
     expect(html).toContain("Import metadata");
     expect(html).toContain("Enable transcript import");
     expect(html).toContain("Import transcripts");
-    expect(html).toContain("Sync all");
+    expect(html).toContain("Sync");
     expect(html).toContain("/home/tyler/.codex/sessions");
   });
 
@@ -85,7 +85,7 @@ describe("AdapterRow", () => {
     await act(async () => {
       buttonByText(container, "Import metadata").click();
       buttonByText(container, "Import transcripts").click();
-      buttonByText(container, "Sync all").click();
+      buttonByText(container, "Sync").click();
     });
 
     expect(onImportMetadata).toHaveBeenCalledWith("codex");

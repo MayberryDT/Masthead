@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AdapterStatus, ImportJob, SourceStatus } from "../app/daemonClient";
 import { AppButton } from "./primitives/AppButton";
 import { StatStrip } from "./primitives/StatStrip";
@@ -17,7 +17,9 @@ type Props = {
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
   onPollImports?: () => void;
+  onConnectSelected?: (runtimes: string[]) => void;
   onRefresh: () => void;
+  onScan?: () => void;
   onRetryImport?: (importJobId: string) => void;
   onSyncAdapter?: (runtime: string) => void;
 };
@@ -32,16 +34,27 @@ export function SourcesPanel({
   onImportMetadata,
   onImportTranscripts,
   onPollImports,
+  onConnectSelected,
   onRefresh,
+  onScan,
   onRetryImport,
   onSyncAdapter,
   sources,
   status
 }: Props) {
   const adapterRows = adapters ?? adaptersFromSources(sources);
+  const activeRuntimes = useMemo(() => adapterRows.filter((adapter) => adapter.runtime !== "gemini_cli" && adapter.state !== "planned").map((adapter) => adapter.runtime), [adapterRows]);
+  const [selectedRuntimes, setSelectedRuntimes] = useState<Set<string>>(() => new Set());
   const totals = sourceTotals(adapterRows);
   const activeImportCount = imports.filter((job) => job.status === "queued" || job.status === "running").length;
-  const syncRuntime = adapterRows.find((adapter) => adapter.runtime === "codex")?.runtime ?? adapterRows[0]?.runtime ?? "codex";
+  const selectedList = Array.from(selectedRuntimes).filter((runtime) => activeRuntimes.includes(runtime));
+
+  useEffect(() => {
+    setSelectedRuntimes((current) => {
+      if (current.size > 0) return current;
+      return new Set(activeRuntimes);
+    });
+  }, [activeRuntimes]);
 
   useEffect(() => {
     if (activeImportCount === 0 || !onPollImports) return undefined;
@@ -58,8 +71,14 @@ export function SourcesPanel({
           <AppButton type="button" onClick={onRefresh} disabled={busy}>
             Discover sources
           </AppButton>
-          <AppButton type="button" variant="primary" onClick={() => onSyncAdapter?.(syncRuntime)} disabled={busy || !onSyncAdapter}>
-            Sync all
+          <AppButton type="button" onClick={onScan ?? onRefresh} disabled={busy}>
+            Scan this computer
+          </AppButton>
+          <AppButton type="button" variant="primary" onClick={() => onConnectSelected?.(selectedList)} disabled={busy || !onConnectSelected || selectedList.length === 0}>
+            Connect selected
+          </AppButton>
+          <AppButton type="button" variant="quiet" onClick={() => selectedList.forEach((runtime) => onSyncAdapter?.(runtime))} disabled={busy || !onSyncAdapter || selectedList.length === 0}>
+            Sync connected
           </AppButton>
         </div>
         {status ? <p className="sources-status surface-status">{status}</p> : null}
@@ -83,7 +102,16 @@ export function SourcesPanel({
         onExcludePath={onExcludePath}
         onImportMetadata={onImportMetadata}
         onImportTranscripts={onImportTranscripts}
+        onToggleSelected={(runtime, checked) => {
+          setSelectedRuntimes((current) => {
+            const next = new Set(current);
+            if (checked) next.add(runtime);
+            else next.delete(runtime);
+            return next;
+          });
+        }}
         onSyncAdapter={onSyncAdapter}
+        selectedRuntimes={selectedRuntimes}
       />
       <ImportJobsTable busy={busy} imports={imports} onCancelImport={onCancelImport} onRetryImport={onRetryImport} />
     </section>

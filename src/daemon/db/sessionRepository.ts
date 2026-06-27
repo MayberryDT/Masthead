@@ -857,7 +857,7 @@ function transcriptValue(
       stringValue(record.sessionId) ??
       stringValue(record.conversation_id) ??
       stringValue(record.conversationId) ??
-      (sourcePath ? basename(sourcePath, ".jsonl") : undefined),
+      (sourcePath?.endsWith(".jsonl") ? basename(sourcePath, ".jsonl") : undefined),
     project: stringValue(record.project) ?? projectLabelFromPath(stringValue(record.cwd) ?? stringValue(record.repoRoot) ?? stringValue(record.repo_root)),
     text: stringValue(record.content) ?? stringValue(record.text) ?? stringValue(record.message),
     toolName: stringValue(record.name) ?? stringValue(record.tool_name) ?? stringValue(record.toolName),

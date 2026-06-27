@@ -91,6 +91,36 @@ export type AdapterImportActionResult = {
   sources?: number;
 };
 
+export type SourceScanResult = {
+  scanId: string;
+  generatedAt: string;
+  adapters: Array<{
+    runtime: string;
+    label: string;
+    state: AdapterStatus["state"];
+    maturity: string;
+    discoveredSessions: number;
+    checkedPaths: Array<{
+      path: string;
+      exists: boolean;
+      readable: boolean;
+      kind: string;
+      fileCount: number;
+      byteCount: number;
+      candidateSessionCount: number;
+      diagnostics: SourceDiagnostic[];
+    }>;
+    diagnostics: SourceDiagnostic[];
+    sources: SourceStatus[];
+  }>;
+};
+
+export type ConnectSourcesResult = {
+  jobs: ImportJob[];
+  queued: number;
+  skipped: Array<{ runtime: string; reason: string }>;
+};
+
 export type SourceExclusionInput = {
   exclusionKind: "source" | "project" | "path";
   pattern: string;
@@ -463,6 +493,38 @@ export async function listAdapters(baseUrl = defaultLiveProjectionUrl()): Promis
   if (!response.ok) throw new Error(`adapters request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; adapters: AdapterStatus[] };
   return body.adapters;
+}
+
+export async function scanSources(baseUrl = defaultLiveProjectionUrl()): Promise<SourceScanResult> {
+  const url = new URL(baseUrl);
+  url.pathname = "/sources/scan";
+  url.search = "";
+  const response = await fetch(url.toString(), { method: "POST", headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`source scan failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; scan: SourceScanResult };
+  return body.scan;
+}
+
+export async function connectSources(
+  input: {
+    runtimes: string[];
+    importMetadata: boolean;
+    importTranscripts: boolean;
+    queueEnrichment: boolean;
+    transcriptApproved?: boolean;
+  },
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<ConnectSourcesResult> {
+  const url = new URL(baseUrl);
+  url.pathname = "/sources/connect";
+  url.search = "";
+  const response = await fetch(url.toString(), {
+    body: JSON.stringify(input),
+    headers: { accept: "application/json", "content-type": "application/json" },
+    method: "POST"
+  });
+  if (!response.ok) throw new Error(`source connect failed: ${response.status}`);
+  return response.json() as Promise<ConnectSourcesResult>;
 }
 
 export async function importAdapterMetadata(

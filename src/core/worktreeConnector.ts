@@ -75,6 +75,7 @@ const staticReadOnlyBridgePaths = new Set([
 
 export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathname: string): boolean {
   if (method === "POST" && (pathname === "/mcp/launch-config/validate" || pathname === "/mcp/test-connection")) return true;
+  if (method === "POST" && pathname === "/sources/scan") return true;
   if (method !== "GET") return false;
   if (staticReadOnlyBridgePaths.has(pathname)) return true;
   return /^\/sessions\/[^/]+(?:\/excerpts|\/dossier|\/transcript)?$/.test(pathname) || /^\/imports\/[^/]+$/.test(pathname);

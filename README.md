@@ -13,8 +13,9 @@ Live Now is a view over collected session data, not the product category.
 
 - Canonical local SQLite ownership for Masthead-owned sessions, source state,
   import jobs, search records, settings, and MCP audit rows.
-- Codex source discovery and imports for metadata and reviewed transcript
-  history.
+- Multi-adapter source discovery for Codex, Cursor, Claude Code,
+  Antigravity, OpenCode, Aider, OpenClaw, Hermes, and Pi, with conservative
+  metadata imports and reviewed transcript history.
 - Logbook search and session detail APIs backed by the canonical store.
 - Shared Board and Logbook session dossier backed by canonical identity,
   coverage diagnostics, transcript rows, files, tools, verification, timeline,
@@ -27,7 +28,8 @@ Live Now is a view over collected session data, not the product category.
 
 ## Experimental
 
-- Additional source adapters beyond Codex.
+- Deeper schema coverage for additional source adapters beyond the initial
+  bounded scanners.
 - Transcript import breadth and exclusion policy tuning.
 - Optional remote enrichment. It is off by default and must stay scoped,
   redacted, previewable, and auditable when enabled.
@@ -118,6 +120,8 @@ See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md).
 - Import existing Codex history: [docs/how-to/import-codex-history.md](docs/how-to/import-codex-history.md)
 - Reset local Masthead data: [docs/how-to/reset-local-data.md](docs/how-to/reset-local-data.md)
 - Daemon API reference: [docs/reference/daemon-api.md](docs/reference/daemon-api.md)
+- Sources reference: [docs/reference/sources.md](docs/reference/sources.md)
+- Adapter reference: [docs/reference/adapters.md](docs/reference/adapters.md)
 - Session dossier reference: [docs/reference/session-dossier.md](docs/reference/session-dossier.md)
 - Configuration reference: [docs/reference/configuration.md](docs/reference/configuration.md)
 - Release gates: [docs/release-gates.md](docs/release-gates.md)

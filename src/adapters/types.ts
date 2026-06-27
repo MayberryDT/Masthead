@@ -1,4 +1,17 @@
-export type RuntimeKind = "codex" | "hermes" | "claude_code" | "pi" | "openclaw" | "crush" | "opencode" | "gemini_cli" | "aider";
+export const RUNTIME_KINDS = [
+  "codex",
+  "cursor",
+  "claude_code",
+  "antigravity",
+  "opencode",
+  "aider",
+  "openclaw",
+  "hermes",
+  "pi",
+  "gemini_cli"
+] as const;
+
+export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 export type SourceKind = "stream" | "hook" | "sdk" | "sqlite" | "jsonl" | "ui_signal" | "inference";
 export type SourceConfidence = "authoritative" | "inferred" | "heuristic";
 

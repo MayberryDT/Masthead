@@ -1,6 +1,7 @@
 import { access, readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { DiscoveryContext, DiscoveredSource } from "../types.ts";
+import type { AdapterPathCandidate } from "../pathTypes.ts";
 
 export type CodexDiscoveryResult = {
   catalogs: DiscoveredSource[];
@@ -50,6 +51,46 @@ export function codexSourceCandidates(homeDir: string): CodexSourceCandidate[] {
       label: "Codex archived session transcripts",
       path: join(root, "archived_sessions"),
       preflightPattern: ".codex/archived_sessions/**/*.jsonl"
+    }
+  ];
+}
+
+export function codexCandidatePaths(context: DiscoveryContext): AdapterPathCandidate[] {
+  const root = join(context.homeDir, ".codex");
+  return [
+    {
+      confidence: "authoritative",
+      contentKind: "jsonl-file",
+      purpose: "Codex session metadata index",
+      relativePath: join(root, "session_index.jsonl"),
+      runtime: "codex",
+      sourceKind: "jsonl"
+    },
+    {
+      confidence: "authoritative",
+      contentKind: "jsonl-file",
+      purpose: "Codex prompt history",
+      relativePath: join(root, "history.jsonl"),
+      runtime: "codex",
+      sourceKind: "jsonl"
+    },
+    {
+      confidence: "authoritative",
+      contentKind: "jsonl-tree",
+      maxDepth: 6,
+      purpose: "Codex active session transcripts",
+      relativePath: join(root, "sessions"),
+      runtime: "codex",
+      sourceKind: "jsonl"
+    },
+    {
+      confidence: "authoritative",
+      contentKind: "jsonl-tree",
+      maxDepth: 6,
+      purpose: "Codex archived session transcripts",
+      relativePath: join(root, "archived_sessions"),
+      runtime: "codex",
+      sourceKind: "jsonl"
     }
   ];
 }

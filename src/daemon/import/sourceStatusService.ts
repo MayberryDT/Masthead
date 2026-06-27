@@ -29,9 +29,11 @@ export type SourceStatusDto = {
 export type AdapterStatusDto = {
   runtime: RuntimeKind;
   name: string;
+  label: string;
   description: string;
   state: "connected" | "degraded" | "disabled" | "not_detected" | "planned";
   implementationState: AdapterImplementationState;
+  maturity: string;
   discoveredCount: number;
   importedCount: number;
   discoveredSessions: number;
@@ -148,10 +150,12 @@ export function getAdapterStatuses(db: MastheadDatabase, input: AdapterStatusInp
       importedSessions,
       lastSyncAt,
       name: adapter.name,
+      label: adapter.label,
+      maturity: adapter.maturity,
       policies: {
         enrichment: sourceLocations.some((source) => source.enrichmentEnabled),
         mcpAccess: sourceLocations.some((source) => source.mcpEnabled),
-        metadataImport: adapter.implementationState === "active",
+        metadataImport: adapter.supportsMetadataImport,
         transcriptImport: sourceLocations.some((source) => source.transcriptImportEnabled)
       },
       runtime: adapter.runtime,

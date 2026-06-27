@@ -59,19 +59,20 @@ describe("source discovery service", () => {
     db.close();
   });
 
-  test("includes planned Claude Code adapter row", async () => {
+  test("includes active Claude Code adapter row when not detected", async () => {
     const { db, home } = await openSourceDiscoveryTestDatabase("masthead-source-discovery-planned-");
 
     const snapshot = await discoverSourceSnapshot({ codexHomeDir: home, now: "2026-06-25T12:00:00.000Z" });
     const adapters = getAdapterStatuses(db, snapshot);
 
     expect(adapters.find((adapter) => adapter.runtime === "claude_code")).toMatchObject({
+      diagnostics: [expect.objectContaining({ code: "claude_code_sources_not_detected", severity: "warning" })],
       discoveredCount: 0,
-      implementationState: "planned",
+      implementationState: "active",
       importedCount: 0,
       name: "Claude Code",
       sourceLocations: [],
-      state: "planned"
+      state: "not_detected"
     });
     db.close();
   });

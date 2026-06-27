@@ -25,27 +25,30 @@ type AdapterRowModel = Omit<AdapterStatus, "state" | "sourceLocations"> & {
 type Props = {
   adapter: AdapterStatus;
   busy: boolean;
+  checked?: boolean;
   onChooseLocation?: (runtime: string) => void;
   onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
+  onToggleSelected?: (runtime: string, checked: boolean) => void;
   onSyncAdapter?: (runtime: string) => void;
 };
 
 export function AdapterRow({
   adapter,
   busy,
+  checked = false,
   onChooseLocation,
   onEnableTranscriptImport,
   onExcludePath,
   onImportMetadata,
   onImportTranscripts,
+  onToggleSelected,
   onSyncAdapter
 }: Props) {
   const view = adapter as AdapterRowModel;
   const state = adapterState(view);
-  const isCodexConnected = view.runtime === "codex" && state === "connected";
   const discoveredCount = view.discoveredCount ?? view.discoveredSessions;
   const importedCount = view.importedCount ?? view.importedSessions;
 
@@ -53,7 +56,15 @@ export function AdapterRow({
     <article className={`adapter-row adapter-row-${state}`}>
       <header className="adapter-row-head">
         <div>
-          <h2>{runtimeLabel(view.runtime)}</h2>
+          <label className="adapter-row-select">
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={busy || state === "planned"}
+              onChange={(event) => onToggleSelected?.(view.runtime, event.currentTarget.checked)}
+            />
+            <h2>{runtimeLabel(view.runtime)}</h2>
+          </label>
           <StatusBadge tone={stateTone(state)}>{stateLabel(state)}</StatusBadge>
         </div>
         <dl>
@@ -73,7 +84,7 @@ export function AdapterRow({
         <div className="adapter-row-actions">
           {state === "planned" ? (
             <AppButton disabled>Coming later</AppButton>
-          ) : isCodexConnected ? (
+          ) : (
             <>
               <AppButton
                 onClick={() => onImportMetadata?.(view.runtime)}
@@ -100,16 +111,7 @@ export function AdapterRow({
                 disabled={busy || !onSyncAdapter}
                 onClick={() => onSyncAdapter?.(view.runtime)}
               >
-                Sync all
-              </AppButton>
-            </>
-          ) : (
-            <>
-              <AppButton disabled={busy || !onSyncAdapter} onClick={() => onSyncAdapter?.(view.runtime)}>
                 Sync
-              </AppButton>
-              <AppButton variant="quiet" disabled={state === "not_detected"}>
-                Configure
               </AppButton>
             </>
           )}
@@ -156,7 +158,8 @@ function runtimeLabel(runtime: string): string {
     aider: "Aider",
     claude_code: "Claude Code",
     codex: "Codex",
-    crush: "Crush",
+    antigravity: "Antigravity",
+    cursor: "Cursor",
     gemini_cli: "Gemini CLI",
     hermes: "Hermes",
     openclaw: "OpenClaw",
