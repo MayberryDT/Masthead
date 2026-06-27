@@ -49,9 +49,6 @@ export function connectSelectedSources(
       if (request.importTranscripts) {
         jobs.push(queueImportJob(db, { importKind: "transcript", sourceId: source.sourceId }, (controls) => runImport("transcript", source.sourceId, controls)));
       }
-      if (request.queueEnrichment) {
-        jobs.push(queueImportJob(db, { importKind: "enrichment", sourceId: source.sourceId }, (controls) => runImport("enrichment", source.sourceId, controls)));
-      }
     }
   }
 
