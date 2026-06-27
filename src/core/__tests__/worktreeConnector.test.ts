@@ -154,6 +154,12 @@ describe("Masthead worktree connector planning", () => {
     expect(isAllowedReadOnlyBridgeRequest("POST", pathname)).toBe(true);
   });
 
+  test("forwards read-only source scans but blocks source writes", () => {
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/scan")).toBe(true);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/connect")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/codex/import-metadata")).toBe(false);
+  });
+
   test("still blocks mutations", () => {
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/data/delete")).toBe(false);

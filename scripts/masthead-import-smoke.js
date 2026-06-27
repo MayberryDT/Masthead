@@ -64,7 +64,7 @@ async function copyTranscriptFixtures(targetDir) {
 }
 
 async function assertCodexSource(baseUrl) {
-  const sources = await getJson(baseUrl, "/sources");
+  const sources = await postJson(baseUrl, "/sources/discover", {});
   assert(Array.isArray(sources.sources) && sources.sources.length > 0, "expected source discovery results");
   const sessionSource = sources.sources.find((source) => source.sourceId === "codex-sessions");
   assert(sessionSource, "expected Codex sessions source discovery");

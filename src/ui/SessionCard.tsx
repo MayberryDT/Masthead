@@ -81,6 +81,11 @@ function AnimatedHeadline({ isNew, staggerIndex, text }: { isNew: boolean; stagg
   const [isTyping, setIsTyping] = useState(false);
   const mountedRef = useRef(false);
   const previousTextRef = useRef(text);
+  const isNewRef = useRef(isNew);
+  const staggerIndexRef = useRef(staggerIndex);
+
+  isNewRef.current = isNew;
+  staggerIndexRef.current = staggerIndex;
 
   useEffect(() => {
     if (!mountedRef.current) {
@@ -94,7 +99,7 @@ function AnimatedHeadline({ isNew, staggerIndex, text }: { isNew: boolean; stagg
     const oldText = previousTextRef.current;
     previousTextRef.current = text;
 
-    if (isNew || staggerIndex === undefined || prefersReducedMotion()) {
+    if (isNewRef.current || staggerIndexRef.current === undefined || prefersReducedMotion()) {
       setIsTyping(false);
       setVisibleText(text);
       return;
@@ -102,13 +107,17 @@ function AnimatedHeadline({ isNew, staggerIndex, text }: { isNew: boolean; stagg
 
     setVisibleText(oldText);
     const characters = Array.from(text);
-    const startDelay = Math.min(staggerIndex, 8) * 75;
+    const startDelay = Math.min(staggerIndexRef.current, 8) * 75;
     const characterDelay = text.length > 72 ? 11 : 16;
     let characterIndex = 0;
     let intervalId: number | undefined;
     const timeoutId = window.setTimeout(() => {
       setIsTyping(true);
       setVisibleText("");
+      if (characters.length === 0) {
+        setIsTyping(false);
+        return;
+      }
       intervalId = window.setInterval(() => {
         characterIndex += 1;
         setVisibleText(characters.slice(0, characterIndex).join(""));
@@ -124,14 +133,14 @@ function AnimatedHeadline({ isNew, staggerIndex, text }: { isNew: boolean; stagg
       window.clearTimeout(timeoutId);
       if (intervalId !== undefined) window.clearInterval(intervalId);
     };
-  }, [isNew, staggerIndex, text]);
+  }, [text]);
 
   return (
     <h2 className={`card-headline ${isTyping ? "is-headline-typing" : ""}`.trim()} aria-label={text}>
       <span className="card-headline-text" aria-hidden="true">
         {visibleText}
       </span>
-      <span className="card-headline-cursor" aria-hidden="true" />
+      {isTyping ? <span className="card-headline-cursor" aria-hidden="true" /> : null}
     </h2>
   );
 }

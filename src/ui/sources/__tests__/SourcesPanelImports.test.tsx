@@ -14,6 +14,8 @@ describe("SourcesPanel import controls", () => {
     const onImportMetadata = vi.fn();
     const onEnableTranscriptImport = vi.fn();
     const onSyncAdapter = vi.fn();
+    const onScan = vi.fn();
+    const onConnectSelected = vi.fn();
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -23,10 +25,12 @@ describe("SourcesPanel import controls", () => {
           adapters={[codexAdapter({ transcriptImport: false })]}
           busy={false}
           imports={[]}
+          onConnectSelected={onConnectSelected}
           onEnableTranscriptImport={onEnableTranscriptImport}
           onExcludePath={noop}
           onImportMetadata={onImportMetadata}
           onRefresh={onRefresh}
+          onScan={onScan}
           onSyncAdapter={onSyncAdapter}
           sources={[]}
         />
@@ -35,12 +39,20 @@ describe("SourcesPanel import controls", () => {
 
     await act(async () => {
       buttonByText(container, "Discover sources").click();
+      buttonByText(container, "Scan this computer").click();
+      buttonByText(container, "Connect selected").click();
+      buttonByText(container, "Details").click();
+    });
+
+    await act(async () => {
       buttonByText(container, "Import metadata").click();
       buttonByText(container, "Enable transcript import").click();
-      buttonByText(container, "Sync all").click();
+      buttonByText(container, "Sync").click();
     });
 
     expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onScan).toHaveBeenCalledTimes(1);
+    expect(onConnectSelected).toHaveBeenCalledWith(["codex"]);
     expect(onImportMetadata).toHaveBeenCalledWith("codex");
     expect(onEnableTranscriptImport).toHaveBeenCalledWith("codex");
     expect(onSyncAdapter).toHaveBeenCalledWith("codex");
@@ -65,6 +77,10 @@ describe("SourcesPanel import controls", () => {
           sources={[]}
         />
       );
+    });
+
+    await act(async () => {
+      buttonByText(container, "Details").click();
     });
 
     await act(async () => {

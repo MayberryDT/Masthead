@@ -391,7 +391,7 @@ describe("ingest server live projection", () => {
     const server = await startServer(storePath, { MASTHEAD_CODEX_HOME: codexHome, MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
 
-    const sources = await getJson(server.baseUrl, "/sources");
+    const sources = await postJson(server.baseUrl, "/sources/discover", {});
     expect(sources).toMatchObject({
       ok: true,
       sources: [expect.objectContaining({ sourceId: "codex-session-index", sourceKind: "jsonl" })]

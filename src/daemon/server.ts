@@ -2,13 +2,12 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import type { AdapterMaturity } from "../adapters/capabilities.ts";
 import { adapterRecordFromCodexHook, codexHookSource } from "../adapters/codex/hookAdapter.ts";
-import { discoverCodexSources } from "../adapters/codex/discovery.ts";
-import { importCodexMetadata } from "../adapters/codex/metadataImport.ts";
-import { parseCodexTranscript } from "../adapters/codex/transcriptParser.ts";
+import { adapterForRuntime } from "../adapters/registry.ts";
 import { createEnrichmentCoordinator } from "../enrichment/enrichmentCoordinator.ts";
 import { createOpenAIEnrichmentProvider } from "../enrichment/openAIProvider.ts";
-import type { AdapterDiagnostic } from "../adapters/types.ts";
+import { RUNTIME_KINDS, type AdapterDiagnostic, type RuntimeKind } from "../adapters/types.ts";
 import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent } from "../core/ingestion.ts";
 import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
@@ -56,6 +55,8 @@ import { cancelImportJob, queueImportJob, type ImportJobControls, type ImportWor
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { discoverSourceSnapshot, type SourceDiscoverySnapshot } from "./sources/sourceDiscoveryService.ts";
+import { scanLocalSources, type SourceScanResult } from "./sources/sourceScanService.ts";
+import { connectSelectedSources, type ConnectSourcesRequest } from "./sources/sourceConnectService.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { buildMastheadHealth } from "./healthService.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
@@ -325,29 +326,64 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return refreshed;
   }
 
+  let latestScan: SourceScanResult | undefined;
+
   async function discoverSourceSnapshotAndPersist(): Promise<SourceDiscoverySnapshot> {
-    const snapshot = await discoverSourceSnapshot({ codexHomeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
+    const snapshot = await discoverSourceSnapshot({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
     getSourceStatuses(database, snapshot.sources);
     return snapshot;
   }
 
-  async function discoverCodexSourcesAndPersist(): Promise<DiscoveredSource[]> {
-    const sources = await discoverCodexSources({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
-    getSourceStatuses(database, sources);
-    return sources;
+  async function scanSourcesAndPersist(): Promise<SourceScanResult> {
+    latestScan = await scanLocalSources({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
+    getSourceStatuses(database, latestScan.adapters.flatMap((adapter) => adapter.sources));
+    return latestScan;
+  }
+
+  function cachedSourceScanResult(): SourceScanResult {
+    const generatedAt = latestScan?.generatedAt ?? new Date().toISOString();
+    return {
+      adapters: getAdapterStatuses(database)
+        .filter((adapter) => adapter.runtime !== "gemini_cli")
+        .map((adapter) => ({
+          checkedPaths: [],
+          diagnostics: adapter.diagnostics,
+          discoveredSessions: adapter.discoveredSessions,
+          label: adapter.label,
+          maturity: adapter.maturity as AdapterMaturity,
+          runtime: adapter.runtime,
+          sources: [],
+          state: adapter.state === "disabled" ? "degraded" : adapter.state
+        })),
+      generatedAt,
+      scanId: latestScan?.scanId ?? "scan:cached"
+    };
+  }
+
+  async function discoverAllSourcesAndPersist(): Promise<DiscoveredSource[]> {
+    const snapshot = await discoverSourceSnapshotAndPersist();
+    return snapshot.sources;
+  }
+
+  async function sourceById(sourceId: string): Promise<DiscoveredSource | undefined> {
+    const scanned = latestScan?.adapters.flatMap((adapter) => adapter.sources).find((source) => source.sourceId === sourceId);
+    if (scanned) return scanned;
+    return (await discoverAllSourcesAndPersist()).find((source) => source.sourceId === sourceId);
   }
 
   async function importMetadataSources(sources: DiscoveredSource[], controls?: ImportJobControls): Promise<ImportWorkResult> {
     const result = emptyImportResult();
     for (const source of sources) {
+      const adapter = adapterForRuntime(source.runtime);
+      if (!adapter) continue;
       controls?.throwIfCancelled();
       controls?.updateProgress({ currentPath: source.path ?? source.sourceId });
-      for await (const record of importCodexMetadata(source)) {
+      for await (const record of adapter.backfill(source)) {
         controls?.throwIfCancelled();
         const { sessionId } = ingestAdapterRecord(database, record, {
           hostId: `host:${config.host}`,
           hostname: config.host,
-          runtimeKind: "codex"
+          runtimeKind: source.runtime
         });
         if (sessionId) indexCanonicalSessionSearch(database, sessionId);
         queueSessionEnrichment(sessionId);
@@ -368,6 +404,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   async function importTranscriptSources(sources: DiscoveredSource[], controls?: ImportJobControls): Promise<ImportWorkResult> {
     const result = emptyImportResult();
     for (const source of sources) {
+      const adapter = adapterForRuntime(source.runtime);
+      if (!adapter) continue;
       controls?.throwIfCancelled();
       for (const transcriptSource of await transcriptSources(source)) {
         controls?.throwIfCancelled();
@@ -384,7 +422,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const info = await stat(transcriptSource.path);
         let latestOffset = cursor && cursor.byteOffset > info.size ? 0 : cursor?.byteOffset ?? 0;
         let cursorContext = cursorContextFromCursor(cursor);
-        for await (const record of parseCodexTranscript(transcriptSource, cursor)) {
+        for await (const record of adapter.backfill(transcriptSource, cursor)) {
           controls?.throwIfCancelled();
           const nextOffset = offsetFromSourceRecordKey(record.sourceRecordKey) ?? latestOffset;
           cursorContext = cursorContextFromRecord(record, cursorContext);
@@ -395,7 +433,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             },
             hostId: `host:${config.host}`,
             hostname: config.host,
-            runtimeKind: "codex"
+            runtimeKind: source.runtime
           });
           if (sessionId) {
             indexCanonicalSessionSearch(database, sessionId);
@@ -432,26 +470,26 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return Promise.resolve(emptyImportResult());
   }
 
-  async function queueCodexMetadataImports(): Promise<{ jobs: ReturnType<typeof queueImportJob>[]; sources: number }> {
-    const sources = await discoverCodexSourcesAndPersist();
+  async function queueAdapterMetadataImports(runtime?: string): Promise<{ jobs: ReturnType<typeof queueImportJob>[]; sources: number }> {
+    const sources = (await discoverAllSourcesAndPersist()).filter((source) => !runtime || source.runtime === runtime);
     const jobs = sources.map((source) =>
       queueImportJob(database, { importKind: "metadata", sourceId: source.sourceId }, (controls) => importMetadataSources([source], controls))
     );
     return { jobs, sources: sources.length };
   }
 
-  async function queueCodexTranscriptImports(): Promise<{ jobs: ReturnType<typeof queueImportJob>[]; sources: number }> {
+  async function queueAdapterTranscriptImports(runtime?: string): Promise<{ jobs: ReturnType<typeof queueImportJob>[]; sources: number }> {
     if (!transcriptImportApproved(database)) {
       throw clientError("Transcript import requires persisted source review approval.");
     }
-    const sources = await discoverCodexSourcesAndPersist();
+    const sources = (await discoverAllSourcesAndPersist()).filter((source) => !runtime || source.runtime === runtime);
     const jobs = sources.map((source) =>
       queueImportJob(database, { importKind: "transcript", sourceId: source.sourceId }, (controls) => importTranscriptSources([source], controls))
     );
     return { jobs, sources: sources.length };
   }
 
-  function approveCodexTranscriptImports(): void {
+  function approveTranscriptImports(): void {
     approveTranscriptImport(database, {
       approvedAt: new Date().toISOString(),
       reason: "Source exclusions reviewed before transcript ingestion."
@@ -612,28 +650,44 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/sources") {
-      const sources = await discoverCodexSourcesAndPersist();
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
-        sources: getSourceStatuses(database, sources)
+        sources: getSourceStatuses(database)
       });
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/adapters") {
-      const snapshot = await discoverSourceSnapshotAndPersist();
       sendJson(request, response, config.allowedOrigins, 200, {
-        adapters: getAdapterStatuses(database, snapshot),
+        adapters: getAdapterStatuses(database),
         ok: true
       });
       return;
     }
 
     if (request.method === "POST" && url.pathname === "/sources/discover") {
-      const sources = await discoverCodexSourcesAndPersist();
+      const sources = await discoverAllSourcesAndPersist();
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
         sources: getSourceStatuses(database, sources)
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/scan") {
+      const scan = await scanSourcesAndPersist();
+      sendJson(request, response, config.allowedOrigins, 202, {
+        ok: true,
+        scan
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/sources/scan/latest") {
+      const scan = latestScan ?? cachedSourceScanResult();
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        scan
       });
       return;
     }
@@ -898,8 +952,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       try {
         const body = JSON.parse(await readBody(request)) as { sourceId?: string; kind?: string };
         if (!body.sourceId || !isImportJobKind(body.kind)) throw new Error("sourceId and kind are required");
-        const sources = await discoverCodexSourcesAndPersist();
-        const source = sources.find((candidate) => candidate.sourceId === body.sourceId);
+        const source = await sourceById(body.sourceId);
         if (!source) throw new Error(`Unknown source: ${body.sourceId}`);
         if (body.kind === "transcript" && !transcriptImportApproved(database)) {
           sendJson(request, response, config.allowedOrigins, 409, {
@@ -944,8 +997,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "import not found" });
         return;
       }
-      const sources = await discoverCodexSourcesAndPersist();
-      const source = sources.find((candidate) => candidate.sourceId === existing.sourceId);
+      const source = await sourceById(existing.sourceId);
       if (!source) {
         sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "source not found" });
         return;
@@ -970,6 +1022,37 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           sourceId: sourcePolicyMatch[1]
         });
         sendJson(request, response, config.allowedOrigins, 202, { ok: true });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/connect") {
+      try {
+        const body = JSON.parse(await readBody(request)) as ConnectSourcesRequest;
+        const scan = latestScan ?? (await scanSourcesAndPersist());
+        if (body.importTranscripts && !body.transcriptApproved && !transcriptImportApproved(database)) {
+          sendJson(request, response, config.allowedOrigins, 409, {
+            ok: false,
+            error: "Transcript import requires explicit source review approval."
+          });
+          return;
+        }
+        const result = connectSelectedSources(database, scan, body, async (kind, sourceId, controls) => {
+          const source = await sourceById(sourceId);
+          if (!source) throw new Error(`Unknown source: ${sourceId}`);
+          return runImportWorkerForSource(kind, source, controls);
+        });
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          jobs: result.jobs,
+          queued: result.jobs.length,
+          skipped: result.skipped
+        });
       } catch (error) {
         sendJson(request, response, config.allowedOrigins, 400, {
           ok: false,
@@ -1153,18 +1236,18 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const adapterImportMatch = url.pathname.match(/^\/adapters\/([^/]+)\/(import-metadata|approve-transcripts|import-transcripts|sync)$/);
     if (request.method === "POST" && adapterImportMatch?.[1] && adapterImportMatch[2]) {
       const runtime = decodeURIComponent(adapterImportMatch[1]);
-      if (runtime !== "codex") {
+      if (!isRuntimeKind(runtime) || !adapterForRuntime(runtime)) {
         sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: `Unsupported adapter runtime: ${runtime}` });
         return;
       }
       const action = adapterImportMatch[2];
       if (action === "approve-transcripts") {
-        approveCodexTranscriptImports();
+        approveTranscriptImports();
         sendJson(request, response, config.allowedOrigins, 202, { ok: true });
         return;
       }
       if (action === "import-metadata") {
-        const queued = await queueCodexMetadataImports();
+        const queued = await queueAdapterMetadataImports(runtime);
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           imported: 0,
@@ -1182,7 +1265,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           });
           return;
         }
-        const queued = await queueCodexTranscriptImports();
+        const queued = await queueAdapterTranscriptImports(runtime);
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           imported: 0,
@@ -1193,9 +1276,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         });
         return;
       }
-      const metadata = await queueCodexMetadataImports();
+      const metadata = await queueAdapterMetadataImports(runtime);
       const transcriptsApproved = transcriptImportApproved(database);
-      const transcripts = transcriptsApproved ? await queueCodexTranscriptImports() : { jobs: [], sources: 0 };
+      const transcripts = transcriptsApproved ? await queueAdapterTranscriptImports(runtime) : { jobs: [], sources: 0 };
       const jobs = [...metadata.jobs, ...transcripts.jobs];
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
@@ -1211,7 +1294,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "POST" && url.pathname === "/sources/codex/import-metadata") {
-      const queued = await queueCodexMetadataImports();
+      const queued = await queueAdapterMetadataImports("codex");
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
         imported: 0,
@@ -1247,7 +1330,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "POST" && url.pathname === "/sources/codex/approve-transcripts") {
-      approveCodexTranscriptImports();
+      approveTranscriptImports();
       sendJson(request, response, config.allowedOrigins, 202, { ok: true });
       return;
     }
@@ -1260,7 +1343,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         });
         return;
       }
-      const queued = await queueCodexTranscriptImports();
+      const queued = await queueAdapterTranscriptImports("codex");
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
         imported: 0,
@@ -1326,19 +1409,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           void refreshKnownGitSnapshots();
         }, config.gitRefreshMs).unref()
       : undefined;
-  const sourceReconcileTimer = setInterval(() => {
-    if (closed) return;
-    void discoverCodexSourcesAndPersist().catch((error: unknown) => {
-      console.error("[masthead] source reconciliation failed", error);
-    });
-  }, 60_000).unref();
-  queueMicrotask(() => {
-    if (closed) return;
-    void discoverCodexSourcesAndPersist().catch((error: unknown) => {
-      console.error("[masthead] source reconciliation failed", error);
-    });
-  });
-
   return {
     server,
     database,
@@ -1350,7 +1420,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         await hydrationPromise;
         await new Promise<void>((resolve) => {
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
-        clearInterval(sourceReconcileTimer);
         server.close(() => {
           try {
             checkpointMastheadDatabase(database);
@@ -1536,6 +1605,7 @@ async function transcriptSources(source: DiscoveredSource): Promise<DiscoveredSo
     ...source,
     path: file,
     runtimeVersion: "file",
+    schemaVersion: source.runtime === "codex" ? "codex-transcript-jsonl" : source.schemaVersion,
     sourceId: `${source.sourceId}:${file.slice(source.path?.length ?? 0)}`
   }));
 }
@@ -1769,6 +1839,10 @@ function isDeleteScopeClientError(error: unknown): boolean {
 
 function isImportJobKind(value: unknown): value is ImportJobKind {
   return value === "metadata" || value === "transcript" || value === "enrichment";
+}
+
+function isRuntimeKind(value: unknown): value is RuntimeKind {
+  return typeof value === "string" && (RUNTIME_KINDS as readonly string[]).includes(value);
 }
 
 function isSourcePolicyKind(value: unknown): value is SourcePolicyKind {

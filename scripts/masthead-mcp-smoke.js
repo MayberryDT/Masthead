@@ -85,7 +85,7 @@ async function createSmokeDatabase() {
   let daemon;
   try {
     daemon = await startDaemon({ codexHome, databasePath, storePath });
-    const sources = await getJson(daemon.baseUrl, "/sources");
+    const sources = await postJson(daemon.baseUrl, "/sources/discover", {});
     const source = sources.sources?.find((entry) => entry.sourceId === "codex-sessions");
     assert(source, "expected Codex sessions source discovery");
     await runImport(daemon.baseUrl, source.sourceId, "metadata");

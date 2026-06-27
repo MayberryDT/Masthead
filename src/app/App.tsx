@@ -61,8 +61,10 @@ import {
   listImports,
   listReviewDispositions,
   listSources,
+  connectSources,
   retryImport,
   saveReviewDisposition,
+  scanSources,
   searchLogbook,
   syncAdapter,
   type LogbookExcerpt,
@@ -608,6 +610,21 @@ export function App() {
     }
   }, [loadSourceInventory]);
 
+  const handleScanSources = useCallback(async () => {
+    setSourcesBusy(true);
+    setSourcesStatus("Scanning known local agent history locations...");
+    try {
+      const scan = await scanSources(activeProjectionUrl);
+      const detected = scan.adapters.filter((adapter) => adapter.state === "connected" || adapter.state === "degraded").length;
+      setSourcesStatus(`Scan complete: ${detected} adapter${detected === 1 ? "" : "s"} detected across known locations.`);
+      await loadSourceInventory();
+    } catch (error) {
+      setSourcesStatus(`Source scan failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  }, [activeProjectionUrl, loadSourceInventory]);
+
   useEffect(() => {
     if (effectiveLiveConnection.state !== "live") return;
     void loadSourceInventory().catch((error: unknown) => {
@@ -840,6 +857,31 @@ export function App() {
       await refreshSourcesAfterImportAction();
     } catch (error) {
       setSourcesStatus(`Sync failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
+  const handleConnectSelectedSources = async (runtimes: string[]) => {
+    setSourcesBusy(true);
+    setSourcesStatus(`Connecting ${runtimes.length} selected adapter${runtimes.length === 1 ? "" : "s"}...`);
+    try {
+      const result = await connectSources(
+        {
+          importMetadata: true,
+          importTranscripts: false,
+          queueEnrichment: true,
+          runtimes
+        },
+        activeProjectionUrl
+      );
+      const skipped = result.skipped?.length ?? 0;
+      setSourcesStatus(
+        `Connect selected queued ${result.jobs.length} job${result.jobs.length === 1 ? "" : "s"}${skipped ? `; ${skipped} adapter${skipped === 1 ? "" : "s"} skipped.` : "."}`
+      );
+      await refreshSourcesAfterImportAction();
+    } catch (error) {
+      setSourcesStatus(`Connect selected failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setSourcesBusy(false);
     }
@@ -1225,6 +1267,7 @@ export function App() {
           busy={sourcesBusy}
           status={sourcesStatus}
           onCancelImport={handleCancelImport}
+          onConnectSelected={handleConnectSelectedSources}
           onEnableTranscriptImport={handleEnableTranscriptImport}
           onExcludePath={handleExcludeSourcePath}
           onImportMetadata={handleImportMetadata}
@@ -1232,6 +1275,7 @@ export function App() {
           onPollImports={handlePollActiveImports}
           onRefresh={handleRefreshSources}
           onRetryImport={handleRetryImport}
+          onScan={handleScanSources}
           onSyncAdapter={handleSyncAdapter}
         />
       )}</SourcesSurface>
