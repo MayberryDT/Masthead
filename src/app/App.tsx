@@ -33,7 +33,6 @@ import {
 import {
   defaultFixtureMode,
 
-  isLiveEventsEnvelope,
   isLiveProjectionEnvelope,
   normalizeLiveBoardProjection,
 } from "./liveProjectionClient";
@@ -465,7 +464,6 @@ export function App() {
     try {
       const body = await mastheadApi.getLiveProjection(selectedLiveSessionId);
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
-      const eventsBody = await mastheadApi.getLiveEvents().catch(() => undefined);
       if (!isCurrentRequest()) return false;
       setLiveProjection(normalizeLiveBoardProjection(body.projection, selectedSessionId));
       setShowDemoData(false);
@@ -479,10 +477,6 @@ export function App() {
         diagnostics: body.diagnostics,
         generatedAt: body.generatedAt
       });
-      if (isLiveEventsEnvelope(eventsBody)) {
-        setLiveEvents(eventsBody.events);
-        setLiveGitSnapshots(eventsBody.gitSnapshots);
-      }
       return true;
     } catch (error) {
       if (!isCurrentRequest()) return false;

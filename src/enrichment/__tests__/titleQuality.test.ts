@@ -94,16 +94,28 @@ describe("session title quality", () => {
       },
       { receivedAt: "2026-06-25T12:00:00.010Z" }
     );
+    const completed = normalizeCodexHookPayload(
+      {
+        provider_event_id: "title-quality-complete",
+        event: "session_completed",
+        session_id: "title-quality-live",
+        timestamp: "2026-06-25T12:00:30.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        summary: "Title quality work is ready for review."
+      },
+      { receivedAt: "2026-06-25T12:00:30.010Z" }
+    );
 
-    const envelope = projectLiveEvents([started], [], {
-      generatedAt: "2026-06-25T12:00:01.000Z",
+    const envelope = projectLiveEvents([started, completed], [], {
+      generatedAt: "2026-06-25T12:00:31.000Z",
       sessionEnrichments: new Map([
-        ["title-quality-live", { liveSummary: "Title quality work is active now.", title: "Codex session" }]
+        ["title-quality-live", { liveSummary: "Title quality work is ready for review.", title: "Codex session" }]
       ])
     });
 
     expect(envelope.projection.cards[0]?.title).toBe("Masthead Codex session");
-    expect(envelope.projection.cards[0]?.copy.headline).toBe("Title quality work is active now.");
+    expect(envelope.projection.cards[0]?.copy.headline).toBe("Title quality work is ready for review.");
   });
 
   test("Logbook list titles use liveSummary before bad stored titles", async () => {

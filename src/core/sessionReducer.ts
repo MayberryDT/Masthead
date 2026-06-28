@@ -47,11 +47,10 @@ export function deriveSessions(
     const latestFailedCommand = latest ? isFailedCommandEvent(latest) : false;
     const flags: SessionFlag[] = [];
     let primaryStatus: SessionStatus = "unknown";
-    const latestSignalAt = latestInstant(latest?.occurredAt, latestSnapshot?.observedAt);
+    const latestSignalAt = latestInstant(latest?.occurredAt);
     const terminal = latest?.type === "session.completed";
     const lifecycle = deriveLifecycle({
       latest,
-      latestSnapshot,
       latestSignalAt,
       now,
       idleAfterMs
@@ -153,20 +152,18 @@ function mergeWorkspace(snapshot: GitSnapshot | undefined, eventWorkspace: Works
 
 function deriveLifecycle({
   latest,
-  latestSnapshot,
   latestSignalAt,
   now,
   idleAfterMs
 }: {
   latest: NormalizedEvent | undefined;
-  latestSnapshot: GitSnapshot | undefined;
   latestSignalAt: Date | undefined;
   now: Date;
   idleAfterMs: number;
 }): SessionLifecycle {
   if (latest?.type === "session.completed") return "ended";
   if (latest?.type === "approval.requested" || latest?.type === "user.question") return "running";
-  if (!latest && !latestSnapshot) return "idle";
+  if (!latest) return "idle";
   if (!latestSignalAt) return "idle";
   return now.getTime() - latestSignalAt.getTime() > idleAfterMs ? "idle" : "running";
 }

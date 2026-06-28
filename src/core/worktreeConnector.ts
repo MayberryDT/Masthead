@@ -56,6 +56,7 @@ const staticReadOnlyBridgePaths = new Set([
   "/projection",
   "/events",
   "/fixture",
+  "/diagnostics/runtime",
   "/adapters",
   "/sources",
   "/sessions",

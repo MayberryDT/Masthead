@@ -396,6 +396,7 @@ function cleanLatestFeedbackHeadline(value: string | undefined): string | undefi
     .trim();
   if (!cleaned) return undefined;
   if (/\bis\s*,/i.test(cleaned) || /\bgenerated\s*\./i.test(cleaned)) return undefined;
+  if (/\[[^\]]+\]\([^)]*\)/.test(cleaned)) return undefined;
   if (/\b(now|then|before|after):[.!?]?$/i.test(cleaned)) return undefined;
   return cleaned;
 }
@@ -404,6 +405,7 @@ function isLowQualitySessionHeadline(value: string): boolean {
   const normalized = value.replace(/[.!?]+$/g, "").trim().toLowerCase();
   if (["codex session", "untitled session", "new session", "session", "chat session"].includes(normalized)) return true;
   if (/^[\w .-]+\s+codex session$/i.test(normalized)) return true;
+  if (/^updated\b/i.test(normalized)) return true;
   if (/^updated\s+(codex|untitled|new|chat)?\s*session$/i.test(normalized)) return true;
   if (/^[0-9a-f]{12,}$/i.test(normalized) || /^session[-_:][a-z0-9][a-z0-9_-]{5,}$/i.test(normalized)) return true;
   return false;
@@ -412,14 +414,14 @@ function isLowQualitySessionHeadline(value: string): boolean {
 function sentenceFromFeedbackFragment(value: string): string | undefined {
   const fragment = value.replace(/[.!?]+$/, "").trim();
   if (!fragment || fragment.length < 12) return undefined;
-  if (/^(updated|fixed|added|removed|corrected)\b/i.test(fragment)) return `${capitalizeFirst(fragment)}.`;
-  return `Updated ${lowercaseFirst(fragment)}.`;
+  if (/^(fixed|added|removed|corrected|implemented|created|verified|moved|published|deployed)\b/i.test(fragment)) return `${capitalizeFirst(fragment)}.`;
+  return undefined;
 }
 
 function completedActivityHeadline(subject: { text: string; plural: boolean }): string {
-  if (subject.plural) return `${subject.text} were updated in this session.`;
+  if (subject.plural) return `${subject.text} are ready for review.`;
   if (subject.text === "This session" || /\bsession$/i.test(subject.text)) return `${subject.text} had recent activity.`;
-  return `${subject.text} was updated in this session.`;
+  return `${subject.text} is ready for review.`;
 }
 
 function headlineSubject(label: string | undefined, project: string | undefined): { text: string; plural: boolean } {

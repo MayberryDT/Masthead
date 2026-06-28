@@ -51,9 +51,17 @@ import { legacyCandidatesFromDirectory, maybeCopyLegacySqliteBeforeOpen } from "
 import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
 import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
 import { setSourcePolicy, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
-import { cancelImportJob, queueImportJob, type ImportJobControls, type ImportWorkResult } from "./import/importCoordinator.ts";
+import {
+  cancelImportJob,
+  getImportQueueState,
+  markInterruptedImportJobs,
+  queueImportJob,
+  type ImportJobControls,
+  type ImportWorkResult
+} from "./import/importCoordinator.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
+import { recordRequestDiagnostic, recordRuntimeDiagnostic, runtimeDiagnosticsSnapshot } from "./diagnostics.ts";
 import { discoverSourceSnapshot, type SourceDiscoverySnapshot } from "./sources/sourceDiscoveryService.ts";
 import { scanLocalSources, type SourceScanResult } from "./sources/sourceScanService.ts";
 import { connectSelectedSources, type ConnectSourcesRequest } from "./sources/sourceConnectService.ts";
@@ -107,6 +115,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       migrateDatabase(database);
       if (pendingMigrations) quickCheckMastheadDatabase(database);
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
+      markInterruptedImportJobs(database);
 
     const hookRawJournal = createRawEventRepository(database, {
       adapter: codexHookSource.runtime,
@@ -190,6 +199,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
     observerRawJournal.appendStoreRecord(record);
+  }
+
+  function queueProjectionEnrichmentRefresh(projection: LiveBoardProjection): void {
+    queueSessionEnrichments(projection.cards.filter(isRefreshableLiveCard).map((card) => card.canonicalSessionId ?? canonicalCardSessionId(card)));
+  }
+
+  function canonicalCardSessionId(card: SessionCardView): string {
+    return canonicalSessionId(`host:${config.host}`, runtimeIdFor("codex", undefined), card.sourceSessionId ?? card.sessionId);
   }
 
   let closed = false;
@@ -616,7 +633,40 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     database.prepare(`DELETE FROM raw_events WHERE source_record_key IN (${placeholders})`).run(...recordIds);
   }
 
-  const server = createServer(async (request, response) => {
+  const server = createServer((request, response) => {
+    const startedAt = Date.now();
+    const requestPathname = pathnameForRequest(request, config);
+    response.on("finish", () => {
+      recordRequestDiagnostic({
+        elapsedMs: Date.now() - startedAt,
+        method: request.method,
+        pathname: requestPathname,
+        statusCode: response.statusCode
+      });
+    });
+    void handleDaemonRequest(request, response).catch((error: unknown) => {
+      recordRuntimeDiagnostic({
+        details: {
+          error,
+          method: request.method,
+          pathname: requestPathname
+        },
+        kind: "http_request_error",
+        message: `Unhandled daemon request error for ${request.method ?? "GET"} ${requestPathname}`,
+        severity: "error"
+      });
+      if (response.headersSent) {
+        response.destroy(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      sendJson(request, response, config.allowedOrigins, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+  });
+
+  async function handleDaemonRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url || "/", `http://${config.host}:${config.port}`);
 
     if (request.method === "OPTIONS") {
@@ -660,6 +710,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           }
         },
         llmCopy: sessionCopyEnricher.status()
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/diagnostics/runtime") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        diagnostics: runtimeDiagnosticsSnapshot(),
+        importQueue: getImportQueueState(),
+        activeImports: listImportJobPage(database, {
+          limit: 10,
+          status: "active"
+        })
       });
       return;
     }
@@ -779,6 +842,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         hostId: `host:${config.host}`,
         runtimeKind: "codex"
       });
+      queueProjectionEnrichmentRefresh(liveEnvelope.projection);
       liveEnvelope.projection = withSessionTokenTotals(database, liveEnvelope.projection);
       sessions.replaceBoardProjection(liveEnvelope.projection, liveEnvelope.generatedAt);
       sendJson(request, response, config.allowedOrigins, 200, liveEnvelope);
@@ -1152,6 +1216,20 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           if (!source) throw new Error(`Unknown source: ${sourceId}`);
           return runImportWorkerForSource(kind, source, controls);
         });
+        recordRuntimeDiagnostic({
+          details: {
+            importMetadata: body.importMetadata,
+            importTranscripts: body.importTranscripts,
+            queueEnrichment: body.queueEnrichment,
+            queued: result.jobs.length,
+            runtimes: body.runtimes,
+            scanId: scan.scanId,
+            skipped: result.skipped
+          },
+          kind: "sources_connect_queued",
+          message: `Sources connect queued ${result.jobs.length} import jobs`,
+          severity: result.jobs.length > 100 ? "warning" : "info"
+        });
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           jobs: result.jobs,
@@ -1507,7 +1585,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "not found" });
-  });
+  }
 
   const gitRefreshTimer =
     config.gitRefreshMs > 0
@@ -1561,6 +1639,18 @@ function closeDatabase(database: MastheadDatabase): void {
 
 function isErrno(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+function pathnameForRequest(request: IncomingMessage, config: DaemonConfig): string {
+  try {
+    return new URL(request.url || "/", `http://${config.host}:${config.port}`).pathname;
+  } catch {
+    return request.url || "/";
+  }
+}
+
+function isRefreshableLiveCard(card: SessionCardView): boolean {
+  return card.lifecycle === "running";
 }
 
 function boundPort(server: Server, fallback: number): number {

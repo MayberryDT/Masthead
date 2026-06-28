@@ -19,9 +19,11 @@ export type ImportJobDto = {
   updatedAt: string;
   currentPath?: string;
   failureMessage?: string;
+  finishedAt?: string;
   progressCurrent: number;
   progressTotal?: number;
   progressPercent?: number;
+  startedAt?: string;
 };
 
 type ImportJobRow = {
@@ -37,6 +39,8 @@ type ImportJobRow = {
   updated_at: string;
   current_path: string | null;
   failure_message: string | null;
+  finished_at: string | null;
+  started_at: string | null;
 };
 
 export type ListImportJobsOptions = {
@@ -87,6 +91,8 @@ export function updateImportJob(
     failureCount?: number;
     currentPath?: string | null;
     failureMessage?: string | null;
+    finishedAt?: string | null;
+    startedAt?: string | null;
     updatedAt: string;
   }
 ): ImportJobDto {
@@ -102,7 +108,9 @@ export function updateImportJob(
       failure_count = ?,
       updated_at = ?,
       current_path = ?,
-      failure_message = ?
+      failure_message = ?,
+      started_at = ?,
+      finished_at = ?
     WHERE import_job_id = ?`
   ).run(
     updates.status ?? current.status,
@@ -114,6 +122,8 @@ export function updateImportJob(
     updates.updatedAt,
     updates.currentPath === undefined ? (current.currentPath ?? null) : updates.currentPath,
     updates.failureMessage === undefined ? (current.failureMessage ?? null) : updates.failureMessage,
+    updates.startedAt === undefined ? (current.startedAt ?? null) : updates.startedAt,
+    updates.finishedAt === undefined ? (current.finishedAt ?? null) : updates.finishedAt,
     importJobId
   );
   return getImportJob(db, importJobId) as ImportJobDto;
@@ -181,6 +191,7 @@ function importJobFromRow(row: ImportJobRow): ImportJobDto {
     discoveredCount: row.discovered_count,
     failureCount: row.failure_count,
     ...(row.failure_message ? { failureMessage: row.failure_message } : {}),
+    ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
     importedCount: row.imported_count,
     importJobId: row.import_job_id,
     importKind: row.import_kind,
@@ -190,6 +201,7 @@ function importJobFromRow(row: ImportJobRow): ImportJobDto {
     progressTotal,
     queuedCount: row.queued_count,
     sourceId: row.source_id,
+    ...(row.started_at ? { startedAt: row.started_at } : {}),
     status: row.status,
     updatedAt: row.updated_at
   };

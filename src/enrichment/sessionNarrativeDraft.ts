@@ -35,8 +35,8 @@ export function draftNarrativeFromFacts(facts: SessionNarrativeFacts): SessionNa
   ]);
   const liveSummary = firstValid("liveSummary", [
     liveSummaryTemplate(facts, subject.label, action, object),
-    `${subject.label} is being updated for ${facts.project ?? "this project"}.`,
-    `${facts.project ?? "Project"} work is being updated around ${object}.`
+    `${subject.label} is active in ${facts.project ?? "this project"}.`,
+    `${facts.project ?? "Project"} work is focused on ${object}.`
   ]);
   const outcome = firstValid("outcome", [
     outcomeFromFacts(facts),
@@ -166,6 +166,7 @@ function liveSummaryTemplate(facts: SessionNarrativeFacts, subject: string, acti
   if (action === "document") return `${subject} is being documented for ${facts.project ?? "this project"}.`;
   if (action === "verify") return `${subject} is being verified with ${facts.commands[0]?.name ?? "recorded checks"}.`;
   if (action === "configure deployment") return `${subject} is being configured for deployment.`;
+  if (action === "update") return `${subject} is active in ${facts.project ?? object}.`;
   return `${subject} is being ${pastParticiple(action)} for ${facts.project ?? object}.`;
 }
 
@@ -214,7 +215,7 @@ function firstValid(field: "title" | "liveSummary" | "outcome" | "searchSummary"
     if (validation.ok) return validation.value;
   }
   if (optional) return undefined;
-  return normalizeNarrativeText(candidates.find(isString) ?? (field === "title" ? "Session narrative work" : "Session narrative work is being updated."));
+  return normalizeNarrativeText(candidates.find(isString) ?? (field === "title" ? "Session narrative work" : "Session narrative work is active."));
 }
 
 function validationWarningsFor(fields: { title: string; liveSummary: string; outcome?: string; searchSummary: string }): string[] {

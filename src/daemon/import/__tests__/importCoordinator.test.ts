@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { getImportJob } from "../../db/importJobRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
-import { queueImportJob, type ImportJobControls, type ImportWorkResult } from "../importCoordinator.ts";
+import { markInterruptedImportJobs, queueImportJob, type ImportJobControls, type ImportWorkResult } from "../importCoordinator.ts";
 
 const tempDirs: string[] = [];
 
@@ -57,8 +57,68 @@ describe("import coordinator", () => {
     await Promise.resolve();
     expect(getImportJob(db, job.importJobId)).toMatchObject({
       discoveredCount: 2,
+      finishedAt: fixedNow(),
       importedCount: 2,
+      startedAt: fixedNow(),
       status: "succeeded"
+    });
+    db.close();
+  });
+
+  test("runs queued imports one at a time", async () => {
+    const db = await openTestDatabase();
+    seedSource(db);
+    seedSource(db, "codex-archive");
+    let resolveFirst: (value: ImportWorkResult) => void = () => undefined;
+    let secondStarted = false;
+
+    const firstWorker = new Promise<ImportWorkResult>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const first = queueImportJob(db, { importKind: "metadata", sourceId: "codex-sessions", now: fixedNow }, () => firstWorker);
+    const second = queueImportJob(db, { importKind: "metadata", sourceId: "codex-archive", now: fixedNow }, () => {
+      secondStarted = true;
+      return Promise.resolve({ discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 });
+    });
+
+    await flushMicrotasks();
+    expect(getImportJob(db, first.importJobId)?.status).toBe("running");
+    expect(getImportJob(db, second.importJobId)?.status).toBe("queued");
+    expect(secondStarted).toBe(false);
+
+    resolveFirst({ discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 });
+    await waitForJobStatus(db, first.importJobId, "succeeded");
+    await waitForJobStatus(db, second.importJobId, "succeeded");
+    expect(secondStarted).toBe(true);
+    db.close();
+  });
+
+  test("marks active jobs from a previous daemon run as interrupted", async () => {
+    const db = await openTestDatabase();
+    seedSource(db);
+    db.prepare(
+      `INSERT INTO import_jobs (
+        import_job_id,
+        source_id,
+        import_kind,
+        status,
+        discovered_count,
+        processed_count,
+        imported_count,
+        queued_count,
+        failure_count,
+        current_path,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("import_job:interrupted", "codex-sessions", "metadata", "running", 10, 10, 10, 0, 0, "/tmp/import.jsonl", fixedNow());
+
+    const interrupted = markInterruptedImportJobs(db, fixedNow);
+    expect(interrupted).toBe(1);
+    expect(getImportJob(db, "import_job:interrupted")).toMatchObject({
+      failureCount: 1,
+      failureMessage: "Import was interrupted by a previous daemon shutdown. Re-run the import to continue.",
+      finishedAt: fixedNow(),
+      status: "failed"
     });
     db.close();
   });
@@ -72,15 +132,28 @@ async function openTestDatabase(): Promise<MastheadDatabase> {
   return db;
 }
 
-function seedSource(db: MastheadDatabase): void {
+function seedSource(db: MastheadDatabase, sourceId = "codex-sessions"): void {
   const now = fixedNow();
   db.prepare(
     `INSERT INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex-sessions", "codex", "jsonl", "/tmp/.codex/sessions", "authoritative", now, now);
+  ).run(sourceId, "codex", "jsonl", `/tmp/.codex/${sourceId}`, "authoritative", now, now);
 }
 
 function fixedNow(): string {
   return "2026-06-25T12:00:00.000Z";
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function waitForJobStatus(db: MastheadDatabase, importJobId: string, status: string): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (getImportJob(db, importJobId)?.status === status) return;
+    await flushMicrotasks();
+  }
+  expect(getImportJob(db, importJobId)?.status).toBe(status);
 }

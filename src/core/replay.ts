@@ -233,7 +233,7 @@ function toCard(
 }
 
 function withEnrichmentCopy(card: SessionCardView, enrichment: LiveSessionEnrichment | undefined): SessionCardView {
-  const headline = cleanLiveSummary(enrichment?.liveSummary) ?? cleanLiveSummary(enrichment?.title);
+  const headline = cleanLiveSummary(enrichment?.liveSummary) ?? cleanLiveTitle(enrichment?.title);
   if (!headline) return card;
   return {
     ...card,
@@ -250,7 +250,22 @@ function withEnrichmentCopy(card: SessionCardView, enrichment: LiveSessionEnrich
 function cleanLiveSummary(value: string | undefined): string | undefined {
   const normalized = value?.replace(/\s+/g, " ").trim();
   if (!normalized || normalized.startsWith("{") || normalized.includes('"event"')) return undefined;
+  if (isWeakEnrichmentHeadline(normalized)) return undefined;
   return normalized;
+}
+
+function cleanLiveTitle(value: string | undefined): string | undefined {
+  const normalized = cleanLiveSummary(value);
+  if (!normalized || !/[.!?]$/.test(normalized)) return undefined;
+  return normalized;
+}
+
+function isWeakEnrichmentHeadline(value: string): boolean {
+  const normalized = value.replace(/[.!?]+$/g, "").trim();
+  if (/^updated\b/i.test(normalized)) return true;
+  if (/^(?:[\w .-]+\s+)?work is being (?:updated|fixed|changed) around [\w .-]+$/i.test(normalized)) return true;
+  if (/^(?:codex hook event|[\w .-]+ work|session narrative|[\w .-]+ session) is being updated for [\w .-]+$/i.test(normalized)) return true;
+  return false;
 }
 
 function toDetail(

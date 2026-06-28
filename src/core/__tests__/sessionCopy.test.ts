@@ -184,7 +184,7 @@ describe("session copy", () => {
     );
     const copy = buildDeterministicSessionCopy(input);
 
-    expect(copy.headline).toBe("Documentation changes were updated in this session.");
+    expect(copy.headline).toBe("Documentation changes are ready for review.");
     expect(copy.headline).toMatch(/[.!?]$/);
     expect(copy.headline).not.toBe("Documentation work");
     expect(copy.headline).not.toContain("waiting for review");
@@ -207,9 +207,7 @@ describe("session copy", () => {
       []
     );
 
-    expect(buildDeterministicSessionCopy(input).headline).toBe(
-      "Updated recent-session pattern audit for durable user signals."
-    );
+    expect(buildDeterministicSessionCopy(input).headline).toBe("App session had recent activity.");
   });
 
   test("rejects broken first-person feedback summaries before building the headline", () => {
@@ -235,7 +233,7 @@ describe("session copy", () => {
       []
     );
 
-    expect(buildDeterministicSessionCopy(input).headline).toBe("Auth changes were updated in this session.");
+    expect(buildDeterministicSessionCopy(input).headline).toBe("Auth changes are ready for review.");
   });
 
   test("rejects dangling transition feedback summaries before building the headline", () => {
@@ -262,6 +260,58 @@ describe("session copy", () => {
     );
 
     expect(buildDeterministicSessionCopy(input).headline).toBe("UI changes are active now.");
+  });
+
+  test("rejects citation-only feedback summaries before building the headline", () => {
+    const input = toSessionCopyInput(
+      cardView({
+        lifecycle: "running",
+        primaryStatus: "editing",
+        workContext: {
+          label: "UI work",
+          confidence: "path_cluster",
+          pathClusters: ["ui"],
+          sourceSignals: ["path:ui"]
+        },
+        latestFeedbackSignal: {
+          present: true,
+          source: "stop_hook",
+          observedAt: "2026-06-24T07:00:00.000Z",
+          claims: ["claims_complete", "mentions_tests"],
+          summary: "[src](:177) Verified:."
+        }
+      }),
+      [],
+      []
+    );
+
+    expect(buildDeterministicSessionCopy(input).headline).toBe("UI changes report completion and need review.");
+  });
+
+  test("rejects generic updated feedback summaries before building the headline", () => {
+    const input = toSessionCopyInput(
+      cardView({
+        lifecycle: "ended",
+        primaryStatus: "completed_unreviewed",
+        workContext: {
+          label: "Documentation work",
+          confidence: "path_cluster",
+          pathClusters: ["docs"],
+          sourceSignals: ["path:docs"]
+        },
+        latestFeedbackSignal: {
+          present: true,
+          source: "stop_hook",
+          observedAt: "2026-06-24T07:00:00.000Z",
+          claims: ["mentions_files"],
+          summary: "Updated file and file incrementally."
+        }
+      }),
+      [],
+      []
+    );
+
+    expect(buildDeterministicSessionCopy(input).headline).toBe("Documentation changes are ready for review.");
   });
 
   test("rejects model headlines that are category labels instead of sentences", () => {

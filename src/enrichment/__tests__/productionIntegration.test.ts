@@ -47,6 +47,26 @@ describe("production enrichment integration", () => {
     expect(projection.projection.cards[0].copy.headline).not.toContain("{");
     expect(projection.projection.cards[0].copy.source).toBe("enrichment");
   });
+
+  test("projection refresh schedules stale running-session enrichment", async () => {
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/ingest", hookPayload("refresh-start", "session_started", { title: "Codex session" }));
+    await postJson(baseUrl, "/ingest", hookPayload("refresh-question", "user_question", { message: "Investigate Board headline refresh." }));
+
+    await waitFor(() => {
+      expect(currentCapsuleFingerprint(daemon, "production-enrichment")).toBeTruthy();
+    });
+    const before = currentCapsuleFingerprint(daemon, "production-enrichment");
+    appendAssistantMessage(daemon, "production-enrichment", "Board refresh headlines now describe active import work.");
+
+    await getJson(baseUrl, "/projection?expandedSessionId=production-enrichment");
+
+    await waitFor(() => {
+      expect(currentCapsuleFingerprint(daemon, "production-enrichment")).not.toBe(before);
+    });
+  });
 });
 
 async function createTestHarness(): Promise<{ daemon: MastheadDaemon; databasePath: string; storePath: string; tempDir: string }> {
@@ -105,6 +125,37 @@ async function getJson(baseUrl: string, path: string): Promise<Record<string, an
   const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" } });
   expect(response.status).toBe(200);
   return response.json() as Promise<Record<string, any>>;
+}
+
+function currentCapsuleFingerprint(daemon: MastheadDaemon, sourceSessionId: string): string | undefined {
+  const row = daemon.database
+    .prepare(
+      `SELECT session_enrichments.content_fingerprint AS fingerprint
+      FROM session_enrichments
+      JOIN sessions ON sessions.session_id = session_enrichments.session_id
+      WHERE sessions.source_session_id = ?
+        AND session_enrichments.enrichment_kind = 'session_capsule'
+        AND session_enrichments.status = 'current'
+      ORDER BY session_enrichments.generated_at DESC
+      LIMIT 1`
+    )
+    .get(sourceSessionId) as { fingerprint: string } | undefined;
+  return row?.fingerprint;
+}
+
+function appendAssistantMessage(daemon: MastheadDaemon, sourceSessionId: string, text: string): void {
+  const session = daemon.database
+    .prepare("SELECT session_id AS sessionId FROM sessions WHERE source_session_id = ?")
+    .get(sourceSessionId) as { sessionId: string } | undefined;
+  expect(session?.sessionId).toBeTruthy();
+  const now = "2026-06-25T12:02:00.000Z";
+  daemon.database
+    .prepare(
+      `INSERT INTO messages (
+        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(`${session!.sessionId}:projection-refresh-message`, session!.sessionId, "assistant", text, "projection-refresh-hash", now, "{}", "authoritative");
 }
 
 async function waitFor(assertion: () => void): Promise<void> {

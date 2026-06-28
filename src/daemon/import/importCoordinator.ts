@@ -6,6 +6,7 @@ import {
   updateImportJob
 } from "../db/importJobRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
+import { recordRuntimeDiagnostic } from "../diagnostics.ts";
 
 export type ImportWorkResult = {
   discoveredCount: number;
@@ -49,6 +50,19 @@ class ImportCancelledError extends Error {
 }
 
 const activeImportJobs = new Map<string, ActiveImportJob>();
+const pendingImportJobs: QueuedImportJob[] = [];
+let runningImportJobs = 0;
+let importDrainScheduled = false;
+
+const maxActiveImportJobs = parseImportConcurrency(process.env.MASTHEAD_IMPORT_CONCURRENCY);
+
+type QueuedImportJob = {
+  db: MastheadDatabase;
+  importJobId: string;
+  now: () => string;
+  token: MutableImportCancellationToken;
+  worker: (controls: ImportJobControls) => Promise<ImportWorkResult>;
+};
 
 export function queueImportJob(
   db: MastheadDatabase,
@@ -67,10 +81,9 @@ export function queueImportJob(
   });
   const token: MutableImportCancellationToken = { cancelled: false, importJobId: job.importJobId };
   activeImportJobs.set(job.importJobId, { token });
-
-  queueMicrotask(() => {
-    void runQueuedImportJob(db, job.importJobId, now, worker, token);
-  });
+  pendingImportJobs.push({ db, importJobId: job.importJobId, now, token, worker });
+  logImportBacklogIfNeeded();
+  scheduleImportDrain();
 
   return job;
 }
@@ -84,6 +97,87 @@ export function cancelImportJob(db: MastheadDatabase, importJobId: string, now =
   return updateImportJob(db, importJobId, {
     status: "cancelling",
     updatedAt: now()
+  });
+}
+
+export function getImportQueueState(): { active: number; maxActive: number; pending: number; tracked: number } {
+  return {
+    active: runningImportJobs,
+    maxActive: maxActiveImportJobs,
+    pending: pendingImportJobs.length,
+    tracked: activeImportJobs.size
+  };
+}
+
+export function markInterruptedImportJobs(db: MastheadDatabase, now = () => new Date().toISOString()): number {
+  const interrupted = db
+    .prepare("SELECT COUNT(*) AS count FROM import_jobs WHERE status IN ('queued', 'running', 'cancelling')")
+    .get() as { count: number };
+  if (interrupted.count === 0) return 0;
+  const interruptedAt = now();
+
+  db.prepare(
+    `UPDATE import_jobs
+    SET status = 'failed',
+      failure_count = CASE WHEN failure_count > 0 THEN failure_count ELSE 1 END,
+      current_path = NULL,
+      failure_message = COALESCE(NULLIF(failure_message, ''), 'Import was interrupted by a previous daemon shutdown. Re-run the import to continue.'),
+      finished_at = ?,
+      updated_at = ?
+    WHERE status IN ('queued', 'running', 'cancelling')`
+  ).run(interruptedAt, interruptedAt);
+
+  recordRuntimeDiagnostic({
+    details: { interruptedJobs: interrupted.count },
+    kind: "import_jobs_interrupted",
+    message: `Marked ${interrupted.count} interrupted import jobs from a previous daemon run`,
+    severity: "warning"
+  });
+  return interrupted.count;
+}
+
+function scheduleImportDrain(): void {
+  if (importDrainScheduled) return;
+  importDrainScheduled = true;
+  queueMicrotask(drainImportQueue);
+}
+
+function drainImportQueue(): void {
+  importDrainScheduled = false;
+  while (runningImportJobs < maxActiveImportJobs) {
+    const queued = pendingImportJobs.shift();
+    if (!queued) return;
+    runningImportJobs += 1;
+    recordRuntimeDiagnostic({
+      details: {
+        active: runningImportJobs,
+        importJobId: queued.importJobId,
+        maxActive: maxActiveImportJobs,
+        pending: pendingImportJobs.length
+      },
+      kind: "import_job_started",
+      message: `Started import job ${queued.importJobId}`,
+      severity: "info"
+    });
+    void runQueuedImportJob(queued.db, queued.importJobId, queued.now, queued.worker, queued.token).finally(() => {
+      runningImportJobs = Math.max(0, runningImportJobs - 1);
+      scheduleImportDrain();
+    });
+  }
+}
+
+function logImportBacklogIfNeeded(): void {
+  const pending = pendingImportJobs.length;
+  if (![10, 50, 100, 500, 1_000, 2_000].includes(pending)) return;
+  recordRuntimeDiagnostic({
+    details: {
+      active: runningImportJobs,
+      maxActive: maxActiveImportJobs,
+      pending
+    },
+    kind: "import_queue_backlog",
+    message: `Import queue backlog reached ${pending} pending jobs`,
+    severity: pending >= 500 ? "warning" : "info"
   });
 }
 
@@ -122,6 +216,7 @@ async function runQueuedImportJob(
       return;
     }
     job = updateImportJob(db, importJobId, {
+      startedAt: current?.startedAt ?? now(),
       status: "running",
       updatedAt: now()
     });
@@ -137,27 +232,64 @@ async function runQueuedImportJob(
     updateImportJob(db, importJobId, {
       ...result,
       currentPath: null,
+      finishedAt: now(),
       status: "succeeded",
       updatedAt: now()
+    });
+    recordRuntimeDiagnostic({
+      details: {
+        discoveredCount: result.discoveredCount,
+        failureCount: result.failureCount,
+        importJobId,
+        importedCount: result.importedCount,
+        processedCount: result.processedCount,
+        queuedCount: result.queuedCount
+      },
+      kind: "import_job_succeeded",
+      message: `Import job ${importJobId} succeeded`,
+      severity: "info"
     });
   } catch (error) {
     if (error instanceof ImportCancelledError || token.cancelled) {
       updateImportJob(db, importJobId, {
         currentPath: null,
+        finishedAt: now(),
         status: "cancelled",
         updatedAt: now()
+      });
+      recordRuntimeDiagnostic({
+        details: { importJobId },
+        kind: "import_job_cancelled",
+        message: `Import job ${importJobId} cancelled`,
+        severity: "info"
       });
     } else {
       const latest = getImportJob(db, importJobId);
       updateImportJob(db, importJobId, {
         currentPath: null,
+        finishedAt: now(),
         failureCount: Math.max(1, latest?.failureCount ?? job.failureCount),
         failureMessage: error instanceof Error ? error.message : String(error),
         status: "failed",
         updatedAt: now()
       });
+      recordRuntimeDiagnostic({
+        details: {
+          error,
+          importJobId
+        },
+        kind: "import_job_failed",
+        message: `Import job ${importJobId} failed`,
+        severity: "warning"
+      });
     }
   } finally {
     activeImportJobs.delete(importJobId);
   }
+}
+
+function parseImportConcurrency(value: string | undefined): number {
+  const parsed = Number.parseInt(value || "", 10);
+  if (Number.isInteger(parsed) && parsed > 0 && parsed <= 8) return parsed;
+  return 1;
 }

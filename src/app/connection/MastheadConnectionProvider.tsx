@@ -42,20 +42,47 @@ export function MastheadConnectionProvider({
     const requestId = refreshRequestIdRef.current + 1;
     refreshRequestIdRef.current = requestId;
     const isCurrentRequest = () => refreshRequestIdRef.current === requestId;
+    const startedAt = performance.now();
     setState({ state: "probing", baseUrl });
     try {
       const health = await api.getHealth();
       if (!isCurrentRequest()) return;
       if (health.runtime?.writable === false) {
+        logConnectionProbe({
+          baseUrl,
+          elapsedMs: elapsedMs(startedAt),
+          state: "read_only"
+        });
         setState({ state: "read_only", baseUrl, health, writable: false });
         return;
       }
+      logConnectionProbe({
+        baseUrl,
+        elapsedMs: elapsedMs(startedAt),
+        state: "ready"
+      });
       setState({ state: "ready", baseUrl, health, writable: true });
     } catch (error) {
       if (!isCurrentRequest()) return;
       if (error instanceof MastheadApiError && error.kind === "incompatible") {
+        logConnectionProbe({
+          baseUrl,
+          elapsedMs: elapsedMs(startedAt),
+          error: error.message,
+          state: "incompatible",
+          status: error.status,
+          url: error.url
+        });
         setState({ state: "incompatible", baseUrl, error: error.message });
       } else {
+        logConnectionProbe({
+          baseUrl,
+          elapsedMs: elapsedMs(startedAt),
+          error: error instanceof Error ? error.message : String(error),
+          state: "offline",
+          status: error instanceof MastheadApiError ? error.status : undefined,
+          url: error instanceof MastheadApiError ? error.url : undefined
+        });
         setState({ state: "offline", baseUrl, error: error instanceof Error ? error.message : String(error) });
       }
     }
@@ -78,4 +105,20 @@ export function MastheadConnectionProvider({
   );
 
   return <MastheadConnectionContext.Provider value={value}>{children}</MastheadConnectionContext.Provider>;
+}
+
+function elapsedMs(startedAt: number): number {
+  return Math.round(performance.now() - startedAt);
+}
+
+function logConnectionProbe(event: {
+  baseUrl: string;
+  elapsedMs: number;
+  error?: string;
+  state: MastheadConnectionState["state"];
+  status?: number;
+  url?: string;
+}): void {
+  if (!import.meta.env.DEV && import.meta.env.VITE_MASTHEAD_CONNECTION_DEBUG !== "1") return;
+  console.info("[masthead] connection probe", event);
 }

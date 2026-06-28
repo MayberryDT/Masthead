@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { removeDaemonOwnershipMetadata, writeDaemonOwnershipMetadata } from "../dist/daemon/src/core/daemonOwnership.js";
 import { buildLiveDevPlan, startReadOnlyConnectorBridge } from "../dist/daemon/src/core/worktreeConnector.js";
 import { classifyDaemonHealth } from "../dist/daemon/src/shared/protocol.js";
@@ -24,6 +24,7 @@ if (plan.connector.mode === "primary" || plan.connector.mode === "isolated_prima
   console.log(`Connector: ${plan.connector.baseUrl} (${plan.connector.mode === "primary" ? "primary" : "isolated primary"})`);
   collector = start("collector", process.execPath, ["dist/daemon/src/daemon/main.js"], {
     MASTHEAD_DATA_DIR: plan.connector.dataDirectory,
+    MASTHEAD_DIAGNOSTIC_LOG_FILE: join(plan.connector.dataDirectory, "runtime", "daemon.log"),
     MASTHEAD_HOST: plan.host,
     MASTHEAD_PORT: String(plan.connector.port),
     MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins
