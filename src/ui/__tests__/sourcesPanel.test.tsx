@@ -60,7 +60,14 @@ describe("SourcesPanel", () => {
       />
     );
 
-    expect(html).toContain("Connected sources");
+    expect(html).toContain("Source health");
+    expect(html).toContain("Set up more sources");
+    expect(html).toContain("Live capture");
+    expect(html).toContain("History");
+    expect(html).toContain("Transcripts");
+    expect(html).toContain("Enrichment");
+    expect(html).toContain("Last activity");
+    expect(html).toContain("Needs enrichment");
     expect(html).toContain("Codex");
     expect(html).toContain("120");
     expect(html).toContain("Advanced diagnostics");
@@ -81,11 +88,19 @@ describe("SourcesPanel", () => {
       />
     );
 
-    expect(html).toContain("Connected sources");
+    expect(html).toContain("Source health");
+    expect(html).toContain("Set up more sources");
     expect(html).toContain("Codex sessions");
     expect(html).toContain("742 sessions");
     expect(html).toContain("510 transcript sessions");
     expect(html).toContain("320 enriched");
+    expect(html).toContain("Live capture");
+    expect(html).toContain("History");
+    expect(html).toContain("Transcripts");
+    expect(html).toContain("Enrichment");
+    expect(html).toContain("Last activity");
+    expect(html).toContain("Needs transcript import");
+    expect(html).toContain("Needs enrichment");
     expect(html).toContain("Queued");
     expect(html).toContain("14");
   });
@@ -117,8 +132,11 @@ describe("SourcesPanel", () => {
       />
     );
 
-    expect(html).toContain("No sources connected");
-    expect(html).toContain("Connect sources");
+    expect(html).toContain("No sources set up");
+    expect(html).toContain("Set up sources");
+    expect(html).toContain("Capture new sessions now, or optionally import past sessions from local harness history.");
+    expect(html).not.toContain("Advanced diagnostics");
+    expect(html).not.toContain("Connect sources");
     expect(html).not.toContain("Gemini CLI");
     expect(html).not.toContain("Harnesses Masthead knows how to check");
   });
@@ -179,12 +197,15 @@ function connectedSetup(): SourcesSetupDto {
         enrichedSessions: 320,
         failureCount: 0,
         importedSessions: 742,
+        enrichmentEnabled: false,
         label: "Codex sessions",
         lastSyncAt: "2026-06-27T12:00:00.000Z",
+        needsAttention: ["transcript_import", "enrichment"],
         queuedRecords: 14,
         runtime: "codex",
         sourceId: "codex-sessions",
         state: "connected",
+        transcriptImportEnabled: false,
         transcriptSessions: 510
       }
     ],

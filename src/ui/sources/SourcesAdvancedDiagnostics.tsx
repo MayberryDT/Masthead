@@ -15,9 +15,9 @@ export function SourcesAdvancedDiagnostics({ children, onClose }: Props) {
         <div>
           <p className="mono-label">Advanced diagnostics</p>
           <h2>Adapter inventory and import jobs</h2>
-          <p className="surface-status">These diagnostics are for troubleshooting connector detection and imports. Most users should use Connect sources, Sync sources, or Repair missing data.</p>
+          <p className="surface-status">These diagnostics are for troubleshooting connector detection and imports. Most users should use Set up sources, Sync sources, or Repair missing data.</p>
         </div>
-        {onClose ? <AppButton type="button" variant="quiet" onClick={onClose}>Hide advanced</AppButton> : null}
+        {onClose ? <AppButton type="button" variant="quiet" onClick={onClose}>Close diagnostics</AppButton> : null}
       </div>
       <details className="advanced-harness-catalog">
         <summary>{harnesses.length} harnesses in catalog</summary>

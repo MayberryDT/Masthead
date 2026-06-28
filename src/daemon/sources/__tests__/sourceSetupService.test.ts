@@ -9,7 +9,8 @@ import { approveTranscriptImport } from "../../db/sourceRepository.ts";
 import { setSourcePolicy } from "../../db/sourcePolicyRepository.ts";
 import { saveSourceScanRun } from "../../db/sourceSetupRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
-import { buildSourcesSetupState } from "../sourceSetupService.ts";
+import type { SourceScanResult } from "../sourceScanService.ts";
+import { buildSourcesSetupState, scanResultToOnboardingScan } from "../sourceSetupService.ts";
 
 const tempDirs: string[] = [];
 
@@ -147,6 +148,35 @@ describe("source setup service", () => {
     expect(setup.connectedSources[0]).toMatchObject({ sourceId: "codex-history", status: "ready" });
     db.close();
   });
+
+  test("marks discovered import-adapter sources importable for setup onboarding", () => {
+    const scan = scanResultToOnboardingScan(realisticScanResult());
+
+    expect(scan.foundSources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          importable: true,
+          runtime: "codex",
+          sourceId: "codex-sessions",
+          state: "importable",
+          transcriptApproval: expect.objectContaining({
+            approved: false,
+            required: true
+          })
+        }),
+        expect.objectContaining({
+          importable: false,
+          runtime: "omp",
+          sourceId: "omp:detector:local",
+          state: "detected",
+          transcriptApproval: expect.objectContaining({
+            approved: false,
+            required: false
+          })
+        })
+      ])
+    );
+  });
 });
 
 async function openTestDatabase(): Promise<MastheadDatabase> {
@@ -164,4 +194,51 @@ function seedSource(db: MastheadDatabase, sourceId: string, runtime: RuntimeKind
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(sourceId, runtime, "jsonl", `/tmp/${sourceId}.jsonl`, "authoritative", now, now);
+}
+
+function realisticScanResult(): SourceScanResult {
+  return {
+    adapters: [
+      {
+        checkedPaths: [],
+        diagnostics: [],
+        discoveredSessions: 7,
+        label: "Codex",
+        maturity: "full",
+        runtime: "codex",
+        sources: [
+          {
+            confidence: "authoritative",
+            path: "/home/tyler/.codex/sessions",
+            runtime: "codex",
+            schemaVersion: "codex-local-jsonl",
+            sourceId: "codex-sessions",
+            sourceKind: "jsonl"
+          }
+        ],
+        state: "connected"
+      },
+      {
+        checkedPaths: [],
+        diagnostics: [],
+        discoveredSessions: 1,
+        label: "Oh My Pi",
+        maturity: "detector",
+        runtime: "omp",
+        sources: [
+          {
+            confidence: "heuristic",
+            path: "/home/tyler/.local/share/omp",
+            runtime: "omp",
+            schemaVersion: "omp-detector-only",
+            sourceId: "omp:detector:local",
+            sourceKind: "inference"
+          }
+        ],
+        state: "connected"
+      }
+    ],
+    generatedAt: "2026-06-27T12:00:00.000Z",
+    scanId: "scan-realistic"
+  };
 }

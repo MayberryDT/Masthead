@@ -40,12 +40,12 @@ export function SourcesConnectedDashboard({
       <div className="sources-action-bar">
         <div>
           <p className="mono-label">Sources</p>
-          <h2>Connected sources</h2>
+          <h2>Source health</h2>
           <p className="surface-status">{coverage.sessions} sessions · {coverage.transcripts} transcript sessions · {coverage.enriched} enriched</p>
         </div>
         <div className="sources-action-group">
           <AppButton type="button" onClick={onAddSource} disabled={busy}>
-            Add source
+            Set up more sources
           </AppButton>
           <AppButton type="button" variant="primary" onClick={onSyncSources} disabled={busy || !hasSyncTarget}>
             Sync sources
@@ -103,25 +103,14 @@ export function SourcesConnectedDashboard({
               </div>
               <span className={`source-state ${source.state}`}>{source.state.replaceAll("_", " ")}</span>
             </div>
-            <dl className="adapter-stat-grid">
-              <div>
-                <dt>Sessions</dt>
-                <dd>{source.sessions}</dd>
-              </div>
-              <div>
-                <dt>Locations</dt>
-                <dd>{source.locations}</dd>
-              </div>
-              <div>
-                <dt>Queued</dt>
-                <dd>{source.queued}</dd>
-              </div>
-              <div>
-                <dt>Issues</dt>
-                <dd>{source.failures}</dd>
-              </div>
+            <dl className="source-proof-list" aria-label={`${source.label} source proof`}>
+              {proofRows(source).map((row) => (
+                <div className={`source-proof source-proof-${row.tone}`} key={row.label}>
+                  <dt>{row.label}</dt>
+                  <dd>{row.value}</dd>
+                </div>
+              ))}
             </dl>
-            {source.lastSyncAt ? <p className="surface-status">Last sync {new Date(source.lastSyncAt).toLocaleString()}</p> : null}
           </article>
         ))}
       </div>
@@ -131,6 +120,7 @@ export function SourcesConnectedDashboard({
 }
 
 type SourceRow = {
+  enrichmentEnabled: boolean;
   failures: number;
   key: string;
   label: string;
@@ -140,6 +130,13 @@ type SourceRow = {
   runtime: string;
   sessions: number;
   state: string;
+  transcriptImportEnabled: boolean;
+};
+
+type ProofRow = {
+  label: string;
+  value: string;
+  tone: "good" | "warn" | "neutral";
 };
 
 function coverageFromAdapters(adapters: AdapterStatus[]) {
@@ -167,6 +164,7 @@ function normalizeSetupCoverage(coverage: SourcesSetupCoverageDto) {
 
 function sourceRowFromAdapter(adapter: AdapterStatus): SourceRow {
   return {
+    enrichmentEnabled: adapter.policies.enrichment,
     failures: adapter.failureCount ?? 0,
     key: adapter.runtime,
     label: adapter.name ?? harnessForRuntime(adapter.runtime as RuntimeKind)?.label ?? adapter.runtime,
@@ -175,12 +173,14 @@ function sourceRowFromAdapter(adapter: AdapterStatus): SourceRow {
     queued: adapter.queuedRecords ?? 0,
     runtime: adapter.runtime,
     sessions: adapter.importedSessions || adapter.discoveredSessions || 0,
-    state: adapter.state
+    state: adapter.state,
+    transcriptImportEnabled: adapter.policies.transcriptImport
   };
 }
 
 function sourceRowFromSetup(source: SourcesSetupConnectedSourceDto): SourceRow {
   return {
+    enrichmentEnabled: Boolean(source.enrichmentEnabled),
     failures: source.failureCount ?? source.failures ?? 0,
     key: source.sourceId,
     label: source.label ?? source.runtime,
@@ -189,6 +189,17 @@ function sourceRowFromSetup(source: SourcesSetupConnectedSourceDto): SourceRow {
     queued: source.queuedRecords ?? source.queuedCount ?? 0,
     runtime: source.runtime,
     sessions: source.importedSessions ?? source.metadataSessions ?? source.discoveredSessions ?? source.sessions ?? source.sessionCount ?? source.importedCount ?? 0,
-    state: source.state ?? source.status ?? "connected"
+    state: source.state ?? source.status ?? "connected",
+    transcriptImportEnabled: Boolean(source.transcriptImportEnabled)
   };
+}
+
+function proofRows(source: SourceRow): ProofRow[] {
+  return [
+    { label: "Live capture", value: source.lastSyncAt ? "Observed" : "No recent activity", tone: source.lastSyncAt ? "good" : "warn" },
+    { label: "History", value: `${source.sessions} sessions`, tone: source.sessions > 0 ? "good" : "neutral" },
+    { label: "Transcripts", value: source.transcriptImportEnabled ? "Enabled" : "Needs transcript import", tone: source.transcriptImportEnabled ? "good" : "warn" },
+    { label: "Enrichment", value: source.enrichmentEnabled ? "Enabled" : "Needs enrichment", tone: source.enrichmentEnabled ? "good" : "warn" },
+    { label: "Last activity", value: source.lastSyncAt ? new Date(source.lastSyncAt).toLocaleString() : "Not observed", tone: source.lastSyncAt ? "good" : "neutral" }
+  ];
 }

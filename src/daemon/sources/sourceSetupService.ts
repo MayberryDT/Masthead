@@ -1,4 +1,5 @@
 import type { DiscoveredSource } from "../../adapters/types.ts";
+import { adapterCapabilityProfile, canImportMetadata, canImportTranscripts } from "../../adapters/capabilities.ts";
 import type {
   ConnectedSourceDto,
   FoundSourceDto,
@@ -98,11 +99,23 @@ function setupStatus(connectedSources: ConnectedSourceDto[], scan: SourcesOnboar
 }
 
 function foundSourceFromDiscovered(source: DiscoveredSource): FoundSourceDto {
+  const capability = adapterCapabilityProfile(source.runtime);
+  const importable = canImportMetadata(capability) && capability.sourceKinds.includes(source.sourceKind) && Boolean(source.path) && source.sourceKind !== "inference";
+  const transcriptImportRequiresApproval = importable && canImportTranscripts(capability);
   return {
     confidence: source.confidence,
+    importable,
+    label: capability.label,
     path: source.path,
     runtime: source.runtime,
     sourceId: source.sourceId,
-    sourceKind: source.sourceKind
+    sourceKind: source.sourceKind,
+    state: importable ? "importable" : "detected",
+    transcriptAvailable: transcriptImportRequiresApproval,
+    transcriptApproval: {
+      approved: false,
+      required: transcriptImportRequiresApproval,
+      summary: transcriptImportRequiresApproval ? "Prompts, code, file paths, command output, and private data may be present." : undefined
+    }
   };
 }
