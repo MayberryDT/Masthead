@@ -10,6 +10,7 @@ import {
 } from "../app/daemonClient";
 import type { MastheadConnectionState } from "../app/connection/MastheadConnectionProvider";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { AdvancedRuntimeSettings } from "./settings/AdvancedRuntimeSettings";
 import { EnrichmentSettings } from "./settings/EnrichmentSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { HookSettings } from "./settings/HookSettings";
@@ -186,6 +187,7 @@ export function OperationsPanel({
             settings={effectiveSettings}
             writeDisabled={writesDisabled}
           />
+          <AdvancedRuntimeSettings dataSummary={effectiveSummary} settings={effectiveSettings} />
           <DangerZone
             busy={writesDisabled}
             databaseId={effectiveSettings?.data.databaseId}

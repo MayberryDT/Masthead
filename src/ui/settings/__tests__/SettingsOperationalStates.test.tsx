@@ -62,6 +62,27 @@ describe("Settings operational states", () => {
     expect(html).toContain("Reconnect");
   });
 
+  test("copies the hook endpoint from everyday setup", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<OperationsPanel settingsState={settings} />);
+    });
+
+    const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "Copy endpoint");
+    expect(button).toBeTruthy();
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(writeText).toHaveBeenCalledWith(settings.hooks.endpoint);
+    expect(container.textContent).toContain("Endpoint copied.");
+  });
+
   test("shows a recoverable failure state when runtime settings cannot be loaded", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("settings offline"))));
     container = document.createElement("div");

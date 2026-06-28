@@ -29,7 +29,7 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Delete all Masthead data");
     expect(html).toContain("Keeps normalized session metadata, summaries, and search records.");
     expect(html).toContain("Original harness files are untouched.");
-    expect(html).toContain("Codex integration");
+    expect(html).toContain("Everyday setup");
     expect(html).not.toContain("ops-card");
     expect(html).not.toContain("ghost-pill");
     expect(html).not.toContain("Manual 30-day prune");
@@ -116,7 +116,7 @@ describe("OperationsPanel", () => {
       />
     );
 
-    expect(html).toContain("Storage");
+    expect(html).toContain("Storage and export");
     expect(html).toContain("Sessions");
     expect(html).toContain("Raw source copies");
     expect(html).toContain("5");
