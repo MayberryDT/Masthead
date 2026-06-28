@@ -8,7 +8,7 @@ export default defineConfig({
   },
   server: {
     watch: {
-      ignored: ["**/src-tauri/target/**", "**/src-tauri/gen/**", "**/dist/**", "**/out/**", "**/.electron-resources/**"]
+      ignored: ["**/dist/**", "**/out/**", "**/.electron-resources/**"]
     }
   }
 });

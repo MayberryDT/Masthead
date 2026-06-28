@@ -15,7 +15,15 @@ Before opening a PR, run the checks that match your change:
 
 ```bash
 npm run verify
-cargo test --manifest-path src-tauri/Cargo.toml
+npm run test:electron
+npm run test:electron-security
+```
+
+For desktop packaging or launcher changes, also run the Electron smoke checks:
+
+```bash
+npm run smoke:electron
+npm run smoke:electron:packaged
 ```
 
 For docs-only changes, at minimum run:

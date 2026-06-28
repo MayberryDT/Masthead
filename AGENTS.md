@@ -94,7 +94,7 @@ npm run version:bump:minor
 npm run version:bump:major
 ```
 
-`version:sync` propagates the version from `package.json` to `src-tauri/tauri.conf.json` (top-level) and `src-tauri/Cargo.toml` ([package]), and ensures the Vite build constant is fresh.
+`version:sync` validates that `package.json` remains the version source of truth. The Electron/Vite build reads that package version directly for runtime display.
 
 All launch/build entrypoints (`dev`, `dev:ui`, `dev:desktop`, `dev:fixture`, `build`, `build:desktop`) run the sync step first.
 
