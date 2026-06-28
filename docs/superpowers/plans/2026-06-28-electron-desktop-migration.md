@@ -338,7 +338,7 @@ git commit -m "docs: capture electron migration baseline"
 Run:
 
 ```bash
-npm install --save-dev electron@42.5.0 @electron-forge/cli@7.11.2 @electron-forge/plugin-vite@7.11.2 @electron-forge/plugin-fuses@7.11.2 @electron/fuses@2.1.2 @electron-forge/maker-deb@7.11.2 @electron-forge/maker-rpm@7.11.2 @electron-forge/maker-zip@7.11.2
+npm install --save-dev electron@42.5.0 @electron-forge/cli@7.11.2 @electron-forge/plugin-vite@7.11.2 @electron-forge/plugin-fuses@7.11.2 @electron/fuses@1.8.0 @electron-forge/maker-deb@7.11.2 @electron-forge/maker-rpm@7.11.2 @electron-forge/maker-zip@7.11.2
 ```
 
 Expected:
@@ -346,6 +346,8 @@ Expected:
 ```text
 package.json and package-lock.json include Electron and Forge packages.
 ```
+
+Note: `@electron-forge/plugin-fuses@7.11.2` declares `@electron/fuses@^1.0.0` as a peer dependency, so the implementation uses `@electron/fuses@1.8.0` rather than the latest 2.x line.
 
 - [ ] **Step 2: Add side-by-side scripts**
 

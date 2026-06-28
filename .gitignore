@@ -1,5 +1,9 @@
 node_modules/
 dist/
+out/
+.vite/
+.electron-resources/daemon/*
+!.electron-resources/daemon/README.txt
 .env
 .env.local
 .env.*.local
