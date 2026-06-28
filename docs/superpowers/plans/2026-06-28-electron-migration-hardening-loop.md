@@ -109,3 +109,26 @@ Verification:
 
 Next risk:
 - Continue CI/security/package inventory: check GitHub workflow coverage, dependency-review skip behavior, packaging artifacts/fuses, and any remaining tracked or untracked Tauri-era assumptions before deciding whether the Electron migration inventory is clean.
+
+## Pass 5
+
+Finding: the PR's `Dependency review` check was skipped because `.github/workflows/security.yml` skipped the whole job for private repositories. That leaves the GitHub check non-green even when there is a useful local fallback available. A full `npm audit --audit-level=high` currently fails on Electron Forge build-tool transitive dev dependencies (`tar` and `tmp`) with no available fix, while the runtime dependency audit is clean.
+
+Action:
+- Added `npm run audit:runtime` as `npm audit --omit=dev --audit-level=high`.
+- Changed the `Dependency review` job so it always runs.
+- Public pull requests still use `actions/dependency-review-action@v4`.
+- Private pull requests and `main` pushes run the runtime dependency audit fallback instead of skipping the job.
+- Updated `docs/release-gates.md` to document the private-repo fallback and the current dev-dependency audit caveat.
+
+Verification:
+- `npm run audit:runtime`: pass, 0 vulnerabilities.
+- Full `npm audit --audit-level=high`: fails on Electron Forge build-tool transitive dev dependencies with no available fix; not changed because that would require upstream or major build-tool dependency work.
+- `.github/workflows/security.yml` parsed successfully with PyYAML.
+- `npm run test:electron-security`: pass, 3 files and 8 tests plus source security check.
+- `npm run verify:no-citations`: pass.
+- `git diff --check`: pass.
+- `gh pr view` before this local commit showed PR #6 open/draft with `verify`, `electron`, and `CodeQL` successful, and `Dependency review` skipped.
+
+Next risk:
+- Continue packaging/security inventory: verify Electron fuse coverage and packaged artifact assumptions, then scan tracked active docs/config for any remaining Tauri-era operational instructions.
