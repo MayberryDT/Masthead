@@ -1,6 +1,6 @@
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { applyRetentionPolicy, countRecordsByType, type PruneLocalDataResult, type RetentionPolicy } from "../core/retention";
 import type { StoreRecord } from "../core/store";
+import { invokeDesktopCommand, isDesktopBridgeAvailable } from "./desktopBridge";
 
 export type ClearLocalDataResult = {
   removedRecords: number;
@@ -11,7 +11,8 @@ type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
 const browserStoreKey = "masthead.localStoreRecords.v1";
 
 export async function exportLocalData(exportedAt = new Date(), invoke?: Invoke): Promise<string> {
-  if (!invoke && !canUseTauri()) {
+  const desktopInvoke = invoke ?? (isDesktopBridgeAvailable() ? invokeDesktopCommand : undefined);
+  if (!desktopInvoke) {
     return JSON.stringify({
       metadata: {
         format: "masthead.native-store.v1",
@@ -22,17 +23,19 @@ export async function exportLocalData(exportedAt = new Date(), invoke?: Invoke):
       records: readBrowserRecords()
     });
   }
-  return (invoke ?? tauriInvoke)<string>("export_store_records_command", { exportedAt: exportedAt.toISOString() });
+  return desktopInvoke<string>("export_store_records_command", { exportedAt: exportedAt.toISOString() }) as Promise<string>;
 }
 
 export async function clearLocalData(invoke?: Invoke): Promise<ClearLocalDataResult> {
-  if (!invoke && !canUseTauri()) {
+  const desktopInvoke = invoke ?? (isDesktopBridgeAvailable() ? invokeDesktopCommand : undefined);
+  if (!desktopInvoke) {
     const removedRecords = readBrowserRecords().length;
     writeBrowserRecords([]);
     return { removedRecords, touchedExternalState: false };
   }
 
-  const result = await (invoke ?? tauriInvoke)<ClearLocalDataResult>("clear_local_data_command");
+  const result = await desktopInvoke<ClearLocalDataResult>("clear_local_data_command");
+  if (!result) throw new Error("Native clear command returned no result.");
   if (result.touchedExternalState) {
     throw new Error("Native clear reported external state mutation.");
   }
@@ -40,7 +43,8 @@ export async function clearLocalData(invoke?: Invoke): Promise<ClearLocalDataRes
 }
 
 export async function pruneLocalData(policy: RetentionPolicy, invoke?: Invoke): Promise<PruneLocalDataResult> {
-  if (!invoke && !canUseTauri()) {
+  const desktopInvoke = invoke ?? (isDesktopBridgeAvailable() ? invokeDesktopCommand : undefined);
+  if (!desktopInvoke) {
     const { retainedRecords, removedRecords } = applyRetentionPolicy(readBrowserRecords(), policy);
     writeBrowserRecords(retainedRecords);
     return {
@@ -52,7 +56,8 @@ export async function pruneLocalData(policy: RetentionPolicy, invoke?: Invoke): 
     };
   }
 
-  const result = await (invoke ?? tauriInvoke)<PruneLocalDataResult>("prune_local_data_command", { policy });
+  const result = await desktopInvoke<PruneLocalDataResult>("prune_local_data_command", { policy });
+  if (!result) throw new Error("Native retention command returned no result.");
   if (result.touchedExternalState) {
     throw new Error("Native retention reported external state mutation.");
   }
@@ -60,16 +65,18 @@ export async function pruneLocalData(policy: RetentionPolicy, invoke?: Invoke): 
 }
 
 export async function readLocalRecords(invoke?: Invoke): Promise<StoreRecord[]> {
-  if (!invoke && !canUseTauri()) return readBrowserRecords();
-  return (invoke ?? tauriInvoke)<StoreRecord[]>("read_store_records_command");
+  const desktopInvoke = invoke ?? (isDesktopBridgeAvailable() ? invokeDesktopCommand : undefined);
+  if (!desktopInvoke) return readBrowserRecords();
+  return (await desktopInvoke<StoreRecord[]>("read_store_records_command")) ?? [];
 }
 
 export async function appendLocalRecords(records: StoreRecord[], invoke?: Invoke): Promise<void> {
-  if (!invoke && !canUseTauri()) {
+  const desktopInvoke = invoke ?? (isDesktopBridgeAvailable() ? invokeDesktopCommand : undefined);
+  if (!desktopInvoke) {
     writeBrowserRecords([...readBrowserRecords(), ...records]);
     return;
   }
-  await (invoke ?? tauriInvoke)<void>("append_store_records_command", { records });
+  await desktopInvoke<void>("append_store_records_command", { records });
 }
 
 export function exportedRecordCount(exported: string): number | undefined {
@@ -79,10 +86,6 @@ export function exportedRecordCount(exported: string): number | undefined {
   } catch {
     return undefined;
   }
-}
-
-function canUseTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 function readBrowserRecords(): StoreRecord[] {

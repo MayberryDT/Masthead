@@ -1,5 +1,5 @@
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
+import { invokeDesktopCommand, isDesktopBridgeAvailable } from "../app/desktopBridge";
 import {
   getSettingsState,
   installCodexHooks,
@@ -134,7 +134,10 @@ export function OperationsPanel({
     const dataDirectory = effectiveSettings?.storage.dataDirectory ?? effectiveSettings?.data.dataDirectory;
     if (!dataDirectory) return;
     try {
-      await tauriInvoke("open_data_directory_command", { path: dataDirectory });
+      if (!isDesktopBridgeAvailable()) {
+        throw new Error("Opening the data directory requires the Masthead desktop app.");
+      }
+      await invokeDesktopCommand<void>("open_data_directory_command", { path: dataDirectory });
       setSettingsError(undefined);
     } catch (error) {
       setSettingsError(error instanceof Error ? error.message : String(error));
