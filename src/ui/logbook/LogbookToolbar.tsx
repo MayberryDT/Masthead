@@ -22,7 +22,6 @@ const sortOptions: Array<{ value: LogbookSort; label: string }> = [
   { value: "recent", label: "Recent" },
   { value: "oldest", label: "Oldest" },
   { value: "duration_desc", label: "Duration" },
-  { value: "files_desc", label: "Files changed" },
   { value: "tools_desc", label: "Tool calls" },
   { value: "errors_desc", label: "Errors" },
   { value: "project", label: "Project" }
@@ -33,14 +32,10 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
   const projectOptions = optionRows(filterOptions?.projects, filters.project);
   const modelOptions = optionRows(filterOptions?.models, filters.model);
   const activeDateFilterCount = [filters.dateFrom, filters.dateTo].filter(Boolean).length;
-  const activeFileFilterCount = filters.file ? 1 : 0;
   const [dateOpen, setDateOpen] = useState(false);
-  const [fileOpen, setFileOpen] = useState(false);
   const datePopoverId = useId();
-  const filePopoverId = useId();
   const updateDateFrom = (value: string) => onFilterChange?.({ ...filters, dateFrom: value || undefined });
   const updateDateTo = (value: string) => onFilterChange?.({ ...filters, dateTo: value || undefined });
-  const updateFile = (value: string) => onFilterChange?.({ ...filters, file: value || undefined });
 
   return (
     <div className="logbook-toolbar observability-toolbar metal-toolbar" aria-label="Logbook controls">
@@ -125,39 +120,6 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
         />
 
         <AppSelect label="Sort sessions" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
-
-        <div className={`logbook-file-popover-filter ${activeFileFilterCount > 0 ? "active" : ""}`.trim()}>
-          <AppButton
-            variant="default"
-            className="logbook-file-trigger"
-            aria-controls={filePopoverId}
-            aria-expanded={fileOpen}
-            aria-label="Open file filter"
-            onClick={() => setFileOpen((current) => !current)}
-          >
-            <Icon name="fileSearch" size="toolbar" weight={iconWeights.toolbar} />
-            <span>File{activeFileFilterCount > 0 ? ` ${activeFileFilterCount}` : ""}</span>
-          </AppButton>
-          <div id={filePopoverId} className="logbook-file-popover" aria-hidden={!fileOpen} hidden={!fileOpen}>
-            <label>
-              <span>Changed file path</span>
-              <input
-                aria-label="Changed file path"
-                value={filters.file ?? ""}
-                placeholder="src/app"
-                onChange={(event) => updateFile(event.currentTarget.value)}
-              />
-            </label>
-            <button
-              type="button"
-              className="logbook-date-clear"
-              disabled={activeFileFilterCount === 0}
-              onClick={() => onFilterChange?.({ ...filters, file: undefined })}
-            >
-              Clear
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

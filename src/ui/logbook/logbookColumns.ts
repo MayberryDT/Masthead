@@ -6,7 +6,6 @@ export const logbookColumns = [
   { key: "model", label: "MODEL", className: "logbook-col-model" },
   { key: "state", label: "STATE", className: "logbook-col-state" },
   { key: "source", label: "SOURCE", className: "logbook-col-source logbook-desktop-column" },
-  { key: "files", label: "FILES", className: "logbook-col-count" },
   { key: "tools", label: "TOOLS", className: "logbook-col-count" },
   { key: "errors", label: "ERRORS", className: "logbook-col-count" },
   { key: "duration", label: "DURATION", className: "logbook-col-duration logbook-desktop-column" }

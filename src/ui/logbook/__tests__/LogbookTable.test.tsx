@@ -38,13 +38,13 @@ describe("LogbookTable", () => {
     expect(html).toContain("<tbody");
     expect(html).toContain("SESSION / MATCH");
     expect(html).toContain("SOURCE");
+    expect(html).not.toContain("FILES");
     expect(html).toContain("Repair OAuth callback");
     expect(html).toContain("<mark>OAuth</mark>");
     expect(html).toContain("Pip");
     expect(html).toContain("Codex");
     expect(html).toContain("Authoritative");
     expect(html).toContain("host:test");
-    expect(html).toContain("9");
     expect(html).toContain("14");
     expect(html).toContain("40m");
     expect(html).toContain('aria-pressed="true"');

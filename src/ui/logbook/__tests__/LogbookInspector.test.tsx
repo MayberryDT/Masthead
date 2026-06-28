@@ -22,7 +22,8 @@ describe("LogbookInspector", () => {
     expect(html).toContain("Worktree: /home/tyler/Documents/Masthead");
     expect(html).toContain("Included");
     expect(html).toContain("Authoritative");
-    expect(html).toContain("src/app/App.tsx");
+    expect(html).not.toContain("Files");
+    expect(html).not.toContain("src/app/App.tsx");
     expect(html).toContain("npm");
     expect(html).toContain("verification missing");
     expect(html).toContain("Relevant excerpts");

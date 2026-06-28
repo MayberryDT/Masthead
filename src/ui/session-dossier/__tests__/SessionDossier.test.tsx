@@ -7,33 +7,92 @@ import type { SessionDetailView } from "../../../core/types";
 import type { SessionDossierDto } from "../../../shared/sessionDossier";
 import { SessionDossier } from "../SessionDossier";
 
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 describe("SessionDossier", () => {
   test("renders canonical session evidence and copy actions", () => {
-    const html = renderToStaticMarkup(<SessionDossier dossier={dossier()} />);
+    const currentDossier = dossier();
+    const html = renderToStaticMarkup(
+      <SessionDossier
+        dossier={currentDossier}
+        transcript={{
+          coverage: currentDossier.coverage.transcript,
+          items: [
+            {
+              itemId: "message-1",
+              kind: "message",
+              label: "user",
+              lowValue: false,
+              observedAt: "2026-06-25T23:01:00.000Z",
+              role: "user",
+              sessionId: "canonical-session-1",
+              sourceRef: {},
+              text: "Please repair the OAuth callback."
+            },
+            {
+              itemId: "file-effect-1",
+              kind: "file_effect",
+              label: "src/app/App.tsx",
+              lowValue: false,
+              observedAt: "2026-06-25T23:04:00.000Z",
+              role: "tool",
+              sessionId: "canonical-session-1",
+              sourceRef: {},
+              text: "src/app/App.tsx"
+            }
+          ],
+          total: 2
+        }}
+      />
+    );
 
     expect(html).toContain("Session dossier");
     expect(html).toContain("Repair OAuth callback");
+    expect(html).toContain("Tokens");
+    expect(html).toContain("Input");
+    expect(html).toContain("Output");
+    expect(html).toContain("Enrichment");
     expect(html).toContain("Fix the OAuth return path.");
-    expect(html).toContain("npm test");
-    expect(html).toContain("src/app/App.tsx");
-    expect(html).toContain("tests passed");
-    expect(html).toContain("Transcript excerpts");
     expect(html).toContain("Transcript");
     expect(html).toContain("Please repair the OAuth callback.");
-    expect(html).toContain("First prompt");
-    expect(html).toContain("OAuth route still fails for missing state.");
-    expect(html).toContain("Input tokens");
-    expect(html).toContain("Narrative evidence");
-    expect(html).toContain("session-capsule-v2");
-    expect(html).toContain("codex · event · source-ref-1");
-    expect(html).toContain("timeline · tool · event-1");
-    expect(html).toContain("User");
-    expect(html).toContain("Assistant");
+    expect(html).toContain("Advanced details");
     expect(html).toContain("Copy context");
     expect(html).toContain("Canonical ID");
-    expect(html).toContain("source-session-1");
+    expect(html).not.toContain("<h4>Files</h4>");
+    expect(html).not.toContain("<h4>Tools</h4>");
+    expect(html).not.toContain("<h4>Timeline</h4>");
+    expect(html).not.toContain("<h4>Verification</h4>");
+    expect(html).not.toContain("<h4>Needs attention</h4>");
+    expect(html).not.toContain("src/app/App.tsx");
+    expect(html).not.toContain("File ");
     expect(html).not.toContain("Open source");
     expect(html).not.toContain("Open repo");
+  });
+
+  test("opens advanced evidence on demand", async () => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<SessionDossier dossier={dossier()} />);
+    });
+
+    expect(host.textContent).not.toContain("Narrative evidence");
+    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
+    expect(button).toBeTruthy();
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(host.textContent).toContain("Verification");
+    expect(host.textContent).toContain("Tools");
+    expect(host.textContent).toContain("Timeline");
+    expect(host.textContent).toContain("Narrative evidence");
+    expect(host.textContent).not.toContain("Files");
+    expect(host.textContent).not.toContain("File ");
+    expect(host.textContent).not.toContain("src/app/App.tsx");
+    root.unmount();
   });
 
   test("renders coverage warning and sparse transcript CTA", () => {
@@ -128,17 +187,29 @@ describe("SessionDossier", () => {
     expect(html).toContain("4 low-value Codex hook event events captured");
   });
 
-  test("limits live-only actions to safe review actions", () => {
-    const html = renderToStaticMarkup(
-      <SessionDossier live={liveSession()} onAction={() => undefined} actionStatus="Marked reviewed." />
-    );
+  test("limits live-only actions to safe review actions", async () => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
 
-    expect(html).toContain("Canonical details unavailable");
-    expect(html).toContain("Dismiss");
-    expect(html).toContain("Mark reviewed");
-    expect(html).not.toContain("Open source");
-    expect(html).not.toContain("Open repo");
-    expect(html).toContain("Marked reviewed.");
+    await act(async () => {
+      root.render(<SessionDossier live={liveSession()} onAction={() => undefined} actionStatus="Marked reviewed." />);
+    });
+
+    expect(host.textContent).toContain("Canonical details unavailable");
+    expect(host.textContent).not.toContain("Dismiss");
+    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
+    expect(button).toBeTruthy();
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(host.textContent).toContain("Dismiss");
+    expect(host.textContent).toContain("Mark reviewed");
+    expect(host.textContent).not.toContain("Open source");
+    expect(host.textContent).not.toContain("Open repo");
+    expect(host.textContent).toContain("Marked reviewed.");
+    root.unmount();
   });
 
   test("copies the canonical context packet", async () => {
@@ -164,7 +235,45 @@ describe("SessionDossier", () => {
     expect(host.textContent).toContain("Copied.");
     root.unmount();
   });
+
+  test("wires transcript search input to the caller", async () => {
+    const onQueryChange = vi.fn();
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <SessionDossier
+          dossier={dossier()}
+          onTranscriptQueryChange={onQueryChange}
+          transcript={{
+            coverage: dossier().coverage.transcript,
+            items: [],
+            total: 0
+          }}
+          transcriptQuery=""
+        />
+      );
+    });
+
+    const input = host.querySelector("input[type='search']");
+    expect(input).toBeTruthy();
+    await act(async () => {
+      setNativeInputValue(input as HTMLInputElement, "OAuth");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(onQueryChange).toHaveBeenCalled();
+    root.unmount();
+    host.remove();
+  });
 });
+
+function setNativeInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  setter?.call(input, value);
+}
 
 function dossier(): SessionDossierDto {
   return {
@@ -287,6 +396,14 @@ function dossier(): SessionDossierDto {
         observedAt: "2026-06-25T23:07:00.000Z",
         sourceRef: { id: "event-1", kind: "tool", source: "timeline" },
         summary: "npm test"
+      },
+      {
+        eventId: "event-file",
+        kind: "file",
+        label: "file changed",
+        observedAt: "2026-06-25T23:06:00.000Z",
+        sourceRef: { id: "event-file", kind: "file", source: "timeline" },
+        summary: "src/app/App.tsx"
       }
     ],
     tools: [
