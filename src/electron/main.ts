@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, net, protocol, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, net, protocol, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
 import { ELECTRON_CHANNELS, registerMastheadIpc } from "./ipc";
 import {
@@ -43,6 +43,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
+    Menu.setApplicationMenu(null);
     registerRendererProtocol();
     registerDesktopIpc();
     mainWindow = await createMainWindow();
@@ -137,6 +138,7 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
 
 async function createMainWindow(): Promise<BrowserWindow> {
   const window = new BrowserWindow({
+    autoHideMenuBar: true,
     height: 900,
     minHeight: 720,
     minWidth: 1024,
