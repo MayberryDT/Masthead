@@ -84,6 +84,14 @@ if (!parsed.renderer?.hasDesktopBridge || parsed.renderer?.hasNodeProcess || par
   console.error(`Packaged renderer security check failed: ${JSON.stringify(parsed.renderer)}`);
   process.exit(1);
 }
+if (!parsed.renderer?.hasCustomChrome) {
+  console.error(`Packaged custom window chrome was not rendered: ${JSON.stringify(parsed.renderer)}`);
+  process.exit(1);
+}
+if (!parsed.renderer?.windowControls?.includes("Minimize window") || !parsed.renderer?.windowControls?.includes("Close window")) {
+  console.error(`Packaged custom window controls were not rendered: ${JSON.stringify(parsed.renderer)}`);
+  process.exit(1);
+}
 
 await assertSmokeConnectorStopped(dataDir);
 await rm(dataDir, { force: true, recursive: true });

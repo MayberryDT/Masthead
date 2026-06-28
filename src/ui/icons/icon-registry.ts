@@ -21,6 +21,7 @@ import {
   GitBranch,
   LockSimple,
   MagnifyingGlass,
+  Minus,
   PauseCircle,
   PlugsConnected,
   Pulse,
@@ -72,6 +73,7 @@ export const iconRegistry = {
   pagePrevious: CaretLeft,
   pageNext: CaretRight,
   pageLast: CaretDoubleRight,
+  minimize: Minus,
   trendUp: TrendUp,
   close: X,
   arrowRight: ArrowRight

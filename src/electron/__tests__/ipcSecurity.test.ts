@@ -5,6 +5,8 @@ describe("Electron IPC security policy", () => {
   test("allows only the Masthead desktop channel set", () => {
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.startLiveConnector)).toBe(true);
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.openDataDirectory)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.windowClose)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.windowMinimize)).toBe(true);
     expect(isAllowedIpcChannel("shell:openExternal")).toBe(false);
     expect(isAllowedIpcChannel("__proto__")).toBe(false);
   });

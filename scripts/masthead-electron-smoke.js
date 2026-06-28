@@ -47,6 +47,14 @@ if (!parsed.renderer?.hasDesktopBridge) {
   console.error("Electron preload bridge was not exposed.");
   process.exit(1);
 }
+if (!parsed.renderer?.hasCustomChrome) {
+  console.error(`Electron custom window chrome was not rendered: ${JSON.stringify(parsed.renderer)}`);
+  process.exit(1);
+}
+if (!parsed.renderer?.windowControls?.includes("Minimize window") || !parsed.renderer?.windowControls?.includes("Close window")) {
+  console.error(`Electron custom window controls were not rendered: ${JSON.stringify(parsed.renderer)}`);
+  process.exit(1);
+}
 if (parsed.renderer?.hasNodeProcess || parsed.renderer?.hasRequire || parsed.renderer?.hasRawIpc) {
   console.error(`Renderer exposed forbidden privileged globals: ${JSON.stringify(parsed.renderer)}`);
   process.exit(1);

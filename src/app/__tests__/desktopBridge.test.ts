@@ -33,6 +33,18 @@ describe("desktop bridge", () => {
     expect(invoke).toHaveBeenCalledWith("open_data_directory_command", { path: "/tmp/masthead" });
   });
 
+  test("routes custom window chrome commands through the bridge", async () => {
+    const invoke = vi.fn(async <T>() => ({ ok: true }) as T);
+    vi.stubGlobal("window", {
+      mastheadDesktop: { invoke }
+    });
+
+    await expect(invokeDesktopCommand("window_minimize_command")).resolves.toEqual({ ok: true });
+    await expect(invokeDesktopCommand("window_close_command")).resolves.toEqual({ ok: true });
+    expect(invoke).toHaveBeenNthCalledWith(1, "window_minimize_command", undefined);
+    expect(invoke).toHaveBeenNthCalledWith(2, "window_close_command", undefined);
+  });
+
   test("returns undefined in a plain browser", async () => {
     vi.stubGlobal("window", {});
 

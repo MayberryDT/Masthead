@@ -1,7 +1,16 @@
 import { describe, expect, test } from "vitest";
-import { isAllowedRendererUrl, mastheadWindowPreferences, rendererTrustedOrigins } from "../window";
+import { isAllowedRendererUrl, mastheadWindowChromeOptions, mastheadWindowPreferences, rendererTrustedOrigins } from "../window";
 
 describe("Electron window security policy", () => {
+  test("removes native chrome for Masthead-owned window controls", () => {
+    expect(mastheadWindowChromeOptions()).toEqual({
+      autoHideMenuBar: true,
+      backgroundColor: "#031019",
+      frame: false,
+      titleBarStyle: "hidden"
+    });
+  });
+
   test("keeps the renderer isolated from Node and Electron internals", () => {
     expect(mastheadWindowPreferences("/tmp/preload.js")).toMatchObject({
       contextIsolation: true,

@@ -2772,6 +2772,63 @@ body {
   background: var(--canvas);
 }
 
+.masthead-shell.desktop-chrome .masthead-workspace {
+  grid-template-rows: 34px minmax(0, 1fr);
+}
+
+.masthead-window-bar {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  min-width: 0;
+  min-height: 34px;
+  border-bottom: 1px solid rgba(194, 221, 241, 0.13);
+  background: linear-gradient(180deg, rgba(5, 23, 36, 0.92), rgba(3, 16, 25, 0.96));
+  -webkit-app-region: drag;
+}
+
+.masthead-window-drag-region {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.masthead-window-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  -webkit-app-region: no-drag;
+}
+
+.masthead-window-control {
+  display: grid;
+  width: 42px;
+  min-width: 42px;
+  height: 34px;
+  place-items: center;
+  border: 0;
+  border-left: 1px solid rgba(194, 221, 241, 0.08);
+  border-radius: 0;
+  background: transparent;
+  color: rgba(214, 228, 239, 0.82);
+  cursor: default;
+  padding: 0;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.masthead-window-control:hover {
+  background: rgba(8, 32, 48, 0.78);
+  color: var(--ink);
+}
+
+.masthead-window-control.close:hover {
+  background: rgba(255, 72, 62, 0.86);
+  color: #fff8f8;
+}
+
 .observability-content,
 .masthead-content {
   display: grid;

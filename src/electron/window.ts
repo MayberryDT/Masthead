@@ -10,9 +10,25 @@ export type MastheadWindowPreferences = {
   webviewTag: boolean;
 };
 
+export type MastheadWindowChromeOptions = {
+  autoHideMenuBar: boolean;
+  backgroundColor: string;
+  frame: boolean;
+  titleBarStyle: "hidden";
+};
+
 export type RendererUrlPolicy = {
   allowDevServer?: boolean;
 };
+
+export function mastheadWindowChromeOptions(): MastheadWindowChromeOptions {
+  return {
+    autoHideMenuBar: true,
+    backgroundColor: "#031019",
+    frame: false,
+    titleBarStyle: "hidden"
+  };
+}
 
 export function mastheadWindowPreferences(preload: string): MastheadWindowPreferences {
   return {

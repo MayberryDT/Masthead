@@ -7,7 +7,9 @@ export const ELECTRON_CHANNELS = {
   openDataDirectory: "masthead:data:open-directory",
   pruneLocalData: "masthead:store:prune",
   readStoreRecords: "masthead:store:read",
-  startLiveConnector: "masthead:connector:start"
+  startLiveConnector: "masthead:connector:start",
+  windowClose: "masthead:window:close",
+  windowMinimize: "masthead:window:minimize"
 } as const;
 
 export const LEGACY_COMMAND_TO_CHANNEL: Record<string, ElectronChannel> = {
@@ -19,7 +21,9 @@ export const LEGACY_COMMAND_TO_CHANNEL: Record<string, ElectronChannel> = {
   open_data_directory_command: ELECTRON_CHANNELS.openDataDirectory,
   prune_local_data_command: ELECTRON_CHANNELS.pruneLocalData,
   read_store_records_command: ELECTRON_CHANNELS.readStoreRecords,
-  start_live_connector_command: ELECTRON_CHANNELS.startLiveConnector
+  start_live_connector_command: ELECTRON_CHANNELS.startLiveConnector,
+  window_close_command: ELECTRON_CHANNELS.windowClose,
+  window_minimize_command: ELECTRON_CHANNELS.windowMinimize
 };
 
 export type ElectronChannel = (typeof ELECTRON_CHANNELS)[keyof typeof ELECTRON_CHANNELS];

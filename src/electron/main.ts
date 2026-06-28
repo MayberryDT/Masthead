@@ -19,6 +19,7 @@ import { createMastheadTray } from "./tray";
 import {
   isAllowedRendererUrl,
   mainPreloadPath,
+  mastheadWindowChromeOptions,
   mastheadWindowPreferences,
   rendererEntryUrl,
   rendererTrustedOrigins
@@ -103,8 +104,10 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
       ownedDaemonChildren
     );
     const renderer = await window.webContents.executeJavaScript(`
-      (() => {
+      (async () => {
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const cards = Array.from(document.querySelectorAll('[data-session-card], .session-card, .observability-card, .session-card-shell'));
+        const windowControls = Array.from(document.querySelectorAll('.masthead-window-control')).map((control) => control.getAttribute('aria-label'));
         const samples = [];
         for (const card of cards.slice(0, 12)) {
           const start = performance.now();
@@ -117,11 +120,13 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
         return {
           cardCount: cards.length,
           hasDesktopBridge: typeof window.mastheadDesktop?.invoke === 'function',
+          hasCustomChrome: document.querySelector('.masthead-shell.desktop-chrome .masthead-window-bar') !== null,
           hasNodeProcess: typeof window.process !== 'undefined',
           hasRawIpc: typeof window.ipcRenderer !== 'undefined',
           hasRequire: typeof window.require !== 'undefined',
           hoverMedianMs: median,
-          hoverP95Ms: p95
+          hoverP95Ms: p95,
+          windowControls
         };
       })()
     `);
@@ -145,7 +150,7 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
 
 async function createMainWindow(): Promise<BrowserWindow> {
   const window = new BrowserWindow({
-    autoHideMenuBar: true,
+    ...mastheadWindowChromeOptions(),
     height: 900,
     minHeight: 720,
     minWidth: 1024,
@@ -153,6 +158,7 @@ async function createMainWindow(): Promise<BrowserWindow> {
     webPreferences: mastheadWindowPreferences(mainPreloadPath(__dirname)),
     width: 1400
   });
+  window.setMenuBarVisibility(false);
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     return isAllowedRendererUrl(url, { allowDevServer: isElectronDevMode() }) ? { action: "allow" } : { action: "deny" };
@@ -223,6 +229,14 @@ function registerDesktopIpc(): void {
     {
       [ELECTRON_CHANNELS.startLiveConnector]: () =>
         startLiveConnector(targetInput(), rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }), ownedDaemonChildren),
+      [ELECTRON_CHANNELS.windowClose]: () => {
+        mainWindow?.close();
+        return { ok: true };
+      },
+      [ELECTRON_CHANNELS.windowMinimize]: () => {
+        mainWindow?.minimize();
+        return { ok: true };
+      },
       [ELECTRON_CHANNELS.openDataDirectory]: (args) => openDataDirectory(stringArg(args, "path")),
       [ELECTRON_CHANNELS.mcpLaunchConfig]: () => mcpLaunchConfig(resolveDaemonLaunchTarget(targetInput())),
       [ELECTRON_CHANNELS.mcpValidateLaunchConfig]: () => validateMcpLaunchConfig(resolveDaemonLaunchTarget(targetInput())),
