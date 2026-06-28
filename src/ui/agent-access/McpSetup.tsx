@@ -24,6 +24,8 @@ const clients: Array<{ id: ClientId; label: string }> = [
   { id: "cursor", label: "Cursor" },
   { id: "generic", label: "Generic stdio" }
 ];
+const primaryClient = clients[0];
+const secondaryClients = clients.slice(1);
 
 export function McpSetup({
   launchConfig,
@@ -72,7 +74,11 @@ export function McpSetup({
       <div className="agent-access-section-head">
         <div>
           <p className="mono-label">Set up a client</p>
-          <h2 id="mcp-setup-title">Local stdio configuration</h2>
+          <h2 id="mcp-setup-title">Connect Codex to Masthead</h2>
+          <p className="agent-access-setup-copy">
+            Start with Codex. Once the launch test passes, ask Codex to check Masthead for information on this project and confirm the
+            answer uses Masthead context.
+          </p>
         </div>
         <StatusBadge tone={status.ready && validation?.valid ? "active" : "warning"}>
           {status.ready && validation?.valid ? "Launch config valid" : "Check launch config"}
@@ -80,18 +86,31 @@ export function McpSetup({
       </div>
 
       <div className="agent-access-tabs" role="tablist" aria-label="MCP client configuration">
-        {clients.map((client) => (
-          <AppButton
-            aria-pressed={client.id === selectedClient}
-            className={client.id === selectedClient ? "agent-access-tab-active" : ""}
-            key={client.id}
-            onClick={() => setSelectedClient(client.id)}
-            variant={client.id === selectedClient ? "primary" : "quiet"}
-          >
-            {client.label}
-          </AppButton>
-        ))}
+        <AppButton
+          aria-pressed={primaryClient.id === selectedClient}
+          className={primaryClient.id === selectedClient ? "agent-access-tab-active" : ""}
+          onClick={() => setSelectedClient(primaryClient.id)}
+          variant={primaryClient.id === selectedClient ? "primary" : "quiet"}
+        >
+          {primaryClient.label}
+        </AppButton>
       </div>
+      <details className="agent-access-secondary-clients">
+        <summary>Other MCP clients</summary>
+        <div className="agent-access-tabs" role="tablist" aria-label="Other MCP client configuration">
+          {secondaryClients.map((client) => (
+            <AppButton
+              aria-pressed={client.id === selectedClient}
+              className={client.id === selectedClient ? "agent-access-tab-active" : ""}
+              key={client.id}
+              onClick={() => setSelectedClient(client.id)}
+              variant={client.id === selectedClient ? "primary" : "quiet"}
+            >
+              {client.label}
+            </AppButton>
+          ))}
+        </div>
+      </details>
 
       {canDisplayConfig ? (
         <CodeBlock code={config} label={`${clients.find((client) => client.id === selectedClient)?.label ?? "Client"} configuration`} />
@@ -124,14 +143,19 @@ export function McpSetup({
 
       <div className="agent-access-actions">
         <AppButton disabled={!canCopyConfig} onClick={copyConfig}>
-          Copy configuration
+          {selectedClient === "codex" ? "Copy Codex configuration" : "Copy configuration"}
         </AppButton>
         <AppButton disabled={!onTestConnection || visibleTestConnectionState === "testing"} onClick={runTestConnection} variant="quiet">
-          {visibleTestConnectionState === "testing" ? "Testing connection…" : "Test connection"}
+          {visibleTestConnectionState === "testing" ? "Testing connection…" : "Test MCP launch"}
         </AppButton>
       </div>
 
       <TestConnectionEvidence result={visibleTestConnectionResult} state={visibleTestConnectionState} />
+      <div className="agent-access-proof-step">
+        <p className="mono-label">Proof step</p>
+        <p>Ask Codex: check Masthead for information on this project.</p>
+        <p>Then confirm the answer includes Masthead session context and the audit table records the query.</p>
+      </div>
     </section>
   );
 }

@@ -7,11 +7,11 @@ type McpToolsTableProps = {
 
 export function McpToolsTable({ tools }: McpToolsTableProps) {
   return (
-    <section className="agent-access-section agent-access-tools-section" aria-labelledby="mcp-tools-title">
+    <section className="agent-access-section agent-access-details-section agent-access-tools-section" aria-labelledby="mcp-tools-title">
       <div className="agent-access-section-head">
         <div>
           <p className="mono-label">Tools</p>
-          <h2 id="mcp-tools-title">Exposed retrieval tools</h2>
+          <h2 id="mcp-tools-title">Available MCP tools</h2>
         </div>
         <StatusBadge tone="info">{tools.length} tools</StatusBadge>
       </div>

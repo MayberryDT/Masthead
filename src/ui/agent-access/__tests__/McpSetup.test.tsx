@@ -9,17 +9,22 @@ import type { McpLaunchConfigDto, McpLaunchValidationDto } from "../../../app/mc
 import { McpSetup } from "../McpSetup";
 
 describe("McpSetup", () => {
-  test("renders client tabs and a real stdio launch config", () => {
+  test("renders Codex-first setup proof flow and a real stdio launch config", () => {
     const html = renderToStaticMarkup(<McpSetup launchConfig={launchConfig} status={status} validation={validLaunchConfig} />);
 
     expect(html).toContain("Codex");
+    expect(html).toContain("Connect Codex to Masthead");
+    expect(html).toContain("Copy Codex configuration");
+    expect(html).toContain("Test MCP launch");
+    expect(html).toContain("Proof step");
+    expect(html).toContain("Ask Codex: check Masthead for information on this project.");
+    expect(html).toContain("audit table records the query");
+    expect(html.indexOf("Codex")).toBeLessThan(html.indexOf("Other MCP clients"));
     expect(html).toContain("Claude Code");
     expect(html).toContain("Cursor");
     expect(html).toContain("Generic stdio");
     expect(html).toContain("MASTHEAD_DB_PATH");
     expect(html).toContain("/Users/tyler/Library/Application Support/Masthead/masthead.sqlite");
-    expect(html).toContain("Copy configuration");
-    expect(html).toContain("Test connection");
     expect(html).toContain("Launch config valid");
     expect(html).not.toContain("npm run mcp");
   });
@@ -45,7 +50,7 @@ describe("McpSetup", () => {
       );
     });
 
-    expect(buttonByText(container, "Copy configuration").disabled).toBe(true);
+    expect(buttonByText(container, "Copy Codex configuration").disabled).toBe(true);
     expect(container.textContent).toContain("Configured command does not exist.");
     expect(container.textContent).toContain("MASTHEAD_DB_PATH points at");
     expect(container.textContent).toContain("Launch configuration is hidden");
@@ -71,7 +76,7 @@ describe("McpSetup", () => {
     });
 
     await act(async () => {
-      buttonByText(container, "Test connection").click();
+      buttonByText(container, "Test MCP launch").click();
     });
 
     expect(onTestConnection).toHaveBeenCalledTimes(1);
@@ -94,7 +99,7 @@ describe("McpSetup", () => {
     });
 
     await act(async () => {
-      buttonByText(container, "Test connection").click();
+      buttonByText(container, "Test MCP launch").click();
     });
 
     expect(onTestConnection).toHaveBeenCalledTimes(1);

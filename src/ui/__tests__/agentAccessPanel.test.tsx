@@ -11,27 +11,36 @@ describe("AgentAccessPanel", () => {
         audit={audit}
         launchConfig={launchConfig}
         launchValidation={validLaunchConfig}
+        onRefresh={() => undefined}
         status={status}
         tools={tools}
       />
     );
 
-    expect(html).toContain("MCP server");
+    expect(html).toContain("Can agents read Masthead?");
+    expect(html).toContain("Read-only MCP access is enabled");
+    expect(html).toContain("Refresh status");
     expect(html).toContain("agent-access-layout");
     expect(html).toContain("agent-access-setup-section");
     expect(html).toContain("agent-access-policy-section");
     expect(html).toContain("agent-access-tools-section");
     expect(html).toContain("agent-access-audit-section");
-    expect(html).toContain("2 read-only");
+    expect(html).toContain("agent-access-details-section");
     expect(html).toContain("Access");
     expect(html).toContain("Enabled");
     expect(html).toContain("MASTHEAD_DB_PATH");
+    expect(html).toContain("Available MCP tools");
+    expect(html).toContain("MCP query audit");
     expect(html).toContain("Search session summaries");
     expect(html).toContain("search_sessions");
     expect(html).toContain("get_session_excerpt");
-    expect(html).toContain("mcp_query_log");
+    expect(html.indexOf("Connect Codex to Masthead")).toBeLessThan(html.indexOf("Read-only access boundary"));
+    expect(html.indexOf("Read-only access boundary")).toBeLessThan(html.indexOf("Available MCP tools"));
+    expect(html.indexOf("Available MCP tools")).toBeLessThan(html.indexOf("MCP query audit"));
     expect(html).toContain("Excluded projects and sessions");
     expect(html).toContain("session:agent");
+    expect(html).not.toContain("agent-access-command-row");
+    expect(html).not.toContain("MCP status");
     expect(html).not.toContain("npm run mcp");
     expect(html).not.toContain("surface-card-grid");
     expect(html).not.toContain("surface-data-card");

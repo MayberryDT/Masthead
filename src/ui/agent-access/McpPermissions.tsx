@@ -7,7 +7,7 @@ type McpPermissionsProps = {
 };
 
 const defaultAllowed = ["Search session summaries", "Read bounded historical excerpts", "Read project history"];
-const defaultBlocked = ["Execute shell commands", "Mutate files or Git", "Modify harness sessions"];
+const defaultBlocked = ["Execute shell commands", "Mutate files or Git", "Modify harness session files"];
 
 export function McpPermissions({ status }: McpPermissionsProps) {
   const permissions = normalizedPermissions(status);
@@ -16,7 +16,7 @@ export function McpPermissions({ status }: McpPermissionsProps) {
       <div className="agent-access-section-head">
         <div>
           <p className="mono-label">Permissions</p>
-          <h2 id="mcp-permissions-title">Read-only access policy</h2>
+          <h2 id="mcp-permissions-title">Read-only access boundary</h2>
         </div>
         <StatusBadge tone={permissions.globalAccessEnabled ? "active" : "danger"}>
           {permissions.globalAccessEnabled ? "Enabled" : "Disabled"}
