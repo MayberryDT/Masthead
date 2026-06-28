@@ -23,10 +23,9 @@ describe("desktop bridge", () => {
     expect(calls).toEqual([{ command: "start_live_connector_command", args: { from: "test" } }]);
   });
 
-  test("prefers the Electron preload bridge when Tauri globals are also present", async () => {
+  test("uses the Electron preload bridge for desktop commands", async () => {
     const invoke = vi.fn(async <T>() => "electron-result" as T);
     vi.stubGlobal("window", {
-      __TAURI_INTERNALS__: {},
       mastheadDesktop: { invoke }
     });
 

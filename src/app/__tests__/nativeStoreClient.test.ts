@@ -52,7 +52,7 @@ describe("native store client", () => {
     ).rejects.toThrow("external state mutation");
   });
 
-  test("prunes local data through the Tauri command boundary", async () => {
+  test("prunes local data through the desktop command boundary", async () => {
     const policy = {
       cutoffAt: "2026-06-01T00:00:00.000Z",
       recordTypes: ["review_disposition" as const],
@@ -85,7 +85,7 @@ describe("native store client", () => {
     ).rejects.toThrow("external state mutation");
   });
 
-  test("reads native store records through the Tauri command boundary", async () => {
+  test("reads native store records through the desktop command boundary", async () => {
     const records: StoreRecord[] = [reviewDispositionRecord()];
     const read = await readLocalRecords(async <T>(command: string) => {
       expect(command).toBe("read_store_records_command");
@@ -95,7 +95,7 @@ describe("native store client", () => {
     expect(read).toEqual(records);
   });
 
-  test("appends native store records through the Tauri command boundary", async () => {
+  test("appends native store records through the desktop command boundary", async () => {
     const records: StoreRecord[] = [reviewDispositionRecord()];
     const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 

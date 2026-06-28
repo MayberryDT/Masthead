@@ -6,8 +6,8 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     executableName: "masthead",
-    extraResource: [".electron-resources/daemon", "src-tauri/icons/icon.png"],
-    icon: "src-tauri/icons/icon",
+    extraResource: [".electron-resources/daemon", "public/assets/masthead-logo-sail.png"],
+    icon: "public/assets/masthead-logo-sail",
     name: "Masthead"
   },
   makers: [
@@ -20,7 +20,7 @@ const config: ForgeConfig = {
       config: {
         options: {
           categories: ["Development"],
-          icon: "src-tauri/icons/icon.png",
+          icon: "public/assets/masthead-logo-sail.png",
           maintainer: "Tyler Mayberry"
         }
       }
@@ -32,7 +32,7 @@ const config: ForgeConfig = {
             config: {
               options: {
                 categories: ["Development"],
-                icon: "src-tauri/icons/icon.png"
+                icon: "public/assets/masthead-logo-sail.png"
               }
             }
           }

@@ -446,7 +446,7 @@ async function isPortAvailable(host: string, port: number): Promise<boolean> {
 }
 
 function defaultAllowedOrigins(host: string, uiPort: number): string {
-  const origins = new Set([`http://${host}:${uiPort}`, "tauri://localhost", "http://tauri.localhost"]);
+  const origins = new Set([`http://${host}:${uiPort}`, "masthead://app"]);
   if (host === "127.0.0.1") origins.add(`http://localhost:${uiPort}`);
   if (host === "localhost") origins.add(`http://127.0.0.1:${uiPort}`);
   return Array.from(origins).join(",");

@@ -48,7 +48,7 @@ if (!app.requestSingleInstanceLock()) {
     mainWindow = await createMainWindow();
     tray = await createMastheadTray(trayIconPath(), {
       onOpenDataDirectory: () => {
-        void openDataDirectory(app.getPath("appData"));
+        void openDataDirectory(app.getPath("userData"));
       },
       onQuit: () => app.quit(),
       onShow: showMainWindow
@@ -79,19 +79,19 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function trayIconPath(): string {
-  const sourceIcon = join(app.getAppPath(), "src-tauri", "icons", "icon.png");
+  const sourceIcon = join(app.getAppPath(), "public", "assets", "masthead-logo-sail.png");
   if (existsSync(sourceIcon)) return sourceIcon;
-  return join(process.resourcesPath, "icon.png");
+  return join(process.resourcesPath, "masthead-logo-sail.png");
 }
 
 async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
   try {
     const connector = await startLiveConnector(
       {
-        appDataDir: app.getPath("appData"),
         currentDir: process.cwd(),
         env: electronDaemonEnv(),
-        resourcesPath: process.resourcesPath
+        resourcesPath: process.resourcesPath,
+        userDataDir: app.getPath("userData")
       },
       allowedOrigins,
       ownedDaemonChildren
@@ -176,10 +176,10 @@ function registerRendererProtocol(): void {
 
 function registerDesktopIpc(): void {
   const targetInput = () => ({
-    appDataDir: app.getPath("appData"),
     currentDir: process.cwd(),
     env: electronDaemonEnv(),
-    resourcesPath: process.resourcesPath
+    resourcesPath: process.resourcesPath,
+    userDataDir: app.getPath("userData")
   });
 
   registerMastheadIpc(ipcMain, {

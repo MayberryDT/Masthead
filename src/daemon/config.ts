@@ -26,8 +26,7 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
   const allowedOrigins = (env.MASTHEAD_ALLOWED_ORIGINS || [
     "http://127.0.0.1:5173",
     "http://localhost:5173",
-    "tauri://localhost",
-    "http://tauri.localhost"
+    "masthead://app"
   ].join(","))
     .split(",")
     .map((origin) => origin.trim())

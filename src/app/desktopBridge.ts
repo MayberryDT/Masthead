@@ -15,18 +15,11 @@ export function getDesktopBridge(): DesktopBridge | undefined {
 }
 
 export function isDesktopBridgeAvailable(): boolean {
-  return Boolean(getDesktopBridge()) || canUseTauri();
+  return Boolean(getDesktopBridge());
 }
 
 export async function invokeDesktopCommand<T>(command: string, args?: Record<string, unknown>): Promise<T | undefined> {
   const bridge = getDesktopBridge();
   if (bridge) return bridge.invoke<T>(command, args);
-  if (!canUseTauri()) return undefined;
-
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<T>(command, args);
-}
-
-function canUseTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  return undefined;
 }

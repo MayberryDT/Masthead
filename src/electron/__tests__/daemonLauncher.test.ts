@@ -68,7 +68,6 @@ describe("Electron daemon launcher policy", () => {
   test("resolves development daemon launch target from env overrides", () => {
     expect(
       resolveDaemonLaunchTarget({
-        appDataDir: "/tmp/masthead",
         currentDir: "/repo",
         env: {
           MASTHEAD_DAEMON_ENTRY: "/repo/dist/daemon/src/daemon/main.js",
@@ -76,7 +75,8 @@ describe("Electron daemon launcher policy", () => {
           MASTHEAD_PORT: "17374",
           MASTHEAD_PROJECT_DIR: "/repo"
         },
-        resourcesPath: "/opt/Masthead/resources"
+        resourcesPath: "/opt/Masthead/resources",
+        userDataDir: "/tmp/masthead"
       })
     ).toMatchObject({
       cwd: "/repo",

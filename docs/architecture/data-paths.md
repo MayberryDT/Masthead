@@ -18,7 +18,7 @@ macOS:   ~/Library/Application Support/Masthead Dev
 Windows: %LOCALAPPDATA%/Masthead Dev
 ```
 
-The packaged Tauri app uses its app-data directory as `MASTHEAD_DATA_DIR`.
+The packaged Electron app uses its app-specific user-data directory as `MASTHEAD_DATA_DIR`.
 
 Tests may still set `MASTHEAD_DB_PATH` and `MASTHEAD_STORE_PATH` directly. Runtime code should prefer `MASTHEAD_DATA_DIR` so the daemon, UI launch flow, and MCP launch config refer to the same database identity.
 

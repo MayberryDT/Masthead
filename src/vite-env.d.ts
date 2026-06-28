@@ -8,6 +8,5 @@ type MastheadDesktopBridge = {
 };
 
 interface Window {
-  __TAURI_INTERNALS__?: unknown;
   mastheadDesktop?: MastheadDesktopBridge;
 }
