@@ -28,7 +28,7 @@ export function ImportJobsTable({
   return (
     <section className="import-jobs-section" aria-label="Import jobs">
       <div className="import-jobs-header">
-        <p className="mono-label">IMPORT JOBS</p>
+        <p className="mono-label">Import jobs</p>
         <p className="surface-status">Showing {visibleCount} of {total} import jobs</p>
       </div>
       <div className="import-jobs-table-frame">

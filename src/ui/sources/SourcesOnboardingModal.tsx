@@ -16,13 +16,14 @@ type Props = {
   scan?: SourcesOnboardingScanDto;
 };
 
-type Step = "intro" | "found" | "transcripts" | "enrichment" | "build" | "success";
+type Step = "intro" | "found" | "history" | "transcripts" | "enrichment" | "build" | "success";
 type EnrichmentMode = SourcesSetupRunInput["enrichmentMode"];
 
 export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConnectSelected, onRunSetup, onScan, onScanSetup, open, scan }: Props) {
   const [step, setStep] = useState<Step>("intro");
   const [localScan, setLocalScan] = useState<SourcesOnboardingScanDto | undefined>(undefined);
   const [running, setRunning] = useState(false);
+  const [importHistory, setImportHistory] = useState(true);
   const [enrichmentMode, setEnrichmentMode] = useState<EnrichmentMode>("local");
   const foundAdapters = useMemo(() => adapters.filter(isFoundAdapter), [adapters]);
   const setupScan = localScan ?? scan;
@@ -65,9 +66,12 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
       try {
         await onRunSetup({
           enrichmentMode,
+          importMetadata: importHistory,
+          importTranscripts: importHistory,
+          queueEnrichment: enrichmentMode !== "skip",
           sourceIds: selectedSources.map((source) => source.sourceId),
           transcriptApprovals: selectedSources.map((source) => ({
-            approved: source.transcriptApproval?.required ? true : Boolean(source.transcriptApproval?.approved),
+            approved: importHistory && (source.transcriptApproval?.required ? true : Boolean(source.transcriptApproval?.approved)),
             runtime: source.runtime,
             sourceId: source.sourceId
           }))
@@ -84,11 +88,11 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="session-detail-modal sources-onboarding-modal" role="dialog" aria-modal="true" aria-label="Connect sources">
+      <section className="session-detail-modal sources-onboarding-modal" role="dialog" aria-modal="true" aria-label="Set up sources">
         <header className="session-detail-header">
           <div>
             <p className="mono-label">Sources setup</p>
-            <h2>Connect local sources</h2>
+            <h2>Set up sources</h2>
           </div>
           <AppButton type="button" variant="quiet" onClick={onClose}>Close</AppButton>
         </header>
@@ -96,10 +100,10 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
         {step === "intro" ? (
           <div className="session-detail-body">
             <p>
-              Masthead checks known local history locations for AI coding tools. It does not scan your whole home directory, and transcripts require explicit approval.
+              Live capture can start without importing old sessions. Masthead checks known local history locations only when you ask it to.
             </p>
             <div className="surface-actions">
-              <AppButton type="button" variant="primary" onClick={handleScan} disabled={busy}>Scan this computer</AppButton>
+              <AppButton type="button" variant="primary" onClick={handleScan} disabled={busy}>Check local sources</AppButton>
             </div>
             {!onScanSetup ? (
               <details className="advanced-diagnostics-preview">
@@ -161,7 +165,33 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
             )}
             <div className="surface-actions">
               <AppButton type="button" onClick={() => setStep("intro")}>Back</AppButton>
-              <AppButton type="button" variant="primary" onClick={() => setStep("transcripts")} disabled={selectedIds.length === 0}>Continue</AppButton>
+              <AppButton type="button" variant="primary" onClick={() => setStep("history")} disabled={selectedIds.length === 0}>Continue</AppButton>
+            </div>
+          </div>
+        ) : null}
+
+        {step === "history" ? (
+          <div className="session-detail-body">
+            <h3>History import</h3>
+            <div className="source-choice-list">
+              <label className="source-choice">
+                <input type="radio" name="source-history-mode" checked={importHistory} onChange={() => setImportHistory(true)} />
+                <span>
+                  <strong>Connect live capture and import past sessions</strong>
+                  <small>Recommended when local history is available and you want Logbook to be useful immediately.</small>
+                </span>
+              </label>
+              <label className="source-choice">
+                <input type="radio" name="source-history-mode" checked={!importHistory} onChange={() => setImportHistory(false)} />
+                <span>
+                  <strong>Connect live capture only</strong>
+                  <small>Masthead starts saving new sessions from this point forward.</small>
+                </span>
+              </label>
+            </div>
+            <div className="surface-actions">
+              <AppButton type="button" onClick={() => setStep("found")}>Back</AppButton>
+              <AppButton type="button" variant="primary" onClick={() => setStep("transcripts")}>Continue</AppButton>
             </div>
           </div>
         ) : null}
@@ -185,7 +215,7 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
               <p>Transcripts can include prompts, code, file paths, command output, and private data. This first pass keeps approval explicit and continues to use the existing source policy flow.</p>
             )}
             <div className="surface-actions">
-              <AppButton type="button" onClick={() => setStep("found")}>Back</AppButton>
+              <AppButton type="button" onClick={() => setStep("history")}>Back</AppButton>
               <AppButton type="button" variant="primary" onClick={() => setStep("enrichment")}>Continue</AppButton>
             </div>
           </div>
@@ -225,11 +255,11 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
 
         {step === "build" ? (
           <div className="session-detail-body">
-            <h3>Build session library</h3>
-            <p>Masthead will connect selected sources, import metadata, and queue transcript/enrichment work through the existing pipeline.</p>
+            <h3>Start source setup</h3>
+            <p>Masthead will connect selected sources for live capture, import approved history, and queue approved enrichment work.</p>
             <div className="surface-actions">
               <AppButton type="button" onClick={() => setStep("enrichment")}>Back</AppButton>
-              <AppButton type="button" variant="primary" onClick={handleBuild} disabled={busy || running || selectedIds.length === 0}>Build session library</AppButton>
+              <AppButton type="button" variant="primary" onClick={handleBuild} disabled={busy || running || selectedIds.length === 0}>Start source setup</AppButton>
             </div>
           </div>
         ) : null}

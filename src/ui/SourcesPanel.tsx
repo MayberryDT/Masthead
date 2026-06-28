@@ -70,7 +70,7 @@ export function SourcesPanel(props: Props) {
   return (
     <section id="sources" className="sources-panel sources-management surface-panel" aria-label="Session sources">
       {!showConnectedDashboard ? (
-        <SourcesEmptyState busy={busy} onConnectSources={() => setOnboardingOpen(true)} onShowAdvanced={() => setAdvancedOpen(true)} status={status} />
+        <SourcesEmptyState busy={busy} onConnectSources={() => setOnboardingOpen(true)} status={status} />
       ) : (
         <SourcesConnectedDashboard
           adapters={connectedAdapters}

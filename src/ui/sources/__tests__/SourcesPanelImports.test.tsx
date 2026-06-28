@@ -22,11 +22,11 @@ describe("SourcesPanel import controls", () => {
     });
 
     await act(async () => {
-      buttonByText(container, "Add source").click();
+      buttonByText(container, "Set up more sources").click();
     });
 
     await act(async () => {
-      buttonByText(container, "Scan this computer").click();
+      buttonByText(container, "Check local sources").click();
     });
 
     expect(onScan).toHaveBeenCalledTimes(1);
@@ -70,11 +70,12 @@ describe("SourcesPanel import controls", () => {
     });
 
     await act(async () => {
-      buttonByText(container, "Connect sources").click();
+      buttonByText(container, "Set up sources").click();
     });
 
-    expect(container.textContent).toContain("Connect local sources");
-    expect(container.textContent).toContain("Scan this computer");
+    expect(container.textContent).toContain("Set up sources");
+    expect(container.textContent).toContain("Check local sources");
+    expect(container.textContent).toContain("Live capture can start without importing old sessions.");
     expect(container.textContent).not.toContain("Gemini CLI");
     await act(async () => root.unmount());
   });
@@ -100,10 +101,10 @@ describe("SourcesPanel import controls", () => {
     });
 
     await act(async () => {
-      buttonByText(container, "Connect sources").click();
+      buttonByText(container, "Set up sources").click();
     });
     await act(async () => {
-      buttonByText(container, "Scan this computer").click();
+      buttonByText(container, "Check local sources").click();
     });
 
     expect(onScanSetup).toHaveBeenCalledTimes(1);
@@ -122,6 +123,9 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       buttonByText(container, "Continue").click();
     });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
 
     expect(container.textContent).toContain("Transcript approval");
     expect(container.textContent).toContain("Codex sessions");
@@ -136,6 +140,9 @@ describe("SourcesPanel import controls", () => {
 
     await renderOpenScannedOnboarding(root, container);
 
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
     await act(async () => {
       buttonByText(container, "Continue").click();
     });
@@ -165,11 +172,17 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Continue").click();
     });
     await act(async () => {
-      buttonByText(container, "Build session library").click();
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Start source setup").click();
     });
 
     expect(onRunSetup).toHaveBeenCalledWith({
       enrichmentMode: "local",
+      importMetadata: true,
+      importTranscripts: true,
+      queueEnrichment: true,
       sourceIds: ["codex-sessions"],
       transcriptApprovals: [{ approved: true, runtime: "codex", sourceId: "codex-sessions" }]
     });
@@ -181,18 +194,60 @@ describe("SourcesPanel import controls", () => {
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<SourcesPanel adapters={[]} busy={false} imports={[]} onExcludePath={noop} onRefresh={noop} setup={diagnosticSetup()} sources={[]} />);
+      root.render(<SourcesPanel adapters={[]} busy={false} imports={[]} onExcludePath={noop} onRefresh={noop} setup={connectedSetup()} sources={[]} />);
     });
 
     await act(async () => {
       buttonByText(container, "Advanced diagnostics").click();
     });
 
+    expect(container.textContent).toContain("Advanced diagnostics");
+    expect(container.textContent).toContain("Adapter inventory");
+    expect(container.textContent).toContain("Import jobs");
+    expect(container.textContent).toContain("Close diagnostics");
     expect(container.textContent).toContain("Adapter inventory and import jobs");
     expect(container.textContent).toContain("harnesses in catalog");
     expect(container.textContent).toContain("ADAPTERS");
     expect(container.textContent).toContain("Codex");
     expect(container.textContent).toContain("metadata");
+    await act(async () => root.unmount());
+  });
+
+  test("live-only setup does not approve historical transcript import", async () => {
+    const onRunSetup = vi.fn(async () => ({ jobs: [], queued: 0, skipped: [] }));
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await renderOpenScannedOnboarding(root, container, { onRunSetup });
+
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      const liveOnly = [...container.querySelectorAll("input[name='source-history-mode']")][1] as HTMLInputElement;
+      liveOnly.click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Start source setup").click();
+    });
+
+    expect(onRunSetup).toHaveBeenCalledWith({
+      enrichmentMode: "local",
+      importMetadata: false,
+      importTranscripts: false,
+      queueEnrichment: true,
+      sourceIds: ["codex-sessions"],
+      transcriptApprovals: [{ approved: false, runtime: "codex", sourceId: "codex-sessions" }]
+    });
     await act(async () => root.unmount());
   });
 });
@@ -266,6 +321,32 @@ function diagnosticSetup(): SourcesSetupDto {
   };
 }
 
+function connectedSetup(): SourcesSetupDto {
+  return {
+    ...diagnosticSetup(),
+    connectedSources: [
+      {
+        discoveredSessions: 742,
+        importedSessions: 742,
+        label: "Codex sessions",
+        lastSyncAt: "2026-06-27T12:00:00.000Z",
+        runtime: "codex",
+        sourceId: "codex-sessions",
+        state: "connected",
+        transcriptSessions: 510
+      }
+    ],
+    coverage: {
+      enriched: 320,
+      failures: 0,
+      queued: 0,
+      sessions: 742,
+      transcripts: 510
+    },
+    status: "ready"
+  };
+}
+
 function scanDto(): SourcesOnboardingScanDto {
   return {
     adapters: [],
@@ -328,10 +409,10 @@ async function renderOpenScannedOnboarding(
     );
   });
   await act(async () => {
-    buttonByText(container, "Connect sources").click();
+    buttonByText(container, "Set up sources").click();
   });
   await act(async () => {
-    buttonByText(container, "Scan this computer").click();
+    buttonByText(container, "Check local sources").click();
   });
 }
 
