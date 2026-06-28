@@ -183,3 +183,32 @@ Verification:
 Approval-required residue:
 - Ignored local dependency artifact `node_modules/@tauri-apps/` exists as an empty directory. Removing it is destructive local cleanup, so it was not removed without approval.
 - Git still reports the pre-existing `.git/gc.log` loose-object cleanup warning during commits. Running prune/gc cleanup is destructive Git maintenance, so it was not done without approval.
+
+## Pass 8
+
+Finding: the full `npm run verify` gate exposed one real stale test contract after the daemon responsiveness hardening. `src/enrichment/__tests__/productionIntegration.test.ts` still expected a `/projection` read to schedule enrichment after a direct database message insert. That contradicts the new Electron-era performance contract from Pass 2: projection reads must stay side-effect free, and enrichment refreshes should be driven by write/import/ingest paths. The same broad verify run also showed many unrelated 5 s Vitest timeouts while the local Electron dev service and shell hooks were consuming CPU; representative isolated timeout cases passed when rerun, so those were treated as local contention after the real enrichment assertion was isolated.
+
+Action:
+- Updated the production enrichment integration test to assert `/projection` does not change the current capsule fingerprint.
+- Replaced the direct test-only database message insert with a real `/ingest` event and asserted that ingestion refreshes the stale running-session enrichment.
+- Removed the test helper that bypassed daemon ingestion and canonical refresh scheduling.
+
+Verification:
+- `npx vitest --run src/enrichment/__tests__/productionIntegration.test.ts src/core/__tests__/ingestServer.test.ts`: pass, 2 files and 16 tests.
+- Temporarily stopped `masthead-dev-electron.service` to reduce local contention, then ran `npm run verify`: pass, including no-citations, product contract, surface contract, typecheck, 153 Vitest files and 659 tests, production build, endpoint matrix, and live/compatibility/import/MCP smokes.
+- Restarted `masthead-dev-electron.service`: active.
+- Live `/health`: pass, `ok: true`, `buildVersion: 0.1.0`, allowed origins include `http://localhost:5173`, `http://127.0.0.1:5173`, and `masthead://app`.
+- Live `/projection`: pass, 34 cards and 0 diagnostics.
+- `npm run test:electron`: pass, 11 files and 36 tests.
+- `npm run test:electron-security`: pass, 3 files and 8 tests plus source security check.
+- `npm run audit:runtime`: pass, 0 vulnerabilities.
+
+Next risk:
+- The source/test/desktop/security inventory is clean enough for local checkpointing. Remaining known items require approval before action: pushing the seven-plus local commits to GitHub, removing the ignored empty `node_modules/@tauri-apps/` directory, or running destructive Git object cleanup for the pre-existing `.git/gc.log` warning.
+
+Post-commit stop state:
+- Local branch `codex/electron-desktop-migration` is clean and ahead of `origin/codex/electron-desktop-migration` by 8 commits.
+- PR #6 is open and draft against `main`. GitHub currently reports `verify`, `electron`, and `CodeQL` passing, with `Dependency review` still skipped on the older remote head. These checks are stale relative to the 8 local commits because pushing is an external publication step and was not done without approval.
+- `masthead-dev-electron.service` is active. Live `/health` reports daemon instance `7f5211f1-fad6-4d4d-9d96-0ce55d2e5ae1`, data directory `/home/tyler/.local/share/masthead-dev`, 327 canonical sessions, 2205 sources, and allowed origins `http://localhost:5173`, `http://127.0.0.1:5173`, and `masthead://app`.
+- Live `/projection` reports 34 cards and 0 diagnostics.
+- Tracked Tauri/Cargo artifact scan is empty. Ignored `node_modules/@tauri-apps/` and pre-existing `.git/gc.log` loose-object cleanup remain approval-bound local maintenance items.

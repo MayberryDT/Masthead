@@ -48,7 +48,7 @@ describe("production enrichment integration", () => {
     expect(projection.projection.cards[0].copy.source).toBe("enrichment");
   });
 
-  test("projection refresh schedules stale running-session enrichment", async () => {
+  test("live ingestion refreshes stale running-session enrichment without projection side effects", async () => {
     const { daemon } = await createTestHarness();
     const baseUrl = await listen(daemon);
 
@@ -59,9 +59,18 @@ describe("production enrichment integration", () => {
       expect(currentCapsuleFingerprint(daemon, "production-enrichment")).toBeTruthy();
     });
     const before = currentCapsuleFingerprint(daemon, "production-enrichment");
-    appendAssistantMessage(daemon, "production-enrichment", "Board refresh headlines now describe active import work.");
 
     await getJson(baseUrl, "/projection?expandedSessionId=production-enrichment");
+    expect(currentCapsuleFingerprint(daemon, "production-enrichment")).toBe(before);
+
+    await postJson(
+      baseUrl,
+      "/ingest",
+      hookPayload("refresh-update", "user_question", {
+        message: "Board refresh headlines now describe active import work.",
+        timestamp: "2026-06-25T12:02:00.000Z"
+      })
+    );
 
     await waitFor(() => {
       expect(currentCapsuleFingerprint(daemon, "production-enrichment")).not.toBe(before);
@@ -141,21 +150,6 @@ function currentCapsuleFingerprint(daemon: MastheadDaemon, sourceSessionId: stri
     )
     .get(sourceSessionId) as { fingerprint: string } | undefined;
   return row?.fingerprint;
-}
-
-function appendAssistantMessage(daemon: MastheadDaemon, sourceSessionId: string, text: string): void {
-  const session = daemon.database
-    .prepare("SELECT session_id AS sessionId FROM sessions WHERE source_session_id = ?")
-    .get(sourceSessionId) as { sessionId: string } | undefined;
-  expect(session?.sessionId).toBeTruthy();
-  const now = "2026-06-25T12:02:00.000Z";
-  daemon.database
-    .prepare(
-      `INSERT INTO messages (
-        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(`${session!.sessionId}:projection-refresh-message`, session!.sessionId, "assistant", text, "projection-refresh-hash", now, "{}", "authoritative");
 }
 
 async function waitFor(assertion: () => void): Promise<void> {
