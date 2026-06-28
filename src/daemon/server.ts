@@ -82,6 +82,7 @@ export type MastheadDaemon = {
   server: Server;
   database: MastheadDatabase;
   startBackgroundHydration: () => void;
+  waitForBackgroundHydration: () => Promise<void>;
   close: () => Promise<void>;
 };
 
@@ -1752,6 +1753,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     server,
     database,
     startBackgroundHydration,
+    waitForBackgroundHydration: () => hydrationPromise,
     close: () => {
       if (closePromise) return closePromise;
       closed = true;

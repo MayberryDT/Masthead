@@ -88,14 +88,14 @@ describe("legacy data migration", () => {
     daemons.push(daemon);
 
     daemon.startBackgroundHydration();
-    await waitFor(
-      () =>
-        Boolean(
-          daemon.database
-            .prepare("SELECT 1 FROM legacy_migrations WHERE migration_key = ?")
-            .get("legacy-events-ndjson-v1")
-        )
-    );
+    await daemon.waitForBackgroundHydration();
+    expect(
+      Boolean(
+        daemon.database
+          .prepare("SELECT 1 FROM legacy_migrations WHERE migration_key = ?")
+          .get("legacy-events-ndjson-v1")
+      )
+    ).toBe(true);
 
     const marker = daemon.database
       .prepare("SELECT details_json FROM legacy_migrations WHERE migration_key = ?")
@@ -134,15 +134,15 @@ describe("legacy data migration", () => {
     daemons.push(daemon);
 
     daemon.startBackgroundHydration();
-    await waitFor(() => countRows(daemon.database, "raw_events") === 2);
-    await waitFor(
-      () =>
-        Boolean(
-          daemon.database
-            .prepare("SELECT 1 FROM legacy_migrations WHERE migration_key = ?")
-            .get("legacy-events-ndjson-v1")
-        )
-    );
+    await daemon.waitForBackgroundHydration();
+    expect(countRows(daemon.database, "raw_events")).toBe(2);
+    expect(
+      Boolean(
+        daemon.database
+          .prepare("SELECT 1 FROM legacy_migrations WHERE migration_key = ?")
+          .get("legacy-events-ndjson-v1")
+      )
+    ).toBe(true);
 
     const marker = daemon.database
       .prepare("SELECT details_json FROM legacy_migrations WHERE migration_key = ?")
@@ -192,13 +192,4 @@ function eventRecord(id: string): StoreRecord {
 
 function countRows(db: { prepare: (sql: string) => { get: () => unknown } }, table: string): number {
   return (db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
-}
-
-async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3_000;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  expect(predicate()).toBe(true);
 }
