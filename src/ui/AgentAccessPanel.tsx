@@ -2,7 +2,7 @@ import type { McpLaunchConfigDto, McpLaunchValidationDto, McpTestConnectionDto }
 import type { McpAuditRowDto, McpStatusDto, McpToolDto } from "../app/daemonClient";
 import { McpAuditTable } from "./agent-access/McpAuditTable";
 import { McpPermissions } from "./agent-access/McpPermissions";
-import { McpSetup } from "./agent-access/McpSetup";
+import { McpSetup, type McpAuditProof } from "./agent-access/McpSetup";
 import { McpToolsTable } from "./agent-access/McpToolsTable";
 import { AppButton } from "./primitives/AppButton";
 import { StatusBadge } from "./primitives/StatusBadge";
@@ -60,7 +60,9 @@ export function AgentAccessPanel({
 
       <div className="agent-access-layout">
         <McpSetup
+          auditProof={latestSuccessfulAuditProof(audit)}
           launchConfig={launchConfig}
+          onRefreshProof={onRefresh}
           onTestConnection={onTestConnection}
           status={status}
           testConnectionResult={testConnectionResult}
@@ -91,4 +93,17 @@ function accessSummary(status: McpStatusDto): string {
   if (!status.globalAccessEnabled) return "Read-only MCP access is disabled";
   if (!status.readOnly) return "MCP is running with write access, which Masthead should not expose";
   return "Read-only MCP access is enabled";
+}
+
+function latestSuccessfulAuditProof(audit: McpAuditRowDto[]): McpAuditProof | undefined {
+  return audit
+    .filter((row) => row.status === "succeeded")
+    .sort((left, right) => new Date(right.requestedAt).getTime() - new Date(left.requestedAt).getTime())
+    .map((row) => ({
+      boundedBytes: row.boundedBytes,
+      requestedAt: row.requestedAt,
+      resultCount: row.resultCount,
+      sessionId: row.sessionIds[0],
+      toolName: row.toolName
+    }))[0];
 }

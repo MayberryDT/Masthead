@@ -10,7 +10,20 @@ import { McpSetup } from "../McpSetup";
 
 describe("McpSetup", () => {
   test("renders Codex-first setup proof flow and a real stdio launch config", () => {
-    const html = renderToStaticMarkup(<McpSetup launchConfig={launchConfig} status={status} validation={validLaunchConfig} />);
+    const html = renderToStaticMarkup(
+      <McpSetup
+        auditProof={{
+          boundedBytes: 512,
+          requestedAt: "2026-06-25T12:00:00.000Z",
+          resultCount: 1,
+          sessionId: "session:agent",
+          toolName: "get_session_excerpt"
+        }}
+        launchConfig={launchConfig}
+        status={status}
+        validation={validLaunchConfig}
+      />
+    );
 
     expect(html).toContain("Codex");
     expect(html).toContain("Connect Codex to Masthead");
@@ -19,6 +32,10 @@ describe("McpSetup", () => {
     expect(html).toContain("Proof step");
     expect(html).toContain("Ask Codex: check Masthead for information on this project.");
     expect(html).toContain("audit table records the query");
+    expect(html).toContain("Audit proof captured");
+    expect(html).toContain("get_session_excerpt succeeded with 1 result");
+    expect(html).toContain("session:agent");
+    expect(html).toContain("512 byte limit");
     expect(html.indexOf("Codex")).toBeLessThan(html.indexOf("Other MCP clients"));
     expect(html).toContain("Claude Code");
     expect(html).toContain("Cursor");
@@ -27,6 +44,34 @@ describe("McpSetup", () => {
     expect(html).toContain("/Users/tyler/Library/Application Support/Masthead/masthead.sqlite");
     expect(html).toContain("Launch config valid");
     expect(html).not.toContain("npm run mcp");
+  });
+
+  test("shows empty proof state and wires proof recheck", async () => {
+    const onRefreshProof = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <McpSetup
+          launchConfig={launchConfig}
+          onRefreshProof={onRefreshProof}
+          status={{ ...status, queryCount: 0, lastQueryAt: undefined }}
+          validation={validLaunchConfig}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain("No Codex/MCP query proof yet");
+    expect(container.textContent).toContain("Run a real Codex Masthead query, then recheck proof");
+
+    await act(async () => {
+      buttonByText(container, "Recheck proof").click();
+    });
+
+    expect(onRefreshProof).toHaveBeenCalledTimes(1);
+
+    await act(async () => root.unmount());
   });
 
   test("disables copy and shows launch config problems when validation fails", async () => {

@@ -20,6 +20,10 @@ describe("AgentAccessPanel", () => {
     expect(html).toContain("Can agents read Masthead?");
     expect(html).toContain("Read-only MCP access is enabled");
     expect(html).toContain("Refresh status");
+    expect(html).toContain("Audit proof captured");
+    expect(html).toContain("get_session_excerpt succeeded with 1 result");
+    expect(html).toContain("session:agent");
+    expect(html).toContain("Recheck proof");
     expect(html).toContain("agent-access-layout");
     expect(html).toContain("agent-access-setup-section");
     expect(html).toContain("agent-access-policy-section");
@@ -46,6 +50,24 @@ describe("AgentAccessPanel", () => {
     expect(html).not.toContain("surface-data-card");
     expect(html).not.toContain("Run command");
     expect(html).not.toContain("Git commit");
+  });
+
+  test("shows an empty audit proof state when no successful MCP query exists", () => {
+    const html = renderToStaticMarkup(
+      <AgentAccessPanel
+        audit={[]}
+        launchConfig={launchConfig}
+        launchValidation={validLaunchConfig}
+        onRefresh={() => undefined}
+        status={{ ...status, queryCount: 0, lastQueryAt: undefined }}
+        tools={tools}
+      />
+    );
+
+    expect(html).toContain("No Codex/MCP query proof yet");
+    expect(html).toContain("Run a real Codex Masthead query, then recheck proof");
+    expect(html).toContain("Recheck proof");
+    expect(html).not.toContain("Audit proof captured");
   });
 });
 

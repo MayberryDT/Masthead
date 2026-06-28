@@ -8,8 +8,18 @@ import { StatusBadge, type StatusBadgeTone } from "../primitives/StatusBadge";
 type ClientId = "codex" | "claude" | "cursor" | "generic";
 type TestConnectionState = "idle" | "testing" | "passed" | "failed";
 
+export type McpAuditProof = {
+  boundedBytes?: number;
+  requestedAt: string;
+  resultCount: number;
+  sessionId?: string;
+  toolName: string;
+};
+
 type McpSetupProps = {
+  auditProof?: McpAuditProof;
   launchConfig?: McpLaunchConfigDto;
+  onRefreshProof?: () => void;
   onTestConnection?: () => Promise<McpTestConnectionDto>;
   status: McpStatusDto;
   testConnectionResult?: McpTestConnectionDto;
@@ -28,7 +38,9 @@ const primaryClient = clients[0];
 const secondaryClients = clients.slice(1);
 
 export function McpSetup({
+  auditProof,
   launchConfig,
+  onRefreshProof,
   onTestConnection,
   status,
   testConnectionResult,
@@ -76,8 +88,8 @@ export function McpSetup({
           <p className="mono-label">Set up a client</p>
           <h2 id="mcp-setup-title">Connect Codex to Masthead</h2>
           <p className="agent-access-setup-copy">
-            Start with Codex. Once the launch test passes, ask Codex to check Masthead for information on this project and confirm the
-            answer uses Masthead context.
+            Start with Codex. The launch test only proves the MCP server can start; audit proof appears after Codex uses a Masthead read
+            tool.
           </p>
         </div>
         <StatusBadge tone={status.ready && validation?.valid ? "active" : "warning"}>
@@ -156,6 +168,7 @@ export function McpSetup({
         <p>Ask Codex: check Masthead for information on this project.</p>
         <p>Then confirm the answer includes Masthead session context and the audit table records the query.</p>
       </div>
+      <AuditProofState proof={auditProof} onRefreshProof={onRefreshProof} />
     </section>
   );
 }
@@ -211,6 +224,33 @@ function TestConnectionEvidence({ result, state }: { result?: McpTestConnectionD
       ))}
     </div>
   );
+}
+
+function AuditProofState({ proof, onRefreshProof }: { proof?: McpAuditProof; onRefreshProof?: () => void }) {
+  return (
+    <div className={`agent-access-proof-state ${proof ? "agent-access-proof-state-captured" : "agent-access-proof-state-empty"}`} aria-live="polite">
+      <div className="agent-access-proof-state-head">
+        <div>
+          <p className="mono-label">Audit proof</p>
+          <h3>{proof ? "Audit proof captured" : "No Codex/MCP query proof yet"}</h3>
+        </div>
+        <StatusBadge tone={proof ? "active" : "warning"}>{proof ? "Recorded" : "Waiting"}</StatusBadge>
+      </div>
+      <p>{proof ? proofSummary(proof) : "Run a real Codex Masthead query, then recheck proof to confirm Masthead recorded it."}</p>
+      {onRefreshProof ? (
+        <AppButton onClick={onRefreshProof} variant="quiet">
+          Recheck proof
+        </AppButton>
+      ) : null}
+    </div>
+  );
+}
+
+function proofSummary(proof: McpAuditProof): string {
+  const resultText = `${proof.resultCount} ${proof.resultCount === 1 ? "result" : "results"}`;
+  const sessionText = proof.sessionId ? ` against ${proof.sessionId}` : " without a referenced session";
+  const boundedText = proof.boundedBytes === undefined ? "" : ` using a ${proof.boundedBytes} byte limit`;
+  return `${proof.toolName} succeeded with ${resultText}${sessionText}${boundedText}.`;
 }
 
 function validationProblems(

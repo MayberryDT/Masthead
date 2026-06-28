@@ -189,6 +189,7 @@
 .agent-access-check,
 .agent-access-problems,
 .agent-access-proof-step,
+.agent-access-proof-state,
 .agent-access-test-evidence {
   border: 1px solid rgba(92, 153, 187, 0.13);
   border-radius: 5px;
@@ -203,6 +204,7 @@
 
 .agent-access-check span,
 .agent-access-proof-step p,
+.agent-access-proof-state p,
 .agent-access-test-evidence p,
 .agent-access-problems li,
 .agent-access-test-evidence li {
@@ -227,10 +229,41 @@
 
 .agent-access-problems .mono-label,
 .agent-access-proof-step p,
+.agent-access-proof-state p,
 .agent-access-problems ul,
 .agent-access-test-evidence p,
 .agent-access-test-evidence ul {
   margin: 0;
+}
+
+.agent-access-proof-state {
+  display: grid;
+  gap: 9px;
+}
+
+.agent-access-proof-state-captured {
+  border-color: rgba(89, 212, 153, 0.18);
+  background: rgba(89, 212, 153, 0.07);
+}
+
+.agent-access-proof-state-empty {
+  border-color: rgba(255, 207, 54, 0.22);
+  background: rgba(255, 207, 54, 0.07);
+}
+
+.agent-access-proof-state-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-access-proof-state h3 {
+  margin: 2px 0 0;
+  color: var(--ink, #f6fbff);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
 }
 
 .agent-access-proof-step {
@@ -384,6 +417,11 @@
   }
 
   .agent-access-section-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .agent-access-proof-state-head {
     align-items: stretch;
     flex-direction: column;
   }
