@@ -61,7 +61,6 @@ export function LogbookInspector({ compactHeader = false, excerpts, loading = fa
           ) : null}
           <div className="logbook-inspector-columns">
             <DetailList label="Topics" values={session.topics} />
-            <DetailList label="Files" values={session.files} />
             <DetailList label="Tools" values={session.tools} />
             <DetailList label="Unresolved" values={session.unresolved} tone="attention" />
           </div>

@@ -24,7 +24,6 @@ const filters: Array<{ label: string; value: SessionTranscriptKindFilter }> = [
   { label: "Assistant", value: "assistant" },
   { label: "Tools", value: "tools" },
   { label: "Checkpoints", value: "checkpoints" },
-  { label: "Files", value: "files" },
   { label: "Signals", value: "signals" }
 ];
 
@@ -40,7 +39,8 @@ export function DossierTranscript({
   transcript
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const renderedItems = compressLowValueRuns(transcript?.items ?? []);
+  const visibleTranscriptItems = (transcript?.items ?? []).filter((item) => item.kind !== "file_effect");
+  const renderedItems = compressLowValueRuns(visibleTranscriptItems);
   const hasUsableTranscript = transcript?.coverage.hasUsableTranscript ?? false;
   const hasQuery = query.trim().length > 0;
 

@@ -32,7 +32,6 @@ export function LogbookRow({ density, onSelect, selected = false, session }: Pro
         <span className="logbook-source-confidence">{statusLabel(session.sourceConfidence ?? "inferred")}</span>
         <span>{session.hostId ?? session.host ?? session.sourceSessionId ?? "Source pending"}</span>
       </td>
-      <td className="logbook-number logbook-col-count">{session.fileCount ?? 0}</td>
       <td className="logbook-number logbook-col-count">{session.toolCount ?? 0}</td>
       <td className={`logbook-number logbook-col-count ${(session.errorCount ?? 0) > 0 ? "attention" : ""}`.trim()}>{session.errorCount ?? 0}</td>
       <td className="logbook-col-duration logbook-desktop-column">{durationLabel(session.startedAt, session.endedAt)}</td>

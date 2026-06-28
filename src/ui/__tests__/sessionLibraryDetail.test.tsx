@@ -18,8 +18,12 @@ describe("SessionLibraryDetail", () => {
     expect(html).toContain("Repair OAuth callback");
     expect(html).toContain("Session dossier");
     expect(html).toContain("Canonical ID");
+    expect(html).toContain("Enrichment");
+    expect(html).toContain("Transcript");
+    expect(html).toContain("Advanced details");
     expect(html).toContain("OAuth route still fails");
-    expect(html).toContain("src/app/App.tsx");
+    expect(html).not.toContain("src/app/App.tsx");
+    expect(html).not.toContain("<h4>Files</h4>");
     expect(html).toContain('class="icon-button"');
     expect(html).not.toContain("surface-inline-action");
   });

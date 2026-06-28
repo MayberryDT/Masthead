@@ -38,7 +38,7 @@ function coverageTitle(level: SessionDossierDto["coverage"]["level"]): string {
 }
 
 function coverageSummary(level: SessionDossierDto["coverage"]["level"]): string {
-  if (level === "complete") return "Transcript, tools, files, and verification records are available.";
+  if (level === "complete") return "Transcript, tools, and verification records are available.";
   if (level === "partial") return "Masthead has useful session data, but some evidence is missing.";
   if (level === "hook_only") return "Masthead captured live hook metadata, but no imported transcript.";
   return "Only sparse session metadata is available.";

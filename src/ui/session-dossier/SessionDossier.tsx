@@ -6,7 +6,7 @@ import type { SessionDossierDto, SessionDossierTimelineEvent } from "../../share
 import { DossierCoverageBanner } from "./DossierCoverageBanner";
 import { DossierTranscript } from "./DossierTranscript";
 
-type TimelineFilter = "all" | "user" | "assistant" | "tools" | "files" | "checkpoints" | "attention";
+type TimelineFilter = "all" | "user" | "assistant" | "tools" | "checkpoints" | "attention";
 type CopyState = "idle" | "copied" | "unavailable" | "failed";
 
 type Props = {
@@ -56,18 +56,18 @@ export function SessionDossier({
 }: Props) {
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("all");
   const [showAllTimeline, setShowAllTimeline] = useState(false);
-  const [showAllFiles, setShowAllFiles] = useState(false);
   const [showAllTools, setShowAllTools] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const identity = dossier?.identity;
   const title = identity?.title ?? live?.copy.headline ?? live?.title ?? "Session";
   const subtitle = [identity?.project ?? live?.project, identity?.runtime ?? live?.runtime, identity?.model ?? live?.model]
     .filter(Boolean)
     .join(" · ");
-  const filteredTimeline = useMemo(() => filterTimeline(dossier?.timeline ?? liveTimeline(live), timelineFilter), [dossier?.timeline, live, timelineFilter]);
+  const timelineEvents = useMemo(() => (dossier?.timeline ?? liveTimeline(live)).filter((event) => event.kind !== "file"), [dossier?.timeline, live]);
+  const filteredTimeline = useMemo(() => filterTimeline(timelineEvents, timelineFilter), [timelineEvents, timelineFilter]);
   const visibleTimeline = showAllTimeline ? filteredTimeline : filteredTimeline.slice(-30);
   const availableActions = live?.safeActions.filter((action) => safeDossierActions.has(action)) ?? [];
-  const visibleFiles = showAllFiles ? dossier?.files : dossier?.files.slice(0, 12);
   const visibleTools = showAllTools ? dossier?.tools : dossier?.tools.slice(0, 12);
 
   const copyContext = async (value?: string) => {
@@ -111,21 +111,20 @@ export function SessionDossier({
           <DossierMetric label="Tokens" value={formatNumber(dossier?.usage.totalTokens ?? live?.totalTokens)} />
           <DossierMetric label="Input" value={formatNumber(dossier?.usage.inputTokens)} />
           <DossierMetric label="Output" value={formatNumber(dossier?.usage.outputTokens)} />
-          <DossierMetric label="Files" value={formatNumber(dossier?.files.length ?? live?.changedFileCount)} />
+          <DossierMetric label="Messages" value={formatNumber(dossier?.coverage.transcript.messages)} />
         </div>
       </section>
 
       <DossierCoverageBanner coverage={dossier?.coverage} onOpenSources={onOpenSources} />
 
       <div className="dossier-grid">
-        <DossierPanel title="Overview" className="dossier-panel-span">
+        <DossierPanel title="Enrichment" className="dossier-panel-span">
           <div className="dossier-copy-stack">
+            <DossierCopyBlock label="Summary" value={dossier?.narrative.liveSummary ?? live?.currentActivity} />
             <DossierCopyBlock label="Objective" value={dossier?.narrative.objective ?? live?.copy.reason} />
-            <DossierCopyBlock label="First prompt" value={dossier?.narrative.firstUserPrompt} />
             <DossierCopyBlock label="Outcome" value={dossier?.narrative.outcome ?? live?.copy.status} />
-            <DossierCopyBlock label="Current summary" value={dossier?.narrative.liveSummary ?? live?.currentActivity} />
+            <DossierCopyBlock label="First prompt" value={dossier?.narrative.firstUserPrompt} />
             <DossierCopyBlock label="Latest prompt" value={dossier?.narrative.latestUserPrompt} />
-            <DossierCopyBlock label="Final assistant note" value={dossier?.narrative.finalAssistantMessage ?? live?.latestFeedback?.text} />
             <DossierTags label="Topics" values={dossier?.narrative.topics} />
             <DossierTags label="Technologies" values={dossier?.narrative.technologies} />
             <DossierTags label="Unresolved" values={dossier?.narrative.unresolved} />
@@ -147,136 +146,13 @@ export function SessionDossier({
           />
         </DossierPanel>
 
-        <DossierPanel title="Verification">
-          <p className={`dossier-status dossier-status-${dossier?.verification.status ?? "unknown"}`}>
-            {dossier?.verification.summary ?? verificationFallback(live)}
-          </p>
-          <ListEmpty empty="No verification commands captured.">
-            {dossier?.verification.commands.slice(0, 5).map((tool) => (
-              <li key={tool.toolCallId}>
-                <strong>{tool.toolName}</strong>
-                <span>{tool.status ?? "unknown"}</span>
-              </li>
-            ))}
-          </ListEmpty>
-        </DossierPanel>
-
-        <DossierPanel title="Needs attention">
-          <ListEmpty empty="No attention items captured.">
-            {(dossier?.attention ?? liveAttention(live)).slice(0, 6).map((item) => (
-              <li key={`${item.kind}:${item.title}`}>
-                <strong>{item.title}</strong>
-                <span>{item.detail ?? item.severity}</span>
-              </li>
-            ))}
-          </ListEmpty>
-        </DossierPanel>
-
-        <DossierPanel title="Files">
-          <ListEmpty empty="No file effects captured.">
-            {visibleFiles?.map((file) => (
-              <li key={file.fileEffectId}>
-                <strong>{file.displayPath}</strong>
-                <span>{file.effectKind}{formatDelta(file.additions, file.deletions)}</span>
-              </li>
-            ))}
-          </ListEmpty>
-          {dossier && dossier.files.length > 12 ? (
-            <button type="button" className="dossier-link-button" onClick={() => setShowAllFiles((current) => !current)}>
-              {showAllFiles ? "Show fewer files" : `Show ${dossier.files.length - 12} more files`}
-            </button>
-          ) : null}
-        </DossierPanel>
-
-        <DossierPanel title="Tools">
-          <ListEmpty empty="No tool calls captured.">
-            {visibleTools?.map((tool) => (
-              <li key={tool.toolCallId} className={tool.status === "failed" || (tool.exitCode !== undefined && tool.exitCode !== 0) ? "is-failed" : ""}>
-                <div>
-                  <strong>{tool.toolName}</strong>
-                  {tool.outputPreview ? <small className="dossier-list-preview">{tool.outputPreview}</small> : null}
-                </div>
-                <span>{tool.status ?? tool.category ?? "captured"}{tool.exitCode !== undefined ? ` · exit ${tool.exitCode}` : ""}</span>
-              </li>
-            ))}
-          </ListEmpty>
-          {dossier && dossier.tools.length > 12 ? (
-            <button type="button" className="dossier-link-button" onClick={() => setShowAllTools((current) => !current)}>
-              {showAllTools ? "Show fewer tools" : `Show ${dossier.tools.length - 12} more tools`}
-            </button>
-          ) : null}
-        </DossierPanel>
-
-        <DossierPanel title="Transcript excerpts" className="dossier-panel-span">
-          <ListEmpty empty="No transcript excerpts captured.">
-            {dossier?.excerpts.map((excerpt) => (
-              <li key={excerpt.excerptId}>
-                <strong>{excerpt.role ?? excerpt.kind}</strong>
-                <span>{excerpt.text}</span>
-              </li>
-            ))}
-          </ListEmpty>
-        </DossierPanel>
-
-        <DossierPanel title="Timeline" className="dossier-panel-span">
-          <div className="dossier-filter-row" aria-label="Timeline filters">
-            {(["all", "user", "assistant", "tools", "files", "checkpoints", "attention"] as TimelineFilter[]).map((filter) => (
-              <button
-                key={filter}
-                type="button"
-                className={filter === timelineFilter ? "is-active" : ""}
-                onClick={() => {
-                  setTimelineFilter(filter);
-                  setShowAllTimeline(false);
-                }}
-              >
-                {timelineLabel(filter)}
-              </button>
-            ))}
-          </div>
-          <ol className="dossier-timeline">
-            {visibleTimeline.length > 0 ? (
-              visibleTimeline.map((event) => (
-                <li key={event.eventId}>
-                  <time dateTime={event.observedAt}>{formatDateTime(event.observedAt)}</time>
-                  <div>
-                    <strong>{event.label}</strong>
-                    <span>{event.summary}</span>
-                    {formatSourceRef(event.sourceRef) ? <small>{formatSourceRef(event.sourceRef)}</small> : null}
-                  </div>
-                </li>
-              ))
-            ) : (
-              <li className="dossier-empty">No timeline events captured.</li>
-            )}
-          </ol>
-          {filteredTimeline.length > 30 ? (
-            <button type="button" className="dossier-link-button" onClick={() => setShowAllTimeline((current) => !current)}>
-              {showAllTimeline ? "Show less" : `Show ${filteredTimeline.length - 30} more`}
-            </button>
-          ) : null}
-        </DossierPanel>
-
-        <DossierPanel title="Token usage">
-          {dossier?.usage.usageRows ? (
-            <div className="dossier-provenance dossier-provenance-compact">
-              <DossierMetric label="Input tokens" value={formatNumber(dossier.usage.inputTokens)} />
-              <DossierMetric label="Output tokens" value={formatNumber(dossier.usage.outputTokens)} />
-              <DossierMetric label="Total tokens" value={formatNumber(dossier.usage.totalTokens)} />
-              <DossierMetric label="Rows" value={formatNumber(dossier.usage.usageRows)} />
-            </div>
-          ) : (
-            <p className="dossier-muted">Token usage not captured.</p>
-          )}
-        </DossierPanel>
-
         <DossierPanel title="Context packet">
           <div className="dossier-copy-actions">
             <button type="button" onClick={() => copyContext(dossier?.reuse.copyableContext)}>
               Copy context
             </button>
             <button type="button" onClick={() => copyContext(identity?.sessionId ?? live?.canonicalSessionId)}>
-              Copy canonical ID
+              Copy Canonical ID
             </button>
             <button type="button" onClick={() => copyContext(identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId)}>
               Copy source ID
@@ -285,51 +161,168 @@ export function SessionDossier({
           <p className="dossier-muted">{copyFeedback(copyState)}</p>
         </DossierPanel>
 
-        <DossierPanel title="Review actions">
-          {availableActions.length > 0 && live && onAction ? (
-            <div className="dossier-action-row">
-              {availableActions.map((action) => (
-                <button key={action} type="button" onClick={() => onAction(action, live)}>
-                  {actionLabel(action)}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="dossier-muted">No safe review actions are available for this session.</p>
-          )}
-          {actionStatus ? <p className="dossier-muted">{actionStatus}</p> : null}
-        </DossierPanel>
+        <div className="dossier-advanced-actions">
+          <button type="button" className="dossier-link-button" onClick={() => setAdvancedOpen((current) => !current)}>
+            {advancedOpen ? "Hide advanced details" : "Advanced details"}
+          </button>
+        </div>
 
-        <DossierPanel title="Provenance" className="dossier-panel-span">
-          <div className="dossier-provenance">
-            <DossierMetric label="Canonical ID" value={identity?.sessionId ?? live?.canonicalSessionId ?? "-"} />
-            <DossierMetric label="Source ID" value={identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId ?? "-"} />
-            <DossierMetric label="MCP included" value={dossier ? (dossier.reuse.mcpIncluded ? "Yes" : "No") : "-"} />
-            <DossierMetric label="Confidence" value={identity?.sourceConfidence ?? live?.identityConfidence ?? "Unknown"} />
-          </div>
-          <div className="dossier-narrative-debug">
-            <h5>Narrative evidence</h5>
-            {dossier?.narrative.narrativeDebug ? (
-              <>
+        {advancedOpen ? (
+          <section className="dossier-advanced-details" aria-label="Advanced session details">
+            <DossierPanel title="Verification">
+              <p className={`dossier-status dossier-status-${dossier?.verification.status ?? "unknown"}`}>
+                {dossier?.verification.summary ?? verificationFallback(live)}
+              </p>
+              <ListEmpty empty="No verification commands captured.">
+                {dossier?.verification.commands.slice(0, 5).map((tool) => (
+                  <li key={tool.toolCallId}>
+                    <strong>{tool.toolName}</strong>
+                    <span>{tool.status ?? "unknown"}</span>
+                  </li>
+                ))}
+              </ListEmpty>
+            </DossierPanel>
+
+            <DossierPanel title="Needs attention">
+              <ListEmpty empty="No attention items captured.">
+                {(dossier?.attention ?? liveAttention(live)).slice(0, 6).map((item) => (
+                  <li key={`${item.kind}:${item.title}`}>
+                    <strong>{item.title}</strong>
+                    <span>{item.detail ?? item.severity}</span>
+                  </li>
+                ))}
+              </ListEmpty>
+            </DossierPanel>
+
+            <DossierPanel title="Tools">
+              <ListEmpty empty="No tool calls captured.">
+                {visibleTools?.map((tool) => (
+                  <li key={tool.toolCallId} className={tool.status === "failed" || (tool.exitCode !== undefined && tool.exitCode !== 0) ? "is-failed" : ""}>
+                    <div>
+                      <strong>{tool.toolName}</strong>
+                      {tool.outputPreview ? <small className="dossier-list-preview">{tool.outputPreview}</small> : null}
+                    </div>
+                    <span>{tool.status ?? tool.category ?? "captured"}{tool.exitCode !== undefined ? ` · exit ${tool.exitCode}` : ""}</span>
+                  </li>
+                ))}
+              </ListEmpty>
+              {dossier && dossier.tools.length > 12 ? (
+                <button type="button" className="dossier-link-button" onClick={() => setShowAllTools((current) => !current)}>
+                  {showAllTools ? "Show fewer tools" : `Show ${dossier.tools.length - 12} more tools`}
+                </button>
+              ) : null}
+            </DossierPanel>
+
+            <DossierPanel title="Transcript excerpts" className="dossier-panel-span">
+              <ListEmpty empty="No transcript excerpts captured.">
+                {dossier?.excerpts.map((excerpt) => (
+                  <li key={excerpt.excerptId}>
+                    <strong>{excerpt.role ?? excerpt.kind}</strong>
+                    <span>{excerpt.text}</span>
+                  </li>
+                ))}
+              </ListEmpty>
+            </DossierPanel>
+
+            <DossierPanel title="Timeline" className="dossier-panel-span">
+              <div className="dossier-filter-row" aria-label="Timeline filters">
+                {(["all", "user", "assistant", "tools", "checkpoints", "attention"] as TimelineFilter[]).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    className={filter === timelineFilter ? "is-active" : ""}
+                    onClick={() => {
+                      setTimelineFilter(filter);
+                      setShowAllTimeline(false);
+                    }}
+                  >
+                    {timelineLabel(filter)}
+                  </button>
+                ))}
+              </div>
+              <ol className="dossier-timeline">
+                {visibleTimeline.length > 0 ? (
+                  visibleTimeline.map((event) => (
+                    <li key={event.eventId}>
+                      <time dateTime={event.observedAt}>{formatDateTime(event.observedAt)}</time>
+                      <div>
+                        <strong>{event.label}</strong>
+                        <span>{event.summary}</span>
+                        {formatSourceRef(event.sourceRef) ? <small>{formatSourceRef(event.sourceRef)}</small> : null}
+                      </div>
+                    </li>
+                  ))
+                ) : (
+                  <li className="dossier-empty">No timeline events captured.</li>
+                )}
+              </ol>
+              {filteredTimeline.length > 30 ? (
+                <button type="button" className="dossier-link-button" onClick={() => setShowAllTimeline((current) => !current)}>
+                  {showAllTimeline ? "Show less" : `Show ${filteredTimeline.length - 30} more`}
+                </button>
+              ) : null}
+            </DossierPanel>
+
+            <DossierPanel title="Token usage">
+              {dossier?.usage.usageRows ? (
                 <div className="dossier-provenance dossier-provenance-compact">
-                  <DossierMetric label="Title source" value={dossier.narrative.narrativeDebug.titleSource ?? "-"} />
-                  <DossierMetric label="Subject source" value={dossier.narrative.narrativeDebug.subjectSource ?? "-"} />
-                  <DossierMetric label="Provider" value={dossier.narrative.narrativeDebug.provider ?? "deterministic"} />
-                  <DossierMetric label="Model" value={dossier.narrative.narrativeDebug.model ?? "local-rules"} />
-                  <DossierMetric label="Prompt version" value={dossier.narrative.narrativeDebug.promptVersion ?? "-"} />
-                  <DossierMetric label="Evidence refs" value={formatNumber(dossier.narrative.narrativeDebug.sourceRefs.length)} />
+                  <DossierMetric label="Input tokens" value={formatNumber(dossier.usage.inputTokens)} />
+                  <DossierMetric label="Output tokens" value={formatNumber(dossier.usage.outputTokens)} />
+                  <DossierMetric label="Total tokens" value={formatNumber(dossier.usage.totalTokens)} />
+                  <DossierMetric label="Rows" value={formatNumber(dossier.usage.usageRows)} />
                 </div>
-                <ul className="dossier-evidence-list">
-                  {dossier.narrative.narrativeDebug.sourceRefs.slice(0, 6).map((ref, index) => (
-                    <li key={`${ref.id}:${index}`}>{formatSourceRef(ref) ?? ref.id}</li>
+              ) : (
+                <p className="dossier-muted">Token usage not captured.</p>
+              )}
+            </DossierPanel>
+
+            <DossierPanel title="Review actions">
+              {availableActions.length > 0 && live && onAction ? (
+                <div className="dossier-action-row">
+                  {availableActions.map((action) => (
+                    <button key={action} type="button" onClick={() => onAction(action, live)}>
+                      {actionLabel(action)}
+                    </button>
                   ))}
-                </ul>
-              </>
-            ) : (
-              <p className="dossier-muted">Narrative not generated yet.</p>
-            )}
-          </div>
-        </DossierPanel>
+                </div>
+              ) : (
+                <p className="dossier-muted">No safe review actions are available for this session.</p>
+              )}
+              {actionStatus ? <p className="dossier-muted">{actionStatus}</p> : null}
+            </DossierPanel>
+
+            <DossierPanel title="Provenance" className="dossier-panel-span">
+              <div className="dossier-provenance">
+                <DossierMetric label="Canonical ID" value={identity?.sessionId ?? live?.canonicalSessionId ?? "-"} />
+                <DossierMetric label="Source ID" value={identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId ?? "-"} />
+                <DossierMetric label="MCP included" value={dossier ? (dossier.reuse.mcpIncluded ? "Yes" : "No") : "-"} />
+                <DossierMetric label="Confidence" value={identity?.sourceConfidence ?? live?.identityConfidence ?? "Unknown"} />
+              </div>
+              <div className="dossier-narrative-debug">
+                <h5>Narrative evidence</h5>
+                {dossier?.narrative.narrativeDebug ? (
+                  <>
+                    <div className="dossier-provenance dossier-provenance-compact">
+                      <DossierMetric label="Title source" value={dossier.narrative.narrativeDebug.titleSource ?? "-"} />
+                      <DossierMetric label="Subject source" value={dossier.narrative.narrativeDebug.subjectSource ?? "-"} />
+                      <DossierMetric label="Provider" value={dossier.narrative.narrativeDebug.provider ?? "deterministic"} />
+                      <DossierMetric label="Model" value={dossier.narrative.narrativeDebug.model ?? "local-rules"} />
+                      <DossierMetric label="Prompt version" value={dossier.narrative.narrativeDebug.promptVersion ?? "-"} />
+                      <DossierMetric label="Evidence refs" value={formatNumber(dossier.narrative.narrativeDebug.sourceRefs.length)} />
+                    </div>
+                    <ul className="dossier-evidence-list">
+                      {dossier.narrative.narrativeDebug.sourceRefs.slice(0, 6).map((ref, index) => (
+                        <li key={`${ref.id}:${index}`}>{formatSourceRef(ref) ?? ref.id}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="dossier-muted">Narrative not generated yet.</p>
+                )}
+              </div>
+            </DossierPanel>
+          </section>
+        ) : null}
       </div>
     </section>
   );
@@ -388,7 +381,6 @@ function filterTimeline(events: SessionDossierTimelineEvent[], filter: TimelineF
   if (filter === "user") return events.filter((event) => event.kind === "user");
   if (filter === "assistant") return events.filter((event) => event.kind === "assistant");
   if (filter === "tools") return events.filter((event) => event.kind === "tool");
-  if (filter === "files") return events.filter((event) => event.kind === "file");
   if (filter === "checkpoints") return events.filter((event) => event.kind === "checkpoint");
   return events.filter((event) => event.kind === "attention" || event.kind === "runtime_signal");
 }
@@ -437,7 +429,6 @@ function timelineLabel(filter: TimelineFilter): string {
   if (filter === "user") return "User";
   if (filter === "assistant") return "Assistant";
   if (filter === "tools") return "Tools";
-  if (filter === "files") return "Files";
   if (filter === "checkpoints") return "Checkpoints";
   return "Attention";
 }
@@ -453,11 +444,6 @@ function actionLabel(action: SafeAction): string {
 function formatNumber(value?: number): string {
   if (typeof value !== "number") return "-";
   return formatter.format(value);
-}
-
-function formatDelta(additions?: number, deletions?: number): string {
-  if (additions === undefined && deletions === undefined) return "";
-  return ` · +${additions ?? 0}/-${deletions ?? 0}`;
 }
 
 function formatSourceRef(value: unknown): string | undefined {
