@@ -17,12 +17,18 @@ export function HookSettings({ busy = false, hooks, onInstall, onTest, onUninsta
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed" | "unavailable">("idle");
 
   async function copyEndpoint(): Promise<void> {
-    if (!hooks?.endpoint || !navigator.clipboard?.writeText) {
+    const clipboard = globalThis.navigator?.clipboard;
+    if (!hooks?.endpoint || !clipboard?.writeText) {
       setCopyState("unavailable");
       return;
     }
     try {
-      await navigator.clipboard.writeText(hooks.endpoint);
+      await Promise.race([
+        clipboard.writeText(hooks.endpoint),
+        new Promise((_, reject) => {
+          window.setTimeout(() => reject(new Error("Clipboard write timed out")), 1000);
+        })
+      ]);
       setCopyState("copied");
       window.setTimeout(() => setCopyState("idle"), 1400);
     } catch {
