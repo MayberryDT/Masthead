@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AdapterStatus, ImportJob, SourceStatus, SourceStatusPage } from "../app/daemonClient";
-import { AppButton } from "./primitives/AppButton";
 import { AdapterList } from "./sources/AdapterList";
 import { ImportJobsTable } from "./sources/ImportJobsTable";
+import { SourcesAdvancedDiagnostics } from "./sources/SourcesAdvancedDiagnostics";
+import { SourcesConnectedDashboard } from "./sources/SourcesConnectedDashboard";
+import { SourcesEmptyState } from "./sources/SourcesEmptyState";
+import { SourcesOnboardingModal } from "./sources/SourcesOnboardingModal";
 
 type Props = {
   adapters?: AdapterStatus[];
@@ -28,131 +31,87 @@ type Props = {
   onSyncAdapter?: (runtime: string) => void;
 };
 
-export function SourcesPanel({
-  adapters,
-  busy,
-  imports = [],
-  importLimit,
-  importOffset,
-  importTotal,
-  onCancelImport,
-  onEnableTranscriptImport,
-  onExcludePath,
-  onImportMetadata,
-  onImportTranscripts,
-  onLoadAdapterSources,
-  onLoadMoreImports,
-  onPollImports,
-  onConnectSelected,
-  onRefresh,
-  onScan,
-  onRetryImport,
-  onSyncAdapter,
-  sources,
-  status
-}: Props) {
+export function SourcesPanel(props: Props) {
+  const { adapters, busy, imports = [], sources, status } = props;
   const adapterRows = adapters ?? adaptersFromSources(sources);
+  const connectedAdapters = useMemo(() => adapterRows.filter(isConnectedAdapter), [adapterRows]);
   const activeRuntimes = useMemo(() => adapterRows.filter((adapter) => adapter.runtime !== "gemini_cli" && adapter.state !== "planned").map((adapter) => adapter.runtime), [adapterRows]);
   const [selectedRuntimes, setSelectedRuntimes] = useState<Set<string>>(() => new Set());
-  const totals = sourceTotals(adapterRows);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const activeImportCount = imports.filter((job) => job.status === "queued" || job.status === "running").length;
-  const selectedList = Array.from(selectedRuntimes).filter((runtime) => activeRuntimes.includes(runtime));
 
   useEffect(() => {
-    setSelectedRuntimes((current) => {
-      if (current.size > 0) return current;
-      return new Set(activeRuntimes);
-    });
+    setSelectedRuntimes((current) => (current.size > 0 ? current : new Set(activeRuntimes)));
   }, [activeRuntimes]);
 
   useEffect(() => {
-    if (activeImportCount === 0 || !onPollImports) return undefined;
-    const timer = window.setInterval(() => {
-      onPollImports();
-    }, 1_500);
+    if (activeImportCount === 0 || !props.onPollImports) return undefined;
+    const timer = window.setInterval(() => props.onPollImports?.(), 1_500);
     return () => window.clearInterval(timer);
-  }, [activeImportCount, onPollImports]);
+  }, [activeImportCount, props.onPollImports]);
+
+  const syncConnected = () => {
+    for (const adapter of connectedAdapters) props.onSyncAdapter?.(adapter.runtime);
+  };
 
   return (
     <section id="sources" className="sources-panel sources-management surface-panel" aria-label="Session sources">
-      <div className="sources-action-bar">
-        <div className="sources-action-group">
-          <AppButton type="button" onClick={onScan ?? onRefresh} disabled={busy}>
-            Scan this computer
-          </AppButton>
-          <AppButton type="button" onClick={onRefresh} disabled={busy}>
-            Discover sources
-          </AppButton>
-          <AppButton
-            type="button"
-            variant="primary"
-            onClick={() => onConnectSelected?.(selectedList)}
-            disabled={busy || !onConnectSelected || selectedList.length === 0}
-          >
-            Connect selected
-          </AppButton>
-          <AppButton
-            type="button"
-            variant="quiet"
-            onClick={() => selectedList.forEach((runtime) => onSyncAdapter?.(runtime))}
-            disabled={busy || !onSyncAdapter || selectedList.length === 0}
-          >
-            Sync connected
-          </AppButton>
-        </div>
-        <dl className="sources-action-summary" aria-label="Source summary">
-          <div>
-            <dt>Adapters</dt>
-            <dd>{adapterRows.length}</dd>
-          </div>
-          <div>
-            <dt>Selected</dt>
-            <dd>{selectedList.length}</dd>
-          </div>
-          <div>
-            <dt>Sessions</dt>
-            <dd>{totals.sessions}</dd>
-          </div>
-          <div>
-            <dt>Queued</dt>
-            <dd>{totals.queued}</dd>
-          </div>
-          <div>
-            <dt>Issues</dt>
-            <dd>{totals.failures}</dd>
-          </div>
-        </dl>
-        {status ? <p className="sources-status surface-status">{status}</p> : null}
-      </div>
+      {connectedAdapters.length === 0 ? (
+        <SourcesEmptyState busy={busy} onConnectSources={() => setOnboardingOpen(true)} onShowAdvanced={() => setAdvancedOpen(true)} status={status} />
+      ) : (
+        <SourcesConnectedDashboard
+          adapters={connectedAdapters}
+          busy={busy}
+          onAddSource={() => setOnboardingOpen(true)}
+          onRepairMissingData={syncConnected}
+          onShowAdvanced={() => setAdvancedOpen(true)}
+          onSyncSources={syncConnected}
+          status={status}
+        />
+      )}
 
-      <AdapterList
+      {advancedOpen ? (
+        <SourcesAdvancedDiagnostics onClose={() => setAdvancedOpen(false)}>
+          <AdapterList
+            adapters={adapterRows}
+            busy={busy}
+            onEnableTranscriptImport={props.onEnableTranscriptImport}
+            onExcludePath={props.onExcludePath}
+            onImportMetadata={props.onImportMetadata}
+            onImportTranscripts={props.onImportTranscripts}
+            onLoadAdapterSources={props.onLoadAdapterSources}
+            onToggleSelected={(runtime, checked) => {
+              setSelectedRuntimes((current) => {
+                const next = new Set(current);
+                if (checked) next.add(runtime);
+                else next.delete(runtime);
+                return next;
+              });
+            }}
+            onSyncAdapter={props.onSyncAdapter}
+            selectedRuntimes={selectedRuntimes}
+          />
+          <ImportJobsTable
+            busy={busy}
+            imports={imports}
+            limit={props.importLimit}
+            offset={props.importOffset}
+            onCancelImport={props.onCancelImport}
+            onLoadMore={props.onLoadMoreImports}
+            onRetryImport={props.onRetryImport}
+            total={props.importTotal}
+          />
+        </SourcesAdvancedDiagnostics>
+      ) : null}
+
+      <SourcesOnboardingModal
         adapters={adapterRows}
         busy={busy}
-        onEnableTranscriptImport={onEnableTranscriptImport}
-        onExcludePath={onExcludePath}
-        onImportMetadata={onImportMetadata}
-        onImportTranscripts={onImportTranscripts}
-        onLoadAdapterSources={onLoadAdapterSources}
-        onToggleSelected={(runtime, checked) => {
-          setSelectedRuntimes((current) => {
-            const next = new Set(current);
-            if (checked) next.add(runtime);
-            else next.delete(runtime);
-            return next;
-          });
-        }}
-        onSyncAdapter={onSyncAdapter}
-        selectedRuntimes={selectedRuntimes}
-      />
-      <ImportJobsTable
-        busy={busy}
-        imports={imports}
-        limit={importLimit}
-        offset={importOffset}
-        onCancelImport={onCancelImport}
-        onLoadMore={onLoadMoreImports}
-        onRetryImport={onRetryImport}
-        total={importTotal}
+        onClose={() => setOnboardingOpen(false)}
+        onConnectSelected={props.onConnectSelected}
+        onScan={props.onScan ?? props.onRefresh}
+        open={onboardingOpen}
       />
     </section>
   );
@@ -160,11 +119,7 @@ export function SourcesPanel({
 
 function adaptersFromSources(sources: SourceStatus[]): AdapterStatus[] {
   const byRuntime = new Map<string, SourceStatus[]>();
-  for (const source of sources) {
-    const current = byRuntime.get(source.runtime) ?? [];
-    current.push(source);
-    byRuntime.set(source.runtime, current);
-  }
+  for (const source of sources) byRuntime.set(source.runtime, [...(byRuntime.get(source.runtime) ?? []), source]);
   return Array.from(byRuntime.entries()).map(([runtime, sourceLocations]) => ({
     discoveredSessions: sourceLocations.reduce((total, source) => total + (source.sessionCount ?? source.discoveredSessions ?? 0), 0),
     importedSessions: sourceLocations.reduce((total, source) => total + (source.importedSessions ?? 0), 0),
@@ -181,38 +136,7 @@ function adaptersFromSources(sources: SourceStatus[]): AdapterStatus[] {
   }));
 }
 
-type AdapterTotalsStatus = AdapterStatus & {
-  diagnostics?: { count?: number; severity?: string }[];
-  failureCount?: number;
-  importedCount?: number;
-  queuedRecords?: number;
-};
-
-function sourceTotals(adapters: AdapterStatus[]) {
-  return adapters.reduce(
-    (totals, adapter) => {
-      const row = adapter as AdapterTotalsStatus;
-      const sourceFailures = row.failureCount ?? row.sourceLocations.reduce(
-        (sourceTotal, source) => sourceTotal + (source.failureCount ?? source.failures ?? 0),
-        0
-      );
-      const diagnosticFailures = row.diagnostics?.filter((diagnostic) => diagnostic.severity === "error").reduce((count, diagnostic) => count + (diagnostic.count ?? 1), 0) ?? 0;
-      const importedRecords = row.sourceLocations.reduce(
-        (sourceTotal, source) => sourceTotal + (source.importedRecords ?? source.importedCount ?? 0),
-        0
-      );
-      const queuedRecords = row.queuedRecords ?? row.sourceLocations.reduce(
-        (sourceTotal, source) => sourceTotal + (source.queuedRecords ?? source.queuedCount ?? 0),
-        0
-      );
-
-      return {
-        failures: totals.failures + sourceFailures + diagnosticFailures,
-        imported: totals.imported + (row.importedCount ?? importedRecords),
-        queued: totals.queued + queuedRecords,
-        sessions: totals.sessions + row.importedSessions
-      };
-    },
-    { failures: 0, imported: 0, queued: 0, sessions: 0 }
-  );
+function isConnectedAdapter(adapter: AdapterStatus): boolean {
+  if ((adapter.importedSessions ?? 0) > 0 || (adapter.importedCount ?? 0) > 0 || adapter.lastSyncAt) return true;
+  return adapter.sourceLocations.some((source) => (source.importedSessions ?? 0) > 0 || (source.importedRecords ?? source.importedCount ?? 0) > 0 || Boolean(source.lastSyncAt ?? source.lastSync));
 }
