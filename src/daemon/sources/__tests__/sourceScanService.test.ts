@@ -2,9 +2,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { supportedAdapters } from "../supportedAdapters.ts";
 import { scanLocalSources } from "../sourceScanService.ts";
 
-const activeScanRuntimes = ["codex", "cursor", "claude_code", "antigravity", "opencode", "aider", "openclaw", "hermes", "pi"] as const;
+const activeScanRuntimes = supportedAdapters.filter((adapter) => adapter.enabled).map((adapter) => adapter.runtime);
 const adapterHomeEnvKeys = [
   "MASTHEAD_CURSOR_HOME",
   "MASTHEAD_CLAUDE_CODE_HOME",

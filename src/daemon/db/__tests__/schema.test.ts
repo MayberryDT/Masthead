@@ -53,6 +53,8 @@ describe("daemon database schema", () => {
         "session_search",
         "app_settings",
         "source_policies",
+        "source_scan_runs",
+        "source_setup_state",
         "legacy_migrations"
       ])
     );
@@ -62,7 +64,8 @@ describe("daemon database schema", () => {
       { version: 2, name: "002_session_data_product" },
       { version: 3, name: "003_session_sources" },
       { version: 4, name: "004_cursor_context" },
-      { version: 5, name: "005_import_progress" }
+      { version: 5, name: "005_import_progress" },
+      { version: 6, name: "006_source_setup" }
     ]);
     expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     expect((db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toBe("wal");

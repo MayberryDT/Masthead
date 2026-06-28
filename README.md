@@ -16,6 +16,9 @@ Live Now is a view over collected session data, not the product category.
 - Multi-adapter source discovery for Codex, Cursor, Claude Code,
   Antigravity, OpenCode, Aider, OpenClaw, Hermes, and Pi, with conservative
   metadata imports and reviewed transcript history.
+- A harness catalog that also names detector-only local harnesses and
+  cloud-reference harnesses without claiming import support before local
+  schema coverage exists.
 - Logbook search and session detail APIs backed by the canonical store.
 - Shared Board and Logbook session dossier backed by canonical identity,
   coverage diagnostics, transcript rows, files, tools, verification, timeline,
@@ -83,9 +86,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 `npm run doctor` checks the active daemon contract, source/import readiness,
-Logbook state, MCP status/tools, and local data summary. `npm run verify` runs
-the product and surface contracts, typecheck, Vitest, build, endpoint matrix,
-and smoke suite.
+Sources pipeline diagnostics, Logbook state, MCP status/tools, and local data
+summary. `npm run verify` runs the product and surface contracts, typecheck,
+Vitest, build, endpoint matrix, and smoke suite.
 
 ## Data Path
 
@@ -122,6 +125,7 @@ See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md).
 - Daemon API reference: [docs/reference/daemon-api.md](docs/reference/daemon-api.md)
 - Sources reference: [docs/reference/sources.md](docs/reference/sources.md)
 - Adapter reference: [docs/reference/adapters.md](docs/reference/adapters.md)
+- Enrichment reference: [docs/reference/enrichment.md](docs/reference/enrichment.md)
 - Session dossier reference: [docs/reference/session-dossier.md](docs/reference/session-dossier.md)
 - Configuration reference: [docs/reference/configuration.md](docs/reference/configuration.md)
 - Release gates: [docs/release-gates.md](docs/release-gates.md)

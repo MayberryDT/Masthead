@@ -52,6 +52,7 @@ import {
   getLogbookSessionExcerpts,
   getSessionDossier,
   getSessionTranscript,
+  getSourcesSetup,
   listAdapterSources,
   getUsageStats,
   importAdapterMetadata,
@@ -63,10 +64,14 @@ import {
   listSources,
   connectSources,
   retryImport,
+  repairSources,
+  runSourcesSetup,
   saveReviewDisposition,
   scanSources,
+  scanSourcesSetup,
   searchLogbook,
   syncAdapter,
+  syncSources,
   type LogbookExcerpt,
   type AdapterStatus,
   type ImportJob,
@@ -80,6 +85,8 @@ import {
   type UsageStatsDto,
   type UsageWindow,
   type SourceStatus,
+  type SourcesSetupDto,
+  type SourcesSetupRunRequest,
   type DataSummary,
   type DeleteMastheadDataScope
 } from "./daemonClient";
@@ -180,6 +187,7 @@ export function App() {
   const [sources, setSources] = useState<SourceStatus[]>([]);
   const [adapters, setAdapters] = useState<AdapterStatus[]>([]);
   const [imports, setImports] = useState<ImportJob[]>([]);
+  const [sourcesSetup, setSourcesSetup] = useState<SourcesSetupDto>();
   const [importPage, setImportPage] = useState<ImportPageState>({ limit: 50, offset: 0, total: 0 });
   const [sourcesBusy, setSourcesBusy] = useState(false);
   const [sourcesStatus, setSourcesStatus] = useState<string>();
@@ -598,12 +606,14 @@ export function App() {
     try {
       const importLimit = importPage.limit;
       const importOffset = options.importOffset ?? 0;
-      const [adapterResult, sourceResult, importResult, activeImportResult] = await Promise.allSettled([
+      const [setupResult, adapterResult, sourceResult, importResult, activeImportResult] = await Promise.allSettled([
+        getSourcesSetup(activeProjectionUrl),
         listAdapters(activeProjectionUrl, { includeLocations: false }),
         listSources(activeProjectionUrl),
         listImports(activeProjectionUrl, { limit: importLimit, offset: importOffset }),
         listImports(activeProjectionUrl, { limit: 50, offset: 0, status: "active" })
       ]);
+      if (setupResult.status === "fulfilled") setSourcesSetup(setupResult.value);
       if (adapterResult.status === "fulfilled") setAdapters(adapterResult.value);
       if (sourceResult.status === "fulfilled") setSources(sourceResult.value);
       if (importResult.status === "fulfilled") {
@@ -617,10 +627,10 @@ export function App() {
           total: Math.max(importResult.value.total, activeImports.length + importResult.value.imports.length)
         });
       }
-      if (sourceResult.status === "rejected" && adapterResult.status === "rejected" && importResult.status === "rejected") {
+      if (setupResult.status === "rejected" && sourceResult.status === "rejected" && adapterResult.status === "rejected" && importResult.status === "rejected") {
         throw sourceResult.reason;
       }
-      if (adapterResult.status === "fulfilled" || sourceResult.status === "fulfilled" || importResult.status === "fulfilled") {
+      if (setupResult.status === "fulfilled" || adapterResult.status === "fulfilled" || sourceResult.status === "fulfilled" || importResult.status === "fulfilled") {
         sourceInventoryLoadedAtRef.current = Date.now();
         sourceInventoryLoadedForUrlRef.current = activeProjectionUrl;
       }
@@ -633,6 +643,7 @@ export function App() {
           importResult.status === "fulfilled"
             ? mergeImportRows(activeImportResult.status === "fulfilled" ? activeImportResult.value.imports : [], importResult.value.imports)
             : undefined,
+        setup: setupResult.status === "fulfilled" ? setupResult.value : undefined,
         sources: sourceResult.status === "fulfilled" ? sourceResult.value : undefined
       };
     } finally {
@@ -676,6 +687,25 @@ export function App() {
       await loadSourceInventory();
     } catch (error) {
       setSourcesStatus(`Source scan failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  }, [activeProjectionUrl, loadSourceInventory]);
+
+  const handleScanSourcesSetup = useCallback(async () => {
+    setSourcesBusy(true);
+    setSourcesStatus("Scanning known local agent history locations...");
+    try {
+      const result = await scanSourcesSetup(activeProjectionUrl);
+      setSourcesSetup(result.setup);
+      const scan = result.scan ?? result.setup.latestScan ?? result.setup.scan;
+      const found = scan?.foundSources.filter((source) => source.importable === true || source.state === "importable").length ?? 0;
+      setSourcesStatus(`Scan complete: ${found} importable source${found === 1 ? "" : "s"} found.`);
+      await loadSourceInventory();
+      return scan;
+    } catch (error) {
+      setSourcesStatus(`Source setup scan failed: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
     } finally {
       setSourcesBusy(false);
     }
@@ -945,6 +975,52 @@ export function App() {
       await refreshSourcesAfterImportAction();
     } catch (error) {
       setSourcesStatus(`Connect selected failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
+  const handleRunSourcesSetup = async (input: SourcesSetupRunRequest) => {
+    setSourcesBusy(true);
+    setSourcesStatus("Building session library...");
+    try {
+      const result = await runSourcesSetup(input, activeProjectionUrl);
+      setSourcesSetup(result.setup);
+      setSourcesStatus(importActionStatus("Session library build", result));
+      await refreshSourcesAfterImportAction();
+    } catch (error) {
+      setSourcesStatus(`Session library build failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
+  const handleSyncSources = async () => {
+    setSourcesBusy(true);
+    setSourcesStatus("Syncing connected sources...");
+    try {
+      const result = await syncSources(activeProjectionUrl);
+      setSourcesSetup(result.setup);
+      setSourcesStatus(importActionStatus("Sources sync", result));
+      await refreshSourcesAfterImportAction();
+    } catch (error) {
+      setSourcesStatus(`Sources sync failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSourcesBusy(false);
+    }
+  };
+
+  const handleRepairSources = async () => {
+    setSourcesBusy(true);
+    setSourcesStatus("Repairing missing source data...");
+    try {
+      const result = await repairSources(activeProjectionUrl);
+      setSourcesSetup(result.setup);
+      setSourcesStatus(result.repairs?.length ? `Repair queued: ${result.repairs.length} repair action${result.repairs.length === 1 ? "" : "s"}.` : importActionStatus("Repair", result));
+      await refreshSourcesAfterImportAction();
+    } catch (error) {
+      setSourcesStatus(`Repair failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setSourcesBusy(false);
     }
@@ -1316,6 +1392,7 @@ export function App() {
           sources={sources}
           adapters={adapters}
           imports={imports}
+          setup={sourcesSetup}
           importLimit={importPage.limit}
           importOffset={importPage.offset}
           importTotal={importPage.total}
@@ -1329,11 +1406,16 @@ export function App() {
           onImportTranscripts={handleImportTranscripts}
           onLoadAdapterSources={handleLoadAdapterSources}
           onLoadMoreImports={handleLoadMoreImports}
+          onOpenLogbook={() => setActiveSurface("logbook")}
           onPollImports={handlePollActiveImports}
+          onRepairSources={handleRepairSources}
           onRefresh={handleRefreshSources}
           onRetryImport={handleRetryImport}
+          onRunSetup={handleRunSourcesSetup}
           onScan={handleScanSources}
+          onScanSetup={handleScanSourcesSetup}
           onSyncAdapter={handleSyncAdapter}
+          onSyncSources={handleSyncSources}
         />
       )}</SourcesSurface>
     ) : activeSurface === "logbook" ? (

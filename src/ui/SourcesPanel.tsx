@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AdapterStatus, ImportJob, SourceStatus, SourceStatusPage } from "../app/daemonClient";
+import type { SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunInput } from "../shared/sourcesSetup";
 import { AdapterList } from "./sources/AdapterList";
 import { ImportJobsTable } from "./sources/ImportJobsTable";
 import { SourcesAdvancedDiagnostics } from "./sources/SourcesAdvancedDiagnostics";
@@ -13,6 +14,7 @@ type Props = {
   importLimit?: number;
   importOffset?: number;
   importTotal?: number;
+  setup?: SourcesSetupDto;
   sources: SourceStatus[];
   busy: boolean;
   status?: string;
@@ -25,21 +27,28 @@ type Props = {
   onLoadMoreImports?: (page: { limit: number; offset: number }) => void;
   onPollImports?: () => void;
   onConnectSelected?: (runtimes: string[]) => void;
+  onOpenLogbook?: () => void;
   onRefresh: () => void;
+  onRepairSources?: () => void;
+  onRunSetup?: (input: SourcesSetupRunInput) => Promise<unknown> | unknown;
   onScan?: () => void;
+  onScanSetup?: () => Promise<SourcesOnboardingScanDto | undefined> | SourcesOnboardingScanDto | undefined | void;
   onRetryImport?: (importJobId: string) => void;
   onSyncAdapter?: (runtime: string) => void;
+  onSyncSources?: () => void;
 };
 
 export function SourcesPanel(props: Props) {
-  const { adapters, busy, imports = [], sources, status } = props;
-  const adapterRows = adapters ?? adaptersFromSources(sources);
+  const { adapters, busy, imports = [], setup, sources, status } = props;
+  const adapterRows = (setup?.advanced.adapters.length ? setup.advanced.adapters : adapters ?? adaptersFromSources(sources)) as AdapterStatus[];
+  const diagnosticImports = (setup ? setup.advanced.imports : imports) as ImportJob[];
   const connectedAdapters = useMemo(() => adapterRows.filter(isConnectedAdapter), [adapterRows]);
+  const connectedSources = setup?.connectedSources ?? [];
   const activeRuntimes = useMemo(() => adapterRows.filter((adapter) => adapter.runtime !== "gemini_cli" && adapter.state !== "planned").map((adapter) => adapter.runtime), [adapterRows]);
   const [selectedRuntimes, setSelectedRuntimes] = useState<Set<string>>(() => new Set());
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const activeImportCount = imports.filter((job) => job.status === "queued" || job.status === "running").length;
+  const activeImportCount = diagnosticImports.filter((job) => job.status === "queued" || job.status === "running").length;
 
   useEffect(() => {
     setSelectedRuntimes((current) => (current.size > 0 ? current : new Set(activeRuntimes)));
@@ -54,19 +63,25 @@ export function SourcesPanel(props: Props) {
   const syncConnected = () => {
     for (const adapter of connectedAdapters) props.onSyncAdapter?.(adapter.runtime);
   };
+  const hasConnectedSetup = connectedSources.length > 0;
+  const hasConnectedAdapters = connectedAdapters.length > 0;
+  const showConnectedDashboard = hasConnectedSetup || hasConnectedAdapters;
 
   return (
     <section id="sources" className="sources-panel sources-management surface-panel" aria-label="Session sources">
-      {connectedAdapters.length === 0 ? (
+      {!showConnectedDashboard ? (
         <SourcesEmptyState busy={busy} onConnectSources={() => setOnboardingOpen(true)} onShowAdvanced={() => setAdvancedOpen(true)} status={status} />
       ) : (
         <SourcesConnectedDashboard
           adapters={connectedAdapters}
           busy={busy}
+          connectedSources={hasConnectedSetup ? connectedSources : undefined}
+          coverage={setup?.coverage}
           onAddSource={() => setOnboardingOpen(true)}
-          onRepairMissingData={syncConnected}
+          onOpenLogbook={props.onOpenLogbook}
+          onRepairMissingData={props.onRepairSources ?? syncConnected}
           onShowAdvanced={() => setAdvancedOpen(true)}
-          onSyncSources={syncConnected}
+          onSyncSources={props.onSyncSources ?? syncConnected}
           status={status}
         />
       )}
@@ -94,7 +109,7 @@ export function SourcesPanel(props: Props) {
           />
           <ImportJobsTable
             busy={busy}
-            imports={imports}
+            imports={diagnosticImports}
             limit={props.importLimit}
             offset={props.importOffset}
             onCancelImport={props.onCancelImport}
@@ -110,8 +125,11 @@ export function SourcesPanel(props: Props) {
         busy={busy}
         onClose={() => setOnboardingOpen(false)}
         onConnectSelected={props.onConnectSelected}
+        onRunSetup={props.onRunSetup}
         onScan={props.onScan ?? props.onRefresh}
+        onScanSetup={props.onScanSetup}
         open={onboardingOpen}
+        scan={setup?.latestScan}
       />
     </section>
   );

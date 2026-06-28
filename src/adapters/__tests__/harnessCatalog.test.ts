@@ -1,5 +1,16 @@
 import { describe, expect, test } from "vitest";
-import { advancedHarnesses, cloudReferenceHarnesses, harnessForRuntime, onboardingHarnesses } from "../harnessCatalog.ts";
+import {
+  activeImportRuntimes,
+  advancedHarnesses,
+  canImportHarness,
+  canScanHarness,
+  catalogOnlyHarnesses,
+  cloudReferenceHarnesses,
+  harnessForRuntime,
+  importAdapterHarnesses,
+  onboardingHarnesses,
+  scanTargetHarnesses
+} from "../harnessCatalog.ts";
 
 describe("harness catalog", () => {
   test("includes the required onboarding harnesses", () => {
@@ -38,8 +49,21 @@ describe("harness catalog", () => {
     const omp = harnessForRuntime("omp");
     expect(omp?.label).toBe("Oh My Pi");
     expect(omp?.supportLevel).toBe("detector_only");
+    expect(omp?.runtimeStatus).toBe("scan_target");
+    expect(canScanHarness(omp!)).toBe(true);
+    expect(canImportHarness(omp!)).toBe(false);
     expect(omp?.aliases).toEqual(expect.arrayContaining(["OMP", "oh-my-pi", "pi-coding-agent"]));
     expect(omp?.knownCandidatePaths).toEqual(expect.arrayContaining(["~/.omp", "~/.oh-my-pi"]));
+  });
+
+  test("separates import adapters from detector scan targets", () => {
+    expect(activeImportRuntimes()).toEqual(["codex", "cursor", "claude_code", "antigravity", "opencode", "aider", "openclaw", "hermes", "pi"]);
+    expect(importAdapterHarnesses().map((entry) => entry.runtime)).toEqual(activeImportRuntimes());
+    expect(scanTargetHarnesses().map((entry) => entry.runtime)).toEqual(
+      expect.arrayContaining(["codex", "cursor", "omp", "cline", "roo_code", "continue_dev", "crush"])
+    );
+    expect(scanTargetHarnesses().map((entry) => entry.runtime)).not.toEqual(activeImportRuntimes());
+    expect(catalogOnlyHarnesses()).toEqual([]);
   });
 
   test("keeps cloud-first tools out of onboarding scans", () => {
@@ -47,6 +71,7 @@ describe("harness catalog", () => {
     expect(onboardingRuntimes).not.toContain("devin");
     expect(onboardingRuntimes).not.toContain("jules");
     expect(cloudReferenceHarnesses().map((entry) => entry.runtime)).toEqual(expect.arrayContaining(["devin", "jules"]));
+    expect(cloudReferenceHarnesses().every((entry) => entry.runtimeStatus === "cloud_reference")).toBe(true);
   });
 
   test("keeps legacy Gemini CLI hidden from default onboarding", () => {

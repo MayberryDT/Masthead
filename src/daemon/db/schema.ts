@@ -30,6 +30,11 @@ const migrations = [
     version: 5,
     name: "005_import_progress",
     path: resolve(currentDir, "migrations/005_import_progress.sql")
+  },
+  {
+    version: 6,
+    name: "006_source_setup",
+    path: resolve(currentDir, "migrations/006_source_setup.sql")
   }
 ];
 
@@ -50,6 +55,8 @@ const criticalTables = [
   "session_search",
   "app_settings",
   "source_policies",
+  "source_scan_runs",
+  "source_setup_state",
   "legacy_migrations"
 ];
 

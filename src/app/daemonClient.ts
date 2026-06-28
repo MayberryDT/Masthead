@@ -2,8 +2,10 @@ import { defaultLiveProjectionUrl } from "./liveProjectionClient";
 import type { ReviewDisposition } from "../core/store";
 import type { SessionDossierDto } from "../shared/sessionDossier";
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
+import type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest } from "../shared/sourcesSetup";
 
 export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
+export type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest };
 
 export type SessionTranscriptKindFilter = "all" | "user" | "assistant" | "tools" | "checkpoints" | "files" | "signals";
 
@@ -494,6 +496,83 @@ export type DataLifecycleResponse = {
   summary: DataSummary;
   result: Partial<DataLifecycleResult> & { rawEvents?: number };
 };
+
+export type SourcesSetupActionResult = {
+  ok: true;
+  setup: SourcesSetupDto;
+  scan?: SourcesOnboardingScanDto;
+  jobs?: ImportJob[];
+  queued?: number;
+  skipped?: Array<{ runtime: string; reason: string }>;
+  repairs?: string[];
+  message?: string;
+};
+
+export async function getSourcesSetup(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<SourcesSetupDto> {
+  const url = new URL(baseUrl);
+  url.pathname = "/sources/setup";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`sources setup request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; setup: SourcesSetupDto };
+  return body.setup;
+}
+
+export async function scanSourcesSetup(baseUrl = defaultLiveProjectionUrl()): Promise<SourcesSetupActionResult> {
+  return postSourcesSetupAction(baseUrl, "/sources/setup/scan");
+}
+
+export async function runSourcesSetup(
+  input: SourcesSetupRunRequest,
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<SourcesSetupActionResult> {
+  return postSourcesSetupAction(baseUrl, "/sources/setup/run", input);
+}
+
+export async function syncSources(
+  baseUrl = defaultLiveProjectionUrl(),
+  input?: SourcesSetupRunRequest
+): Promise<SourcesSetupActionResult> {
+  return postSourcesSetupAction(baseUrl, "/sources/sync", input);
+}
+
+export async function repairSources(
+  baseUrl = defaultLiveProjectionUrl(),
+  input?: Record<string, unknown>
+): Promise<SourcesSetupActionResult> {
+  return postSourcesSetupAction(baseUrl, "/sources/repair", input);
+}
+
+export async function getSourcesAdvanced(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<SourcesAdvancedDto> {
+  const url = new URL(baseUrl);
+  url.pathname = "/sources/advanced";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`sources advanced request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; advanced: SourcesAdvancedDto };
+  return body.advanced;
+}
+
+async function postSourcesSetupAction(baseUrl: string, pathname: string, input?: unknown): Promise<SourcesSetupActionResult> {
+  const url = new URL(baseUrl);
+  url.pathname = pathname;
+  url.search = "";
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (input !== undefined) headers["content-type"] = "application/json";
+  const response = await fetch(url.toString(), {
+    body: input === undefined ? undefined : JSON.stringify(input),
+    headers,
+    method: "POST"
+  });
+  if (!response.ok) throw new Error(`sources setup action failed: ${response.status}`);
+  return response.json() as Promise<SourcesSetupActionResult>;
+}
 
 export async function listSources(baseUrl = defaultLiveProjectionUrl()): Promise<SourceStatus[]> {
   const url = new URL(baseUrl);

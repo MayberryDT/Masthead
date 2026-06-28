@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { adapterCapabilityProfile, ADAPTER_CAPABILITY_PROFILES } from "../capabilities.ts";
+import { adapterCapabilityProfile, ADAPTER_CAPABILITY_PROFILES, canImportMetadata, canImportTranscripts } from "../capabilities.ts";
+import { activeImportRuntimes } from "../harnessCatalog.ts";
 import { RUNTIME_KINDS } from "../types.ts";
 
 describe("adapter capabilities", () => {
-  test("defines the supported runtime set without Crush", () => {
+  test("defines the full catalog runtime set", () => {
     expect(RUNTIME_KINDS).toEqual([
       "codex",
       "cursor",
@@ -14,9 +15,26 @@ describe("adapter capabilities", () => {
       "openclaw",
       "hermes",
       "pi",
-      "gemini_cli"
+      "omp",
+      "cline",
+      "roo_code",
+      "kilo_code",
+      "continue_dev",
+      "openhands",
+      "github_copilot",
+      "windsurf",
+      "zed_ai",
+      "amazon_q",
+      "sourcegraph_amp",
+      "jetbrains_ai",
+      "qodo",
+      "tabnine",
+      "ibm_bob",
+      "devin",
+      "jules",
+      "gemini_cli",
+      "crush"
     ]);
-    expect(RUNTIME_KINDS).not.toContain("crush");
   });
 
   test("marks all required scan adapters as active capability profiles", () => {
@@ -31,17 +49,26 @@ describe("adapter capabilities", () => {
     });
 
     const activeProfiles = ADAPTER_CAPABILITY_PROFILES.filter((profile) => profile.lifecycle === "active");
-    expect(activeProfiles.map((profile) => profile.runtime)).toEqual([
-      "codex",
-      "cursor",
-      "claude_code",
-      "antigravity",
-      "opencode",
-      "aider",
-      "openclaw",
-      "hermes",
-      "pi"
-    ]);
+    expect(activeProfiles.map((profile) => profile.runtime)).toEqual(activeImportRuntimes());
+  });
+
+  test("marks detector scan targets as non-importing capabilities", () => {
+    expect(adapterCapabilityProfile("omp")).toMatchObject({
+      lifecycle: "scan_target",
+      maturity: "detector",
+      runtime: "omp",
+      runtimeStatus: "scan_target",
+      supportsMetadataImport: false,
+      supportsTranscriptImport: false
+    });
+    expect(canImportMetadata(adapterCapabilityProfile("omp"))).toBe(false);
+    expect(canImportTranscripts(adapterCapabilityProfile("omp"))).toBe(false);
+    expect(adapterCapabilityProfile("devin")).toMatchObject({
+      lifecycle: "cloud_reference",
+      maturity: "planned",
+      runtimeStatus: "cloud_reference",
+      supportsMcpExposure: false
+    });
   });
 
   test("keeps Gemini CLI as legacy planned only", () => {

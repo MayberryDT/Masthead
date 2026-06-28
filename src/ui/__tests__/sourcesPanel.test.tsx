@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
+import type { SourcesSetupDto } from "../../shared/sourcesSetup";
 import { SourcesPanel } from "../SourcesPanel";
 
 describe("SourcesPanel", () => {
@@ -9,6 +10,7 @@ describe("SourcesPanel", () => {
         adapters={[
           {
             runtime: "codex",
+            name: "Codex",
             state: "connected",
             discoveredSessions: 742,
             importedSessions: 120,
@@ -66,4 +68,135 @@ describe("SourcesPanel", () => {
     expect(html).not.toContain("/home/tyler/.codex/sessions");
     expect(html).not.toContain("hello from transcript");
   });
+
+  test("renders connected setup coverage when setup is available", () => {
+    const html = renderToStaticMarkup(
+      <SourcesPanel
+        adapters={[]}
+        busy={false}
+        onExcludePath={() => undefined}
+        onRefresh={() => undefined}
+        setup={connectedSetup()}
+        sources={[]}
+      />
+    );
+
+    expect(html).toContain("Connected sources");
+    expect(html).toContain("Codex sessions");
+    expect(html).toContain("742 sessions");
+    expect(html).toContain("510 transcript sessions");
+    expect(html).toContain("320 enriched");
+    expect(html).toContain("Queued");
+    expect(html).toContain("14");
+  });
+
+  test("keeps setup empty state focused on onboarding instead of unconnected harnesses", () => {
+    const html = renderToStaticMarkup(
+      <SourcesPanel
+        adapters={[
+          {
+            runtime: "gemini_cli",
+            name: "Gemini CLI",
+            state: "not_detected",
+            discoveredSessions: 0,
+            importedSessions: 0,
+            policies: {
+              enrichment: false,
+              mcpAccess: false,
+              metadataImport: false,
+              transcriptImport: false
+            },
+            sourceLocations: []
+          }
+        ]}
+        busy={false}
+        onExcludePath={() => undefined}
+        onRefresh={() => undefined}
+        setup={emptySetup()}
+        sources={[]}
+      />
+    );
+
+    expect(html).toContain("No sources connected");
+    expect(html).toContain("Connect sources");
+    expect(html).not.toContain("Gemini CLI");
+    expect(html).not.toContain("Harnesses Masthead knows how to check");
+  });
+
+  test("bounds connected setup source preview for large source inventories", () => {
+    const setup = connectedSetup();
+    setup.connectedSources = Array.from({ length: 20 }, (_, index) => ({
+      discoveredSessions: 1,
+      importedSessions: 1,
+      label: `Source ${index + 1}`,
+      runtime: "codex",
+      sourceId: `source-${index + 1}`,
+      state: "connected",
+      transcriptSessions: 1
+    }));
+
+    const html = renderToStaticMarkup(
+      <SourcesPanel
+        adapters={[]}
+        busy={false}
+        onExcludePath={() => undefined}
+        onRefresh={() => undefined}
+        setup={setup}
+        sources={[]}
+      />
+    );
+
+    expect(html).toContain("20 connected source records");
+    expect(html).toContain("Source 12");
+    expect(html).not.toContain("Source 13");
+  });
 });
+
+function emptySetup(): SourcesSetupDto {
+  return {
+    advanced: {
+      adapters: [],
+      imports: [],
+      sources: []
+    },
+    connectedSources: [],
+    setupId: "setup-empty",
+    status: "empty",
+    updatedAt: "2026-06-27T12:00:00.000Z"
+  };
+}
+
+function connectedSetup(): SourcesSetupDto {
+  return {
+    advanced: {
+      adapters: [],
+      imports: [],
+      sources: []
+    },
+    connectedSources: [
+      {
+        discoveredSessions: 742,
+        enrichedSessions: 320,
+        failureCount: 0,
+        importedSessions: 742,
+        label: "Codex sessions",
+        lastSyncAt: "2026-06-27T12:00:00.000Z",
+        queuedRecords: 14,
+        runtime: "codex",
+        sourceId: "codex-sessions",
+        state: "connected",
+        transcriptSessions: 510
+      }
+    ],
+    coverage: {
+      enriched: 320,
+      failures: 0,
+      queued: 14,
+      sessions: 742,
+      transcripts: 510
+    },
+    setupId: "setup-ready",
+    status: "ready",
+    updatedAt: "2026-06-27T12:00:00.000Z"
+  };
+}

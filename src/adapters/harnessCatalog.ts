@@ -9,6 +9,7 @@ export type AdapterSupportLevel =
   | "legacy";
 
 export type HarnessVisibility = "onboarding" | "advanced" | "hidden_legacy";
+export type HarnessRuntimeStatus = "catalog_only" | "scan_target" | "import_adapter" | "cloud_reference" | "legacy";
 
 export type HarnessCatalogEntry = {
   runtime: RuntimeKind;
@@ -16,6 +17,7 @@ export type HarnessCatalogEntry = {
   aliases: string[];
   description: string;
   supportLevel: AdapterSupportLevel;
+  runtimeStatus: HarnessRuntimeStatus;
   visibility: HarnessVisibility;
   sourceKinds: SourceKind[];
   localFirst: boolean;
@@ -170,6 +172,7 @@ export const HARNESS_CATALOG: HarnessCatalogEntry[] = [
     label: "Gemini CLI",
     localFirst: true,
     runtime: "gemini_cli",
+    runtimeStatus: "legacy",
     sourceKinds: ["jsonl"],
     supportLevel: "legacy",
     supportsFileEffects: false,
@@ -183,7 +186,7 @@ export const HARNESS_CATALOG: HarnessCatalogEntry[] = [
 ];
 
 export function onboardingHarnesses(): HarnessCatalogEntry[] {
-  return HARNESS_CATALOG.filter((entry) => entry.visibility === "onboarding" && !entry.cloudOnly);
+  return HARNESS_CATALOG.filter((entry) => entry.visibility === "onboarding" && canScanHarness(entry));
 }
 
 export function advancedHarnesses(): HarnessCatalogEntry[] {
@@ -199,7 +202,31 @@ export function localHarnesses(): HarnessCatalogEntry[] {
 }
 
 export function cloudReferenceHarnesses(): HarnessCatalogEntry[] {
-  return HARNESS_CATALOG.filter((entry) => entry.cloudOnly);
+  return HARNESS_CATALOG.filter((entry) => entry.runtimeStatus === "cloud_reference");
+}
+
+export function scanTargetHarnesses(): HarnessCatalogEntry[] {
+  return HARNESS_CATALOG.filter(canScanHarness);
+}
+
+export function importAdapterHarnesses(): HarnessCatalogEntry[] {
+  return HARNESS_CATALOG.filter(canImportHarness);
+}
+
+export function catalogOnlyHarnesses(): HarnessCatalogEntry[] {
+  return HARNESS_CATALOG.filter((entry) => entry.runtimeStatus === "catalog_only");
+}
+
+export function activeImportRuntimes(): RuntimeKind[] {
+  return importAdapterHarnesses().map((entry) => entry.runtime);
+}
+
+export function canScanHarness(entry: HarnessCatalogEntry): boolean {
+  return entry.runtimeStatus === "import_adapter" || entry.runtimeStatus === "scan_target";
+}
+
+export function canImportHarness(entry: HarnessCatalogEntry): boolean {
+  return entry.runtimeStatus === "import_adapter";
 }
 
 type SupportOverrides = Partial<{
@@ -219,7 +246,9 @@ function active(
   envOverrides: string[],
   overrides: SupportOverrides = {}
 ): HarnessCatalogEntry {
-  const supportsTranscriptImport = supportLevel === "active_full" || supportLevel === "active_transcript" || supportLevel === "active_metadata" || supportLevel === "detector_only";
+  const runtimeStatus: HarnessRuntimeStatus = supportLevel === "detector_only" ? "scan_target" : "import_adapter";
+  const supportsImport = runtimeStatus === "import_adapter";
+  const supportsTranscriptImport = supportsImport && (supportLevel === "active_full" || supportLevel === "active_transcript" || supportLevel === "active_metadata");
   return {
     aliases,
     cloudOnly: false,
@@ -229,12 +258,13 @@ function active(
     label,
     localFirst: true,
     runtime,
+    runtimeStatus,
     sourceKinds,
     supportLevel,
     supportsFileEffects: overrides.files ?? false,
     supportsLiveWatch: overrides.live ?? false,
     supportsMcpExposure: true,
-    supportsMetadataImport: true,
+    supportsMetadataImport: supportsImport,
     supportsTokenUsage: overrides.tokens ?? false,
     supportsTranscriptImport,
     visibility: "onboarding"
@@ -251,6 +281,7 @@ function cloudReference(runtime: RuntimeKind, label: string, aliases: string[], 
     label,
     localFirst: false,
     runtime,
+    runtimeStatus: "cloud_reference",
     sourceKinds: [],
     supportLevel: "cloud_reference",
     supportsFileEffects: false,

@@ -1,11 +1,130 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { getSessionTranscript, listImports, listReviewDispositions, saveReviewDisposition } from "../daemonClient";
+import {
+  getSessionTranscript,
+  getSourcesAdvanced,
+  getSourcesSetup,
+  listImports,
+  listReviewDispositions,
+  repairSources,
+  runSourcesSetup,
+  saveReviewDisposition,
+  scanSourcesSetup,
+  syncSources
+} from "../daemonClient";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("daemon client review dispositions", () => {
+  test("loads sources setup state from the daemon", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          setup: {
+            connectedSources: [],
+            setupId: "setup:1",
+            status: "empty",
+            updatedAt: "2026-06-27T10:00:00.000Z"
+          }
+        })
+      )
+    );
+
+    await expect(getSourcesSetup("http://127.0.0.1:17373/projection")).resolves.toMatchObject({
+      setupId: "setup:1",
+      status: "empty"
+    });
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/sources/setup", {
+      headers: { accept: "application/json" },
+      signal: undefined
+    });
+  });
+
+  test("posts sources setup actions to the daemon", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          queued: 0,
+          scan: {
+            adapters: [],
+            foundSources: [],
+            generatedAt: "2026-06-27T10:00:00.000Z",
+            scanId: "scan:1",
+            status: "completed",
+            summary: {
+              detectedHarnesses: 0,
+              foundSources: 0,
+              scannedHarnesses: 0
+            }
+          },
+          setup: {
+            connectedSources: [],
+            setupId: "setup:1",
+            status: "empty",
+            updatedAt: "2026-06-27T10:00:00.000Z"
+          }
+        })
+      )
+    );
+
+    await scanSourcesSetup("http://127.0.0.1:17373/projection");
+    await runSourcesSetup({ importMetadata: true, runtimes: ["codex"] }, "http://127.0.0.1:17373/projection");
+    await syncSources("http://127.0.0.1:17373/projection");
+    await repairSources("http://127.0.0.1:17373/projection");
+
+    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:17373/sources/setup/scan", {
+      body: undefined,
+      headers: { accept: "application/json" },
+      method: "POST"
+    });
+    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:17373/sources/setup/run", {
+      body: JSON.stringify({ importMetadata: true, runtimes: ["codex"] }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+    expect(fetch).toHaveBeenNthCalledWith(3, "http://127.0.0.1:17373/sources/sync", {
+      body: undefined,
+      headers: { accept: "application/json" },
+      method: "POST"
+    });
+    expect(fetch).toHaveBeenNthCalledWith(4, "http://127.0.0.1:17373/sources/repair", {
+      body: undefined,
+      headers: { accept: "application/json" },
+      method: "POST"
+    });
+  });
+
+  test("loads sources advanced diagnostics from the daemon", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          advanced: {
+            adapters: [],
+            imports: [],
+            sources: []
+          },
+          ok: true
+        })
+      )
+    );
+
+    await expect(getSourcesAdvanced("http://127.0.0.1:17373/projection")).resolves.toEqual({
+      adapters: [],
+      imports: [],
+      sources: []
+    });
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/sources/advanced", {
+      headers: { accept: "application/json" },
+      signal: undefined
+    });
+  });
+
   test("loads paged import jobs from the daemon", async () => {
     vi.stubGlobal(
       "fetch",

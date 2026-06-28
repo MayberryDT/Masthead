@@ -59,6 +59,8 @@ const staticReadOnlyBridgePaths = new Set([
   "/diagnostics/runtime",
   "/adapters",
   "/sources",
+  "/sources/setup",
+  "/sources/advanced",
   "/sessions",
   "/projects",
   "/imports",

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { sessionAdapters } from "../../adapters/registry.ts";
+import { scanAdapters } from "../../adapters/registry.ts";
 import type { AdapterMaturity } from "../../adapters/capabilities.ts";
 import type { AdapterDiagnostic, DiscoveredSource, DiscoveryContext, RuntimeKind } from "../../adapters/types.ts";
 import { supportedAdapters } from "./supportedAdapters.ts";
@@ -24,14 +24,14 @@ export type SourceScanResult = {
 
 export async function scanLocalSources(context: DiscoveryContext): Promise<SourceScanResult> {
   const [discovered, preflights] = await Promise.all([
-    Promise.all(sessionAdapters.map((adapter) => adapter.discover(context).catch((): DiscoveredSource[] => []))),
+    Promise.all(scanAdapters.map((adapter) => adapter.discover(context).catch((): DiscoveredSource[] => []))),
     preflightAllAdapters(context)
   ]);
   const sources = discovered.flat();
 
   return {
     adapters: supportedAdapters
-      .filter((adapter) => adapter.runtime !== "gemini_cli")
+      .filter((adapter) => adapter.enabled)
       .map((capability) => {
         const runtimeSources = sources.filter((source) => source.runtime === capability.runtime);
         const preflight = preflights.find((item) => item.runtime === capability.runtime);
