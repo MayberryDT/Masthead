@@ -5,6 +5,8 @@ import { createRoot } from "react-dom/client";
 import { describe, expect, test, vi } from "vitest";
 import type { AdapterStatus, ImportJob } from "../../../app/daemonClient";
 import type { SourcesOnboardingScanDto, SourcesSetupDto } from "../../../shared/sourcesSetup";
+import type { SourceScanResult } from "../../../daemon/sources/sourceScanService";
+import { scanResultToOnboardingScan } from "../../../daemon/sources/sourceSetupService";
 import { SourcesPanel } from "../../SourcesPanel";
 
 const noop = () => undefined;
@@ -111,6 +113,65 @@ describe("SourcesPanel import controls", () => {
     expect(container.textContent).toContain("Codex sessions");
     expect(container.textContent).toContain("742 sessions");
     expect(container.textContent).not.toContain("Gemini CLI history");
+    await act(async () => root.unmount());
+  });
+
+  test("real setup scan mapping makes discovered Codex sources selectable", async () => {
+    const onRunSetup = vi.fn(async () => ({ jobs: [], queued: 0, skipped: [] }));
+    const onScanSetup = vi.fn(async () => scanResultToOnboardingScan(realisticScanResult()));
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[]}
+          busy={false}
+          imports={[]}
+          onExcludePath={noop}
+          onRefresh={noop}
+          onRunSetup={onRunSetup}
+          onScanSetup={onScanSetup}
+          setup={emptySetup()}
+          sources={[]}
+        />
+      );
+    });
+
+    await act(async () => {
+      buttonByText(container, "Set up sources").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Check local sources").click();
+    });
+
+    expect(container.textContent).toContain("Codex");
+    expect(container.textContent).toContain("/home/tyler/.codex/sessions");
+    expect(container.textContent).not.toContain("No importable local sources found yet");
+    expect(container.textContent).not.toContain("Oh My Pi");
+
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Start source setup").click();
+    });
+
+    expect(onRunSetup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceIds: ["codex-sessions"],
+        transcriptApprovals: [{ approved: true, runtime: "codex", sourceId: "codex-sessions" }]
+      })
+    );
     await act(async () => root.unmount());
   });
 
@@ -385,6 +446,53 @@ function scanDto(): SourcesOnboardingScanDto {
       foundSources: 2,
       scannedHarnesses: 2
     }
+  };
+}
+
+function realisticScanResult(): SourceScanResult {
+  return {
+    adapters: [
+      {
+        checkedPaths: [],
+        diagnostics: [],
+        discoveredSessions: 7,
+        label: "Codex",
+        maturity: "full",
+        runtime: "codex",
+        sources: [
+          {
+            confidence: "authoritative",
+            path: "/home/tyler/.codex/sessions",
+            runtime: "codex",
+            schemaVersion: "codex-local-jsonl",
+            sourceId: "codex-sessions",
+            sourceKind: "jsonl"
+          }
+        ],
+        state: "connected"
+      },
+      {
+        checkedPaths: [],
+        diagnostics: [],
+        discoveredSessions: 1,
+        label: "Oh My Pi",
+        maturity: "detector",
+        runtime: "omp",
+        sources: [
+          {
+            confidence: "heuristic",
+            path: "/home/tyler/.local/share/omp",
+            runtime: "omp",
+            schemaVersion: "omp-detector-only",
+            sourceId: "omp:detector:local",
+            sourceKind: "inference"
+          }
+        ],
+        state: "connected"
+      }
+    ],
+    generatedAt: "2026-06-27T12:00:00.000Z",
+    scanId: "scan-realistic"
   };
 }
 
