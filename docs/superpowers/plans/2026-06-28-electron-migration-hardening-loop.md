@@ -59,3 +59,27 @@ Verification:
 
 Next risk:
 - Continue Electron migration inventory with IPC/security and packaging/package-smoke review, especially renderer bridge exposure, preload surface, app protocol policy, packaged daemon resource paths, and remaining local app-menu cleanup behavior for orphaned Electron processes.
+
+## Pass 3
+
+Finding: packaged-mode Electron trust policy still treated the Vite dev origins (`http://localhost:5173` and `http://127.0.0.1:5173`) as trusted renderer origins for navigation, window opens, IPC sender validation, and daemon CORS origins. That is acceptable only for local development. In packaged mode, the trusted renderer should be the app protocol (`masthead://app`) so a local dev server cannot become a privileged renderer sender by default.
+
+Action:
+- Added an explicit renderer URL policy and trusted-origin helper.
+- Made packaged/default mode trust only `masthead://app`.
+- Allowed Vite localhost origins only when Electron dev mode opts in.
+- Applied the same policy to window navigation, window-open handling, IPC sender validation, and `startLiveConnector` allowed origins.
+- Updated Electron IPC/window security tests for packaged-default denial and dev-mode opt-in.
+
+Verification:
+- `npm run test:electron-security`: pass, 3 files and 8 tests plus source security check.
+- `npm run verify:no-citations`: pass.
+- `git diff --check`: pass.
+- `npm run test:electron`: pass, 11 files and 36 tests.
+- `npm run build`: pass.
+- `npm run smoke:electron`: pass after stopping the existing app-menu service to release Electron's single-instance lock.
+- `npm run smoke:electron:packaged`: pass; Forge produced Linux zip/deb artifacts and the packaged binary smoke passed at `out/Masthead-linux-x64/masthead`.
+- App-menu service restored after smoke: live `/health` returned in 0.001924 s from daemon instance `99f35e35-6721-4fa5-aa0f-0ace89cc9ce7`.
+
+Next risk:
+- The packaged smoke exposed a separate app-menu/service launch race: after stopping and quickly restarting the service, the wrapper can see the old daemon as healthy while it is still shutting down, leave an orphaned Electron parent holding the single-instance lock, and then run Electron without a live connector. Audit and harden the tracked app-menu launcher/install path next.

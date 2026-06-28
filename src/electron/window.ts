@@ -10,6 +10,10 @@ export type MastheadWindowPreferences = {
   webviewTag: boolean;
 };
 
+export type RendererUrlPolicy = {
+  allowDevServer?: boolean;
+};
+
 export function mastheadWindowPreferences(preload: string): MastheadWindowPreferences {
   return {
     contextIsolation: true,
@@ -22,7 +26,13 @@ export function mastheadWindowPreferences(preload: string): MastheadWindowPrefer
   };
 }
 
-export function isAllowedRendererUrl(rawUrl: string | undefined): boolean {
+export function rendererTrustedOrigins(policy: RendererUrlPolicy = {}): string[] {
+  const origins = ["masthead://app"];
+  if (policy.allowDevServer) origins.push("http://localhost:5173", "http://127.0.0.1:5173");
+  return origins;
+}
+
+export function isAllowedRendererUrl(rawUrl: string | undefined, policy: RendererUrlPolicy = {}): boolean {
   if (!rawUrl) return false;
   let url: URL;
   try {
@@ -32,6 +42,7 @@ export function isAllowedRendererUrl(rawUrl: string | undefined): boolean {
   }
 
   if (url.protocol === "masthead:" && url.hostname === "app") return true;
+  if (!policy.allowDevServer) return false;
   if (url.protocol !== "http:") return false;
   if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return false;
   return url.port === "5173";

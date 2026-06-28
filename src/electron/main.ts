@@ -15,7 +15,13 @@ import {
 import { isMastheadOwnedDirectory } from "./pathPolicy";
 import { resolveProtocolPath } from "./protocol";
 import { createMastheadTray } from "./tray";
-import { isAllowedRendererUrl, mainPreloadPath, mastheadWindowPreferences, rendererEntryUrl } from "./window";
+import {
+  isAllowedRendererUrl,
+  mainPreloadPath,
+  mastheadWindowPreferences,
+  rendererEntryUrl,
+  rendererTrustedOrigins
+} from "./window";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -32,8 +38,6 @@ protocol.registerSchemesAsPrivileged([
 const ownedDaemonChildren = new Set<import("node:child_process").ChildProcess>();
 let mainWindow: BrowserWindow | undefined;
 let tray: unknown;
-
-const allowedOrigins = ["masthead://app", "http://localhost:5173", "http://127.0.0.1:5173"];
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -94,7 +98,7 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
         resourcesPath: process.resourcesPath,
         userDataDir: app.getPath("userData")
       },
-      allowedOrigins,
+      rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }),
       ownedDaemonChildren
     );
     const renderer = await window.webContents.executeJavaScript(`
@@ -148,10 +152,10 @@ async function createMainWindow(): Promise<BrowserWindow> {
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    return isAllowedRendererUrl(url) ? { action: "allow" } : { action: "deny" };
+    return isAllowedRendererUrl(url, { allowDevServer: isElectronDevMode() }) ? { action: "allow" } : { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) => {
-    if (!isAllowedRendererUrl(url)) event.preventDefault();
+    if (!isAllowedRendererUrl(url, { allowDevServer: isElectronDevMode() })) event.preventDefault();
   });
 
   await window.loadURL(rendererEntryUrl());
@@ -184,32 +188,37 @@ function registerDesktopIpc(): void {
     userDataDir: app.getPath("userData")
   });
 
-  registerMastheadIpc(ipcMain, {
-    [ELECTRON_CHANNELS.startLiveConnector]: () => startLiveConnector(targetInput(), allowedOrigins, ownedDaemonChildren),
-    [ELECTRON_CHANNELS.openDataDirectory]: (args) => openDataDirectory(stringArg(args, "path")),
-    [ELECTRON_CHANNELS.mcpLaunchConfig]: () => mcpLaunchConfig(resolveDaemonLaunchTarget(targetInput())),
-    [ELECTRON_CHANNELS.mcpValidateLaunchConfig]: () => validateMcpLaunchConfig(resolveDaemonLaunchTarget(targetInput())),
-    [ELECTRON_CHANNELS.exportStoreRecords]: (args) =>
-      JSON.stringify({
-        metadata: {
-          format: "masthead.native-store.v1",
-          schemaVersion: 1,
-          exportedAt: stringArg(args, "exportedAt") || new Date().toISOString(),
-          recordCount: 0
-        },
-        records: []
+  registerMastheadIpc(
+    ipcMain,
+    {
+      [ELECTRON_CHANNELS.startLiveConnector]: () =>
+        startLiveConnector(targetInput(), rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }), ownedDaemonChildren),
+      [ELECTRON_CHANNELS.openDataDirectory]: (args) => openDataDirectory(stringArg(args, "path")),
+      [ELECTRON_CHANNELS.mcpLaunchConfig]: () => mcpLaunchConfig(resolveDaemonLaunchTarget(targetInput())),
+      [ELECTRON_CHANNELS.mcpValidateLaunchConfig]: () => validateMcpLaunchConfig(resolveDaemonLaunchTarget(targetInput())),
+      [ELECTRON_CHANNELS.exportStoreRecords]: (args) =>
+        JSON.stringify({
+          metadata: {
+            format: "masthead.native-store.v1",
+            schemaVersion: 1,
+            exportedAt: stringArg(args, "exportedAt") || new Date().toISOString(),
+            recordCount: 0
+          },
+          records: []
+        }),
+      [ELECTRON_CHANNELS.clearLocalData]: () => ({ removedRecords: 0, touchedExternalState: false }),
+      [ELECTRON_CHANNELS.pruneLocalData]: () => ({
+        removedRecords: 0,
+        removedRecordIds: [],
+        removedByType: { event: 0, git_snapshot: 0, attention_item: 0, conflict_card: 0, review_disposition: 0 },
+        retainedRecords: 0,
+        touchedExternalState: false
       }),
-    [ELECTRON_CHANNELS.clearLocalData]: () => ({ removedRecords: 0, touchedExternalState: false }),
-    [ELECTRON_CHANNELS.pruneLocalData]: () => ({
-      removedRecords: 0,
-      removedRecordIds: [],
-      removedByType: { event: 0, git_snapshot: 0, attention_item: 0, conflict_card: 0, review_disposition: 0 },
-      retainedRecords: 0,
-      touchedExternalState: false
-    }),
-    [ELECTRON_CHANNELS.readStoreRecords]: () => [],
-    [ELECTRON_CHANNELS.appendStoreRecords]: () => undefined
-  });
+      [ELECTRON_CHANNELS.readStoreRecords]: () => [],
+      [ELECTRON_CHANNELS.appendStoreRecords]: () => undefined
+    },
+    { allowDevRenderer: isElectronDevMode() }
+  );
 }
 
 function electronDaemonEnv(): NodeJS.ProcessEnv {

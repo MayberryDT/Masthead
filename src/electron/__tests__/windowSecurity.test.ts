@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { isAllowedRendererUrl, mastheadWindowPreferences } from "../window";
+import { isAllowedRendererUrl, mastheadWindowPreferences, rendererTrustedOrigins } from "../window";
 
 describe("Electron window security policy", () => {
   test("keeps the renderer isolated from Node and Electron internals", () => {
@@ -14,13 +14,24 @@ describe("Electron window security policy", () => {
     });
   });
 
-  test("allows only Masthead renderer origins", () => {
-    expect(isAllowedRendererUrl("http://localhost:5173")).toBe(true);
-    expect(isAllowedRendererUrl("http://127.0.0.1:5173")).toBe(true);
+  test("allows only Masthead renderer origins in packaged mode", () => {
     expect(isAllowedRendererUrl("masthead://app/index.html")).toBe(true);
 
+    expect(isAllowedRendererUrl("http://localhost:5173")).toBe(false);
+    expect(isAllowedRendererUrl("http://127.0.0.1:5173")).toBe(false);
     expect(isAllowedRendererUrl("https://example.com")).toBe(false);
     expect(isAllowedRendererUrl("file:///tmp/index.html")).toBe(false);
     expect(isAllowedRendererUrl("http://127.0.0.1:17373/projection")).toBe(false);
+  });
+
+  test("allows Vite origins only when dev mode opts in", () => {
+    expect(isAllowedRendererUrl("http://localhost:5173", { allowDevServer: true })).toBe(true);
+    expect(isAllowedRendererUrl("http://127.0.0.1:5173", { allowDevServer: true })).toBe(true);
+    expect(rendererTrustedOrigins()).toEqual(["masthead://app"]);
+    expect(rendererTrustedOrigins({ allowDevServer: true })).toEqual([
+      "masthead://app",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173"
+    ]);
   });
 });

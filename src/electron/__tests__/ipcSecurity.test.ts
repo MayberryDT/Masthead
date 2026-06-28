@@ -10,8 +10,9 @@ describe("Electron IPC security policy", () => {
   });
 
   test("accepts only Masthead renderer URLs as IPC senders", () => {
-    expect(isAllowedIpcSender("http://localhost:5173/src/App.tsx")).toBe(true);
     expect(isAllowedIpcSender("masthead://app/index.html")).toBe(true);
+    expect(isAllowedIpcSender("http://localhost:5173/src/App.tsx")).toBe(false);
+    expect(isAllowedIpcSender("http://localhost:5173/src/App.tsx", { allowDevRenderer: true })).toBe(true);
     expect(isAllowedIpcSender("https://example.com/app.js")).toBe(false);
     expect(isAllowedIpcSender("file:///tmp/app.js")).toBe(false);
   });
