@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 
 async function canExecute(path) {
   try {
@@ -42,6 +43,14 @@ await access(join(resources, process.platform === "win32" ? "node.exe" : "node")
 await access(join(resources, "dist", "src", "daemon", "main.js"), constants.R_OK);
 await access(join(resources, "dist", "src", "mcp", "server.js"), constants.R_OK);
 
+const fuseWire = await getCurrentFuseWire(binary);
+assertFuse(fuseWire, FuseV1Options.RunAsNode, false, "RunAsNode");
+assertFuse(fuseWire, FuseV1Options.EnableNodeOptionsEnvironmentVariable, false, "EnableNodeOptionsEnvironmentVariable");
+assertFuse(fuseWire, FuseV1Options.EnableNodeCliInspectArguments, false, "EnableNodeCliInspectArguments");
+assertFuse(fuseWire, FuseV1Options.EnableEmbeddedAsarIntegrityValidation, true, "EnableEmbeddedAsarIntegrityValidation");
+assertFuse(fuseWire, FuseV1Options.OnlyLoadAppFromAsar, true, "OnlyLoadAppFromAsar");
+assertFuse(fuseWire, FuseV1Options.GrantFileProtocolExtraPrivileges, false, "GrantFileProtocolExtraPrivileges");
+
 const dataDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-smoke-"));
 const disableSandboxForCi = process.env.CI ? { ELECTRON_DISABLE_SANDBOX: "1" } : {};
 const child = spawn(binary, [], {
@@ -63,7 +72,6 @@ child.stderr.on("data", (chunk) => {
 const timeout = setTimeout(() => child.kill("SIGTERM"), 45_000);
 const [code] = await once(child, "exit");
 clearTimeout(timeout);
-await rm(dataDir, { force: true, recursive: true });
 
 const jsonLine = stdout.split(/\r?\n/).find((line) => line.includes('"smoke":"electron"'));
 if (code !== 0 || !jsonLine) {
@@ -77,4 +85,28 @@ if (!parsed.renderer?.hasDesktopBridge || parsed.renderer?.hasNodeProcess || par
   process.exit(1);
 }
 
+await assertSmokeConnectorStopped(dataDir);
+await rm(dataDir, { force: true, recursive: true });
+
 console.log(`Packaged Electron smoke passed. ${binary}`);
+
+function assertFuse(fuseWire, option, expected, name) {
+  const enabled = fuseWire[option] === 49 || fuseWire[option] === "1";
+  if (enabled !== expected) {
+    console.error(`Packaged Electron fuse ${name} expected ${expected ? "enabled" : "disabled"} but was ${enabled ? "enabled" : "disabled"}.`);
+    process.exit(1);
+  }
+}
+
+async function assertSmokeConnectorStopped(dataDir) {
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const health = await fetch("http://127.0.0.1:17373/health", { signal: AbortSignal.timeout(500) })
+      .then((response) => (response.ok ? response.json() : undefined))
+      .catch(() => undefined);
+    if (!health || health?.data?.dataDirectory !== dataDir) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  console.error(`Packaged Electron smoke connector was still running from ${dataDir} after the app exited.`);
+  process.exit(1);
+}

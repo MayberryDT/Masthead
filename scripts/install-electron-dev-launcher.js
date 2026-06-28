@@ -60,7 +60,13 @@ is_masthead_repo_process() {
     *"masthead-dev-desktop"*|*"gtk-launch ai.animas.masthead-dev"*|*"systemctl --user restart masthead-dev-electron.service"*)
       return 1
       ;;
-    "npm run dev:electron"|*"electron-forge start"*|*"/node_modules/electron/dist/electron"*|*"$DAEMON_ENTRY"*)
+    "npm run dev:electron"|\
+    "sh -c npm run version:sync && npm run build:daemon && MASTHEAD_ELECTRON_DEV=1 electron-forge start"|\
+    "node $APP_DIR/node_modules/.bin/electron-forge start"|\
+    "$NODE_BIN $APP_DIR/node_modules/.bin/electron-forge start"|\
+    "$NODE_BIN $APP_DIR/node_modules/@electron-forge/cli/dist/electron-forge-start.js"*|\
+    "$APP_DIR/node_modules/electron/dist/electron"*|\
+    "$NODE_BIN $DAEMON_ENTRY"*)
       return 0
       ;;
   esac

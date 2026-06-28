@@ -132,3 +132,33 @@ Verification:
 
 Next risk:
 - Continue packaging/security inventory: verify Electron fuse coverage and packaged artifact assumptions, then scan tracked active docs/config for any remaining Tauri-era operational instructions.
+
+## Pass 6
+
+Finding: packaged Electron was already using `asar`, but the packaged binary still allowed fallback app-code loading outside `app.asar`, did not enable embedded ASAR integrity validation, and still granted Electron's extra `file://` privileges even though Masthead serves the renderer from the `masthead://` custom protocol. The existing packaged smoke also did not prove fuse state, and a smoke run showed the temporary packaged-smoke daemon could remain alive long enough for the dev service restart to see the wrong connector.
+
+Action:
+- Enabled Electron fuses for `EnableEmbeddedAsarIntegrityValidation` and `OnlyLoadAppFromAsar`.
+- Disabled `GrantFileProtocolExtraPrivileges`.
+- Extended `scripts/masthead-electron-packaged-smoke.js` to read the packaged binary fuse wire and fail if hardening fuses drift.
+- Changed Electron smoke-mode shutdown to explicitly stop and wait for owned daemon children before exiting.
+- Extended packaged smoke to fail if its temporary connector is still serving after the packaged app exits.
+- Tightened the app-menu launcher's stale-process classifier so it only stops exact Masthead daemon, Forge, and Electron command shapes instead of arbitrary shell commands that merely mention Electron paths.
+- Reinstalled the updated launcher locally.
+
+Verification:
+- Official Electron fuse documentation reviewed for `EnableEmbeddedAsarIntegrityValidation`, `OnlyLoadAppFromAsar`, and `GrantFileProtocolExtraPrivileges`.
+- `node --check scripts/masthead-electron-packaged-smoke.js`: pass.
+- `npm run test:electron-security`: pass, 3 files and 8 tests plus source security check.
+- `npm run build`: pass.
+- `npm run smoke:electron:packaged`: pass after rebuilding `out/Masthead-linux-x64/masthead`.
+- Rebuilt packaged fuse wire: `RunAsNode=0`, `EnableNodeOptionsEnvironmentVariable=0`, `EnableNodeCliInspectArguments=0`, `EnableEmbeddedAsarIntegrityValidation=1`, `OnlyLoadAppFromAsar=1`, `GrantFileProtocolExtraPrivileges=0`.
+- `node --check scripts/install-electron-dev-launcher.js`: pass.
+- `npm run install:electron-dev-launcher`: pass.
+- `systemctl --user restart masthead-dev-electron.service`: pass after launcher classifier tightening; `/health` returned in 0.002202 s from `/home/tyler/.local/share/masthead-dev` with daemon instance `ad60fdfa-b630-4ff8-8775-a5a0695bb039`.
+- Live `/projection` returned in 0.372444 s with a 491229 byte response.
+- `npm run verify:no-citations`: pass.
+- `git diff --check`: pass.
+
+Next risk:
+- Final active-source cleanup pass: scan tracked active docs/config/scripts plus ignored working artifacts for Tauri leftovers, classify intentional history versus actionable residue, and decide whether the migration inventory is clean or requires approval for destructive local cleanup.

@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -35,7 +36,7 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
-const ownedDaemonChildren = new Set<import("node:child_process").ChildProcess>();
+const ownedDaemonChildren = new Set<ChildProcess>();
 let mainWindow: BrowserWindow | undefined;
 let tray: unknown;
 
@@ -133,9 +134,11 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
         renderer
       })
     );
-    app.quit();
+    await stopSmokeDaemons();
+    app.exit(0);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
+    await stopSmokeDaemons().catch(() => undefined);
     app.exit(1);
   }
 }
@@ -168,6 +171,33 @@ function showMainWindow(): void {
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
+}
+
+async function stopSmokeDaemons(timeoutMs = 5_000): Promise<void> {
+  const children = [...ownedDaemonChildren].filter(isChildRunning);
+  stopOwnedDaemons(ownedDaemonChildren);
+  if (!children.length) return;
+
+  await Promise.race([Promise.all(children.map(waitForChildExit)), delay(timeoutMs)]);
+  for (const child of children) {
+    if (isChildRunning(child)) child.kill("SIGKILL");
+  }
+  await Promise.race([Promise.all(children.map(waitForChildExit)), delay(1_000)]);
+}
+
+function waitForChildExit(child: ChildProcess): Promise<void> {
+  if (!isChildRunning(child)) return Promise.resolve();
+  return new Promise((resolve) => {
+    child.once("exit", () => resolve());
+  });
+}
+
+function isChildRunning(child: ChildProcess): boolean {
+  return child.exitCode === null && child.signalCode === null;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function registerRendererProtocol(): void {
