@@ -25,15 +25,19 @@ const config: ForgeConfig = {
         }
       }
     },
-    {
-      name: "@electron-forge/maker-rpm",
-      config: {
-        options: {
-          categories: ["Development"],
-          icon: "src-tauri/icons/icon.png"
-        }
-      }
-    }
+    ...(process.env.MASTHEAD_ENABLE_RPM_MAKER === "1"
+      ? [
+          {
+            name: "@electron-forge/maker-rpm",
+            config: {
+              options: {
+                categories: ["Development"],
+                icon: "src-tauri/icons/icon.png"
+              }
+            }
+          }
+        ]
+      : [])
   ],
   plugins: [
     {
