@@ -162,3 +162,24 @@ Verification:
 
 Next risk:
 - Final active-source cleanup pass: scan tracked active docs/config/scripts plus ignored working artifacts for Tauri leftovers, classify intentional history versus actionable residue, and decide whether the migration inventory is clean or requires approval for destructive local cleanup.
+
+## Pass 7
+
+Finding: no tracked `src-tauri` tree, Cargo manifest, Tauri npm dependency, or active operational Tauri command remained. The active PRD still described Tauri/Rust as the initial architecture, which conflicted with the completed Electron migration. Root historical/reference docs still contain Tauri decisions and evidence, but `masthead-project-spec.md` is already marked historical and `masthead-research.md` is a research log. Generic `cargo` command-pattern support remains in source because Masthead can observe arbitrary developer commands and high-risk lockfiles, not because it depends on Tauri.
+
+Action:
+- Updated `prd.md` to describe the current Electron/Chromium shell, TypeScript daemon, SQLite store, and React UI architecture.
+- Updated `prd.md` privileged-boundary and risk-register language from Tauri/Rust setup friction to Electron desktop shell performance and packaging friction.
+- Added a supersession note to `masthead-research.md` so future readers do not treat Tauri/Rust desktop decisions as current architecture.
+
+Verification:
+- Active tracked scan over `prd.md`, README, contributor/agent docs, release/reference docs, GitHub workflows, package scripts, scripts, source, Forge config, and Vite config: no active Tauri operational instructions or dependencies. Remaining matches are the intentional PRD migration note and generic command/lockfile pattern support for `cargo`.
+- `git ls-files` scan for `src-tauri`, Tauri package names, Cargo manifests, and Tauri/Cargo path residue: no matches.
+- Filesystem scan outside `.git`, `node_modules`, `dist`, and `out`: no Tauri/Cargo-named artifacts.
+- `npm ls @tauri-apps/api @tauri-apps/cli --depth=0`: empty dependency tree.
+- `npm run verify:no-citations`: pass.
+- `git diff --check`: pass.
+
+Approval-required residue:
+- Ignored local dependency artifact `node_modules/@tauri-apps/` exists as an empty directory. Removing it is destructive local cleanup, so it was not removed without approval.
+- Git still reports the pre-existing `.git/gc.log` loose-object cleanup warning during commits. Running prune/gc cleanup is destructive Git maintenance, so it was not done without approval.

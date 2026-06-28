@@ -204,9 +204,9 @@ The first build is done when Masthead can be dogfooded against real local Codex 
 
 - **Future adapter vocabulary:** Use neutral domain terms such as session, event, request, artifact, tool call, command run, approval, file change, alert, conflict, and outcome. Do not bake Codex-specific terms into core reducers, storage, UI state, or schemas.
 
-- **Initial architecture:** Use a thin real desktop architecture: Tauri 2, Rust native/core layer, SQLite local store, and React/TypeScript UI. A local web daemon is only a fallback if Tauri blocks progress.
+- **Initial architecture:** Use a thin real desktop architecture: Electron/Chromium desktop shell, TypeScript local daemon, SQLite local store, and React/TypeScript UI. The daemon owns canonical session data; Electron owns desktop shell responsibilities such as windows, tray, local OS actions, packaging, and daemon lifecycle.
 
-- **Privileged boundary:** Keep filesystem, process, Git, hook ingestion, SQLite writes, redaction, and local observer logic behind the native/core layer. The UI should call narrow typed commands rather than directly reaching into privileged local state.
+- **Privileged boundary:** Keep filesystem, process, Git, hook ingestion, SQLite writes, redaction, and local observer logic behind the daemon and Electron main/preload boundary. The UI should call narrow typed commands rather than directly reaching into privileged local state.
 
 - **Build sequence and exit gates:** Build in vertical slices that each leave a testable artifact:
   1. **Fixture shell:** Desktop shell, local SQLite store, fixture replay, and mocked session-board UI. Exit when replayed fixtures produce multiple cards and one expanded detail view.
@@ -312,7 +312,7 @@ The first build is done when Masthead can be dogfooded against real local Codex 
   - **False conflict attribution:** Mitigate with worktree-first detection, confidence labels, degraded same-directory mode, and no hard conflict across separate clones in V0.
   - **LLM hallucination:** Mitigate with evidence packets, schema validation, rejected zero-evidence items, visible observed/inferred/missing sections, and deterministic P0 boundaries.
   - **Privacy leakage:** Mitigate with metadata-first capture, redaction before persistence and remote send, remote off by default, payload preview, and local deletion/export controls.
-  - **Tauri/Rust setup friction:** Mitigate with fixture-first development, thin native commands, stable Git CLI use before deeper libraries, and a local web daemon fallback only if desktop setup blocks the proof.
+  - **Desktop shell performance and packaging friction:** Electron replaced the Tauri/WebKitGTK shell after Linux performance proved unacceptable. Mitigate with fixture-first development, packaged Electron smoke tests, security fuse checks, stable daemon contracts, and local service-launch verification.
   - **Watcher/process unreliability:** Mitigate by using filesystem and process observers as triggers, while Git snapshots and provider events remain stronger evidence.
   - **Over-broad scope:** Mitigate by treating non-Codex adapters, App Server control mode, PR management, cloud sync, and automation as explicit post-V0 work.
 
@@ -443,6 +443,6 @@ The first dogfood release should not be called ready until these gates pass:
 
 - Every new adapter should meet an adapter-readiness gate before being treated as supported: documented integration surface, fixture capture, normalized event mapping, approval model mapping, session identity mapping, file/Git/resource evidence mapping, privacy review, degradation behavior, and dogfood scenario coverage.
 
-- Open build decisions before implementation starts: minimum supported Codex version, exact hook payload subset required for V0, whether local LLM summarization ships before remote LLM opt-in, default retention periods, the first supported operating system target, and the point at which Tauri setup friction triggers the local web daemon fallback.
+- Open build decisions before implementation starts: minimum supported Codex version, exact hook payload subset required for V0, whether local LLM summarization ships before remote LLM opt-in, default retention periods, first supported operating system target, packaging/signing path, and desktop shell performance gates.
 
 - The first release should be dogfooded before broad adapter work. The product will only deserve multi-agent support after the Codex vertical loop feels reliable, calm, useful, and privacy-respecting.

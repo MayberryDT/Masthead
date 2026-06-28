@@ -3,6 +3,8 @@
 **Created:** June 23, 2026  
 **Purpose:** Running research log for the Masthead grill-me phase. This file captures decisions, assumptions, external research, and follow-up questions that emerge while stress-testing the product plan.
 
+> Historical research log. Desktop architecture decisions that mention Tauri/Rust were superseded by the 2026-06-28 Electron migration. Current product scope lives in `prd.md`, and current visual direction lives in `design.md`.
+
 ---
 
 ## Grill Decisions
