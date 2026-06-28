@@ -88,7 +88,11 @@ if (!parsed.renderer?.hasCustomChrome) {
   console.error(`Packaged custom window chrome was not rendered: ${JSON.stringify(parsed.renderer)}`);
   process.exit(1);
 }
-if (!parsed.renderer?.windowControls?.includes("Minimize window") || !parsed.renderer?.windowControls?.includes("Close window")) {
+if (
+  !parsed.renderer?.windowControls?.includes("Minimize window") ||
+  !parsed.renderer?.windowControls?.includes("Maximize window") ||
+  !parsed.renderer?.windowControls?.includes("Close window")
+) {
   console.error(`Packaged custom window controls were not rendered: ${JSON.stringify(parsed.renderer)}`);
   process.exit(1);
 }

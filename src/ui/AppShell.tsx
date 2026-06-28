@@ -46,6 +46,15 @@ function MastheadWindowBar() {
           <Icon name="minimize" size={14} weight="bold" />
         </button>
         <button
+          className="masthead-window-control"
+          type="button"
+          title="Maximize"
+          aria-label="Maximize window"
+          onClick={() => void invokeDesktopCommand("window_maximize_command")}
+        >
+          <Icon name="maximize" size={12} weight="bold" />
+        </button>
+        <button
           className="masthead-window-control close"
           type="button"
           title="Close"

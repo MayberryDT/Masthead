@@ -40,9 +40,11 @@ describe("desktop bridge", () => {
     });
 
     await expect(invokeDesktopCommand("window_minimize_command")).resolves.toEqual({ ok: true });
+    await expect(invokeDesktopCommand("window_maximize_command")).resolves.toEqual({ ok: true });
     await expect(invokeDesktopCommand("window_close_command")).resolves.toEqual({ ok: true });
     expect(invoke).toHaveBeenNthCalledWith(1, "window_minimize_command", undefined);
-    expect(invoke).toHaveBeenNthCalledWith(2, "window_close_command", undefined);
+    expect(invoke).toHaveBeenNthCalledWith(2, "window_maximize_command", undefined);
+    expect(invoke).toHaveBeenNthCalledWith(3, "window_close_command", undefined);
   });
 
   test("returns undefined in a plain browser", async () => {

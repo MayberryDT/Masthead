@@ -2789,6 +2789,17 @@ body {
   -webkit-app-region: drag;
 }
 
+.masthead-window-bar::after {
+  content: "";
+  position: absolute;
+  right: -12px;
+  bottom: -1px;
+  width: 12px;
+  height: 1px;
+  background: rgba(194, 221, 241, 0.13);
+  pointer-events: none;
+}
+
 .masthead-window-drag-region {
   flex: 1 1 auto;
   min-width: 0;
@@ -2802,13 +2813,13 @@ body {
 }
 
 .masthead-window-control {
+  position: relative;
   display: grid;
   width: 42px;
   min-width: 42px;
-  height: 34px;
+  height: 33px;
   place-items: center;
   border: 0;
-  border-left: 1px solid rgba(194, 221, 241, 0.08);
   border-radius: 0;
   background: transparent;
   color: rgba(214, 228, 239, 0.82);
@@ -2817,6 +2828,22 @@ body {
   transition:
     background-color 140ms ease,
     color 140ms ease;
+}
+
+.masthead-window-control::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 1px;
+  width: 1px;
+  background: rgba(194, 221, 241, 0.08);
+  pointer-events: none;
+}
+
+.masthead-window-control.close {
+  width: 54px;
+  min-width: 54px;
 }
 
 .masthead-window-control:hover {

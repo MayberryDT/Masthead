@@ -9,6 +9,7 @@ export const ELECTRON_CHANNELS = {
   readStoreRecords: "masthead:store:read",
   startLiveConnector: "masthead:connector:start",
   windowClose: "masthead:window:close",
+  windowMaximize: "masthead:window:maximize",
   windowMinimize: "masthead:window:minimize"
 } as const;
 
@@ -23,6 +24,7 @@ export const LEGACY_COMMAND_TO_CHANNEL: Record<string, ElectronChannel> = {
   read_store_records_command: ELECTRON_CHANNELS.readStoreRecords,
   start_live_connector_command: ELECTRON_CHANNELS.startLiveConnector,
   window_close_command: ELECTRON_CHANNELS.windowClose,
+  window_maximize_command: ELECTRON_CHANNELS.windowMaximize,
   window_minimize_command: ELECTRON_CHANNELS.windowMinimize
 };
 

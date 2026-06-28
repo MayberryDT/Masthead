@@ -233,6 +233,14 @@ function registerDesktopIpc(): void {
         mainWindow?.close();
         return { ok: true };
       },
+      [ELECTRON_CHANNELS.windowMaximize]: () => {
+        if (mainWindow?.isMaximized()) {
+          mainWindow.unmaximize();
+        } else {
+          mainWindow?.maximize();
+        }
+        return { ok: true };
+      },
       [ELECTRON_CHANNELS.windowMinimize]: () => {
         mainWindow?.minimize();
         return { ok: true };
