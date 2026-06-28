@@ -44,7 +44,6 @@ import { getSessionTokenTotals, getUsageStats, type UsageWindow } from "./db/usa
 import {
   checkpointMastheadDatabase,
   openMastheadDatabase,
-  optimizeMastheadDatabase,
   quickCheckMastheadDatabase,
   type MastheadDatabase
 } from "./db/sqlite.ts";
@@ -179,13 +178,16 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     enrichmentQueueScheduled = false;
     const sessionIds = [...queuedEnrichmentSessionIds];
     queuedEnrichmentSessionIds.clear();
-    for (const sessionId of sessionIds) {
+    for (let index = 0; index < sessionIds.length; index += 1) {
+      const sessionId = sessionIds[index];
+      if (!sessionId) continue;
       try {
         await enrichment.ensureCurrent(sessionId);
         indexCanonicalSessionSearch(database, sessionId);
       } catch (error) {
         console.error("[masthead] session enrichment failed", { sessionId, error });
       }
+      if ((index + 1) % 5 === 0) await yieldToEventLoop();
     }
     if (queuedEnrichmentSessionIds.size > 0 && !enrichmentQueueScheduled) {
       enrichmentQueueScheduled = true;
@@ -203,14 +205,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     observerRawJournal.appendStoreRecord(record);
   }
 
-  function queueProjectionEnrichmentRefresh(projection: LiveBoardProjection): void {
-    queueSessionEnrichments(projection.cards.filter(isRefreshableLiveCard).map((card) => card.canonicalSessionId ?? canonicalCardSessionId(card)));
-  }
-
-  function canonicalCardSessionId(card: SessionCardView): string {
-    return canonicalSessionId(`host:${config.host}`, runtimeIdFor("codex", undefined), card.sourceSessionId ?? card.sessionId);
-  }
-
   let closed = false;
   let closePromise: Promise<void> | undefined;
   let hydrationStarted = false;
@@ -219,8 +213,16 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   function startBackgroundHydration(): void {
     if (hydrationStarted) return;
     hydrationStarted = true;
-    hydrationPromise = (async () => {
-      await migrateLegacyJournalOnce({
+    hydrationPromise = new Promise((resolve) => {
+      setTimeout(() => {
+        void runBackgroundHydration().finally(resolve);
+      }, 1_000).unref();
+    });
+  }
+
+  async function runBackgroundHydration(): Promise<void> {
+    try {
+      const migration = await migrateLegacyJournalOnce({
         appendStoreRecord: appendStoreRecordToRawJournal,
         database,
         indexSession: (sessionId) => indexCanonicalSessionSearch(database, sessionId),
@@ -233,35 +235,49 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         upsertLiveEvent: (event) => sessions.upsertLiveEvent(event),
         yieldToEventLoop
       });
-      indexExistingCanonicalSessions();
-      rebuildLiveStateFromCanonical();
-      optimizeMastheadDatabase(database);
-    })().catch((error: unknown) => {
+      if (migration.importedRecords > 0) {
+        await indexExistingCanonicalSessions();
+        rebuildLiveStateFromCanonical();
+      }
+    } catch (error: unknown) {
       console.error("[masthead] background journal hydration failed", error);
-    });
+    }
   }
 
-  function indexExistingCanonicalSessions(): void {
-    const sessionRows = database
-      .prepare(
-        `SELECT sessions.session_id AS sessionId
-        FROM sessions
-        LEFT JOIN session_search ON session_search.session_id = sessions.session_id
-        WHERE session_search.session_id IS NULL`
-      )
-      .all() as Array<{ sessionId: string }>;
-    if (sessionRows.length === 0) return;
-    database.exec("BEGIN IMMEDIATE;");
-    try {
-      for (const row of sessionRows) {
-        indexCanonicalSessionSearch(database, row.sessionId);
+  async function indexExistingCanonicalSessions(): Promise<number> {
+    let indexed = 0;
+    const batchSize = 5;
+    while (!closed) {
+      const batch = database
+        .prepare(
+          `SELECT sessions.session_id AS sessionId
+          FROM sessions
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM session_search
+            WHERE session_search.session_id = sessions.session_id
+          )
+          ORDER BY sessions.last_activity_at DESC
+          LIMIT ?`
+        )
+        .all(batchSize) as Array<{ sessionId: string }>;
+      if (batch.length === 0) return indexed;
+
+      database.exec("BEGIN IMMEDIATE;");
+      try {
+        for (const row of batch) {
+          indexCanonicalSessionSearch(database, row.sessionId);
+        }
+        database.exec("COMMIT;");
+      } catch (error) {
+        database.exec("ROLLBACK;");
+        throw error;
       }
-      database.exec("COMMIT;");
-      queueSessionEnrichments(sessionRows.map((row) => row.sessionId));
-    } catch (error) {
-      database.exec("ROLLBACK;");
-      throw error;
+      indexed += batch.length;
+      queueSessionEnrichments(batch.map((row) => row.sessionId));
+      await yieldToEventLoop();
     }
+    return indexed;
   }
 
   function yieldToEventLoop(): Promise<void> {
@@ -332,18 +348,34 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   async function refreshKnownGitSnapshots(): Promise<number> {
-    const eventsBySession = new Map(
-      state.events.toSorted((a, b) => a.occurredAt.localeCompare(b.occurredAt)).map((event) => [event.sessionId, event])
-    );
-
     let refreshed = 0;
-    for (const event of eventsBySession.values()) {
+    for (const event of latestRefreshableGitEvents()) {
       if (!event?.sessionId || event.type === "session.completed") continue;
-      const gitSnapshot = await collectGitSnapshot(event);
+      const gitSnapshot = await collectGitSnapshot(event, { includeDiffStats: false });
       if (!gitSnapshot) continue;
       if (await appendGitSnapshotIfChanged(gitSnapshot)) refreshed += 1;
     }
     return refreshed;
+  }
+
+  function latestRefreshableGitEvents(): NormalizedEvent[] {
+    const eventsBySession = new Map<string, NormalizedEvent>();
+    const eventWindow = state.events.slice(-100);
+    for (let index = eventWindow.length - 1; index >= 0 && eventsBySession.size < 5; index -= 1) {
+      const event = eventWindow[index];
+      if (!event?.sessionId || eventsBySession.has(event.sessionId)) continue;
+      if (!event.workspace?.cwd && !event.workspace?.repoRoot && !event.workspace?.worktreePath) continue;
+      eventsBySession.set(event.sessionId, event);
+    }
+    return [...eventsBySession.values()];
+  }
+
+  let gitRefreshPromise: Promise<number> | undefined;
+  function refreshKnownGitSnapshotsSingleFlight(): Promise<number> {
+    gitRefreshPromise ??= refreshKnownGitSnapshots().finally(() => {
+      gitRefreshPromise = undefined;
+    });
+    return gitRefreshPromise;
   }
 
   let latestScan: SourceScanResult | undefined;
@@ -951,19 +983,23 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/projection") {
-      const liveEnvelope = projectLiveEvents(state.events, gitSnapshots, {
-        selectedSessionId: url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined,
+      const selectedSessionId = url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined;
+      const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
+      const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
+      const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
+      const liveEnvelope = projectLiveEvents(projectionEvents, projectionGitSnapshots, {
+        selectedSessionId,
         sessionEnrichments: liveProjectionEnrichments(database),
         diagnostics: state.diagnostics.length
       });
+      liveEnvelope.events = state.events.length;
+      liveEnvelope.gitSnapshots = gitSnapshots.length;
       liveEnvelope.projection = await sessionCopyEnricher.enrichProjection(liveEnvelope.projection);
       liveEnvelope.projection = attachCanonicalCardIds(liveEnvelope.projection, {
         hostId: `host:${config.host}`,
         runtimeKind: "codex"
       });
-      queueProjectionEnrichmentRefresh(liveEnvelope.projection);
       liveEnvelope.projection = withSessionTokenTotals(database, liveEnvelope.projection);
-      sessions.replaceBoardProjection(liveEnvelope.projection, liveEnvelope.generatedAt);
       sendJson(request, response, config.allowedOrigins, 200, liveEnvelope);
       return;
     }
@@ -1182,7 +1218,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if ((request.method === "POST" || request.method === "GET") && url.pathname === "/refresh") {
-      const refreshed = await refreshKnownGitSnapshots();
+      const refreshed = await refreshKnownGitSnapshotsSingleFlight();
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
         refreshed,
@@ -1709,7 +1745,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   const gitRefreshTimer =
     config.gitRefreshMs > 0
       ? setInterval(() => {
-          void refreshKnownGitSnapshots();
+          void refreshKnownGitSnapshotsSingleFlight();
         }, config.gitRefreshMs).unref()
       : undefined;
   return {
@@ -1766,10 +1802,6 @@ function pathnameForRequest(request: IncomingMessage, config: DaemonConfig): str
   } catch {
     return request.url || "/";
   }
-}
-
-function isRefreshableLiveCard(card: SessionCardView): boolean {
-  return card.lifecycle === "running";
 }
 
 function boundPort(server: Server, fallback: number): number {
@@ -1868,6 +1900,16 @@ function parseStoreRecord(payloadJson: string): StoreRecord | undefined {
   } catch {
     return undefined;
   }
+}
+
+function latestProjectionSessionIds(events: NormalizedEvent[], selectedSessionId: string | undefined): Set<string> {
+  const sessionIds = new Set<string>();
+  if (selectedSessionId) sessionIds.add(selectedSessionId);
+  for (let index = events.length - 1; index >= 0 && sessionIds.size < 60; index -= 1) {
+    const sessionId = events[index]?.sessionId;
+    if (sessionId) sessionIds.add(sessionId);
+  }
+  return sessionIds;
 }
 
 function isRawSourceStoreRecord(record: StoreRecord): boolean {

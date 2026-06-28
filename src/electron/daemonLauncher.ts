@@ -151,6 +151,7 @@ export async function startLiveConnector(input: ResolveDaemonLaunchTargetInput, 
   const initialProbe = await probeCollector(target.port, target.dataDirectory);
   if (initialProbe.state === "compatible") {
     const baseUrl = connectorBaseUrl(target.port);
+    await warmProjection(baseUrl);
     return connectorStartResult(false, baseUrl, "Local Masthead collector is already running.", initialProbe.health);
   }
 
@@ -180,6 +181,7 @@ export async function startLiveConnector(input: ResolveDaemonLaunchTargetInput, 
   });
 
   const health = await waitForCompatibleCollector(port, target.dataDirectory);
+  await warmProjection(baseUrl);
   return connectorStartResult(true, baseUrl, "Started local Masthead collector.", health);
 }
 
@@ -248,6 +250,15 @@ async function probeCollector(port: number, expectedDataDirectory: string): Prom
     return { state: "compatible", health };
   } catch {
     return { state: "offline" };
+  }
+}
+
+async function warmProjection(baseUrl: string): Promise<void> {
+  try {
+    const response = await fetch(`${baseUrl}/projection`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
+    await response.arrayBuffer();
+  } catch {
+    // Projection warmup is best-effort; the renderer can still surface live connection errors.
   }
 }
 

@@ -37,7 +37,7 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     port: Number.isFinite(configuredPort) ? configuredPort : 17373,
     dataDirectory: dataPaths.dataDirectory,
     codexHomeDir: resolve(env.MASTHEAD_CODEX_HOME || homedir()),
-    gitRefreshMs: Number.isFinite(configuredGitRefreshMs) ? configuredGitRefreshMs : 5_000,
+    gitRefreshMs: Number.isFinite(configuredGitRefreshMs) ? configuredGitRefreshMs : 60_000,
     allowedOrigins,
     fixturePath: resolve("fixtures/v0/replay-three-sessions-board.json"),
     storePath: dataPaths.legacyJournalPath,

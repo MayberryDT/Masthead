@@ -5,21 +5,29 @@ import type { GitSnapshot, NormalizedEvent } from "../core/types.ts";
 
 const execFileAsync = promisify(execFile);
 
-export async function collectGitSnapshot(event: NormalizedEvent): Promise<GitSnapshot | undefined> {
+export type CollectGitSnapshotOptions = {
+  includeDiffStats?: boolean;
+};
+
+export async function collectGitSnapshot(
+  event: NormalizedEvent,
+  options: CollectGitSnapshotOptions = {}
+): Promise<GitSnapshot | undefined> {
   if (!event.sessionId || !event.workspace) return undefined;
 
   const worktreePath = event.workspace.worktreePath || event.workspace.cwd || event.workspace.repoRoot;
   if (!worktreePath) return undefined;
 
   try {
-    const [repoRoot, gitCommonDir, branch, headSha, statusPorcelain, numstat] = await Promise.all([
+    const [repoRoot, gitCommonDir, branch, headSha, statusPorcelain] = await Promise.all([
       gitOutput(worktreePath, ["rev-parse", "--show-toplevel"]),
       gitOutput(worktreePath, ["rev-parse", "--git-common-dir"]),
       gitOutput(worktreePath, ["branch", "--show-current"]),
       gitOutput(worktreePath, ["rev-parse", "HEAD"]),
-      gitOutput(worktreePath, ["status", "--porcelain"], { trim: false }),
-      gitOutput(worktreePath, ["diff", "--numstat", "HEAD", "--"])
+      gitOutput(worktreePath, ["status", "--porcelain"], { trim: false })
     ]);
+    const numstat =
+      options.includeDiffStats === false ? undefined : await gitOutput(worktreePath, ["diff", "--numstat", "HEAD", "--"]);
 
     return buildGitSnapshot({
       sessionId: event.sessionId,

@@ -33,3 +33,29 @@ Verification:
 
 Next risk:
 - Audit Electron daemon launch and desktop data identity end to end, especially packaged resource paths, app user-data paths, MCP launch config, and live dev-service process cleanup behavior.
+
+## Pass 2
+
+Finding: Electron dev startup was repeatedly making the daemon unresponsive on the live 1.2 GB dev database. Verified symptoms included `/health` timing out with 0 bytes, queued listener backlog on `127.0.0.1:17373`, daemon main thread in `folio_wait_bit_common`, repeated slow `/projection` logs up to 31 seconds, orphaned Electron parents after forced service stops, and a recurring `git diff --numstat` child against unrelated worktrees. The root causes were stacked: every-launch background hydration repeated no-op legacy migration checks, scheduled Git refreshes ran every 5 seconds over too much live state, `/projection` did read-path writes/enrichment scheduling, and Electron handed the renderer a cold projection endpoint.
+
+Action:
+- Made scheduled/manual Git refresh single-flight and status-only, leaving rich diff stats on direct ingest snapshots.
+- Bounded periodic Git refresh to a small recent-session window and changed the default `MASTHEAD_GIT_REFRESH_MS` from 5 seconds to 60 seconds.
+- Deferred background hydration, removed startup `PRAGMA optimize`, batched any legacy-import search indexing, and recorded the empty legacy migration marker so missing legacy files do not repeat startup reconciliation forever.
+- Bounded live board projection to the recent session set while preserving full live event/snapshot totals in the envelope.
+- Removed `/projection` read-path side effects: no enrichment scheduling and no `board_sessions` writes on board reads.
+- Added Electron connector warmup for `/projection` before returning the live connector URL to the renderer.
+- Updated configuration docs and focused tests for the new refresh default, empty migration marker, status-only refresh, and read-only projection contract.
+
+Verification:
+- `npm run build:daemon`: pass.
+- `npm run test:electron`: pass, 11 files and 35 tests.
+- `npx vitest --run src/daemon/__tests__/legacyDataMigration.test.ts src/daemon/__tests__/gitSnapshots.test.ts src/daemon/__tests__/healthApi.test.ts src/core/__tests__/ingestServer.test.ts`: pass, 4 files and 23 tests.
+- `git diff --check`: pass.
+- Live service restart through `masthead-dev-electron.service`: active after restart with Electron running.
+- Live cold connector warmup request logged once as `/projection` in 10523 ms, then subsequent measured `/projection` returned in 0.418 s with a 491100 byte response.
+- Post-refresh proof after waiting past the 60000 ms refresh interval: `/health` returned in 0.002823 s and `/projection` returned in 0.332508 s with a 491100 byte response; no accumulating `git -C` children were present.
+- The live dev database now has the `legacy-events-ndjson-v1` marker with `reason: "empty"` for `/home/tyler/.local/share/masthead-dev/legacy/events.ndjson`.
+
+Next risk:
+- Continue Electron migration inventory with IPC/security and packaging/package-smoke review, especially renderer bridge exposure, preload surface, app protocol policy, packaged daemon resource paths, and remaining local app-menu cleanup behavior for orphaned Electron processes.

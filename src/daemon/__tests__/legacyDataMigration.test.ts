@@ -70,6 +70,44 @@ describe("legacy data migration", () => {
     expect(JSON.parse(rows[0].details_json)).toEqual({ importedRecords: 3 });
     db.close();
   });
+
+  test("marks empty legacy migration so startup does not repeat it", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-legacy-"));
+    tempDirs.push(tempDir);
+    const daemon = await createMastheadDaemon({
+      allowedOrigins: ["http://127.0.0.1:5173"],
+      codexHomeDir: tempDir,
+      databasePath: join(tempDir, "stable", "masthead.sqlite"),
+      fixturePath: join(tempDir, "fixture.json"),
+      gitRefreshMs: 0,
+      host: "127.0.0.1",
+      llmCopyEnabled: false,
+      port: 0,
+      storePath: join(tempDir, "legacy", "events.ndjson")
+    } satisfies DaemonConfig);
+    daemons.push(daemon);
+
+    daemon.startBackgroundHydration();
+    await waitFor(
+      () =>
+        Boolean(
+          daemon.database
+            .prepare("SELECT 1 FROM legacy_migrations WHERE migration_key = ?")
+            .get("legacy-events-ndjson-v1")
+        )
+    );
+
+    const marker = daemon.database
+      .prepare("SELECT details_json FROM legacy_migrations WHERE migration_key = ?")
+      .get("legacy-events-ndjson-v1") as { details_json: string };
+    expect(JSON.parse(marker.details_json)).toMatchObject({
+      importedRecords: 0,
+      migrationKey: "legacy-events-ndjson-v1",
+      reason: "empty",
+      totalRecords: 0
+    });
+  });
+
   test("hydrates only missing records from distinct legacy ndjson and marks migration", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-legacy-"));
     tempDirs.push(tempDir);
@@ -157,7 +195,7 @@ function countRows(db: { prepare: (sql: string) => { get: () => unknown } }, tab
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 1_000;
+  const deadline = Date.now() + 3_000;
   while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));

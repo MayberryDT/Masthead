@@ -232,7 +232,7 @@ describe("ingest server live projection", () => {
     expect(rawJournalRows(databasePath)).toEqual([]);
   });
 
-  test("updates canonical session graph and materialized Board state in SQLite", async () => {
+  test("updates canonical session graph without mutating Board state on projection reads", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
     const storePath = join(tempDir, "events.ndjson");
@@ -253,10 +253,7 @@ describe("ingest server live projection", () => {
       expect(db.prepare("SELECT signal_kind, severity FROM runtime_signals").all()).toEqual([
         { severity: "warning", signal_kind: "approval.requested" }
       ]);
-      const boardRows = db.prepare("SELECT projection_json FROM board_sessions").all() as Array<{ projection_json: string }>;
-      expect(boardRows.map((row) => JSON.parse(row.projection_json))).toEqual([
-        expect.objectContaining({ sessionId: "server-live", title: "Server live projection" })
-      ]);
+      expect(db.prepare("SELECT projection_json FROM board_sessions").all()).toEqual([]);
       expect(logbook).toMatchObject({
         ok: true,
         sessions: [expect.objectContaining({ title: "Server live projection" })]
@@ -365,7 +362,7 @@ describe("ingest server live projection", () => {
     const db = new DatabaseSync(databasePath);
     try {
       expect(db.prepare("SELECT source_session_id FROM sessions").all()).toEqual([{ source_session_id: "server-live" }]);
-      expect(db.prepare("SELECT session_id FROM board_sessions").all()).toHaveLength(1);
+      expect(db.prepare("SELECT session_id FROM board_sessions").all()).toEqual([]);
     } finally {
       db.close();
     }

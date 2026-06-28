@@ -13,7 +13,7 @@ Masthead is configured with environment variables. Defaults are local and develo
 | `MASTHEAD_DB_PATH` | `<data-dir>/masthead.sqlite` | Canonical SQLite path |
 | `MASTHEAD_STORE_PATH` | `<data-dir>/legacy/events.ndjson` | Legacy compatibility journal path |
 | `MASTHEAD_LEGACY_DATA_DIR` | unset | Optional legacy migration input directory |
-| `MASTHEAD_GIT_REFRESH_MS` | `5000` | Known-session Git refresh interval |
+| `MASTHEAD_GIT_REFRESH_MS` | `60000` | Known-session Git refresh interval |
 | `MASTHEAD_CODEX_HOME` | user home | Home directory used for Codex source discovery |
 | `MASTHEAD_BUILD_VERSION` | package version | Health build version override |
 | `MASTHEAD_BUILD_SHA` | `development` | Health build SHA override |

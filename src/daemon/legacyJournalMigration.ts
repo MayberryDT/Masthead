@@ -54,6 +54,18 @@ export async function migrateLegacyJournalOnce(options: LegacyJournalMigrationOp
 
   const totalRecords = sources[1] ? markerRecords.length : primaryRecords.length;
   if (totalRecords === 0) {
+    markLegacyDataMigrationCompleted(options.database, LEGACY_JOURNAL_MIGRATION_KEY, {
+      completedAt: new Date().toISOString(),
+      copiedRecords: 0,
+      importedRecords: 0,
+      migrationKey: LEGACY_JOURNAL_MIGRATION_KEY,
+      reason: "empty",
+      skippedRecords: 0,
+      source: markerSource,
+      sources,
+      targetDatabaseId: options.targetDatabaseId,
+      totalRecords: 0
+    });
     return { importedRecords: 0, reason: "empty", sources, totalRecords: 0 };
   }
 
