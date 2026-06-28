@@ -2,10 +2,9 @@ import type { McpLaunchConfigDto, McpLaunchValidationDto, McpTestConnectionDto }
 import type { McpAuditRowDto, McpStatusDto, McpToolDto } from "../app/daemonClient";
 import { McpAuditTable } from "./agent-access/McpAuditTable";
 import { McpPermissions } from "./agent-access/McpPermissions";
-import { McpSetup } from "./agent-access/McpSetup";
+import { McpSetup, type McpAuditProof } from "./agent-access/McpSetup";
 import { McpToolsTable } from "./agent-access/McpToolsTable";
 import { AppButton } from "./primitives/AppButton";
-import { StatStrip } from "./primitives/StatStrip";
 import { StatusBadge } from "./primitives/StatusBadge";
 
 type AgentAccessPanelProps = {
@@ -39,32 +38,31 @@ export function AgentAccessPanel({
 }: AgentAccessPanelProps) {
   return (
     <section className="agent-access-panel surface-panel" aria-label="Agent Access">
-      <div className="agent-access-command-row">
-        <StatusBadge tone={status.ready ? "active" : "warning"}>{status.ready ? "MCP server ready" : "MCP server unavailable"}</StatusBadge>
-        {onRefresh ? (
-          <AppButton onClick={onRefresh} variant="quiet">
-            Refresh
-          </AppButton>
-        ) : null}
-      </div>
+      <header className="agent-access-overview">
+        <div>
+          <p className="mono-label">Agent Access</p>
+          <h2>Can agents read Masthead?</h2>
+          <p>{accessSummary(status)}</p>
+        </div>
+        <div className="agent-access-overview-actions">
+          <StatusBadge tone={status.ready && status.globalAccessEnabled && status.readOnly ? "active" : "warning"}>
+            {status.ready ? "MCP ready" : "MCP unavailable"}
+          </StatusBadge>
+          {onRefresh ? (
+            <AppButton onClick={onRefresh} variant="quiet">
+              Refresh status
+            </AppButton>
+          ) : null}
+        </div>
+      </header>
 
       {loadState === "error" ? <p className="agent-access-error">{error ?? "MCP status could not be loaded."}</p> : null}
 
-      <StatStrip
-        items={[
-          { label: "MCP server", value: status.ready ? "Ready" : "Unavailable" },
-          { label: "Database", value: status.databasePath },
-          { label: "Mode", value: `${status.mode} / ${status.readOnly ? "read-only" : "write-enabled"}` },
-          { label: "Tools", value: `${status.toolCount} read-only` },
-          { label: "Access", value: status.globalAccessEnabled ? "Enabled" : "Disabled" },
-          { label: "Queries", value: status.lastQueryAt ? `${status.queryCount} total / ${formatDateTime(status.lastQueryAt)}` : `${status.queryCount} total` }
-        ]}
-        label="MCP status"
-      />
-
       <div className="agent-access-layout">
         <McpSetup
+          auditProof={latestSuccessfulAuditProof(audit)}
           launchConfig={launchConfig}
+          onRefreshProof={onRefresh}
           onTestConnection={onTestConnection}
           status={status}
           testConnectionResult={testConnectionResult}
@@ -90,9 +88,22 @@ const defaultStatus: McpStatusDto = {
   toolCount: 0
 };
 
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  });
+function accessSummary(status: McpStatusDto): string {
+  if (!status.ready) return "MCP server is unavailable";
+  if (!status.globalAccessEnabled) return "Read-only MCP access is disabled";
+  if (!status.readOnly) return "MCP is running with write access, which Masthead should not expose";
+  return "Read-only MCP access is enabled";
+}
+
+function latestSuccessfulAuditProof(audit: McpAuditRowDto[]): McpAuditProof | undefined {
+  return audit
+    .filter((row) => row.status === "succeeded")
+    .sort((left, right) => new Date(right.requestedAt).getTime() - new Date(left.requestedAt).getTime())
+    .map((row) => ({
+      boundedBytes: row.boundedBytes,
+      requestedAt: row.requestedAt,
+      resultCount: row.resultCount,
+      sessionId: row.sessionIds[0],
+      toolName: row.toolName
+    }))[0];
 }

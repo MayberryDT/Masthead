@@ -67,6 +67,7 @@ export function AgentAccessSurface() {
       const result = await testMcpConnection(connection.baseUrl);
       setTestConnectionResult(result);
       setTestConnectionState(result.status === "passed" ? "passed" : "failed");
+      if (result.status === "passed") loadMcpState();
       return result;
     } catch (testError: unknown) {
       const result: McpTestConnectionDto = {
@@ -77,7 +78,7 @@ export function AgentAccessSurface() {
       setTestConnectionState("failed");
       return result;
     }
-  }, [connection.baseUrl]);
+  }, [connection.baseUrl, loadMcpState]);
 
   useEffect(() => {
     const controller = new AbortController();
