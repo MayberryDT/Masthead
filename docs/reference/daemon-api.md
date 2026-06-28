@@ -20,6 +20,7 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /sources` discovers and returns source statuses.
 - `GET /adapters` returns adapter statuses.
 - `GET /sources/scan/latest` returns the latest multi-adapter scan result, or runs a bounded scan if none is cached.
+- `GET /diagnostics/runtime` returns runtime diagnostics, import queue state, and a small active import page for Advanced diagnostics.
 - `GET /sessions` searches canonical sessions. Query params include `q`, `project`, `runtime`, `host`, `model`, `state`, date filters, and `limit`.
 - `GET /sessions/:sessionId` returns one session detail.
 - `GET /sessions/:sessionId/excerpts` returns bounded excerpts, with optional `q` and `limit`.
@@ -70,3 +71,5 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 npm run doctor
 npm run check:endpoint-matrix
 ```
+
+`npm run doctor:json` includes a `sources-pipeline` check with scan freshness, connected source count, transcript coverage, enrichment coverage, import failures, unrecognized-schema count, and repair recommendations. The check is read-only and reports warnings from observed daemon data only.

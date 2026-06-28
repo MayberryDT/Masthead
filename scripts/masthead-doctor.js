@@ -59,6 +59,7 @@ checks.push(checkDatabaseIdentity(health));
 checks.push(await checkEndpoints());
 checks.push(await checkSources());
 checks.push(await checkImports());
+checks.push(await checkSourcesPipeline());
 checks.push(await checkMcp());
 checks.push(await checkMcpStdio());
 checks.push(await checkLogbook());
@@ -339,7 +340,7 @@ async function checkMcpStdio() {
 async function checkImports() {
   try {
     const body = await getJson("/imports");
-    const jobs = Array.isArray(body.jobs) ? body.jobs : [];
+    const jobs = importJobsFromBody(body);
     return {
       id: "imports",
       label: "imports",
@@ -349,6 +350,146 @@ async function checkImports() {
     };
   } catch (error) {
     return { id: "imports", label: "imports", status: "fail", message: errorMessage(error), details: { baseUrl } };
+  }
+}
+
+async function checkSourcesPipeline() {
+  try {
+    const [scanBody, adaptersBody, sourcesBody, importsBody, failedImportsBody, logbookBody, usageBody, settingsBody, runtimeDiagnosticsBody] =
+      await Promise.all([
+        getJson("/sources/scan/latest"),
+        getJson("/adapters"),
+        getJson("/sources"),
+        getJson("/imports?limit=50"),
+        getJson("/imports?limit=50&status=failed"),
+        getJson("/logbook/summary"),
+        getJson("/usage/summary?window=all"),
+        getJson("/settings"),
+        getJson("/diagnostics/runtime").catch((error) => ({ diagnosticsEndpointError: errorMessage(error) }))
+      ]);
+
+    const scan = isRecord(scanBody.scan) ? scanBody.scan : undefined;
+    const adapters = Array.isArray(adaptersBody.adapters) ? adaptersBody.adapters.filter(isRecord) : [];
+    const sources = Array.isArray(sourcesBody.sources) ? sourcesBody.sources.filter(isRecord) : [];
+    const imports = importJobsFromBody(importsBody);
+    const failedImports = importJobsFromBody(failedImportsBody);
+    const summary = isRecord(logbookBody.summary) ? logbookBody.summary : {};
+    const usage = isRecord(usageBody.usage) ? usageBody.usage : {};
+    const coverage = isRecord(usage.coverage) ? usage.coverage : {};
+    const settings = isRecord(settingsBody.settings) ? settingsBody.settings : {};
+    const enrichment = isRecord(settings.enrichment) ? settings.enrichment : {};
+    const enrichmentHealth = isRecord(enrichment.health) ? enrichment.health : {};
+    const runtimeDiagnostics = isRecord(runtimeDiagnosticsBody) && Array.isArray(runtimeDiagnosticsBody.diagnostics)
+      ? runtimeDiagnosticsBody.diagnostics.length
+      : undefined;
+
+    if (!scan) {
+      return {
+        id: "sources-pipeline",
+        label: "sources pipeline",
+        status: "fail",
+        message: "Sources setup endpoint did not return a scan payload.",
+        details: { setupEndpoint: "/sources/scan/latest", baseUrl }
+      };
+    }
+
+    const scanGeneratedAt = stringValue(scan.generatedAt);
+    const scanAgeMs = scanGeneratedAt ? Date.now() - Date.parse(scanGeneratedAt) : undefined;
+    const scanStale = scanAgeMs === undefined || !Number.isFinite(scanAgeMs) || scanAgeMs > 24 * 60 * 60 * 1000;
+    const scanCachedOnly = scan.scanId === "scan:cached";
+    const importedSessions = sources.reduce((total, source) => total + (numberValue(source.importedSessions ?? source.sessionCount) ?? 0), 0);
+    const sourceFailureCount = sources.reduce((total, source) => total + (numberValue(source.failureCount ?? source.failures) ?? 0), 0);
+    const adapterDiagnostics = adapters.flatMap((adapter) => (Array.isArray(adapter.diagnostics) ? adapter.diagnostics.filter(isRecord) : []));
+    const unrecognizedDiagnostics = adapterDiagnostics.filter(isUnrecognizedSchemaDiagnostic);
+    const unrecognizedSourceCount = unrecognizedDiagnostics.reduce((total, diagnostic) => total + (numberValue(diagnostic.count) ?? 1), 0);
+    const sessions = numberValue(summary.sessions) ?? 0;
+    const messages = numberValue(summary.messages) ?? 0;
+    const toolCalls = numberValue(summary.toolCalls) ?? 0;
+    const transcriptHasRows = messages > 0 || toolCalls > 0;
+    const enrichmentSessions = numberValue(enrichment.sessionCount) ?? sessions;
+    const currentEnrichments = numberValue(enrichment.currentEnrichments ?? coverage.currentEnrichments) ?? 0;
+    const enrichmentComplete = numberValue(enrichmentHealth.complete) ?? currentEnrichments;
+    const warnings = [];
+    const repairRecommendations = [];
+
+    if (scanCachedOnly || scanStale) {
+      warnings.push("latest scan is missing or stale");
+      repairRecommendations.push("Open Sources and run Scan this computer to refresh bounded local discovery.");
+    }
+    if (sources.length === 0) {
+      warnings.push("no connected sources");
+      repairRecommendations.push("Connect selected recognized sources after a scan; Masthead will not crawl the whole home directory.");
+    }
+    if (sourceFailureCount > 0 || failedImports.length > 0) {
+      warnings.push("import failures recorded");
+      repairRecommendations.push("Use Sources advanced diagnostics or /imports?status=failed to inspect failures, then retry after fixing path or schema issues.");
+    }
+    if (sessions > 0 && !transcriptHasRows) {
+      warnings.push("no transcript rows for imported sessions");
+      repairRecommendations.push("Approve transcript import for trusted sources, then run transcript import or sync connected.");
+    }
+    if (enrichmentSessions > 0 && enrichmentHealth.status === "partial") {
+      warnings.push("enrichment coverage is partial");
+      repairRecommendations.push("Keep the daemon running after imports or inspect Settings enrichment health for failed or queued enrichment.");
+    }
+    if (unrecognizedSourceCount > 0) {
+      warnings.push("unrecognized source schemas detected");
+      repairRecommendations.push("Leave detector-only or unrecognized sources as diagnostics until their schema is mapped; do not treat them as successful transcript imports.");
+    }
+
+    return {
+      id: "sources-pipeline",
+      label: "sources pipeline",
+      status: warnings.length === 0 ? "ok" : "warn",
+      message:
+        warnings.length === 0
+          ? `Sources pipeline responded; ${sources.length} source${sources.length === 1 ? "" : "s"} and ${importedSessions} imported session${importedSessions === 1 ? "" : "s"}.`
+          : `Sources pipeline warnings: ${warnings.join("; ")}.`,
+      details: {
+        setupEndpoint: "/sources/scan/latest",
+        latestScan: {
+          ageMs: scanAgeMs,
+          generatedAt: scanGeneratedAt,
+          scanId: scan.scanId,
+          stale: Boolean(scanStale),
+          cachedOnly: Boolean(scanCachedOnly)
+        },
+        connectedSourceCount: sources.length,
+        importedSessions,
+        transcriptCoverage: {
+          sessions,
+          messages,
+          toolCalls,
+          hasRows: transcriptHasRows
+        },
+        enrichmentCoverage: {
+          currentEnrichments,
+          complete: enrichmentComplete,
+          failed: enrichmentHealth.failed,
+          queued: enrichmentHealth.queued,
+          remoteModelEnabled: enrichment.remoteModelEnabled,
+          status: enrichmentHealth.status,
+          sessions: enrichmentSessions
+        },
+        importFailures: {
+          failedPageCount: failedImports.length,
+          failedTotal: numberValue(failedImportsBody.total) ?? failedImports.length,
+          sourceFailureCount
+        },
+        unrecognizedSourceCount,
+        runtimeDiagnostics,
+        recentImportJobs: imports.length,
+        repairRecommendations: dedupeStrings(repairRecommendations)
+      }
+    };
+  } catch (error) {
+    return {
+      id: "sources-pipeline",
+      label: "sources pipeline",
+      status: "fail",
+      message: errorMessage(error),
+      details: { baseUrl }
+    };
   }
 }
 
@@ -693,6 +834,22 @@ function isRecord(value) {
 
 function arrayStrings(value) {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+}
+
+function importJobsFromBody(body) {
+  if (Array.isArray(body?.jobs)) return body.jobs.filter(isRecord);
+  if (Array.isArray(body?.imports)) return body.imports.filter(isRecord);
+  return [];
+}
+
+function isUnrecognizedSchemaDiagnostic(diagnostic) {
+  const code = stringValue(diagnostic.code) ?? "";
+  const message = stringValue(diagnostic.message) ?? "";
+  return code.includes("schema_not_recognized") || /schema not recognized/i.test(message);
+}
+
+function dedupeStrings(values) {
+  return [...new Set(values)];
 }
 
 function numberValue(value) {

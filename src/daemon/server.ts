@@ -39,6 +39,7 @@ import { getLogbookSummary } from "./db/logbookSummaryRepository.ts";
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
 import { getOrCreateDatabaseIdentity, hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor } from "./db/sessionRepository.ts";
+import { saveSourceScanRun, saveSourceSetupState } from "./db/sourceSetupRepository.ts";
 import { getSessionTokenTotals, getUsageStats, type UsageWindow } from "./db/usageStatsRepository.ts";
 import {
   checkpointMastheadDatabase,
@@ -65,6 +66,7 @@ import { recordRequestDiagnostic, recordRuntimeDiagnostic, runtimeDiagnosticsSna
 import { discoverSourceSnapshot, type SourceDiscoverySnapshot } from "./sources/sourceDiscoveryService.ts";
 import { scanLocalSources, type SourceScanResult } from "./sources/sourceScanService.ts";
 import { connectSelectedSources, type ConnectSourcesRequest } from "./sources/sourceConnectService.ts";
+import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/sourceSetupService.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { buildMastheadHealth } from "./healthService.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
@@ -355,7 +357,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   async function scanSourcesAndPersist(): Promise<SourceScanResult> {
     latestScan = await scanLocalSources({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
     getSourceStatuses(database, latestScan.adapters.flatMap((adapter) => adapter.sources));
+    saveSourceScanRun(database, scanResultToOnboardingScan(latestScan));
     return latestScan;
+  }
+
+  function buildAndPersistSourcesSetup() {
+    const setup = buildSourcesSetupState(database, { now: new Date().toISOString() });
+    saveSourceSetupState(database, setup);
+    return setup;
   }
 
   function cachedSourceScanResult(): SourceScanResult {
@@ -759,6 +768,22 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/sources/setup") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        setup: buildAndPersistSourcesSetup()
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/sources/advanced") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        advanced: buildAndPersistSourcesSetup().advanced,
+        ok: true
+      });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/adapters") {
       const includeLocations = url.searchParams.get("includeLocations") !== "false";
       const adapters = getAdapterStatuses(database).map((adapter) =>
@@ -827,6 +852,100 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
         scan
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/setup/scan") {
+      const scan = await scanSourcesAndPersist();
+      sendJson(request, response, config.allowedOrigins, 202, {
+        ok: true,
+        scan: scanResultToOnboardingScan(scan),
+        setup: buildAndPersistSourcesSetup()
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/setup/run") {
+      try {
+        const scan = latestScan ?? (await scanSourcesAndPersist());
+        const body = objectRecord(await optionalJsonBody(request));
+        const runtimes = setupRuntimesFromBody(body, scan);
+        const importTranscripts = body.importTranscripts === true;
+        if (importTranscripts && body.transcriptApproved !== true && !transcriptImportApproved(database)) {
+          sendJson(request, response, config.allowedOrigins, 409, {
+            ok: false,
+            error: "Transcript import requires explicit source review approval."
+          });
+          return;
+        }
+        const result = connectSelectedSources(
+          database,
+          scan,
+          {
+            importMetadata: body.importMetadata !== false,
+            importTranscripts,
+            queueEnrichment: body.queueEnrichment === true,
+            runtimes,
+            transcriptApproved: body.transcriptApproved === true
+          },
+          async (kind, sourceId, controls) => {
+            const source = await sourceById(sourceId);
+            if (!source) throw new Error(`Unknown source: ${sourceId}`);
+            return runImportWorkerForSource(kind, source, controls);
+          }
+        );
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          jobs: result.jobs,
+          queued: result.jobs.length,
+          setup: buildAndPersistSourcesSetup(),
+          skipped: result.skipped
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/sync") {
+      try {
+        const body = objectRecord(await optionalJsonBody(request));
+        const runtime = stringRecordValue(body, "runtime");
+        if (runtime && !isRuntimeKind(runtime)) throw new Error(`Unsupported adapter runtime: ${runtime}`);
+        const metadata = await queueAdapterMetadataImports(runtime);
+        const transcriptsApproved = transcriptImportApproved(database);
+        const transcripts = transcriptsApproved ? await queueAdapterTranscriptImports(runtime) : { jobs: [], sources: 0 };
+        const jobs = [...metadata.jobs, ...transcripts.jobs];
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          jobs,
+          metadataJobs: metadata.jobs,
+          queued: jobs.length,
+          setup: buildAndPersistSourcesSetup(),
+          skipped: transcriptsApproved ? 0 : 1,
+          sources: metadata.sources + transcripts.sources,
+          transcriptJobs: transcripts.jobs
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/repair") {
+      await optionalJsonBody(request);
+      sendJson(request, response, config.allowedOrigins, 202, {
+        message: "No automated source repair actions are implemented yet.",
+        ok: true,
+        repairs: [],
+        setup: buildAndPersistSourcesSetup()
       });
       return;
     }
@@ -2095,6 +2214,12 @@ function parseBoundedInteger(
 
 function isRuntimeKind(value: unknown): value is RuntimeKind {
   return typeof value === "string" && (RUNTIME_KINDS as readonly string[]).includes(value);
+}
+
+function setupRuntimesFromBody(body: Record<string, unknown>, scan: SourceScanResult): RuntimeKind[] {
+  const requested = Array.isArray(body.runtimes) ? body.runtimes.filter((runtime): runtime is RuntimeKind => isRuntimeKind(runtime)) : [];
+  if (requested.length > 0) return requested;
+  return scan.adapters.filter((adapter) => adapter.sources.length > 0).map((adapter) => adapter.runtime);
 }
 
 function isSourcePolicyKind(value: unknown): value is SourcePolicyKind {

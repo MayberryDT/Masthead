@@ -22,6 +22,8 @@ export const READ_ONLY_ENDPOINTS = [
   { method: "GET", path: "/fixture", label: "fixture replay" },
   { method: "GET", path: "/adapters", label: "adapter status" },
   { method: "GET", path: "/sources", label: "source discovery" },
+  { method: "GET", path: "/sources/setup", label: "sources setup state" },
+  { method: "GET", path: "/sources/advanced", label: "sources advanced diagnostics" },
   { method: "GET", path: "/sessions", label: "session search" },
   { method: "GET", path: "/sessions/session-1", label: "session detail", allowNotFound: true },
   { method: "GET", path: "/sessions/session-1/excerpts?limit=8", label: "session excerpts" },

@@ -8,7 +8,25 @@ export const RUNTIME_KINDS = [
   "openclaw",
   "hermes",
   "pi",
-  "gemini_cli"
+  "omp",
+  "cline",
+  "roo_code",
+  "kilo_code",
+  "continue_dev",
+  "openhands",
+  "github_copilot",
+  "windsurf",
+  "zed_ai",
+  "amazon_q",
+  "sourcegraph_amp",
+  "jetbrains_ai",
+  "qodo",
+  "tabnine",
+  "ibm_bob",
+  "devin",
+  "jules",
+  "gemini_cli",
+  "crush"
 ] as const;
 
 export type RuntimeKind = (typeof RUNTIME_KINDS)[number];

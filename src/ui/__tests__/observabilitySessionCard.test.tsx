@@ -12,11 +12,13 @@ import { sessionDemoTelemetry } from "../observabilityDemo";
 
 describe("observability session card", () => {
   test("renders compact reference facts without prototype telemetry rows", () => {
+    const referenceSession = session();
+    const expectedHeaderTime = new Date(referenceSession.lastActivity).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const html = renderToStaticMarkup(
-      <SessionCard session={session()} onToggle={() => undefined} demoTelemetry={sessionDemoTelemetry("session-1", 0)} />
+      <SessionCard session={referenceSession} onToggle={() => undefined} demoTelemetry={sessionDemoTelemetry("session-1", 0)} />
     );
 
-    expect(html).toContain("Masthead · 08:04 PM");
+    expect(html).toContain(`Masthead · ${expectedHeaderTime}`);
     expect(html).toContain("Refactor auth flow");
     expect(html).toContain("Active");
     expect(html).toContain("8m 42s");

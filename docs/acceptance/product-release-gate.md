@@ -20,6 +20,10 @@
 - [x] Transcript import requires explicit approval. Evidence: `/sources/connect` rejects transcript import without approval and adapter transcript routes use existing policy checks.
 - [x] Imported sessions appear in Logbook search. Evidence: `multiAdapterImport.test.ts` imports all active adapters and indexes canonical search on 2026-06-27.
 - [x] Unrecognized schemas produce diagnostics and do not create fake transcripts. Evidence: `multiAdapterImport.test.ts` covers unrecognized Cursor SQLite diagnostics with zero sessions on 2026-06-27.
+- [x] Harness catalog separates active import, detector-only, cloud-reference, and legacy entries. Evidence: `harnessCatalog.test.ts` covers onboarding harnesses, OMP detector-only status, Devin/Jules cloud references, and hidden Gemini CLI.
+- [ ] Advanced diagnostics reviewed in rendered Sources UI.
+- [ ] `sources-pipeline` doctor check reviewed against current local data.
+- [ ] No whole-home scan guarantee reviewed in docs and UI copy.
 
 ## Logbook
 - [ ] Empty state explains source/import next step.

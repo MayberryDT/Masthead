@@ -1,6 +1,5 @@
-import type { AdapterCapability } from "../../adapters/capabilities.ts";
 import type { AdapterDiagnostic, DiscoveryContext, RuntimeKind } from "../../adapters/types.ts";
-import { supportedAdapters } from "./supportedAdapters.ts";
+import { supportedAdapters, type SupportedAdapter } from "./supportedAdapters.ts";
 import { preflightAdapterCandidates } from "./sourcePreflightCandidates.ts";
 
 export type SourcePreflightDto = {
@@ -18,7 +17,7 @@ export type SourcePreflightDto = {
 export type AdapterPreflightResult = {
   runtime: RuntimeKind;
   label: string;
-  capability: AdapterCapability;
+  capability: SupportedAdapter;
   state: "connected" | "degraded" | "not_detected" | "planned";
   discoveredCount: number;
   diagnostics: AdapterDiagnostic[];
@@ -28,15 +27,15 @@ export type AdapterPreflightResult = {
 export type SourcePreflightResult = AdapterPreflightResult;
 
 export async function preflightAllAdapters(context: DiscoveryContext): Promise<AdapterPreflightResult[]> {
-  return Promise.all(supportedAdapters.map((adapter) => preflightOneAdapter(adapter, context)));
+  return Promise.all(supportedAdapters.filter((adapter) => adapter.enabled).map((adapter) => preflightOneAdapter(adapter, context)));
 }
 
 export async function sourcePreflight(context: DiscoveryContext): Promise<AdapterPreflightResult[]> {
   return preflightAllAdapters(context);
 }
 
-async function preflightOneAdapter(adapter: AdapterCapability, context: DiscoveryContext): Promise<AdapterPreflightResult> {
-  if (adapter.runtime === "gemini_cli" || adapter.maturity === "planned") {
+async function preflightOneAdapter(adapter: SupportedAdapter, context: DiscoveryContext): Promise<AdapterPreflightResult> {
+  if (adapter.implementationState === "planned" || adapter.maturity === "planned") {
     return {
       capability: adapter,
       checkedPaths: [],

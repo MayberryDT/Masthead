@@ -2,7 +2,7 @@
 
 Masthead adapters scan known local agent-history locations and normalize recognized records into the canonical SQLite session graph. They do not control source tools.
 
-## Active Scan Targets
+## Active Import Adapters
 
 - Codex
 - Cursor
@@ -15,6 +15,16 @@ Masthead adapters scan known local agent-history locations and normalize recogni
 - Pi
 
 Gemini CLI is legacy compatibility only for existing imported records. It is not an active scan target.
+
+## Harness Catalog
+
+Sources also carries a broader catalog so users can see what Masthead knows about without overstating support.
+
+- Detector-only local harnesses can be checked at conservative known paths and reported in Advanced diagnostics, but they do not import canonical sessions until schema support exists.
+- Cloud-reference harnesses are listed for product clarity when the agent is cloud-first and has no local source connector in this pass.
+- Legacy hidden entries remain out of default onboarding.
+
+Detector-only examples include OMP, Crush, Cline, Roo Code, Kilo Code, Continue.dev, OpenHands, GitHub Copilot, Windsurf, Zed AI, Amazon Q Developer, Sourcegraph Amp, JetBrains AI, Qodo, Tabnine, and IBM Bob. Cloud-reference examples include Devin and Jules.
 
 ## Import States
 

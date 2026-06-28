@@ -27,6 +27,7 @@ Release docs must preserve these launch boundaries:
 - Remote enrichment is optional, scoped, redacted, previewable, and auditable.
 - Board is a live view over collected session data, not the product category.
 - Source scans check known local agent-history locations only; full transcript import requires explicit approval.
+- Detector-only and cloud-reference harnesses are catalog references, not claims of successful local transcript import.
 
 ## CI And Security Gates
 
@@ -51,6 +52,7 @@ The current build is a Codex-first vertical slice with:
 - One-command live launcher that starts the local collector and Vite UI together, plus UI polling that defaults to live ingestion and shows an explicit disconnected state when the collector is unavailable. Fixture replay is an explicit demo mode.
 - Thin Tauri desktop shell that compiles with native store commands registered.
 - Multi-adapter Sources registry, bounded scan service, connect-selected workflow, and conservative local import attempts for Codex, Cursor, Claude Code, Antigravity, OpenCode, Aider, OpenClaw, Hermes, and Pi.
+- Harness catalog coverage for detector-only local harnesses and cloud-reference harnesses, with Advanced diagnostics expected to distinguish detected paths, unrecognized schemas, and unsupported cloud-first tools.
 
 Real local Codex dogfooding has now been run in this environment: the Masthead-managed hook was installed into the user-level Codex `hooks.json`, reviewed through Codex's official startup hook prompt, trusted, and used to observe three real concurrent `codex exec` sessions with live Git snapshots. The remaining command-failure limitation is upstream payload shape: real Codex `PostToolUse` hook payloads currently include tool metadata and output text but not shell exit status, so the live failed-command gate is proven with an explicit metadata event rather than inferred from a real failed shell hook.
 
@@ -138,6 +140,7 @@ Real local Codex dogfooding has now been run in this environment: the Masthead-m
 
 ## Deferred Release-Gate Gaps
 
+- Keep expanding detector-only harnesses into import adapters only after verified local schemas exist.
 - Add a first-class way to obtain real Codex shell exit status from live hooks, or document an official companion event source if Codex keeps exit status out of `PostToolUse`.
 - Dogfood a real approval request, unrelated-repo case, and measured hook-to-board latency from the trusted user-level hook.
 - Extend live observation beyond known-session Git refresh and explicit event payloads into broader process, port, local-database, and filesystem watcher behavior.

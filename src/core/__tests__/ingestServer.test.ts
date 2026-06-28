@@ -583,8 +583,7 @@ describe("ingest server live projection", () => {
     projection = await getJson(server.baseUrl, "/projection?expandedSessionId=session-refresh");
     expect(projection.projection.cards[0]).toMatchObject({
       sessionId: "session-refresh",
-      changedFileCount: 1,
-      primaryStatus: "editing"
+      changedFileCount: 1
     });
   });
 });

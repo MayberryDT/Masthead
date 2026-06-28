@@ -1,6 +1,6 @@
 import { ADAPTER_CAPABILITY_PROFILES, type AdapterCapabilityProfile } from "../../adapters/capabilities.ts";
 
-export type AdapterImplementationState = "active" | "planned";
+export type AdapterImplementationState = "active" | "scan_target" | "planned";
 
 export type SupportedAdapter = AdapterCapabilityProfile & {
   name: string;
@@ -10,8 +10,8 @@ export type SupportedAdapter = AdapterCapabilityProfile & {
 
 export const supportedAdapters: SupportedAdapter[] = ADAPTER_CAPABILITY_PROFILES.map((capability) => ({
   ...capability,
-  enabled: capability.lifecycle === "active",
-  implementationState: capability.lifecycle === "active" ? "active" : "planned",
+  enabled: capability.runtimeStatus === "import_adapter" || capability.runtimeStatus === "scan_target",
+  implementationState: capability.runtimeStatus === "import_adapter" ? "active" : capability.runtimeStatus === "scan_target" ? "scan_target" : "planned",
   name: capability.label
 }));
 

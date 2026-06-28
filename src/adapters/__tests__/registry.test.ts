@@ -1,22 +1,29 @@
 import { describe, expect, test } from "vitest";
 import { adapterCapabilityProfile } from "../capabilities.ts";
-import { adapterForRuntime, requiredScanRuntimes, sessionAdapters } from "../registry.ts";
-
-const activeScanRuntimes = ["codex", "cursor", "claude_code", "antigravity", "opencode", "aider", "openclaw", "hermes", "pi"] as const;
+import { activeImportRuntimes, scanTargetHarnesses } from "../harnessCatalog.ts";
+import { adapterForRuntime, requiredScanRuntimes, scanAdapters, sessionAdapters } from "../registry.ts";
 
 describe("adapter registry", () => {
-  test("registers every active scan runtime in scan order", () => {
-    expect(requiredScanRuntimes()).toEqual([...activeScanRuntimes]);
-    expect(sessionAdapters.map((adapter) => adapter.runtime)).toEqual([...activeScanRuntimes]);
+  test("registers every active import runtime in catalog order", () => {
+    expect(sessionAdapters.map((adapter) => adapter.runtime)).toEqual(activeImportRuntimes());
   });
 
-  test("resolves active runtime adapters and excludes Gemini CLI", () => {
-    for (const runtime of activeScanRuntimes) {
+  test("resolves import runtime adapters and rejects detector, cloud, and legacy runtimes", () => {
+    for (const runtime of activeImportRuntimes()) {
       expect(adapterForRuntime(runtime)?.runtime).toBe(runtime);
     }
 
+    expect(adapterForRuntime("omp")).toBeUndefined();
+    expect(adapterForRuntime("devin")).toBeUndefined();
     expect(adapterForRuntime("gemini_cli")).toBeUndefined();
     expect(sessionAdapters.map((adapter) => adapter.runtime)).not.toContain("gemini_cli");
+  });
+
+  test("keeps detector scan adapters out of import adapter lookup", () => {
+    expect(requiredScanRuntimes()).toEqual(scanTargetHarnesses().map((entry) => entry.runtime));
+    expect(scanAdapters.map((adapter) => adapter.runtime)).toEqual(requiredScanRuntimes());
+    expect(scanAdapters.find((adapter) => adapter.runtime === "omp")).toBeDefined();
+    expect(sessionAdapters.map((adapter) => adapter.runtime)).not.toContain("omp");
   });
 
   test("keeps Gemini CLI as legacy planned capability only", () => {

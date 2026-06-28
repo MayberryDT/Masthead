@@ -11,6 +11,7 @@ import { aiderCandidatePaths } from "../../adapters/aider/discovery.ts";
 import { openclawCandidatePaths } from "../../adapters/openclaw/discovery.ts";
 import { hermesCandidatePaths } from "../../adapters/hermes/discovery.ts";
 import { piCandidatePaths } from "../../adapters/pi/discovery.ts";
+import { catalogPathCandidatesForRuntime } from "../../adapters/catalogPathCandidates.ts";
 
 export async function preflightAdapterCandidates(runtime: RuntimeKind, context: DiscoveryContext): Promise<SourcePreflightDto[]> {
   const candidates = candidatePathsForRuntime(runtime, context);
@@ -38,5 +39,5 @@ export function candidatePathsForRuntime(runtime: RuntimeKind, context: Discover
   if (runtime === "openclaw") return openclawCandidatePaths(context);
   if (runtime === "hermes") return hermesCandidatePaths(context);
   if (runtime === "pi") return piCandidatePaths(context);
-  return [];
+  return catalogPathCandidatesForRuntime(runtime, context);
 }
