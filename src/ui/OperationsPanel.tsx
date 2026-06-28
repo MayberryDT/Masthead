@@ -10,6 +10,7 @@ import {
 } from "../app/daemonClient";
 import type { MastheadConnectionState } from "../app/connection/MastheadConnectionProvider";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { AdvancedRuntimeSettings } from "./settings/AdvancedRuntimeSettings";
 import { EnrichmentSettings } from "./settings/EnrichmentSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { HookSettings } from "./settings/HookSettings";
@@ -85,6 +86,7 @@ export function OperationsPanel({
   const effectiveSettings = settingsState ?? loadedSettings;
   const effectiveSummary = dataSummary ?? effectiveSettings?.storage.dataSummary;
   const busy = localDataStatus.state === "busy" || hookBusy;
+  const showConnectionRecovery = Boolean(connection && connection.state !== "ready" && onReconnect && onStartConnector);
 
   const loadSettings = useCallback((signal?: AbortSignal) => {
     if (settingsState) return;
@@ -149,7 +151,7 @@ export function OperationsPanel({
 
   return (
     <section id="settings" className="settings-panel" aria-label="Settings">
-      {connection && onReconnect && onStartConnector ? (
+      {showConnectionRecovery && connection && onReconnect && onStartConnector ? (
         <ConnectionRecoveryPanel connection={connection} onRetry={onReconnect} onStart={onStartConnector} retryLabel="Reconnect" />
       ) : null}
       {settingsError ? <p className="settings-error">{settingsError}</p> : null}
@@ -186,6 +188,7 @@ export function OperationsPanel({
             settings={effectiveSettings}
             writeDisabled={writesDisabled}
           />
+          <AdvancedRuntimeSettings dataSummary={effectiveSummary} settings={effectiveSettings} />
           <DangerZone
             busy={writesDisabled}
             databaseId={effectiveSettings?.data.databaseId}

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { CodexHookSettingsDto } from "../../app/daemonClient";
 import { AppButton } from "../primitives/AppButton";
 import { StatusBadge } from "../primitives/StatusBadge";
@@ -13,8 +14,30 @@ type HookSettingsProps = {
 };
 
 export function HookSettings({ busy = false, hooks, onInstall, onTest, onUninstall }: HookSettingsProps) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed" | "unavailable">("idle");
+
+  async function copyEndpoint(): Promise<void> {
+    const clipboard = globalThis.navigator?.clipboard;
+    if (!hooks?.endpoint || !clipboard?.writeText) {
+      setCopyState("unavailable");
+      return;
+    }
+    try {
+      await Promise.race([
+        clipboard.writeText(hooks.endpoint),
+        new Promise((_, reject) => {
+          window.setTimeout(() => reject(new Error("Clipboard write timed out")), 1000);
+        })
+      ]);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1400);
+    } catch {
+      setCopyState("failed");
+    }
+  }
+
   return (
-    <SettingsSection eyebrow="Codex integration" title="Codex integration">
+    <SettingsSection eyebrow="Everyday" title="Everyday setup">
       <SettingsRow
         control={
           <div className="settings-inline-actions">
@@ -31,8 +54,20 @@ export function HookSettings({ busy = false, hooks, onInstall, onTest, onUninsta
         value={<StatusBadge tone={hooks?.installed ? "active" : "warning"}>{hooks?.installed ? "Installed" : "Missing"}</StatusBadge>}
       />
       <SettingsRow
-        control={<AppButton variant="quiet">Copy</AppButton>}
-        description="Codex hooks post sanitized lifecycle events to this local endpoint."
+        control={
+          <AppButton disabled={!hooks?.endpoint} onClick={() => void copyEndpoint()} variant="quiet">
+            Copy endpoint
+          </AppButton>
+        }
+        description={
+          copyState === "copied"
+            ? "Endpoint copied."
+            : copyState === "failed"
+              ? "Endpoint copy failed."
+              : copyState === "unavailable"
+                ? "Endpoint copy unavailable."
+                : "Codex hooks post sanitized lifecycle events to this local endpoint."
+        }
         label="Hook endpoint"
         value={hooks?.endpoint ?? "Unavailable"}
       />

@@ -17,16 +17,23 @@ describe("Settings surface", () => {
       </SettingsSurface>
     );
 
-    expect(html).toContain("Codex integration");
+    expect(html).toContain("Everyday setup");
+    expect(html).toContain("Data boundaries");
+    expect(html).toContain("Storage and export");
+    expect(html).toContain("Advanced runtime");
+    expect(html).toContain("Danger zone");
+    expect(html.indexOf("Everyday setup")).toBeLessThan(html.indexOf("Data boundaries"));
+    expect(html.indexOf("Data boundaries")).toBeLessThan(html.indexOf("Storage and export"));
+    expect(html.indexOf("Storage and export")).toBeLessThan(html.indexOf("Advanced runtime"));
+    expect(html.indexOf("Advanced runtime")).toBeLessThan(html.indexOf("Danger zone"));
     expect(html).toContain("settings-layout");
-    expect(html).toContain("settings-section-wide");
-    expect(html).toContain("settings-section-danger");
     expect(html).toContain("Lifecycle hooks");
     expect(html).toContain("Installed");
     expect(html).toContain("Deterministic fallback");
     expect(html).toContain("MCP access");
     expect(html).toContain("/home/tyler/.local/share/masthead/masthead.sqlite");
     expect(html).toContain("Export data");
+    expect(html).not.toContain("settings-section-wide");
     expect(html).not.toContain("ops-card");
     expect(html).not.toContain("ghost-pill");
     expect(html).not.toContain("<select");

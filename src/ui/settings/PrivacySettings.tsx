@@ -9,7 +9,7 @@ type PrivacySettingsProps = {
 
 export function PrivacySettings({ privacy }: PrivacySettingsProps) {
   return (
-    <SettingsSection eyebrow="Privacy" title="Privacy">
+    <SettingsSection eyebrow="Privacy" title="Data boundaries">
       <SettingsRow
         description="Transcript import follows the current global source policy."
         label="Transcript import"
