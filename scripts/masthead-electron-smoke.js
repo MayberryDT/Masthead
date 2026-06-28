@@ -7,9 +7,11 @@ import { once } from "node:events";
 
 const dataDir = await mkdtemp(join(tmpdir(), "masthead-electron-smoke-"));
 const command = process.platform === "win32" ? "npx.cmd" : "npx";
+const disableSandboxForCi = process.env.CI ? { ELECTRON_DISABLE_SANDBOX: "1" } : {};
 const child = spawn(command, ["electron-forge", "start"], {
   env: {
     ...process.env,
+    ...disableSandboxForCi,
     MASTHEAD_DATA_DIR: dataDir,
     MASTHEAD_ELECTRON_DEV: "1",
     MASTHEAD_ELECTRON_SMOKE: "1",

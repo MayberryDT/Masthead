@@ -43,8 +43,9 @@ await access(join(resources, "dist", "src", "daemon", "main.js"), constants.R_OK
 await access(join(resources, "dist", "src", "mcp", "server.js"), constants.R_OK);
 
 const dataDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-smoke-"));
+const disableSandboxForCi = process.env.CI ? { ELECTRON_DISABLE_SANDBOX: "1" } : {};
 const child = spawn(binary, [], {
-  env: { ...process.env, MASTHEAD_DATA_DIR: dataDir, MASTHEAD_ELECTRON_SMOKE: "1", MASTHEAD_GIT_REFRESH_MS: "0" },
+  env: { ...process.env, ...disableSandboxForCi, MASTHEAD_DATA_DIR: dataDir, MASTHEAD_ELECTRON_SMOKE: "1", MASTHEAD_GIT_REFRESH_MS: "0" },
   stdio: ["ignore", "pipe", "pipe"]
 });
 
