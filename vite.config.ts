@@ -14,7 +14,7 @@ export default defineConfig({
   plugins: [mastheadConnectorManager()],
   server: {
     watch: {
-      ignored: ["**/src-tauri/target/**", "**/src-tauri/gen/**", "**/dist/**"]
+      ignored: ["**/dist/**"]
     }
   },
   test: {

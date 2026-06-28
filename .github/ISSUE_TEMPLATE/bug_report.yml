@@ -31,8 +31,8 @@ body:
       label: Install mode
       options:
         - npm run dev
-        - npm run dev:desktop
-        - packaged app
+        - npm run dev:desktop (Electron)
+        - packaged Electron app
         - other
     validations:
       required: true

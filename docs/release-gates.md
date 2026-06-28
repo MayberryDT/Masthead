@@ -11,7 +11,10 @@ npm run check:product-contract
 npm run verify:no-citations
 npm run doctor
 npm run verify
-cargo test --manifest-path src-tauri/Cargo.toml
+npm run test:electron
+npm run test:electron-security
+npm run smoke:electron
+npm run smoke:electron:packaged
 npm run dogfood:fixture
 npm run dogfood:live
 ```
@@ -31,11 +34,11 @@ Release docs must preserve these launch boundaries:
 
 ## CI And Security Gates
 
-`.github/workflows/ci.yml` is the required fast verification workflow. It runs `npm ci`, `npm run verify`, installs the Linux Tauri dependencies, and runs `cargo test --manifest-path src-tauri/Cargo.toml` on Node 24.15.0.
+`.github/workflows/ci.yml` is the required fast verification workflow. It runs `npm ci` and `npm run verify` on Node 24.15.0, then runs Electron unit, security, smoke, package, and packaged-smoke checks under Linux headless dependencies.
 
-`.github/workflows/security.yml` runs CodeQL for the TypeScript/JavaScript surface, including GitHub Actions workflow extraction, and dependency review on pull requests. This private repository currently lacks GitHub Advanced Security, so CodeQL analysis runs without uploading SARIF to GitHub code scanning. `.github/dependabot.yml` keeps npm and GitHub Actions dependencies visible through weekly update PRs.
+`.github/workflows/security.yml` runs CodeQL for the TypeScript/JavaScript surface, including GitHub Actions workflow extraction. Public pull requests use GitHub Dependency Review; private pull requests and `main` pushes run the runtime dependency audit fallback with `npm run audit:runtime`. This private repository currently lacks GitHub Advanced Security, so CodeQL analysis runs without uploading SARIF to GitHub code scanning. `.github/dependabot.yml` keeps npm and GitHub Actions dependencies visible through weekly update PRs.
 
-`.github/workflows/release-smoke.yml` is a manual or tag-triggered release-candidate check. It repeats the full verification path and adds `npm run dogfood:fixture`. Real `npm run dogfood:live` remains a human acceptance step because it depends on local Codex data.
+`.github/workflows/release-smoke.yml` is a manual or tag-triggered release-candidate check. It repeats the full verification path, runs Electron packaged checks, and adds `npm run dogfood:fixture`. Real `npm run dogfood:live` remains a human acceptance step because it depends on local Codex data.
 
 The current workflow policy uses official GitHub action version tags such as `actions/checkout@v4`, `actions/setup-node@v4`, and `github/codeql-action/*@v4`. A future hardening pass may pin third-party actions to full commit SHAs; do not mix tag and SHA pinning silently in one PR.
 
@@ -48,9 +51,9 @@ The current build is a Codex-first vertical slice with:
 - Sanitized fixture replay that shows three Codex sessions, one approval request, one failed command, one exact-file conflict, unrelated repo separation, degraded attribution, privacy suppression, ordered lifecycle lanes, and selected-session inspector evidence.
 - Codex hook adapter, fail-open hook helper, loopback ingestion server, normalized `/projection` endpoint, event-triggered and periodic known-session Git snapshot refresh, hook onboarding docs, and a path-scoped `hooks.json` admin CLI with preview, install, strict verify, disable, uninstall, backup, atomic write, symlink refusal, and rollback behavior.
 - Dogfood CLI gates covering fixture sessions, attention, failed-command evidence, exact-file conflict, unrelated repo safety, degraded attribution, privacy suppression, calm ops copy, feedback snapshot privacy, local retention controls, four lifecycle lanes, stale disposition freshness, idle-vs-ended separation, terminal outcome labels, evidence-backed LLM outcome candidates, modal evidence compactness, and attention latency metadata; `npm run doctor` checks live collector and hook readiness, while `npm run dogfood:live` remains the strict seeded live-conflict gate.
-- Append-only TypeScript store, file-backed live ingestion persistence, local searchable history panel, history search/export/delete semantics, manual retention pruning, native Tauri SQLite commands for append/read/export/clear/prune, local review disposition persistence, startup disposition hydration, and UI wiring for local export/delete/retention/review actions.
+- Append-only TypeScript store, file-backed live ingestion persistence, canonical SQLite persistence for review dispositions and data lifecycle operations, local searchable history panel, history search/export/delete semantics, manual retention pruning, browser fallback storage for no-daemon mode, startup disposition hydration, and UI wiring for local export/delete/retention/review actions.
 - One-command live launcher that starts the local collector and Vite UI together, plus UI polling that defaults to live ingestion and shows an explicit disconnected state when the collector is unavailable. Fixture replay is an explicit demo mode.
-- Thin Tauri desktop shell that compiles with native store commands registered.
+- Electron/Chromium desktop shell with a typed preload bridge, tray, app-menu launch path, bundled daemon resources, MCP launch config, and packaged smoke coverage.
 - Multi-adapter Sources registry, bounded scan service, connect-selected workflow, and conservative local import attempts for Codex, Cursor, Claude Code, Antigravity, OpenCode, Aider, OpenClaw, Hermes, and Pi.
 - Harness catalog coverage for detector-only local harnesses and cloud-reference harnesses, with Advanced diagnostics expected to distinguish detected paths, unrecognized schemas, and unsupported cloud-first tools.
 
@@ -60,7 +63,7 @@ Real local Codex dogfooding has now been run in this environment: the Masthead-m
 
 | Gate | Status | Notes |
 | --- | --- | --- |
-| Runs locally without account, cloud database, required API key, or internet after installation | Partial | `npm run dev` starts the local collector and UI together; tests, explicit fixture replay, dogfood CLI, and Tauri shell work locally. No account/cloud/API key is required. Packaged installation is not implemented yet. |
+| Runs locally without account, cloud database, required API key, or internet after installation | Partial | `npm run dev` starts the local collector and UI together; tests, explicit fixture replay, dogfood CLI, Electron desktop shell, and packaged smoke work locally. No account/cloud/API key is required. Installer distribution remains future work. |
 | Installs, verifies, disables, and uninstalls Masthead-managed Codex hook through explicit admin flow | Implemented for current Codex install | Path-scoped admin CLI targets official Codex `hooks.json` matcher groups, rejects `config.toml`, previews without writing, creates missing files with `0600`, uses backups plus atomic writes, refuses symlinks, strictly verifies command/timeout, and supports disable/uninstall/rollback. User-level install and official Codex hook trust were dogfooded locally. |
 | Discovers at least three simultaneous Codex sessions as live cards | Implemented for current Codex slice | Clean live verification observed three real `codex exec` sessions from `/home/tyler/Documents/Masthead` and projected them as live cards without fixture or dogfood data. |
 | Cards show project, safe work area, lifecycle state, duration, last activity, unresolved attention | Implemented for replay/live events | Projection derives these fields, then renders plain-language copy and allowlisted work-area labels first while keeping branch/worktree, paths, evidence, and other technical state in details. Real hook sessions without explicit project/title now fall back to the working-directory basename and `Codex session` title instead of `Unknown project` / `Untitled session`. |
@@ -75,10 +78,10 @@ Real local Codex dogfooding has now been run in this environment: the Masthead-m
 | Unrelated repositories do not create a false hard conflict | Implemented for replay/core | Covered by conflict tests and dogfood. |
 | Same-working-directory attribution is clearly labeled degraded unless direct evidence proves ownership | Implemented for replay/UI/live collector | Core conflict attribution, replay indicators, modal attribution note, UI tests, dogfood, browser verification, and live temp-repo conflict projection cover degraded attribution. |
 | Raw prompts, full transcripts, full diffs, full command output, secret contents, screenshots, browser state, shell history, and local database contents are not captured by default | Implemented for current slice | Redaction, hook redaction, real `PostToolUse` output/patch suppression, real `Stop` last-assistant-message suppression, local redacted latest-feedback snapshots, evidence-packet omission, sanitized copy-input allowlists, fixture privacy suppression, and dogfood cover the default. Full settings UI remains future work. |
-| Masthead-local retention controls expire only configured Masthead-local record classes | Implemented for current slice | Manual 30-day retention pruning is wired through the pure TypeScript policy engine, file-backed live collector store, browser fallback, Tauri SQLite command, and Operations UI confirmation flow. Pinned record IDs and unresolved attention are preserved, review dispositions are excluded from the default app-store prune, and all results report `touchedExternalState: false`. Codex sessions, Git state, source files, shell history, browser state, and external services are untouched. |
-| Local history, unresolved alerts, and review dispositions survive restart | Implemented for current slice | File-backed live ingestion and native SQLite store persist records; restart persistence is black-box tested for live hook events and native `review_disposition` records. The UI hydrates stored review dispositions on startup, applies them to fixture/live projections, and exposes a local history panel with project, session, file/path, command/cmd, status, branch, alert, conflict, outcome, and disposition filters. |
+| Masthead-local retention controls expire only configured Masthead-local record classes | Implemented for current slice | Manual 30-day retention pruning is wired through the pure TypeScript policy engine, canonical daemon data lifecycle APIs, browser fallback, and Operations UI confirmation flow. Pinned record IDs and unresolved attention are preserved, review dispositions are excluded from the default app-store prune, and all results report `touchedExternalState: false`. Codex sessions, Git state, source files, shell history, browser state, and external services are untouched. |
+| Local history, unresolved alerts, and review dispositions survive restart | Implemented for current slice | File-backed live ingestion and canonical SQLite repositories persist records; restart persistence is black-box tested for live hook events and daemon `review_disposition` rows. The UI hydrates stored review dispositions on startup, applies them to fixture/live projections, and exposes a local history panel with project, session, file/path, command/cmd, status, branch, alert, conflict, outcome, and disposition filters. |
 | Review dispositions never hide newer session activity | Implemented for current slice | Session/card dispositions are freshness-checked against card activity and attention creation time. Stale dispositions remain visible only as modal review history; visible attention, summary counts, and lifecycle lanes are rebuilt after review actions. |
-| Complete local data deletion removes Masthead-local history without touching Codex, Git, source files, or external services | Partial | Core/file store and native SQLite clear operations return `touchedExternalState: false`. UI export/delete controls now call native commands with two-step delete confirmation, reject any native clear result that claims external mutation, and clear hydrated review dispositions from the board. |
+| Complete local data deletion removes Masthead-local history without touching Codex, Git, source files, or external services | Partial | Core/file store and canonical daemon data lifecycle operations return `touchedExternalState: false`. UI export/delete controls call local daemon or browser-fallback operations with two-step delete confirmation, reject any result that claims external mutation, and clear hydrated review dispositions from the board. |
 | Canonical session details are available from Board and Logbook without source-app control | Implemented for current slice | Board cards carry canonical session ids, `GET /sessions/:sessionId/dossier` serves read-only canonical identity/narrative/files/tools/verification/timeline/reuse/usage data, `GET /sessions/:sessionId/transcript` serves paginated canonical transcript rows, the worktree bridge forwards the read routes, and the shared modal body hides unsupported source-opening actions. |
 | Fixture replay and dogfood tests cover MVP scenarios without private credentials | Implemented for current slice | Fixture/dogfood cover the core supervision loop without private credentials. Live dogfood now covers real Codex hook trust, three real sessions, live Git snapshots, exact-file conflict, degraded attribution, and explicit failed-command metadata. |
 
@@ -97,8 +100,8 @@ Real local Codex dogfooding has now been run in this environment: the Masthead-m
 
 - JSON schemas live under `schemas/`.
 - Store facade and file-backed persistence live in `src/core/store.ts`.
-- Native store frontend wrapper lives in `src/app/nativeStoreClient.ts`.
-- Native SQLite store and Tauri commands live in `src-tauri/src/native_store.rs`.
+- Browser fallback export/delete wrapper lives in `src/app/nativeStoreClient.ts`.
+- Electron desktop shell sources live under `src/electron/`.
 - Local retention policy helpers live in `src/core/retention.ts`.
 - Codex adapter, ingestion state, live projection envelope helper, and Git observer live in `src/core/codexAdapter.ts`, `src/core/ingestion.ts`, `src/core/liveProjection.ts`, and `src/core/gitObserver.ts`.
 - Fail-open hook helper, ingestion server, live app launcher, doctor CLI, hook admin CLI, demo script, fixture dogfood CLI, and live dogfood CLI live under `scripts/`.
@@ -114,7 +117,7 @@ Real local Codex dogfooding has now been run in this environment: the Masthead-m
 - React Live Board UI, live projection client, and local export/delete/review action wiring live under `src/app/`, `src/ui/`, and `src/styles/`.
 - Canonical session dossier repository, shared DTOs, API route, and UI body live in `src/daemon/db/sessionDossierRepository.ts`, `src/shared/sessionDossier.ts`, `src/daemon/server.ts`, and `src/ui/session-dossier/`.
 - Sanitized replay fixture lives in `fixtures/v0/replay-three-sessions-board.json`.
-- Native shell sources and icon live under `src-tauri/`.
+- Electron shell sources live under `src/electron/`; the desktop icon source lives under `public/assets/`.
 
 ## Current Verification
 
@@ -122,13 +125,11 @@ Real local Codex dogfooding has now been run in this environment: the Masthead-m
 - `npm run typecheck`: passing.
 - `npm run dogfood` / `npm run dogfood:fixture`: passing with 3 sessions, 4 attention items, 1 failed-command evidence item, 1 exact-file conflict, 0 unrelated repo hard conflicts, degraded attribution, privacy suppression, calm ops copy, feedback snapshot privacy with a positive bounded feedback sample, retention controls, four lifecycle lanes, stale disposition freshness, idle-not-ended behavior, terminal outcome labels, evidence-backed LLM outcome validation, modal evidence compactness, and 40ms simulated attention latency.
 - `npm run build`: passing.
-- `npm audit --audit-level=low`: 0 vulnerabilities.
-- `cargo test native_store_tests` in `src-tauri`: 5 tests passing.
-- Review disposition verification: local safe actions create append-only `review_disposition` records, `snoozedUntil` persists through the native store, startup hydration reads stored dispositions, reviewed sessions can move from `completed_unreviewed` to `completed_reviewed`, dismissed/snoozed attention leaves visible queues without deleting evidence, expected conflict dispositions suppress conflict attention while preserving conflict cards, fresh attention after an older session disposition remains visible, and summary/lifecycle lanes rebuild after review actions.
+- `npm run audit:runtime`: 0 runtime dependency vulnerabilities at high severity or above. Full dev-dependency audit currently reports Electron Forge build-tool transitive advisories with no available fix, so CI gates runtime dependencies while Dependabot continues to surface build-tool updates.
+- Review disposition verification: local safe actions create append-only `review_disposition` records, `snoozedUntil` persists through the daemon store, startup hydration reads stored dispositions, reviewed sessions can move from `completed_unreviewed` to `completed_reviewed`, dismissed/snoozed attention leaves visible queues without deleting evidence, expected conflict dispositions suppress conflict attention while preserving conflict cards, fresh attention after an older session disposition remains visible, and summary/lifecycle lanes rebuild after review actions.
 - History browser verification: app navigation includes History; the panel searches fixture/live `/events` evidence plus stored local records via the core history engine; fielded filters cover project, session, file/path, command/cmd, status, branch, alert, conflict, outcome, and disposition; quoted command values are supported; no-match searches show explicit zero results; browser-local fallback storage round-trips append/read/export/clear/prune with `touchedExternalState: false`.
 - Control desktop browser verification: in-app Browser at 1280x800 rendered the left session rail, center operations scan, and right session inspector in the first viewport; rail/center scan text contained no raw branch/path/command/event/hash markers; selecting a rail session updated the right inspector without opening the old modal; responsive checks at 390, 641, 760, and 1280 px had no horizontal overflow, with rail/center/inspector stacked from 760px down.
 - Risk-rule verification: stale verification requires `file.changed` evidence after verification or a real before/after Git snapshot delta, a lone dirty snapshot observed after a passing test does not alert, high-risk metadata paths create deterministic P2 attention while sensitive path-only contents stay excluded, explicit port/local-database/migration resource collisions create shared-resource conflicts, duplicate resource events from one session do not collide, and completed historical sessions are excluded from visible shared-resource conflicts.
-- `cargo check` in `src-tauri`: passing.
 - Hook helper/admin verification: malformed and oversized stdin fail open without posting, official Codex `hooks.json` matcher groups install idempotently, missing and mismatched hook events fail strict verification, `config.toml` paths are rejected, symlinked hook files are refused, install writes missing files with `0600`, existing hook groups are preserved, uninstall removes only Masthead handlers, and rollback restores the latest backup.
 - User-level hook verification: installed Masthead hooks into `/home/tyler/.codex/hooks.json`, verified `0600` permissions, used Codex's official startup hook review prompt to trust four hooks, then confirmed real `SessionStart` and `Stop` events reached the live collector from an interactive Codex smoke session.
 - Ingest server black-box verification: `POST /ingest` accepts normalized hook events, duplicate provider events do not append, `GET /projection` returns live board state, malformed payloads create diagnostics without events, restart reloads persisted normalized events from the file-backed store, temp Git repo changes project into live exact-file conflict cards, `/refresh` updates known live Git sessions after later file changes without broad filesystem scanning, and `POST /retention` prunes persisted live event history while updating in-memory projection state.
@@ -145,5 +146,5 @@ Real local Codex dogfooding has now been run in this environment: the Masthead-m
 - Dogfood a real approval request, unrelated-repo case, and measured hook-to-board latency from the trusted user-level hook.
 - Extend live observation beyond known-session Git refresh and explicit event payloads into broader process, port, local-database, and filesystem watcher behavior.
 - Add native notification policy, coalescing, and larger-history pagination/virtualization controls.
-- Add packaged desktop installation/build commands beyond the current local Vite/Tauri development shell.
+- Add installer distribution automation beyond the current Electron package and smoke flow.
 - Harden optional OpenAI copy enrichment with an in-app redacted payload preview and user-facing audit controls before broad release.

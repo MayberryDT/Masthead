@@ -1,8 +1,26 @@
+// @vitest-environment happy-dom
+
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import type { SettingsStateDto } from "../../app/daemonClient";
 import { OperationsPanel } from "../OperationsPanel";
 
 describe("OperationsPanel", () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  afterEach(() => {
+    if (root) {
+      act(() => root?.unmount());
+      root = undefined;
+    }
+    container?.remove();
+    container = undefined;
+    delete window.mastheadDesktop;
+  });
+
   test("renders local export and delete controls", () => {
     const html = renderToStaticMarkup(<OperationsPanel />);
 
@@ -114,4 +132,119 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Export data");
     expect(html).toContain("Delete all Masthead data");
   });
+
+  test("opens the data directory through the desktop bridge", async () => {
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const invoke = async <T,>(command: string, args?: Record<string, unknown>) => {
+      calls.push({ command, args });
+      return undefined as T;
+    };
+    window.mastheadDesktop = { invoke };
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<OperationsPanel settingsState={settings} />);
+    });
+    const openButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Open folder");
+
+    await act(async () => {
+      openButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(calls).toEqual([{ command: "open_data_directory_command", args: { path: "/tmp/masthead" } }]);
+    expect(container.textContent).not.toContain("open failed");
+  });
+
+  test("renders desktop bridge errors when opening the data directory fails", async () => {
+    window.mastheadDesktop = {
+      invoke: async () => {
+        throw new Error("open failed");
+      }
+    };
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<OperationsPanel settingsState={settings} />);
+    });
+    const openButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Open folder");
+
+    await act(async () => {
+      openButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("open failed");
+  });
 });
+
+const settings: SettingsStateDto = {
+  apiVersion: 1,
+  capabilities: ["settings"],
+  schemaVersion: 5,
+  data: {
+    databaseId: "sqlite:test",
+    databasePath: "/tmp/masthead/masthead.sqlite",
+    dataDirectory: "/tmp/masthead",
+    migrationState: "ready",
+    storePath: "/tmp/masthead/events.ndjson"
+  },
+  deletionTargets: {
+    hosts: [],
+    projects: [],
+    runtimes: []
+  },
+  enrichment: {
+    currentEnrichments: 0,
+    health: { complete: 0, disabled: 0, failed: 0, queued: 0, status: "complete" },
+    model: "deterministic",
+    provider: "Deterministic fallback",
+    remoteModelEnabled: false,
+    sessionCount: 0
+  },
+  hooks: {
+    command: "node scripts/masthead-hook.js",
+    configExists: true,
+    configPath: "/tmp/.codex/hooks.json",
+    endpoint: "http://127.0.0.1:17373/ingest",
+    installed: false,
+    missingEvents: [],
+    mismatchedEvents: []
+  },
+  privacy: {
+    mcpAccessEnabled: true,
+    redactionEnabled: true,
+    transcriptImportEnabled: true
+  },
+  product: "masthead",
+  runtime: {
+    host: "127.0.0.1",
+    mode: "primary",
+    port: 17373,
+    writable: true
+  },
+  storage: {
+    dataSummary: {
+      auditRows: 0,
+      enrichments: 0,
+      messages: 0,
+      rawEvents: 0,
+      sessions: 0,
+      sources: 0,
+      storageClasses: {
+        audit_logs: { description: "MCP query audit records.", records: 0, retention: "configurable" },
+        canonical_metadata: { description: "Sessions and capsules.", records: 0, retention: "indefinite" },
+        derived_indexes: { description: "Indexes.", records: 0, retention: "rebuildable" },
+        large_outputs: { description: "Outputs.", records: 0, retention: "short_configurable" },
+        raw_payloads: { description: "Raw payloads.", records: 0, retention: "configurable" },
+        searchable_messages: { description: "Messages.", records: 0, retention: "indefinite_configurable" }
+      },
+      tables: { raw_events: 0, session_search: 0, sessions: 0 }
+    },
+    databasePath: "/tmp/masthead/masthead.sqlite",
+    dataDirectory: "/tmp/masthead",
+    storePath: "/tmp/masthead/events.ndjson"
+  }
+};

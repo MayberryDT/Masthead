@@ -1,4 +1,4 @@
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { invokeDesktopCommand, isDesktopBridgeAvailable } from "./desktopBridge";
 
 export const LOCAL_CONNECTOR_COMMAND = "npm run dev";
 
@@ -31,7 +31,14 @@ export type ConnectorStartResult =
 type Invoke = (command: string, args?: Record<string, unknown>) => Promise<ConnectorStartResult>;
 
 export async function startLiveConnector(invoke?: Invoke): Promise<ConnectorStartResult> {
-  if (!invoke && !canUseTauri()) {
+  if (invoke) return invoke("start_live_connector_command");
+
+  if (isDesktopBridgeAvailable()) {
+    const result = await invokeDesktopCommand<ConnectorStartResult>("start_live_connector_command");
+    if (result) return result;
+  }
+
+  if (!isDesktopBridgeAvailable()) {
     const devServerResult = await startViaDevServer();
     if (devServerResult) return devServerResult;
 
@@ -43,8 +50,12 @@ export async function startLiveConnector(invoke?: Invoke): Promise<ConnectorStar
     };
   }
 
-  if (invoke) return invoke("start_live_connector_command");
-  return tauriInvoke<ConnectorStartResult>("start_live_connector_command");
+  return {
+    ok: false,
+    supported: false,
+    command: LOCAL_CONNECTOR_COMMAND,
+    message: "Masthead desktop bridge did not return a connector result."
+  };
 }
 
 async function startViaDevServer(): Promise<ConnectorStartResult | undefined> {
@@ -91,8 +102,4 @@ function hasDatabaseId(health: object): boolean {
   if ("databaseId" in health && typeof health.databaseId === "string") return true;
   const data = "data" in health ? health.data : undefined;
   return typeof data === "object" && data !== null && "databaseId" in data && typeof data.databaseId === "string";
-}
-
-function canUseTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }

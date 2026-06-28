@@ -42,6 +42,37 @@ describe("connector client", () => {
     expect(result.message).toContain("Run npm run dev");
   });
 
+  test("uses the Electron preload bridge before the dev server endpoint", async () => {
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    vi.stubGlobal("window", {
+      mastheadDesktop: {
+        invoke: async (command: string, args?: Record<string, unknown>) => {
+          calls.push({ command, args });
+          return {
+            ok: true,
+            started: false,
+            baseUrl: "http://127.0.0.1:17373",
+            command: "packaged masthead daemon",
+            health: { apiVersion: 1, databaseId: "db", mode: "primary" },
+            message: "Reused local Masthead collector.",
+            projectionUrl: "http://127.0.0.1:17373/projection"
+          };
+        }
+      }
+    });
+    vi.stubGlobal("fetch", vi.fn());
+
+    const result = await startLiveConnector();
+
+    expect(calls).toEqual([{ command: "start_live_connector_command", args: undefined }]);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: true,
+      started: false,
+      baseUrl: "http://127.0.0.1:17373"
+    });
+  });
+
   test("uses the local dev server endpoint when the browser shell is available", async () => {
     const calls: Array<{ url: string; method?: string }> = [];
     vi.stubGlobal("window", {});

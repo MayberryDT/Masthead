@@ -55,7 +55,7 @@
 ## Settings
 - [x] Settings loads real state. Evidence: `npm run doctor:json` settings contract passed on 2026-06-26.
 - [x] Hook test round-trips. Evidence: settings API tests passed through `npm run verify` on 2026-06-26.
-- [ ] Open folder works in Tauri.
+- [ ] Open folder works in Electron.
 - [x] Delete preview includes database ID. Evidence: Settings UI renders target database and stale-ID preview guard passed on 2026-06-26.
 
 ## Data ownership

@@ -3,7 +3,6 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as wait } from "node:timers/promises";
 import { afterEach, describe, expect, test } from "vitest";
 import type { StoreRecord } from "../../core/store.ts";
 import type { DaemonConfig } from "../config.ts";
@@ -42,8 +41,10 @@ describe("canonical store ownership", () => {
 
     const firstDaemon = await createTestDaemon(tempDir, databasePath, storePath);
     firstDaemon.startBackgroundHydration();
-    await waitFor(() => countRows(firstDaemon.database, "raw_events") === 1 && countRows(firstDaemon.database, "sessions") === 1);
-    await waitFor(() => migrationMarkerCount(firstDaemon.database) === 1);
+    await firstDaemon.waitForBackgroundHydration();
+    expect(countRows(firstDaemon.database, "raw_events")).toBe(1);
+    expect(countRows(firstDaemon.database, "sessions")).toBe(1);
+    expect(migrationMarkerCount(firstDaemon.database)).toBe(1);
     const firstMarker = migrationMarkerDetails(firstDaemon.database);
     expect(firstMarker).toMatchObject({ importedRecords: 1, source: storePath, totalRecords: 1 });
     await firstDaemon.close();
@@ -51,7 +52,9 @@ describe("canonical store ownership", () => {
     const secondDaemon = await createTestDaemon(tempDir, databasePath, storePath);
     daemons.push(secondDaemon);
     secondDaemon.startBackgroundHydration();
-    await waitFor(() => countRows(secondDaemon.database, "raw_events") === 1 && migrationMarkerCount(secondDaemon.database) === 1);
+    await secondDaemon.waitForBackgroundHydration();
+    expect(countRows(secondDaemon.database, "raw_events")).toBe(1);
+    expect(migrationMarkerCount(secondDaemon.database)).toBe(1);
     expect(migrationMarkerDetails(secondDaemon.database)).toEqual(firstMarker);
   });
 });
@@ -167,13 +170,4 @@ type MigrationMarkerRow = {
 function migrationMarkerDetails(db: MastheadDatabase): Record<string, unknown> {
   const row = db.prepare("SELECT details_json FROM legacy_migrations WHERE migration_key = ?").get("legacy-events-ndjson-v1") as MigrationMarkerRow;
   return JSON.parse(row.details_json) as Record<string, unknown>;
-}
-
-async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 1_000;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await wait(10);
-  }
-  expect(predicate()).toBe(true);
 }

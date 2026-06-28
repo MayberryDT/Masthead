@@ -8,12 +8,12 @@ Masthead is configured with environment variables. Defaults are local and develo
 | --- | --- | --- |
 | `MASTHEAD_HOST` | `127.0.0.1` | Daemon bind host |
 | `MASTHEAD_PORT` | `17373` | Daemon bind port; `0` allows a random port in tests |
-| `MASTHEAD_ALLOWED_ORIGINS` | Vite and Tauri local origins | Comma-separated CORS allowlist |
+| `MASTHEAD_ALLOWED_ORIGINS` | Vite local origins and `masthead://app` | Comma-separated CORS allowlist |
 | `MASTHEAD_DATA_DIR` | Platform dev app-data path | Root for runtime files |
 | `MASTHEAD_DB_PATH` | `<data-dir>/masthead.sqlite` | Canonical SQLite path |
 | `MASTHEAD_STORE_PATH` | `<data-dir>/legacy/events.ndjson` | Legacy compatibility journal path |
 | `MASTHEAD_LEGACY_DATA_DIR` | unset | Optional legacy migration input directory |
-| `MASTHEAD_GIT_REFRESH_MS` | `5000` | Known-session Git refresh interval |
+| `MASTHEAD_GIT_REFRESH_MS` | `60000` | Known-session Git refresh interval |
 | `MASTHEAD_CODEX_HOME` | user home | Home directory used for Codex source discovery |
 | `MASTHEAD_BUILD_VERSION` | package version | Health build version override |
 | `MASTHEAD_BUILD_SHA` | `development` | Health build SHA override |
@@ -36,7 +36,7 @@ Masthead is configured with environment variables. Defaults are local and develo
 | Variable | Purpose |
 | --- | --- |
 | `MASTHEAD_MCP_COMMAND` | Command used in generated MCP launch config |
-| `MASTHEAD_NODE_PATH` | Node executable override for daemon/Tauri/MCP launch |
+| `MASTHEAD_NODE_PATH` | Node executable override for daemon/Electron/MCP launch |
 | `MASTHEAD_MCP_ENTRY` | MCP server entry path |
 | `MASTHEAD_DB_PATH` | Required database path for the MCP server |
 

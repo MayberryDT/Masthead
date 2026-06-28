@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   appendLocalRecords,
   clearLocalData,
@@ -18,6 +18,7 @@ describe("native store client", () => {
       value: originalWindow,
       writable: true
     });
+    vi.unstubAllGlobals();
   });
 
   test("exports records with an explicit timestamp", async () => {
@@ -51,7 +52,7 @@ describe("native store client", () => {
     ).rejects.toThrow("external state mutation");
   });
 
-  test("prunes local data through the Tauri command boundary", async () => {
+  test("prunes local data through the desktop command boundary", async () => {
     const policy = {
       cutoffAt: "2026-06-01T00:00:00.000Z",
       recordTypes: ["review_disposition" as const],
@@ -84,7 +85,7 @@ describe("native store client", () => {
     ).rejects.toThrow("external state mutation");
   });
 
-  test("reads native store records through the Tauri command boundary", async () => {
+  test("reads native store records through the desktop command boundary", async () => {
     const records: StoreRecord[] = [reviewDispositionRecord()];
     const read = await readLocalRecords(async <T>(command: string) => {
       expect(command).toBe("read_store_records_command");
@@ -94,7 +95,7 @@ describe("native store client", () => {
     expect(read).toEqual(records);
   });
 
-  test("appends native store records through the Tauri command boundary", async () => {
+  test("appends native store records through the desktop command boundary", async () => {
     const records: StoreRecord[] = [reviewDispositionRecord()];
     const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 
@@ -134,6 +135,60 @@ describe("native store client", () => {
     const result = await clearLocalData();
     expect(result).toEqual({ removedRecords: 1, touchedExternalState: false });
     expect(await readLocalRecords()).toEqual([]);
+  });
+
+  test("routes native store calls through the Electron preload bridge", async () => {
+    const records: StoreRecord[] = [reviewDispositionRecord()];
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    vi.stubGlobal("window", {
+      mastheadDesktop: {
+        invoke: async <T>(command: string, args?: Record<string, unknown>) => {
+          calls.push({ command, args });
+          if (command === "export_store_records_command") {
+            return "{\"metadata\":{\"recordCount\":1},\"records\":[]}" as T;
+          }
+          if (command === "clear_local_data_command") {
+            return { removedRecords: 1, touchedExternalState: false } as T;
+          }
+          if (command === "prune_local_data_command") {
+            return {
+              removedRecords: 0,
+              removedRecordIds: [],
+              removedByType: { event: 0, git_snapshot: 0, attention_item: 0, conflict_card: 0, review_disposition: 0 },
+              retainedRecords: 1,
+              touchedExternalState: false
+            } as T;
+          }
+          if (command === "read_store_records_command") {
+            return records as T;
+          }
+          return undefined as T;
+        }
+      },
+      localStorage: {
+        getItem: vi.fn(),
+        removeItem: vi.fn(),
+        setItem: vi.fn()
+      }
+    });
+
+    await exportLocalData(new Date("2026-06-23T04:30:00.000Z"));
+    await clearLocalData();
+    await pruneLocalData({ cutoffAt: "2026-06-01T00:00:00.000Z" });
+    expect(await readLocalRecords()).toEqual(records);
+    await appendLocalRecords(records);
+
+    expect(calls).toEqual([
+      {
+        command: "export_store_records_command",
+        args: { exportedAt: "2026-06-23T04:30:00.000Z" }
+      },
+      { command: "clear_local_data_command", args: undefined },
+      { command: "prune_local_data_command", args: { policy: { cutoffAt: "2026-06-01T00:00:00.000Z" } } },
+      { command: "read_store_records_command", args: undefined },
+      { command: "append_store_records_command", args: { records } }
+    ]);
+    expect(window.localStorage.getItem).not.toHaveBeenCalled();
   });
 
   test("prunes browser fallback records with the shared local retention policy", async () => {

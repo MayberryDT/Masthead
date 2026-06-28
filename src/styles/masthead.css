@@ -59,7 +59,6 @@ html {
   background: var(--scrollbar-track);
   overflow: hidden;
   scrollbar-color: rgba(92, 153, 187, 0.24) transparent;
-  scrollbar-gutter: stable;
   scrollbar-width: thin;
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "calt", "kern", "liga", "ss03";
@@ -2770,6 +2769,79 @@ body {
   min-height: 0;
   overflow: hidden;
   background: var(--canvas);
+}
+
+.masthead-shell.desktop-chrome .masthead-workspace {
+  grid-template-rows: 34px minmax(0, 1fr);
+}
+
+.masthead-window-bar {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  min-width: 0;
+  min-height: 34px;
+  border-bottom: 1px solid rgba(194, 221, 241, 0.13);
+  background: linear-gradient(180deg, rgba(5, 23, 36, 0.92), rgba(3, 16, 25, 0.96));
+  -webkit-app-region: drag;
+}
+
+.masthead-window-drag-region {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.masthead-window-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  -webkit-app-region: no-drag;
+}
+
+.masthead-window-control {
+  position: relative;
+  display: grid;
+  width: 42px;
+  min-width: 42px;
+  height: 33px;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(214, 228, 239, 0.82);
+  cursor: default;
+  padding: 0;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.masthead-window-control::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 1px;
+  width: 1px;
+  background: rgba(194, 221, 241, 0.08);
+  pointer-events: none;
+}
+
+.masthead-window-control.close {
+  width: 54px;
+  min-width: 54px;
+}
+
+.masthead-window-control:hover {
+  background: rgba(8, 32, 48, 0.78);
+  color: var(--ink);
+}
+
+.masthead-window-control.close:hover {
+  background: rgba(255, 72, 62, 0.86);
+  color: #fff8f8;
 }
 
 .observability-content,

@@ -27,6 +27,8 @@ Live Now is a view over collected session data, not the product category.
   history, and coverage counts.
 - `npm run dev` launcher that starts either a writable daemon or a read-only
   worktree bridge as needed.
+- `npm run dev:desktop` Electron/Chromium desktop shell for app-menu and
+  packaged-app workflows.
 - Product, surface, endpoint-matrix, doctor, smoke, build, and test gates.
 
 ## Experimental
@@ -36,7 +38,7 @@ Live Now is a view over collected session data, not the product category.
 - Transcript import breadth and exclusion policy tuning.
 - Optional remote enrichment. It is off by default and must stay scoped,
   redacted, previewable, and auditable when enabled.
-- Packaged desktop release flow and longer release-smoke automation.
+- Longer packaged desktop release-smoke automation.
 
 ## Install
 
@@ -82,7 +84,10 @@ Full local gate:
 
 ```bash
 npm run verify
-cargo test --manifest-path src-tauri/Cargo.toml
+npm run test:electron
+npm run test:electron-security
+npm run smoke:electron
+npm run smoke:electron:packaged
 ```
 
 `npm run doctor` checks the active daemon contract, source/import readiness,
