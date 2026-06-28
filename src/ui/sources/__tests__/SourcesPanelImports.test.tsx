@@ -9,86 +9,23 @@ import { SourcesPanel } from "../../SourcesPanel";
 const noop = () => undefined;
 
 describe("SourcesPanel import controls", () => {
-  test("wires Codex action buttons through the panel", async () => {
-    const onRefresh = vi.fn();
-    const onImportMetadata = vi.fn();
-    const onEnableTranscriptImport = vi.fn();
-    const onSyncAdapter = vi.fn();
+  test("opens onboarding from the connected-source dashboard", async () => {
     const onScan = vi.fn();
-    const onConnectSelected = vi.fn();
     const container = document.createElement("div");
     const root = createRoot(container);
 
     await act(async () => {
       root.render(
-        <SourcesPanel
-          adapters={[codexAdapter({ transcriptImport: false })]}
-          busy={false}
-          imports={[]}
-          onConnectSelected={onConnectSelected}
-          onEnableTranscriptImport={onEnableTranscriptImport}
-          onExcludePath={noop}
-          onImportMetadata={onImportMetadata}
-          onRefresh={onRefresh}
-          onScan={onScan}
-          onSyncAdapter={onSyncAdapter}
-          sources={[]}
-        />
+        <SourcesPanel adapters={[codexAdapter()]} busy={false} imports={[]} onExcludePath={noop} onRefresh={noop} onScan={onScan} sources={[]} />
       );
     });
 
     await act(async () => {
-      buttonByText(container, "Discover sources").click();
+      buttonByText(container, "Add source").click();
       buttonByText(container, "Scan this computer").click();
-      buttonByText(container, "Connect selected").click();
-      buttonByText(container, "Details").click();
     });
 
-    await act(async () => {
-      buttonByText(container, "Import metadata").click();
-      buttonByText(container, "Enable transcript import").click();
-      buttonByText(container, "Sync").click();
-    });
-
-    expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(onScan).toHaveBeenCalledTimes(1);
-    expect(onConnectSelected).toHaveBeenCalledWith(["codex"]);
-    expect(onImportMetadata).toHaveBeenCalledWith("codex");
-    expect(onEnableTranscriptImport).toHaveBeenCalledWith("codex");
-    expect(onSyncAdapter).toHaveBeenCalledWith("codex");
-
-    await act(async () => root.unmount());
-  });
-
-  test("wires transcript import once transcript policy is enabled", async () => {
-    const onImportTranscripts = vi.fn();
-    const container = document.createElement("div");
-    const root = createRoot(container);
-
-    await act(async () => {
-      root.render(
-        <SourcesPanel
-          adapters={[codexAdapter({ transcriptImport: true })]}
-          busy={false}
-          imports={[]}
-          onExcludePath={noop}
-          onImportTranscripts={onImportTranscripts}
-          onRefresh={noop}
-          sources={[]}
-        />
-      );
-    });
-
-    await act(async () => {
-      buttonByText(container, "Details").click();
-    });
-
-    await act(async () => {
-      buttonByText(container, "Import transcripts").click();
-    });
-
-    expect(onImportTranscripts).toHaveBeenCalledWith("codex");
-
     await act(async () => root.unmount());
   });
 
@@ -99,17 +36,7 @@ describe("SourcesPanel import controls", () => {
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(
-        <SourcesPanel
-          adapters={[codexAdapter({ transcriptImport: true })]}
-          busy={false}
-          imports={[importJob({ status: "running" })]}
-          onExcludePath={noop}
-          onPollImports={onPollImports}
-          onRefresh={noop}
-          sources={[]}
-        />
-      );
+      root.render(<SourcesPanel adapters={[codexAdapter()]} busy={false} imports={[importJob({ status: "running" })]} onExcludePath={noop} onPollImports={onPollImports} onRefresh={noop} sources={[]} />);
     });
 
     await act(async () => {
@@ -118,17 +45,7 @@ describe("SourcesPanel import controls", () => {
     expect(onPollImports).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      root.render(
-        <SourcesPanel
-          adapters={[codexAdapter({ transcriptImport: true })]}
-          busy={false}
-          imports={[importJob({ status: "succeeded" })]}
-          onExcludePath={noop}
-          onPollImports={onPollImports}
-          onRefresh={noop}
-          sources={[]}
-        />
-      );
+      root.render(<SourcesPanel adapters={[codexAdapter()]} busy={false} imports={[importJob({ status: "succeeded" })]} onExcludePath={noop} onPollImports={onPollImports} onRefresh={noop} sources={[]} />);
     });
 
     await act(async () => {
@@ -141,15 +58,16 @@ describe("SourcesPanel import controls", () => {
   });
 });
 
-function codexAdapter({ transcriptImport }: { transcriptImport: boolean }): AdapterStatus {
+function codexAdapter(): AdapterStatus {
   return {
     runtime: "codex",
+    name: "Codex",
     state: "connected",
     discoveredSessions: 742,
     importedSessions: 120,
     policies: {
       metadataImport: true,
-      transcriptImport,
+      transcriptImport: true,
       enrichment: false,
       mcpAccess: true
     },
