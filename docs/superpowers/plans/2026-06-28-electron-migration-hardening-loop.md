@@ -83,3 +83,29 @@ Verification:
 
 Next risk:
 - The packaged smoke exposed a separate app-menu/service launch race: after stopping and quickly restarting the service, the wrapper can see the old daemon as healthy while it is still shutting down, leave an orphaned Electron parent holding the single-instance lock, and then run Electron without a live connector. Audit and harden the tracked app-menu launcher/install path next.
+
+## Pass 4
+
+Finding: the app-menu launcher was only installed in local user config, not reproducible from the repo, and its daemon startup path could reuse a connector that was still shutting down. The reproduced failure left Electron running without a connector on `127.0.0.1:17373`, and an orphaned Electron parent could keep the single-instance lock outside the active service cgroup.
+
+Action:
+- Added `scripts/install-electron-dev-launcher.js`.
+- Added `npm run install:electron-dev-launcher`.
+- The installer writes the launcher wrapper, user systemd unit, and desktop entry.
+- The wrapper now performs targeted cleanup of stale Masthead Electron, Forge, and daemon processes from this checkout before checking or starting the daemon.
+- The wrapper waits for port `17373` to close before starting a new daemon, avoiding the old-daemon health-check race.
+- Installed the updated launcher locally at `/home/tyler/.local/bin/masthead-dev-desktop`, `/home/tyler/.config/systemd/user/masthead-dev-electron.service`, and `/home/tyler/.local/share/applications/ai.animas.masthead-dev.desktop`.
+
+Verification:
+- `node --check scripts/install-electron-dev-launcher.js`: pass.
+- `package.json` parse check: pass.
+- `npm run install:electron-dev-launcher`: pass.
+- `systemctl --user restart masthead-dev-electron.service`: pass; `/health` returned in 0.001252 s from daemon instance `70e7eae1-9e02-4eb6-afe6-b6a83bf13dbb`.
+- Rapid second `systemctl --user restart masthead-dev-electron.service`: pass; `/health` returned in 0.001352 s from daemon instance `49ccd336-0022-4a52-a561-5261aec3fa3d`.
+- Settled service process tree includes the daemon, Electron Forge, Electron main, GPU, network, renderer, and broker processes inside `masthead-dev-electron.service`.
+- Live `/projection` returned in 0.333621 s with a 492209 byte response after the rapid restart.
+- `npm run verify:no-citations`: pass.
+- `git diff --check`: pass.
+
+Next risk:
+- Continue CI/security/package inventory: check GitHub workflow coverage, dependency-review skip behavior, packaging artifacts/fuses, and any remaining tracked or untracked Tauri-era assumptions before deciding whether the Electron migration inventory is clean.
