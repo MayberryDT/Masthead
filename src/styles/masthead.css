@@ -59,7 +59,6 @@ html {
   background: var(--scrollbar-track);
   overflow: hidden;
   scrollbar-color: rgba(92, 153, 187, 0.24) transparent;
-  scrollbar-gutter: stable;
   scrollbar-width: thin;
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "calt", "kern", "liga", "ss03";
@@ -2787,17 +2786,6 @@ body {
   border-bottom: 1px solid rgba(194, 221, 241, 0.13);
   background: linear-gradient(180deg, rgba(5, 23, 36, 0.92), rgba(3, 16, 25, 0.96));
   -webkit-app-region: drag;
-}
-
-.masthead-window-bar::after {
-  content: "";
-  position: absolute;
-  right: -12px;
-  bottom: -1px;
-  width: 12px;
-  height: 1px;
-  background: rgba(194, 221, 241, 0.13);
-  pointer-events: none;
 }
 
 .masthead-window-drag-region {
