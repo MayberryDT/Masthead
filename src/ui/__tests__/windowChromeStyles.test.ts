@@ -18,5 +18,9 @@ describe("Electron window chrome styles", () => {
     expect(cssRule(".masthead-window-controls")).toMatch(/align-self:\s*flex-start;/);
     expect(cssRule(".masthead-window-controls")).toMatch(/height:\s*calc\(100%\s*-\s*1px\);/);
     expect(cssRule(".masthead-window-control::before")).toBe("");
+    expect(cssRule(".masthead-window-control")).toMatch(/width:\s*38px;/);
+    expect(cssRule(".masthead-window-control::after")).toMatch(/inset:\s*4px\s+5px;/);
+    expect(cssRule(".masthead-window-control:hover")).not.toMatch(/background\s*:/);
+    expect(cssRule(".masthead-window-control:hover::after")).toMatch(/opacity:\s*1;/);
   });
 });

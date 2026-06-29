@@ -2841,9 +2841,10 @@ body {
 .masthead-window-control {
   position: relative;
   display: grid;
-  width: 42px;
-  min-width: 42px;
+  width: 38px;
+  min-width: 38px;
   height: 100%;
+  isolation: isolate;
   place-items: center;
   border: 0;
   border-radius: 0;
@@ -2852,23 +2853,39 @@ body {
   cursor: default;
   padding: 0;
   transition:
-    background-color 140ms ease,
     color 140ms ease;
 }
 
+.masthead-window-control::after {
+  content: "";
+  position: absolute;
+  inset: 4px 5px;
+  z-index: -1;
+  background: rgba(87, 193, 255, 0.08);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
 .masthead-window-control.close {
-  width: 42px;
-  min-width: 42px;
+  width: 38px;
+  min-width: 38px;
 }
 
 .masthead-window-control:hover {
-  background: rgba(87, 193, 255, 0.08);
   color: var(--ink);
 }
 
+.masthead-window-control:hover::after {
+  opacity: 1;
+}
+
 .masthead-window-control.close:hover {
-  background: rgba(255, 97, 97, 0.14);
   color: #ffd7d7;
+}
+
+.masthead-window-control.close::after {
+  background: rgba(255, 97, 97, 0.14);
 }
 
 .observability-content,
