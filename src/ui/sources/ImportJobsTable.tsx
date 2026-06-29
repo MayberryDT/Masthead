@@ -7,36 +7,19 @@ type Props = {
   imports: ImportJob[];
   onCancelImport?: (importJobId: string) => void;
   onRetryImport?: (importJobId: string) => void;
-  total?: number;
 };
 
 export function ImportJobsTable({
   busy = false,
   imports,
   onCancelImport,
-  onRetryImport,
-  total = imports.length
+  onRetryImport
 }: Props) {
   if (imports.length === 0) return null;
-  const visibleCount = Math.min(total, imports.length);
   return (
     <section className="import-jobs-section" aria-label="Import jobs">
       <div className="import-jobs-header">
-        <div className="import-jobs-title">
-          <p className="mono-label">Import queue</p>
-          <h2>Import jobs</h2>
-          <p className="surface-status">Showing {visibleCount} of {total} import jobs</p>
-        </div>
-        <dl className="import-jobs-summary" aria-label="Import job page summary">
-          <div>
-            <dt>Visible</dt>
-            <dd>{visibleCount}</dd>
-          </div>
-          <div>
-            <dt>Total</dt>
-            <dd>{total}</dd>
-          </div>
-        </dl>
+        <h2 className="import-jobs-title">Import queue</h2>
       </div>
       <div className="import-jobs-table-frame">
         <table className="import-jobs-table">

@@ -600,16 +600,15 @@ export function App() {
     }
   };
 
-  const loadSourceInventory = useCallback(async (options: { appendImports?: boolean; importOffset?: number; showStatus?: boolean } = {}) => {
+  const loadSourceInventory = useCallback(async (options: { showStatus?: boolean } = {}) => {
     sourceInventoryLoadInFlightRef.current = true;
     try {
       const importLimit = importPage.limit;
-      const importOffset = options.importOffset ?? 0;
       const [setupResult, adapterResult, sourceResult, importResult, activeImportResult] = await Promise.allSettled([
         getSourcesSetup(activeProjectionUrl),
         listAdapters(activeProjectionUrl, { includeLocations: false }),
         listSources(activeProjectionUrl),
-        listImports(activeProjectionUrl, { limit: importLimit, offset: importOffset }),
+        listImports(activeProjectionUrl, { limit: importLimit, offset: 0 }),
         listImports(activeProjectionUrl, { limit: 50, offset: 0, status: "active" })
       ]);
       if (setupResult.status === "fulfilled") setSourcesSetup(setupResult.value);
@@ -617,9 +616,7 @@ export function App() {
       if (sourceResult.status === "fulfilled") setSources(sourceResult.value);
       if (importResult.status === "fulfilled") {
         const activeImports = activeImportResult.status === "fulfilled" ? activeImportResult.value.imports : [];
-        setImports((current) =>
-          mergeImportRows(activeImports, options.appendImports ? [...current.filter((job) => !isActiveImport(job)), ...importResult.value.imports] : importResult.value.imports)
-        );
+        setImports(mergeImportRows(activeImports, importResult.value.imports));
         setImportPage({
           limit: importResult.value.limit,
           offset: importResult.value.offset,
@@ -656,17 +653,6 @@ export function App() {
       await loadSourceInventory({ showStatus: true });
     } catch (error) {
       setSourcesStatus(`Source refresh failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  }, [loadSourceInventory]);
-
-  const handleLoadMoreImports = useCallback(async (page: { limit: number; offset: number }) => {
-    setSourcesBusy(true);
-    try {
-      await loadSourceInventory({ appendImports: true, importOffset: page.offset });
-    } catch (error) {
-      setSourcesStatus(`Import history load failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setSourcesBusy(false);
     }
@@ -1389,9 +1375,6 @@ export function App() {
           adapters={adapters}
           imports={imports}
           setup={sourcesSetup}
-          importLimit={importPage.limit}
-          importOffset={importPage.offset}
-          importTotal={importPage.total}
           busy={sourcesBusy}
           status={sourcesStatus}
           onCancelImport={handleCancelImport}
@@ -1401,7 +1384,6 @@ export function App() {
           onImportMetadata={handleImportMetadata}
           onImportTranscripts={handleImportTranscripts}
           onLoadAdapterSources={handleLoadAdapterSources}
-          onLoadMoreImports={handleLoadMoreImports}
           onOpenLogbook={() => setActiveSurface("logbook")}
           onPollImports={handlePollActiveImports}
           onRepairSources={handleRepairSources}

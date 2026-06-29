@@ -258,7 +258,7 @@ describe("SourcesPanel import controls", () => {
       root.render(<SourcesPanel adapters={[]} busy={false} imports={[]} onExcludePath={noop} onRefresh={noop} setup={connectedSetup()} sources={[]} />);
     });
 
-    expect(container.textContent).toContain("Import jobs");
+    expect(container.textContent).toContain("Import queue");
     expect(container.textContent).toContain("metadata");
     expect(container.textContent).not.toContain("Advanced diagnostics");
     expect(container.textContent).not.toContain("Adapter inventory");

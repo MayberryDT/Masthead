@@ -76,7 +76,7 @@ describe("ImportJobsTable", () => {
     await act(async () => root.unmount());
   });
 
-  test("renders page metadata without a load more control", async () => {
+  test("renders a single import queue title without header metadata", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -84,14 +84,16 @@ describe("ImportJobsTable", () => {
       root.render(
         <ImportJobsTable
           imports={[importJob({ importJobId: "newest-job" }), importJob({ importJobId: "older-job" })]}
-          total={3}
         />
       );
     });
 
-    expect(container.textContent).toContain("Showing 2 of 3 import jobs");
-    expect(container.textContent).toContain("Visible");
-    expect(container.textContent).toContain("Total");
+    expect(container.querySelector(".import-jobs-title")?.textContent).toBe("Import queue");
+    expect(container.querySelector(".import-jobs-summary")).toBeNull();
+    expect(container.textContent).not.toContain("Import jobsShowing");
+    expect(container.textContent).not.toContain("Showing 2 of 3 import jobs");
+    expect(container.textContent).not.toContain("Visible");
+    expect(container.textContent).not.toContain("Total");
     expect(container.textContent).not.toContain("Load more");
 
     await act(async () => root.unmount());
