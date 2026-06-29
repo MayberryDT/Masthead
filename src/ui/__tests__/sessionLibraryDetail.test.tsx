@@ -18,7 +18,7 @@ describe("SessionLibraryDetail", () => {
     expect(html).toContain("modal-scroll-frame");
     expect(html).toContain("Repair OAuth callback");
     expect(html).toContain("Session dossier");
-    expect(html).toContain("Canonical ID");
+    expect(html).toContain("Copy canonical ID");
     expect(html).toContain("Enrichment");
     expect(html).toContain("Transcript");
     expect(html).toContain("Advanced details");

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { SessionTranscriptItem, SessionTranscriptKindFilter, SessionTranscriptResult } from "../../app/daemonClient";
+import { readableTranscriptText } from "./transcriptPresentation";
 
 type Props = {
   sessionId?: string;
@@ -15,8 +16,10 @@ type Props = {
 };
 
 type RenderedTranscriptItem =
-  | { type: "item"; item: SessionTranscriptItem }
+  | { type: "item"; item: ReadableTranscriptItem }
   | { type: "group"; key: string; count: number; firstObservedAt: string; label: string; text: string };
+
+type ReadableTranscriptItem = SessionTranscriptItem & { displayText: string };
 
 const filters: Array<{ label: string; value: SessionTranscriptKindFilter }> = [
   { label: "All", value: "all" },
@@ -39,7 +42,10 @@ export function DossierTranscript({
   transcript
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const visibleTranscriptItems = (transcript?.items ?? []).filter((item) => item.kind !== "file_effect");
+  const visibleTranscriptItems = (transcript?.items ?? [])
+    .filter((item) => item.kind !== "file_effect")
+    .map((item) => ({ ...item, displayText: readableTranscriptText(item.text) }))
+    .filter((item) => item.displayText.length > 0);
   const renderedItems = compressLowValueRuns(visibleTranscriptItems);
   const hasUsableTranscript = transcript?.coverage.hasUsableTranscript ?? false;
   const hasQuery = query.trim().length > 0;
@@ -88,37 +94,39 @@ export function DossierTranscript({
 
       {loading && !transcript ? <p className="dossier-muted">Loading transcript...</p> : null}
 
-      {renderedItems.length > 0 ? (
-        <ol className="dossier-transcript-list">
-          {renderedItems.map((entry) =>
-            entry.type === "group" ? (
-              <li key={entry.key} className="dossier-transcript-group">
-                <time dateTime={entry.firstObservedAt}>{formatDateTime(entry.firstObservedAt)}</time>
-                <div>
-                  <strong>{entry.count} low-value {entry.text} events captured</strong>
-                  <p>{entry.label}</p>
-                </div>
-              </li>
-            ) : (
-              <TranscriptRow
-                expanded={expanded.has(entry.item.itemId)}
-                item={entry.item}
-                key={entry.item.itemId}
-                onToggle={() =>
-                  setExpanded((current) => {
-                    const next = new Set(current);
-                    if (next.has(entry.item.itemId)) next.delete(entry.item.itemId);
-                    else next.add(entry.item.itemId);
-                    return next;
-                  })
-                }
-              />
-            )
-          )}
-        </ol>
-      ) : !loading ? (
-        <p className="dossier-muted">{hasQuery ? "No transcript items match this search." : "No transcript items captured."}</p>
-      ) : null}
+      <div className="dossier-transcript-results" aria-live="polite">
+        {renderedItems.length > 0 ? (
+          <ol className="dossier-transcript-list">
+            {renderedItems.map((entry, index) =>
+              entry.type === "group" ? (
+                <li key={entry.key} className="dossier-transcript-group">
+                  <time dateTime={entry.firstObservedAt}>{formatDateTime(entry.firstObservedAt)}</time>
+                  <div>
+                    <strong>{entry.count} low-value {entry.text} events captured</strong>
+                    <p>{entry.label}</p>
+                  </div>
+                </li>
+              ) : (
+                <TranscriptRow
+                  expanded={expanded.has(entry.item.itemId)}
+                  item={entry.item}
+                  key={`${entry.item.itemId}:${index}`}
+                  onToggle={() =>
+                    setExpanded((current) => {
+                      const next = new Set(current);
+                      if (next.has(entry.item.itemId)) next.delete(entry.item.itemId);
+                      else next.add(entry.item.itemId);
+                      return next;
+                    })
+                  }
+                />
+              )
+            )}
+          </ol>
+        ) : !loading ? (
+          <p className="dossier-muted">{hasQuery ? "No transcript items match this search." : "No transcript items captured."}</p>
+        ) : null}
+      </div>
 
       {transcript?.nextCursor ? (
         <button type="button" className="dossier-link-button" onClick={onLoadMore} disabled={loading}>
@@ -129,11 +137,11 @@ export function DossierTranscript({
   );
 }
 
-function TranscriptRow({ expanded, item, onToggle }: { expanded: boolean; item: SessionTranscriptItem; onToggle: () => void }) {
+function TranscriptRow({ expanded, item, onToggle }: { expanded: boolean; item: ReadableTranscriptItem; onToggle: () => void }) {
   const collapsible = item.collapsedByDefault;
-  const visibleText = collapsible && !expanded ? `${item.text.slice(0, 220).trim()}...` : item.text;
+  const visibleText = collapsible && !expanded ? `${item.displayText.slice(0, 220).trim()}...` : item.displayText;
   return (
-    <li className={["dossier-transcript-item", item.lowValue ? "is-low-value" : ""].filter(Boolean).join(" ")}>
+    <li className={["dossier-transcript-item", `is-role-${item.role}`, item.lowValue ? "is-low-value" : ""].filter(Boolean).join(" ")}>
       <time dateTime={item.observedAt}>{formatDateTime(item.observedAt)}</time>
       <div>
         <span>{itemLabel(item)}</span>
@@ -148,7 +156,7 @@ function TranscriptRow({ expanded, item, onToggle }: { expanded: boolean; item: 
   );
 }
 
-function compressLowValueRuns(items: SessionTranscriptItem[]): RenderedTranscriptItem[] {
+function compressLowValueRuns(items: ReadableTranscriptItem[]): RenderedTranscriptItem[] {
   const rendered: RenderedTranscriptItem[] = [];
   for (let index = 0; index < items.length; ) {
     const item = items[index]!;
@@ -166,9 +174,9 @@ function compressLowValueRuns(items: SessionTranscriptItem[]): RenderedTranscrip
       rendered.push({
         count,
         firstObservedAt: item.observedAt,
-        key: `group:${item.label}:${item.text}:${index}`,
+        key: `group:${item.label}:${item.displayText}:${index}`,
         label: item.label,
-        text: item.text,
+        text: item.displayText,
         type: "group"
       });
     } else {
@@ -179,8 +187,8 @@ function compressLowValueRuns(items: SessionTranscriptItem[]): RenderedTranscrip
   return rendered;
 }
 
-function sameLowValue(left: SessionTranscriptItem, right: SessionTranscriptItem): boolean {
-  return left.text === right.text && left.label === right.label;
+function sameLowValue(left: ReadableTranscriptItem, right: ReadableTranscriptItem): boolean {
+  return left.displayText === right.displayText && left.label === right.label;
 }
 
 function itemLabel(item: SessionTranscriptItem): string {
