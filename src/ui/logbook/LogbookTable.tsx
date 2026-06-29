@@ -108,10 +108,11 @@ function LogbookTableLayer({
         </tr>
       </thead>
       <tbody>
-        {sessions.map((session) => (
+        {sessions.map((session, rowIndex) => (
           <LogbookRow
             key={session.sessionId}
             density={density}
+            rowIndex={rowIndex}
             session={session}
             selected={session.sessionId === selectedSessionId}
             onSelect={onSelect}

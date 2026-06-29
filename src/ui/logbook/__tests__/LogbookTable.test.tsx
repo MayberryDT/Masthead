@@ -69,6 +69,27 @@ describe("LogbookTable", () => {
     expect(html).not.toContain("logbook-card");
   });
 
+  test("adds capped row stagger indices for page entry animations", () => {
+    const html = renderToStaticMarkup(
+      <LogbookTable
+        animateOnMount
+        density="compact"
+        sessions={Array.from({ length: 16 }, (_, index) => ({
+          project: "Masthead",
+          runtime: "codex",
+          sessionId: `session-${index + 1}`,
+          title: `Session ${index + 1}`
+        }))}
+        onSelect={() => undefined}
+      />
+    );
+
+    expect(html).toContain("--logbook-row-index:0");
+    expect(html).toContain("--logbook-row-index:12");
+    expect(html).not.toContain("--logbook-row-index:13");
+    expect(html).toContain("is-entering");
+  });
+
   test("opens the session when any non-control cell in the row is clicked", async () => {
     const onSelect = vi.fn();
     await renderTable(onSelect);

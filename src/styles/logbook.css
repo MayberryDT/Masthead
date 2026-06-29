@@ -417,15 +417,27 @@
   animation: logbook-table-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.logbook-table-wrap.is-entering .logbook-table-current {
-  animation: logbook-table-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
 @keyframes logbook-table-out {
   to {
     opacity: 0;
     transform: translateY(-8px);
     filter: blur(3px);
+  }
+}
+
+.logbook-table-wrap.is-entering .logbook-table-current .logbook-row {
+  animation: logbook-row-in 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--logbook-row-index) * 14ms);
+}
+
+@keyframes logbook-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -696,7 +708,7 @@
 @media (prefers-reduced-motion: reduce) {
   .logbook-table-wrap.is-switching .logbook-table-outgoing,
   .logbook-table-wrap.is-switching .logbook-table-current,
-  .logbook-table-wrap.is-entering .logbook-table-current,
+  .logbook-table-wrap.is-entering .logbook-table-current .logbook-row,
   .logbook-skeleton-line {
     animation: none;
   }
