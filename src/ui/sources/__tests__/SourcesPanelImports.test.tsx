@@ -250,7 +250,7 @@ describe("SourcesPanel import controls", () => {
     await act(async () => root.unmount());
   });
 
-  test("advanced diagnostics still exposes adapter grid and import catalog from setup", async () => {
+  test("connected dashboard keeps import jobs visible without advanced diagnostics", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -258,19 +258,11 @@ describe("SourcesPanel import controls", () => {
       root.render(<SourcesPanel adapters={[]} busy={false} imports={[]} onExcludePath={noop} onRefresh={noop} setup={connectedSetup()} sources={[]} />);
     });
 
-    await act(async () => {
-      buttonByText(container, "Advanced diagnostics").click();
-    });
-
-    expect(container.textContent).toContain("Advanced diagnostics");
-    expect(container.textContent).toContain("Adapter inventory");
     expect(container.textContent).toContain("Import jobs");
-    expect(container.textContent).toContain("Close diagnostics");
-    expect(container.textContent).toContain("Adapter inventory and import jobs");
-    expect(container.textContent).toContain("harnesses in catalog");
-    expect(container.textContent).toContain("ADAPTERS");
-    expect(container.textContent).toContain("Codex");
     expect(container.textContent).toContain("metadata");
+    expect(container.textContent).not.toContain("Advanced diagnostics");
+    expect(container.textContent).not.toContain("Adapter inventory");
+    expect(container.textContent).not.toContain("harnesses in catalog");
     await act(async () => root.unmount());
   });
 
