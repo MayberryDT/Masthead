@@ -21,7 +21,12 @@ describe("Electron window chrome styles", () => {
     expect(cssRule(".masthead-window-controls")).toMatch(/height:\s*calc\(100%\s*-\s*1px\);/);
     expect(cssRule(".masthead-window-control::before")).toBe("");
     expect(cssRule(".masthead-window-control")).toMatch(/width:\s*32px;/);
-    expect(cssRule(".masthead-window-control::after")).toMatch(/inset:\s*2px\s+2px\s+0;/);
+    expect(cssRule(".masthead-window-control::after")).not.toMatch(/inset\s*:/);
+    expect(cssRule(".masthead-window-control::after")).toMatch(/top:\s*50%;/);
+    expect(cssRule(".masthead-window-control::after")).toMatch(/left:\s*50%;/);
+    expect(cssRule(".masthead-window-control::after")).toMatch(/width:\s*20px;/);
+    expect(cssRule(".masthead-window-control::after")).toMatch(/height:\s*20px;/);
+    expect(cssRule(".masthead-window-control::after")).toMatch(/transform:\s*translate\(-50%,\s*-50%\);/);
     expect(cssRule(".masthead-window-control:hover")).not.toMatch(/background\s*:/);
     expect(cssRule(".masthead-window-control:hover::after")).toMatch(/opacity:\s*1;/);
   });
