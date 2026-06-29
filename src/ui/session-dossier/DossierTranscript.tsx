@@ -94,37 +94,39 @@ export function DossierTranscript({
 
       {loading && !transcript ? <p className="dossier-muted">Loading transcript...</p> : null}
 
-      {renderedItems.length > 0 ? (
-        <ol className="dossier-transcript-list">
-          {renderedItems.map((entry, index) =>
-            entry.type === "group" ? (
-              <li key={entry.key} className="dossier-transcript-group">
-                <time dateTime={entry.firstObservedAt}>{formatDateTime(entry.firstObservedAt)}</time>
-                <div>
-                  <strong>{entry.count} low-value {entry.text} events captured</strong>
-                  <p>{entry.label}</p>
-                </div>
-              </li>
-            ) : (
-              <TranscriptRow
-                expanded={expanded.has(entry.item.itemId)}
-                item={entry.item}
-                key={`${entry.item.itemId}:${index}`}
-                onToggle={() =>
-                  setExpanded((current) => {
-                    const next = new Set(current);
-                    if (next.has(entry.item.itemId)) next.delete(entry.item.itemId);
-                    else next.add(entry.item.itemId);
-                    return next;
-                  })
-                }
-              />
-            )
-          )}
-        </ol>
-      ) : !loading ? (
-        <p className="dossier-muted">{hasQuery ? "No transcript items match this search." : "No transcript items captured."}</p>
-      ) : null}
+      <div className="dossier-transcript-results" aria-live="polite">
+        {renderedItems.length > 0 ? (
+          <ol className="dossier-transcript-list">
+            {renderedItems.map((entry, index) =>
+              entry.type === "group" ? (
+                <li key={entry.key} className="dossier-transcript-group">
+                  <time dateTime={entry.firstObservedAt}>{formatDateTime(entry.firstObservedAt)}</time>
+                  <div>
+                    <strong>{entry.count} low-value {entry.text} events captured</strong>
+                    <p>{entry.label}</p>
+                  </div>
+                </li>
+              ) : (
+                <TranscriptRow
+                  expanded={expanded.has(entry.item.itemId)}
+                  item={entry.item}
+                  key={`${entry.item.itemId}:${index}`}
+                  onToggle={() =>
+                    setExpanded((current) => {
+                      const next = new Set(current);
+                      if (next.has(entry.item.itemId)) next.delete(entry.item.itemId);
+                      else next.add(entry.item.itemId);
+                      return next;
+                    })
+                  }
+                />
+              )
+            )}
+          </ol>
+        ) : !loading ? (
+          <p className="dossier-muted">{hasQuery ? "No transcript items match this search." : "No transcript items captured."}</p>
+        ) : null}
+      </div>
 
       {transcript?.nextCursor ? (
         <button type="button" className="dossier-link-button" onClick={onLoadMore} disabled={loading}>

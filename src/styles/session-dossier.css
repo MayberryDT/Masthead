@@ -72,26 +72,32 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(340px, 0.75fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
   border-left: 2px solid var(--blue);
-  background:
-    linear-gradient(90deg, rgba(45, 168, 255, 0.08), rgba(7, 27, 40, 0.72) 38%),
-    rgba(7, 27, 40, 0.72);
+  background: rgba(7, 27, 40, 0.72);
   padding: 14px;
 }
 
-.dossier-hero h3 {
-  margin: 4px 0 6px;
-  color: var(--modal-ink, var(--ink));
-  font-size: 18px;
-  line-height: 1.25;
-  text-wrap: balance;
+.dossier-hero-copy {
+  display: flex;
+  min-width: 0;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .dossier-hero p {
   margin: 0;
   color: var(--modal-mute, var(--mute));
   font-size: 13px;
+}
+
+.dossier-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: auto;
+  padding-top: 8px;
 }
 
 .dossier-grid {
@@ -120,12 +126,6 @@
 
 .dossier-panel-span {
   grid-column: 1 / -1;
-}
-
-.dossier-advanced-actions {
-  display: flex;
-  grid-column: 1 / -1;
-  justify-content: flex-end;
 }
 
 .dossier-advanced-details {
@@ -319,6 +319,7 @@
 }
 
 .dossier-filter-row,
+.dossier-hero-actions,
 .dossier-copy-actions,
 .dossier-action-row {
   display: flex;
@@ -327,6 +328,7 @@
 }
 
 .dossier-filter-row button,
+.dossier-hero-actions button,
 .dossier-copy-actions button,
 .dossier-action-row button,
 .dossier-link-button {
@@ -341,6 +343,7 @@
 }
 
 .dossier-filter-row button:hover,
+.dossier-hero-actions button:hover,
 .dossier-copy-actions button:hover,
 .dossier-action-row button:hover,
 .dossier-link-button:hover,
@@ -366,14 +369,25 @@
 }
 
 .dossier-transcript-toolbar input {
+  appearance: none;
   box-sizing: border-box;
+  -webkit-appearance: none;
   width: 100%;
   min-height: 36px;
   border: 1px solid rgba(92, 153, 187, 0.16);
   border-radius: 4px;
   background: rgba(4, 21, 34, 0.72);
   color: var(--modal-ink, var(--ink));
+  outline: 0;
   padding: 0 10px;
+}
+
+.dossier-transcript-toolbar input:focus,
+.dossier-transcript-toolbar input:focus-visible {
+  border-color: rgba(87, 193, 255, 0.52);
+  background: rgba(4, 21, 34, 0.92);
+  outline: 0;
+  box-shadow: 0 0 0 2px rgba(87, 193, 255, 0.18);
 }
 
 .dossier-transcript-note {
@@ -395,16 +409,24 @@
   line-height: 1.35;
 }
 
+.dossier-transcript-results {
+  min-height: clamp(260px, 42vh, 500px);
+  max-height: min(52vh, 560px);
+  overflow: auto;
+  scrollbar-color: rgba(145, 168, 186, 0.32) transparent;
+  scrollbar-width: thin;
+}
+
+.dossier-transcript-results > .dossier-muted {
+  padding: 10px 0;
+}
+
 .dossier-transcript-list {
   display: grid;
   gap: 0;
-  max-height: min(52vh, 560px);
-  overflow: auto;
   margin: 0;
   padding: 0;
   list-style: none;
-  scrollbar-color: rgba(145, 168, 186, 0.32) transparent;
-  scrollbar-width: thin;
 }
 
 .dossier-transcript-item,

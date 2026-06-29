@@ -46,20 +46,25 @@ describe("SessionDossier", () => {
       />
     );
 
-    expect(html).toContain("Session dossier");
-    expect(html).toContain("Repair OAuth callback");
+    expect(html).toContain("Session identity");
+    expect(html).not.toContain("<h3>Repair OAuth callback</h3>");
     expect(html).toContain("Tokens");
     expect(html).toContain("Input");
     expect(html).toContain("Output");
     expect(html).toContain("Enrichment");
     expect(html).toContain("dossier-panel-primary");
+    expect(html).toContain("Objective: Fix the OAuth return path. Outcome: OAuth route still fails in one edge case.");
     expect(html).toContain("Fix the OAuth return path.");
     expect(html).toContain("Transcript");
     expect(html).toContain("dossier-panel-transcript");
+    expect(html).toContain("dossier-transcript-results");
     expect(html).toContain("Please repair the OAuth callback.");
     expect(html).toContain("Advanced details");
+    expect(html).toContain("dossier-hero-actions");
     expect(html).toContain("Copy context");
-    expect(html).toContain("Canonical ID");
+    expect(html).toContain("Copy canonical ID");
+    expect(html).toContain("Copy source ID");
+    expect(html).not.toContain("<h4>Context packet</h4>");
     expect(html).not.toContain("<h4>Files</h4>");
     expect(html).not.toContain("<h4>Tools</h4>");
     expect(html).not.toContain("<h4>Timeline</h4>");

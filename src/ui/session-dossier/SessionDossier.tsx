@@ -62,10 +62,10 @@ export function SessionDossier({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const identity = dossier?.identity;
-  const title = identity?.title ?? live?.copy.headline ?? live?.title ?? "Session";
   const subtitle = [identity?.project ?? live?.project, identity?.runtime ?? live?.runtime, identity?.model ?? live?.model]
     .filter(Boolean)
     .join(" · ");
+  const summary = dossierSummary(dossier, live);
   const timelineEvents = useMemo(() => (dossier?.timeline ?? liveTimeline(live)).filter((event) => event.kind !== "file"), [dossier?.timeline, live]);
   const filteredTimeline = useMemo(() => filterTimeline(timelineEvents, timelineFilter), [timelineEvents, timelineFilter]);
   const visibleTimeline = showAllTimeline ? filteredTimeline : filteredTimeline.slice(-30);
@@ -102,10 +102,26 @@ export function SessionDossier({
       {!dossier && live ? <div className="dossier-banner">Canonical details unavailable. Showing live session state only.</div> : null}
 
       <section className="dossier-hero">
-        <div>
-          <p className="mono-label">Session dossier</p>
-          <h3>{title}</h3>
-          {subtitle ? <p>{subtitle}</p> : null}
+        <div className="dossier-hero-copy">
+          <div>
+            <p className="mono-label">Session identity</p>
+            <p>{subtitle || "Canonical identifiers and reusable context"}</p>
+          </div>
+          <div className="dossier-hero-actions" aria-label="Session context actions">
+            <button type="button" onClick={() => copyContext(dossier?.reuse.copyableContext)}>
+              Copy context
+            </button>
+            <button type="button" onClick={() => copyContext(identity?.sessionId ?? live?.canonicalSessionId)}>
+              Copy canonical ID
+            </button>
+            <button type="button" onClick={() => copyContext(identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId)}>
+              Copy source ID
+            </button>
+            <button type="button" className="dossier-link-button" onClick={() => setAdvancedOpen((current) => !current)}>
+              {advancedOpen ? "Hide advanced details" : "Advanced details"}
+            </button>
+          </div>
+          <p className="dossier-muted">{copyFeedback(copyState)}</p>
         </div>
         <div className="dossier-identity-grid" aria-label="Session identity">
           <DossierMetric label="Lifecycle" value={identity?.lifecycle ?? live?.lifecycle ?? "Unknown"} />
@@ -122,7 +138,7 @@ export function SessionDossier({
       <div className="dossier-grid">
         <DossierPanel title="Enrichment" className="dossier-panel-span dossier-panel-primary">
           <div className="dossier-copy-stack">
-            <DossierCopyBlock label="Summary" value={dossier?.narrative.liveSummary ?? live?.currentActivity} />
+            <DossierCopyBlock label="Summary" value={summary} />
             <DossierCopyBlock label="Objective" value={dossier?.narrative.objective ?? live?.copy.reason} />
             <DossierCopyBlock label="Outcome" value={dossier?.narrative.outcome ?? live?.copy.status} />
             <DossierCopyBlock label="First prompt" value={dossier?.narrative.firstUserPrompt} />
@@ -147,27 +163,6 @@ export function SessionDossier({
             onRetry={onTranscriptRetry ?? noop}
           />
         </DossierPanel>
-
-        <DossierPanel title="Context packet">
-          <div className="dossier-copy-actions">
-            <button type="button" onClick={() => copyContext(dossier?.reuse.copyableContext)}>
-              Copy context
-            </button>
-            <button type="button" onClick={() => copyContext(identity?.sessionId ?? live?.canonicalSessionId)}>
-              Copy Canonical ID
-            </button>
-            <button type="button" onClick={() => copyContext(identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId)}>
-              Copy source ID
-            </button>
-          </div>
-          <p className="dossier-muted">{copyFeedback(copyState)}</p>
-        </DossierPanel>
-
-        <div className="dossier-advanced-actions">
-          <button type="button" className="dossier-link-button" onClick={() => setAdvancedOpen((current) => !current)}>
-            {advancedOpen ? "Hide advanced details" : "Advanced details"}
-          </button>
-        </div>
 
         {advancedOpen ? (
           <section className="dossier-advanced-details" aria-label="Advanced session details">
@@ -350,6 +345,33 @@ function DossierMetric({ label, value }: { label: string; value?: string | numbe
       <strong>{value ?? "-"}</strong>
     </div>
   );
+}
+
+function dossierSummary(dossier?: SessionDossierDto, live?: SessionDetailView): string | undefined {
+  const narrative = dossier?.narrative;
+  const objective = readableTranscriptText(narrative?.objective ?? live?.copy.reason);
+  const outcome = readableTranscriptText(narrative?.outcome ?? live?.copy.status);
+  const finalAssistantMessage = readableTranscriptText(narrative?.finalAssistantMessage);
+  const fallbackSummary = readableTranscriptText(narrative?.liveSummary ?? live?.currentActivity);
+  const parts = [
+    objective ? `Objective: ${sentence(objective)}` : undefined,
+    outcome && !sameReadableText(outcome, objective) ? `Outcome: ${sentence(outcome)}` : undefined,
+    finalAssistantMessage && !sameReadableText(finalAssistantMessage, outcome) && !sameReadableText(finalAssistantMessage, objective)
+      ? `Latest assistant note: ${sentence(finalAssistantMessage)}`
+      : undefined
+  ].filter(Boolean);
+
+  return parts.length > 0 ? parts.join(" ") : fallbackSummary;
+}
+
+function sentence(value: string): string {
+  const trimmed = value.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function sameReadableText(left?: string, right?: string): boolean {
+  if (!left || !right) return false;
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 function DossierCopyBlock({ label, value }: { label: string; value?: string }) {
