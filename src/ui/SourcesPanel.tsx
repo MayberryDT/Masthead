@@ -80,10 +80,7 @@ export function SourcesPanel(props: Props) {
         <ImportJobsTable
           busy={busy}
           imports={diagnosticImports}
-          limit={props.importLimit}
-          offset={props.importOffset}
           onCancelImport={props.onCancelImport}
-          onLoadMore={props.onLoadMoreImports}
           onRetryImport={props.onRetryImport}
           total={props.importTotal}
         />
