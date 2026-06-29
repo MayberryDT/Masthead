@@ -18,6 +18,38 @@ describe("SessionDossier", () => {
     expect(advancedDetailsRule).toContain("grid-template-columns: repeat(3, minmax(0, 1fr));");
   });
 
+  test("caps dossier panels and scrolls panel bodies", () => {
+    const css = readFileSync("src/styles/session-dossier.css", "utf8");
+    const panelRules = [...css.matchAll(/\.dossier-panel\s*\{[^}]+\}/g)].map((match) => match[0]);
+    const panelBodyRule = css.match(/\.dossier-panel-body\s*\{[^}]+\}/)?.[0] ?? "";
+
+    expect(panelRules.some((rule) => rule.includes("max-height:"))).toBe(true);
+    expect(panelRules.some((rule) => rule.includes("overflow: hidden;"))).toBe(true);
+    expect(panelBodyRule).toContain("overflow: auto;");
+  });
+
+  test("keeps panel headers outside the scrollable panel body", async () => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<SessionDossier dossier={dossier()} />);
+    });
+
+    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
+    expect(button).toBeTruthy();
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const panels = [...host.querySelectorAll(".dossier-panel")];
+    expect(panels.length).toBeGreaterThan(0);
+    expect(panels.every((panel) => panel.children[0]?.tagName === "H4")).toBe(true);
+    expect(panels.every((panel) => panel.children[1]?.classList.contains("dossier-panel-body"))).toBe(true);
+    root.unmount();
+  });
+
   test("renders canonical session evidence and copy actions", () => {
     const currentDossier = dossier();
     const html = renderToStaticMarkup(

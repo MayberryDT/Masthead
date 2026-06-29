@@ -336,7 +336,7 @@ function DossierPanel({ children, className = "", title }: { children: React.Rea
   return (
     <section className={["dossier-panel", className].filter(Boolean).join(" ")}>
       <h4>{title}</h4>
-      {children}
+      <div className="dossier-panel-body">{children}</div>
     </section>
   );
 }
