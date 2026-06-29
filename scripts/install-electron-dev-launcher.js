@@ -59,7 +59,7 @@ read_cmdline() {
   tr '\\0' ' ' <"/proc/$1/cmdline" 2>/dev/null | sed 's/[[:space:]]*$//' || true
 }
 
-is_masthead_repo_process() {
+is_masthead_electron_process() {
   local pid="$1" cwd cmd
   [[ -n "$pid" && "$pid" != "$$" && "$pid" != "$PPID" ]] || return 1
   cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
@@ -71,11 +71,11 @@ is_masthead_repo_process() {
       ;;
     "npm run dev:electron"|\
     "sh -c npm run version:sync && npm run build:daemon && MASTHEAD_ELECTRON_DEV=1 electron-forge start"|\
+    "sh -c npm run version:sync && MASTHEAD_ELECTRON_DEV=1 electron-forge start"|\
     "node $APP_DIR/node_modules/.bin/electron-forge start"|\
     "$NODE_BIN $APP_DIR/node_modules/.bin/electron-forge start"|\
     "$NODE_BIN $APP_DIR/node_modules/@electron-forge/cli/dist/electron-forge-start.js"*|\
-    "$APP_DIR/node_modules/electron/dist/electron"*|\
-    "$NODE_BIN $DAEMON_ENTRY"*)
+    "$APP_DIR/node_modules/electron/dist/electron"*)
       return 0
       ;;
   esac
@@ -92,13 +92,17 @@ wait_for_port_to_close() {
   return 1
 }
 
-stop_stale_repo_processes() {
+daemon_is_healthy() {
+  curl -fsS --max-time 1 http://127.0.0.1:17373/health >/dev/null 2>&1
+}
+
+stop_stale_electron_processes() {
   local pid cmd stale_pids
-  stale_pids="$(pgrep -u "$(id -u)" -f 'npm run dev:electron|/home/.*/Masthead|/Documents/Masthead|electron-forge start|/node_modules/electron/dist/electron|dist/daemon/src/daemon/main.js' 2>/dev/null || true)"
+  stale_pids="$(pgrep -u "$(id -u)" -f 'npm run dev:electron|electron-forge start|/node_modules/electron/dist/electron' 2>/dev/null || true)"
   for pid in $stale_pids; do
-    if is_masthead_repo_process "$pid"; then
+    if is_masthead_electron_process "$pid"; then
       cmd="$(read_cmdline "$pid")"
-      log "Stopping stale Masthead dev process $pid: $cmd"
+      log "Stopping stale Masthead Electron process $pid: $cmd"
       kill "$pid" 2>/dev/null || true
     fi
   done
@@ -106,23 +110,21 @@ stop_stale_repo_processes() {
   sleep 1
 
   for pid in $stale_pids; do
-    if is_masthead_repo_process "$pid"; then
+    if is_masthead_electron_process "$pid"; then
       cmd="$(read_cmdline "$pid")"
-      log "Force stopping stale Masthead dev process $pid: $cmd"
+      log "Force stopping stale Masthead Electron process $pid: $cmd"
       kill -9 "$pid" 2>/dev/null || true
     fi
   done
-
-  wait_for_port_to_close || log "Port 17373 stayed healthy after stale-process cleanup; reusing existing connector if still valid."
 }
 
 start_dev_daemon() {
-  stop_stale_repo_processes
-
-  if curl -fsS --max-time 1 http://127.0.0.1:17373/health >/dev/null 2>&1; then
+  if daemon_is_healthy; then
     log "Masthead daemon already healthy at http://127.0.0.1:17373"
     return 0
   fi
+
+  wait_for_port_to_close || log "Port 17373 stayed occupied by an unhealthy process; daemon start may fail."
 
   log "Building Masthead daemon..."
   if (cd "$APP_DIR" && "$NPM_BIN" run build:daemon) >>"$LOG_FILE" 2>&1; then
@@ -151,7 +153,7 @@ start_dev_daemon() {
   echo "$!" >"$LOG_DIR/dev-daemon.pid"
 
   for _ in {1..80}; do
-    if curl -fsS --max-time 1 http://127.0.0.1:17373/health >/dev/null 2>&1; then
+    if daemon_is_healthy; then
       log "Masthead daemon is ready."
       return 0
     fi
@@ -171,9 +173,20 @@ fi
 log "=== Masthead dev desktop launch $(date -Is) ==="
 log "App dir: $APP_DIR"
 
+stop_stale_electron_processes
 start_dev_daemon
 
+log "Syncing Masthead version metadata..."
+if (cd "$APP_DIR" && "$NPM_BIN" run version:sync) >>"$LOG_FILE" 2>&1; then
+  log "Masthead version metadata is current."
+else
+  sync_status=$?
+  log "Masthead version sync failed with exit status $sync_status."
+  exit "$sync_status"
+fi
+
 cd "$APP_DIR"
+log "Starting Masthead Electron dev app without forcing daemon rebuild."
 exec env \\
   MASTHEAD_ALLOWED_ORIGINS="$ALLOWED_ORIGINS" \\
   MASTHEAD_DATA_DIR="$DATA_DIR" \\
@@ -181,7 +194,8 @@ exec env \\
   MASTHEAD_MCP_ENTRY="$MCP_ENTRY" \\
   MASTHEAD_NODE_PATH="$NODE_BIN" \\
   MASTHEAD_STORE_PATH="$STORE_PATH" \\
-  "$NPM_BIN" run dev:electron >>"$LOG_FILE" 2>&1
+  MASTHEAD_ELECTRON_DEV=1 \\
+  "$NODE_BIN" "$APP_DIR/node_modules/.bin/electron-forge" start >>"$LOG_FILE" 2>&1
 `;
 
 const desktopEntry = `[Desktop Entry]
