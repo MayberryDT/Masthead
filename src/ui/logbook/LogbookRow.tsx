@@ -1,17 +1,21 @@
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import type { LogbookSession } from "../HistoryPanel";
 
 type Props = {
   density: "comfortable" | "compact";
+  rowIndex?: number;
   selected?: boolean;
   session: LogbookSession;
   onSelect: (sessionId: string) => void;
 };
 
-export function LogbookRow({ density, onSelect, selected = false, session }: Props) {
+export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, session }: Props) {
   const primaryModel = session.models?.[0] ?? session.model ?? "Not captured";
   const lifecycle = session.lifecycle ?? session.state ?? "indexed";
   const title = sessionTitle(session);
+  const style = {
+    "--logbook-row-index": Math.min(rowIndex, 12)
+  } as CSSProperties & { "--logbook-row-index": number };
   const openSession = () => onSelect(session.sessionId);
   const handleRowClick = (event: MouseEvent<HTMLTableRowElement>) => {
     if (isInteractiveTarget(event.target)) return;
@@ -30,6 +34,7 @@ export function LogbookRow({ density, onSelect, selected = false, session }: Pro
       tabIndex={0}
       aria-label={`Open session: ${title}`}
       aria-selected={selected}
+      style={style}
       onClick={handleRowClick}
       onKeyDown={handleRowKeyDown}
     >

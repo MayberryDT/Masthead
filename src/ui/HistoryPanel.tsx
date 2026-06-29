@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { searchHistory, type HistorySearchFilters, type HistorySession } from "../core/history";
 import type { StoreRecord } from "../core/store";
 import type {
@@ -159,13 +160,32 @@ export function HistoryPanel({
   const visibleTotal = readyState?.total ?? result?.sessions.length ?? tableSessions.length;
   const recordCount = result?.recordCount ?? visibleTotal;
   const isLoading = loading || loadingState;
+  const [optimisticPageIndex, setOptimisticPageIndex] = useState<number>();
   const totalPages = Math.max(1, Math.ceil(visibleTotal / pageSize));
-  const visiblePageIndex = Math.min(Math.max(0, pageIndex), totalPages - 1);
+  const requestedPageIndex = optimisticPageIndex ?? pageIndex;
+  const visiblePageIndex = Math.min(Math.max(0, requestedPageIndex), totalPages - 1);
+  const isOptimisticPaging = optimisticPageIndex !== undefined && (isLoading || pageIndex !== optimisticPageIndex);
+  const wasLoadingRef = useRef(isLoading);
+  const shouldAnimateLoadedPage = wasLoadingRef.current && !isLoading && !isOptimisticPaging && tableSessions.length > 0;
+  useEffect(() => {
+    wasLoadingRef.current = isLoading;
+  }, [isLoading]);
   const showPagination = usesLogbookStore && Boolean(onPageChange) && visibleTotal > pageSize;
+  const handlePageChange = (nextPageIndex: number) => {
+    const boundedPageIndex = Math.min(Math.max(0, nextPageIndex), totalPages - 1);
+    if (boundedPageIndex === visiblePageIndex) return;
+    setOptimisticPageIndex(boundedPageIndex);
+    onPageChange?.(boundedPageIndex);
+  };
   const sourceSummary = sourceImportSummary(sources, adapters);
   const activeFilters = activeFilterFacets(query, filters, sort, onQueryChange, onFilterChange, onSortChange);
   const hasActiveFilters = activeFilters.length > 0;
   const isFirstRunLoading = isLoading && tableSessions.length === 0 && !errorState;
+  const isPageLoading = (isLoading || isOptimisticPaging) && tableSessions.length > 0 && !errorState;
+  useEffect(() => {
+    if (optimisticPageIndex === undefined) return;
+    if (!isOptimisticPaging || errorState) setOptimisticPageIndex(undefined);
+  }, [errorState, isOptimisticPaging, optimisticPageIndex]);
   const emptyReason = emptyReasonFor({
     activeImports: hasActiveImports(imports),
     connectionState,
@@ -204,17 +224,19 @@ export function HistoryPanel({
       <LogbookFacets facets={activeFilters} />
       <LogbookSummaryStrip items={summaryItems} />
 
-      {isLoading && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Refreshing Logbook results...</p> : null}
       {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
 
       {errorState ? (
         <CanonicalErrorPanel message={errorState.message} onRetry={onRetry} />
       ) : isLoading && tableSessions.length === 0 ? (
         <LogbookSkeleton />
+      ) : isPageLoading ? (
+        <LogbookSkeleton mode="page" />
       ) : tableSessions.length === 0 ? (
         <EmptyPanel {...emptyState} />
       ) : (
         <LogbookTable
+          animateOnMount={shouldAnimateLoadedPage}
           density={density}
           sessions={tableSessions}
           selectedSessionId={selectedSessionId}
@@ -229,12 +251,12 @@ export function HistoryPanel({
             <LogbookPaginationSkeleton />
           ) : showPagination ? (
             <LogbookPagination
-              disabled={isLoading}
+              disabled={isLoading || isOptimisticPaging}
               pageIndex={visiblePageIndex}
               pageSize={pageSize}
               total={visibleTotal}
               visibleCount={tableSessions.length}
-              onPageChange={onPageChange ?? (() => undefined)}
+              onPageChange={handlePageChange}
             />
           ) : null}
           <p className="toolbar-result surface-status">
@@ -266,27 +288,41 @@ function LogbookPagination({
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const isFirst = pageIndex <= 0;
   const isLast = pageIndex >= totalPages - 1;
+  const pointerStartedPageChangeRef = useRef(false);
   const goToPage = (nextPageIndex: number) => {
     onPageChange(Math.min(Math.max(0, nextPageIndex), totalPages - 1));
+  };
+  const handlePointerPageChange = (nextPageIndex: number) => (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "mouse" || event.pointerType === "touch" || event.pointerType === "pen") {
+      pointerStartedPageChangeRef.current = true;
+      goToPage(nextPageIndex);
+    }
+  };
+  const handleClickPageChange = (nextPageIndex: number) => () => {
+    if (pointerStartedPageChangeRef.current) {
+      pointerStartedPageChangeRef.current = false;
+      return;
+    }
+    goToPage(nextPageIndex);
   };
 
   return (
     <nav className="logbook-pagination" aria-label="Logbook pagination">
       <span className="logbook-pagination-range">{pageRangeLabel(pageIndex, pageSize, visibleCount, total)}</span>
       <div className="logbook-pagination-controls">
-        <button type="button" className="logbook-page-button" aria-label="First page" disabled={disabled || isFirst} onClick={() => goToPage(0)}>
+        <button type="button" className="logbook-page-button" aria-label="First page" disabled={disabled || isFirst} onPointerDown={handlePointerPageChange(0)} onClick={handleClickPageChange(0)}>
           <Icon name="pageFirst" size="toolbar" weight={iconWeights.toolbar} />
         </button>
-        <button type="button" className="logbook-page-button" aria-label="Previous page" disabled={disabled || isFirst} onClick={() => goToPage(pageIndex - 1)}>
+        <button type="button" className="logbook-page-button" aria-label="Previous page" disabled={disabled || isFirst} onPointerDown={handlePointerPageChange(pageIndex - 1)} onClick={handleClickPageChange(pageIndex - 1)}>
           <Icon name="pagePrevious" size="toolbar" weight={iconWeights.toolbar} />
         </button>
         <span className="logbook-pagination-page">
           Page {pageIndex + 1} of {totalPages}
         </span>
-        <button type="button" className="logbook-page-button" aria-label="Next page" disabled={disabled || isLast} onClick={() => goToPage(pageIndex + 1)}>
+        <button type="button" className="logbook-page-button" aria-label="Next page" disabled={disabled || isLast} onPointerDown={handlePointerPageChange(pageIndex + 1)} onClick={handleClickPageChange(pageIndex + 1)}>
           <Icon name="pageNext" size="toolbar" weight={iconWeights.toolbar} />
         </button>
-        <button type="button" className="logbook-page-button" aria-label="Last page" disabled={disabled || isLast} onClick={() => goToPage(totalPages - 1)}>
+        <button type="button" className="logbook-page-button" aria-label="Last page" disabled={disabled || isLast} onPointerDown={handlePointerPageChange(totalPages - 1)} onClick={handleClickPageChange(totalPages - 1)}>
           <Icon name="pageLast" size="toolbar" weight={iconWeights.toolbar} />
         </button>
       </div>
@@ -331,16 +367,25 @@ function CanonicalErrorPanel({ message, onRetry }: { message: string; onRetry?: 
   );
 }
 
-function LogbookSkeleton() {
-  const skeletonRows = Array.from({ length: 12 }, (_, index) => index);
+function LogbookSkeleton({ mode = "initial" }: { mode?: "initial" | "page" }) {
+  const isPageLoading = mode === "page";
+  const skeletonRows = Array.from({ length: isPageLoading ? 16 : 24 }, (_, index) => index);
 
   return (
-    <div className="logbook-loading-state logbook-table-wrap logbook-skeleton-table-frame" role="status" aria-live="polite" aria-busy="true" aria-label="Loading Logbook session records">
-      <div className="logbook-loading-copy" aria-hidden="true">
-        <p className="mono-label">Logbook</p>
-        <strong>Loading session records</strong>
-        <span>Hydrating the canonical session database.</span>
-      </div>
+    <div
+      className={`logbook-loading-state logbook-table-wrap logbook-skeleton-table-frame ${isPageLoading ? "logbook-page-loading" : ""}`.trim()}
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label={isPageLoading ? "Loading next Logbook page" : "Loading Logbook session records"}
+    >
+      {isPageLoading ? null : (
+        <div className="logbook-loading-copy" aria-hidden="true">
+          <p className="mono-label">Logbook</p>
+          <strong>Loading session records</strong>
+          <span>Hydrating the canonical session database.</span>
+        </div>
+      )}
       <table className="logbook-table compact logbook-skeleton-table" aria-hidden="true">
         <thead>
           <tr>
