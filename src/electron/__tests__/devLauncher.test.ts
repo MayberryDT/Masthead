@@ -11,6 +11,11 @@ describe("Masthead Dev launcher template", () => {
     expect(healthCheckIndex).toBeGreaterThan(-1);
     expect(buildIndex).toBeGreaterThan(healthCheckIndex);
     expect(source).not.toContain('"$NPM_BIN" run dev:electron');
-    expect(source).toContain("KillMode=process");
+    expect(source).toContain('CANONICAL_RENDERER_URL="http://127.0.0.1:5173"');
+    expect(source).toContain('MASTHEAD_ELECTRON_RENDERER_URL="$CANONICAL_RENDERER_URL"');
+    expect(source).toContain('ELECTRON_BIN="$APP_DIR/node_modules/electron/dist/electron"');
+    expect(source).toContain('"$ELECTRON_BIN" "$APP_DIR"');
+    expect(source).not.toContain('"$NODE_BIN" "$APP_DIR/node_modules/.bin/electron-forge" start');
+    expect(source).toContain("KillMode=control-group");
   });
 });

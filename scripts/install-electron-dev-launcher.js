@@ -23,12 +23,7 @@ function shellQuote(value) {
 }
 
 function devAllowedOrigins() {
-  const origins = new Set(["masthead://app"]);
-  for (let port = 5173; port <= 5199; port += 1) {
-    origins.add(`http://127.0.0.1:${port}`);
-    origins.add(`http://localhost:${port}`);
-  }
-  return Array.from(origins).join(",");
+  return ["masthead://app", "http://127.0.0.1:5173", "http://localhost:5173"].join(",");
 }
 
 const launcher = `#!/usr/bin/env bash
@@ -44,6 +39,9 @@ DB_PATH="$DATA_DIR/masthead.sqlite"
 STORE_PATH="$DATA_DIR/legacy/events.ndjson"
 DAEMON_ENTRY="$APP_DIR/dist/daemon/src/daemon/main.js"
 MCP_ENTRY="$APP_DIR/dist/daemon/src/mcp/server.js"
+CANONICAL_RENDERER_URL="http://127.0.0.1:5173"
+VITE_BIN="$APP_DIR/node_modules/vite/bin/vite.js"
+ELECTRON_BIN="$APP_DIR/node_modules/electron/dist/electron"
 ALLOWED_ORIGINS=${shellQuote(devAllowedOrigins())}
 
 export PATH="$(dirname "$NODE_BIN"):$HOME/.cargo/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
@@ -96,6 +94,10 @@ daemon_is_healthy() {
   curl -fsS --max-time 1 http://127.0.0.1:17373/health >/dev/null 2>&1
 }
 
+ui_is_masthead_dev() {
+  curl -fsS --max-time 1 "$CANONICAL_RENDERER_URL/" 2>/dev/null | grep -q '<title>Masthead</title>'
+}
+
 stop_stale_electron_processes() {
   local pid cmd stale_pids
   stale_pids="$(pgrep -u "$(id -u)" -f 'npm run dev:electron|electron-forge start|/node_modules/electron/dist/electron' 2>/dev/null || true)"
@@ -116,6 +118,48 @@ stop_stale_electron_processes() {
       kill -9 "$pid" 2>/dev/null || true
     fi
   done
+}
+
+start_dev_ui() {
+  if ui_is_masthead_dev; then
+    log "Masthead dev UI already healthy at $CANONICAL_RENDERER_URL"
+    return 0
+  fi
+
+  log "Starting Masthead Vite dev UI at $CANONICAL_RENDERER_URL"
+  (
+    cd "$APP_DIR"
+    exec "$NODE_BIN" "$VITE_BIN" --host 127.0.0.1 --port 5173 --strictPort
+  ) >>"$LOG_FILE" 2>&1 &
+
+  echo "$!" >"$LOG_DIR/dev-ui.pid"
+
+  for _ in {1..80}; do
+    if ui_is_masthead_dev; then
+      log "Masthead dev UI is ready at $CANONICAL_RENDERER_URL"
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  log "Masthead dev UI did not become ready at $CANONICAL_RENDERER_URL. Port 5173 may be occupied by another process."
+  return 1
+}
+
+build_electron_dev_bundles() {
+  log "Building Electron main and preload dev bundles..."
+  if (
+    cd "$APP_DIR"
+    "$NODE_BIN" "$VITE_BIN" build --config "$APP_DIR/vite.main.config.ts" --outDir "$APP_DIR/.vite/build" --emptyOutDir=false
+    "$NODE_BIN" "$VITE_BIN" build --config "$APP_DIR/vite.preload.config.ts" --outDir "$APP_DIR/.vite/build" --emptyOutDir=false
+  ) >>"$LOG_FILE" 2>&1; then
+    log "Electron main and preload dev bundles are ready."
+    return 0
+  fi
+
+  local build_status=$?
+  log "Electron dev bundle build failed with exit status $build_status."
+  return "$build_status"
 }
 
 start_dev_daemon() {
@@ -175,6 +219,7 @@ log "App dir: $APP_DIR"
 
 stop_stale_electron_processes
 start_dev_daemon
+start_dev_ui
 
 log "Syncing Masthead version metadata..."
 if (cd "$APP_DIR" && "$NPM_BIN" run version:sync) >>"$LOG_FILE" 2>&1; then
@@ -185,8 +230,10 @@ else
   exit "$sync_status"
 fi
 
+build_electron_dev_bundles
+
 cd "$APP_DIR"
-log "Starting Masthead Electron dev app without forcing daemon rebuild."
+log "Starting Masthead Electron dev app against $CANONICAL_RENDERER_URL."
 exec env \\
   MASTHEAD_ALLOWED_ORIGINS="$ALLOWED_ORIGINS" \\
   MASTHEAD_DATA_DIR="$DATA_DIR" \\
@@ -195,7 +242,8 @@ exec env \\
   MASTHEAD_NODE_PATH="$NODE_BIN" \\
   MASTHEAD_STORE_PATH="$STORE_PATH" \\
   MASTHEAD_ELECTRON_DEV=1 \\
-  "$NODE_BIN" "$APP_DIR/node_modules/.bin/electron-forge" start >>"$LOG_FILE" 2>&1
+  MASTHEAD_ELECTRON_RENDERER_URL="$CANONICAL_RENDERER_URL" \\
+  "$ELECTRON_BIN" "$APP_DIR" >>"$LOG_FILE" 2>&1
 `;
 
 const desktopEntry = `[Desktop Entry]
@@ -220,7 +268,7 @@ Type=simple
 WorkingDirectory=${repo}
 Environment=MASTHEAD_DEV_LAUNCH_CHILD=1
 ExecStart=${launcherPath}
-KillMode=process
+KillMode=control-group
 TimeoutStopSec=15
 Restart=no
 

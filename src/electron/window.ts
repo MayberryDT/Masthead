@@ -96,8 +96,21 @@ function rendererDevServerOrigin(policy: RendererUrlPolicy = {}): string | undef
 }
 
 function rendererDevServerUrl(): string | undefined {
+  const launcherUrl = process.env.MASTHEAD_ELECTRON_DEV === "1" ? process.env.MASTHEAD_ELECTRON_RENDERER_URL : undefined;
+  if (launcherUrl && isLocalHttpUrl(launcherUrl)) {
+    return launcherUrl;
+  }
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     return MAIN_WINDOW_VITE_DEV_SERVER_URL;
   }
   return undefined;
+}
+
+function isLocalHttpUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
 }

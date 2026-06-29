@@ -1,7 +1,18 @@
-import { describe, expect, test } from "vitest";
-import { isAllowedRendererUrl, mastheadWindowChromeOptions, mastheadWindowPreferences, rendererTrustedOrigins } from "../window";
+import { afterEach, describe, expect, test } from "vitest";
+import {
+  isAllowedRendererUrl,
+  mastheadWindowChromeOptions,
+  mastheadWindowPreferences,
+  rendererEntryUrl,
+  rendererTrustedOrigins
+} from "../window";
 
 describe("Electron window security policy", () => {
+  afterEach(() => {
+    delete process.env.MASTHEAD_ELECTRON_DEV;
+    delete process.env.MASTHEAD_ELECTRON_RENDERER_URL;
+  });
+
   test("removes native chrome for Masthead-owned window controls", () => {
     expect(mastheadWindowChromeOptions()).toEqual({
       autoHideMenuBar: true,
@@ -49,5 +60,12 @@ describe("Electron window security policy", () => {
 
     expect(isAllowedRendererUrl("http://localhost:5174", policy)).toBe(true);
     expect(rendererTrustedOrigins(policy)).toContain("http://localhost:5174");
+  });
+
+  test("uses the canonical dev renderer URL when the launcher provides it", () => {
+    process.env.MASTHEAD_ELECTRON_DEV = "1";
+    process.env.MASTHEAD_ELECTRON_RENDERER_URL = "http://127.0.0.1:5173";
+
+    expect(rendererEntryUrl()).toBe("http://127.0.0.1:5173");
   });
 });
