@@ -71,6 +71,9 @@ describe("HistoryPanel", () => {
     expect(html).toContain("Codex history into");
     expect(html).toContain("<mark>SQLite</mark>");
     expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("logbook-summary-strip");
+    expect(html).toContain("usage-metric sessions");
+    expect(html).not.toContain("stat-strip");
     expect(html).not.toContain('<script>alert("x")</script>');
     expect(html).toContain("Showing 1 of 1");
   });
@@ -187,6 +190,8 @@ describe("HistoryPanel", () => {
     expect(html).toContain("SESSION / MATCH");
     expect(html).toContain("PROJECT");
     expect(html).toContain("logbook-loading-inspector");
+    expect(html).toContain("logbook-skeleton-footer");
+    expect(html).toContain("logbook-skeleton-table-frame");
     expect(html).not.toContain("No sessions");
     expect(html).not.toContain("Logbook could not read");
   });

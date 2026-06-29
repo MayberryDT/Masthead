@@ -13,7 +13,7 @@ describe("SessionLibraryDetail", () => {
     expect(html).toContain('role="dialog"');
     expect(html).toContain('aria-modal="true"');
     expect(html).toContain("modal-backdrop t-modal-backdrop is-opening");
-    expect(html).toContain("session-detail-modal logbook-detail-modal t-modal");
+    expect(html).toContain("session-detail-modal logbook-detail-modal t-modal is-opening");
     expect(html).not.toContain("is-closing");
     expect(html).toContain("modal-scroll-frame");
     expect(html).toContain("Repair OAuth callback");

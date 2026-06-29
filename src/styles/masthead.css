@@ -1108,6 +1108,10 @@ main {
   opacity: 0;
 }
 
+.t-modal-backdrop.is-opening {
+  opacity: 0;
+}
+
 .t-modal-backdrop.is-open {
   opacity: 1;
 }
@@ -1180,6 +1184,12 @@ main {
     transform var(--modal-open-dur) var(--modal-ease),
     opacity var(--modal-open-dur) var(--modal-ease);
   will-change: transform, opacity;
+}
+
+.t-modal.is-opening {
+  transform: scale(var(--modal-scale));
+  opacity: 0;
+  pointer-events: none;
 }
 
 .t-modal.is-open {
