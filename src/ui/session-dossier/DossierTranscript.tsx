@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { SessionTranscriptItem, SessionTranscriptKindFilter, SessionTranscriptResult } from "../../app/daemonClient";
+import { readableTranscriptText } from "./transcriptPresentation";
 
 type Props = {
   sessionId?: string;
@@ -15,8 +16,10 @@ type Props = {
 };
 
 type RenderedTranscriptItem =
-  | { type: "item"; item: SessionTranscriptItem }
+  | { type: "item"; item: ReadableTranscriptItem }
   | { type: "group"; key: string; count: number; firstObservedAt: string; label: string; text: string };
+
+type ReadableTranscriptItem = SessionTranscriptItem & { displayText: string };
 
 const filters: Array<{ label: string; value: SessionTranscriptKindFilter }> = [
   { label: "All", value: "all" },
@@ -39,7 +42,10 @@ export function DossierTranscript({
   transcript
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const visibleTranscriptItems = (transcript?.items ?? []).filter((item) => item.kind !== "file_effect");
+  const visibleTranscriptItems = (transcript?.items ?? [])
+    .filter((item) => item.kind !== "file_effect")
+    .map((item) => ({ ...item, displayText: readableTranscriptText(item.text) }))
+    .filter((item) => item.displayText.length > 0);
   const renderedItems = compressLowValueRuns(visibleTranscriptItems);
   const hasUsableTranscript = transcript?.coverage.hasUsableTranscript ?? false;
   const hasQuery = query.trim().length > 0;
@@ -90,7 +96,7 @@ export function DossierTranscript({
 
       {renderedItems.length > 0 ? (
         <ol className="dossier-transcript-list">
-          {renderedItems.map((entry) =>
+          {renderedItems.map((entry, index) =>
             entry.type === "group" ? (
               <li key={entry.key} className="dossier-transcript-group">
                 <time dateTime={entry.firstObservedAt}>{formatDateTime(entry.firstObservedAt)}</time>
@@ -103,7 +109,7 @@ export function DossierTranscript({
               <TranscriptRow
                 expanded={expanded.has(entry.item.itemId)}
                 item={entry.item}
-                key={entry.item.itemId}
+                key={`${entry.item.itemId}:${index}`}
                 onToggle={() =>
                   setExpanded((current) => {
                     const next = new Set(current);
@@ -129,11 +135,11 @@ export function DossierTranscript({
   );
 }
 
-function TranscriptRow({ expanded, item, onToggle }: { expanded: boolean; item: SessionTranscriptItem; onToggle: () => void }) {
+function TranscriptRow({ expanded, item, onToggle }: { expanded: boolean; item: ReadableTranscriptItem; onToggle: () => void }) {
   const collapsible = item.collapsedByDefault;
-  const visibleText = collapsible && !expanded ? `${item.text.slice(0, 220).trim()}...` : item.text;
+  const visibleText = collapsible && !expanded ? `${item.displayText.slice(0, 220).trim()}...` : item.displayText;
   return (
-    <li className={["dossier-transcript-item", item.lowValue ? "is-low-value" : ""].filter(Boolean).join(" ")}>
+    <li className={["dossier-transcript-item", `is-role-${item.role}`, item.lowValue ? "is-low-value" : ""].filter(Boolean).join(" ")}>
       <time dateTime={item.observedAt}>{formatDateTime(item.observedAt)}</time>
       <div>
         <span>{itemLabel(item)}</span>
@@ -148,7 +154,7 @@ function TranscriptRow({ expanded, item, onToggle }: { expanded: boolean; item: 
   );
 }
 
-function compressLowValueRuns(items: SessionTranscriptItem[]): RenderedTranscriptItem[] {
+function compressLowValueRuns(items: ReadableTranscriptItem[]): RenderedTranscriptItem[] {
   const rendered: RenderedTranscriptItem[] = [];
   for (let index = 0; index < items.length; ) {
     const item = items[index]!;
@@ -166,9 +172,9 @@ function compressLowValueRuns(items: SessionTranscriptItem[]): RenderedTranscrip
       rendered.push({
         count,
         firstObservedAt: item.observedAt,
-        key: `group:${item.label}:${item.text}:${index}`,
+        key: `group:${item.label}:${item.displayText}:${index}`,
         label: item.label,
-        text: item.text,
+        text: item.displayText,
         type: "group"
       });
     } else {
@@ -179,8 +185,8 @@ function compressLowValueRuns(items: SessionTranscriptItem[]): RenderedTranscrip
   return rendered;
 }
 
-function sameLowValue(left: SessionTranscriptItem, right: SessionTranscriptItem): boolean {
-  return left.text === right.text && left.label === right.label;
+function sameLowValue(left: ReadableTranscriptItem, right: ReadableTranscriptItem): boolean {
+  return left.displayText === right.displayText && left.label === right.label;
 }
 
 function itemLabel(item: SessionTranscriptItem): string {
