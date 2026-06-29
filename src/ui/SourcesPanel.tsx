@@ -9,6 +9,7 @@ import { SourcesOnboardingModal } from "./sources/SourcesOnboardingModal";
 type Props = {
   adapters?: AdapterStatus[];
   imports?: ImportJob[];
+  importTotal?: number;
   setup?: SourcesSetupDto;
   sources: SourceStatus[];
   busy: boolean;
@@ -78,6 +79,7 @@ export function SourcesPanel(props: Props) {
           imports={diagnosticImports}
           onCancelImport={props.onCancelImport}
           onRetryImport={props.onRetryImport}
+          total={props.importTotal}
         />
       ) : null}
 

@@ -1374,6 +1374,7 @@ export function App() {
           sources={sources}
           adapters={adapters}
           imports={imports}
+          importTotal={importPage.total}
           setup={sourcesSetup}
           busy={sourcesBusy}
           status={sourcesStatus}
