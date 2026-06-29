@@ -17,5 +17,6 @@ describe("Electron window chrome styles", () => {
     expect(cssRule(".masthead-window-bar::after")).toMatch(/z-index:\s*2;/);
     expect(cssRule(".masthead-window-controls")).toMatch(/align-self:\s*flex-start;/);
     expect(cssRule(".masthead-window-controls")).toMatch(/height:\s*calc\(100%\s*-\s*1px\);/);
+    expect(cssRule(".masthead-window-control::before")).toBe("");
   });
 });

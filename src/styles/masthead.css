@@ -2856,17 +2856,6 @@ body {
     color 140ms ease;
 }
 
-.masthead-window-control::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: rgba(194, 221, 241, 0.08);
-  pointer-events: none;
-}
-
 .masthead-window-control.close {
   width: 42px;
   min-width: 42px;
