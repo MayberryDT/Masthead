@@ -15,6 +15,7 @@ import {
 } from "./daemonLauncher";
 import { isMastheadOwnedDirectory } from "./pathPolicy";
 import { resolveProtocolPath } from "./protocol";
+import { configureElectronRuntime } from "./runtime";
 import { createMastheadTray } from "./tray";
 import {
   isAllowedRendererUrl,
@@ -36,6 +37,8 @@ protocol.registerSchemesAsPrivileged([
     }
   }
 ]);
+
+configureElectronRuntime(app);
 
 const ownedDaemonChildren = new Set<ChildProcess>();
 let mainWindow: BrowserWindow | undefined;
