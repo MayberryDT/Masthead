@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -88,6 +89,13 @@ describe("LogbookTable", () => {
     expect(html).toContain("--logbook-row-index:12");
     expect(html).not.toContain("--logbook-row-index:13");
     expect(html).toContain("is-entering");
+  });
+
+  test("delays row entry cascade so pagination loads before animation starts", () => {
+    const css = readFileSync("src/styles/logbook.css", "utf8");
+
+    expect(css).toContain("--logbook-row-entry-delay: 1000ms");
+    expect(css).toContain("calc(var(--logbook-row-entry-delay) + var(--logbook-row-index) * 14ms)");
   });
 
   test("opens the session when any non-control cell in the row is clicked", async () => {

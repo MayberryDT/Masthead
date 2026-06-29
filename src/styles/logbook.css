@@ -417,6 +417,10 @@
   animation: logbook-table-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.logbook-table-wrap.is-entering {
+  --logbook-row-entry-delay: 1000ms;
+}
+
 @keyframes logbook-table-out {
   to {
     opacity: 0;
@@ -427,7 +431,7 @@
 
 .logbook-table-wrap.is-entering .logbook-table-current .logbook-row {
   animation: logbook-row-in 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(var(--logbook-row-index) * 14ms);
+  animation-delay: calc(var(--logbook-row-entry-delay) + var(--logbook-row-index) * 14ms);
 }
 
 @keyframes logbook-row-in {
