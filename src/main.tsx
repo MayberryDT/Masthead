@@ -10,7 +10,6 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "./styles/primitives.css";
 import "./styles/logbook.css";
 import "./styles/sources.css";
-import "./styles/agent-access.css";
 import "./styles/settings.css";
 import "./styles/session-dossier.css";
 import "./styles/masthead.css";

@@ -16,7 +16,7 @@ type StorageSettingsProps = {
 export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDataDirectory, onRequestPrune, settings, writeDisabled = busy }: StorageSettingsProps) {
   const summary = dataSummary ?? settings?.storage.dataSummary;
   return (
-    <SettingsSection eyebrow="Storage" title="Storage and export">
+    <SettingsSection className="settings-section-wide" eyebrow="Storage" title="Storage">
       <SettingsRow
         control={
           <AppButton disabled={!settings?.storage.dataDirectory} onClick={onOpenDataDirectory} variant="quiet">
@@ -27,7 +27,15 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
         value={settings?.storage.databasePath ?? "Loading"}
       />
       <SettingsRow label="Data directory" value={settings?.storage.dataDirectory ?? "Loading"} />
-      <SettingsRow label="Sessions" value={summary ? formatCount(summary.sessions) : "Loading"} />
+      <SettingsRow label="Database ID" value={settings?.data.databaseId ?? "Loading"} />
+      <SettingsRow
+        label="Runtime"
+        value={
+          settings
+            ? `${settings.runtime.mode} / ${settings.runtime.writable ? "writable" : "read only"} / API ${settings.apiVersion} / schema ${settings.schemaVersion}`
+            : "Loading"
+        }
+      />
       <SettingsRow
         control={
           <AppButton disabled={writeDisabled || !summary} onClick={onRequestPrune} variant="danger">
@@ -35,7 +43,7 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
           </AppButton>
         }
         description="Keeps normalized session metadata, summaries, and search records."
-        label="Raw source copies"
+        label="Source copies"
         value={summary ? formatCount(summary.rawEvents) : "Loading"}
       />
       <SettingsRow

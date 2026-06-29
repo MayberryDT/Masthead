@@ -15,7 +15,7 @@ type Props = {
   onSurfaceChange?: (surface: AppSurface) => void;
 };
 
-export type AppSurface = "now" | "logbook" | "sources" | "usage" | "agent_access" | "settings";
+export type AppSurface = "now" | "logbook" | "sources" | "usage" | "settings";
 
 export function ObservabilitySidebar({
   version,
@@ -66,13 +66,6 @@ export function ObservabilitySidebar({
             label="Usage"
             active={activeSurface === "usage"}
             onClick={() => onSurfaceChange?.("usage")}
-          />
-          <SidebarLink
-            href="#agent-access"
-            icon="agentAccess"
-            label="Agent Access"
-            active={activeSurface === "agent_access"}
-            onClick={() => onSurfaceChange?.("agent_access")}
           />
           <SidebarLink
             href="#settings"

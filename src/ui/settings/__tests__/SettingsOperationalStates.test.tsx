@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe("Settings operational states", () => {
-  test("disables write controls but leaves read-only storage actions visible on read-only connections", () => {
+  test("keeps read-only state out of the Settings chrome while disabling destructive actions", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel
         deletionScopeKind="project"
@@ -33,16 +33,16 @@ describe("Settings operational states", () => {
       />
     );
 
-    expect(html).toContain("Read-only connection");
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Install<\/button>/);
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Test<\/button>/);
+    expect(html).not.toContain("Read-only connection");
+    expect(html).not.toContain("hook writes");
+    expect(html).not.toContain("Codex integration");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Delete raw copies<\/button>/);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Delete selected records<\/button>/);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Delete all Masthead data<\/button>/);
     expect(html.match(/<button[^>]*>Export data<\/button>/)?.[0]).not.toContain("disabled");
   });
 
-  test("hides the connection recovery strip for a healthy writable connection", () => {
+  test("does not render connection recovery chrome inside Settings", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel
         connection={{
@@ -57,80 +57,9 @@ describe("Settings operational states", () => {
       />
     );
 
-    expect(html).toContain("Everyday setup");
-    expect(html).not.toContain("Connection recovery");
     expect(html).not.toContain("Connection ready");
     expect(html).not.toContain("Masthead daemon is ready");
     expect(html).not.toContain("Reconnect");
-  });
-
-  test("keeps actionable connection recovery states inside Settings", () => {
-    const states = [
-      {
-        connection: { state: "probing", baseUrl: "http://127.0.0.1:17374" },
-        expected: "Probing the Masthead daemon",
-        readOnly: false
-      },
-      {
-        connection: { state: "offline", baseUrl: "http://127.0.0.1:17374", error: "Failed to fetch" },
-        expected: "No Masthead daemon is responding",
-        readOnly: false
-      },
-      {
-        connection: { state: "incompatible", baseUrl: "http://127.0.0.1:17374", error: "legacy /health payload" },
-        expected: "Legacy daemon detected",
-        readOnly: false
-      },
-      {
-        connection: {
-          state: "read_only",
-          baseUrl: "http://127.0.0.1:17374",
-          health: currentHealth as MastheadHealthDto,
-          writable: false
-        },
-        expected: "Start writable collector",
-        readOnly: true
-      }
-    ] as const;
-
-    for (const state of states) {
-      const html = renderToStaticMarkup(
-        <OperationsPanel
-          connection={state.connection}
-          onReconnect={() => undefined}
-          onStartConnector={() => undefined}
-          readOnly={state.readOnly}
-          settingsState={settings}
-        />
-      );
-
-      expect(html).toContain("Connection recovery");
-      expect(html).toContain(state.expected);
-      if (state.readOnly) {
-        expect(html).toContain("Read-only connection: destructive data changes and hook writes are disabled.");
-      }
-    }
-  });
-
-  test("copies the hook endpoint from everyday setup", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
-    container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root?.render(<OperationsPanel settingsState={settings} />);
-    });
-
-    const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "Copy endpoint");
-    expect(button).toBeTruthy();
-    await act(async () => {
-      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    expect(writeText).toHaveBeenCalledWith(settings.hooks.endpoint);
-    expect(container.textContent).toContain("Endpoint copied.");
   });
 
   test("shows a recoverable failure state when runtime settings cannot be loaded", async () => {

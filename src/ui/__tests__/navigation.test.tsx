@@ -11,8 +11,9 @@ describe("product navigation", () => {
     expect(html).toContain("Logbook");
     expect(html).toContain("Sources");
     expect(html).toContain("Usage");
-    expect(html).toContain("Agent Access");
     expect(html).toContain("Settings");
+    expect(html).not.toContain("Agent Access");
+    expect(html).not.toContain("#agent-access");
     expect(html).not.toContain("Performance");
     expect(html).not.toContain("Models");
     expect(html).not.toContain("Alerts");
