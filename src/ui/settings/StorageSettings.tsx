@@ -15,7 +15,6 @@ type StorageSettingsProps = {
 
 export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDataDirectory, onRequestPrune, settings, writeDisabled = busy }: StorageSettingsProps) {
   const summary = dataSummary ?? settings?.storage.dataSummary;
-  const storageClasses = summary ? Object.entries(summary.storageClasses) : [];
   return (
     <SettingsSection className="settings-section-wide" eyebrow="Storage" title="Storage">
       <SettingsRow
@@ -37,12 +36,6 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
             : "Loading"
         }
       />
-      <SettingsRow label="Sessions" value={summary ? formatCount(summary.sessions) : "Loading"} />
-      <SettingsRow
-        description={storageClasses.length > 0 ? storageClasses.map(([name, item]) => `${name}: ${item.retention}`).join(", ") : undefined}
-        label="Retention classes"
-        value={storageClasses.length > 0 ? `${storageClasses.length} classes` : "Loading"}
-      />
       <SettingsRow
         control={
           <AppButton disabled={writeDisabled || !summary} onClick={onRequestPrune} variant="danger">
@@ -50,7 +43,7 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
           </AppButton>
         }
         description="Keeps normalized session metadata, summaries, and search records."
-        label="Raw source copies"
+        label="Source copies"
         value={summary ? formatCount(summary.rawEvents) : "Loading"}
       />
       <SettingsRow

@@ -2,9 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { invokeDesktopCommand, isDesktopBridgeAvailable } from "../app/desktopBridge";
 import {
   getSettingsState,
-  installCodexHooks,
-  testCodexHooks,
-  uninstallCodexHooks,
   type DataSummary,
   type SettingsStateDto
 } from "../app/daemonClient";
@@ -12,11 +9,9 @@ import type { MastheadConnectionState } from "../app/connection/MastheadConnecti
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EnrichmentSettings } from "./settings/EnrichmentSettings";
 import { DangerZone } from "./settings/DangerZone";
-import { HookSettings } from "./settings/HookSettings";
 import { McpSettings } from "./settings/McpSettings";
 import { PrivacySettings } from "./settings/PrivacySettings";
 import { StorageSettings } from "./settings/StorageSettings";
-import { ConnectionRecoveryPanel } from "./ConnectionRecoveryPanel";
 
 export type DeletionScopeKind = "project" | "session" | "runtime" | "host";
 
@@ -59,7 +54,6 @@ type Props = {
 
 export function OperationsPanel({
   baseUrl,
-  connection,
   dataSummary,
   deletionScopeKind = "project",
   deletionScopeTarget = "",
@@ -71,21 +65,18 @@ export function OperationsPanel({
   onDeletionScopeKindChange,
   onDeletionScopeTargetChange,
   onExportLocalData,
-  onReconnect,
   onRequestDeleteLocalData,
   onRequestPruneLocalData,
   onRequestScopedDelete,
-  onStartConnector,
   readOnly = false,
   settingsState
 }: Props) {
   const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
   const [settingsError, setSettingsError] = useState<string>();
-  const [hookBusy, setHookBusy] = useState(false);
   const [settingsLoadState, setSettingsLoadState] = useState<"loading" | "ready" | "error">(settingsState ? "ready" : "loading");
   const effectiveSettings = settingsState ?? loadedSettings;
   const effectiveSummary = dataSummary ?? effectiveSettings?.storage.dataSummary;
-  const busy = localDataStatus.state === "busy" || hookBusy;
+  const busy = localDataStatus.state === "busy";
 
   const loadSettings = useCallback((signal?: AbortSignal) => {
     if (settingsState) return;
@@ -109,28 +100,6 @@ export function OperationsPanel({
     return () => controller.abort();
   }, [loadSettings]);
 
-  const runHookAction = async (action: "install" | "uninstall" | "test") => {
-    if (readOnly) {
-      setSettingsError("This Masthead connection is read-only. Start the local writable collector before changing hook settings.");
-      return;
-    }
-    setHookBusy(true);
-    try {
-      const hooks =
-        action === "install"
-          ? await installCodexHooks(baseUrl)
-          : action === "uninstall"
-            ? await uninstallCodexHooks(baseUrl)
-            : await testCodexHooks(baseUrl);
-      setLoadedSettings((current) => (current ? { ...current, hooks } : current));
-      setSettingsError(undefined);
-    } catch (error) {
-      setSettingsError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setHookBusy(false);
-    }
-  };
-
   const openDataDirectory = async () => {
     const dataDirectory = effectiveSettings?.storage.dataDirectory ?? effectiveSettings?.data.dataDirectory;
     if (!dataDirectory) return;
@@ -150,13 +119,7 @@ export function OperationsPanel({
 
   return (
     <section id="settings" className="settings-panel" aria-label="Settings">
-      {connection && onReconnect && onStartConnector ? (
-        <ConnectionRecoveryPanel connection={connection} onRetry={onReconnect} onStart={onStartConnector} retryLabel="Reconnect" />
-      ) : null}
       {settingsError ? <p className="settings-error">{settingsError}</p> : null}
-      {readOnly ? (
-        <p className="settings-status error">Read-only connection: destructive data changes and hook writes are disabled.</p>
-      ) : null}
       {settingsLoadState === "error" && !effectiveSettings ? (
         <div className="settings-recovery" role="alert">
           <h2>Settings unavailable</h2>
@@ -169,16 +132,9 @@ export function OperationsPanel({
 
       {showSettingsSections ? (
         <div className="settings-layout">
-          <HookSettings
-            busy={writesDisabled}
-            hooks={effectiveSettings?.hooks}
-            onInstall={() => void runHookAction("install")}
-            onTest={() => void runHookAction("test")}
-            onUninstall={() => void runHookAction("uninstall")}
-          />
           <EnrichmentSettings enrichment={effectiveSettings?.enrichment} />
           <PrivacySettings privacy={effectiveSettings?.privacy} />
-          <McpSettings baseUrl={baseUrl} />
+          <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
           <StorageSettings
             busy={busy}
             dataSummary={effectiveSummary}

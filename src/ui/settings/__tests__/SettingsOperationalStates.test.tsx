@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe("Settings operational states", () => {
-  test("disables write controls but leaves read-only storage actions visible on read-only connections", () => {
+  test("keeps read-only state out of the Settings chrome while disabling destructive actions", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel
         deletionScopeKind="project"
@@ -33,16 +33,16 @@ describe("Settings operational states", () => {
       />
     );
 
-    expect(html).toContain("Read-only connection");
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Install<\/button>/);
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Test<\/button>/);
+    expect(html).not.toContain("Read-only connection");
+    expect(html).not.toContain("hook writes");
+    expect(html).not.toContain("Codex integration");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Delete raw copies<\/button>/);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Delete selected records<\/button>/);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Delete all Masthead data<\/button>/);
     expect(html.match(/<button[^>]*>Export data<\/button>/)?.[0]).not.toContain("disabled");
   });
 
-  test("shows connection status and reconnect action inside Settings", () => {
+  test("does not render connection recovery chrome inside Settings", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel
         connection={{
@@ -57,9 +57,9 @@ describe("Settings operational states", () => {
       />
     );
 
-    expect(html).toContain("Connection ready");
-    expect(html).toContain("Masthead daemon is ready");
-    expect(html).toContain("Reconnect");
+    expect(html).not.toContain("Connection ready");
+    expect(html).not.toContain("Masthead daemon is ready");
+    expect(html).not.toContain("Reconnect");
   });
 
   test("shows a recoverable failure state when runtime settings cannot be loaded", async () => {

@@ -29,7 +29,7 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Delete all Masthead data");
     expect(html).toContain("Keeps normalized session metadata, summaries, and search records.");
     expect(html).toContain("Original harness files are untouched.");
-    expect(html).toContain("Codex integration");
+    expect(html).not.toContain("Codex integration");
     expect(html).not.toContain("ops-card");
     expect(html).not.toContain("ghost-pill");
     expect(html).not.toContain("Manual 30-day prune");
@@ -117,10 +117,10 @@ describe("OperationsPanel", () => {
     );
 
     expect(html).toContain("Storage");
-    expect(html).toContain("Sessions");
-    expect(html).toContain("Raw source copies");
-    expect(html).toContain("5");
+    expect(html).toContain("Source copies");
     expect(html).toContain("4");
+    expect(html).not.toContain("Sessions");
+    expect(html).not.toContain("Retention classes");
   });
 
   test("renders local action errors without changing action labels", () => {

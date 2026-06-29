@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { McpStatusDto } from "../../app/daemonClient";
+import type { McpStatusDto, SettingsStateDto } from "../../app/daemonClient";
 import { getMcpStatus } from "../../app/daemonClient";
 import {
   getMcpLaunchConfig,
@@ -13,17 +13,25 @@ import { AppButton } from "../primitives/AppButton";
 import { CodeBlock } from "../primitives/CodeBlock";
 import { StatusBadge } from "../primitives/StatusBadge";
 import { SettingsSection } from "./SettingsSection";
+import { SettingsToggle } from "./SettingsToggle";
 
 type McpSettingsProps = {
   baseUrl?: string;
+  privacy?: SettingsStateDto["privacy"];
 };
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type TestState = "idle" | "testing" | "passed" | "failed";
+type ConfigKind = "json" | "codex" | "stdio";
 
-const clients = ["Codex", "Claude Code", "Cursor", "Generic stdio"];
+const configTabs: Array<{ kind: ConfigKind; label: string; description: string }> = [
+  { kind: "json", label: "MCP JSON", description: "Works for Claude Code, Cursor, and most MCP clients." },
+  { kind: "codex", label: "Codex TOML", description: "Use when a client expects TOML server entries." },
+  { kind: "stdio", label: "stdio", description: "Raw command, args, and environment for custom launchers." }
+];
 
-export function McpSettings({ baseUrl }: McpSettingsProps) {
+export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
+  const [activeConfig, setActiveConfig] = useState<ConfigKind>("json");
   const [launchConfig, setLaunchConfig] = useState<McpLaunchConfigDto>();
   const [launchValidation, setLaunchValidation] = useState<McpLaunchValidationDto>();
   const [loadError, setLoadError] = useState<string>();
@@ -62,12 +70,13 @@ export function McpSettings({ baseUrl }: McpSettingsProps) {
   }, [loadMcp]);
 
   const configs = useMemo(() => agentConfigs(launchConfig), [launchConfig]);
+  const activeTab = configTabs.find((tab) => tab.kind === activeConfig) ?? configTabs[0];
+  const activeCode = configs[activeConfig] ?? "MCP launch configuration is loading.";
   const canCopy = Boolean(launchConfig && launchValidation?.valid);
 
-  async function copyConfig(kind: keyof ReturnType<typeof agentConfigs>): Promise<void> {
-    const config = configs[kind];
-    if (!config || !canCopy || !globalThis.navigator?.clipboard) return;
-    await globalThis.navigator.clipboard.writeText(config);
+  async function copyConfig(): Promise<void> {
+    if (!canCopy || !globalThis.navigator?.clipboard) return;
+    await globalThis.navigator.clipboard.writeText(activeCode);
   }
 
   async function runLaunchTest(): Promise<void> {
@@ -91,54 +100,57 @@ export function McpSettings({ baseUrl }: McpSettingsProps) {
     <SettingsSection
       className="settings-section-wide settings-section-mcp"
       eyebrow="MCP"
-      title="Connect MCP agents"
-      description="Read-only session retrieval for local agents. Copy a config, add it to the agent, then test the launch."
+      title="MCP server"
+      description="Read-only local session retrieval for agents that support MCP."
     >
-      <div className="settings-row">
-        <div className="settings-row-copy">
-          <span>Status</span>
+      <div className="settings-mcp-summary">
+        <div>
+          <span className="settings-mcp-label">Status</span>
           <p>{statusSummary(status, loadState, loadError)}</p>
         </div>
-        <div className="settings-row-value">
+        <div className="settings-mcp-actions">
           <StatusBadge tone={statusTone(status, loadState)}>{statusLabel(status, loadState)}</StatusBadge>
-        </div>
-        <div className="settings-row-control">
-          <div className="settings-inline-actions">
-            <AppButton onClick={() => loadMcp()} variant="quiet">
-              Refresh MCP
-            </AppButton>
-            <AppButton disabled={testState === "testing"} onClick={() => void runLaunchTest()} variant="quiet">
-              {testState === "testing" ? "Testing MCP launch..." : "Test MCP launch"}
-            </AppButton>
-          </div>
+          <AppButton onClick={() => loadMcp()} variant="quiet">
+            Refresh MCP
+          </AppButton>
+          <AppButton disabled={testState === "testing"} onClick={() => void runLaunchTest()} variant="quiet">
+            {testState === "testing" ? "Testing..." : "Test MCP launch"}
+          </AppButton>
         </div>
       </div>
 
-      <div className="settings-mcp-clients" aria-label="MCP agent connection options">
-        <div className="settings-mcp-client-list" aria-label="Supported MCP clients">
-          {clients.map((client) => (
-            <span key={client}>{client}</span>
+      <div className="settings-mcp-access">
+        <div>
+          <span className="settings-mcp-label">MCP access</span>
+          <p>Allow read-only MCP clients to query sessions that are not excluded by source or session policy.</p>
+        </div>
+        <SettingsToggle label="MCP access" checked={privacy?.mcpAccessEnabled ?? status?.globalAccessEnabled} />
+      </div>
+
+      <div className="settings-mcp-config" aria-label="MCP config formats">
+        <div className="settings-mcp-tabs" role="tablist" aria-label="MCP config format">
+          {configTabs.map((tab) => (
+            <button
+              key={tab.kind}
+              type="button"
+              className={tab.kind === activeConfig ? "active" : ""}
+              role="tab"
+              aria-selected={tab.kind === activeConfig}
+              onClick={() => setActiveConfig(tab.kind)}
+            >
+              {tab.label}
+            </button>
           ))}
         </div>
-        <CodeBlock code={configs.codex ?? "MCP launch configuration is loading."} label="Codex config.toml" />
-        <div className="settings-inline-actions">
-          <AppButton disabled={!canCopy} onClick={() => void copyConfig("codex")}>
-            Copy Codex config
-          </AppButton>
-        </div>
-        <details className="settings-mcp-secondary">
-          <summary>Other MCP clients</summary>
-          <CodeBlock code={configs.claude ?? "MCP launch configuration is loading."} label="Claude Code / Cursor JSON" />
-          <CodeBlock code={configs.generic ?? "MCP launch configuration is loading."} label="Generic stdio JSON" />
-          <div className="settings-inline-actions">
-            <AppButton disabled={!canCopy} onClick={() => void copyConfig("claude")} variant="quiet">
-              Copy Claude/Cursor JSON
-            </AppButton>
-            <AppButton disabled={!canCopy} onClick={() => void copyConfig("generic")} variant="quiet">
-              Copy generic stdio JSON
+        <div className="settings-mcp-tab-panel" role="tabpanel">
+          <div className="settings-mcp-tab-meta">
+            <p>{activeTab.description}</p>
+            <AppButton disabled={!canCopy} onClick={() => void copyConfig()} variant="quiet">
+              Copy config
             </AppButton>
           </div>
-        </details>
+          <CodeBlock code={activeCode} label={activeTab.label} />
+        </div>
       </div>
 
       {testResult ? (
@@ -154,8 +166,8 @@ export function McpSettings({ baseUrl }: McpSettingsProps) {
   );
 }
 
-function agentConfigs(launchConfig?: McpLaunchConfigDto): { codex?: string; claude?: string; generic?: string } {
-  if (!launchConfig) return {};
+function agentConfigs(launchConfig?: McpLaunchConfigDto): Record<ConfigKind, string | undefined> {
+  if (!launchConfig) return { codex: undefined, json: undefined, stdio: undefined };
   const jsonConfig = JSON.stringify({ mcpServers: { masthead: launchConfig } }, null, 2);
   return {
     codex: [
@@ -164,8 +176,13 @@ function agentConfigs(launchConfig?: McpLaunchConfigDto): { codex?: string; clau
       `args = ${JSON.stringify(launchConfig.args)}`,
       `env = ${JSON.stringify(launchConfig.env)}`
     ].join("\n"),
-    claude: jsonConfig,
-    generic: JSON.stringify(launchConfig, null, 2)
+    json: jsonConfig,
+    stdio: [
+      launchConfig.command,
+      ...launchConfig.args.map((arg) => JSON.stringify(arg)),
+      "",
+      JSON.stringify({ env: launchConfig.env }, null, 2)
+    ].join(" ")
   };
 }
 
