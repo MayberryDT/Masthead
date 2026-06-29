@@ -52,8 +52,10 @@ describe("SessionDossier", () => {
     expect(html).toContain("Input");
     expect(html).toContain("Output");
     expect(html).toContain("Enrichment");
+    expect(html).toContain("dossier-panel-primary");
     expect(html).toContain("Fix the OAuth return path.");
     expect(html).toContain("Transcript");
+    expect(html).toContain("dossier-panel-transcript");
     expect(html).toContain("Please repair the OAuth callback.");
     expect(html).toContain("Advanced details");
     expect(html).toContain("Copy context");
@@ -67,6 +69,80 @@ describe("SessionDossier", () => {
     expect(html).not.toContain("File ");
     expect(html).not.toContain("Open source");
     expect(html).not.toContain("Open repo");
+  });
+
+  test("hides raw system and bracket metadata from the default transcript but keeps raw access in advanced details", async () => {
+    const rawPrompt = [
+      "# AGENTS.md instructions for /tmp/Masthead",
+      "<INSTRUCTIONS>",
+      "# Codex Behavioral Guidelines",
+      "Do not show this repository instruction block by default.",
+      "</INSTRUCTIONS>",
+      "<environment_context>",
+      "<cwd>/tmp/Masthead</cwd>",
+      "</environment_context>",
+      "Please repair [system: hidden metadata] the OAuth callback and keep array[index] readable."
+    ].join("\n");
+    const rawPermissions = "Filesystem sandboxing defines which files can be read or written. Network access is restricted.";
+    const currentDossier = dossier();
+    currentDossier.narrative.firstUserPrompt = rawPrompt;
+    const host = document.createElement("div");
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <SessionDossier
+          dossier={currentDossier}
+          transcript={{
+            coverage: currentDossier.coverage.transcript,
+            items: [
+              {
+                itemId: "message-raw",
+                kind: "message",
+                label: "user",
+                lowValue: false,
+                observedAt: "2026-06-25T23:01:00.000Z",
+                role: "user",
+                sessionId: "canonical-session-1",
+                sourceRef: {},
+                text: rawPrompt
+              },
+              {
+                itemId: "message-permissions",
+                kind: "message",
+                label: "unknown",
+                lowValue: false,
+                observedAt: "2026-06-25T23:02:00.000Z",
+                role: "unknown",
+                sessionId: "canonical-session-1",
+                sourceRef: {},
+                text: rawPermissions
+              }
+            ],
+            total: 2
+          }}
+        />
+      );
+    });
+
+    expect(host.textContent).toContain("Please repair the OAuth callback and keep array[index] readable.");
+    expect(host.textContent).not.toContain("AGENTS.md");
+    expect(host.textContent).not.toContain("Codex Behavioral Guidelines");
+    expect(host.textContent).not.toContain("system: hidden metadata");
+    expect(host.textContent).not.toContain("Filesystem sandboxing defines");
+
+    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
+    expect(button).toBeTruthy();
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(host.textContent).toContain("Raw transcript");
+    expect(host.textContent).toContain("AGENTS.md");
+    expect(host.textContent).toContain("system: hidden metadata");
+    expect(host.textContent).toContain("Filesystem sandboxing defines");
+    root.unmount();
   });
 
   test("opens advanced evidence on demand", async () => {
