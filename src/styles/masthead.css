@@ -2974,7 +2974,7 @@ body {
   right: 0;
   top: 0;
   display: grid;
-  grid-template-columns: 35px auto;
+  grid-template-columns: 42px auto;
   gap: 10px;
   height: 78px;
   align-items: center;
@@ -2988,8 +2988,9 @@ body {
 
 .brand-sail {
   display: block;
-  width: 35px;
-  height: 35px;
+  width: 42px;
+  height: 42px;
+  border-radius: 7px;
   object-fit: contain;
 }
 
