@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SessionTranscriptItem, SessionTranscriptKindFilter, SessionTranscriptResult } from "../../app/daemonClient";
 import { readableTranscriptText } from "./transcriptPresentation";
 
@@ -39,9 +39,13 @@ export function DossierTranscript({
   onQueryChange,
   onRetry,
   query,
+  sessionId,
   transcript
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const requestedCursorRef = useRef<string | undefined>(undefined);
   const visibleTranscriptItems = (transcript?.items ?? [])
     .filter((item) => item.kind !== "file_effect")
     .map((item) => ({ ...item, displayText: readableTranscriptText(item.text) }))
@@ -49,6 +53,29 @@ export function DossierTranscript({
   const renderedItems = compressLowValueRuns(visibleTranscriptItems);
   const hasUsableTranscript = transcript?.coverage.hasUsableTranscript ?? false;
   const hasQuery = query.trim().length > 0;
+  const nextCursor = transcript?.nextCursor;
+
+  useEffect(() => {
+    requestedCursorRef.current = undefined;
+  }, [filter, query, sessionId]);
+
+  useEffect(() => {
+    if (!nextCursor || loading || typeof IntersectionObserver === "undefined") return;
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        if (requestedCursorRef.current === nextCursor) return;
+        requestedCursorRef.current = nextCursor;
+        onLoadMore();
+      },
+      { root: resultsRef.current, rootMargin: "120px 0px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loading, nextCursor, onLoadMore]);
 
   return (
     <div className="dossier-transcript">
@@ -94,7 +121,7 @@ export function DossierTranscript({
 
       {loading && !transcript ? <p className="dossier-muted">Loading transcript...</p> : null}
 
-      <div className="dossier-transcript-results" aria-live="polite">
+      <div className="dossier-transcript-results" aria-live="polite" ref={resultsRef}>
         {renderedItems.length > 0 ? (
           <ol className="dossier-transcript-list">
             {renderedItems.map((entry, index) =>
@@ -126,13 +153,12 @@ export function DossierTranscript({
         ) : !loading ? (
           <p className="dossier-muted">{hasQuery ? "No transcript items match this search." : "No transcript items captured."}</p>
         ) : null}
+        {nextCursor ? (
+          <div className="dossier-transcript-sentinel" ref={sentinelRef} aria-live="polite">
+            {loading ? "Loading more transcript..." : null}
+          </div>
+        ) : null}
       </div>
-
-      {transcript?.nextCursor ? (
-        <button type="button" className="dossier-link-button" onClick={onLoadMore} disabled={loading}>
-          {loading ? "Loading..." : "Load more"}
-        </button>
-      ) : null}
     </div>
   );
 }

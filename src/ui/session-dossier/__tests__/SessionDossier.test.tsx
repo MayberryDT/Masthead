@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import type { SessionDetailView } from "../../../core/types";
 import type { SessionDossierDto } from "../../../shared/sessionDossier";
+import { DossierTranscript } from "../DossierTranscript";
 import { SessionDossier } from "../SessionDossier";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -14,8 +15,74 @@ describe("SessionDossier", () => {
   test("lays out the first advanced detail cards in one desktop row", () => {
     const css = readFileSync("src/styles/session-dossier.css", "utf8");
     const advancedDetailsRule = css.match(/\.dossier-advanced-details\s*\{[^}]+\}/)?.[0] ?? "";
+    const advancedPanelRule = css.match(/\.dossier-advanced-details\s*>\s*\.dossier-panel\s*\{[^}]+\}/)?.[0] ?? "";
 
-    expect(advancedDetailsRule).toContain("grid-template-columns: repeat(3, minmax(0, 1fr));");
+    expect(advancedDetailsRule).toContain("grid-template-columns: repeat(6, minmax(0, 1fr));");
+    expect(advancedPanelRule).toContain("grid-column: span 2;");
+  });
+
+  test("expands token usage and review actions across the advanced detail width", async () => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<SessionDossier dossier={dossier()} />);
+    });
+
+    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
+    expect(button).toBeTruthy();
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const tokenUsage = [...host.querySelectorAll(".dossier-panel")].find((panel) => panel.querySelector("h4")?.textContent === "Token usage");
+    const reviewActions = [...host.querySelectorAll(".dossier-panel")].find((panel) => panel.querySelector("h4")?.textContent === "Review actions");
+    expect(tokenUsage?.classList.contains("dossier-panel-half")).toBe(true);
+    expect(reviewActions?.classList.contains("dossier-panel-half")).toBe(true);
+    root.unmount();
+  });
+
+  test("makes the transcript panel tall without adding an outer panel scrollbar", () => {
+    const css = readFileSync("src/styles/session-dossier.css", "utf8");
+    const transcriptRule = css.match(/\.dossier-panel-transcript\s*\{[^}]+\}/)?.[0] ?? "";
+    const transcriptBodyRule = css.match(/\.dossier-panel-transcript\s+\.dossier-panel-body\s*\{[^}]+\}/)?.[0] ?? "";
+    const transcriptResultsRule = css.match(/\.dossier-transcript-results\s*\{[^}]+\}/)?.[0] ?? "";
+
+    expect(transcriptRule).toContain("max-height:");
+    expect(transcriptBodyRule).toContain("overflow: visible;");
+    expect(transcriptResultsRule).toContain("min-height:");
+  });
+
+  test("centers the timeline load-more action at the bottom of its panel", async () => {
+    const css = readFileSync("src/styles/session-dossier.css", "utf8");
+    const footerActionRule = css.match(/\.dossier-panel-body\s*>\s*\.dossier-panel-footer-action\s*\{[^}]+\}/)?.[0] ?? "";
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    const currentDossier = dossier();
+    currentDossier.timeline = Array.from({ length: 32 }, (_, index) => ({
+      eventId: `event-${index}`,
+      kind: "tool" as const,
+      label: "tool",
+      observedAt: `2026-06-25T23:${String(index % 60).padStart(2, "0")}:00.000Z`,
+      summary: `Command ${index}`
+    }));
+
+    await act(async () => {
+      root.render(<SessionDossier dossier={currentDossier} />);
+    });
+
+    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
+    expect(button).toBeTruthy();
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const showMore = [...host.querySelectorAll("button")].find((item) => item.textContent === "Show 2 more");
+    expect(showMore?.classList.contains("dossier-panel-footer-action")).toBe(true);
+    expect(footerActionRule).toContain("justify-self: center;");
+    root.unmount();
   });
 
   test("caps dossier panels and scrolls panel bodies", () => {
@@ -411,7 +478,104 @@ describe("SessionDossier", () => {
     root.unmount();
     host.remove();
   });
+
+  test("loads more transcript items from the scroll sentinel instead of a button", async () => {
+    const onLoadMore = vi.fn();
+    const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+    const observers: MockIntersectionObserver[] = [];
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    globalThis.IntersectionObserver = class extends MockIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        super(callback, options);
+        observers.push(this);
+      }
+    } as typeof IntersectionObserver;
+
+    try {
+      await act(async () => {
+        root.render(
+          <DossierTranscript
+            filter="all"
+            query=""
+            onFilterChange={() => undefined}
+            onLoadMore={onLoadMore}
+            onQueryChange={() => undefined}
+            onRetry={() => undefined}
+            sessionId="canonical-session-1"
+            transcript={{
+              coverage: dossier().coverage.transcript,
+              items: [
+                {
+                  itemId: "message-1",
+                  kind: "message",
+                  label: "user",
+                  lowValue: false,
+                  observedAt: "2026-06-25T23:01:00.000Z",
+                  role: "user",
+                  sessionId: "canonical-session-1",
+                  sourceRef: {},
+                  text: "Please repair the OAuth callback."
+                }
+              ],
+              nextCursor: "cursor-2",
+              total: 2
+            }}
+          />
+        );
+      });
+
+      expect([...host.querySelectorAll("button")].some((item) => item.textContent === "Load more")).toBe(false);
+      expect(host.querySelector(".dossier-transcript-sentinel")).toBeTruthy();
+      expect(observers.length).toBe(1);
+
+      await act(async () => {
+        observers[0]?.trigger(true);
+      });
+
+      expect(onLoadMore).toHaveBeenCalledTimes(1);
+    } finally {
+      root.unmount();
+      globalThis.IntersectionObserver = OriginalIntersectionObserver;
+    }
+  });
 });
+
+class MockIntersectionObserver {
+  readonly root: Element | Document | null;
+  readonly rootMargin: string;
+  readonly thresholds: ReadonlyArray<number>;
+  private callback: IntersectionObserverCallback;
+  private target?: Element;
+
+  constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+    this.callback = callback;
+    this.root = options?.root ?? null;
+    this.rootMargin = options?.rootMargin ?? "";
+    this.thresholds = Array.isArray(options?.threshold) ? options.threshold : [options?.threshold ?? 0];
+  }
+
+  disconnect() {
+    this.target = undefined;
+  }
+
+  observe(target: Element) {
+    this.target = target;
+  }
+
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+
+  unobserve(target: Element) {
+    if (this.target === target) this.target = undefined;
+  }
+
+  trigger(isIntersecting: boolean) {
+    if (!this.target) return;
+    this.callback([{ isIntersecting, target: this.target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+  }
+}
 
 function setNativeInputValue(input: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;

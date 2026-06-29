@@ -255,13 +255,13 @@ export function SessionDossier({
                 )}
               </ol>
               {filteredTimeline.length > 30 ? (
-                <button type="button" className="dossier-link-button" onClick={() => setShowAllTimeline((current) => !current)}>
+                <button type="button" className="dossier-link-button dossier-panel-footer-action" onClick={() => setShowAllTimeline((current) => !current)}>
                   {showAllTimeline ? "Show less" : `Show ${filteredTimeline.length - 30} more`}
                 </button>
               ) : null}
             </DossierPanel>
 
-            <DossierPanel title="Token usage">
+            <DossierPanel title="Token usage" className="dossier-panel-half">
               {dossier?.usage.usageRows ? (
                 <div className="dossier-provenance dossier-provenance-compact">
                   <DossierMetric label="Input tokens" value={formatNumber(dossier.usage.inputTokens)} />
@@ -274,7 +274,7 @@ export function SessionDossier({
               )}
             </DossierPanel>
 
-            <DossierPanel title="Review actions">
+            <DossierPanel title="Review actions" className="dossier-panel-half">
               {availableActions.length > 0 && live && onAction ? (
                 <div className="dossier-action-row">
                   {availableActions.map((action) => (
