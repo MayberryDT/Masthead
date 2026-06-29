@@ -2797,7 +2797,7 @@ body {
 }
 
 .masthead-shell.desktop-chrome .masthead-workspace {
-  grid-template-rows: 34px minmax(0, 1fr);
+  grid-template-rows: 30px minmax(0, 1fr);
 }
 
 .masthead-window-bar {
@@ -2807,7 +2807,7 @@ body {
   align-items: stretch;
   justify-content: flex-end;
   min-width: 0;
-  height: 34px;
+  height: 30px;
   background: linear-gradient(180deg, rgba(5, 23, 36, 0.92), rgba(3, 16, 25, 0.96));
   -webkit-app-region: drag;
 }
@@ -2841,8 +2841,8 @@ body {
 .masthead-window-control {
   position: relative;
   display: grid;
-  width: 38px;
-  min-width: 38px;
+  width: 32px;
+  min-width: 32px;
   height: 100%;
   isolation: isolate;
   place-items: center;
@@ -2859,7 +2859,7 @@ body {
 .masthead-window-control::after {
   content: "";
   position: absolute;
-  inset: 4px 5px;
+  inset: 2px 2px 0;
   z-index: -1;
   background: rgba(87, 193, 255, 0.08);
   opacity: 0;
@@ -2868,8 +2868,8 @@ body {
 }
 
 .masthead-window-control.close {
-  width: 38px;
-  min-width: 38px;
+  width: 32px;
+  min-width: 32px;
 }
 
 .masthead-window-control:hover {

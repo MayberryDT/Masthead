@@ -43,7 +43,7 @@ function MastheadWindowBar() {
           aria-label="Minimize window"
           onClick={() => void invokeDesktopCommand("window_minimize_command")}
         >
-          <Icon name="minimize" size={12} weight="bold" />
+          <Icon name="minimize" size={11} weight="bold" />
         </button>
         <button
           className="masthead-window-control"
@@ -52,7 +52,7 @@ function MastheadWindowBar() {
           aria-label="Maximize window"
           onClick={() => void invokeDesktopCommand("window_maximize_command")}
         >
-          <Icon name="maximize" size={11} weight="regular" />
+          <Icon name="maximize" size={10} weight="regular" />
         </button>
         <button
           className="masthead-window-control close"
@@ -61,7 +61,7 @@ function MastheadWindowBar() {
           aria-label="Close window"
           onClick={() => void invokeDesktopCommand("window_close_command")}
         >
-          <Icon name="close" size={12} weight="regular" />
+          <Icon name="close" size={11} weight="regular" />
         </button>
       </div>
     </header>
