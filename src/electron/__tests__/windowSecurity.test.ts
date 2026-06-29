@@ -43,4 +43,11 @@ describe("Electron window security policy", () => {
       "http://127.0.0.1:5173"
     ]);
   });
+
+  test("trusts the actual Electron Forge renderer dev server origin", () => {
+    const policy = { allowDevServer: true, devServerUrl: "http://localhost:5174/" };
+
+    expect(isAllowedRendererUrl("http://localhost:5174", policy)).toBe(true);
+    expect(rendererTrustedOrigins(policy)).toContain("http://localhost:5174");
+  });
 });

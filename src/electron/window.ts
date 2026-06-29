@@ -19,6 +19,7 @@ export type MastheadWindowChromeOptions = {
 
 export type RendererUrlPolicy = {
   allowDevServer?: boolean;
+  devServerUrl?: string;
 };
 
 export function mastheadWindowChromeOptions(): MastheadWindowChromeOptions {
@@ -44,7 +45,11 @@ export function mastheadWindowPreferences(preload: string): MastheadWindowPrefer
 
 export function rendererTrustedOrigins(policy: RendererUrlPolicy = {}): string[] {
   const origins = ["masthead://app"];
-  if (policy.allowDevServer) origins.push("http://localhost:5173", "http://127.0.0.1:5173");
+  if (policy.allowDevServer) {
+    origins.push("http://localhost:5173", "http://127.0.0.1:5173");
+    const devServerOrigin = rendererDevServerOrigin(policy);
+    if (devServerOrigin && !origins.includes(devServerOrigin)) origins.push(devServerOrigin);
+  }
   return origins;
 }
 
@@ -61,16 +66,38 @@ export function isAllowedRendererUrl(rawUrl: string | undefined, policy: Rendere
   if (!policy.allowDevServer) return false;
   if (url.protocol !== "http:") return false;
   if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return false;
-  return url.port === "5173";
+  return rendererTrustedOrigins(policy).includes(url.origin);
 }
 
 export function rendererEntryUrl(): string {
-  if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    return MAIN_WINDOW_VITE_DEV_SERVER_URL;
+  const devServerUrl = rendererDevServerUrl();
+  if (devServerUrl) {
+    return devServerUrl;
   }
   return "masthead://app/index.html";
 }
 
 export function mainPreloadPath(dirname: string): string {
   return join(dirname, "preload.cjs");
+}
+
+function rendererDevServerOrigin(policy: RendererUrlPolicy = {}): string | undefined {
+  const devServerUrl = policy.devServerUrl ?? rendererDevServerUrl();
+  if (!devServerUrl) return undefined;
+
+  try {
+    const url = new URL(devServerUrl);
+    if (url.protocol !== "http:") return undefined;
+    if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return undefined;
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function rendererDevServerUrl(): string | undefined {
+  if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    return MAIN_WINDOW_VITE_DEV_SERVER_URL;
+  }
+  return undefined;
 }
