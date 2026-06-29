@@ -27,19 +27,18 @@ export function SourcesConnectedDashboard({
   onSyncSources,
   status
 }: Props) {
-  const rows = connectedSources?.length ? sourceFamiliesFromSetup(connectedSources) : adapters.map(sourceRowFromAdapter);
+  const rows = (connectedSources?.length ? sourceFamiliesFromSetup(connectedSources) : adapters.map(sourceRowFromAdapter)).filter(isVisibleSourceRow);
   const coverage = setupCoverage ? normalizeSetupCoverage(setupCoverage) : coverageFromAdapters(adapters);
   const locationCount = rows.reduce((total, row) => total + row.locations, 0);
   const hasSyncTarget = adapters.length > 0 || rows.length > 0;
   return (
     <section className="sources-connected-dashboard" aria-label="Connected sources">
-      <div className="sources-action-bar">
-        <div>
-          <p className="mono-label">Sources</p>
-          <h2>Source health</h2>
-          <p className="surface-status">{coverage.sessions} sessions · {coverage.transcripts} transcript sessions · {coverage.enriched} enriched</p>
+      <div className="sources-action-bar sources-toolbar observability-toolbar metal-toolbar">
+        <div className="sources-toolbar-context" aria-label="Source inventory status">
+          <span className="source-state connected">Inventory</span>
+          <span>{rows.length} source {rows.length === 1 ? "family" : "families"} indexed</span>
         </div>
-        <div className="sources-action-group">
+        <div className="toolbar-select-row sources-action-group" aria-label="Source actions">
           <AppButton type="button" onClick={onAddSource} disabled={busy}>
             Set up more sources
           </AppButton>
@@ -62,6 +61,7 @@ export function SourcesConnectedDashboard({
         <SourceMetric label="Locations" tone="tokens" value={locationCount} />
         <SourceMetric label="Sessions" tone="rate" value={coverage.sessions} />
         <SourceMetric label="Transcripts" tone="tools" value={coverage.transcripts} />
+        <SourceMetric label="Enriched" tone="enriched" value={coverage.enriched} />
         <SourceMetric label="Queued" tone="files" value={coverage.queued} />
         <SourceMetric label="Issues" tone="mcp" value={coverage.failures} />
       </dl>
@@ -191,6 +191,10 @@ function sourceRowFromSetupFamily(runtime: string, sources: SourcesSetupConnecte
     state,
     transcriptImportEnabled: sources.some((source) => Boolean(source.transcriptImportEnabled))
   };
+}
+
+function isVisibleSourceRow(source: SourceRow): boolean {
+  return source.runtime !== "masthead" && source.key !== "masthead-git-observer";
 }
 
 function proofRows(source: SourceRow): ProofRow[] {

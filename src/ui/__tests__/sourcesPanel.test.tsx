@@ -60,7 +60,8 @@ describe("SourcesPanel", () => {
       />
     );
 
-    expect(html).toContain("Source health");
+    expect(html).toContain('class="sources-action-bar sources-toolbar observability-toolbar metal-toolbar"');
+    expect(html).not.toContain("Source health");
     expect(html).toContain("Set up more sources");
     expect(html).toContain("Live capture");
     expect(html).toContain("History");
@@ -88,12 +89,13 @@ describe("SourcesPanel", () => {
       />
     );
 
-    expect(html).toContain("Source health");
+    expect(html).not.toContain("Source health");
     expect(html).toContain("Set up more sources");
     expect(html).toContain("Codex sessions");
     expect(html).toContain("742 sessions");
-    expect(html).toContain("510 transcript sessions");
-    expect(html).toContain("320 enriched");
+    expect(html).toContain("<dt>Enriched</dt>");
+    expect(html).toContain("<dd>320</dd>");
+    expect(html).not.toContain("320 enriched");
     expect(html).toContain("Live capture");
     expect(html).toContain("History");
     expect(html).toContain("Transcripts");
@@ -106,6 +108,37 @@ describe("SourcesPanel", () => {
     expect(html).toContain("sources-summary-strip");
     expect(html).toContain("usage-metric");
     expect(html).not.toContain("sources-action-summary");
+  });
+
+  test("hides Masthead internal provenance from source inventory", () => {
+    const setup = connectedSetup();
+    setup.connectedSources = [
+      ...setup.connectedSources,
+      {
+        discoveredSessions: 8,
+        importedSessions: 8,
+        label: "Masthead",
+        runtime: "masthead",
+        sourceId: "masthead-git-observer",
+        state: "connected"
+      }
+    ];
+
+    const html = renderToStaticMarkup(
+      <SourcesPanel
+        adapters={[]}
+        busy={false}
+        onExcludePath={() => undefined}
+        onRefresh={() => undefined}
+        setup={setup}
+        sources={[]}
+      />
+    );
+
+    expect(html.match(/connected-source-row/g)).toHaveLength(1);
+    expect(html).toContain("Codex sessions");
+    expect(html).not.toContain("Masthead");
+    expect(html).not.toContain("masthead-git-observer");
   });
 
   test("groups repeated Antigravity source locations into one source family", () => {
