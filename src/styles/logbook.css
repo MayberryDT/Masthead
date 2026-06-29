@@ -417,6 +417,10 @@
   animation: logbook-table-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.logbook-table-wrap.is-entering .logbook-table-current {
+  animation: logbook-table-in 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @keyframes logbook-table-out {
   to {
     opacity: 0;
@@ -622,6 +626,10 @@
   pointer-events: none;
 }
 
+.logbook-page-loading {
+  animation: logbook-loading-frame-in 140ms ease-out both;
+}
+
 .logbook-skeleton-row:hover {
   background: transparent;
 }
@@ -686,6 +694,25 @@
   }
   100% {
     background-position: -120% 0;
+  }
+}
+
+@keyframes logbook-loading-frame-in {
+  from {
+    opacity: 0.72;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logbook-table-wrap.is-switching .logbook-table-outgoing,
+  .logbook-table-wrap.is-switching .logbook-table-current,
+  .logbook-table-wrap.is-entering .logbook-table-current,
+  .logbook-page-loading,
+  .logbook-skeleton-line {
+    animation: none;
   }
 }
 

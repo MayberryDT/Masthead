@@ -145,7 +145,7 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("Load more");
   });
 
-  test("keeps page controls and table mounted while refreshing a canonical page", () => {
+  test("renders a table-shaped skeleton while refreshing a canonical page", () => {
     const html = renderToStaticMarkup(
       <HistoryPanel
         loadState={{
@@ -168,11 +168,12 @@ describe("HistoryPanel", () => {
     );
 
     expect(html).toContain('aria-busy="true"');
-    expect(html).toContain('aria-label="Logbook pagination"');
+    expect(html).toContain('aria-label="Loading next Logbook page"');
     expect(html).toContain("Page 2 of 3");
     expect(html).toContain("Refreshing Logbook results...");
     expect(html).toContain("<table");
-    expect(html).not.toContain("Loading Logbook results");
+    expect(html).toContain("logbook-page-loading");
+    expect(html).not.toContain("Session 1");
   });
 
   test("renders first-run canonical loading as a Logbook table and inspector skeleton", () => {

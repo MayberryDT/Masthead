@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { searchHistory, type HistorySearchFilters, type HistorySession } from "../core/history";
 import type { StoreRecord } from "../core/store";
 import type {
@@ -159,6 +160,11 @@ export function HistoryPanel({
   const visibleTotal = readyState?.total ?? result?.sessions.length ?? tableSessions.length;
   const recordCount = result?.recordCount ?? visibleTotal;
   const isLoading = loading || loadingState;
+  const wasLoadingRef = useRef(isLoading);
+  const shouldAnimateLoadedPage = wasLoadingRef.current && !isLoading && tableSessions.length > 0;
+  useEffect(() => {
+    wasLoadingRef.current = isLoading;
+  }, [isLoading]);
   const totalPages = Math.max(1, Math.ceil(visibleTotal / pageSize));
   const visiblePageIndex = Math.min(Math.max(0, pageIndex), totalPages - 1);
   const showPagination = usesLogbookStore && Boolean(onPageChange) && visibleTotal > pageSize;
@@ -166,6 +172,7 @@ export function HistoryPanel({
   const activeFilters = activeFilterFacets(query, filters, sort, onQueryChange, onFilterChange, onSortChange);
   const hasActiveFilters = activeFilters.length > 0;
   const isFirstRunLoading = isLoading && tableSessions.length === 0 && !errorState;
+  const isPageLoading = isLoading && tableSessions.length > 0 && !errorState;
   const emptyReason = emptyReasonFor({
     activeImports: hasActiveImports(imports),
     connectionState,
@@ -211,10 +218,13 @@ export function HistoryPanel({
         <CanonicalErrorPanel message={errorState.message} onRetry={onRetry} />
       ) : isLoading && tableSessions.length === 0 ? (
         <LogbookSkeleton />
+      ) : isPageLoading ? (
+        <LogbookSkeleton mode="page" />
       ) : tableSessions.length === 0 ? (
         <EmptyPanel {...emptyState} />
       ) : (
         <LogbookTable
+          animateOnMount={shouldAnimateLoadedPage}
           density={density}
           sessions={tableSessions}
           selectedSessionId={selectedSessionId}
@@ -331,16 +341,25 @@ function CanonicalErrorPanel({ message, onRetry }: { message: string; onRetry?: 
   );
 }
 
-function LogbookSkeleton() {
+function LogbookSkeleton({ mode = "initial" }: { mode?: "initial" | "page" }) {
   const skeletonRows = Array.from({ length: 12 }, (_, index) => index);
+  const isPageLoading = mode === "page";
 
   return (
-    <div className="logbook-loading-state logbook-table-wrap logbook-skeleton-table-frame" role="status" aria-live="polite" aria-busy="true" aria-label="Loading Logbook session records">
-      <div className="logbook-loading-copy" aria-hidden="true">
-        <p className="mono-label">Logbook</p>
-        <strong>Loading session records</strong>
-        <span>Hydrating the canonical session database.</span>
-      </div>
+    <div
+      className={`logbook-loading-state logbook-table-wrap logbook-skeleton-table-frame ${isPageLoading ? "logbook-page-loading" : ""}`.trim()}
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label={isPageLoading ? "Loading next Logbook page" : "Loading Logbook session records"}
+    >
+      {isPageLoading ? null : (
+        <div className="logbook-loading-copy" aria-hidden="true">
+          <p className="mono-label">Logbook</p>
+          <strong>Loading session records</strong>
+          <span>Hydrating the canonical session database.</span>
+        </div>
+      )}
       <table className="logbook-table compact logbook-skeleton-table" aria-hidden="true">
         <thead>
           <tr>
