@@ -55,6 +55,40 @@ describe("HistoryPanel pagination", () => {
 
     expect(onPageChange).toHaveBeenCalledWith(1);
   });
+
+  test("starts page transition on pointer down before click", async () => {
+    const onPageChange = vi.fn();
+    await renderPanel(onPageChange);
+
+    const nextButton = currentContainer().querySelector<HTMLButtonElement>('button[aria-label="Next page"]');
+    expect(nextButton).not.toBeNull();
+
+    await act(async () => {
+      nextButton?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }));
+    });
+
+    expect(onPageChange).toHaveBeenCalledTimes(1);
+    expect(onPageChange).toHaveBeenCalledWith(1);
+    expect(currentContainer().textContent).toContain("Page 2 of 3");
+    expect(currentContainer().querySelector(".logbook-page-loading")).not.toBeNull();
+    expect(currentContainer().textContent).not.toContain("Session 1");
+  });
+
+  test("does not notify twice when pointer down is followed by click", async () => {
+    const onPageChange = vi.fn();
+    await renderPanel(onPageChange);
+
+    const nextButton = currentContainer().querySelector<HTMLButtonElement>('button[aria-label="Next page"]');
+    expect(nextButton).not.toBeNull();
+
+    await act(async () => {
+      nextButton?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }));
+      nextButton?.click();
+    });
+
+    expect(onPageChange).toHaveBeenCalledTimes(1);
+    expect(onPageChange).toHaveBeenCalledWith(1);
+  });
 });
 
 async function renderPanel(onPageChange: (pageIndex: number) => void) {

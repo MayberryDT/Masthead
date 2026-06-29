@@ -605,6 +605,7 @@
 .logbook-loading-state {
   grid-row: 4;
   display: block;
+  height: 100%;
   min-height: 0;
 }
 

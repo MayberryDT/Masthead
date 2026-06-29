@@ -193,6 +193,7 @@ describe("HistoryPanel", () => {
     expect(html).toContain("logbook-loading-inspector");
     expect(html).toContain("logbook-skeleton-footer");
     expect(html).toContain("logbook-skeleton-table-frame");
+    expect((html.match(/logbook-skeleton-row/g) ?? []).length).toBe(24);
     expect(html).not.toContain("No sessions");
     expect(html).not.toContain("Logbook could not read");
   });

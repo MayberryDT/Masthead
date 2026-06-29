@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { searchHistory, type HistorySearchFilters, type HistorySession } from "../core/history";
 import type { StoreRecord } from "../core/store";
 import type {
@@ -288,27 +288,41 @@ function LogbookPagination({
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const isFirst = pageIndex <= 0;
   const isLast = pageIndex >= totalPages - 1;
+  const pointerStartedPageChangeRef = useRef(false);
   const goToPage = (nextPageIndex: number) => {
     onPageChange(Math.min(Math.max(0, nextPageIndex), totalPages - 1));
+  };
+  const handlePointerPageChange = (nextPageIndex: number) => (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "mouse" || event.pointerType === "touch" || event.pointerType === "pen") {
+      pointerStartedPageChangeRef.current = true;
+      goToPage(nextPageIndex);
+    }
+  };
+  const handleClickPageChange = (nextPageIndex: number) => () => {
+    if (pointerStartedPageChangeRef.current) {
+      pointerStartedPageChangeRef.current = false;
+      return;
+    }
+    goToPage(nextPageIndex);
   };
 
   return (
     <nav className="logbook-pagination" aria-label="Logbook pagination">
       <span className="logbook-pagination-range">{pageRangeLabel(pageIndex, pageSize, visibleCount, total)}</span>
       <div className="logbook-pagination-controls">
-        <button type="button" className="logbook-page-button" aria-label="First page" disabled={disabled || isFirst} onClick={() => goToPage(0)}>
+        <button type="button" className="logbook-page-button" aria-label="First page" disabled={disabled || isFirst} onPointerDown={handlePointerPageChange(0)} onClick={handleClickPageChange(0)}>
           <Icon name="pageFirst" size="toolbar" weight={iconWeights.toolbar} />
         </button>
-        <button type="button" className="logbook-page-button" aria-label="Previous page" disabled={disabled || isFirst} onClick={() => goToPage(pageIndex - 1)}>
+        <button type="button" className="logbook-page-button" aria-label="Previous page" disabled={disabled || isFirst} onPointerDown={handlePointerPageChange(pageIndex - 1)} onClick={handleClickPageChange(pageIndex - 1)}>
           <Icon name="pagePrevious" size="toolbar" weight={iconWeights.toolbar} />
         </button>
         <span className="logbook-pagination-page">
           Page {pageIndex + 1} of {totalPages}
         </span>
-        <button type="button" className="logbook-page-button" aria-label="Next page" disabled={disabled || isLast} onClick={() => goToPage(pageIndex + 1)}>
+        <button type="button" className="logbook-page-button" aria-label="Next page" disabled={disabled || isLast} onPointerDown={handlePointerPageChange(pageIndex + 1)} onClick={handleClickPageChange(pageIndex + 1)}>
           <Icon name="pageNext" size="toolbar" weight={iconWeights.toolbar} />
         </button>
-        <button type="button" className="logbook-page-button" aria-label="Last page" disabled={disabled || isLast} onClick={() => goToPage(totalPages - 1)}>
+        <button type="button" className="logbook-page-button" aria-label="Last page" disabled={disabled || isLast} onPointerDown={handlePointerPageChange(totalPages - 1)} onClick={handleClickPageChange(totalPages - 1)}>
           <Icon name="pageLast" size="toolbar" weight={iconWeights.toolbar} />
         </button>
       </div>
@@ -354,8 +368,8 @@ function CanonicalErrorPanel({ message, onRetry }: { message: string; onRetry?: 
 }
 
 function LogbookSkeleton({ mode = "initial" }: { mode?: "initial" | "page" }) {
-  const skeletonRows = Array.from({ length: 12 }, (_, index) => index);
   const isPageLoading = mode === "page";
+  const skeletonRows = Array.from({ length: isPageLoading ? 16 : 24 }, (_, index) => index);
 
   return (
     <div
