@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { searchHistory, type HistorySearchFilters, type HistorySession } from "../core/history";
 import type { StoreRecord } from "../core/store";
 import type {
@@ -160,19 +160,32 @@ export function HistoryPanel({
   const visibleTotal = readyState?.total ?? result?.sessions.length ?? tableSessions.length;
   const recordCount = result?.recordCount ?? visibleTotal;
   const isLoading = loading || loadingState;
+  const [optimisticPageIndex, setOptimisticPageIndex] = useState<number>();
+  const totalPages = Math.max(1, Math.ceil(visibleTotal / pageSize));
+  const requestedPageIndex = optimisticPageIndex ?? pageIndex;
+  const visiblePageIndex = Math.min(Math.max(0, requestedPageIndex), totalPages - 1);
+  const isOptimisticPaging = optimisticPageIndex !== undefined && (isLoading || pageIndex !== optimisticPageIndex);
   const wasLoadingRef = useRef(isLoading);
-  const shouldAnimateLoadedPage = wasLoadingRef.current && !isLoading && tableSessions.length > 0;
+  const shouldAnimateLoadedPage = wasLoadingRef.current && !isLoading && !isOptimisticPaging && tableSessions.length > 0;
   useEffect(() => {
     wasLoadingRef.current = isLoading;
   }, [isLoading]);
-  const totalPages = Math.max(1, Math.ceil(visibleTotal / pageSize));
-  const visiblePageIndex = Math.min(Math.max(0, pageIndex), totalPages - 1);
   const showPagination = usesLogbookStore && Boolean(onPageChange) && visibleTotal > pageSize;
+  const handlePageChange = (nextPageIndex: number) => {
+    const boundedPageIndex = Math.min(Math.max(0, nextPageIndex), totalPages - 1);
+    if (boundedPageIndex === visiblePageIndex) return;
+    setOptimisticPageIndex(boundedPageIndex);
+    onPageChange?.(boundedPageIndex);
+  };
   const sourceSummary = sourceImportSummary(sources, adapters);
   const activeFilters = activeFilterFacets(query, filters, sort, onQueryChange, onFilterChange, onSortChange);
   const hasActiveFilters = activeFilters.length > 0;
   const isFirstRunLoading = isLoading && tableSessions.length === 0 && !errorState;
-  const isPageLoading = isLoading && tableSessions.length > 0 && !errorState;
+  const isPageLoading = (isLoading || isOptimisticPaging) && tableSessions.length > 0 && !errorState;
+  useEffect(() => {
+    if (optimisticPageIndex === undefined) return;
+    if (!isOptimisticPaging || errorState) setOptimisticPageIndex(undefined);
+  }, [errorState, isOptimisticPaging, optimisticPageIndex]);
   const emptyReason = emptyReasonFor({
     activeImports: hasActiveImports(imports),
     connectionState,
@@ -211,7 +224,7 @@ export function HistoryPanel({
       <LogbookFacets facets={activeFilters} />
       <LogbookSummaryStrip items={summaryItems} />
 
-      {isLoading && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Refreshing Logbook results...</p> : null}
+      {isPageLoading ? <p className="toolbar-result surface-status">Loading Logbook page {visiblePageIndex + 1}...</p> : null}
       {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
 
       {errorState ? (
@@ -239,12 +252,12 @@ export function HistoryPanel({
             <LogbookPaginationSkeleton />
           ) : showPagination ? (
             <LogbookPagination
-              disabled={isLoading}
+              disabled={isLoading || isOptimisticPaging}
               pageIndex={visiblePageIndex}
               pageSize={pageSize}
               total={visibleTotal}
               visibleCount={tableSessions.length}
-              onPageChange={onPageChange ?? (() => undefined)}
+              onPageChange={handlePageChange}
             />
           ) : null}
           <p className="toolbar-result surface-status">
