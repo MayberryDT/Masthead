@@ -124,7 +124,7 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
 
         {step === "found" ? (
           <div className="session-detail-body">
-            <p className="surface-status">Select the sources Masthead should connect. Unrecognized schemas stay in Advanced diagnostics until their import shape is verified.</p>
+            <p className="surface-status">Select the sources Masthead should connect. Unrecognized schemas stay out of the connected inventory until their import shape is verified.</p>
             {usesSetupScan ? (
               importableSources.length > 0 ? (
                 <div className="source-adapter-grid">
@@ -267,7 +267,7 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
         {step === "success" ? (
           <div className="session-detail-body">
             <h3>Session library build started</h3>
-            <p>Sources are connected. Import jobs and any skipped work remain visible in Advanced diagnostics.</p>
+            <p>Sources are connected. Import jobs and any skipped work remain visible in the Sources inventory.</p>
             <div className="surface-actions">
               <AppButton type="button" variant="primary" onClick={onClose}>Done</AppButton>
             </div>
@@ -283,7 +283,7 @@ function ScanEmptyState() {
     <div className="empty-session-state">
       <p className="mono-label">Scan complete</p>
       <h3>No importable local sources found yet</h3>
-      <p>Advanced diagnostics can show checked locations and detector-only harnesses.</p>
+      <p>Checked locations and detector-only harnesses stay out of the connected inventory until Masthead can import them.</p>
     </div>
   );
 }

@@ -70,7 +70,7 @@ describe("SourcesPanel", () => {
     expect(html).toContain("Needs enrichment");
     expect(html).toContain("Codex");
     expect(html).toContain("120");
-    expect(html).toContain("Advanced diagnostics");
+    expect(html).not.toContain("Advanced diagnostics");
     expect(html).toContain("Metadata import ready");
     expect(html).not.toContain("/home/tyler/.codex/sessions");
     expect(html).not.toContain("hello from transcript");
@@ -103,6 +103,83 @@ describe("SourcesPanel", () => {
     expect(html).toContain("Needs enrichment");
     expect(html).toContain("Queued");
     expect(html).toContain("14");
+    expect(html).toContain("sources-summary-strip");
+    expect(html).toContain("usage-metric");
+    expect(html).not.toContain("sources-action-summary");
+  });
+
+  test("groups repeated Antigravity source locations into one source family", () => {
+    const setup = connectedSetup();
+    setup.connectedSources = Array.from({ length: 12 }, (_, index) => ({
+      discoveredSessions: 2,
+      importedSessions: 2,
+      label: "Antigravity",
+      lastSyncAt: `2026-06-27T${String(10 + (index % 3)).padStart(2, "0")}:00:00.000Z`,
+      path: `/home/tyler/.config/Antigravity/User/workspaceStorage/workspace-${index + 1}/state.vscdb`,
+      queuedRecords: index === 0 ? 3 : 0,
+      runtime: "antigravity",
+      sourceId: `antigravity-${index + 1}`,
+      state: "connected",
+      transcriptImportEnabled: true
+    }));
+    setup.coverage = {
+      enriched: 0,
+      failures: 0,
+      queued: 3,
+      sessions: 24,
+      transcripts: 0
+    };
+
+    const html = renderToStaticMarkup(
+      <SourcesPanel
+        adapters={[]}
+        busy={false}
+        onExcludePath={() => undefined}
+        onRefresh={() => undefined}
+        setup={setup}
+        sources={[]}
+      />
+    );
+
+    expect(html.match(/connected-source-row/g)).toHaveLength(1);
+    expect(html).toContain("Antigravity");
+    expect(html).toContain("12 locations");
+    expect(html).toContain("24 sessions");
+    expect(html).not.toContain("Showing 12 of 12 connected source records");
+    expect(html).not.toContain("workspace-12");
+  });
+
+  test("shows import jobs by default instead of behind advanced diagnostics", () => {
+    const setup = connectedSetup();
+    setup.advanced.imports = [
+      {
+        discoveredCount: 12,
+        failureCount: 0,
+        importJobId: "job-antigravity",
+        importedCount: 4,
+        importKind: "metadata",
+        queuedCount: 8,
+        sourceId: "antigravity-workspace",
+        status: "running",
+        updatedAt: "2026-06-27T12:00:00.000Z"
+      }
+    ];
+
+    const html = renderToStaticMarkup(
+      <SourcesPanel
+        adapters={[]}
+        busy={false}
+        onExcludePath={() => undefined}
+        onRefresh={() => undefined}
+        setup={setup}
+        sources={[]}
+      />
+    );
+
+    expect(html).toContain("Import jobs");
+    expect(html).toContain("antigravity-workspace");
+    expect(html).toContain("metadata");
+    expect(html).not.toContain("Advanced diagnostics");
   });
 
   test("keeps setup empty state focused on onboarding instead of unconnected harnesses", () => {
@@ -141,7 +218,7 @@ describe("SourcesPanel", () => {
     expect(html).not.toContain("Harnesses Masthead knows how to check");
   });
 
-  test("bounds connected setup source preview for large source inventories", () => {
+  test("summarizes large connected source inventories by source family", () => {
     const setup = connectedSetup();
     setup.connectedSources = Array.from({ length: 20 }, (_, index) => ({
       discoveredSessions: 1,
@@ -164,8 +241,10 @@ describe("SourcesPanel", () => {
       />
     );
 
-    expect(html).toContain("20 connected source records");
-    expect(html).toContain("Source 12");
+    expect(html.match(/connected-source-row/g)).toHaveLength(1);
+    expect(html).toContain("20 locations");
+    expect(html).toContain("20 sessions");
+    expect(html).not.toContain("Source 12");
     expect(html).not.toContain("Source 13");
   });
 });
