@@ -112,6 +112,16 @@ type Candidate = {
   snippet: string;
 };
 
+type SessionPage = {
+  limit: number;
+  offset: number;
+};
+
+type SessionWhereClause = {
+  where: string[];
+  params: Array<string | number | null>;
+};
+
 type ExcerptRow = {
   excerptId: string;
   kind: SessionExcerptDto["kind"];
@@ -129,17 +139,20 @@ export function querySessions(db: MastheadDatabase, query: SessionQuery): Sessio
 
   const snippetBySession = new Map(candidates?.map((candidate) => [candidate.sessionId, candidate.snippet]) ?? []);
   const candidateOrder = new Map(candidates?.map((candidate, index) => [candidate.sessionId, index]) ?? []);
-  const rows = loadSessionRows(db, query, candidates?.map((candidate) => candidate.sessionId));
+  const candidateIds = candidates?.map((candidate) => candidate.sessionId);
+  const canPageInSql = !candidates || Boolean(query.sort);
+  const rows = loadSessionRows(db, query, candidateIds, { page: canPageInSql ? { limit, offset } : undefined });
   const sortedRows = candidates && !query.sort
     ? rows.toSorted((left, right) => (candidateOrder.get(left.sessionId) ?? 0) - (candidateOrder.get(right.sessionId) ?? 0))
     : rows;
-  const page = sortedRows.slice(offset, offset + limit);
+  const total = canPageInSql ? countSessionRows(db, query, candidateIds) : sortedRows.length;
+  const page = canPageInSql ? sortedRows : sortedRows.slice(offset, offset + limit);
   const enrichments = currentSessionEnrichmentViews(db, page.map((row) => row.sessionId));
 
   return {
-    nextCursor: offset + limit < sortedRows.length ? String(offset + limit) : undefined,
+    nextCursor: offset + limit < total ? String(offset + limit) : undefined,
     sessions: page.map((row) => rowToListItem(row, snippetBySession.get(row.sessionId), enrichments.get(row.sessionId))),
-    total: sortedRows.length
+    total
   };
 }
 
@@ -253,8 +266,72 @@ function loadSessionRows(
   db: MastheadDatabase,
   query: SessionQuery,
   candidateIds?: string[],
-  options: { includeDeleted?: boolean; includeDetailColumns?: boolean } = {}
+  options: { includeDeleted?: boolean; includeDetailColumns?: boolean; page?: SessionPage } = {}
 ): SessionRow[] {
+  const { where, params } = sessionWhereClause(query, candidateIds, options);
+  const pageClause = options.page ? "LIMIT ? OFFSET ?" : "";
+  const pageParams = options.page ? [options.page.limit, options.page.offset] : [];
+
+  return db
+    .prepare(
+      `SELECT
+        sessions.session_id AS sessionId,
+        sessions.source_session_id AS sourceSessionId,
+        sessions.title AS title,
+        sessions.objective AS objective,
+        sessions.outcome_label AS outcome,
+        sessions.project_label AS project,
+        runtimes.runtime_kind AS runtime,
+        sessions.host_id AS hostId,
+        sessions.branch AS branch,
+        sessions.lifecycle AS lifecycle,
+        sessions.started_at AS startedAt,
+        sessions.last_activity_at AS lastActivityAt,
+        sessions.ended_at AS endedAt,
+        sessions.source_confidence AS sourceConfidence,
+        ${options.includeDetailColumns ? "sessions.repo_root AS repoRoot, sessions.worktree_path AS worktreePath, sessions.excluded_from_mcp_at AS excludedFromMcpAt," : ""}
+        (SELECT json_group_array(model)
+          FROM (SELECT DISTINCT model FROM model_usage WHERE session_id = sessions.session_id AND model IS NOT NULL AND trim(model) <> '' ORDER BY model)
+        ) AS modelsJson,
+        (SELECT json_group_array(topic)
+          FROM (SELECT DISTINCT topic FROM session_topics WHERE session_id = sessions.session_id ORDER BY topic)
+        ) AS topicsJson,
+        (SELECT COUNT(DISTINCT path) FROM file_effects WHERE session_id = sessions.session_id) AS fileCount,
+        (SELECT COUNT(DISTINCT tool_name) FROM tool_calls WHERE session_id = sessions.session_id) AS toolCount,
+        (SELECT COUNT(*)
+          FROM tool_results
+          WHERE session_id = sessions.session_id
+            AND lower(status) NOT IN ('succeeded', 'success', 'ok')
+        ) AS errorCount
+      FROM sessions
+      JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+      JOIN hosts ON hosts.host_id = sessions.host_id
+      ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+      ${sortOrderClause(query.sort)}
+      ${pageClause}`
+    )
+    .all(...params, ...pageParams) as SessionRow[];
+}
+
+function countSessionRows(db: MastheadDatabase, query: SessionQuery, candidateIds?: string[]): number {
+  const { where, params } = sessionWhereClause(query, candidateIds);
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS total
+      FROM sessions
+      JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+      JOIN hosts ON hosts.host_id = sessions.host_id
+      ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}`
+    )
+    .get(...params) as { total: number } | undefined;
+  return row?.total ?? 0;
+}
+
+function sessionWhereClause(
+  query: SessionQuery,
+  candidateIds?: string[],
+  options: { includeDeleted?: boolean } = {}
+): SessionWhereClause {
   const where: string[] = [];
   const params: Array<string | number | null> = [];
 
@@ -320,44 +397,7 @@ function loadSessionRows(
     params.push(dateTo);
   }
 
-  return db
-    .prepare(
-      `SELECT
-        sessions.session_id AS sessionId,
-        sessions.source_session_id AS sourceSessionId,
-        sessions.title AS title,
-        sessions.objective AS objective,
-        sessions.outcome_label AS outcome,
-        sessions.project_label AS project,
-        runtimes.runtime_kind AS runtime,
-        sessions.host_id AS hostId,
-        sessions.branch AS branch,
-        sessions.lifecycle AS lifecycle,
-        sessions.started_at AS startedAt,
-        sessions.last_activity_at AS lastActivityAt,
-        sessions.ended_at AS endedAt,
-        sessions.source_confidence AS sourceConfidence,
-        ${options.includeDetailColumns ? "sessions.repo_root AS repoRoot, sessions.worktree_path AS worktreePath, sessions.excluded_from_mcp_at AS excludedFromMcpAt," : ""}
-        (SELECT json_group_array(model)
-          FROM (SELECT DISTINCT model FROM model_usage WHERE session_id = sessions.session_id AND model IS NOT NULL AND trim(model) <> '' ORDER BY model)
-        ) AS modelsJson,
-        (SELECT json_group_array(topic)
-          FROM (SELECT DISTINCT topic FROM session_topics WHERE session_id = sessions.session_id ORDER BY topic)
-        ) AS topicsJson,
-        (SELECT COUNT(DISTINCT path) FROM file_effects WHERE session_id = sessions.session_id) AS fileCount,
-        (SELECT COUNT(DISTINCT tool_name) FROM tool_calls WHERE session_id = sessions.session_id) AS toolCount,
-        (SELECT COUNT(*)
-          FROM tool_results
-          WHERE session_id = sessions.session_id
-            AND lower(status) NOT IN ('succeeded', 'success', 'ok')
-        ) AS errorCount
-      FROM sessions
-      JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
-      JOIN hosts ON hosts.host_id = sessions.host_id
-      ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
-      ${sortOrderClause(query.sort)}`
-    )
-    .all(...params) as SessionRow[];
+  return { where, params };
 }
 
 function mcpSessionPolicySql(sessionAlias: string): string {

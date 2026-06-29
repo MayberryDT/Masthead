@@ -428,6 +428,7 @@
 
 .logbook-row {
   height: 62px;
+  cursor: pointer;
   transition-property: background-color;
   transition-duration: 160ms;
   transition-timing-function: ease;
@@ -440,6 +441,13 @@
 .logbook-row:hover,
 .logbook-row.selected {
   background: rgba(9, 38, 58, 0.62);
+}
+
+.logbook-row:focus-visible {
+  outline: 0;
+  box-shadow:
+    inset 3px 0 0 rgba(46, 167, 255, 0.74),
+    inset 0 0 0 1px rgba(116, 185, 224, 0.28);
 }
 
 .logbook-date {
@@ -541,18 +549,128 @@
   text-transform: uppercase;
 }
 
-.logbook-skeleton {
+.logbook-loading-state {
   grid-row: 4;
   display: grid;
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid rgba(92, 153, 187, 0.14);
-  border-radius: 5px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.28fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
 }
 
-.logbook-skeleton span {
-  height: 58px;
-  background: rgba(8, 29, 43, 0.82);
+.logbook-loading-copy {
+  grid-column: 1 / -1;
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(92, 153, 187, 0.14);
+  border-radius: 5px;
+  background: rgba(6, 25, 37, 0.72);
+  color: var(--mute);
+  padding: 0 12px;
+}
+
+.logbook-loading-copy p,
+.logbook-loading-copy strong,
+.logbook-loading-copy span {
+  margin: 0;
+}
+
+.logbook-loading-copy strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.logbook-skeleton-table-wrap {
+  grid-row: 2;
+  height: auto;
+}
+
+.logbook-skeleton-table {
+  pointer-events: none;
+}
+
+.logbook-skeleton-row:hover {
+  background: transparent;
+}
+
+.logbook-skeleton-line {
+  display: block;
+  width: min(100%, 120px);
+  height: 10px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(92, 153, 187, 0.1), rgba(116, 185, 224, 0.22), rgba(92, 153, 187, 0.1));
+  background-size: 220% 100%;
+  animation: logbook-skeleton-shimmer 1400ms ease-in-out infinite;
+}
+
+.logbook-skeleton-line.skeleton-2 {
+  width: min(100%, 240px);
+}
+
+.logbook-skeleton-line.skeleton-3,
+.logbook-skeleton-line.skeleton-5,
+.logbook-skeleton-line.skeleton-7 {
+  width: min(100%, 150px);
+}
+
+.logbook-skeleton-line.skeleton-8,
+.logbook-skeleton-line.skeleton-9 {
+  margin-left: auto;
+  width: 32px;
+}
+
+.logbook-loading-inspector {
+  grid-row: 2;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid rgba(92, 153, 187, 0.14);
+  border-radius: 5px;
+  background: rgba(6, 25, 37, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(190, 225, 245, 0.04),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+  padding: 14px;
+}
+
+.logbook-loading-inspector span,
+.logbook-loading-inspector strong,
+.logbook-loading-inspector div {
+  display: block;
+  height: 10px;
+  border-radius: 9999px;
+  background: rgba(116, 185, 224, 0.14);
+}
+
+.logbook-loading-inspector span {
+  width: 74px;
+}
+
+.logbook-loading-inspector strong {
+  width: 72%;
+  height: 16px;
+  margin-bottom: 8px;
+  background: rgba(190, 225, 245, 0.18);
+}
+
+.logbook-loading-inspector div {
+  width: 100%;
+  height: 42px;
+  border-radius: 5px;
+  background: rgba(8, 29, 43, 0.72);
+}
+
+@keyframes logbook-skeleton-shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
 }
 
 .logbook-footer {
@@ -809,6 +927,14 @@
     height: clamp(220px, 42vh, 320px);
   }
 
+  .logbook-loading-state {
+    grid-template-columns: 1fr;
+  }
+
+  .logbook-loading-inspector {
+    display: none;
+  }
+
   .logbook-toolbar,
   .logbook-toolbar-row {
     flex-wrap: wrap;
@@ -855,7 +981,8 @@
     transition-duration: 1ms;
   }
   .logbook-table-wrap.is-switching .logbook-table-current,
-  .logbook-table-wrap.is-switching .logbook-table-outgoing {
+  .logbook-table-wrap.is-switching .logbook-table-outgoing,
+  .logbook-skeleton-line {
     animation: none;
   }
   .logbook-filter-drawer {

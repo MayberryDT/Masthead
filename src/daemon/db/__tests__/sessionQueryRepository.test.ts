@@ -101,6 +101,27 @@ describe("session query repository", () => {
     db.close();
   });
 
+  test("returns the first SQL-backed page without losing the full canonical total", async () => {
+    const db = await openTestDatabase();
+    for (let index = 1; index <= 4; index += 1) {
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId: `session-${index}`,
+        title: `Session ${index}`
+      });
+      db.prepare("UPDATE sessions SET last_activity_at = ? WHERE session_id = ?").run(`2026-06-25T12:0${index}:00.000Z`, `session-${index}`);
+    }
+
+    const firstPage = querySessions(db, { limit: 2, offset: 0, sort: "recent" });
+
+    expect(firstPage.total).toBe(4);
+    expect(firstPage.nextCursor).toBe("2");
+    expect(sessionIds(firstPage)).toEqual(["session-4", "session-3"]);
+    db.close();
+  });
+
   test("searches seeded canonical SQLite rows and reduces with filters", async () => {
     const db = await openTestDatabase();
     seedQueryableSession(db, {

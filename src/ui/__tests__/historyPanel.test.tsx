@@ -172,6 +172,25 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("Loading Logbook results");
   });
 
+  test("renders first-run canonical loading as a Logbook table and inspector skeleton", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        loadState={{ state: "loading" }}
+        query=""
+        onQueryChange={() => {}}
+      />
+    );
+
+    expect(html).toContain('aria-label="Loading Logbook session records"');
+    expect(html).toContain("Loading session records");
+    expect(html).toContain("<table");
+    expect(html).toContain("SESSION / MATCH");
+    expect(html).toContain("PROJECT");
+    expect(html).toContain("logbook-loading-inspector");
+    expect(html).not.toContain("No sessions");
+    expect(html).not.toContain("Logbook could not read");
+  });
+
   test("renders no-match queries with an explicit zero result count", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:Missing" onQueryChange={() => {}} />);
 

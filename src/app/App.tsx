@@ -115,7 +115,7 @@ type ImportPageState = Pick<ImportJobPage, "limit" | "offset" | "total">;
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
-const LOGBOOK_PAGE_SIZE = 100;
+const LOGBOOK_PAGE_SIZE = 50;
 
 const emptyLiveBoard: LiveBoardProjection = {
   summary: {
@@ -729,32 +729,29 @@ export function App() {
   useEffect(() => {
     if (activeSurface !== "logbook" || effectiveLiveConnection.state !== "live") return;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      setLogbookLoading(true);
-      setLogbookError(undefined);
-      void searchLogbook(
-        { ...logbookFilters, limit: LOGBOOK_PAGE_SIZE, offset: logbookPageIndex * LOGBOOK_PAGE_SIZE, q: historyQuery, sort: logbookSort },
-        activeProjectionUrl,
-        { signal: controller.signal }
-      )
-        .then((result) => {
-          setLogbookResult(result);
-          setLogbookError(undefined);
-          setSelectedLogbookSessionId(undefined);
-        })
-        .catch((error: unknown) => {
-          if (!controller.signal.aborted) {
-            console.error("[masthead] Logbook search failed", error);
-            setLogbookError(error instanceof Error ? error.message : String(error));
-          }
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setLogbookLoading(false);
-        });
-    }, 150);
+    setLogbookLoading(true);
+    setLogbookError(undefined);
+    void searchLogbook(
+      { ...logbookFilters, limit: LOGBOOK_PAGE_SIZE, offset: logbookPageIndex * LOGBOOK_PAGE_SIZE, q: historyQuery, sort: logbookSort },
+      activeProjectionUrl,
+      { signal: controller.signal }
+    )
+      .then((result) => {
+        setLogbookResult(result);
+        setLogbookError(undefined);
+        setSelectedLogbookSessionId(undefined);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          console.error("[masthead] Logbook search failed", error);
+          setLogbookError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLogbookLoading(false);
+      });
     return () => {
       controller.abort();
-      window.clearTimeout(timer);
     };
   }, [activeProjectionUrl, activeSurface, effectiveLiveConnection.state, historyQuery, logbookFilters, logbookPageIndex, logbookRetryKey, logbookSort]);
   useEffect(() => {
