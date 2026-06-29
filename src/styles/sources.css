@@ -84,19 +84,23 @@
 
 .connected-source-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 420px));
-  justify-content: start;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  align-items: stretch;
+  justify-content: stretch;
   gap: var(--space-sm);
   min-width: 0;
 }
 
 .connected-source-row {
+  position: relative;
   display: grid;
   grid-template-rows: auto 1fr;
-  gap: var(--space-sm);
+  gap: 10px;
   align-items: stretch;
   width: 100%;
   min-width: 0;
+  min-height: 232px;
+  overflow: hidden;
   border: 1px solid rgba(92, 153, 187, 0.16);
   border-left: 3px solid var(--blue);
   border-radius: 5px;
@@ -104,7 +108,23 @@
   box-shadow:
     0 0 0 1px rgba(92, 153, 187, 0.08),
     0 2px 8px rgba(0, 0, 0, 0.12);
-  padding: 12px;
+  padding: 13px 14px 12px;
+  transition-property: border-color, background-color, box-shadow, transform;
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.connected-source-row:hover {
+  border-color: rgba(112, 173, 205, 0.26);
+  background: #09202f;
+  box-shadow:
+    0 0 0 1px rgba(112, 173, 205, 0.12),
+    0 5px 14px rgba(0, 0, 0, 0.16);
+  transform: translateY(-1px);
+}
+
+.connected-source-row:active {
+  transform: scale(0.99);
 }
 
 .connected-source-main {
@@ -119,10 +139,11 @@
   margin: 3px 0 0;
   overflow: hidden;
   color: var(--ink);
-  font-size: 15px;
-  line-height: 1.25;
+  font-size: 16px;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-wrap: balance;
 }
 
 .source-state {
@@ -306,17 +327,17 @@
 .source-proof-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
+  gap: 0 14px;
   align-content: start;
   margin: 0;
 }
 
 .source-proof {
   display: grid;
-  gap: 3px;
+  gap: 4px;
   align-items: baseline;
   border-top: 1px solid rgba(194, 221, 241, 0.1);
-  padding-top: 7px;
+  padding: 8px 0 7px;
 }
 
 .source-proof dt {
