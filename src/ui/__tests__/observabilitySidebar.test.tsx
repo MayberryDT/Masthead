@@ -18,7 +18,7 @@ describe("ObservabilitySidebar", () => {
     expect(html).toContain("Logbook");
     expect(html).toContain("Sources");
     expect(html).toContain("Usage");
-    expect(html).toContain("Agent Access");
+    expect(html).not.toContain("Agent Access");
     expect(html).toContain("Workspace");
     expect(html).not.toContain("Overview");
     expect(html).not.toContain("Analysis");

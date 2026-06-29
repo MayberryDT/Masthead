@@ -72,6 +72,10 @@
   display: grid;
 }
 
+.settings-section-mcp {
+  grid-column: span 8;
+}
+
 .settings-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -129,6 +133,71 @@
 .settings-row-control > .app-button,
 .settings-inline-actions .app-button {
   min-width: 0;
+}
+
+.settings-mcp-clients {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 10px;
+}
+
+.settings-mcp-client-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-mcp-client-list span {
+  border: 1px solid rgba(194, 221, 241, 0.12);
+  border-radius: 999px;
+  background: rgba(6, 25, 37, 0.64);
+  color: var(--body, #d6e4ef);
+  font-size: 12px;
+  line-height: 1;
+  padding: 7px 9px;
+}
+
+.settings-section-mcp .code-block {
+  min-width: 0;
+  margin: 0;
+}
+
+.settings-section-mcp .code-block pre {
+  overflow-x: hidden;
+}
+
+.settings-section-mcp .code-block code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings-mcp-secondary {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-mcp-secondary summary {
+  cursor: pointer;
+  color: var(--body, #d6e4ef);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-mcp-result {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid rgba(194, 221, 241, 0.08);
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.settings-mcp-result p {
+  margin: 0;
+  color: var(--mute, #91a8ba);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .settings-delete-controls {
@@ -210,6 +279,7 @@
 
   .settings-section,
   .settings-section-wide,
+  .settings-section-mcp,
   .settings-section-danger {
     grid-column: 1;
   }
@@ -236,6 +306,7 @@
 @media (min-width: 861px) and (max-width: 1180px) {
   .settings-section,
   .settings-section-wide,
+  .settings-section-mcp,
   .settings-section-danger {
     grid-column: span 6;
   }

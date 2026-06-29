@@ -13,6 +13,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { EnrichmentSettings } from "./settings/EnrichmentSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { HookSettings } from "./settings/HookSettings";
+import { McpSettings } from "./settings/McpSettings";
 import { PrivacySettings } from "./settings/PrivacySettings";
 import { StorageSettings } from "./settings/StorageSettings";
 import { ConnectionRecoveryPanel } from "./ConnectionRecoveryPanel";
@@ -177,6 +178,7 @@ export function OperationsPanel({
           />
           <EnrichmentSettings enrichment={effectiveSettings?.enrichment} />
           <PrivacySettings privacy={effectiveSettings?.privacy} />
+          <McpSettings baseUrl={baseUrl} />
           <StorageSettings
             busy={busy}
             dataSummary={effectiveSummary}

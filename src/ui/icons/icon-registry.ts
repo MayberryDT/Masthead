@@ -25,7 +25,6 @@ import {
   PauseCircle,
   PlugsConnected,
   Pulse,
-  ShieldCheck,
   Square,
   SquaresFour,
   TerminalWindow,
@@ -44,7 +43,6 @@ export const iconRegistry = {
   performance: ChartLineUp,
   sources: Database,
   usage: Gauge,
-  agentAccess: ShieldCheck,
   settings: GearSix,
 
   search: MagnifyingGlass,

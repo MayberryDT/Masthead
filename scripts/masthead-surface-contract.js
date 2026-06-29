@@ -4,11 +4,6 @@ import { readFile } from "node:fs/promises";
 
 const forbiddenPairs = [
   {
-    file: "src/ui/AgentAccessPanel.tsx",
-    label: "AgentAccessPanel + surface-data-card",
-    patterns: [/AgentAccessPanel/, /surface-data-card/]
-  },
-  {
     file: "src/ui/SourcesPanel.tsx",
     label: "SourcesPanel + surface-card-grid",
     patterns: [/SourcesPanel/, /surface-card-grid/]

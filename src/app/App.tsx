@@ -92,7 +92,6 @@ import {
 } from "./daemonClient";
 import type { SessionDossierDto } from "../shared/sessionDossier";
 import { exportedRecordCount, exportLocalData } from "./nativeStoreClient";
-import { AgentAccessSurface } from "./surfaces/AgentAccessSurface";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
@@ -1492,14 +1491,6 @@ export function App() {
           />
         )}
       </UsageSurface>
-    ) : activeSurface === "agent_access" ? (
-      needsRecoveryPanel ? (
-        <section className="app-surface agent-access-surface surface-panel" aria-label="Agent Access">
-          {recoveryPanel}
-        </section>
-      ) : (
-        <AgentAccessSurface />
-      )
     ) : activeSurface === "settings" ? (
       <SettingsSurface>
         <OperationsPanel

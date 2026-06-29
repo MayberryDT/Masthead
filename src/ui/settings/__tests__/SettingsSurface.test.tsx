@@ -25,8 +25,17 @@ describe("Settings surface", () => {
     expect(html).toContain("Installed");
     expect(html).toContain("Deterministic fallback");
     expect(html).toContain("MCP access");
+    expect(html).toContain("Connect MCP agents");
+    expect(html).toContain("Refresh MCP");
+    expect(html).toContain("Codex");
+    expect(html).toContain("Claude Code");
+    expect(html).toContain("Cursor");
+    expect(html).toContain("Generic stdio");
+    expect(html).toContain("Test MCP launch");
     expect(html).toContain("/home/tyler/.local/share/masthead/masthead.sqlite");
     expect(html).toContain("Export data");
+    expect(html).not.toContain("Can agents read Masthead?");
+    expect(html).not.toContain("Agent Access");
     expect(html).not.toContain("ops-card");
     expect(html).not.toContain("ghost-pill");
     expect(html).not.toContain("<select");
