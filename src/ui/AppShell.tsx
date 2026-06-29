@@ -61,7 +61,7 @@ function MastheadWindowBar() {
           aria-label="Close window"
           onClick={() => void invokeDesktopCommand("window_close_command")}
         >
-          <Icon name="close" size={14} weight="bold" />
+          <Icon name="close" size={13} weight="regular" />
         </button>
       </div>
     </header>
