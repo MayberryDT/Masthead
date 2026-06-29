@@ -56,7 +56,17 @@ export function SessionLibraryDetail({
     "logbook-detail-modal",
     "t-modal",
     modalState === "closing" ? "is-closing" : "",
-    modalState === "open" ? "is-open" : ""
+    modalState === "open" ? "is-open" : "",
+    modalState === "opening" ? "is-opening" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const backdropClassName = [
+    "modal-backdrop",
+    "t-modal-backdrop",
+    modalState === "closing" ? "is-closing" : "",
+    modalState === "open" ? "is-open" : "",
+    modalState === "opening" ? "is-opening" : ""
   ]
     .filter(Boolean)
     .join(" ");
@@ -67,8 +77,14 @@ export function SessionLibraryDetail({
 
   useEffect(() => {
     setModalState("opening");
-    const frame = window.requestAnimationFrame(() => setModalState("open"));
-    return () => window.cancelAnimationFrame(frame);
+    let openFrame = 0;
+    const paintFrame = window.requestAnimationFrame(() => {
+      openFrame = window.requestAnimationFrame(() => setModalState("open"));
+    });
+    return () => {
+      window.cancelAnimationFrame(paintFrame);
+      if (openFrame) window.cancelAnimationFrame(openFrame);
+    };
   }, [session?.sessionId]);
 
   useEffect(() => {
@@ -104,7 +120,7 @@ export function SessionLibraryDetail({
   if (!session && !loading) return null;
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={requestClose}>
+    <div className={backdropClassName} role="presentation" onClick={requestClose}>
       <article
         ref={modalRef}
         className={modalClassName}

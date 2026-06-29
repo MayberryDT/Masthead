@@ -1104,6 +1104,25 @@ main {
     opacity var(--modal-open-dur) var(--modal-ease);
 }
 
+.t-modal-backdrop {
+  opacity: 0;
+}
+
+.t-modal-backdrop.is-opening {
+  opacity: 0;
+}
+
+.t-modal-backdrop.is-open {
+  opacity: 1;
+}
+
+.t-modal-backdrop.is-closing {
+  opacity: 0;
+  transition:
+    background-color var(--modal-close-dur) var(--modal-ease),
+    opacity var(--modal-close-dur) var(--modal-ease);
+}
+
 .modal-backdrop:has(.t-modal.is-closing) {
   opacity: 0;
   transition:
@@ -1165,6 +1184,12 @@ main {
     transform var(--modal-open-dur) var(--modal-ease),
     opacity var(--modal-open-dur) var(--modal-ease);
   will-change: transform, opacity;
+}
+
+.t-modal.is-opening {
+  transform: scale(var(--modal-scale));
+  opacity: 0;
+  pointer-events: none;
 }
 
 .t-modal.is-open {
@@ -4845,7 +4870,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .t-dropdown,
-  .t-modal {
+  .t-modal,
+  .t-modal-backdrop {
     transition: none !important;
   }
 

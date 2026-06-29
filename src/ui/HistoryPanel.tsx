@@ -11,10 +11,10 @@ import type {
 import { LogbookFacets } from "./logbook/LogbookFacets";
 import { LogbookTable } from "./logbook/LogbookTable";
 import { LogbookToolbar } from "./logbook/LogbookToolbar";
+import { logbookColumns } from "./logbook/logbookColumns";
 import { Icon } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
 import { AppButton } from "./primitives/AppButton";
-import { StatStrip, type StatStripItem } from "./primitives/StatStrip";
 
 type Props = {
   records?: StoreRecord[];
@@ -103,6 +103,12 @@ type SourceImportSummary = {
   metadataRuntime?: string;
 };
 
+type LogbookSummaryItem = {
+  label: string;
+  value: string;
+  tone: "sessions" | "projects" | "runtime" | "messages" | "tools" | "range";
+};
+
 export function HistoryPanel({
   adapters = [],
   connectionState = "live",
@@ -159,6 +165,7 @@ export function HistoryPanel({
   const sourceSummary = sourceImportSummary(sources, adapters);
   const activeFilters = activeFilterFacets(query, filters, sort, onQueryChange, onFilterChange, onSortChange);
   const hasActiveFilters = activeFilters.length > 0;
+  const isFirstRunLoading = isLoading && tableSessions.length === 0 && !errorState;
   const emptyReason = emptyReasonFor({
     activeImports: hasActiveImports(imports),
     connectionState,
@@ -195,7 +202,7 @@ export function HistoryPanel({
         onSortChange={onSortChange ?? (() => undefined)}
       />
       <LogbookFacets facets={activeFilters} />
-      <StatStrip items={summaryItems} label="Logbook summary" />
+      <LogbookSummaryStrip items={summaryItems} />
 
       {isLoading && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Refreshing Logbook results...</p> : null}
       {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
@@ -217,8 +224,10 @@ export function HistoryPanel({
       )}
 
       {errorState ? null : (
-        <div className={`logbook-footer ${showPagination ? "has-pagination" : ""}`.trim()}>
-          {showPagination ? (
+        <div className={`logbook-footer ${showPagination ? "has-pagination" : ""} ${isFirstRunLoading ? "logbook-skeleton-footer" : ""}`.trim()}>
+          {isFirstRunLoading ? (
+            <LogbookPaginationSkeleton />
+          ) : showPagination ? (
             <LogbookPagination
               disabled={isLoading}
               pageIndex={visiblePageIndex}
@@ -285,6 +294,21 @@ function LogbookPagination({
   );
 }
 
+function LogbookPaginationSkeleton() {
+  return (
+    <nav className="logbook-pagination logbook-pagination-skeleton" aria-hidden="true">
+      <span className="logbook-skeleton-line logbook-skeleton-range" />
+      <div className="logbook-pagination-controls">
+        <span className="logbook-page-button" />
+        <span className="logbook-page-button" />
+        <span className="logbook-skeleton-line logbook-skeleton-page" />
+        <span className="logbook-page-button" />
+        <span className="logbook-page-button" />
+      </div>
+    </nav>
+  );
+}
+
 function pageRangeLabel(pageIndex: number, pageSize: number, visibleCount: number, total: number): string {
   if (total === 0 || visibleCount === 0) return "0 of 0";
   const start = pageIndex * pageSize + 1;
@@ -308,12 +332,59 @@ function CanonicalErrorPanel({ message, onRetry }: { message: string; onRetry?: 
 }
 
 function LogbookSkeleton() {
+  const skeletonRows = Array.from({ length: 12 }, (_, index) => index);
+
   return (
-    <div className="logbook-skeleton" aria-label="Loading Logbook results">
-      {Array.from({ length: 6 }, (_, index) => (
-        <span key={index} />
-      ))}
+    <div className="logbook-loading-state logbook-table-wrap logbook-skeleton-table-frame" role="status" aria-live="polite" aria-busy="true" aria-label="Loading Logbook session records">
+      <div className="logbook-loading-copy" aria-hidden="true">
+        <p className="mono-label">Logbook</p>
+        <strong>Loading session records</strong>
+        <span>Hydrating the canonical session database.</span>
+      </div>
+      <table className="logbook-table compact logbook-skeleton-table" aria-hidden="true">
+        <thead>
+          <tr>
+            {logbookColumns.map((column) => (
+              <th key={column.key} scope="col" className={column.className}>
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {skeletonRows.map((row) => (
+            <tr key={row} className="logbook-row compact logbook-skeleton-row">
+              {logbookColumns.map((column, columnIndex) => (
+                <td key={column.key} className={column.className}>
+                  <span className={`logbook-skeleton-line skeleton-${columnIndex + 1}`} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <aside className="logbook-loading-inspector sr-only" aria-hidden="true" hidden>
+        <span />
+        <strong />
+        <div />
+        <div />
+        <div />
+      </aside>
     </div>
+  );
+}
+
+function LogbookSummaryStrip({ items }: { items: LogbookSummaryItem[] }) {
+  return (
+    <dl className="logbook-summary-strip usage-summary-strip" aria-label="Logbook summary">
+      {items.map((item) => (
+        <div key={item.label} className={`usage-metric ${item.tone}`}>
+          <span className="usage-metric-accent" aria-hidden="true" />
+          <dt>{item.label}</dt>
+          <dd>{item.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -483,23 +554,23 @@ function hasActiveImports(imports: ImportJob[]): boolean {
   return imports.some((job) => job.status === "queued" || job.status === "running");
 }
 
-function summaryItemsFor(summary: LogbookSummary | undefined, visibleTotal: number, recordCount: number): StatStripItem[] {
+function summaryItemsFor(summary: LogbookSummary | undefined, visibleTotal: number, recordCount: number): LogbookSummaryItem[] {
   if (!summary) {
     return [
-      { label: "Sessions", value: formatCount(visibleTotal) },
-      { label: "Projects", value: "n/a" },
-      { label: "Harnesses", value: "n/a" },
-      { label: "Records", value: formatCount(recordCount) }
+      { label: "Sessions", value: formatCount(visibleTotal), tone: "sessions" },
+      { label: "Projects", value: "n/a", tone: "projects" },
+      { label: "Harnesses", value: "n/a", tone: "runtime" },
+      { label: "Records", value: formatCount(recordCount), tone: "messages" }
     ];
   }
 
   return [
-    { label: "Sessions", value: formatCount(summary.sessions) },
-    { label: "Projects", value: formatCount(summary.projects) },
-    { label: "Harnesses", value: formatCount(summary.runtimes.length) },
-    { label: "Messages", value: formatCount(summary.messages) },
-    { label: "Tool calls", value: formatCount(summary.toolCalls) },
-    { label: "Date range", value: dateRange(summary.earliestActivityAt, summary.latestActivityAt) }
+    { label: "Sessions", value: formatCount(summary.sessions), tone: "sessions" },
+    { label: "Projects", value: formatCount(summary.projects), tone: "projects" },
+    { label: "Harnesses", value: formatCount(summary.runtimes.length), tone: "runtime" },
+    { label: "Messages", value: formatCount(summary.messages), tone: "messages" },
+    { label: "Tool calls", value: formatCount(summary.toolCalls), tone: "tools" },
+    { label: "Date range", value: dateRange(summary.earliestActivityAt, summary.latestActivityAt), tone: "range" }
   ];
 }
 
