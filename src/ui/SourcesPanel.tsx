@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AdapterStatus, ImportJob, SourceStatus, SourceStatusPage } from "../app/daemonClient";
 import type { SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunInput } from "../shared/sourcesSetup";
-import { AdapterList } from "./sources/AdapterList";
 import { ImportJobsTable } from "./sources/ImportJobsTable";
-import { SourcesAdvancedDiagnostics } from "./sources/SourcesAdvancedDiagnostics";
 import { SourcesConnectedDashboard } from "./sources/SourcesConnectedDashboard";
 import { SourcesEmptyState } from "./sources/SourcesEmptyState";
 import { SourcesOnboardingModal } from "./sources/SourcesOnboardingModal";
@@ -44,15 +42,8 @@ export function SourcesPanel(props: Props) {
   const diagnosticImports = (setup ? setup.advanced.imports : imports) as ImportJob[];
   const connectedAdapters = useMemo(() => adapterRows.filter(isConnectedAdapter), [adapterRows]);
   const connectedSources = setup?.connectedSources ?? [];
-  const activeRuntimes = useMemo(() => adapterRows.filter((adapter) => adapter.runtime !== "gemini_cli" && adapter.state !== "planned").map((adapter) => adapter.runtime), [adapterRows]);
-  const [selectedRuntimes, setSelectedRuntimes] = useState<Set<string>>(() => new Set());
   const [onboardingOpen, setOnboardingOpen] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const activeImportCount = diagnosticImports.filter((job) => job.status === "queued" || job.status === "running").length;
-
-  useEffect(() => {
-    setSelectedRuntimes((current) => (current.size > 0 ? current : new Set(activeRuntimes)));
-  }, [activeRuntimes]);
 
   useEffect(() => {
     if (activeImportCount === 0 || !props.onPollImports) return undefined;
@@ -80,44 +71,22 @@ export function SourcesPanel(props: Props) {
           onAddSource={() => setOnboardingOpen(true)}
           onOpenLogbook={props.onOpenLogbook}
           onRepairMissingData={props.onRepairSources ?? syncConnected}
-          onShowAdvanced={() => setAdvancedOpen(true)}
           onSyncSources={props.onSyncSources ?? syncConnected}
           status={status}
         />
       )}
 
-      {advancedOpen ? (
-        <SourcesAdvancedDiagnostics onClose={() => setAdvancedOpen(false)}>
-          <AdapterList
-            adapters={adapterRows}
-            busy={busy}
-            onEnableTranscriptImport={props.onEnableTranscriptImport}
-            onExcludePath={props.onExcludePath}
-            onImportMetadata={props.onImportMetadata}
-            onImportTranscripts={props.onImportTranscripts}
-            onLoadAdapterSources={props.onLoadAdapterSources}
-            onToggleSelected={(runtime, checked) => {
-              setSelectedRuntimes((current) => {
-                const next = new Set(current);
-                if (checked) next.add(runtime);
-                else next.delete(runtime);
-                return next;
-              });
-            }}
-            onSyncAdapter={props.onSyncAdapter}
-            selectedRuntimes={selectedRuntimes}
-          />
-          <ImportJobsTable
-            busy={busy}
-            imports={diagnosticImports}
-            limit={props.importLimit}
-            offset={props.importOffset}
-            onCancelImport={props.onCancelImport}
-            onLoadMore={props.onLoadMoreImports}
-            onRetryImport={props.onRetryImport}
-            total={props.importTotal}
-          />
-        </SourcesAdvancedDiagnostics>
+      {showConnectedDashboard ? (
+        <ImportJobsTable
+          busy={busy}
+          imports={diagnosticImports}
+          limit={props.importLimit}
+          offset={props.importOffset}
+          onCancelImport={props.onCancelImport}
+          onLoadMore={props.onLoadMoreImports}
+          onRetryImport={props.onRetryImport}
+          total={props.importTotal}
+        />
       ) : null}
 
       <SourcesOnboardingModal

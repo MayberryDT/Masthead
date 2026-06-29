@@ -13,11 +13,8 @@ type Props = {
   onAddSource: () => void;
   onOpenLogbook?: () => void;
   onRepairMissingData: () => void;
-  onShowAdvanced: () => void;
   onSyncSources: () => void;
 };
-
-const CONNECTED_SOURCE_PREVIEW_LIMIT = 12;
 
 export function SourcesConnectedDashboard({
   adapters,
@@ -27,13 +24,12 @@ export function SourcesConnectedDashboard({
   onAddSource,
   onOpenLogbook,
   onRepairMissingData,
-  onShowAdvanced,
   onSyncSources,
   status
 }: Props) {
-  const rows = connectedSources?.length ? connectedSources.map(sourceRowFromSetup) : adapters.map(sourceRowFromAdapter);
-  const visibleRows = rows.slice(0, CONNECTED_SOURCE_PREVIEW_LIMIT);
+  const rows = connectedSources?.length ? sourceFamiliesFromSetup(connectedSources) : adapters.map(sourceRowFromAdapter);
   const coverage = setupCoverage ? normalizeSetupCoverage(setupCoverage) : coverageFromAdapters(adapters);
+  const locationCount = rows.reduce((total, row) => total + row.locations, 0);
   const hasSyncTarget = adapters.length > 0 || rows.length > 0;
   return (
     <section className="sources-connected-dashboard" aria-label="Connected sources">
@@ -58,45 +54,22 @@ export function SourcesConnectedDashboard({
               Open Logbook
             </AppButton>
           ) : null}
-          <AppButton type="button" variant="quiet" onClick={onShowAdvanced}>
-            Advanced diagnostics
-          </AppButton>
         </div>
       </div>
 
-      <dl className="sources-action-summary" aria-label="Source coverage summary">
-        <div>
-          <dt>Sessions</dt>
-          <dd>{coverage.sessions}</dd>
-        </div>
-        <div>
-          <dt>Transcripts</dt>
-          <dd>{coverage.transcripts}</dd>
-        </div>
-        <div>
-          <dt>Enriched</dt>
-          <dd>{coverage.enriched}</dd>
-        </div>
-        <div>
-          <dt>Queued</dt>
-          <dd>{coverage.queued}</dd>
-        </div>
-        <div>
-          <dt>Issues</dt>
-          <dd>{coverage.failures}</dd>
-        </div>
+      <dl className="usage-summary-strip sources-summary-strip" aria-label="Source coverage summary">
+        <SourceMetric label="Sources" tone="sessions" value={rows.length} />
+        <SourceMetric label="Locations" tone="tokens" value={locationCount} />
+        <SourceMetric label="Sessions" tone="rate" value={coverage.sessions} />
+        <SourceMetric label="Transcripts" tone="tools" value={coverage.transcripts} />
+        <SourceMetric label="Queued" tone="files" value={coverage.queued} />
+        <SourceMetric label="Issues" tone="mcp" value={coverage.failures} />
       </dl>
 
-      {rows.length > CONNECTED_SOURCE_PREVIEW_LIMIT ? (
-        <p className="surface-status">
-          Showing {CONNECTED_SOURCE_PREVIEW_LIMIT} of {rows.length} connected source records. Open Advanced diagnostics for the full source inventory.
-        </p>
-      ) : null}
-
-      <div className="source-adapter-grid connected-source-grid">
-        {visibleRows.map((source) => (
-          <article className="adapter-card connected-source-card" key={source.key}>
-            <div className="adapter-card-head">
+      <div className="connected-source-list" aria-label="Source inventory">
+        {rows.map((source) => (
+          <article className="connected-source-row" key={source.key}>
+            <div className="connected-source-main">
               <div>
                 <p className="mono-label">{source.runtime}</p>
                 <h3>{source.label}</h3>
@@ -116,6 +89,16 @@ export function SourcesConnectedDashboard({
       </div>
       {status ? <p className="sources-status surface-status">{status}</p> : null}
     </section>
+  );
+}
+
+function SourceMetric({ label, tone, value }: { label: string; tone: string; value: number }) {
+  return (
+    <div className={`usage-metric ${tone}`}>
+      <span className="usage-metric-accent" aria-hidden="true" />
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
   );
 }
 
@@ -152,6 +135,12 @@ function coverageFromAdapters(adapters: AdapterStatus[]) {
   );
 }
 
+function sourceFamiliesFromSetup(sources: SourcesSetupConnectedSourceDto[]): SourceRow[] {
+  const byRuntime = new Map<string, SourcesSetupConnectedSourceDto[]>();
+  for (const source of sources) byRuntime.set(source.runtime, [...(byRuntime.get(source.runtime) ?? []), source]);
+  return Array.from(byRuntime.entries()).map(([runtime, runtimeSources]) => sourceRowFromSetupFamily(runtime, runtimeSources));
+}
+
 function normalizeSetupCoverage(coverage: SourcesSetupCoverageDto) {
   return {
     enriched: coverage.enriched ?? coverage.enrichedSessions ?? 0,
@@ -178,28 +167,41 @@ function sourceRowFromAdapter(adapter: AdapterStatus): SourceRow {
   };
 }
 
-function sourceRowFromSetup(source: SourcesSetupConnectedSourceDto): SourceRow {
+function sourceRowFromSetupFamily(runtime: string, sources: SourcesSetupConnectedSourceDto[]): SourceRow {
+  const single = sources.length === 1 ? sources[0] : undefined;
+  const sessions = sources.reduce(
+    (total, source) => total + (source.importedSessions ?? source.metadataSessions ?? source.discoveredSessions ?? source.sessions ?? source.sessionCount ?? source.importedCount ?? 0),
+    0
+  );
+  const queued = sources.reduce((total, source) => total + (source.queuedRecords ?? source.queuedCount ?? 0), 0);
+  const failures = sources.reduce((total, source) => total + (source.failureCount ?? source.failures ?? 0), 0);
+  const lastSyncAt = sources.map((source) => source.lastSyncAt ?? source.lastSync).filter(Boolean).toSorted().at(-1);
+  const harnessLabel = harnessForRuntime(runtime as RuntimeKind)?.label ?? runtime;
+  const state = failures > 0 ? "needs_attention" : queued > 0 ? "importing" : single?.state ?? single?.status ?? "connected";
   return {
-    enrichmentEnabled: Boolean(source.enrichmentEnabled),
-    failures: source.failureCount ?? source.failures ?? 0,
-    key: source.sourceId,
-    label: source.label ?? source.runtime,
-    lastSyncAt: source.lastSyncAt ?? source.lastSync,
-    locations: source.path || source.detectedPath ? 1 : 0,
-    queued: source.queuedRecords ?? source.queuedCount ?? 0,
-    runtime: source.runtime,
-    sessions: source.importedSessions ?? source.metadataSessions ?? source.discoveredSessions ?? source.sessions ?? source.sessionCount ?? source.importedCount ?? 0,
-    state: source.state ?? source.status ?? "connected",
-    transcriptImportEnabled: Boolean(source.transcriptImportEnabled)
+    enrichmentEnabled: sources.some((source) => Boolean(source.enrichmentEnabled)),
+    failures,
+    key: runtime,
+    label: single?.label ?? harnessLabel,
+    lastSyncAt,
+    locations: sources.length,
+    queued,
+    runtime,
+    sessions,
+    state,
+    transcriptImportEnabled: sources.some((source) => Boolean(source.transcriptImportEnabled))
   };
 }
 
 function proofRows(source: SourceRow): ProofRow[] {
   return [
-    { label: "Live capture", value: source.lastSyncAt ? "Observed" : "No recent activity", tone: source.lastSyncAt ? "good" : "warn" },
+    { label: "Locations", value: `${source.locations} ${source.locations === 1 ? "location" : "locations"}`, tone: source.locations > 0 ? "good" : "neutral" },
     { label: "History", value: `${source.sessions} sessions`, tone: source.sessions > 0 ? "good" : "neutral" },
+    { label: "Live capture", value: source.lastSyncAt ? "Observed" : "No recent activity", tone: source.lastSyncAt ? "good" : "warn" },
     { label: "Transcripts", value: source.transcriptImportEnabled ? "Enabled" : "Needs transcript import", tone: source.transcriptImportEnabled ? "good" : "warn" },
     { label: "Enrichment", value: source.enrichmentEnabled ? "Enabled" : "Needs enrichment", tone: source.enrichmentEnabled ? "good" : "warn" },
+    { label: "Queued", value: `${source.queued}`, tone: source.queued > 0 ? "warn" : "neutral" },
+    { label: "Issues", value: `${source.failures}`, tone: source.failures > 0 ? "warn" : "neutral" },
     { label: "Last activity", value: source.lastSyncAt ? new Date(source.lastSyncAt).toLocaleString() : "Not observed", tone: source.lastSyncAt ? "good" : "neutral" }
   ];
 }
