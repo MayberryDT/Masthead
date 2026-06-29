@@ -32,18 +32,15 @@ type Props = {
 };
 
 const formatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const safeDossierActions = new Set<SafeAction>(["snooze", "dismiss", "mark_reviewed", "mark_expected"]);
 const noop = () => undefined;
 const noopString = (_value: string) => undefined;
 const noopTranscriptFilter = (_value: SessionTranscriptKindFilter) => undefined;
 
 export function SessionDossier({
-  actionStatus,
   dossier,
   error,
   live,
   loading = false,
-  onAction,
   onOpenSources,
   onRetry,
   onTranscriptFilterChange,
@@ -69,7 +66,6 @@ export function SessionDossier({
   const timelineEvents = useMemo(() => (dossier?.timeline ?? liveTimeline(live)).filter((event) => event.kind !== "file"), [dossier?.timeline, live]);
   const filteredTimeline = useMemo(() => filterTimeline(timelineEvents, timelineFilter), [timelineEvents, timelineFilter]);
   const visibleTimeline = showAllTimeline ? filteredTimeline : filteredTimeline.slice(-30);
-  const availableActions = live?.safeActions.filter((action) => safeDossierActions.has(action)) ?? [];
   const visibleTools = showAllTools ? dossier?.tools : dossier?.tools.slice(0, 12);
 
   const copyContext = async (value?: string) => {
@@ -123,9 +119,9 @@ export function SessionDossier({
         <div className="dossier-identity-grid" aria-label="Session identity">
           <DossierMetric label="Lifecycle" value={identity?.lifecycle ?? live?.lifecycle ?? "Unknown"} />
           <DossierMetric label="Duration" value={formatDuration(identity?.durationMs) ?? live?.durationLabel ?? "-"} />
-          <DossierMetric label="Tokens" value={formatNumber(dossier?.usage.totalTokens ?? live?.totalTokens)} />
-          <DossierMetric label="Input" value={formatNumber(dossier?.usage.inputTokens)} />
-          <DossierMetric label="Output" value={formatNumber(dossier?.usage.outputTokens)} />
+          <DossierMetric label="Total tokens" value={formatNumber(dossier?.usage.totalTokens ?? live?.totalTokens)} />
+          <DossierMetric label="Input tokens" value={formatNumber(dossier?.usage.inputTokens)} />
+          <DossierMetric label="Output tokens" value={formatNumber(dossier?.usage.outputTokens)} />
           <DossierMetric label="Messages" value={formatNumber(dossier?.coverage.transcript.messages)} />
         </div>
       </section>
@@ -259,34 +255,6 @@ export function SessionDossier({
                   {showAllTimeline ? "Show less" : `Show ${filteredTimeline.length - 30} more`}
                 </button>
               ) : null}
-            </DossierPanel>
-
-            <DossierPanel title="Token usage" className="dossier-panel-half">
-              {dossier?.usage.usageRows ? (
-                <div className="dossier-provenance dossier-provenance-compact">
-                  <DossierMetric label="Input tokens" value={formatNumber(dossier.usage.inputTokens)} />
-                  <DossierMetric label="Output tokens" value={formatNumber(dossier.usage.outputTokens)} />
-                  <DossierMetric label="Total tokens" value={formatNumber(dossier.usage.totalTokens)} />
-                  <DossierMetric label="Rows" value={formatNumber(dossier.usage.usageRows)} />
-                </div>
-              ) : (
-                <p className="dossier-muted">Token usage not captured.</p>
-              )}
-            </DossierPanel>
-
-            <DossierPanel title="Review actions" className="dossier-panel-half">
-              {availableActions.length > 0 && live && onAction ? (
-                <div className="dossier-action-row">
-                  {availableActions.map((action) => (
-                    <button key={action} type="button" onClick={() => onAction(action, live)}>
-                      {actionLabel(action)}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="dossier-muted">No safe review actions are available for this session.</p>
-              )}
-              {actionStatus ? <p className="dossier-muted">{actionStatus}</p> : null}
             </DossierPanel>
 
             <DossierPanel title="Provenance" className="dossier-panel-span">
@@ -485,14 +453,6 @@ function timelineLabel(filter: TimelineFilter): string {
   if (filter === "tools") return "Tools";
   if (filter === "checkpoints") return "Checkpoints";
   return "Attention";
-}
-
-function actionLabel(action: SafeAction): string {
-  if (action === "snooze") return "Snooze";
-  if (action === "dismiss") return "Dismiss";
-  if (action === "mark_reviewed") return "Mark reviewed";
-  if (action === "mark_expected") return "Mark expected";
-  return action;
 }
 
 function formatNumber(value?: number): string {

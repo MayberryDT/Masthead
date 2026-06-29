@@ -157,10 +157,6 @@
   grid-column: 1 / -1;
 }
 
-.dossier-panel-half {
-  grid-column: span 3;
-}
-
 .dossier-advanced-details {
   display: grid;
   grid-column: 1 / -1;
@@ -170,10 +166,6 @@
 
 .dossier-advanced-details > .dossier-panel {
   grid-column: span 2;
-}
-
-.dossier-advanced-details > .dossier-panel-half {
-  grid-column: span 3;
 }
 
 .dossier-advanced-details > .dossier-panel-span {
@@ -371,8 +363,7 @@
 
 .dossier-filter-row,
 .dossier-hero-actions,
-.dossier-copy-actions,
-.dossier-action-row {
+.dossier-copy-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
@@ -381,7 +372,6 @@
 .dossier-filter-row button,
 .dossier-hero-actions button,
 .dossier-copy-actions button,
-.dossier-action-row button,
 .dossier-link-button {
   min-height: 30px;
   border: 1px solid rgba(92, 153, 187, 0.16);
@@ -396,7 +386,6 @@
 .dossier-filter-row button:hover,
 .dossier-hero-actions button:hover,
 .dossier-copy-actions button:hover,
-.dossier-action-row button:hover,
 .dossier-link-button:hover,
 .dossier-filter-row .is-active {
   border-color: rgba(87, 193, 255, 0.52);
@@ -666,8 +655,7 @@
     grid-template-columns: 1fr;
   }
 
-  .dossier-advanced-details > .dossier-panel,
-  .dossier-panel-half {
+  .dossier-advanced-details > .dossier-panel {
     grid-column: 1 / -1;
   }
 

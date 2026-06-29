@@ -21,7 +21,7 @@ describe("SessionDossier", () => {
     expect(advancedPanelRule).toContain("grid-column: span 2;");
   });
 
-  test("expands token usage and review actions across the advanced detail width", async () => {
+  test("keeps token stats in the identity card and omits redundant advanced cards", async () => {
     const host = document.createElement("div");
     const root = createRoot(host);
 
@@ -29,6 +29,10 @@ describe("SessionDossier", () => {
       root.render(<SessionDossier dossier={dossier()} />);
     });
 
+    const identityCard = host.querySelector(".dossier-hero");
+    expect(identityCard?.textContent).toContain("Total tokens");
+    expect(identityCard?.textContent).toContain("Input tokens");
+    expect(identityCard?.textContent).toContain("Output tokens");
     const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
     expect(button).toBeTruthy();
 
@@ -36,10 +40,9 @@ describe("SessionDossier", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const tokenUsage = [...host.querySelectorAll(".dossier-panel")].find((panel) => panel.querySelector("h4")?.textContent === "Token usage");
-    const reviewActions = [...host.querySelectorAll(".dossier-panel")].find((panel) => panel.querySelector("h4")?.textContent === "Review actions");
-    expect(tokenUsage?.classList.contains("dossier-panel-half")).toBe(true);
-    expect(reviewActions?.classList.contains("dossier-panel-half")).toBe(true);
+    const advancedHeadings = [...host.querySelectorAll(".dossier-advanced-details .dossier-panel h4")].map((heading) => heading.textContent);
+    expect(advancedHeadings).not.toContain("Token usage");
+    expect(advancedHeadings).not.toContain("Review actions");
     root.unmount();
   });
 
@@ -155,9 +158,9 @@ describe("SessionDossier", () => {
 
     expect(html).toContain("Session identity");
     expect(html).not.toContain("<h3>Repair OAuth callback</h3>");
-    expect(html).toContain("Tokens");
-    expect(html).toContain("Input");
-    expect(html).toContain("Output");
+    expect(html).toContain("Total tokens");
+    expect(html).toContain("Input tokens");
+    expect(html).toContain("Output tokens");
     expect(html).toContain("Enrichment");
     expect(html).toContain("dossier-panel-primary");
     expect(html).toContain("Objective: Fix the OAuth return path. Outcome: OAuth route still fails in one edge case.");
@@ -397,7 +400,7 @@ describe("SessionDossier", () => {
     expect(html).toContain("4 low-value Codex hook event events captured");
   });
 
-  test("limits live-only actions to safe review actions", async () => {
+  test("does not render review actions in advanced details", async () => {
     const host = document.createElement("div");
     const root = createRoot(host);
 
@@ -414,11 +417,12 @@ describe("SessionDossier", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(host.textContent).toContain("Dismiss");
-    expect(host.textContent).toContain("Mark reviewed");
+    expect(host.textContent).not.toContain("Dismiss");
+    expect(host.textContent).not.toContain("Mark reviewed");
+    expect(host.textContent).not.toContain("Marked reviewed.");
+    expect(host.textContent).not.toContain("Review actions");
     expect(host.textContent).not.toContain("Open source");
     expect(host.textContent).not.toContain("Open repo");
-    expect(host.textContent).toContain("Marked reviewed.");
     root.unmount();
   });
 
