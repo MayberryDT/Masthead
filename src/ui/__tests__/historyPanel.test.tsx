@@ -170,7 +170,7 @@ describe("HistoryPanel", () => {
     expect(html).toContain('aria-busy="true"');
     expect(html).toContain('aria-label="Loading next Logbook page"');
     expect(html).toContain("Page 2 of 3");
-    expect(html).toContain("Loading Logbook page 2...");
+    expect(html).not.toContain("Loading Logbook page");
     expect(html).toContain("<table");
     expect(html).toContain("logbook-page-loading");
     expect(html).not.toContain("Session 1");

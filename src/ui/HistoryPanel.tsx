@@ -224,7 +224,6 @@ export function HistoryPanel({
       <LogbookFacets facets={activeFilters} />
       <LogbookSummaryStrip items={summaryItems} />
 
-      {isPageLoading ? <p className="toolbar-result surface-status">Loading Logbook page {visiblePageIndex + 1}...</p> : null}
       {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
 
       {errorState ? (
