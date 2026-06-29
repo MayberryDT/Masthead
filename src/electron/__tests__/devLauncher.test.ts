@@ -11,5 +11,6 @@ describe("Masthead Dev launcher template", () => {
     expect(healthCheckIndex).toBeGreaterThan(-1);
     expect(buildIndex).toBeGreaterThan(healthCheckIndex);
     expect(source).not.toContain('"$NPM_BIN" run dev:electron');
+    expect(source).toContain("KillMode=process");
   });
 });

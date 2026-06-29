@@ -220,7 +220,7 @@ Type=simple
 WorkingDirectory=${repo}
 Environment=MASTHEAD_DEV_LAUNCH_CHILD=1
 ExecStart=${launcherPath}
-KillMode=control-group
+KillMode=process
 TimeoutStopSec=15
 Restart=no
 
