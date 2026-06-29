@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -10,6 +11,13 @@ import { SessionDossier } from "../SessionDossier";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("SessionDossier", () => {
+  test("lays out the first advanced detail cards in one desktop row", () => {
+    const css = readFileSync("src/styles/session-dossier.css", "utf8");
+    const advancedDetailsRule = css.match(/\.dossier-advanced-details\s*\{[^}]+\}/)?.[0] ?? "";
+
+    expect(advancedDetailsRule).toContain("grid-template-columns: repeat(3, minmax(0, 1fr));");
+  });
+
   test("renders canonical session evidence and copy actions", () => {
     const currentDossier = dossier();
     const html = renderToStaticMarkup(
