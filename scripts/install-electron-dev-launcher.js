@@ -22,6 +22,15 @@ function shellQuote(value) {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+function devAllowedOrigins() {
+  const origins = new Set(["masthead://app"]);
+  for (let port = 5173; port <= 5199; port += 1) {
+    origins.add(`http://127.0.0.1:${port}`);
+    origins.add(`http://localhost:${port}`);
+  }
+  return Array.from(origins).join(",");
+}
+
 const launcher = `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -35,7 +44,7 @@ DB_PATH="$DATA_DIR/masthead.sqlite"
 STORE_PATH="$DATA_DIR/legacy/events.ndjson"
 DAEMON_ENTRY="$APP_DIR/dist/daemon/src/daemon/main.js"
 MCP_ENTRY="$APP_DIR/dist/daemon/src/mcp/server.js"
-ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173,masthead://app"
+ALLOWED_ORIGINS=${shellQuote(devAllowedOrigins())}
 
 export PATH="$(dirname "$NODE_BIN"):$HOME/.cargo/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 export npm_config_update_notifier=false

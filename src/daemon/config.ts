@@ -23,11 +23,7 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
   const configuredPort = Number.parseInt(env.MASTHEAD_PORT || "", 10);
   const configuredGitRefreshMs = Number.parseInt(env.MASTHEAD_GIT_REFRESH_MS || "", 10);
   const dataPaths = resolveMastheadDataPaths({ env });
-  const allowedOrigins = (env.MASTHEAD_ALLOWED_ORIGINS || [
-    "http://127.0.0.1:5173",
-    "http://localhost:5173",
-    "masthead://app"
-  ].join(","))
+  const allowedOrigins = (env.MASTHEAD_ALLOWED_ORIGINS || defaultAllowedOrigins().join(","))
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -47,4 +43,13 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.MASTHEAD_OPENAI_MODEL
   };
+}
+
+function defaultAllowedOrigins(): string[] {
+  const origins = new Set<string>(["masthead://app"]);
+  for (let port = 5173; port <= 5199; port += 1) {
+    origins.add(`http://127.0.0.1:${port}`);
+    origins.add(`http://localhost:${port}`);
+  }
+  return Array.from(origins);
 }
