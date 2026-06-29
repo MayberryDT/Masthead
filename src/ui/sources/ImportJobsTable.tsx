@@ -5,10 +5,7 @@ import { StatusBadge, type StatusBadgeTone } from "../primitives/StatusBadge";
 type Props = {
   busy?: boolean;
   imports: ImportJob[];
-  limit?: number;
-  offset?: number;
   onCancelImport?: (importJobId: string) => void;
-  onLoadMore?: (page: { limit: number; offset: number }) => void;
   onRetryImport?: (importJobId: string) => void;
   total?: number;
 };
@@ -16,20 +13,26 @@ type Props = {
 export function ImportJobsTable({
   busy = false,
   imports,
-  limit = imports.length,
   onCancelImport,
-  onLoadMore,
   onRetryImport,
   total = imports.length
 }: Props) {
   if (imports.length === 0) return null;
   const visibleCount = Math.min(total, imports.length);
-  const canLoadMore = visibleCount < total;
   return (
     <section className="import-jobs-section" aria-label="Import jobs">
       <div className="import-jobs-header">
-        <p className="mono-label">Import jobs</p>
-        <p className="surface-status">Showing {visibleCount} of {total} import jobs</p>
+        <h2 className="import-jobs-title">Import queue</h2>
+        <dl className="import-jobs-summary" aria-label="Import queue summary">
+          <div>
+            <dt>Visible</dt>
+            <dd>{visibleCount}</dd>
+          </div>
+          <div>
+            <dt>Total</dt>
+            <dd>{total}</dd>
+          </div>
+        </dl>
       </div>
       <div className="import-jobs-table-frame">
         <table className="import-jobs-table">
@@ -62,18 +65,6 @@ export function ImportJobsTable({
           </tbody>
         </table>
       </div>
-      {canLoadMore ? (
-        <div className="import-jobs-footer">
-          <AppButton
-            type="button"
-            variant="quiet"
-            disabled={busy || !onLoadMore}
-            onClick={() => onLoadMore?.({ limit, offset: visibleCount })}
-          >
-            Load more
-          </AppButton>
-        </div>
-      ) : null}
     </section>
   );
 }

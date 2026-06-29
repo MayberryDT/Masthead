@@ -9,8 +9,6 @@ import { SourcesOnboardingModal } from "./sources/SourcesOnboardingModal";
 type Props = {
   adapters?: AdapterStatus[];
   imports?: ImportJob[];
-  importLimit?: number;
-  importOffset?: number;
   importTotal?: number;
   setup?: SourcesSetupDto;
   sources: SourceStatus[];
@@ -22,7 +20,6 @@ type Props = {
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
   onLoadAdapterSources?: (runtime: string, page: { limit: number; offset: number }) => Promise<SourceStatusPage>;
-  onLoadMoreImports?: (page: { limit: number; offset: number }) => void;
   onPollImports?: () => void;
   onConnectSelected?: (runtimes: string[]) => void;
   onOpenLogbook?: () => void;
@@ -80,10 +77,7 @@ export function SourcesPanel(props: Props) {
         <ImportJobsTable
           busy={busy}
           imports={diagnosticImports}
-          limit={props.importLimit}
-          offset={props.importOffset}
           onCancelImport={props.onCancelImport}
-          onLoadMore={props.onLoadMoreImports}
           onRetryImport={props.onRetryImport}
           total={props.importTotal}
         />

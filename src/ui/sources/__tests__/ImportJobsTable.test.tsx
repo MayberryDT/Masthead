@@ -76,8 +76,7 @@ describe("ImportJobsTable", () => {
     await act(async () => root.unmount());
   });
 
-  test("renders page metadata and invokes pagination callback", async () => {
-    const onLoadMore = vi.fn();
+  test("renders import queue title with compact header stats", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -85,21 +84,17 @@ describe("ImportJobsTable", () => {
       root.render(
         <ImportJobsTable
           imports={[importJob({ importJobId: "newest-job" }), importJob({ importJobId: "older-job" })]}
-          limit={2}
-          offset={0}
           total={3}
-          onLoadMore={onLoadMore}
         />
       );
     });
 
-    expect(container.textContent).toContain("Showing 2 of 3 import jobs");
-
-    await act(async () => {
-      buttonByText(container, "Load more").click();
-    });
-
-    expect(onLoadMore).toHaveBeenCalledWith({ limit: 2, offset: 2 });
+    expect(container.querySelector(".import-jobs-title")?.textContent).toBe("Import queue");
+    expect(container.querySelector(".import-jobs-summary")?.textContent).toContain("Visible2");
+    expect(container.querySelector(".import-jobs-summary")?.textContent).toContain("Total3");
+    expect(container.textContent).not.toContain("Import jobsShowing");
+    expect(container.textContent).not.toContain("Showing 2 of 3 import jobs");
+    expect(container.textContent).not.toContain("Load more");
 
     await act(async () => root.unmount());
   });
