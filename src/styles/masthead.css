@@ -2808,9 +2808,20 @@ body {
   justify-content: flex-end;
   min-width: 0;
   height: 34px;
-  border-bottom: 1px solid rgba(194, 221, 241, 0.13);
   background: linear-gradient(180deg, rgba(5, 23, 36, 0.92), rgba(3, 16, 25, 0.96));
   -webkit-app-region: drag;
+}
+
+.masthead-window-bar::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  height: 1px;
+  background: rgba(194, 221, 241, 0.13);
+  pointer-events: none;
 }
 
 .masthead-window-drag-region {
@@ -2822,7 +2833,8 @@ body {
   display: flex;
   flex: 0 0 auto;
   align-items: stretch;
-  height: 100%;
+  align-self: flex-start;
+  height: calc(100% - 1px);
   -webkit-app-region: no-drag;
 }
 
