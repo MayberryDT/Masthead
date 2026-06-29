@@ -11,6 +11,7 @@ import type {
 import { LogbookFacets } from "./logbook/LogbookFacets";
 import { LogbookTable } from "./logbook/LogbookTable";
 import { LogbookToolbar } from "./logbook/LogbookToolbar";
+import { logbookColumns } from "./logbook/logbookColumns";
 import { Icon } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
 import { AppButton } from "./primitives/AppButton";
@@ -308,11 +309,46 @@ function CanonicalErrorPanel({ message, onRetry }: { message: string; onRetry?: 
 }
 
 function LogbookSkeleton() {
+  const skeletonRows = Array.from({ length: 7 }, (_, index) => index);
+
   return (
-    <div className="logbook-skeleton" aria-label="Loading Logbook results">
-      {Array.from({ length: 6 }, (_, index) => (
-        <span key={index} />
-      ))}
+    <div className="logbook-loading-state" role="status" aria-live="polite" aria-busy="true" aria-label="Loading Logbook session records">
+      <div className="logbook-loading-copy">
+        <p className="mono-label">Logbook</p>
+        <strong>Loading session records</strong>
+        <span>Hydrating the canonical session database.</span>
+      </div>
+      <div className="logbook-table-wrap logbook-skeleton-table-wrap" aria-hidden="true">
+        <table className="logbook-table compact logbook-skeleton-table">
+          <thead>
+            <tr>
+              {logbookColumns.map((column) => (
+                <th key={column.key} scope="col" className={column.className}>
+                  {column.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {skeletonRows.map((row) => (
+              <tr key={row} className="logbook-row compact logbook-skeleton-row">
+                {logbookColumns.map((column, columnIndex) => (
+                  <td key={column.key} className={column.className}>
+                    <span className={`logbook-skeleton-line skeleton-${columnIndex + 1}`} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <aside className="logbook-loading-inspector" aria-hidden="true">
+        <span />
+        <strong />
+        <div />
+        <div />
+        <div />
+      </aside>
     </div>
   );
 }

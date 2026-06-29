@@ -59,6 +59,15 @@ export function SessionDetailModal({
   ]
     .filter(Boolean)
     .join(" ");
+  const backdropClassName = [
+    "modal-backdrop",
+    "t-modal-backdrop",
+    modalState === "closing" ? "is-closing" : "",
+    modalState === "open" ? "is-open" : "",
+    modalState === "opening" ? "is-opening" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   useEffect(() => {
     modalRef.current?.focus();
@@ -106,7 +115,7 @@ export function SessionDetailModal({
   };
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={requestClose}>
+    <div className={backdropClassName} role="presentation" onClick={requestClose}>
       <article
         ref={modalRef}
         className={modalClassName}

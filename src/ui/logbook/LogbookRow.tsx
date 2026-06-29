@@ -1,3 +1,4 @@
+import type { KeyboardEvent, MouseEvent } from "react";
 import type { LogbookSession } from "../HistoryPanel";
 
 type Props = {
@@ -10,15 +11,43 @@ type Props = {
 export function LogbookRow({ density, onSelect, selected = false, session }: Props) {
   const primaryModel = session.models?.[0] ?? session.model ?? "Not captured";
   const lifecycle = session.lifecycle ?? session.state ?? "indexed";
+  const title = sessionTitle(session);
+  const openSession = () => onSelect(session.sessionId);
+  const handleRowClick = (event: MouseEvent<HTMLTableRowElement>) => {
+    if (isInteractiveTarget(event.target)) return;
+    openSession();
+  };
+  const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (isInteractiveTarget(event.target)) return;
+    event.preventDefault();
+    openSession();
+  };
+
   return (
-    <tr className={`logbook-row ${density === "compact" ? "compact" : ""} ${selected ? "selected" : ""}`.trim()}>
+    <tr
+      className={`logbook-row ${density === "compact" ? "compact" : ""} ${selected ? "selected" : ""}`.trim()}
+      tabIndex={0}
+      aria-label={`Open session: ${title}`}
+      aria-selected={selected}
+      onClick={handleRowClick}
+      onKeyDown={handleRowKeyDown}
+    >
       <td className="logbook-date logbook-col-date">
         <time dateTime={session.lastActivityAt}>{formatDate(session.lastActivityAt)}</time>
         <span>{formatTime(session.lastActivityAt)}</span>
       </td>
       <td className="logbook-session-cell logbook-col-session">
-        <button type="button" className="logbook-session-button" onClick={() => onSelect(session.sessionId)} aria-pressed={selected}>
-          <strong>{sessionTitle(session)}</strong>
+        <button
+          type="button"
+          className="logbook-session-button"
+          onClick={(event) => {
+            event.stopPropagation();
+            openSession();
+          }}
+          aria-pressed={selected}
+        >
+          <strong>{title}</strong>
           {session.snippet ? <HighlightedSnippet snippet={session.snippet} /> : <span>{session.objective ?? session.outcome ?? session.sourceSessionId}</span>}
         </button>
       </td>
@@ -37,6 +66,10 @@ export function LogbookRow({ density, onSelect, selected = false, session }: Pro
       <td className="logbook-col-duration logbook-desktop-column">{durationLabel(session.startedAt, session.endedAt)}</td>
     </tr>
   );
+}
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest("a, button, input, select, textarea, [data-logbook-row-stop]"));
 }
 
 function HighlightedSnippet({ snippet }: { snippet: string }) {
