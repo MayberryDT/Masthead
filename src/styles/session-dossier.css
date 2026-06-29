@@ -135,6 +135,12 @@
   gap: 12px;
 }
 
+.dossier-advanced-footer {
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
+}
+
 .dossier-panel h4 {
   display: flex;
   gap: 8px;
@@ -621,6 +627,11 @@
   }
 
   .dossier-timeline li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .dossier-list li {
     grid-template-columns: 1fr;
     gap: 4px;
   }

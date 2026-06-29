@@ -76,6 +76,28 @@ describe("SessionDossier", () => {
     expect(html).not.toContain("Open repo");
   });
 
+  test("keeps copy actions in the identity card and centers advanced details below the dossier", async () => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<SessionDossier dossier={dossier()} />);
+    });
+
+    expect(host.textContent).not.toContain("Copies canonical session context for reuse.");
+    const copyActions = host.querySelector(".dossier-hero-actions");
+    expect(copyActions?.textContent).toContain("Copy context");
+    expect(copyActions?.textContent).toContain("Copy canonical ID");
+    expect(copyActions?.textContent).toContain("Copy source ID");
+    expect(copyActions?.textContent).not.toContain("Advanced details");
+
+    const advancedButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
+    expect(advancedButton).toBeTruthy();
+    expect(advancedButton?.closest(".dossier-hero")).toBeNull();
+    expect(advancedButton?.closest(".dossier-advanced-footer")).toBeTruthy();
+    root.unmount();
+  });
+
   test("hides raw system and bracket metadata from the default transcript but keeps raw access in advanced details", async () => {
     const rawPrompt = [
       "# AGENTS.md instructions for /tmp/Masthead",

@@ -117,11 +117,8 @@ export function SessionDossier({
             <button type="button" onClick={() => copyContext(identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId)}>
               Copy source ID
             </button>
-            <button type="button" className="dossier-link-button" onClick={() => setAdvancedOpen((current) => !current)}>
-              {advancedOpen ? "Hide advanced details" : "Advanced details"}
-            </button>
           </div>
-          <p className="dossier-muted">{copyFeedback(copyState)}</p>
+          {copyState !== "idle" ? <p className="dossier-muted">{copyFeedback(copyState)}</p> : null}
         </div>
         <div className="dossier-identity-grid" aria-label="Session identity">
           <DossierMetric label="Lifecycle" value={identity?.lifecycle ?? live?.lifecycle ?? "Unknown"} />
@@ -324,6 +321,12 @@ export function SessionDossier({
             </DossierPanel>
           </section>
         ) : null}
+      </div>
+
+      <div className="dossier-advanced-footer">
+        <button type="button" className="dossier-link-button" onClick={() => setAdvancedOpen((current) => !current)}>
+          {advancedOpen ? "Hide advanced details" : "Advanced details"}
+        </button>
       </div>
     </section>
   );
@@ -528,5 +531,5 @@ function copyFeedback(state: CopyState): string {
   if (state === "copied") return "Copied.";
   if (state === "unavailable") return "Clipboard unavailable.";
   if (state === "failed") return "Copy failed.";
-  return "Copies canonical session context for reuse.";
+  return "";
 }
