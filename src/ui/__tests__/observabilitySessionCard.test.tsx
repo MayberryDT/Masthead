@@ -26,7 +26,9 @@ describe("observability session card", () => {
     expect(html).toContain("Tokens");
     expect(html).toContain("126.7M");
     expect(html).toContain("Duration");
-    expect(html).toContain("card-harness");
+    expect(html).toContain("runtime-tag");
+    expect(html).toContain("bottom-variant-card dovetail-card is-active");
+    expect(html).toContain("bottom-signal");
     expect(html).toContain("Model");
     expect(html).toContain("Worktree");
     expect(html).not.toContain("Thinking");
@@ -176,7 +178,8 @@ describe("observability session card", () => {
       />
     );
 
-    expect(html).toContain("Turn complete");
+    expect(html).toContain(">Idle<");
+    expect(html).toContain("is-idle");
     expect(html).not.toContain(">Active<");
   });
 
@@ -233,14 +236,15 @@ describe("observability session card", () => {
     expect(stateClassName(session({ lifecycle: "running", primaryStatus: "failed", indicators: ["attention"] }))).toBe("running");
   });
 
-  test("marks newly created cards for entry animation", () => {
+  test("keeps exact mockup class names when a new-card hint is provided", () => {
     const html = renderToStaticMarkup(<SessionCard session={session()} isNew newCardIndex={2} onToggle={() => undefined} />);
 
-    expect(html).toContain("is-new-card");
+    expect(html).toContain("session-card bottom-variant-card dovetail-card is-active");
+    expect(html).not.toContain("is-new-card");
     expect(html).toContain("--new-card-index:2");
   });
 
-  test("only marks cards added after the board has mounted as new", async () => {
+  test("does not add legacy new-card classes after the board has mounted", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -260,7 +264,8 @@ describe("observability session card", () => {
     });
 
     expect(container.querySelector('[data-session-id="session-1"]')?.className).not.toContain("is-new-card");
-    expect(container.querySelector('[data-session-id="session-2"]')?.className).toContain("is-new-card");
+    expect(container.querySelector('[data-session-id="session-2"]')?.className).not.toContain("is-new-card");
+    expect(container.querySelector('[data-session-id="session-2"]')?.className).toContain("dovetail-card");
 
     await act(async () => root.unmount());
   });
@@ -442,8 +447,7 @@ describe("observability session card", () => {
     }
   });
 
-  test("stagger-types changed headlines on existing cards", async () => {
-    vi.useFakeTimers();
+  test("updates mockup headlines immediately on existing cards", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
     const first = session({
@@ -472,44 +476,16 @@ describe("observability session card", () => {
         );
       });
 
-      const headlines = Array.from(container.querySelectorAll<HTMLElement>(".card-headline"));
-      expect(headlines[0]?.textContent).toContain("First old headline");
-      expect(headlines[1]?.textContent).toContain("Second old headline");
-
-      await act(async () => {
-        vi.advanceTimersByTime(0);
-      });
-
-      expect(headlines[0]?.className).toContain("is-headline-typing");
-      expect(headlines[0]?.textContent).toBe("");
-      expect(headlines[1]?.textContent).toContain("Second old headline");
-
-      await act(async () => {
-        vi.advanceTimersByTime(16);
-      });
-
-      expect(headlines[0]?.textContent).toBe("F");
-
-      await act(async () => {
-        vi.advanceTimersByTime(80);
-      });
-
-      expect(headlines[1]?.className).toContain("is-headline-typing");
-
-      await act(async () => {
-        vi.advanceTimersByTime(2000);
-      });
-
+      const headlines = Array.from(container.querySelectorAll<HTMLElement>(".headline"));
       expect(headlines[0]?.textContent).toContain("First updated headline");
       expect(headlines[1]?.textContent).toContain("Second updated headline");
+      expect(container.querySelector(".card-headline-cursor")).toBeNull();
     } finally {
       await act(async () => root.unmount());
-      vi.useRealTimers();
     }
   });
 
-  test("keeps typing after a same-text board refresh clears the transient stagger index", async () => {
-    vi.useFakeTimers();
+  test("keeps the mockup headline stable after a same-text board refresh", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
     const original = session({
@@ -527,40 +503,22 @@ describe("observability session card", () => {
         root.render(<SessionBoard cards={[updated]} variant="observability" />);
       });
 
-      await act(async () => {
-        vi.advanceTimersByTime(16);
-      });
-
-      const headline = container.querySelector<HTMLElement>(".card-headline");
-      expect(headline?.textContent).toBe("U");
-      expect(headline?.querySelector(".card-headline-cursor")).not.toBeNull();
+      const headline = container.querySelector<HTMLElement>(".headline");
+      expect(headline?.textContent).toBe("Updated board headline");
+      expect(headline?.querySelector(".card-headline-cursor")).toBeNull();
 
       await act(async () => {
         root.render(<SessionBoard cards={[updated]} variant="observability" />);
       });
 
-      await act(async () => {
-        vi.advanceTimersByTime(64);
-      });
-
-      expect(headline?.textContent).toBe("Updat");
-      expect(headline?.className).toContain("is-headline-typing");
-
-      await act(async () => {
-        vi.advanceTimersByTime(2000);
-      });
-
       expect(headline?.textContent).toContain("Updated board headline");
-      expect(headline?.className).not.toContain("is-headline-typing");
       expect(headline?.querySelector(".card-headline-cursor")).toBeNull();
     } finally {
       await act(async () => root.unmount());
-      vi.useRealTimers();
     }
   });
 
-  test("does not render an idle headline cursor or animate when reduced motion is requested", async () => {
-    vi.useFakeTimers();
+  test("does not render a legacy headline cursor in the mockup card", async () => {
     const originalMatchMedia = window.matchMedia;
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: query === "(prefers-reduced-motion: reduce)",
@@ -591,14 +549,12 @@ describe("observability session card", () => {
         root.render(<SessionBoard cards={[updated]} variant="observability" />);
       });
 
-      const headline = container.querySelector<HTMLElement>(".card-headline");
+      const headline = container.querySelector<HTMLElement>(".headline");
       expect(headline?.textContent).toContain("Updated reduced headline");
-      expect(headline?.className).not.toContain("is-headline-typing");
       expect(container.querySelector(".card-headline-cursor")).toBeNull();
     } finally {
       await act(async () => root.unmount());
       window.matchMedia = originalMatchMedia;
-      vi.useRealTimers();
     }
   });
 
@@ -638,7 +594,7 @@ describe("observability session card", () => {
     );
 
     expect(html).toContain(">Blocked<");
-    expect(html).toContain("needs-attention");
+    expect(html).toContain("is-blocked");
     expect(html).not.toContain(">Active<");
   });
 

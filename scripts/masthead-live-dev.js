@@ -5,55 +5,65 @@ import { removeDaemonOwnershipMetadata, writeDaemonOwnershipMetadata } from "../
 import { buildLiveDevPlan, startReadOnlyConnectorBridge } from "../dist/daemon/src/core/worktreeConnector.js";
 import { classifyDaemonHealth } from "../dist/daemon/src/shared/protocol.js";
 
-const plan = await buildLiveDevPlan(process.env);
 const children = new Set();
 const bridges = new Set();
 let shuttingDown = false;
-
-console.log("Starting Masthead live app");
-console.log(`App:       ${plan.uiUrl}`);
-
 let collector;
 let activeHealth;
 let ownershipPath;
-if (plan.connector.mode === "primary" || plan.connector.mode === "isolated_primary") {
-  if (plan.connector.mode === "isolated_primary") {
-    console.warn(`Found incompatible Masthead daemon at ${plan.connector.incompatibleBaseUrl}`);
-    console.warn("Starting current daemon on an isolated port.");
+let outputClosed = false;
+
+process.stdout.on("error", handleOutputError);
+process.stderr.on("error", handleOutputError);
+
+try {
+  const plan = await buildLiveDevPlan(process.env);
+
+  writeLine("Starting Masthead live app");
+  writeLine(`App:       ${plan.uiUrl}`);
+
+  if (plan.connector.mode === "primary" || plan.connector.mode === "isolated_primary") {
+    if (plan.connector.mode === "isolated_primary") {
+      writeLine(`Found incompatible Masthead daemon at ${plan.connector.incompatibleBaseUrl}`, "warn");
+      writeLine("Starting current daemon on an isolated port.", "warn");
+    }
+    writeLine(`Connector: ${plan.connector.baseUrl} (${plan.connector.mode === "primary" ? "primary" : "isolated primary"})`);
+    collector = start("collector", process.execPath, ["dist/daemon/src/daemon/main.js"], {
+      MASTHEAD_DATA_DIR: plan.connector.dataDirectory,
+      MASTHEAD_DIAGNOSTIC_LOG_FILE: join(plan.connector.dataDirectory, "runtime", "daemon.log"),
+      MASTHEAD_HOST: plan.host,
+      MASTHEAD_PORT: String(plan.connector.port),
+      MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins
+    });
+
+    activeHealth = await waitForHealth(`${plan.connector.baseUrl}/health`, 8_000);
+    ownershipPath = await writeOwnership(plan.connector.baseUrl, activeHealth);
+  } else {
+    writeLine(`Connector: ${plan.connector.baseUrl} (read-only worktree bridge)`);
+    writeLine(`Upstream:  ${plan.connector.upstreamBaseUrl}`);
+    const bridge = await startReadOnlyConnectorBridge({
+      allowedOrigins: plan.allowedOrigins,
+      host: plan.host,
+      port: plan.connector.port,
+      upstreamBaseUrl: plan.connector.upstreamBaseUrl
+    });
+    bridges.add(bridge);
+    activeHealth = await waitForHealth(`${bridge.baseUrl}/health`, 8_000);
   }
-  console.log(`Connector: ${plan.connector.baseUrl} (${plan.connector.mode === "primary" ? "primary" : "isolated primary"})`);
-  collector = start("collector", process.execPath, ["dist/daemon/src/daemon/main.js"], {
-    MASTHEAD_DATA_DIR: plan.connector.dataDirectory,
-    MASTHEAD_DIAGNOSTIC_LOG_FILE: join(plan.connector.dataDirectory, "runtime", "daemon.log"),
-    MASTHEAD_HOST: plan.host,
-    MASTHEAD_PORT: String(plan.connector.port),
-    MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins
+
+  printStartupIdentity(plan, activeHealth);
+
+  const viteBin = resolve("node_modules/vite/bin/vite.js");
+  start("ui", process.execPath, [viteBin, "--host", plan.host, "--port", String(plan.uiPort), "--strictPort"], {
+    VITE_MASTHEAD_PROJECTION_URL: plan.projectionUrl
   });
 
-  activeHealth = await waitForHealth(`${plan.connector.baseUrl}/health`, 8_000);
-  ownershipPath = await writeOwnership(plan.connector.baseUrl, activeHealth);
-} else {
-  console.log(`Connector: ${plan.connector.baseUrl} (read-only worktree bridge)`);
-  console.log(`Upstream:  ${plan.connector.upstreamBaseUrl}`);
-  const bridge = await startReadOnlyConnectorBridge({
-    allowedOrigins: plan.allowedOrigins,
-    host: plan.host,
-    port: plan.connector.port,
-    upstreamBaseUrl: plan.connector.upstreamBaseUrl
-  });
-  bridges.add(bridge);
-  activeHealth = await waitForHealth(`${bridge.baseUrl}/health`, 8_000);
+  writeLine("Masthead is ready.");
+  writeLine(`Open ${plan.uiUrl}`);
+} catch (error) {
+  writeLine(error instanceof Error ? error.stack ?? error.message : String(error), "error");
+  stopAll(1);
 }
-
-printStartupIdentity(plan, activeHealth);
-
-const viteBin = resolve("node_modules/vite/bin/vite.js");
-start("ui", process.execPath, [viteBin, "--host", plan.host, "--port", String(plan.uiPort), "--strictPort"], {
-  VITE_MASTHEAD_PROJECTION_URL: plan.projectionUrl
-});
-
-console.log("Masthead is ready.");
-console.log(`Open ${plan.uiUrl}`);
 
 process.on("SIGINT", stopAll);
 process.on("SIGTERM", stopAll);
@@ -73,7 +83,7 @@ function start(label, command, args, extraEnv = {}) {
   child.on("exit", (code, signal) => {
     children.delete(child);
     if (shuttingDown) return;
-    console.error(`${label} exited${signal ? ` by ${signal}` : ""}${typeof code === "number" ? ` with ${code}` : ""}.`);
+    writeLine(`${label} exited${signal ? ` by ${signal}` : ""}${typeof code === "number" ? ` with ${code}` : ""}.`, "error");
     stopAll(typeof code === "number" && code !== 0 ? code : 1);
   });
 
@@ -114,25 +124,51 @@ async function writeOwnership(baseUrl, health) {
 }
 
 function printStartupIdentity(plan, health) {
-  console.log("Runtime identity");
-  console.log(`UI:        ${plan.uiUrl}`);
-  console.log(`Daemon:    ${plan.connector.baseUrl}`);
-  console.log(`Mode:      ${health?.runtime?.mode ?? plan.connector.mode}`);
-  console.log(`API:       ${health?.apiVersion ?? "unknown"}`);
-  console.log(`Build SHA: ${health?.buildSha ?? "unknown"}`);
-  console.log(`Database:  ${health?.data?.databasePath ?? "unknown"}`);
-  console.log(`DB ID:     ${health?.data?.databaseId ?? "unknown"}`);
-  console.log(`Source root: ${process.env.MASTHEAD_CODEX_HOME ?? "default"}`);
+  writeLine("Runtime identity");
+  writeLine(`UI:        ${plan.uiUrl}`);
+  writeLine(`Daemon:    ${plan.connector.baseUrl}`);
+  writeLine(`Mode:      ${health?.runtime?.mode ?? plan.connector.mode}`);
+  writeLine(`API:       ${health?.apiVersion ?? "unknown"}`);
+  writeLine(`Build SHA: ${health?.buildSha ?? "unknown"}`);
+  writeLine(`Database:  ${health?.data?.databasePath ?? "unknown"}`);
+  writeLine(`DB ID:     ${health?.data?.databaseId ?? "unknown"}`);
+  writeLine(`Source root: ${process.env.MASTHEAD_CODEX_HOME ?? "default"}`);
 }
 
 function writePrefixed(label, chunk) {
   for (const line of String(chunk).split(/\r?\n/)) {
     if (!line) continue;
-    console.log(`[${label}] ${line}`);
+    writeLine(`[${label}] ${line}`);
   }
 }
 
-function stopAll(exitCode = 0) {
+function writeLine(message, method = "log") {
+  if (outputClosed) return;
+  try {
+    console[method](message);
+  } catch (error) {
+    if (isBrokenPipeError(error)) {
+      outputClosed = true;
+      return;
+    }
+    throw error;
+  }
+}
+
+function handleOutputError(error) {
+  if (isBrokenPipeError(error)) {
+    outputClosed = true;
+    return;
+  }
+  throw error;
+}
+
+function isBrokenPipeError(error) {
+  return typeof error === "object" && error !== null && error.code === "EPIPE";
+}
+
+function stopAll(exitCodeOrSignal = 0) {
+  const exitCode = typeof exitCodeOrSignal === "number" ? exitCodeOrSignal : 0;
   shuttingDown = true;
   for (const child of children) {
     child.kill("SIGTERM");

@@ -72,7 +72,7 @@ describe("SourcesPanel", () => {
     expect(html).toContain("Codex");
     expect(html).toContain("120");
     expect(html).not.toContain("Advanced diagnostics");
-    expect(html).toContain("Metadata import ready");
+    expect(html).not.toContain("Metadata import ready");
     expect(html).not.toContain("/home/tyler/.codex/sessions");
     expect(html).not.toContain("hello from transcript");
   });

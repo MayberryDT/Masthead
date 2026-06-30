@@ -509,11 +509,12 @@ async function createTestHarness(): Promise<{ daemon: MastheadDaemon; tempDir: s
     allowedOrigins: ["http://127.0.0.1:5173"],
     codexHomeDir: tempDir,
     databasePath: join(tempDir, "masthead.sqlite"),
-    fixturePath: join(tempDir, "fixture.json"),
-    gitRefreshMs: 0,
-    host: "127.0.0.1",
-    llmCopyEnabled: false,
-    port: 0,
+        fixturePath: join(tempDir, "fixture.json"),
+        gitRefreshMs: 0,
+        host: "127.0.0.1",
+        hookTranscriptCatchupEnabled: false,
+        llmCopyEnabled: false,
+        port: 0,
     storePath: join(tempDir, "events.ndjson")
   };
   const daemon = await createMastheadDaemon(config);

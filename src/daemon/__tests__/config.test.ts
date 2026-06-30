@@ -11,4 +11,16 @@ describe("daemon config", () => {
     expect(config.allowedOrigins).toContain("http://localhost:5180");
     expect(config.allowedOrigins).toContain("masthead://app");
   });
+
+  test("can disable background hydration for responsive live previews", () => {
+    const config = daemonConfigFromEnv({ MASTHEAD_BACKGROUND_HYDRATION: "0" });
+
+    expect(config.backgroundHydrationEnabled).toBe(false);
+  });
+
+  test("can disable hook transcript catch-up for responsive live previews", () => {
+    const config = daemonConfigFromEnv({ MASTHEAD_HOOK_TRANSCRIPT_CATCHUP: "0" });
+
+    expect(config.hookTranscriptCatchupEnabled).toBe(false);
+  });
 });

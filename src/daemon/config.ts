@@ -7,6 +7,7 @@ export type DaemonConfig = {
   port: number;
   dataDirectory?: string;
   codexHomeDir: string;
+  backgroundHydrationEnabled?: boolean;
   gitRefreshMs: number;
   allowedOrigins: string[];
   fixturePath: string;
@@ -14,6 +15,7 @@ export type DaemonConfig = {
   databasePath: string;
   legacyDataDirectory?: string;
   llmCopyEnabled: boolean;
+  hookTranscriptCatchupEnabled: boolean;
   openaiApiKey?: string;
   openaiModel?: string;
 };
@@ -33,6 +35,7 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     port: Number.isFinite(configuredPort) ? configuredPort : 17373,
     dataDirectory: dataPaths.dataDirectory,
     codexHomeDir: resolve(env.MASTHEAD_CODEX_HOME || homedir()),
+    backgroundHydrationEnabled: env.MASTHEAD_BACKGROUND_HYDRATION !== "0",
     gitRefreshMs: Number.isFinite(configuredGitRefreshMs) ? configuredGitRefreshMs : 60_000,
     allowedOrigins,
     fixturePath: resolve("fixtures/v0/replay-three-sessions-board.json"),
@@ -40,6 +43,7 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     databasePath: dataPaths.databasePath,
     legacyDataDirectory: env.MASTHEAD_LEGACY_DATA_DIR ? resolve(env.MASTHEAD_LEGACY_DATA_DIR) : undefined,
     llmCopyEnabled: env.MASTHEAD_LLM_COPY === "1",
+    hookTranscriptCatchupEnabled: env.MASTHEAD_HOOK_TRANSCRIPT_CATCHUP !== "0",
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.MASTHEAD_OPENAI_MODEL
   };

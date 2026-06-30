@@ -86,6 +86,8 @@ export type MastheadDaemon = {
   close: () => Promise<void>;
 };
 
+export const LIVE_BOARD_RAW_RECORD_LIMIT = 500;
+
 export async function createMastheadDaemon(config: DaemonConfig): Promise<MastheadDaemon> {
   await mkdir(dirname(config.storePath), { recursive: true });
   const writerLock = await acquireDatabaseWriterLock(config.dataDirectory ?? dirname(config.databasePath));
@@ -550,6 +552,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   function scheduleHookTranscriptCatchup(event: NormalizedEvent): void {
+    if (!config.hookTranscriptCatchupEnabled) return;
     const key = stringFromPayload(event.payload, ["transcriptPath", "transcript_path"]) ?? event.eventId;
     const previous = hookTranscriptCatchups.get(key) ?? Promise.resolve();
     const next = previous
@@ -1860,28 +1863,33 @@ const rawSourceRetentionPolicy = {
 };
 
 function canonicalLiveEvents(database: MastheadDatabase): NormalizedEvent[] {
-  return canonicalStoreRecords(database, [codexHookSource.sourceId])
+  return canonicalStoreRecords(database, [codexHookSource.sourceId], LIVE_BOARD_RAW_RECORD_LIMIT)
     .filter((record): record is Extract<StoreRecord, { recordType: "event" }> => record.recordType === "event")
     .map((record) => record.value);
 }
 
 function canonicalGitSnapshots(database: MastheadDatabase): GitSnapshot[] {
-  return canonicalStoreRecords(database, ["masthead-git-observer"])
+  return canonicalStoreRecords(database, ["masthead-git-observer"], LIVE_BOARD_RAW_RECORD_LIMIT)
     .filter((record): record is Extract<StoreRecord, { recordType: "git_snapshot" }> => record.recordType === "git_snapshot")
     .map((record) => record.value);
 }
 
-function canonicalStoreRecords(database: MastheadDatabase, sourceIds: string[]): StoreRecord[] {
+export function canonicalStoreRecords(database: MastheadDatabase, sourceIds: string[], limit = LIVE_BOARD_RAW_RECORD_LIMIT): StoreRecord[] {
   if (sourceIds.length === 0) return [];
   const placeholders = sourceIds.map(() => "?").join(", ");
   const rows = database
     .prepare(
       `SELECT payload_json
-      FROM raw_events
-      WHERE source_id IN (${placeholders})
+      FROM (
+        SELECT raw_event_id, observed_at, payload_json
+        FROM raw_events
+        WHERE source_id IN (${placeholders})
+        ORDER BY observed_at DESC, raw_event_id DESC
+        LIMIT ?
+      )
       ORDER BY observed_at ASC, raw_event_id ASC`
     )
-    .all(...sourceIds) as Array<{ payload_json: string }>;
+    .all(...sourceIds, Math.max(1, Math.min(limit, LIVE_BOARD_RAW_RECORD_LIMIT))) as Array<{ payload_json: string }>;
   return rows.map((row) => parseStoreRecord(row.payload_json)).filter((record): record is StoreRecord => Boolean(record));
 }
 

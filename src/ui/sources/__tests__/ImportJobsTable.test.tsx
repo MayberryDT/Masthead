@@ -89,7 +89,7 @@ describe("ImportJobsTable", () => {
       );
     });
 
-    expect(container.querySelector(".import-jobs-title")?.textContent).toBe("Import queue");
+    expect(container.querySelector(".import-jobs-title")?.textContent).toBe("Import Queue");
     expect(container.querySelector(".import-jobs-summary")?.textContent).toContain("Visible2");
     expect(container.querySelector(".import-jobs-summary")?.textContent).toContain("Total3");
     expect(container.textContent).not.toContain("Import jobsShowing");

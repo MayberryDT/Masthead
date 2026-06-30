@@ -290,6 +290,7 @@ async function runQueuedImportJob(
 
 function parseImportConcurrency(value: string | undefined): number {
   const parsed = Number.parseInt(value || "", 10);
+  if (parsed === 0) return 0;
   if (Number.isInteger(parsed) && parsed > 0 && parsed <= 8) return parsed;
   return 1;
 }
