@@ -126,7 +126,7 @@
     .prototype-page {
       display: grid;
       gap: 18px;
-      width: min(1380px, calc(100vw - 32px));
+      width: min(1380px, calc(100% - 32px));
       margin: 0 auto;
       padding: 18px 0 48px;
     }
@@ -286,102 +286,22 @@
       max-height: 176px;
     }
 
-    .layout-four-lanes {
-      grid-template-columns: minmax(230px, 0.95fr) minmax(250px, 1fr) minmax(250px, 1fr) minmax(280px, 1.08fr);
-      grid-template-areas:
-        "storage privacy hooks mcp"
-        "storage enrichment advanced mcp"
-        "storage enrichment danger mcp";
-    }
-
     .layout-priority-bay {
-      grid-template-columns: minmax(210px, 0.82fr) minmax(245px, 1fr) minmax(310px, 1.16fr) minmax(245px, 1fr) minmax(210px, 0.82fr);
-      grid-template-areas:
-        "storage privacy mcp hooks danger"
-        "storage enrichment mcp advanced danger";
+      grid-template-columns: minmax(190px, 0.82fr) minmax(220px, 1fr) minmax(270px, 1.16fr) minmax(220px, 1fr) minmax(190px, 0.82fr);
+      max-width: 1240px;
     }
 
-    .layout-paired-decks {
-      grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr) minmax(300px, 1.04fr);
-      grid-template-areas:
-        "privacy storage mcp"
-        "enrichment storage mcp"
-        "hooks advanced danger";
-      max-width: 1040px;
-    }
-
-    .layout-offset-rail {
-      grid-template-columns: minmax(210px, 0.84fr) minmax(270px, 1fr) minmax(270px, 1fr) minmax(300px, 1.08fr);
-      grid-template-areas:
-        "storage privacy hooks mcp"
-        "advanced enrichment hooks mcp"
-        "danger enrichment hooks mcp";
-      max-width: 1160px;
-    }
-
-    .layout-stepped-rack {
-      grid-template-columns: minmax(210px, 0.86fr) minmax(240px, 1fr) minmax(240px, 1fr) minmax(240px, 1fr) minmax(300px, 1.12fr);
-      grid-auto-rows: minmax(58px, auto);
-      grid-auto-flow: dense;
-    }
-
-    .storage { grid-area: storage; }
-    .privacy { grid-area: privacy; }
-    .enrichment { grid-area: enrichment; }
-    .hooks { grid-area: hooks; }
-    .mcp { grid-area: mcp; }
-    .advanced { grid-area: advanced; }
-    .danger { grid-area: danger; }
-
-    .layout-stepped-rack .storage {
-      grid-column: 1;
-      grid-row: 1 / span 4;
-    }
-
-    .layout-stepped-rack .privacy {
-      grid-column: 2;
-      grid-row: 1 / span 2;
-    }
-
-    .layout-stepped-rack .enrichment {
-      grid-column: 2;
-      grid-row: 3 / span 3;
-    }
-
-    .layout-stepped-rack .hooks {
-      grid-column: 3;
-      grid-row: 2 / span 3;
-    }
-
-    .layout-stepped-rack .advanced {
-      grid-column: 4;
-      grid-row: 1 / span 2;
-    }
-
-    .layout-stepped-rack .danger {
-      grid-column: 4;
-      grid-row: 3 / span 2;
-    }
-
-    .layout-stepped-rack .mcp {
-      grid-column: 5;
-      grid-row: 1 / span 5;
+    .priority-column {
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      min-width: 0;
     }
 
     @media (max-width: 1180px) {
-      .rack-grid {
+      .layout-priority-bay {
         grid-template-columns: repeat(2, minmax(260px, 1fr)) !important;
-        grid-template-areas: none !important;
         max-width: 820px;
-      }
-
-      .rack-grid .settings-section,
-      .rack-grid .settings-section-wide,
-      .rack-grid .settings-section-mcp,
-      .rack-grid .settings-section-danger {
-        grid-area: auto !important;
-        grid-column: auto !important;
-        grid-row: auto !important;
       }
     }
 
@@ -419,7 +339,7 @@
         white-space: normal;
       }
 
-      .rack-grid {
+      .layout-priority-bay {
         grid-template-columns: minmax(0, 1fr) !important;
         max-width: none;
       }
@@ -439,106 +359,36 @@
   <div class="masthead-shell prototype-shell">
     <nav class="prototype-index" aria-label="Settings layout iterations">
       <strong>Settings rack</strong>
-      <a href="#iteration-1">01 Four lanes</a>
-      <a href="#iteration-2">02 Priority bay</a>
-      <a href="#iteration-3">03 Paired decks</a>
-      <a href="#iteration-4">04 Offset rail</a>
-      <a href="#iteration-5">05 Stepped rack</a>
+      <a href="#priority-bay">02 Priority bay</a>
     </nav>
 
     <main class="prototype-page">
       <header class="prototype-brief">
         <p class="mono-label">Settings layout exploration</p>
-        <h1>Five focused iterations of the channel rack layout</h1>
-        <p>Each option uses the same Settings content and imports the current app card and control styling from the live stylesheets. The only prototype changes here are spatial arrangement, grouping, density, and responsive behavior.</p>
+        <h1>Priority Bay settings layout</h1>
+        <p>This prototype keeps the selected rack direction only. It imports the current app card and control styling from the live stylesheets, then uses independent vertical columns so every card pair has the same spacing.</p>
       </header>
 
-      <section class="option" id="iteration-1" aria-labelledby="iteration-1-title">
-        <header class="option-head">
-          <div>
-            <div class="option-title">
-              <span class="option-kicker">01</span>
-              <h2 id="iteration-1-title">Four Lane Rack</h2>
-            </div>
-            <p>Four narrow vertical channels keep every card readable while allowing Storage, policy, session capture, and MCP to scan as separate lanes.</p>
-          </div>
-          <span class="density-note">4 columns / stacked lanes</span>
-        </header>
-        <div class="option-stage">
-          <div class="settings-panel">
-            <div class="settings-layout rack-grid layout-four-lanes" data-settings-target></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="option" id="iteration-2" aria-labelledby="iteration-2-title">
+      <section class="option" id="priority-bay" aria-labelledby="priority-bay-title">
         <header class="option-head">
           <div>
             <div class="option-title">
               <span class="option-kicker">02</span>
-              <h2 id="iteration-2-title">Priority Bay</h2>
+              <h2 id="priority-bay-title">Priority Bay</h2>
             </div>
-            <p>MCP becomes the center bay without becoming a full-width panel. Lower-frequency storage and danger controls sit in slimmer guard rails.</p>
+            <p>MCP remains the priority bay without becoming a full-width panel. Lower-frequency storage and danger controls sit in slimmer guard rails.</p>
           </div>
-          <span class="density-note">5 columns / centered MCP</span>
+          <span class="density-note">5 columns / independent stacks</span>
         </header>
         <div class="option-stage">
           <div class="settings-panel">
-            <div class="settings-layout rack-grid layout-priority-bay" data-settings-target></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="option" id="iteration-3" aria-labelledby="iteration-3-title">
-        <header class="option-head">
-          <div>
-            <div class="option-title">
-              <span class="option-kicker">03</span>
-              <h2 id="iteration-3-title">Paired Decks</h2>
+            <div class="settings-layout rack-grid layout-priority-bay" data-settings-target>
+              <div class="priority-column" data-card-column="storage"></div>
+              <div class="priority-column" data-card-column="policy"></div>
+              <div class="priority-column" data-card-column="session"></div>
+              <div class="priority-column" data-card-column="mcp"></div>
+              <div class="priority-column" data-card-column="danger"></div>
             </div>
-            <p>Three balanced decks group policy and enrichment on the left, durable storage in the middle, and agent access on the right.</p>
-          </div>
-          <span class="density-note">3 columns / paired stacks</span>
-        </header>
-        <div class="option-stage">
-          <div class="settings-panel">
-            <div class="settings-layout rack-grid layout-paired-decks" data-settings-target></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="option" id="iteration-4" aria-labelledby="iteration-4-title">
-        <header class="option-head">
-          <div>
-            <div class="option-title">
-              <span class="option-kicker">04</span>
-              <h2 id="iteration-4-title">Offset Rail</h2>
-            </div>
-            <p>A left rail carries database facts and destructive actions while hooks form a tall operational spine beside the MCP card.</p>
-          </div>
-          <span class="density-note">4 columns / offset stacks</span>
-        </header>
-        <div class="option-stage">
-          <div class="settings-panel">
-            <div class="settings-layout rack-grid layout-offset-rail" data-settings-target></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="option" id="iteration-5" aria-labelledby="iteration-5-title">
-        <header class="option-head">
-          <div>
-            <div class="option-title">
-              <span class="option-kicker">05</span>
-              <h2 id="iteration-5-title">Stepped Rack</h2>
-            </div>
-            <p>A denser, masonry-like rack uses short cards as steps around the tall MCP bay, reducing the blocky feeling of equal columns.</p>
-          </div>
-          <span class="density-note">5 columns / staggered rhythm</span>
-        </header>
-        <div class="option-stage">
-          <div class="settings-panel">
-            <div class="settings-layout rack-grid layout-stepped-rack" data-settings-target></div>
           </div>
         </div>
       </section>
@@ -807,7 +657,22 @@
   <script>
     const template = document.getElementById("settings-card-set");
     document.querySelectorAll("[data-settings-target]").forEach((target) => {
-      target.append(template.content.cloneNode(true));
+      const clone = template.content.cloneNode(true);
+      const columnByClass = new Map([
+        ["storage", "storage"],
+        ["privacy", "policy"],
+        ["enrichment", "policy"],
+        ["hooks", "session"],
+        ["advanced", "session"],
+        ["mcp", "mcp"],
+        ["danger", "danger"]
+      ]);
+
+      clone.querySelectorAll(".settings-section").forEach((card) => {
+        const className = [...columnByClass.keys()].find((name) => card.classList.contains(name));
+        const columnName = columnByClass.get(className);
+        target.querySelector(`[data-card-column="${columnName}"]`)?.append(card);
+      });
     });
   </script>
 </body>
