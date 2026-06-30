@@ -1,0 +1,1391 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Masthead Usage Heavy Card Animation Directions</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --page-bg: #031019;
+        --toolbar-bg: #051724;
+        --panel-bg: #061925;
+        --card-bg: #071b28;
+        --card-top: rgba(190, 225, 245, 0.06);
+        --card-bottom: rgba(0, 0, 0, 0.54);
+        --line: rgba(92, 153, 187, 0.18);
+        --line-strong: rgba(46, 167, 255, 0.34);
+        --ink: #f6fbff;
+        --body: #d6e4ef;
+        --mute: #91a8ba;
+        --ash: #61798e;
+        --blue: #2ea7ff;
+        --green: #36d869;
+        --yellow: #ffcf36;
+        --red: #ff483e;
+        --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        --ease-heavy: cubic-bezier(0.14, 0.72, 0.13, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-height: 100%;
+        background: var(--page-bg);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        font-feature-settings: "calt", "kern", "liga", "ss03";
+        font-variant-numeric: tabular-nums;
+        -webkit-font-smoothing: antialiased;
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at 22% -10%, rgba(46, 167, 255, 0.08), transparent 32%),
+          linear-gradient(180deg, #031019 0%, #020a10 100%);
+        color: var(--body);
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .page-shell {
+        width: min(1480px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 18px 0 52px;
+      }
+
+      .prototype-head {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+        align-items: start;
+        border-bottom: 1px solid rgba(92, 153, 187, 0.16);
+        background: rgba(3, 16, 25, 0.72);
+        padding: 10px 0 12px;
+      }
+
+      .prototype-head h1 {
+        margin: 0;
+        color: var(--ink);
+        font-size: clamp(20px, 2.2vw, 28px);
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .prototype-head p {
+        margin: 6px 0 0;
+        max-width: 120ch;
+        color: var(--mute);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .index {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 6px;
+      }
+
+      .index a {
+        min-height: 32px;
+        border: 1px solid rgba(92, 153, 187, 0.2);
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.034), transparent),
+          #04131f;
+        color: var(--body);
+        padding: 7px 9px;
+        text-decoration: none;
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+
+      .direction {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+        padding-top: 16px;
+        scroll-margin-top: 18px;
+      }
+
+      .direction-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: end;
+      }
+
+      .direction-kicker {
+        color: var(--blue);
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+
+      .direction h2 {
+        margin: 3px 0 0;
+        color: var(--ink);
+        font-size: 20px;
+        line-height: 1.15;
+      }
+
+      .direction-copy {
+        margin: 5px 0 0;
+        max-width: 88ch;
+        color: var(--mute);
+        font-size: 13px;
+        line-height: 1.42;
+      }
+
+      .replay-button {
+        min-height: 40px;
+        border: 1px solid rgba(46, 167, 255, 0.34);
+        clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%);
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.045), transparent),
+          #061925;
+        color: var(--ink);
+        cursor: pointer;
+        padding: 0 13px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        transition: background-color 160ms var(--ease-heavy), border-color 160ms var(--ease-heavy), transform 160ms var(--ease-heavy);
+      }
+
+      .replay-button:hover {
+        border-color: rgba(46, 167, 255, 0.48);
+        background-color: #082235;
+      }
+
+      .replay-button:active {
+        transform: scale(0.96);
+      }
+
+      .usage-frame {
+        border: 1px solid rgba(92, 153, 187, 0.18);
+        background:
+          linear-gradient(180deg, rgba(190, 225, 245, 0.022), transparent 42%),
+          #04131f;
+        padding: 12px;
+      }
+
+      .usage-panel {
+        display: grid;
+        grid-auto-rows: max-content;
+        align-content: start;
+        gap: 12px;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      .usage-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        justify-self: center;
+        width: fit-content;
+        max-width: 100%;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        margin: 0 auto;
+        clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%);
+        border: 1px solid rgba(92, 153, 187, 0.18);
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.032), transparent),
+          repeating-linear-gradient(135deg, rgba(196, 226, 248, 0.012) 0 1px, transparent 1px 18px),
+          var(--toolbar-bg);
+        padding: 6px;
+      }
+
+      .usage-toolbar button {
+        min-height: 34px;
+        border: 1px solid rgba(92, 153, 187, 0.2);
+        border-radius: 1px;
+        clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.032), transparent),
+          #04131f;
+        color: var(--body);
+        padding: 0 11px;
+        font-size: 12px;
+      }
+
+      .usage-toolbar button.active {
+        border-color: rgba(46, 167, 255, 0.36);
+        background-color: #09263a;
+        color: var(--ink);
+      }
+
+      .usage-summary-strip {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .usage-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .usage-card {
+        --impact-shadow: rgba(0, 0, 0, 0.38);
+        position: relative;
+        isolation: isolate;
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid rgba(46, 167, 255, 0.24);
+        border-radius: 5px;
+        background: var(--card-bg);
+        box-shadow:
+          inset 0 1px 0 var(--card-top),
+          inset 0 -1px 0 var(--card-bottom);
+        transform-origin: 50% 100%;
+        will-change: transform, opacity, filter;
+      }
+
+      .usage-card::before {
+        content: "";
+        position: absolute;
+        inset: 8px 0;
+        z-index: 0;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='28' viewBox='0 0 96 28'%3E%3Cpath d='M0 7h96M0 18h96' stroke='%230d2d40' stroke-width='1' stroke-opacity='.5'/%3E%3Cpath d='M0 8h96M0 19h96' stroke='%23030d14' stroke-width='1' stroke-opacity='.32'/%3E%3C/svg%3E");
+        background-repeat: repeat;
+        background-size: 96px 28px;
+        pointer-events: none;
+      }
+
+      .usage-card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        border-bottom: 2px solid rgba(46, 167, 255, 0.42);
+        border-radius: inherit;
+        pointer-events: none;
+      }
+
+      .usage-card > * {
+        position: relative;
+        z-index: 1;
+      }
+
+      .usage-metric {
+        min-height: 74px;
+        padding: 9px 10px 10px;
+      }
+
+      .usage-metric dt,
+      .usage-coverage dt {
+        color: var(--mute);
+        font-size: 10.5px;
+        line-height: 1.1;
+      }
+
+      .usage-metric dd,
+      .usage-coverage dd {
+        margin: 4px 0 0;
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 17px;
+        font-weight: 600;
+        line-height: 1;
+      }
+
+      .usage-table-card,
+      .usage-coverage {
+        min-height: 204px;
+        padding: 14px;
+      }
+
+      .usage-table-card h3,
+      .usage-coverage h3 {
+        margin: 0 0 10px;
+        color: var(--ink);
+        font-size: 14px;
+        line-height: 1.2;
+      }
+
+      .usage-table-wrap {
+        max-height: 188px;
+        overflow: hidden;
+      }
+
+      .usage-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: 12px;
+      }
+
+      .usage-table th,
+      .usage-table td {
+        border-bottom: 1px solid rgba(155, 205, 230, 0.08);
+        padding: 8px 4px;
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      .usage-table th:first-child,
+      .usage-table td:first-child {
+        width: 38%;
+        overflow: hidden;
+        text-align: left;
+        text-overflow: ellipsis;
+      }
+
+      .usage-table th {
+        color: var(--ash);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .usage-table td {
+        color: var(--body);
+        font-family: var(--font-mono);
+      }
+
+      .usage-table td:first-child {
+        color: var(--ink);
+        font-family: var(--font-ui);
+        font-weight: 600;
+      }
+
+      .usage-coverage dl {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 12px;
+        margin: 0;
+      }
+
+      .usage-coverage dl div {
+        min-width: 0;
+        min-height: 58px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.025);
+        padding: 10px 11px;
+      }
+
+      .usage-card:nth-of-type(1) { --i: 0; }
+      .usage-card:nth-of-type(2) { --i: 1; }
+      .usage-card:nth-of-type(3) { --i: 2; }
+      .usage-card:nth-of-type(4) { --i: 3; }
+      .usage-card:nth-of-type(5) { --i: 4; }
+      .usage-card:nth-of-type(6) { --i: 5; }
+
+      .usage-summary-strip .usage-card:nth-child(1) { --i: 0; }
+      .usage-summary-strip .usage-card:nth-child(2) { --i: 1; }
+      .usage-summary-strip .usage-card:nth-child(3) { --i: 2; }
+      .usage-summary-strip .usage-card:nth-child(4) { --i: 3; }
+      .usage-summary-strip .usage-card:nth-child(5) { --i: 4; }
+      .usage-summary-strip .usage-card:nth-child(6) { --i: 5; }
+      .usage-grid .usage-card:nth-child(1) { --i: 6; }
+      .usage-grid .usage-card:nth-child(2) { --i: 7; }
+      .usage-grid .usage-card:nth-child(3) { --i: 8; }
+      .usage-grid .usage-card:nth-child(4) { --i: 9; }
+      .usage-coverage.usage-card { --i: 10; }
+
+      .is-replaying .usage-card {
+        animation-delay: calc(var(--i) * 26ms);
+      }
+
+      .option-hydraulic.is-replaying .usage-card {
+        animation: hydraulic-lift-plate 520ms cubic-bezier(0.15, 0.78, 0.14, 1) both;
+      }
+
+      .option-flush.is-replaying .usage-card {
+        animation: flush-deck-elevation 500ms cubic-bezier(0.18, 0.78, 0.12, 1) both;
+      }
+
+      .option-guidepost.is-replaying .usage-card {
+        animation: guidepost-jack-raise 540ms steps(4, end) both;
+      }
+
+      .option-scissor.is-replaying .usage-card {
+        animation: scissor-lift-lockout 520ms cubic-bezier(0.18, 0.84, 0.12, 1) both;
+      }
+
+      .option-foundry.is-replaying .usage-card {
+        animation: foundry-table-rise 480ms cubic-bezier(0.2, 0.82, 0.16, 1) both;
+      }
+
+      .option-shutter-clamp.is-replaying .usage-card {
+        animation: steel-shutter-clamp 460ms cubic-bezier(0.2, 0.86, 0.14, 1) both;
+      }
+
+      .option-dovetail-gate.is-replaying .usage-card {
+        animation: dovetail-gate-shear 480ms cubic-bezier(0.22, 0.88, 0.14, 1) both;
+      }
+
+      .option-twin-shutter.is-replaying .usage-card {
+        animation: twin-shutter-pinch 500ms cubic-bezier(0.18, 0.82, 0.13, 1) both;
+      }
+
+      .option-pressure-seal.is-replaying .usage-card {
+        animation: pressure-seal-seat 460ms cubic-bezier(0.2, 0.86, 0.16, 1) both;
+      }
+
+      .option-static-lock.is-replaying .usage-card {
+        animation: static-lock-plate 440ms cubic-bezier(0.22, 0.86, 0.16, 1) both;
+      }
+
+      .option-cold-plate.is-replaying .usage-card {
+        animation: cold-plate-slide-lock 520ms cubic-bezier(0.16, 0.78, 0.12, 1) both;
+      }
+
+      .option-tempered-edge.is-replaying .usage-card {
+        animation: tempered-edge-drop-seat 500ms cubic-bezier(0.18, 0.82, 0.14, 1) both;
+      }
+
+      .option-deadbolt-surface.is-replaying .usage-card {
+        animation: deadbolt-surface-throw 480ms cubic-bezier(0.18, 0.8, 0.14, 1) both;
+      }
+
+      .option-bolt-rail.is-replaying .usage-card {
+        animation: bolt-rail-catch 520ms cubic-bezier(0.16, 0.8, 0.12, 1) both;
+      }
+
+      .option-press-dock.is-replaying .usage-card {
+        animation: press-fit-dock 500ms cubic-bezier(0.18, 0.82, 0.14, 1) both;
+      }
+
+      .option-lift-block.is-replaying .usage-card {
+        animation: lift-block-expand 500ms cubic-bezier(0.17, 0.78, 0.13, 1) both;
+      }
+
+      .option-telescoping-plate.is-replaying .usage-card {
+        animation: telescoping-plate-seat 520ms cubic-bezier(0.16, 0.8, 0.12, 1) both;
+      }
+
+      .option-riser-clamp.is-replaying .usage-card {
+        animation: riser-clamp-lock 480ms cubic-bezier(0.18, 0.82, 0.14, 1) both;
+      }
+
+      @keyframes hydraulic-lift-plate {
+        0% {
+          opacity: 1;
+          clip-path: inset(88% 0 0 0);
+          transform: translateY(6px) scaleY(0.992);
+          border-color: rgba(46, 167, 255, 0.08);
+          box-shadow:
+            0 8px 0 rgba(0, 0, 0, 0.44),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        70% {
+          clip-path: inset(0 0 0 0);
+          transform: translateY(1px) scaleY(1.002);
+          border-color: rgba(46, 167, 255, 0.46);
+          box-shadow:
+            0 2px 0 rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        100% {
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0) scaleY(1);
+          border-color: rgba(46, 167, 255, 0.24);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes flush-deck-elevation {
+        0% {
+          opacity: 1;
+          clip-path: inset(100% 0 0 0);
+          transform: translateY(0);
+          border-color: rgba(46, 167, 255, 0.06);
+          filter: brightness(0.82);
+        }
+        76% {
+          clip-path: inset(0 0 0 0);
+          border-color: rgba(46, 167, 255, 0.5);
+          filter: brightness(1.08);
+        }
+        100% {
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1);
+        }
+      }
+
+      @keyframes guidepost-jack-raise {
+        0% {
+          opacity: 1;
+          clip-path: inset(76% 0 0 0);
+          transform: translateY(5px) scaleY(0.994);
+          border-color: rgba(46, 167, 255, 0.08);
+        }
+        35% {
+          clip-path: inset(44% 0 0 0);
+          transform: translateY(3px) scaleY(0.996);
+        }
+        65% {
+          clip-path: inset(16% 0 0 0);
+          transform: translateY(1px) scaleY(1);
+          border-color: rgba(46, 167, 255, 0.42);
+        }
+        100% {
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0) scaleY(1);
+          border-color: rgba(46, 167, 255, 0.24);
+        }
+      }
+
+      @keyframes scissor-lift-lockout {
+        0% {
+          opacity: 1;
+          clip-path: inset(94% 0 0 0);
+          transform: translateY(4px) scaleY(0.985);
+          border-color: rgba(46, 167, 255, 0.08);
+        }
+        66% {
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0) scaleY(1.006);
+          border-color: rgba(46, 167, 255, 0.48);
+        }
+        82% {
+          transform: translateY(0) scaleY(0.996);
+        }
+        100% {
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0) scaleY(1);
+          border-color: rgba(46, 167, 255, 0.24);
+        }
+      }
+
+      @keyframes foundry-table-rise {
+        0% {
+          opacity: 1;
+          clip-path: inset(68% 0 0 0);
+          transform: translateY(3px);
+          border-color: rgba(46, 167, 255, 0.08);
+          box-shadow:
+            0 6px 0 rgba(0, 0, 0, 0.42),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        62% {
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0);
+          border-color: rgba(46, 167, 255, 0.44);
+          box-shadow:
+            0 1px 0 rgba(0, 0, 0, 0.58),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        100% {
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0);
+          border-color: rgba(46, 167, 255, 0.24);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes steel-shutter-clamp {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 100% 0 0);
+          transform: translateY(0);
+          border-color: rgba(46, 167, 255, 0.08);
+        }
+        70% {
+          clip-path: inset(0 0 0 0);
+          border-color: rgba(46, 167, 255, 0.5);
+          filter: brightness(1.08);
+        }
+        100% {
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1);
+        }
+      }
+
+      @keyframes dovetail-gate-shear {
+        0% {
+          opacity: 1;
+          clip-path: polygon(0 0, 0 0, 0 100%, 0 100%);
+          transform: translateY(0) scaleX(0.998);
+          border-color: rgba(46, 167, 255, 0.08);
+        }
+        68% {
+          clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+          transform: translateY(0) scaleX(1);
+          border-color: rgba(46, 167, 255, 0.48);
+        }
+        100% {
+          clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+          transform: translateY(0) scaleX(1);
+          border-color: rgba(46, 167, 255, 0.24);
+        }
+      }
+
+      @keyframes twin-shutter-pinch {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 50% 0 50%);
+          transform: translateY(0);
+          border-color: rgba(46, 167, 255, 0.08);
+        }
+        72% {
+          clip-path: inset(0 0 0 0);
+          border-color: rgba(46, 167, 255, 0.48);
+          box-shadow:
+            0 0 0 2px rgba(46, 167, 255, 0.08),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        100% {
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0);
+          border-color: rgba(46, 167, 255, 0.24);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes pressure-seal-seat {
+        0% {
+          opacity: 0.82;
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0) scaleY(0.992);
+          border-color: rgba(46, 167, 255, 0.1);
+          filter: brightness(0.84);
+        }
+        64% {
+          opacity: 1;
+          transform: translateY(0) scaleY(1.004);
+          border-color: rgba(46, 167, 255, 0.5);
+          filter: brightness(1.1);
+        }
+        100% {
+          opacity: 1;
+          transform: translateY(0) scaleY(1);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1);
+        }
+      }
+
+      @keyframes static-lock-plate {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 0 0 0);
+          transform: translateY(0);
+          border-color: rgba(46, 167, 255, 0.08);
+          filter: brightness(0.72) contrast(1.08);
+        }
+        58% {
+          border-color: rgba(46, 167, 255, 0.52);
+          filter: brightness(1.12) contrast(1.02);
+          box-shadow:
+            0 0 0 2px rgba(46, 167, 255, 0.1),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        100% {
+          transform: translateY(0);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1) contrast(1);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes cold-plate-slide-lock {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 0 0 0);
+          transform: translateX(-16px) scaleX(1.006);
+          border-color: rgba(46, 167, 255, 0.18);
+          filter: brightness(0.99) saturate(0.99);
+          box-shadow:
+            7px 0 0 rgba(0, 0, 0, 0.28),
+            inset 0 1px 0 rgba(190, 225, 245, 0.052),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        66% {
+          transform: translateX(2px) scaleX(0.997);
+          border-color: rgba(46, 167, 255, 0.34);
+          filter: brightness(1.018) saturate(1.012);
+          box-shadow:
+            1px 0 0 rgba(0, 0, 0, 0.36),
+            inset 0 1px 0 rgba(190, 225, 245, 0.07),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        82% {
+          transform: translateX(-1px) scaleX(1.001);
+        }
+        100% {
+          transform: translateX(0) scaleX(1);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1) saturate(1);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes tempered-edge-drop-seat {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 0 0 0);
+          transform: translateY(-12px) scaleY(1.006);
+          border-color: rgba(54, 216, 105, 0.16);
+          filter: brightness(0.992) saturate(0.99);
+          box-shadow:
+            0 9px 0 rgba(0, 0, 0, 0.28),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        64% {
+          transform: translateY(2px) scaleY(0.996);
+          border-color: rgba(54, 216, 105, 0.3);
+          filter: brightness(1.016) saturate(1.012);
+          box-shadow:
+            0 1px 0 rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        82% {
+          transform: translateY(-1px) scaleY(1.002);
+        }
+        100% {
+          transform: translateY(0) scaleY(1);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1) saturate(1);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes deadbolt-surface-throw {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 0 0 0);
+          transform: translateX(14px) scaleX(0.994);
+          border-color: rgba(196, 226, 248, 0.18);
+          filter: brightness(0.99) contrast(1.01);
+          box-shadow:
+            -6px 0 0 rgba(0, 0, 0, 0.26),
+            inset 0 1px 0 rgba(190, 225, 245, 0.058),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        60% {
+          transform: translateX(-2px) scaleX(1.004);
+          border-color: rgba(196, 226, 248, 0.32);
+          filter: brightness(1.014) contrast(1.012);
+          box-shadow:
+            1px 0 0 rgba(0, 0, 0, 0.36),
+            inset 0 1px 0 rgba(190, 225, 245, 0.066),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        80% {
+          transform: translateX(1px) scaleX(0.999);
+        }
+        100% {
+          transform: translateX(0) scaleX(1);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1) contrast(1);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes bolt-rail-catch {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 0 0 0);
+          transform: translateX(-18px) translateY(4px) scale(1.004);
+          border-color: rgba(46, 167, 255, 0.16);
+          filter: brightness(0.99);
+          box-shadow:
+            8px 5px 0 rgba(0, 0, 0, 0.26),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        62% {
+          transform: translateX(2px) translateY(0) scale(0.997);
+          border-color: rgba(46, 167, 255, 0.34);
+          filter: brightness(1.016);
+          box-shadow:
+            0 1px 0 rgba(0, 0, 0, 0.38),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        82% {
+          transform: translateX(-1px) translateY(0) scale(1.001);
+        }
+        100% {
+          transform: translateX(0) translateY(0) scale(1);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes press-fit-dock {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 0 0 0);
+          transform: translateY(13px) scaleY(0.994);
+          border-color: rgba(255, 207, 54, 0.16);
+          filter: brightness(0.99) saturate(0.99);
+          box-shadow:
+            0 -6px 0 rgba(0, 0, 0, 0.22),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        58% {
+          transform: translateY(-2px) scaleY(1.004);
+          border-color: rgba(255, 207, 54, 0.28);
+          filter: brightness(1.014) saturate(1.01);
+          box-shadow:
+            0 1px 0 rgba(0, 0, 0, 0.38),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        78% {
+          transform: translateY(1px) scaleY(0.998);
+        }
+        100% {
+          transform: translateY(0) scaleY(1);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1) saturate(1);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes lift-block-expand {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 0 0 0);
+          transform: translateY(9px) scale(0.968);
+          border-color: rgba(46, 167, 255, 0.16);
+          filter: brightness(0.992);
+          box-shadow:
+            0 -3px 0 rgba(0, 0, 0, 0.18),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        66% {
+          transform: translateY(-1px) scale(1.004);
+          border-color: rgba(46, 167, 255, 0.32);
+          filter: brightness(1.012);
+          box-shadow:
+            0 1px 0 rgba(0, 0, 0, 0.34),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        84% {
+          transform: translateY(1px) scale(0.999);
+        }
+        100% {
+          transform: translateY(0) scale(1);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes telescoping-plate-seat {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 0 0 0);
+          transform: translateY(8px) scaleX(0.972) scaleY(0.955);
+          border-color: rgba(196, 226, 248, 0.16);
+          filter: brightness(0.99) contrast(1.006);
+          box-shadow:
+            0 -3px 0 rgba(0, 0, 0, 0.2),
+            inset 0 1px 0 rgba(190, 225, 245, 0.05),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        58% {
+          transform: translateY(0) scaleX(1.004) scaleY(1.008);
+          border-color: rgba(196, 226, 248, 0.3);
+          filter: brightness(1.012) contrast(1.01);
+          box-shadow:
+            0 1px 0 rgba(0, 0, 0, 0.34),
+            inset 0 1px 0 rgba(190, 225, 245, 0.07),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        78% {
+          transform: translateY(0) scaleX(0.998) scaleY(0.997);
+        }
+        100% {
+          transform: translateY(0) scaleX(1) scaleY(1);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1) contrast(1);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @keyframes riser-clamp-lock {
+        0% {
+          opacity: 1;
+          clip-path: inset(0 0 0 0);
+          transform: translateY(7px) scale(0.978);
+          border-color: rgba(255, 207, 54, 0.14);
+          filter: brightness(0.994) saturate(0.99);
+          box-shadow:
+            0 -2px 0 rgba(0, 0, 0, 0.18),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        60% {
+          transform: translateY(-1px) scale(1.003);
+          border-color: rgba(255, 207, 54, 0.24);
+          filter: brightness(1.01) saturate(1.008);
+          box-shadow:
+            0 1px 0 rgba(0, 0, 0, 0.32),
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+        82% {
+          transform: translateY(0) scale(0.998);
+        }
+        100% {
+          transform: translateY(0) scale(1);
+          border-color: rgba(46, 167, 255, 0.24);
+          filter: brightness(1) saturate(1);
+          box-shadow:
+            inset 0 1px 0 var(--card-top),
+            inset 0 -1px 0 var(--card-bottom);
+        }
+      }
+
+      @media (max-width: 980px) {
+        .prototype-head,
+        .direction-head {
+          grid-template-columns: 1fr;
+        }
+
+        .index {
+          justify-content: flex-start;
+        }
+
+        .usage-summary-strip,
+        .usage-grid,
+        .usage-coverage dl {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 560px) {
+        .page-shell {
+          width: min(100vw - 20px, 1480px);
+        }
+
+        .usage-summary-strip,
+        .usage-grid,
+        .usage-coverage dl {
+          grid-template-columns: 1fr;
+        }
+
+        .usage-toolbar {
+          width: 100%;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .is-replaying .usage-card {
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="prototype-head">
+        <div>
+          <h1>Usage Tab Heavy Card Animation Directions</h1>
+          <p>Eighteen focused variations using the same Usage tab content. Options 1-5 explore heavy lift-table motion, options 6-10 iterate on shutter and dovetail reveals, options 11-15 test present-frame lock travel, and options 16-18 try smaller cards rising up, expanding, and locking into place.</p>
+        </div>
+        <nav class="index" aria-label="Prototype options">
+          <a href="#option-1">01 hydraulic</a>
+          <a href="#option-2">02 flush deck</a>
+          <a href="#option-3">03 guidepost</a>
+          <a href="#option-4">04 scissor</a>
+          <a href="#option-5">05 foundry</a>
+          <a href="#option-6">06 shutter</a>
+          <a href="#option-7">07 dovetail</a>
+          <a href="#option-8">08 twin gate</a>
+          <a href="#option-9">09 pressure</a>
+          <a href="#option-10">10 static lock</a>
+          <a href="#option-11">11 slide lock</a>
+          <a href="#option-12">12 drop seat</a>
+          <a href="#option-13">13 throw lock</a>
+          <a href="#option-14">14 rail catch</a>
+          <a href="#option-15">15 press dock</a>
+          <a href="#option-16">16 lift block</a>
+          <a href="#option-17">17 telescoping</a>
+          <a href="#option-18">18 riser clamp</a>
+        </nav>
+      </header>
+
+      <section id="option-1" class="direction option-hydraulic is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 01 / floor cylinder / lift plate</div>
+            <h2>Hydraulic Lift Plate</h2>
+            <p class="direction-copy">Cards rise from a floor slot with only six pixels of travel. The bottom-up reveal does most of the work, then the plate seats with a short pressure stop.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-2" class="direction option-flush is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 02 / flush deck / elevator plate</div>
+            <h2>Flush Deck Elevation</h2>
+            <p class="direction-copy">The cards do not translate at all. They emerge from the surface like a deck elevator, using a straight bottom mask and a heavy brightness lock.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-3" class="direction option-guidepost is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 03 / guideposts / stepped jack</div>
+            <h2>Guidepost Jack Raise</h2>
+            <p class="direction-copy">A stepped jack motion gives the lift a mechanical cadence without letting it float. Travel stays under five pixels while the mask rises in hard increments.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-4" class="direction option-scissor is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 04 / scissor lift / lockout</div>
+            <h2>Scissor Lift Lockout</h2>
+            <p class="direction-copy">The cards push upward like a compact lift and hard-lock at the top. It has a tiny vertical press, then a compressed metal stop.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-5" class="direction option-foundry is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 05 / foundry table / platen rise</div>
+            <h2>Foundry Table Rise</h2>
+            <p class="direction-copy">A heavier table version of the lift concept. The cards rise into view from below and shed their floor shadow as they settle into the surface.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-6" class="direction option-shutter-clamp is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 06 / favorite 7 / steel shutter</div>
+            <h2>Steel Shutter Clamp</h2>
+            <p class="direction-copy">A tighter version of option 7. The cards do not travel; a straight shutter opens across the face and the edge clamps into its final border state.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-7" class="direction option-dovetail-gate is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 07 / favorite 4 / dovetail gate</div>
+            <h2>Dovetail Gate Shear</h2>
+            <p class="direction-copy">This keeps the dovetail idea but removes the old lateral throw. The card is already seated, then a machined gate shears open in place.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-8" class="direction option-twin-shutter is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 08 / favorite 7 / twin shutters</div>
+            <h2>Twin Shutter Pinch</h2>
+            <p class="direction-copy">Two shutters open from the center line, creating a heavy gate feel with no body travel. The lock moment is a short border pressure pulse.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-9" class="direction option-pressure-seal is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 09 / favorite 4+7 / pressure seal</div>
+            <h2>Pressure Seal Seat</h2>
+            <p class="direction-copy">The content is present from the first frame, then the metal surface brightens and compresses slightly as if pressure is applied from below.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-10" class="direction option-static-lock is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 10 / favorite 7 / no-travel lock</div>
+            <h2>Static Lock Plate</h2>
+            <p class="direction-copy">The most restrained version. No mask travel and no card movement, just a low brightness state snapping into a locked steel plate.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-11" class="direction option-cold-plate is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 11 / present frame / lateral slide lock</div>
+            <h2>Cold Plate Slide Lock</h2>
+            <p class="direction-copy">Cards are visible from the first frame, then travel left-to-right into a cold steel stop. The motion has real throw, a small rebound, and only a restrained edge pulse.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-12" class="direction option-tempered-edge is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 12 / present frame / tempered drop seat</div>
+            <h2>Tempered Drop Seat</h2>
+            <p class="direction-copy">The cards begin fully visible above the seat, drop into position, overshoot by two pixels, and settle. The green temper is faint so the travel carries the lock-in.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-13" class="direction option-deadbolt-surface is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 13 / present frame / deadbolt throw</div>
+            <h2>Deadbolt Surface Throw</h2>
+            <p class="direction-copy">The cards start visible to the right, throw into place like a bolt, then rebound against the final edge. Lighting stays almost neutral; the force comes from travel.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-14" class="direction option-bolt-rail is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 14 / present frame / diagonal rail catch</div>
+            <h2>Bolt Rail Catch</h2>
+            <p class="direction-copy">A heavier diagonal catch: cards start visible down-left, drive into the rail, and clamp back to zero. It reads more physical without introducing a hidden reveal.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-15" class="direction option-press-dock is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 15 / present frame / press-fit dock</div>
+            <h2>Press-Fit Dock</h2>
+            <p class="direction-copy">Cards start visible below the seat, press upward into the frame, rebound, then lock. The color change is deliberately small, with a warm edge only at the impact.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-16" class="direction option-lift-block is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 16 / scale rise / lift block</div>
+            <h2>Lift Block Expand</h2>
+            <p class="direction-copy">Cards start visible, smaller, and slightly low. They rise into place, expand just past full size, then compress into a hard metal lock.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-17" class="direction option-telescoping-plate is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 17 / scale rise / telescoping plate</div>
+            <h2>Telescoping Plate Seat</h2>
+            <p class="direction-copy">A more mechanical version: the cards begin squatter, telescope upward into full height, over-expand by a hair, then settle flat.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+
+      <section id="option-18" class="direction option-riser-clamp is-replaying" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker">Option 18 / scale rise / riser clamp</div>
+            <h2>Riser Clamp Lock</h2>
+            <p class="direction-copy">The most restrained of the three: a short upward rise, a modest scale expansion, and a final clamp with minimal warm edge pressure.</p>
+          </div>
+          <button class="replay-button" type="button" data-replay>Reset animation</button>
+        </div>
+        <div class="usage-frame"></div>
+      </section>
+    </main>
+
+    <template id="usage-template">
+      <div class="usage-panel">
+        <div class="usage-toolbar" aria-label="Usage window">
+          <button class="active" type="button">Today</button>
+          <button type="button">24h</button>
+          <button type="button">7d</button>
+          <button type="button">30d</button>
+          <button type="button">All</button>
+          <button type="button">Refresh</button>
+        </div>
+
+        <dl class="usage-summary-strip">
+          <div class="usage-card usage-metric"><dt>Sessions</dt><dd>42</dd></div>
+          <div class="usage-card usage-metric"><dt>Total tokens</dt><dd>6.1M</dd></div>
+          <div class="usage-card usage-metric"><dt>Tokens/m</dt><dd>842</dd></div>
+          <div class="usage-card usage-metric"><dt>Tool calls</dt><dd>2,707</dd></div>
+          <div class="usage-card usage-metric"><dt>File effects</dt><dd>438</dd></div>
+          <div class="usage-card usage-metric"><dt>MCP queries</dt><dd>119</dd></div>
+        </dl>
+
+        <section class="usage-grid">
+          <section class="usage-card usage-table-card">
+            <h3>By model</h3>
+            <div class="usage-table-wrap">
+              <table class="usage-table">
+                <thead><tr><th>Model</th><th>Sessions</th><th>Input</th><th>Output</th><th>Total</th></tr></thead>
+                <tbody>
+                  <tr><td>gpt-5.5</td><td>21</td><td>2.7M</td><td>1.4M</td><td>4.1M</td></tr>
+                  <tr><td>gpt-5.4</td><td>12</td><td>921K</td><td>510K</td><td>1.4M</td></tr>
+                  <tr><td>gpt-5.3-codex</td><td>7</td><td>382K</td><td>181K</td><td>563K</td></tr>
+                  <tr><td>local deterministic</td><td>2</td><td>18K</td><td>6K</td><td>24K</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="usage-card usage-table-card">
+            <h3>By project</h3>
+            <div class="usage-table-wrap">
+              <table class="usage-table">
+                <thead><tr><th>Project</th><th>Sessions</th><th>Tokens</th><th>Tools</th><th>Files</th></tr></thead>
+                <tbody>
+                  <tr><td>Masthead</td><td>18</td><td>2.8M</td><td>1,034</td><td>166</td></tr>
+                  <tr><td>Brain</td><td>10</td><td>1.5M</td><td>628</td><td>92</td></tr>
+                  <tr><td>Codex plugins</td><td>8</td><td>1.1M</td><td>512</td><td>111</td></tr>
+                  <tr><td>Interface studies</td><td>6</td><td>702K</td><td>533</td><td>69</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="usage-card usage-table-card">
+            <h3>By runtime</h3>
+            <div class="usage-table-wrap">
+              <table class="usage-table">
+                <thead><tr><th>Runtime</th><th>Sessions</th><th>Tokens</th><th>Messages</th><th>Tools</th></tr></thead>
+                <tbody>
+                  <tr><td>codex</td><td>31</td><td>4.9M</td><td>1,614</td><td>2,101</td></tr>
+                  <tr><td>cursor</td><td>4</td><td>521K</td><td>214</td><td>178</td></tr>
+                  <tr><td>antigravity</td><td>5</td><td>489K</td><td>248</td><td>263</td></tr>
+                  <tr><td>opencode</td><td>2</td><td>190K</td><td>96</td><td>165</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="usage-card usage-table-card">
+            <h3>Activity</h3>
+            <div class="usage-table-wrap">
+              <table class="usage-table">
+                <thead><tr><th>Bucket</th><th>Sessions</th><th>Tokens</th><th>Tools</th><th>Files</th></tr></thead>
+                <tbody>
+                  <tr><td>09:00</td><td>7</td><td>1.2M</td><td>461</td><td>84</td></tr>
+                  <tr><td>10:00</td><td>11</td><td>1.7M</td><td>699</td><td>112</td></tr>
+                  <tr><td>11:00</td><td>13</td><td>2.1M</td><td>891</td><td>147</td></tr>
+                  <tr><td>12:00</td><td>11</td><td>1.1M</td><td>656</td><td>95</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="usage-card usage-coverage">
+          <h3>Data coverage</h3>
+          <dl>
+            <div><dt>Sources</dt><dd>6</dd></div>
+            <div><dt>Imported</dt><dd>397</dd></div>
+            <div><dt>With tokens</dt><dd>281</dd></div>
+            <div><dt>Without tokens</dt><dd>116</dd></div>
+            <div><dt>Enriched</dt><dd>214</dd></div>
+            <div><dt>MCP queries</dt><dd>119</dd></div>
+          </dl>
+        </section>
+      </div>
+    </template>
+
+    <script>
+      const template = document.querySelector("#usage-template");
+
+      document.querySelectorAll(".usage-frame").forEach((frame) => {
+        frame.append(template.content.cloneNode(true));
+      });
+
+      function replay(section) {
+        section.classList.remove("is-replaying");
+        section.querySelectorAll(".usage-card").forEach((card) => {
+          card.style.animation = "none";
+        });
+        void section.offsetWidth;
+        section.querySelectorAll(".usage-card").forEach((card) => {
+          card.style.animation = "";
+        });
+        section.classList.add("is-replaying");
+      }
+
+      document.querySelectorAll("[data-replay]").forEach((button) => {
+        button.addEventListener("click", () => replay(button.closest("[data-option]")));
+      });
+    </script>
+  </body>
+</html>
