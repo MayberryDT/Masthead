@@ -31,7 +31,8 @@ describe("HistoryPanel pagination", () => {
 
     expect(onPageChange).toHaveBeenCalledWith(1);
     expect(currentContainer().textContent).toContain("Page 2 of 3");
-    expect(currentContainer().textContent).toContain("Showing 51-100 of 125");
+    expect(currentContainer().textContent).not.toContain("Showing 51-100 of 125");
+    expect(currentContainer().textContent).not.toContain("searching 125 canonical sessions");
     expect(currentContainer().textContent).not.toContain("Loading Logbook page");
     expect(currentContainer().querySelector('[aria-label="Loading next Logbook page"]')).not.toBeNull();
     expect(currentContainer().querySelector(".logbook-page-loading")).not.toBeNull();
@@ -41,7 +42,7 @@ describe("HistoryPanel pagination", () => {
   test("updates visible pagination before notifying the parent page change handler", async () => {
     const onPageChange = vi.fn(() => {
       expect(currentContainer().textContent).toContain("Page 2 of 3");
-      expect(currentContainer().textContent).toContain("Showing 51-100 of 125");
+      expect(currentContainer().textContent).not.toContain("Showing 51-100 of 125");
       expect(currentContainer().querySelector(".logbook-page-loading")).not.toBeNull();
     });
     await renderPanel(onPageChange);

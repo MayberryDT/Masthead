@@ -245,8 +245,8 @@ export function HistoryPanel({
         />
       )}
 
-      {errorState ? null : (
-        <div className={`logbook-footer ${showPagination ? "has-pagination" : ""} ${isFirstRunLoading ? "logbook-skeleton-footer" : ""}`.trim()}>
+      {!errorState && (showPagination || isFirstRunLoading) ? (
+        <div className={`logbook-footer observability-toolbar metal-toolbar ${showPagination ? "has-pagination" : ""} ${isFirstRunLoading ? "logbook-skeleton-footer" : ""}`.trim()}>
           {isFirstRunLoading ? (
             <LogbookPaginationSkeleton />
           ) : showPagination ? (
@@ -255,17 +255,11 @@ export function HistoryPanel({
               pageIndex={visiblePageIndex}
               pageSize={pageSize}
               total={visibleTotal}
-              visibleCount={tableSessions.length}
               onPageChange={handlePageChange}
             />
           ) : null}
-          <p className="toolbar-result surface-status">
-            {showPagination
-              ? `Showing ${pageRangeLabel(visiblePageIndex, pageSize, tableSessions.length, visibleTotal)}; searching ${formatCount(recordCount)} ${usesLogbookStore ? "canonical sessions" : "local records"}`
-              : `Showing ${tableSessions.length} of ${visibleTotal}; searching ${recordCount} ${usesLogbookStore ? "canonical sessions" : "local records"}`}
-          </p>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -275,15 +269,13 @@ function LogbookPagination({
   onPageChange,
   pageIndex,
   pageSize,
-  total,
-  visibleCount
+  total
 }: {
   disabled: boolean;
   onPageChange: (pageIndex: number) => void;
   pageIndex: number;
   pageSize: number;
   total: number;
-  visibleCount: number;
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const isFirst = pageIndex <= 0;
@@ -308,21 +300,20 @@ function LogbookPagination({
 
   return (
     <nav className="logbook-pagination" aria-label="Logbook pagination">
-      <span className="logbook-pagination-range">{pageRangeLabel(pageIndex, pageSize, visibleCount, total)}</span>
       <div className="logbook-pagination-controls">
-        <button type="button" className="logbook-page-button" aria-label="First page" disabled={disabled || isFirst} onPointerDown={handlePointerPageChange(0)} onClick={handleClickPageChange(0)}>
+        <button type="button" className="logbook-page-button toolbar-icon-button" aria-label="First page" disabled={disabled || isFirst} onPointerDown={handlePointerPageChange(0)} onClick={handleClickPageChange(0)}>
           <Icon name="pageFirst" size="toolbar" weight={iconWeights.toolbar} />
         </button>
-        <button type="button" className="logbook-page-button" aria-label="Previous page" disabled={disabled || isFirst} onPointerDown={handlePointerPageChange(pageIndex - 1)} onClick={handleClickPageChange(pageIndex - 1)}>
+        <button type="button" className="logbook-page-button toolbar-icon-button" aria-label="Previous page" disabled={disabled || isFirst} onPointerDown={handlePointerPageChange(pageIndex - 1)} onClick={handleClickPageChange(pageIndex - 1)}>
           <Icon name="pagePrevious" size="toolbar" weight={iconWeights.toolbar} />
         </button>
         <span className="logbook-pagination-page">
           Page {pageIndex + 1} of {totalPages}
         </span>
-        <button type="button" className="logbook-page-button" aria-label="Next page" disabled={disabled || isLast} onPointerDown={handlePointerPageChange(pageIndex + 1)} onClick={handleClickPageChange(pageIndex + 1)}>
+        <button type="button" className="logbook-page-button toolbar-icon-button" aria-label="Next page" disabled={disabled || isLast} onPointerDown={handlePointerPageChange(pageIndex + 1)} onClick={handleClickPageChange(pageIndex + 1)}>
           <Icon name="pageNext" size="toolbar" weight={iconWeights.toolbar} />
         </button>
-        <button type="button" className="logbook-page-button" aria-label="Last page" disabled={disabled || isLast} onPointerDown={handlePointerPageChange(totalPages - 1)} onClick={handleClickPageChange(totalPages - 1)}>
+        <button type="button" className="logbook-page-button toolbar-icon-button" aria-label="Last page" disabled={disabled || isLast} onPointerDown={handlePointerPageChange(totalPages - 1)} onClick={handleClickPageChange(totalPages - 1)}>
           <Icon name="pageLast" size="toolbar" weight={iconWeights.toolbar} />
         </button>
       </div>
@@ -333,23 +324,15 @@ function LogbookPagination({
 function LogbookPaginationSkeleton() {
   return (
     <nav className="logbook-pagination logbook-pagination-skeleton" aria-hidden="true">
-      <span className="logbook-skeleton-line logbook-skeleton-range" />
       <div className="logbook-pagination-controls">
-        <span className="logbook-page-button" />
-        <span className="logbook-page-button" />
+        <span className="logbook-page-button toolbar-icon-button" />
+        <span className="logbook-page-button toolbar-icon-button" />
         <span className="logbook-skeleton-line logbook-skeleton-page" />
-        <span className="logbook-page-button" />
-        <span className="logbook-page-button" />
+        <span className="logbook-page-button toolbar-icon-button" />
+        <span className="logbook-page-button toolbar-icon-button" />
       </div>
     </nav>
   );
-}
-
-function pageRangeLabel(pageIndex: number, pageSize: number, visibleCount: number, total: number): string {
-  if (total === 0 || visibleCount === 0) return "0 of 0";
-  const start = pageIndex * pageSize + 1;
-  const end = Math.min(total, start + visibleCount - 1);
-  return `${formatCount(start)}-${formatCount(end)} of ${formatCount(total)}`;
 }
 
 function CanonicalErrorPanel({ message, onRetry }: { message: string; onRetry?: () => void }) {

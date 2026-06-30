@@ -32,7 +32,8 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("Search and inspect durable agent-session history.");
     expect(html).toContain("SESSION / MATCH");
     expect(html).toContain("Session needs review");
-    expect(html).toContain("Showing 1 of 1; searching");
+    expect(html).not.toContain("Showing 1 of 1; searching");
+    expect(html).not.toContain("searching 1 local records");
     expect(html).not.toContain("surface-card-grid");
     expect(html).not.toContain("logbook-card");
     expect(html).not.toContain("History case");
@@ -75,7 +76,7 @@ describe("HistoryPanel", () => {
     expect(html).toContain("usage-metric sessions");
     expect(html).not.toContain("stat-strip");
     expect(html).not.toContain('<script>alert("x")</script>');
-    expect(html).toContain("Showing 1 of 1");
+    expect(html).not.toContain("Showing 1 of 1");
   });
 
   test("renders more than six database-backed sessions and exposes detail actions", () => {
@@ -111,7 +112,7 @@ describe("HistoryPanel", () => {
     expect(html).toContain("Session 1");
     expect(html).toContain("Session 8");
     expect(html).toContain("<table");
-    expect(html).toContain("Showing 8 of 8");
+    expect(html).not.toContain("Showing 8 of 8");
   });
 
   test("renders page controls for canonical Logbook pages instead of load more", () => {
@@ -141,7 +142,10 @@ describe("HistoryPanel", () => {
     expect(html).toContain('aria-label="Next page"');
     expect(html).toContain('aria-label="Last page"');
     expect(html).toContain("Page 2 of 3");
-    expect(html).toContain("Showing 101-200 of 250");
+    expect(html).toContain("logbook-footer observability-toolbar metal-toolbar has-pagination");
+    expect(html).toContain("logbook-page-button toolbar-icon-button");
+    expect(html).not.toContain("Showing 101-200 of 250");
+    expect(html).not.toContain("searching 250 canonical sessions");
     expect(html).not.toContain("Load more");
   });
 
@@ -204,7 +208,7 @@ describe("HistoryPanel", () => {
     expect(html).toContain("Logbook");
     expect(html).not.toContain("Session library");
     expect(html).toContain("<dd>0</dd>");
-    expect(html).toContain("Showing 0 of 0; searching 0 local records");
+    expect(html).not.toContain("Showing 0 of 0; searching 0 local records");
     expect(html).not.toContain("History case");
   });
 
