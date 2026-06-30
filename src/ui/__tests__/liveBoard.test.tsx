@@ -300,17 +300,17 @@ describe("Live Board UI", () => {
     const html = renderToStaticMarkup(<SessionDetailModal session={session} onClose={() => undefined} />);
 
     expect(html).toContain("modal-scroll-frame");
-    expect(html).toContain("modal-session-meta");
-    expect(html).toContain("Thinking Extra High");
-    expect(html).toContain("Canonical details unavailable");
+    expect(html).toContain("session-dossier-modal");
+    expect(html).toContain("meta-rail");
+    expect(html).toContain("title-block");
     expect(html).toContain("Session dossier");
-    expect(html).toContain("Session summary");
+    expect(html).toContain("Enrichment summary");
     expect(html).toContain("Advanced details");
     expect(html).toContain("Still running");
     expect(html).not.toContain("Review shared edits");
     expect(html).not.toContain("This session is active with overlapping work to inspect.");
-    expect(html).not.toContain("Confidence");
-    expect(html).not.toContain("shared_workspace");
+    expect(html).toContain("Source confidence");
+    expect(html).toContain("shared_workspace");
     expect(html).not.toContain("Implementation is complete, but auth tests are still failing.");
     expect(html).not.toContain("Approve request");
     expect(html).not.toContain("Run command");

@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { LogbookExcerpt, LogbookSessionDetail, SessionTranscriptKindFilter, SessionTranscriptResult } from "../app/daemonClient";
 import type { SessionDossierDto } from "../shared/sessionDossier";
-import { Icon } from "./icons/Icon";
-import { iconWeights } from "./icons/icon-tokens";
 import { SessionDossier } from "./session-dossier/SessionDossier";
 
 type Props = {
@@ -53,6 +51,7 @@ export function SessionLibraryDetail({
   const titleId = `${session?.sessionId ?? "logbook-loading"}-logbook-modal-title`;
   const modalClassName = [
     "session-detail-modal",
+    "session-dossier-modal",
     "logbook-detail-modal",
     "t-modal",
     modalState === "closing" ? "is-closing" : "",
@@ -131,23 +130,6 @@ export function SessionLibraryDetail({
         onKeyDown={(event) => handleLogbookModalKeyDown(event, modalRef.current, requestClose)}
         tabIndex={-1}
       >
-        <header className="modal-head">
-          <div className="modal-session-meta" aria-label="Logbook session summary">
-            <span>{session?.project ?? "Project not captured"}</span>
-            <span>{session?.runtime ?? "Runtime not captured"}</span>
-            <span>{session?.lifecycle ?? "Loading"}</span>
-            <span>{session?.models.join(", ") || "Model not captured"}</span>
-          </div>
-          <div className="modal-title-row">
-            <div>
-              <p className="mono-label">Session detail</p>
-              <h2 id={titleId}>{session?.title ?? "Loading session"}</h2>
-            </div>
-            <button type="button" className="icon-button" aria-label="Close session detail" onClick={requestClose}>
-              <Icon name="close" size="toolbar" weight={iconWeights.toolbar} />
-            </button>
-          </div>
-        </header>
         <div className="modal-scroll-frame">
           <SessionDossier
             dossier={dossier}
@@ -164,6 +146,8 @@ export function SessionLibraryDetail({
             onTranscriptLoadMore={onTranscriptLoadMore}
             onTranscriptRetry={onRetryTranscript}
             onOpenSources={onOpenSources}
+            onClose={requestClose}
+            titleId={titleId}
           />
           {!dossier && excerpts.length > 0 ? <span className="sr-only">{excerpts[0]?.text}</span> : null}
         </div>

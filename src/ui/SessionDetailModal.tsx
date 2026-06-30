@@ -2,8 +2,6 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { SessionTranscriptKindFilter, SessionTranscriptResult } from "../app/daemonClient";
 import type { SafeAction, SessionDetailView } from "../core/types";
 import type { SessionDossierDto } from "../shared/sessionDossier";
-import { Icon } from "./icons/Icon";
-import { iconWeights } from "./icons/icon-tokens";
 import { SessionDossier } from "./session-dossier/SessionDossier";
 
 type Props = {
@@ -53,6 +51,7 @@ export function SessionDetailModal({
   const [modalState, setModalState] = useState<"opening" | "open" | "closing">("opening");
   const modalClassName = [
     "session-detail-modal",
+    "session-dossier-modal",
     "t-modal",
     modalState === "closing" ? "is-closing" : "",
     modalState === "open" ? "is-open" : ""
@@ -126,23 +125,6 @@ export function SessionDetailModal({
         onKeyDown={(event) => handleModalKeyDown(event, modalRef.current, requestClose)}
         tabIndex={-1}
       >
-        <header className="modal-head">
-          <div className="modal-session-meta" aria-label="Session summary">
-            <span>{session.project}</span>
-            <span>{session.lifecycle}</span>
-            <span>{session.durationLabel}</span>
-            <span>Thinking {session.thinkingLevel ?? "Not captured"}</span>
-          </div>
-          <div className="modal-title-row">
-            <div>
-              <p className="mono-label">Session details</p>
-              <h2 id={`${session.sessionId}-modal-title`}>{session.copy.headline}</h2>
-            </div>
-            <button type="button" className="icon-button" aria-label="Close session details" onClick={requestClose}>
-              <Icon name="close" size="toolbar" weight={iconWeights.toolbar} />
-            </button>
-          </div>
-        </header>
         <div className="modal-scroll-frame">
           <SessionDossier
             live={session}
@@ -162,6 +144,8 @@ export function SessionDetailModal({
             onOpenSources={onOpenSources}
             onAction={onAction}
             actionStatus={actionStatus}
+            onClose={requestClose}
+            titleId={`${session.sessionId}-modal-title`}
           />
         </div>
       </article>

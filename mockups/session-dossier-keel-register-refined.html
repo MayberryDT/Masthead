@@ -1,0 +1,1158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Masthead Session Dossier, Keel Register Refined</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+      :root {
+        --primary: #031019;
+        --secondary: #071b28;
+        --surface-hover: #082130;
+        --toolbar: #051724;
+        --control: #061925;
+        --control-raised: #081d2a;
+        --ink: #f6fbff;
+        --body: #d6e4ef;
+        --mute: #91a8ba;
+        --blue: #2ea7ff;
+        --green: #36d869;
+        --yellow: #ffcf36;
+        --line: rgba(194, 221, 241, 0.13);
+        --line-strong: rgba(196, 226, 248, 0.2);
+        --border: rgba(92, 153, 187, 0.18);
+        --border-hover: rgba(112, 173, 205, 0.24);
+        --ease: cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background: var(--primary);
+        color: var(--body);
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .page {
+        min-height: 100vh;
+        padding: 28px;
+      }
+
+      .prototype-note {
+        max-width: 1180px;
+        margin: 0 auto 16px;
+        color: var(--mute);
+      }
+
+      .prototype-note p {
+        max-width: 840px;
+        margin: 6px 0 0;
+      }
+
+      .eyebrow,
+      .mono,
+      .rail-label,
+      .metric span,
+      .metric strong,
+      .meta-cell span,
+      .evidence-block,
+      .transcript time,
+      .advanced-cell span,
+      .path-row {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+      }
+
+      .prototype-note h1 {
+        margin: 0;
+        color: var(--ink);
+        font-size: 24px;
+        line-height: 1.1;
+        letter-spacing: 0;
+      }
+
+      .stage {
+        display: grid;
+        place-items: start center;
+      }
+
+      .backdrop {
+        width: min(1180px, 100%);
+        padding: 18px;
+        border: 2px solid rgba(196, 226, 248, 0.1);
+        border-radius: 8px;
+        background: #020c13;
+      }
+
+      .dossier {
+        overflow: hidden;
+        border: 2px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--secondary);
+      }
+
+      .dossier-header {
+        border-bottom: 1px solid var(--line);
+        background: var(--toolbar);
+      }
+
+      .meta-rail {
+        display: grid;
+        grid-template-columns: 1.1fr 0.75fr 0.7fr 1fr 0.75fr;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .meta-cell {
+        min-width: 0;
+        padding: 10px 13px;
+        border-right: 1px solid rgba(194, 221, 241, 0.11);
+        background: rgba(3, 16, 25, 0.22);
+      }
+
+      .meta-cell:last-child {
+        border-right: 0;
+      }
+
+      .meta-cell span {
+        display: block;
+        color: var(--mute);
+        font-size: 10.5px;
+        line-height: 1.25;
+      }
+
+      .meta-cell strong {
+        display: block;
+        margin-top: 4px;
+        color: var(--ink);
+        font-size: 12.5px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .title-block {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 16px;
+        padding: 18px;
+      }
+
+      .title-block h2 {
+        margin: 3px 0 0;
+        color: var(--ink);
+        font-size: 24px;
+        line-height: 1.1;
+        letter-spacing: 0;
+      }
+
+      .title-block p {
+        max-width: 820px;
+        margin: 9px 0 0;
+        color: var(--body);
+      }
+
+      .close {
+        width: 40px;
+        height: 40px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        background: var(--control-raised);
+        color: var(--body);
+        font-size: 18px;
+        transition:
+          transform 160ms var(--ease),
+          border-color 160ms var(--ease),
+          background-color 160ms var(--ease);
+      }
+
+      .close:hover,
+      .button:hover {
+        transform: translateY(-1px);
+        border-color: var(--border-hover);
+        background-color: var(--surface-hover);
+      }
+
+      .content-grid {
+        display: grid;
+        grid-template-columns: 265px minmax(0, 1fr);
+        grid-template-areas:
+          "metrics summary"
+          "transcript transcript"
+          "advanced advanced";
+        gap: 14px;
+        padding: 14px;
+      }
+
+      .panel,
+      .metric,
+      .transcript li,
+      .advanced-cell {
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: rgba(3, 16, 25, 0.42);
+      }
+
+      .metrics {
+        grid-area: metrics;
+        display: grid;
+        grid-template-rows: repeat(9, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .metric {
+        min-width: 0;
+        padding: 10px 11px;
+        border-color: rgba(196, 226, 248, 0.14);
+      }
+
+      .metric span {
+        display: block;
+        color: var(--mute);
+        font-size: 10.5px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 5px;
+        color: var(--ink);
+        font-size: 15px;
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+      }
+
+      .summary {
+        grid-area: summary;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        height: 626px;
+        min-height: 0;
+        overflow: hidden;
+        padding: 0;
+      }
+
+      .panel {
+        min-width: 0;
+        padding: 14px;
+      }
+
+      .panel.summary {
+        padding: 0;
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+
+      .summary .panel-head {
+        margin: 0;
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid rgba(194, 221, 241, 0.11);
+      }
+
+      .panel h3 {
+        margin: 0;
+        color: var(--ink);
+        font-size: 14px;
+        line-height: 1.25;
+      }
+
+      .rail-label {
+        color: var(--mute);
+        font-size: 10.5px;
+      }
+
+      .summary-scroll {
+        min-height: 0;
+        overflow-y: auto;
+        padding: 12px 14px 14px;
+        scrollbar-color: rgba(196, 226, 248, 0.24) #041421;
+        scrollbar-width: thin;
+      }
+
+      .summary-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .summary-scroll::-webkit-scrollbar-track {
+        background: #041421;
+      }
+
+      .summary-scroll::-webkit-scrollbar-thumb {
+        border: 2px solid #041421;
+        border-radius: 0;
+        background: rgba(196, 226, 248, 0.28);
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .summary-fact {
+        min-width: 0;
+        padding: 9px;
+        border: 1px solid rgba(194, 221, 241, 0.1);
+        border-radius: 4px;
+        background: rgba(6, 25, 37, 0.58);
+      }
+
+      .summary-fact span {
+        display: block;
+        color: var(--mute);
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10.5px;
+      }
+
+      .summary-fact strong {
+        display: block;
+        margin-top: 4px;
+        color: var(--ink);
+        overflow-wrap: anywhere;
+      }
+
+      .evidence-blocks {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .evidence-block {
+        display: grid;
+        place-items: center;
+        min-width: 0;
+        min-height: 46px;
+        padding: 8px 9px;
+        border: 1px solid rgba(194, 221, 241, 0.12);
+        border-radius: 3px;
+        color: var(--mute);
+        font-size: 10.5px;
+        text-align: center;
+        background: rgba(6, 25, 37, 0.54);
+      }
+
+      .evidence-block span {
+        display: block;
+        color: var(--body);
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-size: 12px;
+        line-height: 1.25;
+        text-align: center;
+        overflow-wrap: anywhere;
+      }
+
+      .evidence-block.is-blue {
+        border-color: rgba(45, 168, 255, 0.24);
+        border-top-color: rgba(45, 168, 255, 0.5);
+      }
+
+      .evidence-block.is-green {
+        border-color: rgba(89, 212, 153, 0.28);
+        border-top-color: rgba(89, 212, 153, 0.48);
+      }
+
+      .evidence-block.is-yellow {
+        border-color: rgba(247, 201, 72, 0.26);
+        border-top-color: rgba(247, 201, 72, 0.48);
+      }
+
+      .summary-section {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(194, 221, 241, 0.12);
+      }
+
+      .summary-section h4 {
+        margin: 0 0 7px;
+        color: var(--ink);
+        font-size: 12px;
+        line-height: 1.25;
+      }
+
+      .summary-section p {
+        margin: 0;
+        color: var(--body);
+      }
+
+      .summary-section p + p {
+        margin-top: 8px;
+      }
+
+      .transcript {
+        grid-area: transcript;
+      }
+
+      .transcript-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+
+      .filter-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .filter {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 5px 9px;
+        border: 1px solid rgba(194, 221, 241, 0.12);
+        border-radius: 3px;
+        color: var(--mute);
+        background: var(--control);
+        font-size: 10.5px;
+      }
+
+      .filter.is-active {
+        color: var(--ink);
+        border-color: rgba(45, 168, 255, 0.42);
+        background: rgba(6, 25, 37, 0.84);
+      }
+
+      .transcript ol {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .transcript li {
+        display: grid;
+        grid-template-columns: 72px 112px minmax(0, 1fr);
+        gap: 10px;
+        padding: 10px;
+      }
+
+      .transcript time,
+      .transcript b {
+        color: var(--mute);
+        font-size: 11px;
+      }
+
+      .transcript p {
+        margin: 0;
+      }
+
+      .transcript .is-user b {
+        color: var(--blue);
+      }
+
+      .transcript .is-assistant b {
+        color: var(--green);
+      }
+
+      .transcript .is-tool b {
+        color: var(--yellow);
+      }
+
+      .advanced {
+        position: relative;
+        grid-area: advanced;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 5px;
+        background: #041421;
+      }
+
+      .advanced::before {
+        content: none;
+      }
+
+      .advanced-cell {
+        position: relative;
+        z-index: 1;
+        min-width: 0;
+        padding: 11px;
+        border-color: rgba(160, 198, 222, 0.26);
+        background: #071b2a;
+      }
+
+      .advanced-cell span {
+        display: block;
+        color: var(--body);
+        font-size: 10.5px;
+      }
+
+      .advanced-cell strong {
+        display: block;
+        margin-top: 5px;
+        color: var(--ink);
+        overflow-wrap: anywhere;
+      }
+
+      .advanced-cell.is-wide {
+        grid-column: span 2;
+      }
+
+      .path-row {
+        margin-top: 9px;
+        color: var(--mute);
+        font-size: 11px;
+        overflow-wrap: anywhere;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 40px;
+        padding: 9px 10px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        background: var(--control-raised);
+        color: var(--body);
+        text-decoration: none;
+        transition:
+          transform 160ms var(--ease),
+          border-color 160ms var(--ease),
+          background-color 160ms var(--ease);
+      }
+
+      .advanced .button {
+        grid-column: 1 / -1;
+        justify-self: center;
+        min-width: 220px;
+      }
+
+      .advanced-details-panel {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 2px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(194, 221, 241, 0.12);
+      }
+
+      .advanced-details-panel[hidden] {
+        display: none;
+      }
+
+      .advanced-detail-card {
+        min-width: 0;
+        padding: 11px;
+        border: 1px solid rgba(160, 198, 222, 0.2);
+        border-radius: 4px;
+        background: #061925;
+      }
+
+      .advanced-detail-card.is-wide {
+        grid-column: span 2;
+      }
+
+      .advanced-detail-card.is-full {
+        grid-column: 1 / -1;
+      }
+
+      .advanced-detail-card.is-scroll-window {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        padding: 0;
+        overflow: hidden;
+      }
+
+      .advanced-detail-card.is-timeline {
+        height: 360px;
+      }
+
+      .advanced-detail-card.is-raw {
+        height: 440px;
+      }
+
+      .advanced-detail-card h4 {
+        margin: 0 0 8px;
+        color: var(--ink);
+        font-size: 12px;
+        line-height: 1.25;
+      }
+
+      .advanced-detail-card p {
+        margin: 0;
+        color: var(--body);
+      }
+
+      .advanced-scroll-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-width: 0;
+        padding: 11px 11px 9px;
+        border-bottom: 1px solid rgba(194, 221, 241, 0.11);
+      }
+
+      .advanced-scroll-head h4 {
+        margin: 0;
+      }
+
+      .advanced-scroll-body {
+        min-height: 0;
+        overflow-y: auto;
+        padding: 10px 11px 11px;
+        scrollbar-color: rgba(196, 226, 248, 0.24) #041421;
+        scrollbar-width: thin;
+      }
+
+      .advanced-scroll-body::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .advanced-scroll-body::-webkit-scrollbar-track {
+        background: #041421;
+      }
+
+      .advanced-scroll-body::-webkit-scrollbar-thumb {
+        border: 2px solid #041421;
+        border-radius: 0;
+        background: rgba(196, 226, 248, 0.28);
+      }
+
+      .advanced-list {
+        display: grid;
+        gap: 7px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .advanced-list li {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: baseline;
+        padding-top: 7px;
+        border-top: 1px solid rgba(194, 221, 241, 0.1);
+      }
+
+      .advanced-list li:first-child {
+        padding-top: 0;
+        border-top: 0;
+      }
+
+      .advanced-list strong,
+      .advanced-list span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .advanced-list strong {
+        color: var(--ink);
+      }
+
+      .advanced-list span,
+      .advanced-detail-muted {
+        color: var(--mute);
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10.5px;
+      }
+
+      .timeline-list li {
+        grid-template-columns: 118px minmax(0, 1fr);
+      }
+
+      .raw-transcript-list li {
+        grid-template-columns: 118px minmax(0, 1fr);
+        align-items: start;
+      }
+
+      .timeline-list,
+      .raw-transcript-list {
+        gap: 6px;
+      }
+
+      .timeline-list li,
+      .raw-transcript-list li {
+        padding: 8px;
+        border: 1px solid rgba(194, 221, 241, 0.1);
+        background: #071b2a;
+      }
+
+      .timeline-list li:nth-child(even),
+      .raw-transcript-list li:nth-child(even) {
+        background: #061722;
+      }
+
+      .timeline-list li:first-child,
+      .raw-transcript-list li:first-child {
+        border-top: 1px solid rgba(194, 221, 241, 0.1);
+      }
+
+      .timeline-list strong,
+      .raw-transcript-list strong {
+        display: block;
+        padding: 5px 6px;
+        border: 1px solid rgba(194, 221, 241, 0.1);
+        border-radius: 2px;
+        background: #041421;
+        color: var(--body);
+        font-size: 10.5px;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.25;
+      }
+
+      .timeline-list span,
+      .raw-transcript-list span {
+        color: var(--body);
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-size: 12.5px;
+        line-height: 1.45;
+        text-wrap: pretty;
+      }
+
+      .timeline-list .is-user strong,
+      .raw-transcript-list .is-user strong {
+        border-color: rgba(45, 168, 255, 0.22);
+        background: rgba(45, 168, 255, 0.08);
+        color: var(--blue);
+      }
+
+      .timeline-list .is-assistant strong,
+      .raw-transcript-list .is-assistant strong {
+        border-color: rgba(89, 212, 153, 0.22);
+        background: rgba(89, 212, 153, 0.08);
+        color: var(--green);
+      }
+
+      .timeline-list .is-tool strong,
+      .raw-transcript-list .is-tool strong {
+        border-color: rgba(247, 201, 72, 0.24);
+        background: rgba(247, 201, 72, 0.08);
+        color: var(--yellow);
+      }
+
+      .timeline-list .is-system strong,
+      .raw-transcript-list .is-system strong {
+        border-color: rgba(196, 226, 248, 0.16);
+        color: var(--mute);
+      }
+
+      @media (max-width: 920px) {
+        .page {
+          padding: 18px;
+        }
+
+        .meta-rail {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .meta-cell:nth-child(even) {
+          border-right: 0;
+        }
+
+        .content-grid {
+          grid-template-columns: 1fr;
+          grid-template-areas:
+            "metrics"
+            "summary"
+            "transcript"
+            "advanced";
+        }
+
+        .metrics,
+        .summary-grid,
+        .advanced,
+        .evidence-blocks,
+        .advanced-details-panel {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .metrics {
+          grid-template-rows: none;
+        }
+
+        .summary {
+          height: 520px;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .page {
+          padding: 12px;
+        }
+
+        .backdrop {
+          padding: 0;
+          border: 0;
+          background: transparent;
+        }
+
+        .meta-rail,
+        .metrics,
+        .summary-grid,
+        .advanced,
+        .evidence-blocks,
+        .advanced-details-panel {
+          grid-template-columns: 1fr;
+        }
+
+        .summary {
+          height: 480px;
+        }
+
+        .meta-cell {
+          border-right: 0;
+        }
+
+        .title-block {
+          grid-template-columns: minmax(0, 1fr) 40px;
+          padding: 14px;
+        }
+
+        .title-block h2 {
+          font-size: 20px;
+        }
+
+        .content-grid {
+          padding: 12px;
+        }
+
+        .transcript-toolbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .transcript li {
+          grid-template-columns: 1fr;
+        }
+
+        .advanced-cell.is-wide {
+          grid-column: auto;
+        }
+
+        .advanced-detail-card.is-wide,
+        .advanced-detail-card.is-full {
+          grid-column: auto;
+        }
+
+        .advanced-detail-card.is-scroll-window {
+          grid-column: auto;
+        }
+
+        .advanced-detail-card.is-timeline,
+        .advanced-detail-card.is-raw {
+          height: 420px;
+        }
+
+        .timeline-list li,
+        .raw-transcript-list li {
+          grid-template-columns: 1fr;
+          gap: 6px;
+        }
+
+        .advanced::before {
+          left: 0;
+          right: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="prototype-note">
+        <p class="eyebrow">Masthead prototype / option 7 refinement / real local session data</p>
+        <h1>Cast Ballast Keel Register, Masthead palette pass</h1>
+        <p>
+          Single-direction prototype based on option 7. Data is from the local Masthead connector for
+          canonical session <span class="mono">session:8d71b6441acbee46d11b62a43c06a325</span>, using real read-only dossier and transcript data.
+        </p>
+      </header>
+
+      <section class="stage" aria-label="Refined session dossier prototype">
+        <div class="backdrop">
+          <article class="dossier" aria-label="Session dossier modal prototype">
+            <header class="dossier-header">
+              <div class="meta-rail" aria-label="Session identity metadata">
+                <div class="meta-cell"><span>Project</span><strong>Masthead</strong></div>
+                <div class="meta-cell"><span>Runtime</span><strong>codex</strong></div>
+                <div class="meta-cell"><span>Lifecycle</span><strong>ended</strong></div>
+                <div class="meta-cell"><span>Ended</span><strong>Jun 30, 04:56</strong></div>
+                <div class="meta-cell"><span>Model</span><strong>gpt-5.5</strong></div>
+              </div>
+              <div class="title-block">
+                <div>
+                  <span class="mono label">Session identity</span>
+                  <h2>Launcher cleanup path is patched</h2>
+                  <p>The launcher cleanup path is patched. Masthead retained this session as authoritative Codex data and includes it in MCP retrieval.</p>
+                </div>
+                <button class="close" aria-label="Close session dossier">&times;</button>
+              </div>
+            </header>
+
+            <div class="content-grid">
+              <section class="metrics" aria-label="Key stats">
+                <div class="metric is-good"><span>Source confidence</span><strong>authoritative</strong></div>
+                <div class="metric"><span>Coverage</span><strong>partial</strong></div>
+                <div class="metric is-primary"><span>Total tokens</span><strong>113.6M</strong></div>
+                <div class="metric"><span>Input tokens</span><strong>113.0M</strong></div>
+                <div class="metric"><span>Output tokens</span><strong>410.2K</strong></div>
+                <div class="metric"><span>Usage rows</span><strong>851</strong></div>
+                <div class="metric"><span>Messages</span><strong>758</strong></div>
+                <div class="metric"><span>Tool calls</span><strong>2,079</strong></div>
+                <div class="metric is-warning"><span>Attention rows</span><strong>41</strong></div>
+              </section>
+
+              <section class="panel summary" aria-label="Enrichment summary">
+                <div class="panel-head">
+                  <h3>Enrichment summary</h3>
+                  <span class="rail-label">session-capsule-v2 / current</span>
+                </div>
+                <div class="summary-scroll">
+                  <div class="summary-grid" aria-label="Enrichment stats">
+                    <div class="summary-fact"><span>User messages</span><strong>31</strong></div>
+                    <div class="summary-fact"><span>Assistant messages</span><strong>724</strong></div>
+                    <div class="summary-fact"><span>Tool results</span><strong>2,417</strong></div>
+                    <div class="summary-fact"><span>Checkpoints</span><strong>7</strong></div>
+                    <div class="summary-fact"><span>Runtime signals</span><strong>1,217</strong></div>
+                    <div class="summary-fact"><span>Low-value rows</span><strong>2,406</strong></div>
+                  </div>
+                  <div class="evidence-blocks" aria-label="Session topics and warnings">
+                    <div class="evidence-block is-blue"><span>mcp</span></div>
+                    <div class="evidence-block is-blue"><span>launcher cleanup path patched</span></div>
+                    <div class="evidence-block is-green"><span>MCP included</span></div>
+                    <div class="evidence-block is-yellow"><span>verification missing</span></div>
+                    <div class="evidence-block is-yellow"><span>tool details partial</span></div>
+                  </div>
+                  <div class="summary-section">
+                    <h4>Transcript summary</h4>
+                    <p>Codex hook event is being fixed for Masthead. The latest user prompt asked to recreate the card exactly with the prototype as the source of truth.</p>
+                    <p>Coverage is partial because file effects, full tool detail, and verification evidence were not captured, while the transcript itself is usable.</p>
+                  </div>
+                  <div class="summary-section">
+                    <h4>First prompt</h4>
+                    <p>Use this skill combined with our current UI to come up with some more unique and interesting UI elements, but keeping it still very not over the top. Let's keep the same color scheme.</p>
+                  </div>
+                  <div class="summary-section">
+                    <h4>Latest prompt</h4>
+                    <p>The latest request focused on the selected dossier layout, keeping enrichment details in one tall summary pane while preserving the stats, topics, transcript summary, and prompt hierarchy.</p>
+                  </div>
+                  <div class="summary-section">
+                    <h4>Technologies</h4>
+                    <p>Masthead UI prototype, standalone HTML, IBM Plex Sans, IBM Plex Mono, local-first session dossier, read-only Codex session data, deterministic enrichment.</p>
+                  </div>
+                  <div class="summary-section">
+                    <h4>Unresolved</h4>
+                    <p>Verification commands were not captured for the real session. Tool result density is high, but only summary-level tool coverage is represented in this prototype pass.</p>
+                  </div>
+                  <div class="summary-section">
+                    <h4>Additional enrichment notes</h4>
+                    <p>Additional enrichment row A: the session includes launcher cleanup discussion, MCP retrieval expectations, and modal structure decisions for the selected Keel Register direction.</p>
+                    <p>Additional enrichment row B: the preferred modal keeps stats compact, gives topics a block treatment, and separates narrative layers with quiet horizontal rules.</p>
+                  </div>
+                  <div class="summary-section">
+                    <h4>Retrieval notes</h4>
+                    <p>Agent retrieval remains included. The reusable context should prioritize the canonical ID, source session ID, first prompt, latest prompt, transcript summary, and attention notes.</p>
+                  </div>
+                  <div class="summary-section">
+                    <h4>Continuation notes</h4>
+                    <p>Sample row 01: the launch path fix should remain tied to source confidence because the session is retained as authoritative Codex data.</p>
+                    <p>Sample row 02: session reuse should prefer compact evidence labels over long generated prose when the dossier is opened from Logbook.</p>
+                    <p>Sample row 03: unresolved verification remains an attention signal, but it should stay secondary to the transcript-backed summary.</p>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel transcript" aria-label="Transcript excerpt">
+                <div class="transcript-toolbar">
+                  <div>
+                    <h3>Transcript evidence</h3>
+                    <span class="rail-label">filtered to useful card/prototype rows</span>
+                  </div>
+                  <div class="filter-row" aria-label="Transcript filters">
+                    <span class="filter is-active">Evidence</span>
+                    <span class="filter">User</span>
+                    <span class="filter">Assistant</span>
+                    <span class="filter">Tools</span>
+                  </div>
+                </div>
+                <ol>
+                  <li class="is-user">
+                    <time>20:29</time>
+                    <b>User</b>
+                    <p>Use this skill combined with our current UI to come up with some more unique and interesting UI elements, but keeping it still very not over the top. Let's keep the same color scheme.</p>
+                  </li>
+                  <li class="is-assistant">
+                    <time>20:29</time>
+                    <b>Assistant</b>
+                    <p>I am going to ground it in Masthead's current design docs and the board session card before proposing options.</p>
+                  </li>
+                  <li class="is-user">
+                    <time>20:32</time>
+                    <b>User</b>
+                    <p>Generate an example of all three, showcase active, idle, and blocked sessions for all three suggestions in one HTML page.</p>
+                  </li>
+                  <li class="is-tool">
+                    <time>20:38</time>
+                    <b>Tool result</b>
+                    <p>Verified 9 cards with no horizontal overflow, active 3, idle 3, blocked 3, and visible text present.</p>
+                  </li>
+                  <li class="is-assistant">
+                    <time>20:40</time>
+                    <b>Assistant</b>
+                    <p>Created the standalone showcase page with all three directions and active, idle, and blocked examples for each.</p>
+                  </li>
+                </ol>
+              </section>
+
+              <section class="advanced" aria-label="Advanced session details">
+                <div class="advanced-cell is-wide">
+                  <span>Canonical ID</span>
+                  <strong>session:8d71b6441acbee46d11b62a43c06a325</strong>
+                </div>
+                <div class="advanced-cell">
+                  <span>Source session</span>
+                  <strong>019f1512-73b2-7fe0-b4b8-e840ef5f9684</strong>
+                </div>
+                <div class="advanced-cell">
+                  <span>Agent retrieval</span>
+                  <strong>Included</strong>
+                </div>
+                <div class="advanced-cell">
+                  <span>Verification</span>
+                  <strong>No verification signal captured</strong>
+                </div>
+                <div class="advanced-cell">
+                  <span>Enrichment</span>
+                  <strong>deterministic / current</strong>
+                </div>
+                <div class="advanced-cell is-wide">
+                  <span>Worktree</span>
+                  <strong>/home/tyler/.codex/worktrees/05ed/Masthead</strong>
+                  <div class="path-row">Host: host:127.0.0.1</div>
+                </div>
+                <button class="button advanced-toggle" type="button" aria-expanded="false" aria-controls="advanced-details-panel">Advanced details</button>
+                <div class="advanced-details-panel" id="advanced-details-panel" hidden>
+                  <section class="advanced-detail-card">
+                    <h4>Verification</h4>
+                    <p>No verification signal was captured for this session.</p>
+                  </section>
+                  <section class="advanced-detail-card">
+                    <h4>Needs attention</h4>
+                    <ul class="advanced-list">
+                      <li><strong>verification missing</strong><span>medium</span></li>
+                      <li><strong>tool details partial</strong><span>low</span></li>
+                    </ul>
+                  </section>
+                  <section class="advanced-detail-card is-wide">
+                    <h4>Tools</h4>
+                    <ul class="advanced-list">
+                      <li><strong>rg</strong><span>captured</span></li>
+                      <li><strong>sed</strong><span>captured</span></li>
+                      <li><strong>apply_patch</strong><span>captured</span></li>
+                      <li><strong>browser verification</strong><span>partial</span></li>
+                    </ul>
+                  </section>
+                  <section class="advanced-detail-card is-wide">
+                    <h4>Provenance</h4>
+                    <ul class="advanced-list">
+                      <li><strong>Canonical ID</strong><span>session:8d71b6441acbee46d11b62a43c06a325</span></li>
+                      <li><strong>Source session</strong><span>019f1512-73b2-7fe0-b4b8-e840ef5f9684</span></li>
+                      <li><strong>Source confidence</strong><span>authoritative</span></li>
+                      <li><strong>Agent retrieval</strong><span>included in MCP search</span></li>
+                    </ul>
+                  </section>
+                  <section class="advanced-detail-card is-wide">
+                    <h4>Narrative evidence</h4>
+                    <ul class="advanced-list">
+                      <li><strong>Title source</strong><span>deterministic transcript summary</span></li>
+                      <li><strong>Subject source</strong><span>first user prompt plus final assistant message</span></li>
+                      <li><strong>Provider</strong><span>local rules</span></li>
+                      <li><strong>Evidence refs</strong><span>raw transcript rows, topics, usage rows, attention rows</span></li>
+                    </ul>
+                  </section>
+                  <section class="advanced-detail-card is-full is-scroll-window is-timeline">
+                    <div class="advanced-scroll-head">
+                      <h4>Timeline</h4>
+                      <span class="rail-label">14 events / all</span>
+                    </div>
+                    <div class="advanced-scroll-body">
+                      <ol class="advanced-list timeline-list">
+                        <li class="is-user"><strong>Jun 30, 20:29</strong><span>Session card visual exploration started from Masthead design context.</span></li>
+                        <li class="is-tool"><strong>Jun 30, 20:31</strong><span>Current board and design source were inspected to keep the exploration grounded.</span></li>
+                        <li class="is-user"><strong>Jun 30, 20:32</strong><span>Prototype scope expanded to compare active, idle, and blocked states.</span></li>
+                        <li class="is-assistant"><strong>Jun 30, 20:35</strong><span>Option set assembled around Masthead palette, dense evidence, and local-first session memory.</span></li>
+                        <li class="is-tool"><strong>Jun 30, 20:38</strong><span>Standalone HTML verification completed with no horizontal overflow.</span></li>
+                        <li class="is-assistant"><strong>Jun 30, 20:40</strong><span>Session retained as reusable evidence for dossier refinement.</span></li>
+                        <li class="is-user"><strong>Jun 30, 20:46</strong><span>Selected Keel Register direction received metal-weight treatment and removed pill-chip styling.</span></li>
+                        <li class="is-user"><strong>Jun 30, 20:52</strong><span>Enrichment panel was reordered into stats, topics, transcript summary, and first prompt.</span></li>
+                        <li class="is-assistant"><strong>Jun 30, 20:57</strong><span>Summary pane was extended to align with the stats column above Transcript evidence.</span></li>
+                        <li class="is-user"><strong>Jun 30, 21:03</strong><span>Advanced details control became an interactive toggle inside the prototype.</span></li>
+                        <li class="is-user"><strong>Jun 30, 21:09</strong><span>The redundant excerpt-only section was removed from the advanced drawer.</span></li>
+                        <li class="is-assistant"><strong>Jun 30, 21:12</strong><span>Provenance and narrative evidence were paired side by side.</span></li>
+                        <li class="is-user"><strong>Jun 30, 21:15</strong><span>Timeline moved below provenance and narrative evidence.</span></li>
+                        <li class="is-assistant"><strong>Jun 30, 21:18</strong><span>Timeline and raw transcript were expanded into scroll-window cards.</span></li>
+                      </ol>
+                    </div>
+                  </section>
+                  <section class="advanced-detail-card is-full is-scroll-window is-raw">
+                    <div class="advanced-scroll-head">
+                      <h4>Raw transcript</h4>
+                      <span class="rail-label">16 rows / transcript</span>
+                    </div>
+                    <div class="advanced-scroll-body">
+                      <ul class="advanced-list raw-transcript-list">
+                        <li class="is-user"><strong>20:29 user</strong><span>Use this skill combined with our current UI to come up with some more unique and interesting UI elements, but keeping it still very not over the top.</span></li>
+                        <li class="is-assistant"><strong>20:29 assistant</strong><span>I am going to ground it in Masthead's current design docs and the board session card before proposing options.</span></li>
+                        <li class="is-tool"><strong>20:31 tool</strong><span>Read design.md and inspected the current session surfaces for palette, type, and evidence density.</span></li>
+                        <li class="is-user"><strong>20:32 user</strong><span>Generate an example of all three, showcase active, idle, and blocked sessions for all three suggestions in one HTML page.</span></li>
+                        <li class="is-assistant"><strong>20:34 assistant</strong><span>Built the first standalone prototype with realistic Masthead session states and comparable content.</span></li>
+                        <li class="is-tool"><strong>20:36 tool</strong><span>Rendered the prototype in the browser and checked text fit, option count, and visible card states.</span></li>
+                        <li class="is-tool"><strong>20:38 tool</strong><span>Verified 9 cards with no horizontal overflow, active 3, idle 3, blocked 3, and visible text present.</span></li>
+                        <li class="is-assistant"><strong>20:40 assistant</strong><span>Created the standalone showcase page with all three directions and active, idle, and blocked examples for each.</span></li>
+                        <li class="is-user"><strong>20:46 user</strong><span>Refine the selected option into a heavier metal-like session dossier using Masthead colors and real data.</span></li>
+                        <li class="is-assistant"><strong>20:49 assistant</strong><span>Loaded local session data and carried the selected direction into a single refined dossier mockup.</span></li>
+                        <li class="is-user"><strong>20:52 user</strong><span>Reorder the enrichment summary so stats come first, topics second, summary third, and first prompt fourth.</span></li>
+                        <li class="is-assistant"><strong>20:55 assistant</strong><span>Updated the summary window into a scrollable ordered stack with section separators.</span></li>
+                        <li class="is-user"><strong>20:57 user</strong><span>Remove the redundant topics label and extend the summary card down to the transcript evidence row.</span></li>
+                        <li class="is-user"><strong>21:03 user</strong><span>Make the Advanced details button work and open the advanced details below it.</span></li>
+                        <li class="is-user"><strong>21:09 user</strong><span>Remove the excerpt-only card, put Provenance and Narrative evidence side by side, and move Raw transcript to the bottom.</span></li>
+                        <li class="is-user"><strong>21:18 user</strong><span>Move Timeline down one row and give Timeline plus Raw transcript expanded scroll windows.</span></li>
+                      </ul>
+                    </div>
+                  </section>
+                </div>
+              </section>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+    <script>
+      const advancedToggle = document.querySelector(".advanced-toggle");
+      const advancedPanel = document.querySelector("#advanced-details-panel");
+
+      advancedToggle?.addEventListener("click", () => {
+        const isOpen = advancedToggle.getAttribute("aria-expanded") === "true";
+        advancedToggle.setAttribute("aria-expanded", String(!isOpen));
+        advancedToggle.textContent = isOpen ? "Advanced details" : "Hide advanced details";
+        advancedPanel.hidden = isOpen;
+      });
+    </script>
+  </body>
+</html>
