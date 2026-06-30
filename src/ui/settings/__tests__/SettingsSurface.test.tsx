@@ -25,6 +25,9 @@ describe("Settings surface", () => {
     expect(html).toContain("fast, lightweight model");
     expect(html).toContain("Transcript import");
     expect(html).toContain("Redaction");
+    expect(html).toContain("Codex hooks");
+    expect(html).toContain("Repair hooks");
+    expect(html).toContain("Capture mode");
     expect(html).toContain("MCP access");
     expect(html).toContain("MCP server");
     expect(html).toContain("Refresh MCP");
@@ -34,6 +37,8 @@ describe("Settings surface", () => {
     expect(html).toContain("Test MCP launch");
     expect(html).toContain("/home/tyler/.local/share/masthead/masthead.sqlite");
     expect(html).toContain("Export data");
+    expect(html).toContain("Advanced runtime");
+    expect(html).toContain("Retention classes");
     expect(html).not.toContain("Codex integration");
     expect(html).not.toContain("Lifecycle hooks");
     expect(html).not.toContain("Current enrichments");
@@ -41,7 +46,6 @@ describe("Settings surface", () => {
     expect(html).not.toContain("Copy Codex config");
     expect(html).not.toContain("Other MCP clients");
     expect(html).not.toContain("Sessions");
-    expect(html).not.toContain("Retention classes");
     expect(html).not.toContain("Can agents read Masthead?");
     expect(html).not.toContain("Agent Access");
     expect(html).not.toContain("ops-card");

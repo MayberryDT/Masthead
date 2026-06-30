@@ -120,7 +120,7 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Source copies");
     expect(html).toContain("4");
     expect(html).not.toContain("Sessions");
-    expect(html).not.toContain("Retention classes");
+    expect(html).toContain("Retention classes");
   });
 
   test("renders local action errors without changing action labels", () => {

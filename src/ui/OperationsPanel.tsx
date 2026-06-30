@@ -7,8 +7,10 @@ import {
 } from "../app/daemonClient";
 import type { MastheadConnectionState } from "../app/connection/MastheadConnectionProvider";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { AdvancedRuntimeSettings } from "./settings/AdvancedRuntimeSettings";
 import { EnrichmentSettings } from "./settings/EnrichmentSettings";
 import { DangerZone } from "./settings/DangerZone";
+import { HooksSettings } from "./settings/HooksSettings";
 import { McpSettings } from "./settings/McpSettings";
 import { PrivacySettings } from "./settings/PrivacySettings";
 import { StorageSettings } from "./settings/StorageSettings";
@@ -132,31 +134,43 @@ export function OperationsPanel({
       ) : null}
 
       {showSettingsSections ? (
-        <div className="settings-layout">
-          <EnrichmentSettings enrichment={effectiveSettings?.enrichment} />
-          <PrivacySettings privacy={effectiveSettings?.privacy} />
-          <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
-          <StorageSettings
-            busy={busy}
-            dataSummary={effectiveSummary}
-            onOpenDataDirectory={openDataDirectory}
-            onExport={onExportLocalData}
-            onRequestPrune={onRequestPruneLocalData}
-            settings={effectiveSettings}
-            writeDisabled={writesDisabled}
-          />
-          <DangerZone
-            busy={writesDisabled}
-            databaseId={effectiveSettings?.data.databaseId}
-            databasePath={effectiveSettings?.data.databasePath}
-            deletionScopeKind={deletionScopeKind}
-            deletionScopeTarget={deletionScopeTarget}
-            onDeletionScopeKindChange={onDeletionScopeKindChange}
-            onDeletionScopeTargetChange={onDeletionScopeTargetChange}
-            onRequestDeleteAll={onRequestDeleteLocalData}
-            onRequestScopedDelete={onRequestScopedDelete}
-            targets={effectiveSettings?.deletionTargets}
-          />
+        <div className="settings-layout settings-layout-priority-bay">
+          <div className="settings-priority-column settings-priority-column-storage">
+            <StorageSettings
+              busy={busy}
+              dataSummary={effectiveSummary}
+              onOpenDataDirectory={openDataDirectory}
+              onExport={onExportLocalData}
+              onRequestPrune={onRequestPruneLocalData}
+              settings={effectiveSettings}
+              writeDisabled={writesDisabled}
+            />
+          </div>
+          <div className="settings-priority-column settings-priority-column-policy">
+            <PrivacySettings privacy={effectiveSettings?.privacy} />
+            <EnrichmentSettings enrichment={effectiveSettings?.enrichment} />
+          </div>
+          <div className="settings-priority-column settings-priority-column-session">
+            <HooksSettings baseUrl={baseUrl} hooks={effectiveSettings?.hooks} readOnly={readOnly} />
+            <AdvancedRuntimeSettings dataSummary={effectiveSummary} settings={effectiveSettings} />
+          </div>
+          <div className="settings-priority-column settings-priority-column-mcp">
+            <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
+          </div>
+          <div className="settings-priority-column settings-priority-column-danger">
+            <DangerZone
+              busy={writesDisabled}
+              databaseId={effectiveSettings?.data.databaseId}
+              databasePath={effectiveSettings?.data.databasePath}
+              deletionScopeKind={deletionScopeKind}
+              deletionScopeTarget={deletionScopeTarget}
+              onDeletionScopeKindChange={onDeletionScopeKindChange}
+              onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+              onRequestDeleteAll={onRequestDeleteLocalData}
+              onRequestScopedDelete={onRequestScopedDelete}
+              targets={effectiveSettings?.deletionTargets}
+            />
+          </div>
         </div>
       ) : null}
 
