@@ -304,11 +304,11 @@ describe("Live Board UI", () => {
     expect(html).toContain("Thinking Extra High");
     expect(html).toContain("Canonical details unavailable");
     expect(html).toContain("Session dossier");
-    expect(html).toContain("Enrichment");
+    expect(html).toContain("Session summary");
     expect(html).toContain("Advanced details");
     expect(html).toContain("Still running");
-    expect(html).toContain("Review shared edits");
-    expect(html).toContain("This session is active with overlapping work to inspect.");
+    expect(html).not.toContain("Review shared edits");
+    expect(html).not.toContain("This session is active with overlapping work to inspect.");
     expect(html).not.toContain("Confidence");
     expect(html).not.toContain("shared_workspace");
     expect(html).not.toContain("Implementation is complete, but auth tests are still failing.");

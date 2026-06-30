@@ -23,6 +23,7 @@ describe("buildMastheadHealth", () => {
       fixturePath: "/tmp/masthead-test/fixture.json",
       gitRefreshMs: 0,
       host: "127.0.0.1",
+      hookTranscriptCatchupEnabled: false,
       llmCopyEnabled: false,
       port: 17373,
       storePath: "/tmp/masthead-test/events.ndjson"

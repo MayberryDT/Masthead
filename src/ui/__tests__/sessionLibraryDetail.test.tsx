@@ -19,7 +19,7 @@ describe("SessionLibraryDetail", () => {
     expect(html).toContain("Repair OAuth callback");
     expect(html).toContain("Session dossier");
     expect(html).toContain("Copy canonical ID");
-    expect(html).toContain("Enrichment");
+    expect(html).toContain("Session summary");
     expect(html).toContain("Transcript");
     expect(html).toContain("Advanced details");
     expect(html).toContain("OAuth route still fails");
