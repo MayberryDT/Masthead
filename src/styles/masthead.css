@@ -5408,7 +5408,7 @@ body {
 .masthead-shell .connected-source-row::after,
 .observability-console .adapter-card::after,
 .masthead-shell .adapter-card::after {
-  border-top-width: 1px;
+  border-top-width: 0;
 }
 
 .observability-console .sidebar-usage > *,
