@@ -1,15 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import type { SessionTranscriptKindFilter, SessionTranscriptResult } from "../../app/daemonClient";
-import type { SessionTranscriptItem } from "../../shared/sessionTranscript";
 import type { SafeAction, SessionDetailView } from "../../core/types";
 import type { SessionDossierDto, SessionDossierTimelineEvent } from "../../shared/sessionDossier";
-import { DossierCoverageBanner } from "./DossierCoverageBanner";
-import { DossierTranscript } from "./DossierTranscript";
+import type { SessionTranscriptItem } from "../../shared/sessionTranscript";
+import { AppButton } from "../primitives/AppButton";
 import { readableTranscriptText } from "./transcriptPresentation";
 
 type TimelineFilter = "all" | "user" | "assistant" | "tools" | "checkpoints" | "attention";
-type CopyState = "idle" | "copied" | "unavailable" | "failed";
 
 type Props = {
   live?: SessionDetailView;
@@ -29,303 +27,448 @@ type Props = {
   onOpenSources?: () => void;
   onAction?: (action: SafeAction, session: SessionDetailView) => void;
   actionStatus?: string;
+  onClose?: () => void;
+  titleId?: string;
 };
 
 const formatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const noop = () => undefined;
-const noopString = (_value: string) => undefined;
-const noopTranscriptFilter = (_value: SessionTranscriptKindFilter) => undefined;
+const transcriptFilters: Array<{ label: string; value: SessionTranscriptKindFilter }> = [
+  { label: "Evidence", value: "all" },
+  { label: "User", value: "user" },
+  { label: "Assistant", value: "assistant" },
+  { label: "Tools", value: "tools" }
+];
 
 export function SessionDossier({
   dossier,
   error,
   live,
   loading = false,
-  onOpenSources,
-  onRetry,
+  onClose,
   onTranscriptFilterChange,
   onTranscriptLoadMore,
-  onTranscriptQueryChange,
-  onTranscriptRetry,
+  titleId,
   transcript,
   transcriptError,
   transcriptFilter = "all",
   transcriptLoading = false,
   transcriptQuery = ""
 }: Props) {
-  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("all");
-  const [showAllTimeline, setShowAllTimeline] = useState(false);
-  const [showAllTools, setShowAllTools] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [copyState, setCopyState] = useState<CopyState>("idle");
+  const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+  const transcriptLoadMoreRef = useRef<HTMLDivElement | null>(null);
+  const requestedTranscriptCursorRef = useRef<string | undefined>(undefined);
   const identity = dossier?.identity;
-  const subtitle = [identity?.project ?? live?.project, identity?.runtime ?? live?.runtime, identity?.model ?? live?.model]
-    .filter(Boolean)
-    .join(" · ");
   const summary = dossierSummary(dossier, live);
+  const attentionItems = dossier?.attention ?? liveAttention(live);
   const timelineEvents = useMemo(() => (dossier?.timeline ?? liveTimeline(live)).filter((event) => event.kind !== "file"), [dossier?.timeline, live]);
-  const filteredTimeline = useMemo(() => filterTimeline(timelineEvents, timelineFilter), [timelineEvents, timelineFilter]);
-  const visibleTimeline = showAllTimeline ? filteredTimeline : filteredTimeline.slice(-30);
-  const visibleTools = showAllTools ? dossier?.tools : dossier?.tools.slice(0, 12);
+  const transcriptRows = useMemo(() => compactTranscriptRows(transcript?.items), [transcript?.items]);
+  const title = identity?.title ?? live?.copy.headline ?? live?.title ?? "Session dossier";
+  const description =
+    summary ??
+    readableTranscriptText(live?.copy.reason) ??
+    readableTranscriptText(live?.currentActivity) ??
+    "Canonical identifiers and reusable session context.";
+  const endedAt = identity?.endedAt ?? identity?.lastActivityAt ?? live?.lastActivity;
+  const advancedPanelId = `${identity?.sessionId ?? live?.canonicalSessionId ?? live?.sessionId ?? "session"}-advanced-details-panel`;
+  const sourceId = identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId ?? "-";
 
-  const copyContext = async (value?: string) => {
-    if (!value || !navigator.clipboard?.writeText) {
-      setCopyState("unavailable");
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopyState("copied");
-      window.setTimeout(() => setCopyState("idle"), 1400);
-    } catch {
-      setCopyState("failed");
-    }
-  };
+  useEffect(() => {
+    requestedTranscriptCursorRef.current = undefined;
+  }, [transcriptFilter, transcriptQuery]);
+
+  useEffect(() => {
+    const nextCursor = transcript?.nextCursor;
+    const sentinel = transcriptLoadMoreRef.current;
+    if (!nextCursor || !sentinel || transcriptLoading || !onTranscriptLoadMore || typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        if (requestedTranscriptCursorRef.current === nextCursor) return;
+        requestedTranscriptCursorRef.current = nextCursor;
+        onTranscriptLoadMore();
+      },
+      { root: transcriptScrollRef.current, rootMargin: "80px 0px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [onTranscriptLoadMore, transcript?.nextCursor, transcriptLoading]);
 
   return (
-    <section className="session-dossier" aria-label="Session dossier">
-      {loading ? <div className="dossier-banner">Loading canonical session dossier...</div> : null}
-      {error ? (
-        <div className="dossier-banner dossier-banner-error">
-          <span>{error}</span>
-          {onRetry ? (
-            <button type="button" className="dossier-link-button" onClick={onRetry}>
-              Retry
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-      {!dossier && live ? <div className="dossier-banner">Canonical details unavailable. Showing live session state only.</div> : null}
-
-      <section className="dossier-hero">
-        <div className="dossier-hero-copy">
-          <div>
-            <p className="mono-label">Session identity</p>
-            <p>{subtitle || "Canonical identifiers and reusable context"}</p>
-          </div>
-          <div className="dossier-hero-actions" aria-label="Session context actions">
-            <button type="button" onClick={() => copyContext(dossier?.reuse.copyableContext)}>
-              Copy context
-            </button>
-            <button type="button" onClick={() => copyContext(identity?.sessionId ?? live?.canonicalSessionId)}>
-              Copy canonical ID
-            </button>
-            <button type="button" onClick={() => copyContext(identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId)}>
-              Copy source ID
-            </button>
-          </div>
-          {copyState !== "idle" ? <p className="dossier-muted">{copyFeedback(copyState)}</p> : null}
-        </div>
-        <div className="dossier-identity-grid" aria-label="Session identity">
-          <DossierMetric label="Lifecycle" value={identity?.lifecycle ?? live?.lifecycle ?? "Unknown"} />
-          <DossierMetric label="Duration" value={formatDuration(identity?.durationMs) ?? live?.durationLabel ?? "-"} />
-          <DossierMetric label="Total tokens" value={formatNumber(dossier?.usage.totalTokens ?? live?.totalTokens)} />
-          <DossierMetric label="Input tokens" value={formatNumber(dossier?.usage.inputTokens)} />
-          <DossierMetric label="Output tokens" value={formatNumber(dossier?.usage.outputTokens)} />
-          <DossierMetric label="Messages" value={formatNumber(dossier?.coverage.transcript.messages)} />
-        </div>
-      </section>
-
-      <DossierCoverageBanner coverage={dossier?.coverage} onOpenSources={onOpenSources} />
-
-      <div className="dossier-grid">
-        <DossierPanel title="Session summary" className="dossier-panel-span dossier-panel-primary">
-          <div className="dossier-copy-stack">
-            <DossierCopyBlock label="Transcript summary" value={summary} />
-            <DossierCopyBlock label="First prompt" value={dossier?.narrative.firstUserPrompt} />
-            <DossierCopyBlock label="Latest prompt" value={dossier?.narrative.latestUserPrompt} />
-            <DossierTags label="Topics" values={dossier?.narrative.topics} />
-            <DossierTags label="Technologies" values={dossier?.narrative.technologies} />
-            <DossierTags label="Unresolved" values={dossier?.narrative.unresolved} />
-          </div>
-        </DossierPanel>
-
-        <DossierPanel title="Transcript" className="dossier-panel-span dossier-panel-transcript">
-          <DossierTranscript
-            sessionId={identity?.sessionId ?? live?.canonicalSessionId}
-            transcript={transcript}
-            loading={transcriptLoading}
-            error={transcriptError}
-            filter={transcriptFilter}
-            query={transcriptQuery}
-            onFilterChange={onTranscriptFilterChange ?? noopTranscriptFilter}
-            onQueryChange={onTranscriptQueryChange ?? noopString}
-            onLoadMore={onTranscriptLoadMore ?? noop}
-            onRetry={onTranscriptRetry ?? noop}
-          />
-        </DossierPanel>
-
-        {advancedOpen ? (
-          <section className="dossier-advanced-details" aria-label="Advanced session details">
-            <DossierPanel title="Verification">
-              <p className={`dossier-status dossier-status-${dossier?.verification.status ?? "unknown"}`}>
-                {dossier?.verification.summary ?? verificationFallback(live)}
-              </p>
-              <ListEmpty empty="No verification commands captured.">
-                {dossier?.verification.commands.slice(0, 5).map((tool) => (
-                  <li key={tool.toolCallId}>
-                    <strong>{tool.toolName}</strong>
-                    <span>{tool.status ?? "unknown"}</span>
-                  </li>
-                ))}
-              </ListEmpty>
-            </DossierPanel>
-
-            <DossierPanel title="Needs attention">
-              <ListEmpty empty="No attention items captured.">
-                {(dossier?.attention ?? liveAttention(live)).slice(0, 6).map((item, index) => (
-                  <li key={`${item.kind}:${item.title}:${index}`}>
-                    <strong>{item.title}</strong>
-                    <span>{item.detail ?? item.severity}</span>
-                  </li>
-                ))}
-              </ListEmpty>
-            </DossierPanel>
-
-            <DossierPanel title="Tools">
-              <ListEmpty empty="No tool calls captured.">
-                {visibleTools?.map((tool, index) => (
-                  <li key={`${tool.toolCallId}:${index}`} className={tool.status === "failed" || (tool.exitCode !== undefined && tool.exitCode !== 0) ? "is-failed" : ""}>
-                    <div>
-                      <strong>{tool.toolName}</strong>
-                      {tool.outputPreview ? <small className="dossier-list-preview">{tool.outputPreview}</small> : null}
-                    </div>
-                    <span>{tool.status ?? tool.category ?? "captured"}{tool.exitCode !== undefined ? ` · exit ${tool.exitCode}` : ""}</span>
-                  </li>
-                ))}
-              </ListEmpty>
-              {dossier && dossier.tools.length > 12 ? (
-                <button type="button" className="dossier-link-button" onClick={() => setShowAllTools((current) => !current)}>
-                  {showAllTools ? "Show fewer tools" : `Show ${dossier.tools.length - 12} more tools`}
-                </button>
-              ) : null}
-            </DossierPanel>
-
-            <DossierPanel title="Transcript excerpts" className="dossier-panel-span">
-              <ListEmpty empty="No transcript excerpts captured.">
-                {dossier?.excerpts.map((excerpt, index) => (
-                  <li key={`${excerpt.excerptId}:${index}`}>
-                    <strong>{excerpt.role ?? excerpt.kind}</strong>
-                    <span>{excerpt.text}</span>
-                  </li>
-                ))}
-              </ListEmpty>
-            </DossierPanel>
-
-            <DossierPanel title="Raw transcript" className="dossier-panel-span">
-              <DossierRawTranscript items={transcript?.items} />
-            </DossierPanel>
-
-            <DossierPanel title="Timeline" className="dossier-panel-span">
-              <div className="dossier-filter-row" aria-label="Timeline filters">
-                {(["all", "user", "assistant", "tools", "checkpoints", "attention"] as TimelineFilter[]).map((filter) => (
-                  <button
-                    key={filter}
-                    type="button"
-                    className={filter === timelineFilter ? "is-active" : ""}
-                    onClick={() => {
-                      setTimelineFilter(filter);
-                      setShowAllTimeline(false);
-                    }}
-                  >
-                    {timelineLabel(filter)}
-                  </button>
-                ))}
+    <section className="session-dossier stage" aria-label="Session dossier">
+      <div className="backdrop">
+        <article className="dossier" aria-label="Session dossier modal">
+          <header className="dossier-header">
+            <div className="meta-rail" aria-label="Session identity metadata">
+              <MetaCell label="Project" value={identity?.project ?? live?.project ?? "Not captured"} />
+              <MetaCell label="Runtime" value={identity?.runtime ?? live?.runtime ?? "Not captured"} />
+              <MetaCell label="Lifecycle" value={identity?.lifecycle ?? live?.lifecycle ?? "Unknown"} />
+              <MetaCell label="Ended" value={endedAt ? formatDateTime(endedAt) : live?.durationLabel ?? "-"} />
+              <MetaCell label="Model" value={identity?.model ?? live?.model ?? identity?.models?.join(", ") ?? "Not captured"} />
+            </div>
+            <div className="title-block">
+              <div>
+                <span className="mono label">Session identity</span>
+                <h2 id={titleId}>{title}</h2>
+                <p>{description}</p>
               </div>
-              <ol className="dossier-timeline">
-                {visibleTimeline.length > 0 ? (
-                  visibleTimeline.map((event, index) => (
-                    <li key={`${event.eventId}:${index}`}>
-                      <time dateTime={event.observedAt}>{formatDateTime(event.observedAt)}</time>
-                      <div>
-                        <strong>{event.label}</strong>
-                        <span>{event.summary}</span>
-                        {formatSourceRef(event.sourceRef) ? <small>{formatSourceRef(event.sourceRef)}</small> : null}
-                      </div>
+              <AppButton className="close" variant="icon" type="button" aria-label="Close session dossier" onClick={onClose}>
+                &times;
+              </AppButton>
+            </div>
+          </header>
+
+          <div className="content-grid">
+            <section className="metrics" aria-label="Key stats">
+              <Metric className="is-good" label="Source confidence" value={identity?.sourceConfidence ?? live?.identityConfidence ?? "Unknown"} />
+              <Metric label="Coverage" value={coverageLabel(dossier?.coverage.level)} />
+              <Metric className="is-primary" label="Total tokens" value={formatCompactNumber(dossier?.usage.totalTokens ?? live?.totalTokens)} />
+              <Metric label="Input tokens" value={formatCompactNumber(dossier?.usage.inputTokens)} />
+              <Metric label="Output tokens" value={formatCompactNumber(dossier?.usage.outputTokens)} />
+              <Metric label="Usage rows" value={formatNumber(dossier?.usage.usageRows)} />
+              <Metric label="Messages" value={formatNumber(dossier?.coverage.transcript.messages)} />
+              <Metric label="Tool calls" value={formatNumber(dossier?.coverage.transcript.toolCalls)} />
+              <Metric className={attentionItems.length > 0 ? "is-warning" : undefined} label="Attention rows" value={formatNumber(attentionItems.length)} />
+            </section>
+
+            <DossierEnrichmentPanel dossier={dossier} error={error} loading={loading} summary={summary} />
+
+            <section className="panel transcript" aria-label="Transcript excerpt">
+              <div className="transcript-toolbar">
+                <div>
+                  <h3>Transcript evidence</h3>
+                  <span className="rail-label">filtered to useful card/prototype rows</span>
+                </div>
+                <div className="filter-row" aria-label="Transcript filters">
+                  {transcriptFilters.map((filter) => (
+                    <AppButton
+                      key={filter.value}
+                      className={filter.value === transcriptFilter ? "filter is-active" : "filter"}
+                      variant={filter.value === transcriptFilter ? "primary" : "default"}
+                      type="button"
+                      aria-pressed={filter.value === transcriptFilter}
+                      onClick={() => onTranscriptFilterChange?.(filter.value)}
+                    >
+                      {filter.label}
+                    </AppButton>
+                  ))}
+                </div>
+              </div>
+              <div className="transcript-scroll" ref={transcriptScrollRef}>
+                <ol>
+                  {transcriptRows.length > 0 ? (
+                    transcriptRows.map((item, index) => (
+                      <li key={`${item.itemId}:${index}`} className={rowTone(item.kind === "message" ? item.role : item.kind)}>
+                        <time dateTime={item.observedAt}>{formatTime(item.observedAt)}</time>
+                        <b>{itemLabel(item)}</b>
+                        <p>{item.displayText}</p>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="is-system">
+                      <time>-</time>
+                      <b>Empty</b>
+                      <p>{transcriptError ? `Transcript error: ${transcriptError}` : transcriptLoading ? "Loading transcript..." : "No transcript evidence captured."}</p>
                     </li>
-                  ))
-                ) : (
-                  <li className="dossier-empty">No timeline events captured.</li>
-                )}
-              </ol>
-              {filteredTimeline.length > 30 ? (
-                <button type="button" className="dossier-link-button dossier-panel-footer-action" onClick={() => setShowAllTimeline((current) => !current)}>
-                  {showAllTimeline ? "Show less" : `Show ${filteredTimeline.length - 30} more`}
-                </button>
-              ) : null}
-            </DossierPanel>
-
-            <DossierPanel title="Provenance" className="dossier-panel-span">
-              <div className="dossier-provenance">
-                <DossierMetric label="Canonical ID" value={identity?.sessionId ?? live?.canonicalSessionId ?? "-"} />
-                <DossierMetric label="Source ID" value={identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId ?? "-"} />
-                <DossierMetric label="Agent retrieval" value={dossier ? (dossier.reuse.mcpIncluded ? "Included" : "Excluded") : "-"} />
-                <DossierMetric label="Confidence" value={identity?.sourceConfidence ?? live?.identityConfidence ?? "Unknown"} />
+                  )}
+                </ol>
+                {transcript?.nextCursor ? (
+                  <div ref={transcriptLoadMoreRef} className="transcript-sentinel" aria-hidden="true">
+                    {transcriptLoading ? "Loading more evidence..." : ""}
+                  </div>
+                ) : null}
               </div>
-              <div className="dossier-narrative-debug">
-                <h5>Narrative evidence</h5>
-                {dossier?.narrative.narrativeDebug ? (
-                  <>
-                    <div className="dossier-provenance dossier-provenance-compact">
-                      <DossierMetric label="Title source" value={dossier.narrative.narrativeDebug.titleSource ?? "-"} />
-                      <DossierMetric label="Subject source" value={dossier.narrative.narrativeDebug.subjectSource ?? "-"} />
-                      <DossierMetric label="Provider" value={dossier.narrative.narrativeDebug.provider ?? "deterministic"} />
-                      <DossierMetric label="Model" value={dossier.narrative.narrativeDebug.model ?? "local-rules"} />
-                      <DossierMetric label="Status" value={dossier.narrative.narrativeDebug.providerStatus ?? "-"} />
-                      <DossierMetric label="Confidence" value={dossier.narrative.narrativeDebug.confidence ?? "-"} />
-                      <DossierMetric label="Prompt version" value={dossier.narrative.narrativeDebug.promptVersion ?? "-"} />
-                      <DossierMetric label="Evidence refs" value={formatNumber(dossier.narrative.narrativeDebug.sourceRefs.length)} />
-                    </div>
-                    {dossier.narrative.narrativeDebug.missingEvidence?.length ? (
-                      <p className="dossier-muted">
-                        Missing evidence: {dossier.narrative.narrativeDebug.missingEvidence.join(", ")}
-                      </p>
-                    ) : null}
-                    {dossier.narrative.narrativeDebug.failureCode ? (
-                      <p className="dossier-warning">
-                        Enrichment failed: {dossier.narrative.narrativeDebug.failureMessage ?? dossier.narrative.narrativeDebug.failureCode}
-                      </p>
-                    ) : null}
-                    <ul className="dossier-evidence-list">
-                      {dossier.narrative.narrativeDebug.sourceRefs.slice(0, 6).map((ref, index) => (
-                        <li key={`${ref.id}:${index}`}>{formatSourceRef(ref) ?? ref.id}</li>
-                      ))}
+            </section>
+
+            <section className="advanced" aria-label="Advanced session details">
+              <div className="advanced-cell is-wide">
+                <span>Canonical ID</span>
+                <strong>{identity?.sessionId ?? live?.canonicalSessionId ?? "-"}</strong>
+              </div>
+              <div className="advanced-cell">
+                <span>Source session</span>
+                <strong>{sourceId}</strong>
+              </div>
+              <div className="advanced-cell">
+                <span>Agent retrieval</span>
+                <strong>{dossier ? (dossier.reuse.mcpIncluded ? "Included" : "Excluded") : "-"}</strong>
+              </div>
+              <div className="advanced-cell">
+                <span>Verification</span>
+                <strong>{dossier?.verification.summary ?? verificationFallback(live)}</strong>
+              </div>
+              <div className="advanced-cell">
+                <span>Enrichment</span>
+                <strong>{dossier?.narrative.narrativeDebug?.providerStatus ?? (dossier ? "deterministic / current" : "-")}</strong>
+              </div>
+              <div className="advanced-cell is-wide">
+                <span>Worktree</span>
+                <strong>{identity?.worktreePath ?? identity?.repoRoot ?? live?.workspace?.worktreePath ?? "-"}</strong>
+                <div className="path-row">Host: {identity?.hostId ?? live?.workspace?.repoRoot ?? "Not captured"}</div>
+              </div>
+              <AppButton
+                className="advanced-toggle"
+                type="button"
+                aria-expanded={advancedOpen}
+                aria-controls={advancedPanelId}
+                onClick={() => setAdvancedOpen((current) => !current)}
+              >
+                {advancedOpen ? "Hide advanced details" : "Advanced details"}
+              </AppButton>
+              <div className="advanced-details-panel" id={advancedPanelId} hidden={!advancedOpen}>
+                <section className="advanced-detail-card is-compact">
+                  <h4>Verification</h4>
+                  <p>{dossier?.verification.summary ?? verificationFallback(live)}</p>
+                </section>
+
+                <section className="advanced-detail-card is-compact">
+                  <h4>Needs attention</h4>
+                  <AdvancedList empty="No attention items captured.">
+                    {attentionItems.slice(0, 6).map((item, index) => (
+                      <li key={`${item.kind}:${item.title}:${index}`}>
+                        <strong>{item.title}</strong>
+                        <span>{item.detail ?? item.severity}</span>
+                      </li>
+                    ))}
+                  </AdvancedList>
+                </section>
+
+                <section className="advanced-detail-card is-wide is-compact">
+                  <h4>Tools</h4>
+                  <AdvancedList empty="No tool calls captured.">
+                    {dossier?.tools.slice(0, 12).map((tool, index) => (
+                      <li key={`${tool.toolCallId}:${index}`}>
+                        <strong>{tool.toolName}</strong>
+                        <span>{tool.status ?? tool.category ?? "captured"}{tool.exitCode !== undefined ? ` / exit ${tool.exitCode}` : ""}</span>
+                      </li>
+                    ))}
+                  </AdvancedList>
+                </section>
+
+                <section className="advanced-detail-card is-wide">
+                  <h4>Provenance</h4>
+                  <ul className="advanced-list">
+                    <li><strong>Canonical ID</strong><span>{identity?.sessionId ?? live?.canonicalSessionId ?? "-"}</span></li>
+                    <li><strong>Source session</strong><span>{sourceId}</span></li>
+                    <li><strong>Source confidence</strong><span>{identity?.sourceConfidence ?? live?.identityConfidence ?? "Unknown"}</span></li>
+                    <li><strong>Agent retrieval</strong><span>{dossier ? (dossier.reuse.mcpIncluded ? "included in MCP search" : "excluded from MCP search") : "-"}</span></li>
+                  </ul>
+                </section>
+
+                <section className="advanced-detail-card is-wide">
+                  <h4>Narrative evidence</h4>
+                  {dossier?.narrative.narrativeDebug ? (
+                    <ul className="advanced-list">
+                      <li><strong>Title source</strong><span>{dossier.narrative.narrativeDebug.titleSource ?? "-"}</span></li>
+                      <li><strong>Subject source</strong><span>{dossier.narrative.narrativeDebug.subjectSource ?? "-"}</span></li>
+                      <li><strong>Provider</strong><span>{dossier.narrative.narrativeDebug.provider ?? "local rules"}</span></li>
+                      <li><strong>Evidence refs</strong><span>{formatNumber(dossier.narrative.narrativeDebug.sourceRefs.length)}</span></li>
                     </ul>
-                  </>
-                ) : (
-                  <p className="dossier-muted">Narrative not generated yet.</p>
-                )}
+                  ) : (
+                    <p className="advanced-detail-muted">Narrative not generated yet.</p>
+                  )}
+                </section>
+
+                <section className="advanced-detail-card is-full is-scroll-window is-timeline">
+                  <div className="advanced-scroll-head">
+                    <h4>Timeline</h4>
+                    <span className="rail-label">{formatNumber(timelineEvents.length)} events / all</span>
+                  </div>
+                  <div className="advanced-scroll-body">
+                    <ol className="advanced-list timeline-list">
+                      {timelineEvents.length > 0 ? (
+                        timelineEvents.map((event, index) => (
+                          <li key={`${event.eventId}:${index}`} className={rowTone(event.kind)}>
+                            <strong>{formatDateTime(event.observedAt)}</strong>
+                            <span>{event.summary}</span>
+                          </li>
+                        ))
+                      ) : (
+                        <li className="is-system"><strong>-</strong><span>No timeline events captured.</span></li>
+                      )}
+                    </ol>
+                  </div>
+                </section>
+
+                <section className="advanced-detail-card is-full is-scroll-window is-raw">
+                  <div className="advanced-scroll-head">
+                    <h4>Raw transcript</h4>
+                    <span className="rail-label">{formatNumber(transcript?.items.length)} rows / transcript</span>
+                  </div>
+                  <div className="advanced-scroll-body">
+                    <DossierRawTranscript items={transcript?.items} />
+                  </div>
+                </section>
               </div>
-            </DossierPanel>
-          </section>
-        ) : null}
-      </div>
-
-      <div className="dossier-advanced-footer">
-        <button type="button" className="dossier-link-button" onClick={() => setAdvancedOpen((current) => !current)}>
-          {advancedOpen ? "Hide advanced details" : "Advanced details"}
-        </button>
+            </section>
+          </div>
+        </article>
       </div>
     </section>
   );
 }
 
-function DossierPanel({ children, className = "", title }: { children: React.ReactNode; className?: string; title: string }) {
+function MetaCell({ label, value }: { label: string; value?: string | number }) {
   return (
-    <section className={["dossier-panel", className].filter(Boolean).join(" ")}>
-      <h4>{title}</h4>
-      <div className="dossier-panel-body">{children}</div>
-    </section>
-  );
-}
-
-function DossierMetric({ label, value }: { label: string; value?: string | number }) {
-  return (
-    <div className="dossier-metric">
+    <div className="meta-cell">
       <span>{label}</span>
       <strong>{value ?? "-"}</strong>
     </div>
   );
+}
+
+function Metric({ className, label, value }: { className?: string; label: string; value?: string | number }) {
+  return (
+    <div className={["metric", className].filter(Boolean).join(" ")}>
+      <span>{label}</span>
+      <strong>{value ?? "-"}</strong>
+    </div>
+  );
+}
+
+function DossierEnrichmentPanel({
+  dossier,
+  error,
+  loading,
+  summary
+}: {
+  dossier?: SessionDossierDto;
+  error?: string;
+  loading?: boolean;
+  summary?: string;
+}) {
+  const coverage = dossier?.coverage.transcript;
+  const status = dossier
+    ? [dossier.narrative.narrativeDebug?.promptVersion ?? "session-capsule-v2", dossier.reuse.mcpIncluded ? "current" : "not indexed"].join(" / ")
+    : "live projection";
+  return (
+    <section className="panel summary" aria-label="Enrichment summary">
+      <div className="panel-head">
+        <h3>Enrichment summary</h3>
+        <span className="rail-label">{status}</span>
+      </div>
+      <div className="summary-scroll">
+        <div className="summary-grid" aria-label="Enrichment stats" data-dossier-section="stats">
+          <SummaryFact label="User messages" value={formatNumber(coverage?.userMessages)} />
+          <SummaryFact label="Assistant messages" value={formatNumber(coverage?.assistantMessages)} />
+          <SummaryFact label="Tool results" value={formatNumber(coverage?.toolResults)} />
+          <SummaryFact label="Checkpoints" value={formatNumber(coverage?.checkpoints)} />
+          <SummaryFact label="Runtime signals" value={formatNumber(coverage?.runtimeSignals)} />
+          <SummaryFact label="Low-value rows" value={formatNumber(coverage?.lowValueItems)} />
+        </div>
+        <DossierEvidenceBlocks dossier={dossier} />
+        <SummarySection label="Transcript summary" section="summary" value={summary} extraParagraphs={[dossier?.narrative.outcome].filter((value): value is string => Boolean(value))} />
+        <SummarySection label="First prompt" section="first-prompt" value={dossier?.narrative.firstUserPrompt} />
+        <SummarySection label="Latest prompt" section="latest-prompt" value={dossier?.narrative.latestUserPrompt} />
+        <SummarySection label="Technologies" section="technologies" values={dossier?.narrative.technologies} />
+        <SummarySection label="Unresolved" section="unresolved" values={dossier?.narrative.unresolved} />
+        {loading ? <SummarySection label="Loading" section="loading" value="Loading canonical session dossier..." /> : null}
+        {error ? <SummarySection label="Dossier error" section="error" value={error} /> : null}
+        <SummarySection label="Retrieval notes" section="retrieval" value={dossier?.reuse.copyableContext} />
+        <SummarySection label="Continuation notes" section="continuation" values={dossier?.attention.map((item) => item.title)} />
+      </div>
+    </section>
+  );
+}
+
+function SummaryFact({ label, value }: { label: string; value?: string | number }) {
+  return (
+    <div className="summary-fact">
+      <span>{label}</span>
+      <strong>{value ?? "-"}</strong>
+    </div>
+  );
+}
+
+function DossierEvidenceBlocks({ dossier }: { dossier?: SessionDossierDto }) {
+  const values = [
+    ...(dossier?.narrative.topics ?? []).map((value) => ({ className: "is-blue", value })),
+    ...(dossier?.reuse.mcpIncluded ? [{ className: "is-green", value: "MCP included" }] : []),
+    ...(dossier?.narrative.unresolved ?? []).map((value) => ({ className: "is-yellow", value })),
+    ...(dossier?.coverage.warnings.slice(0, 3).map((warning) => ({ className: "is-yellow", value: warning.code.replaceAll("_", " ") })) ?? [])
+  ];
+  const uniqueValues = values.filter((item, index) => {
+    const key = item.value.trim().toLowerCase();
+    return values.findIndex((candidate) => candidate.value.trim().toLowerCase() === key) === index;
+  });
+  if (uniqueValues.length === 0) return null;
+  return (
+    <div className="evidence-blocks" aria-label="Session topics and warnings" data-dossier-section="signals">
+      {uniqueValues.slice(0, 10).map((item) => (
+        <div key={`${item.className}:${item.value}`} className={`evidence-block ${item.className}`}>
+          <span>{item.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SummarySection({
+  extraParagraphs,
+  label,
+  section,
+  value,
+  values
+}: {
+  extraParagraphs?: string[];
+  label: string;
+  section: string;
+  value?: string;
+  values?: string[];
+}) {
+  const text = readableTranscriptText(value);
+  const paragraphs = [text, ...(extraParagraphs?.map(readableTranscriptText) ?? [])]
+    .filter((item): item is string => Boolean(item))
+    .filter((item, index, items) => items.findIndex((candidate) => sameReadableText(candidate, item)) === index)
+    .slice(0, 8);
+  const visibleValues = values?.map(readableTranscriptText).filter(Boolean).slice(0, 8) ?? [];
+  if (paragraphs.length === 0 && visibleValues.length === 0) return null;
+  return (
+    <div className="summary-section" data-dossier-section={section}>
+      <h4>{label}</h4>
+      {paragraphs.map((paragraph) => (
+        <p key={paragraph}>{paragraph}</p>
+      ))}
+      {visibleValues.length > 0 ? <p>{visibleValues.join(", ")}</p> : null}
+    </div>
+  );
+}
+
+function AdvancedList({ children, empty }: { children?: React.ReactNode; empty: string }) {
+  const items = Array.isArray(children) ? children.filter(Boolean) : children ? [children] : [];
+  if (items.length === 0) return <p className="advanced-detail-muted">{empty}</p>;
+  return <ul className="advanced-list">{items}</ul>;
+}
+
+function DossierRawTranscript({ items }: { items?: SessionTranscriptItem[] }) {
+  const visibleItems = items?.slice(0, 120) ?? [];
+  if (visibleItems.length === 0) {
+    return (
+      <ul className="advanced-list raw-transcript-list">
+        <li className="is-system"><strong>-</strong><span>No raw transcript items loaded.</span></li>
+      </ul>
+    );
+  }
+  return (
+    <ul className="advanced-list raw-transcript-list">
+      {visibleItems.map((item, index) => (
+        <li key={`${item.itemId}:${index}`} className={rowTone(item.kind === "message" ? item.role : item.kind)}>
+          <strong>{formatTime(item.observedAt)} {itemLabel(item).toLowerCase()}</strong>
+          <span>{item.text}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+type CompactTranscriptRow = SessionTranscriptItem & { displayText: string };
+
+function compactTranscriptRows(items?: SessionTranscriptItem[]): CompactTranscriptRow[] {
+  return (items ?? [])
+    .filter((item) => item.kind !== "file_effect")
+    .map((item) => ({ ...item, displayText: readableTranscriptText(item.text) }))
+    .filter((item) => item.displayText.length > 0);
 }
 
 function dossierSummary(dossier?: SessionDossierDto, live?: SessionDetailView): string | undefined {
@@ -356,30 +499,6 @@ function sameReadableText(left?: string, right?: string): boolean {
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
-function DossierCopyBlock({ label, value }: { label: string; value?: string }) {
-  const text = readableTranscriptText(value);
-  if (!text) return null;
-  return (
-    <div>
-      <span>{label}</span>
-      <p>{text}</p>
-    </div>
-  );
-}
-
-function DossierRawTranscript({ items }: { items?: SessionTranscriptItem[] }) {
-  return (
-    <ListEmpty empty="No raw transcript items loaded.">
-      {items?.slice(0, 30).map((item, index) => (
-        <li key={`${item.itemId}:${index}`} className="dossier-raw-transcript-item">
-          <strong>{itemLabel(item)}</strong>
-          <span>{item.text}</span>
-        </li>
-      ))}
-    </ListEmpty>
-  );
-}
-
 function itemLabel(item: SessionTranscriptItem): string {
   if (item.kind === "tool_call") return `Tool · ${item.toolName ?? item.label}`;
   if (item.kind === "tool_result") return `Tool result · ${item.status ?? item.label}`;
@@ -387,35 +506,6 @@ function itemLabel(item: SessionTranscriptItem): string {
   if (item.kind === "runtime_signal") return `Signal · ${item.label}`;
   if (item.kind === "checkpoint") return `Checkpoint · ${item.label}`;
   return item.role[0].toUpperCase() + item.role.slice(1);
-}
-
-function DossierTags({ label, values }: { label: string; values?: string[] }) {
-  if (!values?.length) return null;
-  return (
-    <div>
-      <span>{label}</span>
-      <div className="dossier-tags">
-        {values.slice(0, 10).map((value) => (
-          <b key={value}>{value}</b>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ListEmpty({ children, empty }: { children?: React.ReactNode; empty: string }) {
-  const items = Array.isArray(children) ? children.filter(Boolean) : children ? [children] : [];
-  if (items.length === 0) return <p className="dossier-muted">{empty}</p>;
-  return <ul className="dossier-list">{items}</ul>;
-}
-
-function filterTimeline(events: SessionDossierTimelineEvent[], filter: TimelineFilter): SessionDossierTimelineEvent[] {
-  if (filter === "all") return events;
-  if (filter === "user") return events.filter((event) => event.kind === "user");
-  if (filter === "assistant") return events.filter((event) => event.kind === "assistant");
-  if (filter === "tools") return events.filter((event) => event.kind === "tool");
-  if (filter === "checkpoints") return events.filter((event) => event.kind === "checkpoint");
-  return events.filter((event) => event.kind === "attention" || event.kind === "runtime_signal");
 }
 
 function liveTimeline(live?: SessionDetailView): SessionDossierTimelineEvent[] {
@@ -457,13 +547,24 @@ function verificationFallback(live?: SessionDetailView): string {
   return "No canonical verification signal captured.";
 }
 
-function timelineLabel(filter: TimelineFilter): string {
-  if (filter === "all") return "All";
-  if (filter === "user") return "User";
-  if (filter === "assistant") return "Assistant";
-  if (filter === "tools") return "Tools";
-  if (filter === "checkpoints") return "Checkpoints";
-  return "Attention";
+function rowTone(kind?: string): string {
+  if (kind === "user") return "is-user";
+  if (kind === "assistant") return "is-assistant";
+  if (kind === "tool" || kind === "tool_call" || kind === "tool_result") return "is-tool";
+  if (kind === "checkpoint") return "is-tool";
+  return "is-system";
+}
+
+function coverageLabel(value?: SessionDossierDto["coverage"]["level"]): string {
+  if (!value) return "Live";
+  return value.replaceAll("_", " ");
+}
+
+function formatCompactNumber(value?: number): string {
+  if (typeof value !== "number") return "-";
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return formatter.format(value);
 }
 
 function formatNumber(value?: number): string {
@@ -471,36 +572,14 @@ function formatNumber(value?: number): string {
   return formatter.format(value);
 }
 
-function formatSourceRef(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const ref = value as { id?: unknown; kind?: unknown; source?: unknown; observedAt?: unknown };
-  const parts = [
-    typeof ref.source === "string" ? ref.source : undefined,
-    typeof ref.kind === "string" ? ref.kind : undefined,
-    typeof ref.id === "string" ? ref.id : undefined,
-    typeof ref.observedAt === "string" ? formatDateTime(ref.observedAt) : undefined
-  ].filter(Boolean);
-  return parts.length > 0 ? parts.join(" · ") : undefined;
-}
-
-function formatDuration(value?: number): string | undefined {
-  if (typeof value !== "number") return undefined;
-  const minutes = Math.max(1, Math.round(value / 60_000));
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remaining = minutes % 60;
-  return remaining > 0 ? `${hours}h ${remaining}m` : `${hours}h`;
-}
-
 function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-function copyFeedback(state: CopyState): string {
-  if (state === "copied") return "Copied.";
-  if (state === "unavailable") return "Clipboard unavailable.";
-  if (state === "failed") return "Copy failed.";
-  return "";
+function formatTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "-";
+  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
 }

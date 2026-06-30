@@ -12,16 +12,30 @@ import { SessionDossier } from "../SessionDossier";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("SessionDossier", () => {
-  test("lays out the first advanced detail cards in one desktop row", () => {
+  test("uses the selected prototype grid and scroll-window classes", () => {
     const css = readFileSync("src/styles/session-dossier.css", "utf8");
-    const advancedDetailsRule = css.match(/\.dossier-advanced-details\s*\{[^}]+\}/)?.[0] ?? "";
-    const advancedPanelRule = css.match(/\.dossier-advanced-details\s*>\s*\.dossier-panel\s*\{[^}]+\}/)?.[0] ?? "";
+    const backdropRule = css.match(/\.session-dossier\s+\.backdrop\s*\{[^}]+\}/)?.[0] ?? "";
+    const dossierRule = css.match(/\.session-dossier\s+\.dossier\s*\{[^}]+\}/)?.[0] ?? "";
+    const gridRule = css.match(/\.session-dossier\s+\.content-grid\s*\{[^}]+\}/)?.[0] ?? "";
+    const summaryRule = css.match(/\.session-dossier\s+\.summary\s*\{[^}]+\}/)?.[0] ?? "";
+    const summaryScrollRule = css.match(/\.session-dossier\s+\.summary-scroll\s*\{[^}]+\}/)?.[0] ?? "";
+    const advancedPanelRule = css.match(/\.session-dossier\s+\.advanced-details-panel\s*\{[^}]+\}/)?.[0] ?? "";
+    const closeRule = css.match(/\.session-dossier\s+\.close\s*\{[^}]+\}/)?.[0] ?? "";
 
-    expect(advancedDetailsRule).toContain("grid-template-columns: repeat(6, minmax(0, 1fr));");
-    expect(advancedPanelRule).toContain("grid-column: span 2;");
+    expect(backdropRule).toContain("border: 0;");
+    expect(backdropRule).toContain("background: transparent;");
+    expect(dossierRule).toContain("max-height: calc(100vh - 48px);");
+    expect(dossierRule).toContain("overflow-y: auto;");
+    expect(gridRule).toContain("grid-template-areas:");
+    expect(gridRule).toContain("\"metrics summary\"");
+    expect(summaryRule).toContain("height: 626px;");
+    expect(summaryScrollRule).toContain("overflow-y: auto;");
+    expect(advancedPanelRule).toContain("grid-template-columns: repeat(4, minmax(0, 1fr));");
+    expect(closeRule).toContain("height: 30px;");
+    expect(closeRule).toContain("min-height: 30px;");
   });
 
-  test("keeps token stats in the identity card and omits redundant advanced cards", async () => {
+  test("keeps token and coverage stats in the left metrics rail and omits redundant advanced cards", async () => {
     const host = document.createElement("div");
     const root = createRoot(host);
 
@@ -29,10 +43,13 @@ describe("SessionDossier", () => {
       root.render(<SessionDossier dossier={dossier()} />);
     });
 
-    const identityCard = host.querySelector(".dossier-hero");
-    expect(identityCard?.textContent).toContain("Total tokens");
-    expect(identityCard?.textContent).toContain("Input tokens");
-    expect(identityCard?.textContent).toContain("Output tokens");
+    const metricsRail = host.querySelector(".metrics");
+    expect(metricsRail?.textContent).toContain("Source confidence");
+    expect(metricsRail?.textContent).toContain("Total tokens");
+    expect(metricsRail?.textContent).toContain("Input tokens");
+    expect(metricsRail?.textContent).toContain("Output tokens");
+    expect(metricsRail?.textContent).toContain("Usage rows");
+    expect(metricsRail?.textContent).toContain("Attention rows");
     const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
     expect(button).toBeTruthy();
 
@@ -40,26 +57,83 @@ describe("SessionDossier", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const advancedHeadings = [...host.querySelectorAll(".dossier-advanced-details .dossier-panel h4")].map((heading) => heading.textContent);
+    const advancedHeadings = [...host.querySelectorAll(".advanced-details-panel .advanced-detail-card h4")].map((heading) => heading.textContent);
     expect(advancedHeadings).not.toContain("Token usage");
     expect(advancedHeadings).not.toContain("Review actions");
+    expect(host.querySelectorAll(".advanced-details-panel .advanced-detail-card.is-compact")).toHaveLength(3);
     root.unmount();
   });
 
-  test("makes the transcript panel tall without adding an outer panel scrollbar", () => {
-    const css = readFileSync("src/styles/session-dossier.css", "utf8");
-    const transcriptRule = css.match(/\.dossier-panel-transcript\s*\{[^}]+\}/)?.[0] ?? "";
-    const transcriptBodyRule = css.match(/\.dossier-panel-transcript\s+\.dossier-panel-body\s*\{[^}]+\}/)?.[0] ?? "";
-    const transcriptResultsRule = css.match(/\.dossier-transcript-results\s*\{[^}]+\}/)?.[0] ?? "";
+  test("orders enrichment as stats, signals, transcript summary, and first prompt", async () => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
 
-    expect(transcriptRule).toContain("max-height:");
-    expect(transcriptBodyRule).toContain("overflow: visible;");
-    expect(transcriptResultsRule).toContain("min-height:");
+    await act(async () => {
+      root.render(<SessionDossier dossier={dossier()} />);
+    });
+
+    const panel = host.querySelector(".panel.summary");
+    expect(panel?.querySelector("h3")?.textContent).toBe("Enrichment summary");
+    const sections = [...(panel?.querySelectorAll("[data-dossier-section]") ?? [])].map((section) => section.getAttribute("data-dossier-section"));
+    expect(sections.slice(0, 4)).toEqual(["stats", "signals", "summary", "first-prompt"]);
+    expect(panel?.textContent).not.toContain("Topics and signals");
+    root.unmount();
   });
 
-  test("centers the timeline load-more action at the bottom of its panel", async () => {
+  test("keeps transcript filter loading state out of the enrichment summary", async () => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<SessionDossier dossier={dossier()} transcript={{ coverage: dossier().coverage.transcript, items: [], total: 0 }} transcriptLoading />);
+    });
+
+    const summary = host.querySelector(".panel.summary");
+    const transcript = host.querySelector(".panel.transcript");
+    expect(summary?.textContent).not.toContain("Transcript loading");
+    expect(summary?.textContent).not.toContain("Loading transcript evidence");
+    expect(transcript?.textContent).toContain("Loading transcript");
+    root.unmount();
+  });
+
+  test("uses enriched dossier values for evidence blocks instead of hard-coded topics", () => {
+    const currentDossier = dossier();
+    currentDossier.narrative.topics = ["local import", "session capsule"];
+    currentDossier.narrative.technologies = ["vite"];
+    currentDossier.narrative.unresolved = ["verification missing"];
+    currentDossier.coverage.warnings = [{ code: "tool_details_partial", message: "Tool details are partial." }];
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
+
+    expect(html).toContain("local import");
+    expect(html).toContain("session capsule");
+    expect(html).toContain("MCP included");
+    expect(html).toContain("verification missing");
+    expect(html).toContain("tool details partial");
+    expect(html).not.toContain("launcher cleanup path patched");
+    expect(html).toContain("Technologies");
+    expect(html).toContain("vite");
+  });
+
+  test("uses the prototype transcript evidence rows instead of the old transcript panel frame", () => {
     const css = readFileSync("src/styles/session-dossier.css", "utf8");
-    const footerActionRule = css.match(/\.dossier-panel-body\s*>\s*\.dossier-panel-footer-action\s*\{[^}]+\}/)?.[0] ?? "";
+    const transcriptScrollRule = css.match(/\.session-dossier\s+\.transcript-scroll\s*\{[^}]+\}/)?.[0] ?? "";
+    const transcriptRule = css.match(/\.session-dossier\s+\.transcript\s+li\s*\{[^}]+\}/)?.[0] ?? "";
+    const transcriptToolbarRule = css.match(/\.session-dossier\s+\.transcript-toolbar\s*\{[^}]+\}/)?.[0] ?? "";
+
+    expect(transcriptScrollRule).toContain("height: 360px;");
+    expect(transcriptScrollRule).toContain("overflow-y: auto;");
+    expect(transcriptRule).toContain("grid-template-columns: 72px 112px minmax(0, 1fr);");
+    expect(transcriptToolbarRule).toContain("justify-content: space-between;");
+    expect(css).not.toContain(".dossier-panel-transcript");
+  });
+
+  test("keeps timeline and raw transcript as readable scroll windows", async () => {
+    const css = readFileSync("src/styles/session-dossier.css", "utf8");
+    const compactRule = css.match(/\.session-dossier\s+\.advanced-detail-card\.is-compact\s*\{[^}]+\}/)?.[0] ?? "";
+    const scrollBodyRule = css.match(/\.session-dossier\s+\.advanced-scroll-body\s*\{[^}]+\}/)?.[0] ?? "";
+    const timelineRule = css.match(/\.session-dossier\s+\.advanced-detail-card\.is-timeline\s*\{[^}]+\}/)?.[0] ?? "";
+    const rawRule = css.match(/\.session-dossier\s+\.advanced-detail-card\.is-raw\s*\{[^}]+\}/)?.[0] ?? "";
     const host = document.createElement("div");
     const root = createRoot(host);
     const currentDossier = dossier();
@@ -82,23 +156,17 @@ describe("SessionDossier", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const showMore = [...host.querySelectorAll("button")].find((item) => item.textContent === "Show 2 more");
-    expect(showMore?.classList.contains("dossier-panel-footer-action")).toBe(true);
-    expect(footerActionRule).toContain("justify-self: center;");
+    expect(host.querySelector(".advanced-detail-card.is-timeline .advanced-scroll-body")).toBeTruthy();
+    expect(host.querySelector(".advanced-detail-card.is-raw .advanced-scroll-body")).toBeTruthy();
+    expect(compactRule).toContain("height: 112px;");
+    expect(compactRule).toContain("overflow-y: auto;");
+    expect(scrollBodyRule).toContain("overflow-y: auto;");
+    expect(timelineRule).toContain("height: 360px;");
+    expect(rawRule).toContain("height: 440px;");
     root.unmount();
   });
 
-  test("caps dossier panels and scrolls panel bodies", () => {
-    const css = readFileSync("src/styles/session-dossier.css", "utf8");
-    const panelRules = [...css.matchAll(/\.dossier-panel\s*\{[^}]+\}/g)].map((match) => match[0]);
-    const panelBodyRule = css.match(/\.dossier-panel-body\s*\{[^}]+\}/)?.[0] ?? "";
-
-    expect(panelRules.some((rule) => rule.includes("max-height:"))).toBe(true);
-    expect(panelRules.some((rule) => rule.includes("overflow: hidden;"))).toBe(true);
-    expect(panelBodyRule).toContain("overflow: auto;");
-  });
-
-  test("keeps panel headers outside the scrollable panel body", async () => {
+  test("keeps advanced details in the selected card order", async () => {
     const host = document.createElement("div");
     const root = createRoot(host);
 
@@ -113,14 +181,48 @@ describe("SessionDossier", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const panels = [...host.querySelectorAll(".dossier-panel")];
-    expect(panels.length).toBeGreaterThan(0);
-    expect(panels.every((panel) => panel.children[0]?.tagName === "H4")).toBe(true);
-    expect(panels.every((panel) => panel.children[1]?.classList.contains("dossier-panel-body"))).toBe(true);
+    const advancedHeadings = [...host.querySelectorAll(".advanced-details-panel .advanced-detail-card h4")].map((heading) => heading.textContent);
+    expect(advancedHeadings).toEqual(["Verification", "Needs attention", "Tools", "Provenance", "Narrative evidence", "Timeline", "Raw transcript"]);
+    expect(host.textContent).not.toContain("Transcript excerpts");
     root.unmount();
   });
 
-  test("renders canonical session evidence and copy actions", () => {
+  test("caps dossier scroll surfaces instead of nesting panel scrollbars", () => {
+    const css = readFileSync("src/styles/session-dossier.css", "utf8");
+    const summaryScrollRule = css.match(/\.session-dossier\s+\.summary-scroll\s*\{[^}]+\}/)?.[0] ?? "";
+    const transcriptScrollRule = css.match(/\.session-dossier\s+\.transcript-scroll\s*\{[^}]+\}/)?.[0] ?? "";
+    const scrollBodyRule = css.match(/\.session-dossier\s+\.advanced-scroll-body\s*\{[^}]+\}/)?.[0] ?? "";
+    const transcriptRule = css.match(/\.session-dossier\s+\.transcript\s+li\s*\{[^}]+\}/)?.[0] ?? "";
+
+    expect(summaryScrollRule).toContain("overflow-y: auto;");
+    expect(transcriptScrollRule).toContain("overflow-y: auto;");
+    expect(scrollBodyRule).toContain("overflow-y: auto;");
+    expect(transcriptRule).toContain("grid-template-columns: 72px 112px minmax(0, 1fr);");
+  });
+
+  test("keeps advanced card headers outside the scrollable bodies", async () => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<SessionDossier dossier={dossier()} />);
+    });
+
+    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
+    expect(button).toBeTruthy();
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const panels = [...host.querySelectorAll(".advanced-detail-card.is-scroll-window")];
+    expect(panels.length).toBeGreaterThan(0);
+    expect(panels.every((panel) => panel.children[0]?.classList.contains("advanced-scroll-head"))).toBe(true);
+    expect(panels.every((panel) => panel.children[1]?.classList.contains("advanced-scroll-body"))).toBe(true);
+    root.unmount();
+  });
+
+  test("renders canonical session evidence in the prototype modal structure", () => {
     const currentDossier = dossier();
     const html = renderToStaticMarkup(
       <SessionDossier
@@ -161,8 +263,8 @@ describe("SessionDossier", () => {
     expect(html).toContain("Total tokens");
     expect(html).toContain("Input tokens");
     expect(html).toContain("Output tokens");
-    expect(html).toContain("Session summary");
-    expect(html).toContain("dossier-panel-primary");
+    expect(html).toContain("Enrichment summary");
+    expect(html).toContain("panel summary");
     expect(html).toContain("Transcript summary");
     expect(html).toContain("OAuth route still fails for missing state.");
     expect(html).not.toContain("Objective:");
@@ -170,27 +272,27 @@ describe("SessionDossier", () => {
     expect(html).not.toContain(">Objective<");
     expect(html).not.toContain(">Outcome<");
     expect(html).toContain("Transcript");
-    expect(html).toContain("dossier-panel-transcript");
-    expect(html).toContain("dossier-transcript-results");
+    expect(html).toContain("panel transcript");
+    expect(html).toContain("Transcript evidence");
     expect(html).toContain("Please repair the OAuth callback.");
     expect(html).toContain("Advanced details");
-    expect(html).toContain("dossier-hero-actions");
-    expect(html).toContain("Copy context");
-    expect(html).toContain("Copy canonical ID");
-    expect(html).toContain("Copy source ID");
+    expect(html).toContain("meta-rail");
+    expect(html).toContain("title-block");
+    expect(html).toContain("app-button");
+    expect(html).toContain("advanced-details-panel");
+    expect(html).toContain("hidden=\"\"");
+    expect(html).not.toContain("dossier-hero-actions");
     expect(html).not.toContain("<h4>Context packet</h4>");
     expect(html).not.toContain("<h4>Files</h4>");
-    expect(html).not.toContain("<h4>Tools</h4>");
-    expect(html).not.toContain("<h4>Timeline</h4>");
-    expect(html).not.toContain("<h4>Verification</h4>");
-    expect(html).not.toContain("<h4>Needs attention</h4>");
-    expect(html).not.toContain("src/app/App.tsx");
-    expect(html).not.toContain("File ");
+    expect(html).toContain("<h4>Tools</h4>");
+    expect(html).toContain("<h4>Timeline</h4>");
+    expect(html).toContain("<h4>Verification</h4>");
+    expect(html).toContain("<h4>Needs attention</h4>");
     expect(html).not.toContain("Open source");
     expect(html).not.toContain("Open repo");
   });
 
-  test("keeps copy actions in the identity card and centers advanced details below the dossier", async () => {
+  test("keeps the identity header and centers advanced details below the dossier", async () => {
     const host = document.createElement("div");
     const root = createRoot(host);
 
@@ -199,16 +301,14 @@ describe("SessionDossier", () => {
     });
 
     expect(host.textContent).not.toContain("Copies canonical session context for reuse.");
-    const copyActions = host.querySelector(".dossier-hero-actions");
-    expect(copyActions?.textContent).toContain("Copy context");
-    expect(copyActions?.textContent).toContain("Copy canonical ID");
-    expect(copyActions?.textContent).toContain("Copy source ID");
-    expect(copyActions?.textContent).not.toContain("Advanced details");
+    expect(host.querySelector(".dossier-header")).toBeTruthy();
+    expect(host.querySelector(".meta-rail")).toBeTruthy();
+    expect(host.querySelector(".title-block")).toBeTruthy();
 
     const advancedButton = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
     expect(advancedButton).toBeTruthy();
-    expect(advancedButton?.closest(".dossier-hero")).toBeNull();
-    expect(advancedButton?.closest(".dossier-advanced-footer")).toBeTruthy();
+    expect(advancedButton?.closest(".title-block")).toBeNull();
+    expect(advancedButton?.closest(".advanced")).toBeTruthy();
     root.unmount();
   });
 
@@ -266,19 +366,26 @@ describe("SessionDossier", () => {
       );
     });
 
-    expect(host.textContent).toContain("Please repair the OAuth callback and keep array[index] readable.");
-    expect(host.textContent).not.toContain("AGENTS.md");
-    expect(host.textContent).not.toContain("Codex Behavioral Guidelines");
-    expect(host.textContent).not.toContain("system: hidden metadata");
-    expect(host.textContent).not.toContain("Filesystem sandboxing defines");
+    const visibleDossierText = `${host.querySelector(".summary")?.textContent ?? ""} ${host.querySelector(".transcript")?.textContent ?? ""}`;
+    expect(visibleDossierText).toContain("Please repair the OAuth callback and keep array[index] readable.");
+    expect(visibleDossierText).not.toContain("AGENTS.md");
+    expect(visibleDossierText).not.toContain("Codex Behavioral Guidelines");
+    expect(visibleDossierText).not.toContain("system: hidden metadata");
+    expect(visibleDossierText).not.toContain("Filesystem sandboxing defines");
 
     const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
     expect(button).toBeTruthy();
+    const panel = host.querySelector(".advanced-details-panel") as HTMLElement | null;
+    expect(panel?.hidden).toBe(true);
+    expect(panel?.textContent).toContain("AGENTS.md");
+    expect(panel?.textContent).toContain("system: hidden metadata");
+    expect(panel?.textContent).toContain("Filesystem sandboxing defines");
 
     await act(async () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
+    expect(panel?.hidden).toBe(false);
     expect(host.textContent).toContain("Raw transcript");
     expect(host.textContent).toContain("AGENTS.md");
     expect(host.textContent).toContain("system: hidden metadata");
@@ -294,7 +401,9 @@ describe("SessionDossier", () => {
       root.render(<SessionDossier dossier={dossier()} />);
     });
 
-    expect(host.textContent).not.toContain("Narrative evidence");
+    const panel = host.querySelector(".advanced-details-panel") as HTMLElement | null;
+    expect(panel?.hidden).toBe(true);
+    expect(panel?.textContent).toContain("Narrative evidence");
     const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
     expect(button).toBeTruthy();
 
@@ -302,6 +411,7 @@ describe("SessionDossier", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
+    expect(panel?.hidden).toBe(false);
     expect(host.textContent).toContain("Verification");
     expect(host.textContent).toContain("Tools");
     expect(host.textContent).toContain("Timeline");
@@ -362,12 +472,13 @@ describe("SessionDossier", () => {
       />
     );
 
-    expect(html).toContain("Hook events only");
-    expect(html).toContain("No usable transcript messages imported.");
-    expect(html).toContain("Import transcripts in Sources");
+    expect(html).toContain("hook only");
+    expect(html).toContain("transcript missing");
+    expect(html).toContain("Codex hook event");
+    expect(html).not.toContain("Import transcripts in Sources");
   });
 
-  test("groups repeated low-value transcript rows", () => {
+  test("renders repeated low-value transcript rows as prototype evidence rows", () => {
     const transcriptItems = Array.from({ length: 4 }, (_, index) => ({
       itemId: `low-${index}`,
       kind: "message" as const,
@@ -401,7 +512,94 @@ describe("SessionDossier", () => {
       />
     );
 
-    expect(html).toContain("4 low-value Codex hook event events captured");
+    expect(html).toContain("Codex hook event");
+    expect(html).not.toContain("low-value Codex hook event events captured");
+    expect((html.match(/Codex hook event/g) ?? []).length).toBeGreaterThanOrEqual(4);
+  });
+
+  test("renders all loaded useful transcript evidence in a fixed scroll window", () => {
+    const transcriptItems = Array.from({ length: 12 }, (_, index) => ({
+      itemId: `message-${index}`,
+      kind: "message" as const,
+      label: "assistant",
+      lowValue: false,
+      observedAt: `2026-06-25T23:${String(index).padStart(2, "0")}:00.000Z`,
+      role: "assistant" as const,
+      sessionId: "canonical-session-1",
+      sourceRef: {},
+      text: `Transcript evidence row ${index}`
+    }));
+
+    const html = renderToStaticMarkup(
+      <SessionDossier
+        dossier={dossier()}
+        transcript={{
+          coverage: dossier().coverage.transcript,
+          items: transcriptItems,
+          total: transcriptItems.length
+        }}
+      />
+    );
+
+    expect(html).toContain("transcript-scroll");
+    expect(html).toContain("Transcript evidence row 0");
+    expect(html).toContain("Transcript evidence row 11");
+  });
+
+  test("loads more transcript evidence from the scroll sentinel", async () => {
+    const onLoadMore = vi.fn();
+    const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+    const observers: MockIntersectionObserver[] = [];
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    globalThis.IntersectionObserver = class extends MockIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        super(callback, options);
+        observers.push(this);
+      }
+    } as typeof IntersectionObserver;
+
+    try {
+      await act(async () => {
+        root.render(
+          <SessionDossier
+            dossier={dossier()}
+            onTranscriptLoadMore={onLoadMore}
+            transcript={{
+              coverage: dossier().coverage.transcript,
+              items: [
+                {
+                  itemId: "message-1",
+                  kind: "message",
+                  label: "user",
+                  lowValue: false,
+                  observedAt: "2026-06-25T23:01:00.000Z",
+                  role: "user",
+                  sessionId: "canonical-session-1",
+                  sourceRef: {},
+                  text: "Please repair the OAuth callback."
+                }
+              ],
+              nextCursor: "cursor-2",
+              total: 2
+            }}
+          />
+        );
+      });
+
+      expect(host.querySelector(".transcript-scroll")).toBeTruthy();
+      expect(host.querySelector(".transcript-sentinel")).toBeTruthy();
+      expect(observers.length).toBe(1);
+
+      await act(async () => {
+        observers[0]?.trigger(true);
+      });
+
+      expect(onLoadMore).toHaveBeenCalledTimes(1);
+    } finally {
+      root.unmount();
+      globalThis.IntersectionObserver = OriginalIntersectionObserver;
+    }
   });
 
   test("does not render review actions in advanced details", async () => {
@@ -412,7 +610,9 @@ describe("SessionDossier", () => {
       root.render(<SessionDossier live={liveSession()} onAction={() => undefined} actionStatus="Marked reviewed." />);
     });
 
-    expect(host.textContent).toContain("Canonical details unavailable");
+    expect(host.textContent).toContain("Live session title");
+    expect(host.textContent).toContain("live-session-1");
+    expect(host.querySelector(".meta-rail")).toBeTruthy();
     expect(host.textContent).not.toContain("Dismiss");
     const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Advanced details");
     expect(button).toBeTruthy();
@@ -430,32 +630,27 @@ describe("SessionDossier", () => {
     root.unmount();
   });
 
-  test("copies the canonical context packet", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText }
-    });
+  test("wires the prototype close control to the caller", async () => {
+    const onClose = vi.fn();
     const host = document.createElement("div");
     const root = createRoot(host);
 
     await act(async () => {
-      root.render(<SessionDossier dossier={dossier()} />);
+      root.render(<SessionDossier dossier={dossier()} onClose={onClose} />);
     });
-    const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Copy context");
+    const button = host.querySelector(".title-block .close");
     expect(button).toBeTruthy();
 
     await act(async () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(writeText).toHaveBeenCalledWith("# Masthead Session Context\nSummary: OAuth route still fails in one edge case.\nAgent retrieval: included");
-    expect(host.textContent).toContain("Copied.");
+    expect(onClose).toHaveBeenCalledTimes(1);
     root.unmount();
   });
 
-  test("wires transcript search input to the caller", async () => {
-    const onQueryChange = vi.fn();
+  test("wires prototype transcript filters to the caller", async () => {
+    const onFilterChange = vi.fn();
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -464,25 +659,23 @@ describe("SessionDossier", () => {
       root.render(
         <SessionDossier
           dossier={dossier()}
-          onTranscriptQueryChange={onQueryChange}
+          onTranscriptFilterChange={onFilterChange}
           transcript={{
             coverage: dossier().coverage.transcript,
             items: [],
             total: 0
           }}
-          transcriptQuery=""
         />
       );
     });
 
-    const input = host.querySelector("input[type='search']");
-    expect(input).toBeTruthy();
+    const button = [...host.querySelectorAll(".filter")].find((item) => item.textContent === "User");
+    expect(button).toBeTruthy();
     await act(async () => {
-      setNativeInputValue(input as HTMLInputElement, "OAuth");
-      input?.dispatchEvent(new Event("input", { bubbles: true }));
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(onQueryChange).toHaveBeenCalled();
+    expect(onFilterChange).toHaveBeenCalledWith("user");
     root.unmount();
     host.remove();
   });
@@ -583,11 +776,6 @@ class MockIntersectionObserver {
     if (!this.target) return;
     this.callback([{ isIntersecting, target: this.target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
   }
-}
-
-function setNativeInputValue(input: HTMLInputElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-  setter?.call(input, value);
 }
 
 function dossier(): SessionDossierDto {
