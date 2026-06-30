@@ -5400,6 +5400,17 @@ body {
   pointer-events: none;
 }
 
+.observability-console .logbook-summary-strip.usage-summary-strip .usage-metric::after,
+.masthead-shell .logbook-summary-strip.usage-summary-strip .usage-metric::after,
+.observability-console .sources-summary-strip.usage-summary-strip .usage-metric::after,
+.masthead-shell .sources-summary-strip.usage-summary-strip .usage-metric::after,
+.observability-console .connected-source-row::after,
+.masthead-shell .connected-source-row::after,
+.observability-console .adapter-card::after,
+.masthead-shell .adapter-card::after {
+  border-top-width: 1px;
+}
+
 .observability-console .sidebar-usage > *,
 .masthead-shell .sidebar-usage > *,
 .observability-console .usage-summary-strip .usage-metric > *,
