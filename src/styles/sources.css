@@ -9,16 +9,17 @@
 
 .sources-action-bar.sources-toolbar {
   box-sizing: border-box;
-  width: 100%;
+  justify-self: center;
+  width: fit-content;
   max-width: 100%;
-  justify-content: flex-start;
-  margin: 0;
+  justify-content: center;
+  margin: 0 auto;
   flex-wrap: wrap;
 }
 
 .sources-action-bar.sources-toolbar .sources-action-group {
   flex: 0 1 auto;
-  justify-content: flex-start;
+  justify-content: center;
 }
 
 .sources-action-bar.sources-toolbar .app-button {
@@ -716,16 +717,13 @@
 
 @media (max-width: 1060px) {
   .sources-action-bar.sources-toolbar {
-    align-items: stretch;
+    align-items: center;
   }
 
   .sources-action-bar.sources-toolbar .sources-action-group {
-    flex: 0 1 100%;
-    width: 100%;
-  }
-
-  .sources-action-bar.sources-toolbar .sources-action-group {
-    justify-content: flex-start;
+    flex: 0 1 auto;
+    width: auto;
+    justify-content: center;
   }
 
   .sources-status {

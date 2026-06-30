@@ -74,8 +74,20 @@ describe("SourcesPanel", () => {
     expect(html).toContain("120");
     expect(html).not.toContain("Advanced diagnostics");
     expect(html).not.toContain("Metadata import ready");
+    expect(html).not.toContain("Open Logbook");
     expect(html).not.toContain("/home/tyler/.codex/sessions");
     expect(html).not.toContain("hello from transcript");
+  });
+
+  test("does not wire a redundant Logbook action into the source toolbar", () => {
+    const dashboard = readFileSync("src/ui/sources/SourcesConnectedDashboard.tsx", "utf8");
+    const panel = readFileSync("src/ui/SourcesPanel.tsx", "utf8");
+    const app = readFileSync("src/app/App.tsx", "utf8");
+
+    expect(dashboard).not.toContain("Open Logbook");
+    expect(dashboard).not.toContain("onOpenLogbook");
+    expect(panel).not.toContain("onOpenLogbook");
+    expect(app).not.toContain("onOpenLogbook");
   });
 
   test("renders connected setup coverage when setup is available", () => {
@@ -289,6 +301,25 @@ describe("SourcesPanel", () => {
 
     expect(css).toMatch(/\.source-state\s*\{[\s\S]*border-radius: 1px;[\s\S]*clip-path: var\(--folded-control-clip/);
     expect(css).toMatch(/\.sources-management \.status-badge\s*\{[\s\S]*border-radius: 1px;[\s\S]*clip-path: var\(--folded-control-clip/);
+  });
+
+  test("centers a compact source action toolbar", () => {
+    const css = readFileSync("src/styles/sources.css", "utf8");
+    const toolbarRule = css.match(/\.sources-action-bar\.sources-toolbar\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const toolbarGroupRule = css.match(/\.sources-action-bar\.sources-toolbar \.sources-action-group\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+
+    expect(toolbarRule).toContain("justify-self: center;");
+    expect(toolbarRule).toContain("width: fit-content;");
+    expect(toolbarRule).toContain("justify-content: center;");
+    expect(toolbarRule).toContain("margin: 0 auto;");
+    expect(toolbarGroupRule).toContain("justify-content: center;");
+  });
+
+  test("uses shared card entrance motion for source inventory cards", () => {
+    const css = readFileSync("src/styles/masthead.css", "utf8");
+
+    expect(css).toMatch(/\.usage-summary-strip \.usage-metric,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: usage-card-enter/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: none/);
   });
 });
 

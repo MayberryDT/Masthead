@@ -22,7 +22,6 @@ type Props = {
   onLoadAdapterSources?: (runtime: string, page: { limit: number; offset: number }) => Promise<SourceStatusPage>;
   onPollImports?: () => void;
   onConnectSelected?: (runtimes: string[]) => void;
-  onOpenLogbook?: () => void;
   onRefresh: () => void;
   onRepairSources?: () => void;
   onRunSetup?: (input: SourcesSetupRunInput) => Promise<unknown> | unknown;
@@ -66,7 +65,6 @@ export function SourcesPanel(props: Props) {
           connectedSources={hasConnectedSetup ? connectedSources : undefined}
           coverage={setup?.coverage}
           onAddSource={() => setOnboardingOpen(true)}
-          onOpenLogbook={props.onOpenLogbook}
           onRepairMissingData={props.onRepairSources ?? syncConnected}
           onSyncSources={props.onSyncSources ?? syncConnected}
           status={status}

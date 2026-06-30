@@ -1424,7 +1424,6 @@ export function App() {
           onImportMetadata={handleImportMetadata}
           onImportTranscripts={handleImportTranscripts}
           onLoadAdapterSources={handleLoadAdapterSources}
-          onOpenLogbook={() => setActiveSurface("logbook")}
           onPollImports={handlePollActiveImports}
           onRepairSources={handleRepairSources}
           onRefresh={handleRefreshSources}

@@ -11,7 +11,6 @@ type Props = {
   busy?: boolean;
   status?: string;
   onAddSource: () => void;
-  onOpenLogbook?: () => void;
   onRepairMissingData: () => void;
   onSyncSources: () => void;
 };
@@ -22,7 +21,6 @@ export function SourcesConnectedDashboard({
   connectedSources,
   coverage: setupCoverage,
   onAddSource,
-  onOpenLogbook,
   onRepairMissingData,
   onSyncSources
 }: Props) {
@@ -43,11 +41,6 @@ export function SourcesConnectedDashboard({
           <AppButton type="button" variant="quiet" onClick={onRepairMissingData} disabled={busy || !hasSyncTarget}>
             Repair missing data
           </AppButton>
-          {onOpenLogbook ? (
-            <AppButton type="button" variant="quiet" onClick={onOpenLogbook}>
-              Open Logbook
-            </AppButton>
-          ) : null}
         </div>
       </div>
 
