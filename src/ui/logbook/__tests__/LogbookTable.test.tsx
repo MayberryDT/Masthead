@@ -15,6 +15,7 @@ let root: Root | undefined;
 describe("LogbookTable", () => {
   afterEach(async () => {
     if (root) await act(async () => root?.unmount());
+    vi.useRealTimers();
     container?.remove();
     container = undefined;
     root = undefined;
@@ -91,11 +92,30 @@ describe("LogbookTable", () => {
     expect(html).toContain("is-entering");
   });
 
-  test("delays row entry cascade so pagination loads before animation starts", () => {
+  test("starts row entry cascade promptly enough to be visible", () => {
     const css = readFileSync("src/styles/logbook.css", "utf8");
 
-    expect(css).toContain("--logbook-row-entry-delay: 1000ms");
+    expect(css).toContain("--logbook-row-entry-delay: 40ms");
     expect(css).toContain("calc(var(--logbook-row-entry-delay) + var(--logbook-row-index) * 14ms)");
+  });
+
+  test("keeps the entering class until the staggered cascade has time to run", async () => {
+    vi.useFakeTimers();
+    await renderTable(undefined, { animateOnMount: true });
+
+    expect(currentContainer().querySelector(".logbook-table-wrap")?.className).toContain("is-entering");
+
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+    });
+
+    expect(currentContainer().querySelector(".logbook-table-wrap")?.className).toContain("is-entering");
+
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+
+    expect(currentContainer().querySelector(".logbook-table-wrap")?.className).not.toContain("is-entering");
   });
 
   test("renders lifecycle state tokens with explicit semantic classes", () => {
@@ -156,7 +176,7 @@ describe("LogbookTable", () => {
   });
 });
 
-async function renderTable(onSelect: (sessionId: string) => void) {
+async function renderTable(onSelect: (sessionId: string) => void = () => undefined, options: { animateOnMount?: boolean } = {}) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -164,6 +184,7 @@ async function renderTable(onSelect: (sessionId: string) => void) {
   await act(async () => {
     root?.render(
       <LogbookTable
+        animateOnMount={options.animateOnMount}
         density="compact"
         sessions={[
           {

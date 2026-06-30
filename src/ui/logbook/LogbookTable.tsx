@@ -27,7 +27,7 @@ export function LogbookTable({ animateOnMount = false, density, onSelect, select
 
   useEffect(() => {
     if (!mountAnimation) return undefined;
-    const timer = window.setTimeout(() => setMountAnimation(false), 320);
+    const timer = window.setTimeout(() => setMountAnimation(false), 460);
     return () => window.clearTimeout(timer);
   }, [mountAnimation]);
 

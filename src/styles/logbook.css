@@ -423,7 +423,7 @@
 }
 
 .logbook-table-wrap.is-entering {
-  --logbook-row-entry-delay: 1000ms;
+  --logbook-row-entry-delay: 40ms;
 }
 
 @keyframes logbook-table-out {

@@ -101,6 +101,12 @@ import { UsagePanel } from "../ui/usage/UsagePanel";
 import { APP_VERSION_LABEL } from "./version";
 import { shouldRefreshSourceInventory } from "./sourceInventoryRefresh";
 import type { ConnectionState } from "../ui/ConnectionStatus";
+import {
+  logbookPageSearchFilters,
+  readCachedLogbookPage,
+  writeCachedLogbookPage,
+  type LogbookPageCacheRequest
+} from "./logbookPageCache";
 
 type ConnectorActionState =
   | { state: "idle"; message?: string }
@@ -207,6 +213,7 @@ export function App() {
   const sourceInventoryLoadedAtRef = useRef<number | undefined>(undefined);
   const sourceInventoryLoadedForUrlRef = useRef<string | undefined>(undefined);
   const sourceInventoryLoadInFlightRef = useRef(false);
+  const logbookPageCacheRef = useRef(new Map<string, LogbookSearchResult>());
   const [logbookProjectOptions, setLogbookProjectOptions] = useState<string[]>([]);
   const [logbookFilters, setLogbookFilters] = useState<LogbookFilterState>({});
   const [selectedLogbookSessionId, setSelectedLogbookSessionId] = useState<string>();
@@ -307,6 +314,18 @@ export function App() {
       )
     }),
     [adapters, logbookProjectOptions, logbookSummary]
+  );
+  const logbookPageRequest = useMemo<LogbookPageCacheRequest>(
+    () => ({
+      baseUrl: activeProjectionUrl,
+      filters: logbookFilters,
+      pageIndex: logbookPageIndex,
+      pageSize: LOGBOOK_PAGE_SIZE,
+      query: historyQuery,
+      retryKey: logbookRetryKey,
+      sort: logbookSort
+    }),
+    [activeProjectionUrl, historyQuery, logbookFilters, logbookPageIndex, logbookRetryKey, logbookSort]
   );
   const filteredAttentionItems = useMemo(
     () => filterAttentionItemsForCards(board.attentionQueue, filteredCards),
@@ -713,15 +732,25 @@ export function App() {
 
   useEffect(() => {
     if (activeSurface !== "logbook" || effectiveLiveConnection.state !== "live") return;
+    const cachedResult = readCachedLogbookPage(logbookPageCacheRef.current, logbookPageRequest);
+    if (cachedResult) {
+      setLogbookResult(cachedResult);
+      setLogbookError(undefined);
+      setLogbookLoading(false);
+      return undefined;
+    }
+
     const controller = new AbortController();
     setLogbookLoading(true);
     setLogbookError(undefined);
     void searchLogbook(
-      { ...logbookFilters, limit: LOGBOOK_PAGE_SIZE, offset: logbookPageIndex * LOGBOOK_PAGE_SIZE, q: historyQuery, sort: logbookSort },
+      logbookPageSearchFilters(logbookPageRequest),
       activeProjectionUrl,
       { signal: controller.signal }
     )
       .then((result) => {
+        if (controller.signal.aborted) return;
+        writeCachedLogbookPage(logbookPageCacheRef.current, logbookPageRequest, result);
         setLogbookResult(result);
         setLogbookError(undefined);
         setSelectedLogbookSessionId(undefined);
@@ -738,7 +767,7 @@ export function App() {
     return () => {
       controller.abort();
     };
-  }, [activeProjectionUrl, activeSurface, effectiveLiveConnection.state, historyQuery, logbookFilters, logbookPageIndex, logbookRetryKey, logbookSort]);
+  }, [activeProjectionUrl, activeSurface, effectiveLiveConnection.state, logbookPageRequest]);
   useEffect(() => {
     if (activeSurface !== "logbook") return;
     const controller = new AbortController();
@@ -1308,9 +1337,19 @@ export function App() {
   };
 
   const handleLogbookPageChange = (nextPageIndex: number) => {
-    if (nextPageIndex === logbookPageIndex || logbookLoading) return;
+    if (nextPageIndex === logbookPageIndex) return;
+    const nextPageRequest = {
+      ...logbookPageRequest,
+      pageIndex: nextPageIndex
+    };
+    const cachedResult = readCachedLogbookPage(logbookPageCacheRef.current, nextPageRequest);
     setLogbookPageIndex(nextPageIndex);
-    setLogbookLoading(true);
+    if (cachedResult) {
+      setLogbookResult(cachedResult);
+      setLogbookLoading(false);
+    } else {
+      setLogbookLoading(true);
+    }
     setLogbookError(undefined);
     setSelectedLogbookSessionId(undefined);
   };
