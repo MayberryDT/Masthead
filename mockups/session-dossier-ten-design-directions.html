@@ -1,0 +1,1021 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Masthead Session Dossier, Ten Design Directions</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@500;600;700&display=swap");
+
+      :root {
+        --canvas: #031019;
+        --sidebar: #041522;
+        --toolbar: #051724;
+        --metal: #071b28;
+        --metal-2: #082130;
+        --line: rgba(194, 221, 241, 0.14);
+        --line-strong: rgba(196, 226, 248, 0.22);
+        --ink: #f6fbff;
+        --body: #d6e4ef;
+        --muted: #91a8ba;
+        --ash: #61798e;
+        --blue: #2ea7ff;
+        --green: #36d869;
+        --yellow: #ffcf36;
+        --red: #ff483e;
+        --ease: cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(180deg, rgba(46, 167, 255, 0.07), transparent 360px),
+          var(--canvas);
+        color: var(--body);
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .prototype-shell {
+        display: grid;
+        grid-template-columns: 230px minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      .index {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        padding: 22px 18px;
+        border-right: 1px solid var(--line);
+        background: rgba(4, 21, 34, 0.96);
+        overflow: auto;
+      }
+
+      .index h1 {
+        margin: 0 0 8px;
+        color: var(--ink);
+        font-size: 18px;
+        line-height: 1.15;
+      }
+
+      .index p {
+        margin: 0 0 18px;
+        color: var(--muted);
+      }
+
+      .index a {
+        display: block;
+        margin: 0 0 6px;
+        padding: 8px 9px;
+        border: 1px solid rgba(194, 221, 241, 0.08);
+        border-radius: 4px;
+        background: rgba(7, 27, 40, 0.7);
+        color: var(--body);
+        text-decoration: none;
+        transition:
+          background-color 160ms var(--ease),
+          border-color 160ms var(--ease),
+          transform 160ms var(--ease);
+      }
+
+      .index a:hover {
+        border-color: rgba(46, 167, 255, 0.34);
+        background: rgba(8, 33, 48, 0.95);
+        transform: translateX(2px);
+      }
+
+      .content {
+        min-width: 0;
+        padding: 28px;
+      }
+
+      .brief {
+        max-width: 1080px;
+        margin: 0 auto 24px;
+        padding: 0 2px;
+      }
+
+      .brief .eyebrow,
+      .mono,
+      .label,
+      .metric span,
+      .transcript time,
+      .advanced span,
+      .source-row span,
+      .tag {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+      }
+
+      .brief h2 {
+        margin: 0 0 8px;
+        color: var(--ink);
+        font-size: 24px;
+        line-height: 1.1;
+      }
+
+      .brief p {
+        margin: 0;
+        max-width: 880px;
+        color: var(--muted);
+      }
+
+      .direction {
+        max-width: 1180px;
+        margin: 0 auto 34px;
+        padding-top: 10px;
+      }
+
+      .direction-title {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 12px;
+        color: var(--muted);
+      }
+
+      .direction-title h3 {
+        margin: 0;
+        color: var(--ink);
+        font-size: 17px;
+        line-height: 1.25;
+      }
+
+      .direction-title p {
+        margin: 3px 0 0;
+        max-width: 660px;
+      }
+
+      .option-number {
+        flex: 0 0 auto;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        color: var(--blue);
+      }
+
+      .modal {
+        overflow: hidden;
+        border: 1px solid var(--line-strong);
+        color: var(--body);
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+      }
+
+      .modal-header {
+        display: grid;
+        gap: 10px;
+      }
+
+      .meta-line {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        color: var(--muted);
+      }
+
+      .meta-line span,
+      .status,
+      .tag,
+      .filter,
+      .button {
+        min-height: 26px;
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 9px;
+      }
+
+      .title-row {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .title-row h4 {
+        margin: 3px 0 0;
+        color: var(--ink);
+        font-size: 22px;
+        line-height: 1.14;
+        letter-spacing: 0;
+      }
+
+      .close {
+        width: 40px;
+        height: 40px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: rgba(8, 29, 42, 0.9);
+        color: var(--body);
+      }
+
+      .body-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .metrics {
+        display: grid;
+        gap: 8px;
+      }
+
+      .metric {
+        min-width: 0;
+        padding: 10px;
+        border: 1px solid var(--line);
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 10.5px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 5px;
+        color: var(--ink);
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 15px;
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+      }
+
+      .panel {
+        min-width: 0;
+        border: 1px solid var(--line);
+      }
+
+      .panel b,
+      .advanced b,
+      .source-row b {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .panel h5 {
+        margin: 0;
+        color: var(--ink);
+        font-size: 13px;
+        line-height: 1.25;
+      }
+
+      .panel p {
+        margin: 8px 0 0;
+      }
+
+      .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 10px;
+      }
+
+      .tag {
+        color: var(--muted);
+        font-size: 10.5px;
+        border-radius: 999px;
+      }
+
+      .transcript {
+        min-width: 0;
+      }
+
+      .transcript-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-bottom: 10px;
+      }
+
+      .filter {
+        border-radius: 3px;
+        color: var(--muted);
+      }
+
+      .filter.active {
+        border-color: rgba(46, 167, 255, 0.55);
+        color: var(--ink);
+      }
+
+      .transcript ol {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .transcript li {
+        display: grid;
+        grid-template-columns: 72px minmax(0, 1fr);
+        gap: 10px;
+        padding: 10px;
+        border: 1px solid rgba(194, 221, 241, 0.11);
+      }
+
+      .transcript time,
+      .transcript b {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .transcript p {
+        margin: 4px 0 0;
+        color: var(--body);
+      }
+
+      .advanced {
+        display: grid;
+        gap: 8px;
+      }
+
+      .advanced-row,
+      .source-row {
+        min-width: 0;
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr);
+        gap: 10px;
+        padding: 8px 0;
+        border-top: 1px solid rgba(194, 221, 241, 0.1);
+      }
+
+      .advanced span,
+      .source-row span {
+        color: var(--muted);
+        font-size: 10.5px;
+      }
+
+      .button {
+        justify-content: center;
+        min-height: 40px;
+        border-radius: 3px;
+        background: rgba(8, 29, 42, 0.92);
+        color: var(--body);
+        transition:
+          transform 160ms var(--ease),
+          border-color 160ms var(--ease),
+          background-color 160ms var(--ease);
+      }
+
+      .button:hover {
+        transform: translateY(-1px);
+        border-color: rgba(46, 167, 255, 0.42);
+        background: rgba(9, 34, 49, 0.96);
+      }
+
+      .status {
+        border-radius: 999px;
+        color: var(--green);
+        background: rgba(54, 216, 105, 0.08);
+      }
+
+      .coverage {
+        color: var(--yellow);
+        background: rgba(255, 207, 54, 0.08);
+        border-color: rgba(255, 207, 54, 0.24);
+      }
+
+      .opt-1 .modal {
+        background: #061725;
+        border-radius: 8px;
+      }
+
+      .opt-1 .modal-header {
+        padding: 18px;
+        background:
+          linear-gradient(90deg, rgba(46, 167, 255, 0.08), transparent 58%),
+          #071b28;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .opt-1 .body-grid {
+        grid-template-columns: 1.05fr 1.45fr 0.9fr;
+        padding: 14px;
+      }
+
+      .opt-1 .metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .opt-1 .panel {
+        padding: 13px;
+        border-radius: 5px;
+        background: rgba(3, 16, 25, 0.34);
+      }
+
+      .opt-2 .modal {
+        position: relative;
+        border-radius: 2px 18px 2px 18px;
+        background: #051522;
+      }
+
+      .opt-2 .modal::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 36%;
+        width: 1px;
+        background: linear-gradient(var(--blue), transparent, var(--green));
+        opacity: 0.45;
+      }
+
+      .opt-2 .modal-header {
+        padding: 18px 22px 10px;
+      }
+
+      .opt-2 .body-grid {
+        grid-template-columns: 0.72fr 1fr;
+        grid-template-areas:
+          "stats summary"
+          "advanced transcript";
+        padding: 0 22px 20px;
+      }
+
+      .opt-2 .metrics {
+        grid-area: stats;
+      }
+
+      .opt-2 .summary {
+        grid-area: summary;
+      }
+
+      .opt-2 .transcript {
+        grid-area: transcript;
+      }
+
+      .opt-2 .advanced {
+        grid-area: advanced;
+      }
+
+      .opt-2 .panel,
+      .opt-2 .metric,
+      .opt-2 .transcript li {
+        border-radius: 999px 8px 8px 999px;
+        background: rgba(7, 27, 40, 0.64);
+      }
+
+      .opt-3 .modal {
+        border-radius: 6px;
+        background: #071a26;
+      }
+
+      .opt-3 .modal-header {
+        padding: 16px;
+        border-bottom: 4px double rgba(194, 221, 241, 0.18);
+      }
+
+      .opt-3 .body-grid {
+        grid-template-columns: 0.86fr 1.2fr;
+        padding: 16px;
+        background:
+          repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.018) 1px, transparent 1px, transparent 34px),
+          #061723;
+      }
+
+      .opt-3 .metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-column: 1 / -1;
+      }
+
+      .opt-3 .panel,
+      .opt-3 .metric,
+      .opt-3 .transcript li {
+        border-radius: 0;
+        background: #082130;
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.04);
+      }
+
+      .opt-4 .modal {
+        background: #030c12;
+        border-radius: 0;
+        border-color: rgba(54, 216, 105, 0.26);
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+      }
+
+      .opt-4 .modal-header {
+        padding: 14px;
+        border-bottom: 1px solid rgba(54, 216, 105, 0.22);
+      }
+
+      .opt-4 .body-grid {
+        grid-template-columns: 1fr 1fr;
+        padding: 14px;
+      }
+
+      .opt-4 .metrics {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-column: 1 / -1;
+      }
+
+      .opt-4 .panel,
+      .opt-4 .metric,
+      .opt-4 .transcript li {
+        border-radius: 0;
+        background: rgba(54, 216, 105, 0.035);
+        border-color: rgba(54, 216, 105, 0.17);
+      }
+
+      .opt-4 .title-row h4,
+      .opt-4 .panel h5,
+      .opt-4 .metric strong {
+        color: #d9ffe5;
+      }
+
+      .opt-5 .modal {
+        border-radius: 8px;
+        background:
+          linear-gradient(90deg, rgba(46, 167, 255, 0.07) 1px, transparent 1px),
+          linear-gradient(rgba(46, 167, 255, 0.05) 1px, transparent 1px),
+          #041724;
+        background-size: 42px 42px;
+      }
+
+      .opt-5 .modal-header {
+        padding: 18px;
+      }
+
+      .opt-5 .body-grid {
+        grid-template-columns: 0.8fr 1.1fr 1.1fr;
+        padding: 16px;
+      }
+
+      .opt-5 .metrics {
+        align-content: start;
+      }
+
+      .opt-5 .panel,
+      .opt-5 .metric,
+      .opt-5 .transcript li {
+        border-radius: 5px;
+        background: rgba(3, 16, 25, 0.82);
+        backdrop-filter: blur(0.5px);
+      }
+
+      .opt-5 .summary {
+        border-left: 4px solid rgba(46, 167, 255, 0.42);
+      }
+
+      .opt-6 .modal {
+        border-radius: 4px;
+        background: #061823;
+      }
+
+      .opt-6 .modal-header {
+        grid-template-columns: minmax(0, 1fr) auto;
+        padding: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .opt-6 .body-grid {
+        grid-template-columns: 1.35fr 0.9fr;
+        padding: 16px;
+      }
+
+      .opt-6 .metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-column: 1 / -1;
+      }
+
+      .opt-6 .panel,
+      .opt-6 .metric {
+        border-style: dashed;
+        background: rgba(246, 251, 255, 0.025);
+      }
+
+      .opt-6 .transcript li {
+        border-left: 3px solid rgba(46, 167, 255, 0.38);
+        background: rgba(7, 27, 40, 0.68);
+      }
+
+      .opt-7 .modal {
+        border-radius: 8px;
+        background: #071823;
+      }
+
+      .opt-7 .modal-header {
+        padding: 18px;
+        background: linear-gradient(135deg, rgba(97, 121, 142, 0.15), transparent 46%);
+      }
+
+      .opt-7 .body-grid {
+        grid-template-columns: 0.75fr 1fr 0.75fr;
+        padding: 18px;
+      }
+
+      .opt-7 .metrics {
+        gap: 0;
+      }
+
+      .opt-7 .metric,
+      .opt-7 .panel,
+      .opt-7 .transcript li {
+        border-radius: 2px;
+        background: rgba(3, 16, 25, 0.66);
+        box-shadow: inset 4px 0 rgba(255, 207, 54, 0.18);
+      }
+
+      .opt-7 .advanced {
+        padding-top: 44px;
+      }
+
+      .opt-8 .modal {
+        border-radius: 8px;
+        background: #041522;
+      }
+
+      .opt-8 .modal-header {
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .opt-8 .body-grid {
+        grid-template-columns: 170px minmax(0, 1fr);
+        grid-template-areas:
+          "stats summary"
+          "stats transcript"
+          "advanced transcript";
+        padding: 0;
+      }
+
+      .opt-8 .metrics {
+        grid-area: stats;
+        padding: 14px;
+        border-right: 1px solid var(--line);
+      }
+
+      .opt-8 .summary {
+        grid-area: summary;
+        margin: 14px 14px 0 0;
+      }
+
+      .opt-8 .transcript {
+        grid-area: transcript;
+        margin: 0 14px 14px 0;
+      }
+
+      .opt-8 .advanced {
+        grid-area: advanced;
+        padding: 0 14px 14px;
+        border-right: 1px solid var(--line);
+      }
+
+      .opt-8 .panel,
+      .opt-8 .metric,
+      .opt-8 .transcript li {
+        background: rgba(7, 27, 40, 0.76);
+      }
+
+      .opt-9 .modal {
+        border-radius: 8px;
+        background: #061822;
+      }
+
+      .opt-9 .modal-header {
+        padding: 18px;
+      }
+
+      .opt-9 .body-grid {
+        grid-template-columns: 1fr 1fr;
+        padding: 18px;
+      }
+
+      .opt-9 .metrics {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-column: 1 / -1;
+      }
+
+      .opt-9 .panel,
+      .opt-9 .metric,
+      .opt-9 .transcript li {
+        border-radius: 7px;
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.055), transparent),
+          rgba(7, 27, 40, 0.8);
+      }
+
+      .opt-9 .transcript li {
+        min-height: 92px;
+      }
+
+      .opt-10 .modal {
+        border-radius: 3px;
+        background: #04131d;
+      }
+
+      .opt-10 .modal-header {
+        padding: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .opt-10 .body-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        padding: 14px;
+      }
+
+      .opt-10 .metrics {
+        grid-column: span 1;
+      }
+
+      .opt-10 .summary {
+        grid-column: span 1;
+      }
+
+      .opt-10 .transcript {
+        grid-column: span 2;
+      }
+
+      .opt-10 .advanced {
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .opt-10 .panel,
+      .opt-10 .metric,
+      .opt-10 .transcript li {
+        border-radius: 0;
+        background: rgba(7, 27, 40, 0.72);
+      }
+
+      .opt-10 .advanced-row {
+        display: block;
+      }
+
+      @media (max-width: 920px) {
+        .prototype-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .index {
+          position: static;
+          height: auto;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .content {
+          padding: 18px;
+        }
+
+        .direction-title {
+          display: block;
+        }
+
+        .body-grid,
+        .opt-1 .body-grid,
+        .opt-2 .body-grid,
+        .opt-3 .body-grid,
+        .opt-4 .body-grid,
+        .opt-5 .body-grid,
+        .opt-6 .body-grid,
+        .opt-7 .body-grid,
+        .opt-8 .body-grid,
+        .opt-9 .body-grid,
+        .opt-10 .body-grid {
+          grid-template-columns: 1fr;
+          grid-template-areas: none;
+        }
+
+        .opt-2 .metrics,
+        .opt-2 .summary,
+        .opt-2 .transcript,
+        .opt-2 .advanced,
+        .opt-8 .metrics,
+        .opt-8 .summary,
+        .opt-8 .transcript,
+        .opt-8 .advanced {
+          grid-area: auto;
+          margin: 0;
+          border-right: 0;
+          padding: 0;
+        }
+
+        .metrics,
+        .opt-1 .metrics,
+        .opt-3 .metrics,
+        .opt-4 .metrics,
+        .opt-6 .metrics,
+        .opt-9 .metrics,
+        .opt-10 .metrics,
+        .opt-10 .advanced {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-column: auto;
+        }
+
+        .opt-10 .summary,
+        .opt-10 .transcript,
+        .opt-10 .advanced {
+          grid-column: auto;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .content {
+          padding: 12px;
+        }
+
+        .modal-header,
+        .opt-1 .modal-header,
+        .opt-2 .modal-header,
+        .opt-3 .modal-header,
+        .opt-4 .modal-header,
+        .opt-5 .modal-header,
+        .opt-6 .modal-header,
+        .opt-7 .modal-header,
+        .opt-8 .modal-header,
+        .opt-9 .modal-header,
+        .opt-10 .modal-header {
+          padding: 13px;
+        }
+
+        .opt-1 .body-grid,
+        .opt-2 .body-grid,
+        .opt-3 .body-grid,
+        .opt-4 .body-grid,
+        .opt-5 .body-grid,
+        .opt-6 .body-grid,
+        .opt-7 .body-grid,
+        .opt-8 .body-grid,
+        .opt-9 .body-grid,
+        .opt-10 .body-grid {
+          padding: 12px;
+        }
+
+        .metrics,
+        .opt-10 .advanced {
+          grid-template-columns: 1fr;
+        }
+
+        .title-row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 40px;
+        }
+
+        .title-row h4 {
+          font-size: 18px;
+        }
+
+        .transcript li,
+        .advanced-row,
+        .source-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="prototype-shell">
+      <nav class="index" aria-label="Design direction index">
+        <h1>Session Dossier Directions</h1>
+        <p>Ten implemented modal systems using the same Masthead session evidence.</p>
+        <a href="#option-1">01 Ledger Steel Fold</a>
+        <a href="#option-2">02 Threaded Evidence Loom</a>
+        <a href="#option-3">03 Library Index Drawer</a>
+        <a href="#option-4">04 Command Plate Console</a>
+        <a href="#option-5">05 Source Cartography Sheet</a>
+        <a href="#option-6">06 Transcript Editing Bench</a>
+        <a href="#option-7">07 Provenance Packet Seal</a>
+        <a href="#option-8">08 Split Rail Junction</a>
+        <a href="#option-9">09 Aperture Light Table</a>
+        <a href="#option-10">10 Constraint Matrix Field</a>
+      </nav>
+
+      <main class="content">
+        <header class="brief">
+          <p class="eyebrow mono">Masthead mockup / local-first session dossier</p>
+          <h2>Ten implemented design directions for the session dossier modal</h2>
+          <p>
+            Each option keeps the same realistic session identity, token usage, enrichment summary, transcript,
+            and advanced evidence placement so hierarchy and structure can be compared directly.
+          </p>
+        </header>
+
+        <section class="direction opt-1" id="option-1" data-option="1">
+          <div class="direction-title">
+            <div>
+              <h3>Ledger Steel Fold</h3>
+              <p>Folded sheet-metal panels, ledger ordering, and quiet machined dividers make canonical facts feel audited.</p>
+            </div>
+            <span class="option-number">Option 01</span>
+          </div>
+          <article class="modal">
+            <header class="modal-header">
+              <div class="meta-line"><span>Sources</span><span>codex</span><span>complete</span><span>18m 42s</span><span>gpt-5-codex</span></div>
+              <div class="title-row">
+                <div><span class="mono label">Session identity</span><h4>Refine Logbook transcript import and dossier evidence</h4></div>
+                <button class="close" aria-label="Close">×</button>
+              </div>
+            </header>
+            <div class="body-grid">
+              <section class="metrics" aria-label="Key stats">
+                <div class="metric"><span>Lifecycle</span><strong>complete</strong></div>
+                <div class="metric"><span>Duration</span><strong>18m 42s</strong></div>
+                <div class="metric"><span>Total tokens</span><strong>48,912</strong></div>
+                <div class="metric"><span>Input tokens</span><strong>33,204</strong></div>
+                <div class="metric"><span>Output tokens</span><strong>15,708</strong></div>
+                <div class="metric"><span>Messages</span><strong>37</strong></div>
+              </section>
+              <section class="panel summary">
+                <h5>Enrichment summary</h5>
+                <p>Masthead imported approved Codex transcript rows, preserved token counts on the canonical session, and exposed a transcript-first dossier view for historical reuse.</p>
+                <div class="tags"><span class="tag">transcript import</span><span class="tag">session dossier</span><span class="tag">Sources</span><span class="tag coverage">weak evidence: none</span></div>
+              </section>
+              <section class="panel advanced">
+                <h5>Advanced evidence</h5>
+                <div class="advanced-row"><span>Canonical ID</span><b>ses_20260630_logbook_import</b></div>
+                <div class="advanced-row"><span>Agent retrieval</span><b>Included in MCP search</b></div>
+                <div class="advanced-row"><span>Confidence</span><b>high, transcript-backed</b></div>
+                <a class="button">Open advanced details</a>
+              </section>
+              <section class="panel transcript">
+                <h5>Transcript</h5>
+                <div class="transcript-toolbar"><span class="filter active">All</span><span class="filter">User</span><span class="filter">Assistant</span><span class="filter">Tools</span></div>
+                <ol>
+                  <li><time>09:14</time><div><b>User</b><p>Show me the real session conversation and make the dossier transcript-first.</p></div></li>
+                  <li><time>09:19</time><div><b>Tool · rg</b><p>Located SessionDossier, DossierTranscript, and progressive import coverage tests.</p></div></li>
+                  <li><time>09:27</time><div><b>Assistant</b><p>Added transcript grouping, sparse transcript warnings, and raw access in advanced details.</p></div></li>
+                </ol>
+              </section>
+            </div>
+          </article>
+        </section>
+
+        <section class="direction opt-2" id="option-2" data-option="2">
+          <div class="direction-title">
+            <div>
+              <h3>Threaded Evidence Loom</h3>
+              <p>Data is woven around a central thread: metrics hang on one side while summary and transcript interlock on the other.</p>
+            </div>
+            <span class="option-number">Option 02</span>
+          </div>
+          <article class="modal">
+            <header class="modal-header">
+              <div class="meta-line"><span>Sources</span><span>codex</span><span>complete</span><span>18m 42s</span><span>gpt-5-codex</span></div>
+              <div class="title-row">
+                <div><span class="mono label">Session identity</span><h4>Refine Logbook transcript import and dossier evidence</h4></div>
+                <button class="close" aria-label="Close">×</button>
+              </div>
+            </header>
+            <div class="body-grid">
+              <section class="metrics"><div class="metric"><span>Lifecycle</span><strong>complete</strong></div><div class="metric"><span>Duration</span><strong>18m 42s</strong></div><div class="metric"><span>Total tokens</span><strong>48,912</strong></div><div class="metric"><span>Input tokens</span><strong>33,204</strong></div><div class="metric"><span>Output tokens</span><strong>15,708</strong></div><div class="metric"><span>Messages</span><strong>37</strong></div></section>
+              <section class="panel summary"><h5>Enrichment summary</h5><p>Masthead imported approved Codex transcript rows, preserved token counts on the canonical session, and exposed a transcript-first dossier view for historical reuse.</p><div class="tags"><span class="tag">transcript import</span><span class="tag">session dossier</span><span class="tag">Sources</span><span class="tag coverage">weak evidence: none</span></div></section>
+              <section class="panel advanced"><h5>Advanced evidence</h5><div class="advanced-row"><span>Canonical ID</span><b>ses_20260630_logbook_import</b></div><div class="advanced-row"><span>Agent retrieval</span><b>Included in MCP search</b></div><div class="advanced-row"><span>Confidence</span><b>high, transcript-backed</b></div><a class="button">Open advanced details</a></section>
+              <section class="panel transcript"><h5>Transcript</h5><div class="transcript-toolbar"><span class="filter active">All</span><span class="filter">User</span><span class="filter">Assistant</span><span class="filter">Tools</span></div><ol><li><time>09:14</time><div><b>User</b><p>Show me the real session conversation and make the dossier transcript-first.</p></div></li><li><time>09:19</time><div><b>Tool · rg</b><p>Located SessionDossier, DossierTranscript, and progressive import coverage tests.</p></div></li><li><time>09:27</time><div><b>Assistant</b><p>Added transcript grouping, sparse transcript warnings, and raw access in advanced details.</p></div></li></ol></section>
+            </div>
+          </article>
+        </section>
+
+        <section class="direction opt-3" id="option-3" data-option="3">
+          <div class="direction-title"><div><h3>Library Index Drawer</h3><p>Archival drawers, tabular cataloging, and double rules make the dossier read like a durable local record.</p></div><span class="option-number">Option 03</span></div>
+          <article class="modal"><header class="modal-header"><div class="meta-line"><span>Sources</span><span>codex</span><span>complete</span><span>18m 42s</span><span>gpt-5-codex</span></div><div class="title-row"><div><span class="mono label">Session identity</span><h4>Refine Logbook transcript import and dossier evidence</h4></div><button class="close" aria-label="Close">×</button></div></header><div class="body-grid"><section class="metrics"><div class="metric"><span>Lifecycle</span><strong>complete</strong></div><div class="metric"><span>Duration</span><strong>18m 42s</strong></div><div class="metric"><span>Total tokens</span><strong>48,912</strong></div><div class="metric"><span>Input tokens</span><strong>33,204</strong></div><div class="metric"><span>Output tokens</span><strong>15,708</strong></div><div class="metric"><span>Messages</span><strong>37</strong></div></section><section class="panel summary"><h5>Enrichment summary</h5><p>Masthead imported approved Codex transcript rows, preserved token counts on the canonical session, and exposed a transcript-first dossier view for historical reuse.</p><div class="tags"><span class="tag">transcript import</span><span class="tag">session dossier</span><span class="tag">Sources</span><span class="tag coverage">weak evidence: none</span></div></section><section class="panel transcript"><h5>Transcript</h5><div class="transcript-toolbar"><span class="filter active">All</span><span class="filter">User</span><span class="filter">Assistant</span><span class="filter">Tools</span></div><ol><li><time>09:14</time><div><b>User</b><p>Show me the real session conversation and make the dossier transcript-first.</p></div></li><li><time>09:19</time><div><b>Tool · rg</b><p>Located SessionDossier, DossierTranscript, and progressive import coverage tests.</p></div></li><li><time>09:27</time><div><b>Assistant</b><p>Added transcript grouping, sparse transcript warnings, and raw access in advanced details.</p></div></li></ol></section><section class="panel advanced"><h5>Advanced evidence</h5><div class="advanced-row"><span>Canonical ID</span><b>ses_20260630_logbook_import</b></div><div class="advanced-row"><span>Agent retrieval</span><b>Included in MCP search</b></div><div class="advanced-row"><span>Confidence</span><b>high, transcript-backed</b></div><a class="button">Open advanced details</a></section></div></article>
+        </section>
+
+        <section class="direction opt-4" id="option-4" data-option="4">
+          <div class="direction-title"><div><h3>Command Plate Console</h3><p>Monospace command plates, terse evidence rows, and green verification tone emphasize local machine provenance.</p></div><span class="option-number">Option 04</span></div>
+          <article class="modal"><header class="modal-header"><div class="meta-line"><span>Sources</span><span>codex</span><span>complete</span><span>18m 42s</span><span>gpt-5-codex</span></div><div class="title-row"><div><span class="mono label">$ masthead session inspect</span><h4>Refine Logbook transcript import and dossier evidence</h4></div><button class="close" aria-label="Close">×</button></div></header><div class="body-grid"><section class="metrics"><div class="metric"><span>Lifecycle</span><strong>complete</strong></div><div class="metric"><span>Duration</span><strong>18m 42s</strong></div><div class="metric"><span>Total tokens</span><strong>48,912</strong></div><div class="metric"><span>Input tokens</span><strong>33,204</strong></div><div class="metric"><span>Output tokens</span><strong>15,708</strong></div><div class="metric"><span>Messages</span><strong>37</strong></div></section><section class="panel summary"><h5>Enrichment summary</h5><p>Masthead imported approved Codex transcript rows, preserved token counts on the canonical session, and exposed a transcript-first dossier view for historical reuse.</p><div class="tags"><span class="tag">transcript import</span><span class="tag">session dossier</span><span class="tag">Sources</span><span class="tag coverage">weak evidence: none</span></div></section><section class="panel transcript"><h5>Transcript</h5><div class="transcript-toolbar"><span class="filter active">All</span><span class="filter">User</span><span class="filter">Assistant</span><span class="filter">Tools</span></div><ol><li><time>09:14</time><div><b>User</b><p>Show me the real session conversation and make the dossier transcript-first.</p></div></li><li><time>09:19</time><div><b>Tool · rg</b><p>Located SessionDossier, DossierTranscript, and progressive import coverage tests.</p></div></li><li><time>09:27</time><div><b>Assistant</b><p>Added transcript grouping, sparse transcript warnings, and raw access in advanced details.</p></div></li></ol></section><section class="panel advanced"><h5>Advanced evidence</h5><div class="advanced-row"><span>Canonical ID</span><b>ses_20260630_logbook_import</b></div><div class="advanced-row"><span>Agent retrieval</span><b>Included in MCP search</b></div><div class="advanced-row"><span>Confidence</span><b>high, transcript-backed</b></div><a class="button">Open advanced details</a></section></div></article>
+        </section>
+
+        <section class="direction opt-5" id="option-5" data-option="5">
+          <div class="direction-title"><div><h3>Source Cartography Sheet</h3><p>Map-sheet coordinates and pinned evidence blocks emphasize where each fact came from without becoming decorative analytics.</p></div><span class="option-number">Option 05</span></div>
+          <article class="modal"><header class="modal-header"><div class="meta-line"><span>Sources</span><span>codex</span><span>complete</span><span>18m 42s</span><span>gpt-5-codex</span></div><div class="title-row"><div><span class="mono label">Session identity</span><h4>Refine Logbook transcript import and dossier evidence</h4></div><button class="close" aria-label="Close">×</button></div></header><div class="body-grid"><section class="metrics"><div class="metric"><span>Lifecycle</span><strong>complete</strong></div><div class="metric"><span>Duration</span><strong>18m 42s</strong></div><div class="metric"><span>Total tokens</span><strong>48,912</strong></div><div class="metric"><span>Input tokens</span><strong>33,204</strong></div><div class="metric"><span>Output tokens</span><strong>15,708</strong></div><div class="metric"><span>Messages</span><strong>37</strong></div></section><section class="panel summary"><h5>Enrichment summary</h5><p>Masthead imported approved Codex transcript rows, preserved token counts on the canonical session, and exposed a transcript-first dossier view for historical reuse.</p><div class="tags"><span class="tag">transcript import</span><span class="tag">session dossier</span><span class="tag">Sources</span><span class="tag coverage">weak evidence: none</span></div></section><section class="panel transcript"><h5>Transcript</h5><div class="transcript-toolbar"><span class="filter active">All</span><span class="filter">User</span><span class="filter">Assistant</span><span class="filter">Tools</span></div><ol><li><time>09:14</time><div><b>User</b><p>Show me the real session conversation and make the dossier transcript-first.</p></div></li><li><time>09:19</time><div><b>Tool · rg</b><p>Located SessionDossier, DossierTranscript, and progressive import coverage tests.</p></div></li><li><time>09:27</time><div><b>Assistant</b><p>Added transcript grouping, sparse transcript warnings, and raw access in advanced details.</p></div></li></ol></section><section class="panel advanced"><h5>Advanced evidence</h5><div class="advanced-row"><span>Canonical ID</span><b>ses_20260630_logbook_import</b></div><div class="advanced-row"><span>Agent retrieval</span><b>Included in MCP search</b></div><div class="advanced-row"><span>Confidence</span><b>high, transcript-backed</b></div><a class="button">Open advanced details</a></section></div></article>
+        </section>
+
+        <section class="direction opt-6" id="option-6" data-option="6">
+          <div class="direction-title"><div><h3>Transcript Editing Bench</h3><p>Dashed review marks, wide transcript lanes, and side notes make the modal feel like a bench for inspecting evidence text.</p></div><span class="option-number">Option 06</span></div>
+          <article class="modal"><header class="modal-header"><div><div class="meta-line"><span>Sources</span><span>codex</span><span>complete</span><span>18m 42s</span><span>gpt-5-codex</span></div><div class="title-row"><div><span class="mono label">Session identity</span><h4>Refine Logbook transcript import and dossier evidence</h4></div></div></div><button class="close" aria-label="Close">×</button></header><div class="body-grid"><section class="metrics"><div class="metric"><span>Lifecycle</span><strong>complete</strong></div><div class="metric"><span>Duration</span><strong>18m 42s</strong></div><div class="metric"><span>Total tokens</span><strong>48,912</strong></div><div class="metric"><span>Input tokens</span><strong>33,204</strong></div><div class="metric"><span>Output tokens</span><strong>15,708</strong></div><div class="metric"><span>Messages</span><strong>37</strong></div></section><section class="panel transcript"><h5>Transcript</h5><div class="transcript-toolbar"><span class="filter active">All</span><span class="filter">User</span><span class="filter">Assistant</span><span class="filter">Tools</span></div><ol><li><time>09:14</time><div><b>User</b><p>Show me the real session conversation and make the dossier transcript-first.</p></div></li><li><time>09:19</time><div><b>Tool · rg</b><p>Located SessionDossier, DossierTranscript, and progressive import coverage tests.</p></div></li><li><time>09:27</time><div><b>Assistant</b><p>Added transcript grouping, sparse transcript warnings, and raw access in advanced details.</p></div></li></ol></section><section class="panel summary"><h5>Enrichment summary</h5><p>Masthead imported approved Codex transcript rows, preserved token counts on the canonical session, and exposed a transcript-first dossier view for historical reuse.</p><div class="tags"><span class="tag">transcript import</span><span class="tag">session dossier</span><span class="tag">Sources</span><span class="tag coverage">weak evidence: none</span></div></section><section class="panel advanced"><h5>Advanced evidence</h5><div class="advanced-row"><span>Canonical ID</span><b>ses_20260630_logbook_import</b></div><div class="advanced-row"><span>Agent retrieval</span><b>Included in MCP search</b></div><div class="advanced-row"><span>Confidence</span><b>high, transcript-backed</b></div><a class="button">Open advanced details</a></section></div></article>
+        </section>
+
+        <section class="direction opt-7" id="option-7" data-option="7">
+          <div class="direction-title"><div><h3>Provenance Packet Seal</h3><p>Sealed packet strips, asymmetric gutters, and stamped confidence markers foreground source trust and reuse readiness.</p></div><span class="option-number">Option 07</span></div>
+          <article class="modal"><header class="modal-header"><div class="meta-line"><span>Sources</span><span>codex</span><span>complete</span><span>18m 42s</span><span>gpt-5-codex</span></div><div class="title-row"><div><span class="mono label">Session identity</span><h4>Refine Logbook transcript import and dossier evidence</h4></div><button class="close" aria-label="Close">×</button></div></header><div class="body-grid"><section class="metrics"><div class="metric"><span>Lifecycle</span><strong>complete</strong></div><div class="metric"><span>Duration</span><strong>18m 42s</strong></div><div class="metric"><span>Total tokens</span><strong>48,912</strong></div><div class="metric"><span>Input tokens</span><strong>33,204</strong></div><div class="metric"><span>Output tokens</span><strong>15,708</strong></div><div class="metric"><span>Messages</span><strong>37</strong></div></section><section class="panel summary"><h5>Enrichment summary</h5><p>Masthead imported approved Codex transcript rows, preserved token counts on the canonical session, and exposed a transcript-first dossier view for historical reuse.</p><div class="tags"><span class="tag">transcript import</span><span class="tag">session dossier</span><span class="tag">Sources</span><span class="tag coverage">weak evidence: none</span></div></section><section class="panel transcript"><h5>Transcript</h5><div class="transcript-toolbar"><span class="filter active">All</span><span class="filter">User</span><span class="filter">Assistant</span><span class="filter">Tools</span></div><ol><li><time>09:14</time><div><b>User</b><p>Show me the real session conversation and make the dossier transcript-first.</p></div></li><li><time>09:19</time><div><b>Tool · rg</b><p>Located SessionDossier, DossierTranscript, and progressive import coverage tests.</p></div></li><li><time>09:27</time><div><b>Assistant</b><p>Added transcript grouping, sparse transcript warnings, and raw access in advanced details.</p></div></li></ol></section><section class="panel advanced"><h5>Advanced evidence</h5><div class="advanced-row"><span>Canonical ID</span><b>ses_20260630_logbook_import</b></div><div class="advanced-row"><span>Agent retrieval</span><b>Included in MCP search</b></div><div class="advanced-row"><span>Confidence</span><b>high, transcript-backed</b></div><a class="button">Open advanced details</a></section></div></article>
+        </section>
+
+        <section class="direction opt-8" id="option-8" data-option="8">
+          <div class="direction-title"><div><h3>Split Rail Junction</h3><p>A fixed evidence rail, junction-like content lanes, and compact switches make the modal feel fast to scan from Board or Logbook.</p></div><span class="option-number">Option 08</span></div>
+          <article class="modal"><header class="modal-header"><div class="meta-line"><span>Sources</span><span>codex</span><span>complete</span><span>18m 42s</span><span>gpt-5-codex</span></div><div class="title-row"><div><span class="mono label">Session identity</span><h4>Refine Logbook transcript import and dossier evidence</h4></div><button class="close" aria-label="Close">×</button></div></header><div class="body-grid"><section class="metrics"><div class="metric"><span>Lifecycle</span><strong>complete</strong></div><div class="metric"><span>Duration</span><strong>18m 42s</strong></div><div class="metric"><span>Total tokens</span><strong>48,912</strong></div><div class="metric"><span>Input tokens</span><strong>33,204</strong></div><div class="metric"><span>Output tokens</span><strong>15,708</strong></div><div class="metric"><span>Messages</span><strong>37</strong></div></section><section class="panel summary"><h5>Enrichment summary</h5><p>Masthead imported approved Codex transcript rows, preserved token counts on the canonical session, and exposed a transcript-first dossier view for historical reuse.</p><div class="tags"><span class="tag">transcript import</span><span class="tag">session dossier</span><span class="tag">Sources</span><span class="tag coverage">weak evidence: none</span></div></section><section class="panel transcript"><h5>Transcript</h5><div class="transcript-toolbar"><span class="filter active">All</span><span class="filter">User</span><span class="filter">Assistant</span><span class="filter">Tools</span></div><ol><li><time>09:14</time><div><b>User</b><p>Show me the real session conversation and make the dossier transcript-first.</p></div></li><li><time>09:19</time><div><b>Tool · rg</b><p>Located SessionDossier, DossierTranscript, and progressive import coverage tests.</p></div></li><li><time>09:27</time><div><b>Assistant</b><p>Added transcript grouping, sparse transcript warnings, and raw access in advanced details.</p></div></li></ol></section><section class="panel advanced"><h5>Advanced evidence</h5><div class="advanced-row"><span>Canonical ID</span><b>ses_20260630_logbook_import</b></div><div class="advanced-row"><span>Agent retrieval</span><b>Included in MCP search</b></div><div class="advanced-row"><span>Confidence</span><b>high, transcript-backed</b></div><a class="button">Open advanced details</a></section></div></article>
+        </section>
+
+        <section class="direction opt-9" id="option-9" data-option="9">
+          <div class="direction-title"><div><h3>Aperture Light Table</h3><p>Contact-sheet compartments and soft top highlights treat each evidence block like inspectable captured material.</p></div><span class="option-number">Option 09</span></div>
+          <article class="modal"><header class="modal-header"><div class="meta-line"><span>Sources</span><span>codex</span><span>complete</span><span>18m 42s</span><span>gpt-5-codex</span></div><div class="title-row"><div><span class="mono label">Session identity</span><h4>Refine Logbook transcript import and dossier evidence</h4></div><button class="close" aria-label="Close">×</button></div></header><div class="body-grid"><section class="metrics"><div class="metric"><span>Lifecycle</span><strong>complete</strong></div><div class="metric"><span>Duration</span><strong>18m 42s</strong></div><div class="metric"><span>Total tokens</span><strong>48,912</strong></div><div class="metric"><span>Input tokens</span><strong>33,204</strong></div><div class="metric"><span>Output tokens</span><strong>15,708</strong></div><div class="metric"><span>Messages</span><strong>37</strong></div></section><section class="panel summary"><h5>Enrichment summary</h5><p>Masthead imported approved Codex transcript rows, preserved token counts on the canonical session, and exposed a transcript-first dossier view for historical reuse.</p><div class="tags"><span class="tag">transcript import</span><span class="tag">session dossier</span><span class="tag">Sources</span><span class="tag coverage">weak evidence: none</span></div></section><section class="panel transcript"><h5>Transcript</h5><div class="transcript-toolbar"><span class="filter active">All</span><span class="filter">User</span><span class="filter">Assistant</span><span class="filter">Tools</span></div><ol><li><time>09:14</time><div><b>User</b><p>Show me the real session conversation and make the dossier transcript-first.</p></div></li><li><time>09:19</time><div><b>Tool · rg</b><p>Located SessionDossier, DossierTranscript, and progressive import coverage tests.</p></div></li><li><time>09:27</time><div><b>Assistant</b><p>Added transcript grouping, sparse transcript warnings, and raw access in advanced details.</p></div></li></ol></section><section class="panel advanced"><h5>Advanced evidence</h5><div class="advanced-row"><span>Canonical ID</span><b>ses_20260630_logbook_import</b></div><div class="advanced-row"><span>Agent retrieval</span><b>Included in MCP search</b></div><div class="advanced-row"><span>Confidence</span><b>high, transcript-backed</b></div><a class="button">Open advanced details</a></section></div></article>
+        </section>
+
+        <section class="direction opt-10" id="option-10" data-option="10">
+          <div class="direction-title"><div><h3>Constraint Matrix Field</h3><p>A strict four-column matrix treats the dossier as a set of verifiable constraints, with advanced facts always visible as a lower band.</p></div><span class="option-number">Option 10</span></div>
+          <article class="modal"><header class="modal-header"><div class="meta-line"><span>Sources</span><span>codex</span><span>complete</span><span>18m 42s</span><span>gpt-5-codex</span></div><div class="title-row"><div><span class="mono label">Session identity</span><h4>Refine Logbook transcript import and dossier evidence</h4></div><button class="close" aria-label="Close">×</button></div></header><div class="body-grid"><section class="metrics"><div class="metric"><span>Lifecycle</span><strong>complete</strong></div><div class="metric"><span>Duration</span><strong>18m 42s</strong></div><div class="metric"><span>Total tokens</span><strong>48,912</strong></div><div class="metric"><span>Input tokens</span><strong>33,204</strong></div><div class="metric"><span>Output tokens</span><strong>15,708</strong></div><div class="metric"><span>Messages</span><strong>37</strong></div></section><section class="panel summary"><h5>Enrichment summary</h5><p>Masthead imported approved Codex transcript rows, preserved token counts on the canonical session, and exposed a transcript-first dossier view for historical reuse.</p><div class="tags"><span class="tag">transcript import</span><span class="tag">session dossier</span><span class="tag">Sources</span><span class="tag coverage">weak evidence: none</span></div></section><section class="panel transcript"><h5>Transcript</h5><div class="transcript-toolbar"><span class="filter active">All</span><span class="filter">User</span><span class="filter">Assistant</span><span class="filter">Tools</span></div><ol><li><time>09:14</time><div><b>User</b><p>Show me the real session conversation and make the dossier transcript-first.</p></div></li><li><time>09:19</time><div><b>Tool · rg</b><p>Located SessionDossier, DossierTranscript, and progressive import coverage tests.</p></div></li><li><time>09:27</time><div><b>Assistant</b><p>Added transcript grouping, sparse transcript warnings, and raw access in advanced details.</p></div></li></ol></section><section class="panel advanced"><h5>Advanced evidence</h5><div class="advanced-row"><span>Canonical ID</span><b>ses_20260630_logbook_import</b></div><div class="advanced-row"><span>Agent retrieval</span><b>Included in MCP search</b></div><div class="advanced-row"><span>Confidence</span><b>high, transcript-backed</b></div><a class="button">Open advanced details</a></section></div></article>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
