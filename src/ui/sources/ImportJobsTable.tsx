@@ -22,7 +22,7 @@ export function ImportJobsTable({
   return (
     <section className="import-jobs-section" aria-label="Import jobs">
       <div className="import-jobs-header">
-        <h2 className="import-jobs-title">Import queue</h2>
+        <h2 className="import-jobs-title">Import Queue</h2>
         <dl className="import-jobs-summary" aria-label="Import queue summary">
           <div>
             <dt>Visible</dt>

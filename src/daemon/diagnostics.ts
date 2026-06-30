@@ -18,6 +18,10 @@ const verboseDiagnostics = process.env.MASTHEAD_DIAGNOSTIC_LOGS === "1";
 const diagnosticLogFile = process.env.MASTHEAD_DIAGNOSTIC_LOG_FILE;
 const events: RuntimeDiagnosticEvent[] = [];
 let nextEventId = 1;
+let consoleOutputFailed = false;
+
+process.stdout.on("error", handleConsoleStreamError);
+process.stderr.on("error", handleConsoleStreamError);
 
 export function recordRuntimeDiagnostic(input: {
   kind: string;
@@ -38,11 +42,11 @@ export function recordRuntimeDiagnostic(input: {
   while (events.length > maxEvents) events.shift();
 
   if (event.severity === "error") {
-    console.error(`[masthead] ${event.message}`, event.details ?? "");
+    writeConsoleDiagnostic("error", `[masthead] ${event.message}`, event.details ?? "");
   } else if (event.severity === "warning") {
-    console.warn(`[masthead] ${event.message}`, event.details ?? "");
+    writeConsoleDiagnostic("warn", `[masthead] ${event.message}`, event.details ?? "");
   } else if (verboseDiagnostics) {
-    console.log(`[masthead] ${event.message}`, event.details ?? "");
+    writeConsoleDiagnostic("log", `[masthead] ${event.message}`, event.details ?? "");
   }
   writeDiagnosticLog(event);
 
@@ -117,6 +121,36 @@ function writeDiagnosticLog(event: RuntimeDiagnosticEvent): void {
     mkdirSync(dirname(diagnosticLogFile), { recursive: true });
     appendFileSync(diagnosticLogFile, `${JSON.stringify(event)}\n`, "utf8");
   } catch (error) {
-    console.error("[masthead] failed to write diagnostic log", sanitizeDiagnosticValue(error));
+    writeConsoleDiagnostic("error", "[masthead] failed to write diagnostic log", sanitizeDiagnosticValue(error));
   }
+}
+
+function writeConsoleDiagnostic(method: "error" | "log" | "warn", message: string, details: unknown): void {
+  if (consoleOutputFailed) return;
+  try {
+    console[method](message, details);
+  } catch (error) {
+    if (isBrokenPipeError(error)) {
+      consoleOutputFailed = true;
+      return;
+    }
+    throw error;
+  }
+}
+
+function isBrokenPipeError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "EPIPE"
+  );
+}
+
+function handleConsoleStreamError(error: Error): void {
+  if (isBrokenPipeError(error)) {
+    consoleOutputFailed = true;
+    return;
+  }
+  throw error;
 }

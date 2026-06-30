@@ -3949,7 +3949,7 @@ body {
   height: 218px;
   min-height: 218px;
   --status-rail: var(--green);
-  border-left: 3px solid var(--status-rail);
+  border-left: 1px solid var(--surface-metal-border);
   padding: 0;
   transition:
     height var(--layout-dur) var(--layout-ease),
@@ -3969,7 +3969,6 @@ body {
 .masthead-shell .session-card.running {
   --status-rail: var(--green);
   border-color: var(--surface-metal-border);
-  border-left-color: var(--status-rail);
 }
 
 .observability-console .session-card.stalled,
@@ -3993,7 +3992,7 @@ body {
 
 .observability-console .session-card:hover,
 .masthead-shell .session-card:hover {
-  border-left-color: var(--status-rail);
+  border-left-color: var(--surface-metal-border-hover);
 }
 
 .observability-console .session-card:active,
@@ -4931,6 +4930,541 @@ body {
   }
 }
 
+.observability-console .session-card,
+.masthead-shell .session-card {
+  --state: var(--green);
+  --state-border: rgba(54, 216, 105, 0.42);
+  --border: var(--surface-border);
+  --border-hover: var(--surface-border-hover);
+  --highlight: var(--edge-highlight);
+  --radius-card: 5px;
+  --radius-control: 3px;
+  --ease: var(--layout-ease);
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  width: 100%;
+  height: auto;
+  min-height: 232px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.32),
+    0 8px 18px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(190, 225, 245, 0.065),
+    inset 1px 0 0 rgba(135, 195, 225, 0.026),
+    inset -1px 0 0 rgba(0, 0, 0, 0.26),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.58);
+  color: var(--body);
+  padding: 13px 14px;
+  transition-property: transform, border-color, background-color, box-shadow;
+  transition-duration: 180ms;
+  transition-timing-function: var(--ease);
+}
+
+.observability-console .session-card::before,
+.observability-console .session-card::after,
+.masthead-shell .session-card::before,
+.masthead-shell .session-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.observability-console .session-card::before,
+.masthead-shell .session-card::before {
+  background:
+    linear-gradient(180deg, rgba(190, 225, 245, 0.055), transparent 38%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 12px);
+}
+
+.observability-console .session-card::after,
+.masthead-shell .session-card::after {
+  background-image: var(--surface-grain-image);
+  background-size: 96px 96px;
+  mix-blend-mode: soft-light;
+  opacity: 0.018;
+}
+
+.observability-console .session-card:hover,
+.masthead-shell .session-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-hover);
+  background-color: var(--card-bg-hover);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.34),
+    0 11px 22px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(205, 234, 248, 0.082),
+    inset 1px 0 0 rgba(150, 205, 232, 0.038),
+    inset -1px 0 0 rgba(0, 0, 0, 0.26),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.58);
+}
+
+.observability-console .session-card:active,
+.masthead-shell .session-card:active {
+  transform: translateY(0) scale(0.96);
+}
+
+.observability-console .session-card.is-idle,
+.masthead-shell .session-card.is-idle {
+  --state: var(--blue);
+  --state-border: rgba(45, 168, 255, 0.42);
+}
+
+.observability-console .session-card.is-blocked,
+.masthead-shell .session-card.is-blocked {
+  --state: var(--red);
+  --state-border: rgba(255, 72, 62, 0.44);
+}
+
+.observability-console .session-card.bottom-variant-card.dovetail-card,
+.masthead-shell .session-card.bottom-variant-card.dovetail-card {
+  --state: var(--green);
+  --state-border: rgba(54, 216, 105, 0.42);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), 72% calc(100% - 6px), 67% 100%, 33% 100%, 28% calc(100% - 6px), 0 calc(100% - 6px));
+  margin-bottom: 0;
+  overflow: hidden;
+}
+
+.observability-console .session-card.bottom-variant-card.dovetail-card.is-idle,
+.masthead-shell .session-card.bottom-variant-card.dovetail-card.is-idle {
+  --state: var(--blue);
+  --state-border: rgba(45, 168, 255, 0.42);
+}
+
+.observability-console .session-card.bottom-variant-card.dovetail-card.is-blocked,
+.masthead-shell .session-card.bottom-variant-card.dovetail-card.is-blocked {
+  --state: var(--red);
+  --state-border: rgba(255, 72, 62, 0.44);
+}
+
+.observability-console .session-card .card-topline,
+.masthead-shell .session-card .card-topline {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.observability-console .session-card .project,
+.masthead-shell .session-card .project {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: #b8c9d8;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 19px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.observability-console .session-card .runtime-tag,
+.observability-console .session-card .state-pill,
+.masthead-shell .session-card .runtime-tag,
+.masthead-shell .session-card .state-pill {
+  flex: 0 0 auto;
+  height: 22px;
+  border-radius: var(--radius-control);
+  padding: 0 8px;
+  font-size: 10.5px;
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+.observability-console .session-card .runtime-tag,
+.masthead-shell .session-card .runtime-tag {
+  background: #071724;
+  box-shadow:
+    0 0 0 1px rgba(178, 213, 240, 0.11),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.42);
+  color: #b6c7d5;
+}
+
+.observability-console .session-card .state-pill,
+.masthead-shell .session-card .state-pill {
+  border: 1px solid rgba(194, 221, 241, 0.12);
+  background: rgba(6, 25, 37, 0.76);
+  color: #d7e5ef;
+  font-weight: 600;
+  text-align: center;
+}
+
+.observability-console .session-card .headline,
+.masthead-shell .session-card .headline {
+  display: grid;
+  align-content: center;
+  min-height: 58px;
+  border-top: 1px solid rgba(194, 221, 241, 0.1);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.32);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+    rgba(6, 25, 37, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(190, 225, 245, 0.04),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.34);
+  color: var(--ink);
+  padding: 9px 10px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.32;
+  letter-spacing: 0;
+  text-wrap: pretty;
+}
+
+.observability-console .session-card .fact-grid,
+.masthead-shell .session-card .fact-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  border: 1px solid rgba(194, 221, 241, 0.1);
+  background: rgba(3, 16, 25, 0.24);
+  box-shadow: inset 0 1px 0 rgba(190, 225, 245, 0.035);
+  padding: 8px;
+}
+
+.observability-console .session-card .fact,
+.masthead-shell .session-card .fact {
+  min-width: 0;
+  border-left: 1px solid rgba(194, 221, 241, 0.1);
+  padding-left: 8px;
+}
+
+.observability-console .session-card .fact:first-child,
+.masthead-shell .session-card .fact:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.observability-console .session-card .fact-value,
+.masthead-shell .session-card .fact-value {
+  overflow: hidden;
+  color: #eef6ff;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.observability-console .session-card .fact-label,
+.masthead-shell .session-card .fact-label {
+  overflow: hidden;
+  color: #8fa1b2;
+  font-size: 10.5px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.observability-console .session-card .footer-line,
+.masthead-shell .session-card .footer-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #a4b2bf;
+  font-size: 11.5px;
+}
+
+.observability-console .session-card .timestamp,
+.masthead-shell .session-card .timestamp {
+  color: var(--body);
+}
+
+.observability-console .session-card.bottom-variant-card,
+.masthead-shell .session-card.bottom-variant-card {
+  min-height: 238px;
+  margin-bottom: 8px;
+  overflow: visible;
+  padding-bottom: 18px;
+}
+
+.observability-console .observability-card-grid.compact .session-card.bottom-variant-card,
+.masthead-shell .observability-card-grid.compact .session-card.bottom-variant-card {
+  height: auto;
+  min-height: 238px;
+  overflow: visible;
+}
+
+.observability-console .observability-card-grid.compact .session-card.bottom-variant-card.dovetail-card,
+.masthead-shell .observability-card-grid.compact .session-card.bottom-variant-card.dovetail-card {
+  overflow: hidden;
+}
+
+.observability-console .session-card.bottom-variant-card::before,
+.masthead-shell .session-card.bottom-variant-card::before {
+  background:
+    linear-gradient(180deg, rgba(190, 225, 245, 0.055), transparent 38%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 12px);
+}
+
+.observability-console .session-card.bottom-variant-card::after,
+.masthead-shell .session-card.bottom-variant-card::after {
+  border-radius: inherit;
+}
+
+.observability-console .session-card .bottom-signal,
+.masthead-shell .session-card .bottom-signal {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(246, 251, 255, 0.22), transparent 34%),
+    linear-gradient(180deg, var(--state), var(--state));
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(246, 251, 255, 0.24),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.52);
+}
+
+.observability-console .session-card.dovetail-card .bottom-signal,
+.masthead-shell .session-card.dovetail-card .bottom-signal {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 10px;
+  clip-path: polygon(0 0, 28% 0, 33% 60%, 67% 60%, 72% 0, 100% 0, 100% 100%, 0 100%);
+}
+
+.observability-console .session-card.dovetail-card.is-active .bottom-signal {
+  background:
+    linear-gradient(105deg, transparent 0 16%, rgba(246, 251, 255, 0.18) 25%, rgba(246, 251, 255, 0.58) 34%, rgba(246, 251, 255, 0.18) 43%, transparent 54%) 0 0 / 56px 100% repeat-x,
+    linear-gradient(180deg, rgba(246, 251, 255, 0.22), transparent 34%),
+    linear-gradient(180deg, var(--state), var(--state));
+  animation: dovetail-active-run 950ms linear infinite;
+}
+
+.masthead-shell .session-card.dovetail-card.is-active .bottom-signal {
+  background:
+    linear-gradient(105deg, transparent 0 16%, rgba(246, 251, 255, 0.18) 25%, rgba(246, 251, 255, 0.58) 34%, rgba(246, 251, 255, 0.18) 43%, transparent 54%) 0 0 / 56px 100% repeat-x,
+    linear-gradient(180deg, rgba(246, 251, 255, 0.22), transparent 34%),
+    linear-gradient(180deg, var(--state), var(--state));
+  animation: dovetail-active-run 950ms linear infinite;
+}
+
+.observability-console .session-card.dovetail-card.is-blocked .bottom-signal {
+  animation: dovetail-blocked-pulse 1500ms ease-in-out infinite;
+  filter: drop-shadow(0 0 7px rgba(255, 72, 62, 0.42));
+}
+
+.masthead-shell .session-card.dovetail-card.is-blocked .bottom-signal {
+  animation: dovetail-blocked-pulse 1500ms ease-in-out infinite;
+  filter: drop-shadow(0 0 7px rgba(255, 72, 62, 0.42));
+}
+
+@keyframes dovetail-active-run {
+  to {
+    background-position: 56px 0, 0 0, 0 0;
+  }
+}
+
+@keyframes dovetail-blocked-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 5px rgba(255, 72, 62, 0.34));
+  }
+
+  50% {
+    filter: drop-shadow(0 0 12px rgba(255, 72, 62, 0.62));
+  }
+}
+
+/*
+ * Secondary app card treatment sourced from
+ * mockups/secondary-card-directions.html option 11.
+ */
+.observability-console .sidebar-usage,
+.masthead-shell .sidebar-usage,
+.observability-console .usage-summary-strip .usage-metric,
+.masthead-shell .usage-summary-strip .usage-metric,
+.observability-console .usage-table-card,
+.masthead-shell .usage-table-card,
+.observability-console .usage-coverage,
+.masthead-shell .usage-coverage,
+.observability-console .usage-state,
+.masthead-shell .usage-state,
+.observability-console .settings-section,
+.masthead-shell .settings-section,
+.observability-console .connected-source-row,
+.masthead-shell .connected-source-row,
+.observability-console .adapter-card,
+.masthead-shell .adapter-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgba(46, 167, 255, 0.24);
+  border-color: rgba(46, 167, 255, 0.24);
+  border-radius: 5px;
+  background: #071b28;
+  box-shadow: none;
+  transition-property: border-color, background-color, transform;
+  transition-duration: 180ms;
+  transition-timing-function: var(--layout-ease);
+}
+
+.observability-console .sidebar-usage:hover,
+.masthead-shell .sidebar-usage:hover,
+.observability-console .usage-summary-strip .usage-metric:hover,
+.masthead-shell .usage-summary-strip .usage-metric:hover,
+.observability-console .usage-table-card:hover,
+.masthead-shell .usage-table-card:hover,
+.observability-console .usage-coverage:hover,
+.masthead-shell .usage-coverage:hover,
+.observability-console .usage-state:hover,
+.masthead-shell .usage-state:hover,
+.observability-console .settings-section:hover,
+.masthead-shell .settings-section:hover,
+.observability-console .connected-source-row:hover,
+.masthead-shell .connected-source-row:hover,
+.observability-console .adapter-card:hover,
+.observability-console .adapter-card:focus-visible,
+.masthead-shell .adapter-card:hover,
+.masthead-shell .adapter-card:focus-visible {
+  border-color: rgba(46, 167, 255, 0.32);
+  background-color: #071b28;
+  box-shadow: none;
+  transform: none;
+}
+
+.observability-console .connected-source-row:active,
+.masthead-shell .connected-source-row:active,
+.observability-console .adapter-card:active,
+.masthead-shell .adapter-card:active {
+  transform: none;
+}
+
+.observability-console .sidebar-usage::before,
+.masthead-shell .sidebar-usage::before,
+.observability-console .usage-summary-strip .usage-metric::before,
+.masthead-shell .usage-summary-strip .usage-metric::before,
+.observability-console .usage-table-card::before,
+.masthead-shell .usage-table-card::before,
+.observability-console .usage-coverage::before,
+.masthead-shell .usage-coverage::before,
+.observability-console .usage-state::before,
+.masthead-shell .usage-state::before,
+.observability-console .settings-section::before,
+.masthead-shell .settings-section::before,
+.observability-console .connected-source-row::before,
+.masthead-shell .connected-source-row::before,
+.observability-console .adapter-card::before,
+.masthead-shell .adapter-card::before {
+  content: "";
+  position: absolute;
+  inset: 8px 0;
+  z-index: 0;
+  height: auto;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='28' viewBox='0 0 96 28'%3E%3Cpath d='M0 7h96M0 18h96' stroke='%230d2d40' stroke-width='1' stroke-opacity='.5'/%3E%3Cpath d='M0 8h96M0 19h96' stroke='%23030d14' stroke-width='1' stroke-opacity='.32'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 96px 28px;
+  opacity: 1;
+  pointer-events: none;
+}
+
+.observability-console .sidebar-usage::after,
+.masthead-shell .sidebar-usage::after,
+.observability-console .usage-summary-strip .usage-metric::after,
+.masthead-shell .usage-summary-strip .usage-metric::after,
+.observability-console .usage-table-card::after,
+.masthead-shell .usage-table-card::after,
+.observability-console .usage-coverage::after,
+.masthead-shell .usage-coverage::after,
+.observability-console .usage-state::after,
+.masthead-shell .usage-state::after,
+.observability-console .settings-section::after,
+.masthead-shell .settings-section::after,
+.observability-console .connected-source-row::after,
+.masthead-shell .connected-source-row::after,
+.observability-console .adapter-card::after,
+.masthead-shell .adapter-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-top: 2px solid rgba(46, 167, 255, 0.54);
+  border-bottom: 2px solid rgba(46, 167, 255, 0.42);
+  border-radius: inherit;
+  background-color: transparent;
+  background-image: none;
+  pointer-events: none;
+}
+
+.observability-console .sidebar-usage > *,
+.masthead-shell .sidebar-usage > *,
+.observability-console .usage-summary-strip .usage-metric > *,
+.masthead-shell .usage-summary-strip .usage-metric > *,
+.observability-console .usage-table-card > *,
+.masthead-shell .usage-table-card > *,
+.observability-console .usage-coverage > *,
+.masthead-shell .usage-coverage > *,
+.observability-console .usage-state > *,
+.masthead-shell .usage-state > *,
+.observability-console .settings-section > *,
+.masthead-shell .settings-section > *,
+.observability-console .connected-source-row > *,
+.masthead-shell .connected-source-row > *,
+.observability-console .adapter-card > *,
+.masthead-shell .adapter-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.observability-console .usage-metric-accent,
+.masthead-shell .usage-metric-accent {
+  display: none;
+}
+
+.observability-console .sidebar-usage,
+.masthead-shell .sidebar-usage {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+}
+
+@media (max-width: 760px) {
+  .observability-console .sidebar-usage,
+  .masthead-shell .sidebar-usage {
+    position: static;
+    margin: 18px 16px 0;
+  }
+}
+
+.observability-console .session-card.bottom-variant-card .state-pill,
+.masthead-shell .session-card.bottom-variant-card .state-pill {
+  border-color: var(--state-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), transparent),
+    rgba(3, 16, 25, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.36);
+  color: var(--state);
+}
+
+.observability-console .session-card .card-topline,
+.observability-console .session-card .headline,
+.observability-console .session-card .fact-grid,
+.observability-console .session-card .footer-line,
+.masthead-shell .session-card .card-topline,
+.masthead-shell .session-card .headline,
+.masthead-shell .session-card .fact-grid,
+.masthead-shell .session-card .footer-line {
+  position: relative;
+  z-index: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .t-dropdown,
   .t-modal,
@@ -4969,6 +5503,13 @@ body {
   .primary-pill,
   .ghost-pill {
     transition-duration: 1ms;
+  }
+
+  .observability-console .session-card.dovetail-card.is-active .bottom-signal,
+  .observability-console .session-card.dovetail-card.is-blocked .bottom-signal,
+  .masthead-shell .session-card.dovetail-card.is-active .bottom-signal,
+  .masthead-shell .session-card.dovetail-card.is-blocked .bottom-signal {
+    animation: none;
   }
 
   .observability-console .metal-surface:hover::before,

@@ -24,8 +24,7 @@ export function SourcesConnectedDashboard({
   onAddSource,
   onOpenLogbook,
   onRepairMissingData,
-  onSyncSources,
-  status
+  onSyncSources
 }: Props) {
   const rows = (connectedSources?.length ? sourceFamiliesFromSetup(connectedSources) : adapters.map(sourceRowFromAdapter)).filter(isVisibleSourceRow);
   const coverage = setupCoverage ? normalizeSetupCoverage(setupCoverage) : coverageFromAdapters(adapters);
@@ -87,7 +86,6 @@ export function SourcesConnectedDashboard({
           </article>
         ))}
       </div>
-      {status ? <p className="sources-status surface-status">{status}</p> : null}
     </section>
   );
 }

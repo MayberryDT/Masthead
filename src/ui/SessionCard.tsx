@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import type { SessionCardView } from "../core/types";
-import { isBlockedSessionCard, stateClassName } from "./format";
-import { Icon, type IconName } from "./icons/Icon";
-import { iconWeights } from "./icons/icon-tokens";
+import { isBlockedSessionCard } from "./format";
 import type { DemoSessionTelemetry } from "./observabilityDemo";
 
 type Props = {
@@ -14,9 +12,8 @@ type Props = {
   headlineUpdateIndex?: number;
 };
 
-export function SessionCard({ session, onToggle, demoTelemetry, isNew = false, newCardIndex = 0, headlineUpdateIndex }: Props) {
-  const className = stateClassName(session);
-  const isBlocked = isBlockedSessionCard(session);
+export function SessionCard({ session, onToggle, demoTelemetry, newCardIndex = 0 }: Props) {
+  const stateClass = sessionStateClassName(session);
   const model = demoTelemetry?.model.value ?? session.model ?? "Not captured";
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Codex";
   const worktree = session.branchOrWorktree ?? "None";
@@ -29,7 +26,7 @@ export function SessionCard({ session, onToggle, demoTelemetry, isNew = false, n
 
   return (
     <article
-      className={`session-card metal-surface metal-card ${className}${isNew ? " is-new-card" : ""}`}
+      className={`session-card bottom-variant-card dovetail-card ${stateClass}`}
       data-session-id={session.sessionId}
       style={style}
       role="button"
@@ -43,31 +40,27 @@ export function SessionCard({ session, onToggle, demoTelemetry, isNew = false, n
         }
       }}
     >
-      <header className="observability-card-head">
-        <span className="card-session-name" title={sessionName}>
+      <span className="bottom-signal" aria-hidden="true" />
+      <header className="card-topline">
+        <span className="project" title={sessionName}>
           {sessionName}
         </span>
-        <span className="card-harness">{harness}</span>
-        <span className={`state-token ${isBlocked ? "attention" : ""}`}>
-          {observabilityStateLabel(session)}
-        </span>
+        <span className="runtime-tag">{harness}</span>
+        <span className="state-pill">{sessionStatePillLabel(session)}</span>
       </header>
 
-      <AnimatedHeadline isNew={isNew} staggerIndex={headlineUpdateIndex} text={headline} />
+      <h3 className="headline">{headline}</h3>
       <CopyRefreshBadge session={session} />
 
-      <dl className="observability-card-facts">
-        <Fact icon="runtime" label="Runtime" value={harness} valueClassName="runtime-value" />
-        <Fact icon="lastActivity" label="Tokens" value={tokenLabel(session.totalTokens)} />
-        <Fact icon="model" label="Model" value={model} valueClassName="model-name" />
-        <Fact icon="worktree" label="Worktree" value={worktree} valueClassName="worktree-name" />
-      </dl>
+      <div className="fact-grid">
+        <Fact label="Runtime" value={harness} />
+        <Fact label="Tokens" value={tokenLabel(session.totalTokens)} />
+        <Fact label="Model" value={model} />
+        <Fact label="Worktree" value={worktree} />
+      </div>
 
-      <span className="card-rule" aria-hidden="true" />
-
-      <footer className="observability-card-footer">
-        <span className="card-footer-meta">
-          <Icon name="lastActivity" size="inline" weight={iconWeights.inline} />
+      <footer className="footer-line">
+        <span>
           Last activity <span className="timestamp">{session.lastActivityLabel}</span>
         </span>
         <span>
@@ -90,112 +83,29 @@ function CopyRefreshBadge({ session }: { session: SessionCardView }) {
     </span>
   );
 }
-
-function AnimatedHeadline({ isNew, staggerIndex, text }: { isNew: boolean; staggerIndex?: number; text: string }) {
-  const [visibleText, setVisibleText] = useState(text);
-  const [isTyping, setIsTyping] = useState(false);
-  const mountedRef = useRef(false);
-  const previousTextRef = useRef(text);
-  const isNewRef = useRef(isNew);
-  const staggerIndexRef = useRef(staggerIndex);
-
-  isNewRef.current = isNew;
-  staggerIndexRef.current = staggerIndex;
-
-  useEffect(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      previousTextRef.current = text;
-      setVisibleText(text);
-      return;
-    }
-
-    if (previousTextRef.current === text) return;
-    const oldText = previousTextRef.current;
-    previousTextRef.current = text;
-
-    if (isNewRef.current || staggerIndexRef.current === undefined || prefersReducedMotion()) {
-      setIsTyping(false);
-      setVisibleText(text);
-      return;
-    }
-
-    setVisibleText(oldText);
-    const characters = Array.from(text);
-    const startDelay = Math.min(staggerIndexRef.current, 8) * 75;
-    const characterDelay = text.length > 72 ? 11 : 16;
-    let characterIndex = 0;
-    let intervalId: number | undefined;
-    const timeoutId = window.setTimeout(() => {
-      setIsTyping(true);
-      setVisibleText("");
-      if (characters.length === 0) {
-        setIsTyping(false);
-        return;
-      }
-      intervalId = window.setInterval(() => {
-        characterIndex += 1;
-        setVisibleText(characters.slice(0, characterIndex).join(""));
-        if (characterIndex >= characters.length) {
-          if (intervalId !== undefined) window.clearInterval(intervalId);
-          intervalId = undefined;
-          setIsTyping(false);
-        }
-      }, characterDelay);
-    }, startDelay);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-      if (intervalId !== undefined) window.clearInterval(intervalId);
-    };
-  }, [text]);
-
-  return (
-    <h2 className={`card-headline ${isTyping ? "is-headline-typing" : ""}`.trim()} aria-label={text}>
-      <span className="card-headline-text" aria-hidden="true">
-        {visibleText}
-      </span>
-      {isTyping ? <span className="card-headline-cursor" aria-hidden="true" /> : null}
-    </h2>
-  );
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-}
-
 function viewTransitionNamePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
-function Fact({
-  icon,
-  label,
-  value,
-  valueClassName
-}: {
-  icon: IconName;
-  label: string;
-  value: string;
-  valueClassName?: string;
-}) {
+function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <span className="fact-icon" aria-hidden="true">
-        <Icon name={icon} size="cardMeta" weight={iconWeights.cardMeta} />
-      </span>
-      <dt>{label}</dt>
-      <dd className={valueClassName}>{value}</dd>
+    <div className="fact">
+      <div className="fact-value">{value}</div>
+      <div className="fact-label">{label}</div>
     </div>
   );
 }
 
-function observabilityStateLabel(session: SessionCardView): string {
+function sessionStatePillLabel(session: SessionCardView): string {
   if (isBlockedSessionCard(session)) return "Blocked";
-  if (session.lifecycle === "idle") return "Idle";
-  if (session.lifecycle === "ended" && session.outcomeLabel === "completed") return "Turn complete";
-  if (session.lifecycle === "ended") return "Response ready";
+  if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") return "Idle";
   return "Active";
+}
+
+function sessionStateClassName(session: SessionCardView): "is-active" | "is-idle" | "is-blocked" {
+  if (isBlockedSessionCard(session)) return "is-blocked";
+  if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") return "is-idle";
+  return "is-active";
 }
 
 function startedLabel(value: string): string {

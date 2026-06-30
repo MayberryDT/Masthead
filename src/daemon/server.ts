@@ -87,6 +87,8 @@ export type MastheadDaemon = {
   close: () => Promise<void>;
 };
 
+export const LIVE_BOARD_RAW_RECORD_LIMIT = 500;
+
 export async function createMastheadDaemon(config: DaemonConfig): Promise<MastheadDaemon> {
   await mkdir(dirname(config.storePath), { recursive: true });
   const writerLock = await acquireDatabaseWriterLock(config.dataDirectory ?? dirname(config.databasePath));
@@ -630,6 +632,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   function scheduleHookTranscriptCatchup(event: NormalizedEvent): void {
+    if (!config.hookTranscriptCatchupEnabled) return;
     const key = stringFromPayload(event.payload, ["transcriptPath", "transcript_path"]) ?? event.eventId;
     const previous = hookTranscriptCatchups.get(key) ?? Promise.resolve();
     const next = previous
@@ -2018,7 +2021,7 @@ function canonicalGitSnapshots(database: MastheadDatabase): GitSnapshot[] {
     .map((record) => record.value);
 }
 
-function canonicalStoreRecords(database: MastheadDatabase, sourceIds: string[], limit: number): StoreRecord[] {
+export function canonicalStoreRecords(database: MastheadDatabase, sourceIds: string[], limit = LIVE_BOARD_RAW_RECORD_LIMIT): StoreRecord[] {
   if (sourceIds.length === 0) return [];
   const placeholders = sourceIds.map(() => "?").join(", ");
   const rows = database
@@ -2033,7 +2036,7 @@ function canonicalStoreRecords(database: MastheadDatabase, sourceIds: string[], 
       )
       ORDER BY observed_at ASC, raw_event_id ASC`
     )
-    .all(...sourceIds, limit) as Array<{ payload_json: string }>;
+    .all(...sourceIds, Math.max(1, Math.min(limit, CANONICAL_LIVE_REPLAY_LIMIT))) as Array<{ payload_json: string }>;
   return rows.map((row) => parseStoreRecord(row.payload_json)).filter((record): record is StoreRecord => Boolean(record));
 }
 

@@ -16,4 +16,22 @@ describe("daemon config", () => {
     expect(daemonConfigFromEnv({}).skipMigrationQuickCheck).toBe(false);
     expect(daemonConfigFromEnv({ MASTHEAD_SKIP_MIGRATION_QUICK_CHECK: "1" }).skipMigrationQuickCheck).toBe(true);
   });
+
+  test("can disable background hydration for responsive live previews", () => {
+    const config = daemonConfigFromEnv({ MASTHEAD_BACKGROUND_HYDRATION: "0" });
+
+    expect(config.backgroundHydrationEnabled).toBe(false);
+  });
+
+  test("maps legacy background hydration skip from the dev launcher", () => {
+    const config = daemonConfigFromEnv({ MASTHEAD_SKIP_BACKGROUND_HYDRATION: "1" });
+
+    expect(config.backgroundHydrationEnabled).toBe(false);
+  });
+
+  test("can disable hook transcript catch-up for responsive live previews", () => {
+    const config = daemonConfigFromEnv({ MASTHEAD_HOOK_TRANSCRIPT_CATCHUP: "0" });
+
+    expect(config.hookTranscriptCatchupEnabled).toBe(false);
+  });
 });

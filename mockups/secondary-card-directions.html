@@ -1,0 +1,1295 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Masthead secondary card directions</title>
+    <style>
+      :root {
+        --page-bg: #031019;
+        --sidebar-bg: #041522;
+        --toolbar-bg: #051724;
+        --card-bg: #071b28;
+        --card-bg-hover: #082130;
+        --control-bg: #061925;
+        --ink: #f6fbff;
+        --body: #d6e4ef;
+        --mute: #91a8ba;
+        --ash: #61798e;
+        --blue: #2ea7ff;
+        --blue-soft: rgba(46, 167, 255, 0.18);
+        --blue-line: rgba(46, 167, 255, 0.44);
+        --green: #36d869;
+        --yellow: #ffcf36;
+        --red: #ff483e;
+        --line: rgba(194, 221, 241, 0.13);
+        --line-strong: rgba(196, 226, 248, 0.2);
+        --border: rgba(92, 153, 187, 0.18);
+        --border-hover: rgba(112, 173, 205, 0.24);
+        --highlight: rgba(190, 225, 245, 0.065);
+        --font-sans: "IBM Plex Sans", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        --radius-card: 5px;
+        --radius-control: 3px;
+        --ease: cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at 18% 0%, rgba(46, 167, 255, 0.065), transparent 31rem),
+          linear-gradient(180deg, #041522 0, var(--page-bg) 24rem);
+        color: var(--ink);
+        font-family: var(--font-sans);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      h1,
+      h2,
+      h3,
+      p,
+      dl,
+      dd {
+        margin: 0;
+      }
+
+      .page {
+        width: min(1500px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 28px 0 42px;
+      }
+
+      .page-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 18px;
+        align-items: end;
+        margin-bottom: 18px;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 18px;
+      }
+
+      .page-kicker,
+      .direction-index,
+      .direction-note,
+      .mono-label,
+      .metric-label,
+      .metric-value,
+      .tag,
+      th,
+      td,
+      .today-row strong {
+        font-family: var(--font-mono);
+      }
+
+      .page-kicker {
+        margin-bottom: 8px;
+        color: var(--blue);
+        font-size: 11px;
+        font-weight: 500;
+        line-height: 1.3;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 760px;
+        color: var(--ink);
+        font-size: clamp(22px, 2.5vw, 34px);
+        font-weight: 600;
+        line-height: 1.08;
+        letter-spacing: 0;
+        text-wrap: balance;
+      }
+
+      .page-summary {
+        max-width: 760px;
+        margin-top: 8px;
+        color: var(--body);
+        font-size: 14px;
+        line-height: 1.5;
+        text-wrap: pretty;
+      }
+
+      .scope-list {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 7px;
+        max-width: 560px;
+      }
+
+      .scope-list span {
+        display: inline-flex;
+        min-height: 28px;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-control);
+        background: rgba(8, 29, 42, 0.74);
+        color: var(--body);
+        padding: 0 9px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+
+      .direction {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background:
+          linear-gradient(180deg, rgba(7, 27, 40, 0.82), rgba(3, 16, 25, 0.94)),
+          var(--page-bg);
+        box-shadow:
+          0 1px 1px rgba(0, 0, 0, 0.32),
+          0 16px 38px rgba(0, 0, 0, 0.22),
+          inset 0 1px 0 var(--highlight);
+        padding: 14px;
+      }
+
+      .direction-head {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) minmax(220px, auto);
+        gap: 12px;
+        align-items: baseline;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 12px;
+      }
+
+      .direction-index {
+        color: var(--ash);
+        font-size: 11px;
+      }
+
+      .direction h2 {
+        color: var(--ink);
+        font-size: 17px;
+        font-weight: 600;
+        line-height: 1.32;
+        letter-spacing: 0;
+      }
+
+      .direction-note {
+        justify-self: end;
+        max-width: 360px;
+        color: var(--mute);
+        font-size: 11px;
+        line-height: 1.35;
+        text-align: right;
+      }
+
+      .prototype-grid {
+        display: grid;
+        grid-template-columns: 190px minmax(0, 170px) minmax(300px, 1.1fr) minmax(300px, 1.15fr) minmax(360px, 1.35fr);
+        gap: 12px;
+        align-items: stretch;
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .metal-card {
+        --accent: var(--blue);
+        --accent-line: var(--blue-line);
+        --accent-soft: var(--blue-soft);
+        position: relative;
+        isolation: isolate;
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-card);
+        background: var(--card-bg);
+        box-shadow:
+          0 1px 1px rgba(0, 0, 0, 0.32),
+          0 8px 18px rgba(0, 0, 0, 0.16),
+          inset 0 1px 0 rgba(190, 225, 245, 0.065),
+          inset 1px 0 0 rgba(135, 195, 225, 0.026),
+          inset -1px 0 0 rgba(0, 0, 0, 0.26),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.58);
+        color: var(--body);
+        transition-property: transform, border-color, background-color, box-shadow;
+        transition-duration: 180ms;
+        transition-timing-function: var(--ease);
+      }
+
+      .metal-card:hover {
+        transform: translateY(-1px);
+        border-color: var(--border-hover);
+        background-color: var(--card-bg-hover);
+        box-shadow:
+          0 1px 1px rgba(0, 0, 0, 0.34),
+          0 11px 22px rgba(0, 0, 0, 0.2),
+          inset 0 1px 0 rgba(205, 234, 248, 0.082),
+          inset 1px 0 0 rgba(150, 205, 232, 0.038),
+          inset -1px 0 0 rgba(0, 0, 0, 0.26),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.58);
+      }
+
+      .metal-card:active {
+        transform: translateY(0) scale(0.98);
+      }
+
+      .metal-card::before,
+      .metal-card::after,
+      .signal,
+      .corner-signal {
+        content: "";
+        position: absolute;
+        pointer-events: none;
+      }
+
+      .metal-card::before {
+        inset: 0;
+        z-index: -2;
+        border-radius: inherit;
+        background:
+          linear-gradient(180deg, rgba(190, 225, 245, 0.055), transparent 38%),
+          linear-gradient(135deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 12px);
+      }
+
+      .metal-card::after {
+        inset: 0;
+        z-index: -1;
+        border-radius: inherit;
+        background:
+          radial-gradient(circle at 20% 15%, rgba(246, 251, 255, 0.08) 0 1px, transparent 1px 6px),
+          radial-gradient(circle at 80% 64%, rgba(0, 0, 0, 0.14) 0 1px, transparent 1px 7px);
+        background-size: 34px 34px, 41px 41px;
+        mix-blend-mode: soft-light;
+        opacity: 0.025;
+      }
+
+      .metal-card > *:not(.signal):not(.corner-signal) {
+        position: relative;
+        z-index: 1;
+      }
+
+      .today-card {
+        display: grid;
+        gap: 7px;
+        align-self: start;
+        padding: 12px;
+      }
+
+      .today-card h3,
+      .metric-label,
+      .mono-label {
+        color: var(--mute);
+        font-size: 10.5px;
+        font-weight: 600;
+        line-height: 1.2;
+        text-transform: uppercase;
+      }
+
+      .today-card h3 {
+        color: var(--ash);
+        letter-spacing: 0.12em;
+      }
+
+      .today-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        color: var(--mute);
+        font-size: 12px;
+        line-height: 1.25;
+      }
+
+      .today-row strong {
+        overflow: hidden;
+        color: #d9f4ff;
+        font-weight: 650;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .metric-card {
+        display: grid;
+        align-content: start;
+        min-height: 72px;
+        padding: 8px 10px 9px;
+      }
+
+      .metric-value {
+        overflow: hidden;
+        margin-top: 5px;
+        color: var(--ink);
+        font-size: 17px;
+        font-weight: 650;
+        line-height: 1;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .metric-sub {
+        margin-top: 8px;
+        color: var(--ash);
+        font-size: 11px;
+        line-height: 1.3;
+      }
+
+      .source-card {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 10px;
+        min-height: 232px;
+        padding: 13px 14px 12px;
+      }
+
+      .source-main,
+      .section-head,
+      .queue-head {
+        display: flex;
+        min-width: 0;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .source-main h3,
+      .section-head h3,
+      .queue-head h3 {
+        overflow: hidden;
+        margin-top: 3px;
+        color: var(--ink);
+        font-size: 15px;
+        font-weight: 600;
+        line-height: 1.24;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .tag {
+        flex: 0 0 auto;
+        height: 22px;
+        border: 1px solid rgba(54, 216, 105, 0.28);
+        border-radius: var(--radius-control);
+        background: rgba(3, 16, 25, 0.58);
+        color: var(--green);
+        font-size: 10.5px;
+        line-height: 20px;
+        padding: 0 8px;
+        white-space: nowrap;
+      }
+
+      .proof-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        align-content: end;
+      }
+
+      .proof-list div,
+      .coverage-grid div {
+        min-width: 0;
+        border: 1px solid rgba(194, 221, 241, 0.08);
+        border-radius: 4px;
+        background: rgba(3, 16, 25, 0.34);
+        box-shadow: inset 0 1px 0 rgba(190, 225, 245, 0.035);
+        padding: 9px;
+      }
+
+      dt {
+        color: var(--mute);
+        font-size: 10.5px;
+        line-height: 1.15;
+      }
+
+      dd {
+        overflow: hidden;
+        margin-top: 5px;
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 1.25;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .section-card {
+        display: grid;
+        align-content: start;
+        gap: 12px;
+        min-height: 232px;
+        padding: 14px;
+      }
+
+      .section-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+
+      .section-copy {
+        max-width: 620px;
+        color: var(--mute);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .coverage-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .settings-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        border-top: 1px solid rgba(194, 221, 241, 0.09);
+        padding-top: 10px;
+      }
+
+      .settings-row p {
+        color: var(--body);
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .quiet-button {
+        min-height: 34px;
+        border: 1px solid rgba(92, 153, 187, 0.2);
+        border-radius: var(--radius-control);
+        background: rgba(6, 25, 37, 0.78);
+        color: var(--body);
+        font: 600 12px/1 var(--font-sans);
+        padding: 0 10px;
+      }
+
+      .queue-card {
+        display: grid;
+        gap: 12px;
+        min-height: 232px;
+        padding: 12px;
+      }
+
+      .queue-head {
+        min-height: 48px;
+        align-items: center;
+      }
+
+      .queue-head h3 {
+        font-size: 20px;
+        line-height: 1.15;
+      }
+
+      .queue-summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(86px, 1fr));
+        gap: 8px;
+      }
+
+      .queue-table {
+        overflow: hidden;
+        border: 1px solid rgba(194, 221, 241, 0.09);
+        border-radius: 4px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid rgba(155, 205, 230, 0.08);
+        color: var(--body);
+        font-size: 11px;
+        line-height: 1.35;
+        padding: 8px 9px;
+        text-align: left;
+        white-space: nowrap;
+      }
+
+      th {
+        color: var(--ash);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      td {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .inlay .metal-card {
+        border-color: rgba(92, 153, 187, 0.2);
+      }
+
+      .inlay .signal {
+        right: 10px;
+        bottom: 0;
+        left: 10px;
+        z-index: 0;
+        height: 5px;
+        border-top: 1px solid rgba(246, 251, 255, 0.12);
+        background:
+          linear-gradient(90deg, transparent 0 16%, rgba(46, 167, 255, 0.18) 16% 84%, transparent 84%),
+          linear-gradient(180deg, rgba(46, 167, 255, 0.34), rgba(46, 167, 255, 0.16));
+        clip-path: polygon(0 0, 42% 0, 46% 100%, 54% 100%, 58% 0, 100% 0, 100% 100%, 0 100%);
+        opacity: 0.78;
+      }
+
+      .inlay .source-card .signal,
+      .inlay .section-card .signal,
+      .inlay .queue-card .signal {
+        left: 14px;
+        right: 14px;
+      }
+
+      .inlay .metal-card::before {
+        background:
+          linear-gradient(180deg, rgba(190, 225, 245, 0.058), transparent 38%),
+          linear-gradient(90deg, transparent 0 12px, rgba(46, 167, 255, 0.08) 12px calc(100% - 12px), transparent calc(100% - 12px)) bottom 6px left / 100% 1px no-repeat,
+          linear-gradient(135deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 12px);
+      }
+
+      .channel .metal-card {
+        border-color: rgba(92, 153, 187, 0.18);
+        box-shadow:
+          0 1px 1px rgba(0, 0, 0, 0.32),
+          0 8px 18px rgba(0, 0, 0, 0.16),
+          inset 0 1px 0 rgba(190, 225, 245, 0.065),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.58),
+          inset 0 0 0 1px rgba(3, 16, 25, 0.5);
+      }
+
+      .channel .signal {
+        inset: 0;
+        z-index: 0;
+        border-radius: inherit;
+        background:
+          linear-gradient(90deg, transparent 0 12px, rgba(46, 167, 255, 0.3) 12px 64px, transparent 64px calc(100% - 64px), rgba(46, 167, 255, 0.3) calc(100% - 64px) calc(100% - 12px), transparent calc(100% - 12px)) top / 100% 1px no-repeat,
+          linear-gradient(90deg, transparent 0 12px, rgba(46, 167, 255, 0.25) 12px calc(100% - 12px), transparent calc(100% - 12px)) bottom / 100% 1px no-repeat,
+          linear-gradient(180deg, transparent 0 12px, rgba(46, 167, 255, 0.18) 12px 48px, transparent 48px calc(100% - 48px), rgba(46, 167, 255, 0.18) calc(100% - 48px) calc(100% - 12px), transparent calc(100% - 12px)) left / 1px 100% no-repeat;
+        opacity: 0.78;
+      }
+
+      .channel .metal-card::before {
+        background:
+          linear-gradient(180deg, rgba(190, 225, 245, 0.055), transparent 38%),
+          linear-gradient(180deg, rgba(3, 16, 25, 0.24), transparent 18px),
+          linear-gradient(135deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 12px);
+      }
+
+      .laminate .metal-card {
+        border-color: rgba(92, 153, 187, 0.2);
+      }
+
+      .laminate .signal {
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 0;
+        height: 4px;
+        background:
+          linear-gradient(90deg, rgba(46, 167, 255, 0.3), rgba(46, 167, 255, 0.12) 42%, rgba(46, 167, 255, 0.22) 58%, rgba(46, 167, 255, 0.3)),
+          linear-gradient(180deg, rgba(246, 251, 255, 0.16), transparent 45%);
+        opacity: 0.72;
+      }
+
+      .laminate .corner-signal {
+        inset: 0;
+        z-index: 0;
+        border-radius: inherit;
+        background:
+          linear-gradient(90deg, rgba(46, 167, 255, 0.28) 0 34px, transparent 34px calc(100% - 34px), rgba(46, 167, 255, 0.28) calc(100% - 34px)) top / 100% 1px no-repeat,
+          linear-gradient(180deg, rgba(46, 167, 255, 0.24) 0 34px, transparent 34px calc(100% - 34px), rgba(46, 167, 255, 0.24) calc(100% - 34px)) right / 1px 100% no-repeat;
+        opacity: 0.66;
+      }
+
+      .laminate .metal-card::before {
+        background:
+          linear-gradient(180deg, rgba(190, 225, 245, 0.055), transparent 38%),
+          linear-gradient(90deg, rgba(246, 251, 255, 0.018), transparent 12px calc(100% - 12px), rgba(0, 0, 0, 0.22)),
+          linear-gradient(135deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 12px);
+      }
+
+      .forged .metal-card {
+        border-color: rgba(46, 167, 255, 0.28);
+        background:
+          linear-gradient(180deg, rgba(8, 33, 49, 0.82), rgba(7, 27, 40, 0.98)),
+          var(--card-bg);
+        box-shadow:
+          0 1px 1px rgba(0, 0, 0, 0.34),
+          0 10px 20px rgba(0, 0, 0, 0.18),
+          inset 0 1px 0 rgba(218, 239, 250, 0.08),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.62),
+          inset 1px 0 0 rgba(46, 167, 255, 0.06),
+          inset -1px 0 0 rgba(0, 0, 0, 0.28);
+      }
+
+      .forged .signal {
+        inset: auto 0 0;
+        z-index: 0;
+        height: 7px;
+        background:
+          linear-gradient(90deg, rgba(46, 167, 255, 0.1), rgba(46, 167, 255, 0.72) 20%, rgba(46, 167, 255, 0.42) 50%, rgba(46, 167, 255, 0.72) 80%, rgba(46, 167, 255, 0.1)),
+          linear-gradient(180deg, rgba(246, 251, 255, 0.2), transparent 40%);
+        box-shadow:
+          inset 0 1px 0 rgba(246, 251, 255, 0.18),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.5);
+        clip-path: polygon(0 0, 38% 0, 42% 70%, 58% 70%, 62% 0, 100% 0, 100% 100%, 0 100%);
+      }
+
+      .forged .corner-signal {
+        inset: 0;
+        z-index: 0;
+        border-radius: inherit;
+        background:
+          linear-gradient(135deg, rgba(46, 167, 255, 0.46) 0 12px, transparent 12px) top left / 54px 54px no-repeat,
+          linear-gradient(225deg, rgba(46, 167, 255, 0.46) 0 12px, transparent 12px) top right / 54px 54px no-repeat;
+        opacity: 0.74;
+      }
+
+      .ribbed .metal-card {
+        border-color: rgba(92, 153, 187, 0.23);
+        background:
+          repeating-linear-gradient(180deg, rgba(246, 251, 255, 0.018) 0 1px, transparent 1px 7px),
+          linear-gradient(180deg, rgba(8, 32, 47, 0.92), rgba(6, 24, 36, 0.98));
+      }
+
+      .ribbed .signal {
+        inset: 0;
+        z-index: 0;
+        border-radius: inherit;
+        background:
+          repeating-linear-gradient(90deg, transparent 0 24px, rgba(46, 167, 255, 0.34) 24px 26px, transparent 26px 50px) bottom / 100% 6px no-repeat,
+          linear-gradient(90deg, transparent 0 10px, rgba(46, 167, 255, 0.48) 10px calc(100% - 10px), transparent calc(100% - 10px)) bottom 6px left / 100% 1px no-repeat,
+          linear-gradient(180deg, transparent 0 10px, rgba(46, 167, 255, 0.22) 10px calc(100% - 10px), transparent calc(100% - 10px)) right / 2px 100% no-repeat;
+      }
+
+      .tabs .metal-card {
+        border-color: rgba(46, 167, 255, 0.22);
+      }
+
+      .tabs .signal {
+        inset: 0;
+        z-index: 0;
+        border-radius: inherit;
+        background:
+          linear-gradient(180deg, rgba(46, 167, 255, 0.62), rgba(46, 167, 255, 0.28)) 14px bottom / 46px 7px no-repeat,
+          linear-gradient(180deg, rgba(46, 167, 255, 0.62), rgba(46, 167, 255, 0.28)) calc(100% - 60px) bottom / 46px 7px no-repeat,
+          linear-gradient(90deg, rgba(46, 167, 255, 0.2), rgba(46, 167, 255, 0.5), rgba(46, 167, 255, 0.2)) bottom / 100% 1px no-repeat,
+          linear-gradient(90deg, rgba(46, 167, 255, 0.34) 0 40px, transparent 40px calc(100% - 40px), rgba(46, 167, 255, 0.34) calc(100% - 40px)) top / 100% 2px no-repeat;
+      }
+
+      .plate .metal-card {
+        border-color: rgba(46, 167, 255, 0.26);
+        box-shadow:
+          0 1px 1px rgba(0, 0, 0, 0.34),
+          0 9px 18px rgba(0, 0, 0, 0.18),
+          inset 0 1px 0 rgba(218, 239, 250, 0.08),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.64);
+      }
+
+      .plate .signal {
+        right: 9px;
+        bottom: 8px;
+        left: 9px;
+        z-index: 0;
+        height: 6px;
+        border-radius: 1px;
+        background:
+          linear-gradient(90deg, rgba(46, 167, 255, 0.22), rgba(46, 167, 255, 0.78) 25%, rgba(46, 167, 255, 0.42) 50%, rgba(46, 167, 255, 0.78) 75%, rgba(46, 167, 255, 0.22)),
+          linear-gradient(180deg, rgba(246, 251, 255, 0.18), transparent 50%);
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.34),
+          inset 0 1px 0 rgba(246, 251, 255, 0.2),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+      }
+
+      .plate .corner-signal {
+        inset: auto 9px 4px;
+        z-index: 0;
+        height: 1px;
+        background: rgba(194, 221, 241, 0.18);
+      }
+
+      .weld .metal-card {
+        border-color: rgba(46, 167, 255, 0.2);
+        background:
+          linear-gradient(180deg, rgba(9, 35, 51, 0.86), rgba(6, 24, 36, 0.98)),
+          var(--card-bg);
+      }
+
+      .weld .signal {
+        inset: 0;
+        z-index: 0;
+        border-radius: inherit;
+        background:
+          linear-gradient(90deg, transparent 0 10px, rgba(46, 167, 255, 0.6) 10px calc(100% - 10px), transparent calc(100% - 10px)) top / 100% 2px no-repeat,
+          linear-gradient(90deg, transparent 0 10px, rgba(46, 167, 255, 0.6) 10px calc(100% - 10px), transparent calc(100% - 10px)) bottom / 100% 2px no-repeat,
+          linear-gradient(180deg, rgba(46, 167, 255, 0.36), transparent 50%, rgba(46, 167, 255, 0.36)) left / 2px 100% no-repeat;
+      }
+
+      .weld .metal-card::before {
+        background:
+          linear-gradient(180deg, rgba(190, 225, 245, 0.07), transparent 38%),
+          linear-gradient(90deg, rgba(46, 167, 255, 0.05), transparent 26px calc(100% - 26px), rgba(46, 167, 255, 0.05)),
+          linear-gradient(135deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 12px);
+      }
+
+      .weld-sheet .metal-card {
+        border-color: rgba(46, 167, 255, 0.24);
+        background: #071b28;
+        box-shadow: none;
+      }
+
+      .weld-sheet .metal-card:hover {
+        border-color: rgba(46, 167, 255, 0.32);
+        background-color: #071b28;
+        box-shadow: none;
+      }
+
+      .weld-sheet .signal {
+        inset: 0;
+        z-index: 0;
+        border-radius: inherit;
+        border-top: 2px solid rgba(46, 167, 255, 0.54);
+        border-bottom: 2px solid rgba(46, 167, 255, 0.42);
+        background-color: transparent;
+        background-image: none;
+      }
+
+      .weld-sheet .metal-card::before {
+        inset: 8px 0;
+        z-index: 0;
+        background-color: transparent;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='28' viewBox='0 0 96 28'%3E%3Cpath d='M0 7h96M0 18h96' stroke='%230d2d40' stroke-width='1' stroke-opacity='.5'/%3E%3Cpath d='M0 8h96M0 19h96' stroke='%23030d14' stroke-width='1' stroke-opacity='.32'/%3E%3C/svg%3E");
+        background-repeat: repeat;
+        background-size: 96px 28px;
+      }
+
+      .weld-sheet .metal-card::after {
+        background: none;
+        background-image: none;
+        opacity: 0;
+      }
+
+      .flange .metal-card {
+        border-color: rgba(46, 167, 255, 0.24);
+      }
+
+      .flange .signal {
+        inset: 0;
+        z-index: 0;
+        border-radius: inherit;
+        background:
+          radial-gradient(circle, rgba(246, 251, 255, 0.24) 0 1px, transparent 1.5px) left 13px bottom 5px / 28px 8px repeat-x,
+          linear-gradient(180deg, rgba(46, 167, 255, 0.58), rgba(46, 167, 255, 0.28)) bottom / 100% 8px no-repeat,
+          linear-gradient(180deg, rgba(46, 167, 255, 0.24), transparent 42%, rgba(46, 167, 255, 0.24)) left / 5px 100% no-repeat,
+          linear-gradient(180deg, rgba(46, 167, 255, 0.24), transparent 42%, rgba(46, 167, 255, 0.24)) right / 5px 100% no-repeat;
+      }
+
+      .clamp .metal-card {
+        border-color: rgba(46, 167, 255, 0.3);
+        background:
+          linear-gradient(180deg, rgba(9, 34, 49, 0.88), rgba(6, 23, 35, 0.98)),
+          var(--card-bg);
+      }
+
+      .clamp .signal {
+        inset: 0;
+        z-index: 0;
+        border-radius: inherit;
+        background:
+          linear-gradient(90deg, rgba(46, 167, 255, 0.56) 0 42px, transparent 42px calc(100% - 42px), rgba(46, 167, 255, 0.56) calc(100% - 42px)) top / 100% 5px no-repeat,
+          linear-gradient(90deg, rgba(46, 167, 255, 0.56) 0 42px, transparent 42px calc(100% - 42px), rgba(46, 167, 255, 0.56) calc(100% - 42px)) bottom / 100% 5px no-repeat,
+          linear-gradient(180deg, rgba(46, 167, 255, 0.5) 0 42px, transparent 42px calc(100% - 42px), rgba(46, 167, 255, 0.5) calc(100% - 42px)) left / 5px 100% no-repeat,
+          linear-gradient(180deg, rgba(46, 167, 255, 0.5) 0 42px, transparent 42px calc(100% - 42px), rgba(46, 167, 255, 0.5) calc(100% - 42px)) right / 5px 100% no-repeat;
+      }
+
+      .clamp .corner-signal {
+        right: 12px;
+        bottom: 10px;
+        left: 12px;
+        z-index: 0;
+        height: 1px;
+        background: rgba(246, 251, 255, 0.16);
+      }
+
+      @media (max-width: 1420px) {
+        .prototype-grid {
+          grid-template-columns: 190px repeat(2, minmax(0, 1fr));
+        }
+
+        .queue-card {
+          grid-column: 2 / -1;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .page {
+          width: min(100vw - 22px, 680px);
+          padding-top: 18px;
+        }
+
+        .page-header,
+        .direction-head,
+        .prototype-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .scope-list,
+        .direction-note {
+          justify-content: flex-start;
+          justify-self: start;
+          text-align: left;
+        }
+
+        .queue-card {
+          grid-column: auto;
+        }
+
+        .coverage-grid,
+        .proof-list {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="page-header">
+        <div>
+          <p class="page-kicker">Secondary card directions</p>
+          <h1>Eleven metal treatments for Masthead's non-session cards.</h1>
+          <p class="page-summary">
+            Each direction keeps the Board card's machined dark-metal language, while testing stronger blue highlights that still stay quieter than live session state.
+          </p>
+        </div>
+        <div class="scope-list" aria-label="Prototype card types">
+          <span>Today box</span>
+          <span>Stat card</span>
+          <span>Source card</span>
+          <span>Usage card</span>
+          <span>Settings card</span>
+          <span>Import Queue</span>
+        </div>
+      </header>
+
+      <section class="direction inlay" aria-labelledby="direction-1">
+        <div class="direction-head">
+          <span class="direction-index">01</span>
+          <h2 id="direction-1">Compressed Anodized Inlays</h2>
+          <p class="direction-note">A thin blue insert is pressed into the lower metal edge; the surface stays mostly dark.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card">
+            <span class="signal" aria-hidden="true"></span>
+            <h3>Today</h3>
+            <div class="today-row"><span>Sessions</span><strong>32</strong></div>
+            <div class="today-row"><span>Tokens</span><strong>529.6M</strong></div>
+            <div class="today-row"><span>Tools</span><strong>8,573</strong></div>
+            <div class="today-row"><span>MCP</span><strong>0</strong></div>
+          </article>
+
+          <article class="metal-card metric-card">
+            <span class="signal" aria-hidden="true"></span>
+            <p class="metric-label">Sessions</p>
+            <p class="metric-value">370</p>
+            <p class="metric-sub">Logbook range</p>
+          </article>
+
+          <article class="metal-card source-card">
+            <span class="signal" aria-hidden="true"></span>
+            <div class="source-main">
+              <div>
+                <p class="mono-label">Codex</p>
+                <h3>Codex sessions</h3>
+              </div>
+              <span class="tag">connected</span>
+            </div>
+            <dl class="proof-list">
+              <div><dt>Locations</dt><dd>3 paths</dd></div>
+              <div><dt>Sessions</dt><dd>742</dd></div>
+              <div><dt>Freshness</dt><dd>18m ago</dd></div>
+              <div><dt>Policy</dt><dd>metadata + transcript</dd></div>
+            </dl>
+          </article>
+
+          <div class="stack">
+            <article class="metal-card section-card">
+              <span class="signal" aria-hidden="true"></span>
+              <div class="section-head">
+                <div>
+                  <p class="mono-label">Usage</p>
+                  <h3>By runtime</h3>
+                </div>
+              </div>
+              <p class="section-copy">Usage cards stay dense and tabular; the blue is a small machinery cue, not a state rail.</p>
+              <dl class="coverage-grid">
+                <div><dt>Codex</dt><dd>58.4M</dd></div>
+                <div><dt>Claude</dt><dd>14.2M</dd></div>
+                <div><dt>Other</dt><dd>2.1M</dd></div>
+              </dl>
+            </article>
+            <article class="metal-card section-card">
+              <span class="signal" aria-hidden="true"></span>
+              <div class="section-head">
+                <div>
+                  <p class="mono-label">Settings</p>
+                  <h3>Storage</h3>
+                </div>
+              </div>
+              <p class="section-copy">Local canonical data stays on this machine. Controls remain plain and scoped.</p>
+              <div class="settings-row"><p>Retention window</p><button class="quiet-button">Review</button></div>
+            </article>
+          </div>
+
+          <article class="metal-card queue-card">
+            <span class="signal" aria-hidden="true"></span>
+            <div class="queue-head">
+              <h3>Import Queue</h3>
+              <dl class="queue-summary">
+                <div><dt>Visible</dt><dd>2</dd></div>
+                <div><dt>Total</dt><dd>3</dd></div>
+              </dl>
+            </div>
+            <div class="queue-table">
+              <table>
+                <thead>
+                  <tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr>
+                  <tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="direction channel" aria-labelledby="direction-2">
+        <div class="direction-head">
+          <span class="direction-index">02</span>
+          <h2 id="direction-2">Engraved Signal Channels</h2>
+          <p class="direction-note">Blue is visible only where the metal has been cut into shallow perimeter channels.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card">
+            <span class="signal" aria-hidden="true"></span>
+            <h3>Today</h3>
+            <div class="today-row"><span>Sessions</span><strong>32</strong></div>
+            <div class="today-row"><span>Tokens</span><strong>529.6M</strong></div>
+            <div class="today-row"><span>Tools</span><strong>8,573</strong></div>
+            <div class="today-row"><span>MCP</span><strong>0</strong></div>
+          </article>
+
+          <article class="metal-card metric-card">
+            <span class="signal" aria-hidden="true"></span>
+            <p class="metric-label">Tool calls</p>
+            <p class="metric-value">8,573</p>
+            <p class="metric-sub">Usage summary</p>
+          </article>
+
+          <article class="metal-card source-card">
+            <span class="signal" aria-hidden="true"></span>
+            <div class="source-main">
+              <div>
+                <p class="mono-label">Codex</p>
+                <h3>Codex sessions</h3>
+              </div>
+              <span class="tag">connected</span>
+            </div>
+            <dl class="proof-list">
+              <div><dt>Locations</dt><dd>3 paths</dd></div>
+              <div><dt>Sessions</dt><dd>742</dd></div>
+              <div><dt>Freshness</dt><dd>18m ago</dd></div>
+              <div><dt>Policy</dt><dd>metadata + transcript</dd></div>
+            </dl>
+          </article>
+
+          <div class="stack">
+            <article class="metal-card section-card">
+              <span class="signal" aria-hidden="true"></span>
+              <div class="section-head">
+                <div>
+                  <p class="mono-label">Usage</p>
+                  <h3>By project</h3>
+                </div>
+              </div>
+              <p class="section-copy">The treatment is more structural than decorative: shallow grooves define the card as a data plate.</p>
+              <dl class="coverage-grid">
+                <div><dt>Masthead</dt><dd>34.8M</dd></div>
+                <div><dt>Pip</dt><dd>3.7M</dd></div>
+                <div><dt>Tools</dt><dd>8,573</dd></div>
+              </dl>
+            </article>
+            <article class="metal-card section-card">
+              <span class="signal" aria-hidden="true"></span>
+              <div class="section-head">
+                <div>
+                  <p class="mono-label">Settings</p>
+                  <h3>Agent access</h3>
+                </div>
+              </div>
+              <p class="section-copy">Permissions remain calm, with the channel acting like a low-level active surface marker.</p>
+              <div class="settings-row"><p>Read-only MCP tools</p><button class="quiet-button">Inspect</button></div>
+            </article>
+          </div>
+
+          <article class="metal-card queue-card">
+            <span class="signal" aria-hidden="true"></span>
+            <div class="queue-head">
+              <h3>Import Queue</h3>
+              <dl class="queue-summary">
+                <div><dt>Visible</dt><dd>2</dd></div>
+                <div><dt>Total</dt><dd>3</dd></div>
+              </dl>
+            </div>
+            <div class="queue-table">
+              <table>
+                <thead>
+                  <tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr>
+                  <tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="direction laminate" aria-labelledby="direction-3">
+        <div class="direction-head">
+          <span class="direction-index">03</span>
+          <h2 id="direction-3">Laminated Edge Plates</h2>
+          <p class="direction-note">A thin blue plate sits under the metal skin, visible only at the lower edge and two corners.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card">
+            <span class="signal" aria-hidden="true"></span>
+            <span class="corner-signal" aria-hidden="true"></span>
+            <h3>Today</h3>
+            <div class="today-row"><span>Sessions</span><strong>32</strong></div>
+            <div class="today-row"><span>Tokens</span><strong>529.6M</strong></div>
+            <div class="today-row"><span>Tools</span><strong>8,573</strong></div>
+            <div class="today-row"><span>MCP</span><strong>0</strong></div>
+          </article>
+
+          <article class="metal-card metric-card">
+            <span class="signal" aria-hidden="true"></span>
+            <span class="corner-signal" aria-hidden="true"></span>
+            <p class="metric-label">Date range</p>
+            <p class="metric-value">Jun 2026</p>
+            <p class="metric-sub">Logbook filter</p>
+          </article>
+
+          <article class="metal-card source-card">
+            <span class="signal" aria-hidden="true"></span>
+            <span class="corner-signal" aria-hidden="true"></span>
+            <div class="source-main">
+              <div>
+                <p class="mono-label">Codex</p>
+                <h3>Codex sessions</h3>
+              </div>
+              <span class="tag">connected</span>
+            </div>
+            <dl class="proof-list">
+              <div><dt>Locations</dt><dd>3 paths</dd></div>
+              <div><dt>Sessions</dt><dd>742</dd></div>
+              <div><dt>Freshness</dt><dd>18m ago</dd></div>
+              <div><dt>Policy</dt><dd>metadata + transcript</dd></div>
+            </dl>
+          </article>
+
+          <div class="stack">
+            <article class="metal-card section-card">
+              <span class="signal" aria-hidden="true"></span>
+              <span class="corner-signal" aria-hidden="true"></span>
+              <div class="section-head">
+                <div>
+                  <p class="mono-label">Usage</p>
+                  <h3>Data coverage</h3>
+                </div>
+              </div>
+              <p class="section-copy">The highlight reads as an exposed layer, so it keeps the card grounded instead of glowing.</p>
+              <dl class="coverage-grid">
+                <div><dt>Sources</dt><dd>7</dd></div>
+                <div><dt>Imported</dt><dd>742</dd></div>
+                <div><dt>Current</dt><dd>320</dd></div>
+              </dl>
+            </article>
+            <article class="metal-card section-card">
+              <span class="signal" aria-hidden="true"></span>
+              <span class="corner-signal" aria-hidden="true"></span>
+              <div class="section-head">
+                <div>
+                  <p class="mono-label">Settings</p>
+                  <h3>Runtime adapters</h3>
+                </div>
+              </div>
+              <p class="section-copy">This works best when the section needs a little more object-ness without strong state color.</p>
+              <div class="settings-row"><p>Adapter discovery</p><button class="quiet-button">Configure</button></div>
+            </article>
+          </div>
+
+          <article class="metal-card queue-card">
+            <span class="signal" aria-hidden="true"></span>
+            <span class="corner-signal" aria-hidden="true"></span>
+            <div class="queue-head">
+              <h3>Import Queue</h3>
+              <dl class="queue-summary">
+                <div><dt>Visible</dt><dd>2</dd></div>
+                <div><dt>Total</dt><dd>3</dd></div>
+              </dl>
+            </div>
+            <div class="queue-table">
+              <table>
+                <thead>
+                  <tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr>
+                  <tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="direction forged" aria-labelledby="direction-4">
+        <div class="direction-head">
+          <span class="direction-index">04</span>
+          <h2 id="direction-4">Forged Blue Bevel Rails</h2>
+          <p class="direction-note">The blue is a forged lower bevel with small top clamps, giving the card more machine weight.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><h3>Today</h3><div class="today-row"><span>Sessions</span><strong>32</strong></div><div class="today-row"><span>Tokens</span><strong>529.6M</strong></div><div class="today-row"><span>Tools</span><strong>8,573</strong></div><div class="today-row"><span>MCP</span><strong>0</strong></div></article>
+          <article class="metal-card metric-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><p class="metric-label">Messages</p><p class="metric-value">18,204</p><p class="metric-sub">Logbook summary</p></article>
+          <article class="metal-card source-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="source-main"><div><p class="mono-label">Codex</p><h3>Codex sessions</h3></div><span class="tag">connected</span></div><dl class="proof-list"><div><dt>Locations</dt><dd>3 paths</dd></div><div><dt>Sessions</dt><dd>742</dd></div><div><dt>Freshness</dt><dd>18m ago</dd></div><div><dt>Policy</dt><dd>metadata + transcript</dd></div></dl></article>
+          <div class="stack"><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Usage</p><h3>By model</h3></div></div><p class="section-copy">A heavier bevel makes the card feel machined without turning the whole card blue.</p><dl class="coverage-grid"><div><dt>gpt-5.5</dt><dd>58.4M</dd></div><div><dt>gpt-5</dt><dd>9.8M</dd></div><div><dt>Other</dt><dd>2.1M</dd></div></dl></article><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Settings</p><h3>Storage</h3></div></div><p class="section-copy">The clamp detail gives settings sections more structure while keeping controls unforced.</p><div class="settings-row"><p>Retention window</p><button class="quiet-button">Review</button></div></article></div>
+          <article class="metal-card queue-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="queue-head"><h3>Import Queue</h3><dl class="queue-summary"><div><dt>Visible</dt><dd>2</dd></div><div><dt>Total</dt><dd>3</dd></div></dl></div><div class="queue-table"><table><thead><tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr></thead><tbody><tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr><tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+
+      <section class="direction ribbed" aria-labelledby="direction-5">
+        <div class="direction-head">
+          <span class="direction-index">05</span>
+          <h2 id="direction-5">Ribbed Signal Sheet Metal</h2>
+          <p class="direction-note">Fine ribs and a stronger blue lower strip make the surfaces feel stamped rather than decorated.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card"><span class="signal" aria-hidden="true"></span><h3>Today</h3><div class="today-row"><span>Sessions</span><strong>32</strong></div><div class="today-row"><span>Tokens</span><strong>529.6M</strong></div><div class="today-row"><span>Tools</span><strong>8,573</strong></div><div class="today-row"><span>MCP</span><strong>0</strong></div></article>
+          <article class="metal-card metric-card"><span class="signal" aria-hidden="true"></span><p class="metric-label">Projects</p><p class="metric-value">19</p><p class="metric-sub">Logbook summary</p></article>
+          <article class="metal-card source-card"><span class="signal" aria-hidden="true"></span><div class="source-main"><div><p class="mono-label">Codex</p><h3>Codex sessions</h3></div><span class="tag">connected</span></div><dl class="proof-list"><div><dt>Locations</dt><dd>3 paths</dd></div><div><dt>Sessions</dt><dd>742</dd></div><div><dt>Freshness</dt><dd>18m ago</dd></div><div><dt>Policy</dt><dd>metadata + transcript</dd></div></dl></article>
+          <div class="stack"><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Usage</p><h3>Activity</h3></div></div><p class="section-copy">The repeated rib catches the blue in small cuts, so the color reads as part of the metal.</p><dl class="coverage-grid"><div><dt>Sessions</dt><dd>370</dd></div><div><dt>Messages</dt><dd>18.2K</dd></div><div><dt>Tools</dt><dd>8,573</dd></div></dl></article><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Settings</p><h3>Runtime adapters</h3></div></div><p class="section-copy">The right-side blue line helps long sections scan without becoming a left rail.</p><div class="settings-row"><p>Adapter discovery</p><button class="quiet-button">Configure</button></div></article></div>
+          <article class="metal-card queue-card"><span class="signal" aria-hidden="true"></span><div class="queue-head"><h3>Import Queue</h3><dl class="queue-summary"><div><dt>Visible</dt><dd>2</dd></div><div><dt>Total</dt><dd>3</dd></div></dl></div><div class="queue-table"><table><thead><tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr></thead><tbody><tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr><tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+
+      <section class="direction tabs" aria-labelledby="direction-6">
+        <div class="direction-head">
+          <span class="direction-index">06</span>
+          <h2 id="direction-6">Milled Corner Tabs</h2>
+          <p class="direction-note">Small blue tabs are milled into opposing corners and lower feet instead of wrapping the card.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card"><span class="signal" aria-hidden="true"></span><h3>Today</h3><div class="today-row"><span>Sessions</span><strong>32</strong></div><div class="today-row"><span>Tokens</span><strong>529.6M</strong></div><div class="today-row"><span>Tools</span><strong>8,573</strong></div><div class="today-row"><span>MCP</span><strong>0</strong></div></article>
+          <article class="metal-card metric-card"><span class="signal" aria-hidden="true"></span><p class="metric-label">Harnesses</p><p class="metric-value">4</p><p class="metric-sub">Logbook summary</p></article>
+          <article class="metal-card source-card"><span class="signal" aria-hidden="true"></span><div class="source-main"><div><p class="mono-label">Codex</p><h3>Codex sessions</h3></div><span class="tag">connected</span></div><dl class="proof-list"><div><dt>Locations</dt><dd>3 paths</dd></div><div><dt>Sessions</dt><dd>742</dd></div><div><dt>Freshness</dt><dd>18m ago</dd></div><div><dt>Policy</dt><dd>metadata + transcript</dd></div></dl></article>
+          <div class="stack"><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Usage</p><h3>Data coverage</h3></div></div><p class="section-copy">The blue tabs make the object feel assembled from parts without overpowering the content.</p><dl class="coverage-grid"><div><dt>Sources</dt><dd>7</dd></div><div><dt>Imported</dt><dd>742</dd></div><div><dt>Current</dt><dd>320</dd></div></dl></article><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Settings</p><h3>Agent access</h3></div></div><p class="section-copy">Tabs are useful where the card needs more personality but not a broad colored base.</p><div class="settings-row"><p>Read-only MCP tools</p><button class="quiet-button">Inspect</button></div></article></div>
+          <article class="metal-card queue-card"><span class="signal" aria-hidden="true"></span><div class="queue-head"><h3>Import Queue</h3><dl class="queue-summary"><div><dt>Visible</dt><dd>2</dd></div><div><dt>Total</dt><dd>3</dd></div></dl></div><div class="queue-table"><table><thead><tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr></thead><tbody><tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr><tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+
+      <section class="direction plate" aria-labelledby="direction-7">
+        <div class="direction-head">
+          <span class="direction-index">07</span>
+          <h2 id="direction-7">Press-Fit Indicator Plates</h2>
+          <p class="direction-note">A slim blue plate is mounted just above the bottom edge, like a replaceable indicator insert.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><h3>Today</h3><div class="today-row"><span>Sessions</span><strong>32</strong></div><div class="today-row"><span>Tokens</span><strong>529.6M</strong></div><div class="today-row"><span>Tools</span><strong>8,573</strong></div><div class="today-row"><span>MCP</span><strong>0</strong></div></article>
+          <article class="metal-card metric-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><p class="metric-label">Sources</p><p class="metric-value">7</p><p class="metric-sub">Source coverage</p></article>
+          <article class="metal-card source-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="source-main"><div><p class="mono-label">Codex</p><h3>Codex sessions</h3></div><span class="tag">connected</span></div><dl class="proof-list"><div><dt>Locations</dt><dd>3 paths</dd></div><div><dt>Sessions</dt><dd>742</dd></div><div><dt>Freshness</dt><dd>18m ago</dd></div><div><dt>Policy</dt><dd>metadata + transcript</dd></div></dl></article>
+          <div class="stack"><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Usage</p><h3>By runtime</h3></div></div><p class="section-copy">This is the most literal metal insert, with enough blue to scan but no full-card color fill.</p><dl class="coverage-grid"><div><dt>Codex</dt><dd>58.4M</dd></div><div><dt>Claude</dt><dd>14.2M</dd></div><div><dt>Other</dt><dd>2.1M</dd></div></dl></article><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Settings</p><h3>Storage</h3></div></div><p class="section-copy">The plate works well for cards that need a consistent family mark more than state color.</p><div class="settings-row"><p>Retention window</p><button class="quiet-button">Review</button></div></article></div>
+          <article class="metal-card queue-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="queue-head"><h3>Import Queue</h3><dl class="queue-summary"><div><dt>Visible</dt><dd>2</dd></div><div><dt>Total</dt><dd>3</dd></div></dl></div><div class="queue-table"><table><thead><tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr></thead><tbody><tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr><tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+
+      <section class="direction weld" aria-labelledby="direction-8">
+        <div class="direction-head">
+          <span class="direction-index">08</span>
+          <h2 id="direction-8">Subsurface Weld Lines</h2>
+          <p class="direction-note">Blue appears as welded seams under the metal skin, stronger on edges than in the middle.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card"><span class="signal" aria-hidden="true"></span><h3>Today</h3><div class="today-row"><span>Sessions</span><strong>32</strong></div><div class="today-row"><span>Tokens</span><strong>529.6M</strong></div><div class="today-row"><span>Tools</span><strong>8,573</strong></div><div class="today-row"><span>MCP</span><strong>0</strong></div></article>
+          <article class="metal-card metric-card"><span class="signal" aria-hidden="true"></span><p class="metric-label">Transcripts</p><p class="metric-value">100</p><p class="metric-sub">Source coverage</p></article>
+          <article class="metal-card source-card"><span class="signal" aria-hidden="true"></span><div class="source-main"><div><p class="mono-label">Codex</p><h3>Codex sessions</h3></div><span class="tag">connected</span></div><dl class="proof-list"><div><dt>Locations</dt><dd>3 paths</dd></div><div><dt>Sessions</dt><dd>742</dd></div><div><dt>Freshness</dt><dd>18m ago</dd></div><div><dt>Policy</dt><dd>metadata + transcript</dd></div></dl></article>
+          <div class="stack"><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Usage</p><h3>By project</h3></div></div><p class="section-copy">The welded perimeter gives the card more voltage while staying restrained and flat.</p><dl class="coverage-grid"><div><dt>Masthead</dt><dd>34.8M</dd></div><div><dt>Pip</dt><dd>3.7M</dd></div><div><dt>Tools</dt><dd>8,573</dd></div></dl></article><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Settings</p><h3>Runtime adapters</h3></div></div><p class="section-copy">This gives settings sections more edge clarity without decorative center glow.</p><div class="settings-row"><p>Adapter discovery</p><button class="quiet-button">Configure</button></div></article></div>
+          <article class="metal-card queue-card"><span class="signal" aria-hidden="true"></span><div class="queue-head"><h3>Import Queue</h3><dl class="queue-summary"><div><dt>Visible</dt><dd>2</dd></div><div><dt>Total</dt><dd>3</dd></div></dl></div><div class="queue-table"><table><thead><tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr></thead><tbody><tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr><tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+
+      <section class="direction flange" aria-labelledby="direction-9">
+        <div class="direction-head">
+          <span class="direction-index">09</span>
+          <h2 id="direction-9">Riveted Anodized Flanges</h2>
+          <p class="direction-note">Side flanges and small rivet marks make the blue read like fastened anodized hardware.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card"><span class="signal" aria-hidden="true"></span><h3>Today</h3><div class="today-row"><span>Sessions</span><strong>32</strong></div><div class="today-row"><span>Tokens</span><strong>529.6M</strong></div><div class="today-row"><span>Tools</span><strong>8,573</strong></div><div class="today-row"><span>MCP</span><strong>0</strong></div></article>
+          <article class="metal-card metric-card"><span class="signal" aria-hidden="true"></span><p class="metric-label">Queued</p><p class="metric-value">14</p><p class="metric-sub">Source coverage</p></article>
+          <article class="metal-card source-card"><span class="signal" aria-hidden="true"></span><div class="source-main"><div><p class="mono-label">Codex</p><h3>Codex sessions</h3></div><span class="tag">connected</span></div><dl class="proof-list"><div><dt>Locations</dt><dd>3 paths</dd></div><div><dt>Sessions</dt><dd>742</dd></div><div><dt>Freshness</dt><dd>18m ago</dd></div><div><dt>Policy</dt><dd>metadata + transcript</dd></div></dl></article>
+          <div class="stack"><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Usage</p><h3>Activity</h3></div></div><p class="section-copy">The riveted edge makes repeated cards feel like durable instrument modules.</p><dl class="coverage-grid"><div><dt>Sessions</dt><dd>370</dd></div><div><dt>Messages</dt><dd>18.2K</dd></div><div><dt>Tools</dt><dd>8,573</dd></div></dl></article><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Settings</p><h3>Agent access</h3></div></div><p class="section-copy">This has the most physical hardware feel of the secondary card set.</p><div class="settings-row"><p>Read-only MCP tools</p><button class="quiet-button">Inspect</button></div></article></div>
+          <article class="metal-card queue-card"><span class="signal" aria-hidden="true"></span><div class="queue-head"><h3>Import Queue</h3><dl class="queue-summary"><div><dt>Visible</dt><dd>2</dd></div><div><dt>Total</dt><dd>3</dd></div></dl></div><div class="queue-table"><table><thead><tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr></thead><tbody><tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr><tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+
+      <section class="direction clamp" aria-labelledby="direction-10">
+        <div class="direction-head">
+          <span class="direction-index">10</span>
+          <h2 id="direction-10">Tempered Edge Clamps</h2>
+          <p class="direction-note">Blue clamps grip the corners and edges, making the card feel locked into the console frame.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><h3>Today</h3><div class="today-row"><span>Sessions</span><strong>32</strong></div><div class="today-row"><span>Tokens</span><strong>529.6M</strong></div><div class="today-row"><span>Tools</span><strong>8,573</strong></div><div class="today-row"><span>MCP</span><strong>0</strong></div></article>
+          <article class="metal-card metric-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><p class="metric-label">Issues</p><p class="metric-value">0</p><p class="metric-sub">Source coverage</p></article>
+          <article class="metal-card source-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="source-main"><div><p class="mono-label">Codex</p><h3>Codex sessions</h3></div><span class="tag">connected</span></div><dl class="proof-list"><div><dt>Locations</dt><dd>3 paths</dd></div><div><dt>Sessions</dt><dd>742</dd></div><div><dt>Freshness</dt><dd>18m ago</dd></div><div><dt>Policy</dt><dd>metadata + transcript</dd></div></dl></article>
+          <div class="stack"><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Usage</p><h3>Data coverage</h3></div></div><p class="section-copy">The clamp treatment has the strongest blue silhouette while still avoiding a full state base.</p><dl class="coverage-grid"><div><dt>Sources</dt><dd>7</dd></div><div><dt>Imported</dt><dd>742</dd></div><div><dt>Current</dt><dd>320</dd></div></dl></article><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Settings</p><h3>Storage</h3></div></div><p class="section-copy">Best if you want the secondary cards to feel more mechanically locked into the app.</p><div class="settings-row"><p>Retention window</p><button class="quiet-button">Review</button></div></article></div>
+          <article class="metal-card queue-card"><span class="signal" aria-hidden="true"></span><span class="corner-signal" aria-hidden="true"></span><div class="queue-head"><h3>Import Queue</h3><dl class="queue-summary"><div><dt>Visible</dt><dd>2</dd></div><div><dt>Total</dt><dd>3</dd></div></dl></div><div class="queue-table"><table><thead><tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr></thead><tbody><tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr><tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+
+      <section class="direction weld-sheet" aria-labelledby="direction-11">
+        <div class="direction-head">
+          <span class="direction-index">11</span>
+          <h2 id="direction-11">Welded Sheet Metal Strata</h2>
+          <p class="direction-note">Flat welded seams over a quiet sheet surface: no glow, no side hardware, just pressure and blue seams.</p>
+        </div>
+        <div class="prototype-grid">
+          <article class="metal-card today-card"><span class="signal" aria-hidden="true"></span><h3>Today</h3><div class="today-row"><span>Sessions</span><strong>32</strong></div><div class="today-row"><span>Tokens</span><strong>529.6M</strong></div><div class="today-row"><span>Tools</span><strong>8,573</strong></div><div class="today-row"><span>MCP</span><strong>0</strong></div></article>
+          <article class="metal-card metric-card"><span class="signal" aria-hidden="true"></span><p class="metric-label">Transcripts</p><p class="metric-value">100</p><p class="metric-sub">Source coverage</p></article>
+          <article class="metal-card source-card"><span class="signal" aria-hidden="true"></span><div class="source-main"><div><p class="mono-label">Codex</p><h3>Codex sessions</h3></div><span class="tag">connected</span></div><dl class="proof-list"><div><dt>Locations</dt><dd>3 paths</dd></div><div><dt>Sessions</dt><dd>742</dd></div><div><dt>Freshness</dt><dd>18m ago</dd></div><div><dt>Policy</dt><dd>metadata + transcript</dd></div></dl></article>
+          <div class="stack"><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Usage</p><h3>By project</h3></div></div><p class="section-copy">This combines the calm weld-line framing with the physical stamped-sheet texture, stripped of side rails.</p><dl class="coverage-grid"><div><dt>Masthead</dt><dd>34.8M</dd></div><div><dt>Pip</dt><dd>3.7M</dd></div><div><dt>Tools</dt><dd>8,573</dd></div></dl></article><article class="metal-card section-card"><span class="signal" aria-hidden="true"></span><div class="section-head"><div><p class="mono-label">Settings</p><h3>Runtime adapters</h3></div></div><p class="section-copy">The blue reads as machined seams, while the sheet texture keeps the card from feeling flat.</p><div class="settings-row"><p>Adapter discovery</p><button class="quiet-button">Configure</button></div></article></div>
+          <article class="metal-card queue-card"><span class="signal" aria-hidden="true"></span><div class="queue-head"><h3>Import Queue</h3><dl class="queue-summary"><div><dt>Visible</dt><dd>2</dd></div><div><dt>Total</dt><dd>3</dd></div></dl></div><div class="queue-table"><table><thead><tr><th>Started</th><th>Source</th><th>Progress</th><th>Status</th></tr></thead><tbody><tr><td>09:20 PM</td><td>codex-sessions</td><td>120 / 742</td><td>running</td></tr><tr><td>09:14 PM</td><td>cursor-workspaces</td><td>88 / 88</td><td>complete</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

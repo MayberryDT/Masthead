@@ -7,6 +7,7 @@ export type DaemonConfig = {
   port: number;
   dataDirectory?: string;
   codexHomeDir: string;
+  backgroundHydrationEnabled?: boolean;
   gitRefreshMs: number;
   allowedOrigins: string[];
   fixturePath: string;
@@ -18,6 +19,7 @@ export type DaemonConfig = {
   liveCopyTimeoutMs?: number;
   liveCopyProjectionBudgetMs?: number;
   liveCopyMaxConcurrent?: number;
+  hookTranscriptCatchupEnabled: boolean;
   openaiApiKey?: string;
   openaiModel?: string;
   skipMigrationQuickCheck?: boolean;
@@ -38,6 +40,7 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     port: Number.isFinite(configuredPort) ? configuredPort : 17373,
     dataDirectory: dataPaths.dataDirectory,
     codexHomeDir: resolve(env.MASTHEAD_CODEX_HOME || homedir()),
+    backgroundHydrationEnabled: env.MASTHEAD_BACKGROUND_HYDRATION !== "0" && env.MASTHEAD_SKIP_BACKGROUND_HYDRATION !== "1",
     gitRefreshMs: Number.isFinite(configuredGitRefreshMs) ? configuredGitRefreshMs : 60_000,
     allowedOrigins,
     fixturePath: resolve("fixtures/v0/replay-three-sessions-board.json"),
@@ -49,6 +52,7 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     liveCopyTimeoutMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_TIMEOUT_MS),
     liveCopyProjectionBudgetMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_PROJECTION_BUDGET_MS),
     liveCopyMaxConcurrent: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_MAX_CONCURRENT),
+    hookTranscriptCatchupEnabled: env.MASTHEAD_HOOK_TRANSCRIPT_CATCHUP !== "0",
     openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.MASTHEAD_OPENAI_MODEL,
     skipMigrationQuickCheck: env.MASTHEAD_SKIP_MIGRATION_QUICK_CHECK === "1"
