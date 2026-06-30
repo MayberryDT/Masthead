@@ -11,32 +11,14 @@
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
-  justify-content: space-between;
+  justify-content: flex-start;
   margin: 0;
   flex-wrap: wrap;
 }
 
-.sources-toolbar-context {
-  display: flex;
-  flex: 0 1 auto;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  color: var(--mute);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.sources-toolbar-context > span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .sources-action-bar.sources-toolbar .sources-action-group {
-  flex: 1 1 360px;
-  justify-content: flex-end;
+  flex: 0 1 auto;
+  justify-content: flex-start;
 }
 
 .sources-action-bar.sources-toolbar .app-button {
@@ -686,9 +668,8 @@
     align-items: stretch;
   }
 
-  .sources-action-bar.sources-toolbar .sources-action-group,
-  .sources-action-bar.sources-toolbar .sources-toolbar-context {
-    flex: 1 1 100%;
+  .sources-action-bar.sources-toolbar .sources-action-group {
+    flex: 0 1 100%;
     width: 100%;
   }
 
@@ -708,10 +689,6 @@
 @media (max-width: 760px) {
   .sources-action-bar.sources-toolbar {
     align-items: stretch;
-  }
-
-  .sources-toolbar-context {
-    width: 100%;
   }
 
   .sources-action-group,

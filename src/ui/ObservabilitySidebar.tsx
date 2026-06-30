@@ -37,7 +37,7 @@ export function ObservabilitySidebar({
       </a>
 
       <nav className="sidebar-nav" aria-label="Masthead sections">
-        <SidebarGroup title="Workspace">
+        <SidebarGroup>
           <SidebarLink
             href="#board"
             icon="sessions"
@@ -81,10 +81,9 @@ export function ObservabilitySidebar({
   );
 }
 
-function SidebarGroup({ title, children }: { title: string; children: ReactNode }) {
+function SidebarGroup({ children }: { children: ReactNode }) {
   return (
     <section className="sidebar-group">
-      <p>{title}</p>
       <div>{children}</div>
     </section>
   );

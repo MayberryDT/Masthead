@@ -215,13 +215,16 @@ describe("dovetail card system", () => {
 
     const prototypeCardRule = cssRuleBody(prototypeHtml, ".weld-sheet .metal-card");
     const prototypeHoverRule = cssRuleBody(prototypeHtml, ".weld-sheet .metal-card:hover");
-    const prototypeSignalRule = cssRuleBody(prototypeHtml, ".weld-sheet .signal");
+    const prototypeSignalRule = withoutCssDeclarations(cssRuleBody(prototypeHtml, ".weld-sheet .signal"), [
+      "border-top: 2px solid rgba(46, 167, 255, 0.54);"
+    ]);
     const prototypeSheetRule = cssRuleBody(prototypeHtml, ".weld-sheet .metal-card::before");
     const targetSelectors = [
       ".masthead-shell .sidebar-usage",
       ".masthead-shell .usage-summary-strip .usage-metric",
       ".masthead-shell .usage-table-card",
       ".masthead-shell .usage-coverage",
+      ".masthead-shell .usage-state",
       ".masthead-shell .settings-section",
       ".masthead-shell .connected-source-row",
       ".masthead-shell .adapter-card"
@@ -232,6 +235,7 @@ describe("dovetail card system", () => {
       expect(cssRuleBody(mastheadCss, `${selector}:hover`), `${selector}:hover`).toContainDeclarationsFrom(prototypeHoverRule);
       expect(cssRuleBody(mastheadCss, `${selector}::before`), `${selector}::before`).toContainDeclarationsFrom(prototypeSheetRule);
       expect(cssRuleBody(mastheadCss, `${selector}::after`), `${selector}::after`).toContainDeclarationsFrom(prototypeSignalRule);
+      expect(cssRuleBody(mastheadCss, `${selector}::after`), `${selector}::after`).toContain("border-top: 0;");
     }
 
     expect(cssRuleBody(mastheadCss, ".masthead-shell .usage-metric-accent")).toContain("display: none;");
@@ -284,6 +288,13 @@ function cssDeclarations(value: string): string[] {
     .map((declaration) => declaration.trim())
     .filter(Boolean)
     .map((declaration) => `${declaration};`);
+}
+
+function withoutCssDeclarations(value: string, declarations: string[]): string {
+  const excluded = new Set(declarations);
+  return cssDeclarations(value)
+    .filter((declaration) => !excluded.has(declaration))
+    .join("\n");
 }
 
 function cssRuleBody(css: string, selector: string, options: { nestedSelector?: string } = {}): string {

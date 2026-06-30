@@ -3026,33 +3026,9 @@ body {
   position: relative;
 }
 
-.sidebar-group::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 8px;
-  top: calc(var(--space-sm) * -1);
-  height: 1px;
-  background: rgba(118, 175, 207, 0.09);
-}
-
-.sidebar-group:first-child::before {
-  top: calc(var(--space-sm) * -1);
-}
-
 .sidebar-group > div {
   display: grid;
   gap: 8px;
-}
-
-.sidebar-group p {
-  margin: 0 0 var(--space-sm) 7px;
-  color: rgba(174, 201, 218, 0.58);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  line-height: 1.2;
-  text-transform: uppercase;
 }
 
 .sidebar-link {
@@ -5286,6 +5262,8 @@ body {
 .masthead-shell .sidebar-usage,
 .observability-console .usage-summary-strip .usage-metric,
 .masthead-shell .usage-summary-strip .usage-metric,
+.observability-console .import-jobs-summary div,
+.masthead-shell .import-jobs-summary div,
 .observability-console .usage-table-card,
 .masthead-shell .usage-table-card,
 .observability-console .usage-coverage,
@@ -5315,6 +5293,8 @@ body {
 .masthead-shell .sidebar-usage:hover,
 .observability-console .usage-summary-strip .usage-metric:hover,
 .masthead-shell .usage-summary-strip .usage-metric:hover,
+.observability-console .import-jobs-summary div:hover,
+.masthead-shell .import-jobs-summary div:hover,
 .observability-console .usage-table-card:hover,
 .masthead-shell .usage-table-card:hover,
 .observability-console .usage-coverage:hover,
@@ -5346,6 +5326,8 @@ body {
 .masthead-shell .sidebar-usage::before,
 .observability-console .usage-summary-strip .usage-metric::before,
 .masthead-shell .usage-summary-strip .usage-metric::before,
+.observability-console .import-jobs-summary div::before,
+.masthead-shell .import-jobs-summary div::before,
 .observability-console .usage-table-card::before,
 .masthead-shell .usage-table-card::before,
 .observability-console .usage-coverage::before,
@@ -5376,6 +5358,8 @@ body {
 .masthead-shell .sidebar-usage::after,
 .observability-console .usage-summary-strip .usage-metric::after,
 .masthead-shell .usage-summary-strip .usage-metric::after,
+.observability-console .import-jobs-summary div::after,
+.masthead-shell .import-jobs-summary div::after,
 .observability-console .usage-table-card::after,
 .masthead-shell .usage-table-card::after,
 .observability-console .usage-coverage::after,
@@ -5392,7 +5376,7 @@ body {
   position: absolute;
   inset: 0;
   z-index: 0;
-  border-top: 2px solid rgba(46, 167, 255, 0.54);
+  border-top: 0;
   border-bottom: 2px solid rgba(46, 167, 255, 0.42);
   border-radius: inherit;
   background-color: transparent;
@@ -5404,6 +5388,8 @@ body {
 .masthead-shell .sidebar-usage > *,
 .observability-console .usage-summary-strip .usage-metric > *,
 .masthead-shell .usage-summary-strip .usage-metric > *,
+.observability-console .import-jobs-summary div > *,
+.masthead-shell .import-jobs-summary div > *,
 .observability-console .usage-table-card > *,
 .masthead-shell .usage-table-card > *,
 .observability-console .usage-coverage > *,
@@ -5439,6 +5425,369 @@ body {
     position: static;
     margin: 18px 16px 0;
   }
+}
+
+/*
+ * Small-control treatment from mockups/control-system-directions.html option 4:
+ * Folded Sheet-Metal Corner.
+ */
+.observability-console,
+.masthead-shell {
+  --folded-control-clip: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
+  --folded-control-texture: repeating-linear-gradient(135deg, rgba(196, 226, 248, 0.022) 0 1px, transparent 1px 13px);
+  --folded-control-fill: #04131f;
+  --folded-control-fill-hover: #061925;
+  --folded-control-top: rgba(246, 251, 255, 0.06);
+  --folded-control-bottom: rgba(3, 16, 25, 0.78);
+}
+
+.observability-console .observability-toolbar,
+.masthead-shell .observability-toolbar {
+  border-color: transparent;
+  border-radius: 1px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.observability-console .observability-toolbar::before,
+.masthead-shell .observability-toolbar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  clip-path: var(--folded-control-clip);
+  border: 1px solid rgba(92, 153, 187, 0.18);
+  border-radius: 1px;
+  background:
+    linear-gradient(180deg, rgba(246, 251, 255, 0.038), transparent),
+    var(--folded-control-texture),
+    var(--toolbar-bg);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.24),
+    0 6px 14px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(190, 225, 245, 0.052),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.observability-console .observability-toolbar::after,
+.masthead-shell .observability-toolbar::after {
+  background-image: none;
+  opacity: 0;
+}
+
+.observability-console .connection-recovery,
+.masthead-shell .connection-recovery {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.82fr) minmax(220px, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 58px;
+  margin: 0;
+  padding: 10px;
+}
+
+.observability-console .connection-recovery .connection-primary,
+.masthead-shell .connection-recovery .connection-primary,
+.observability-console .connection-recovery .connection-detail,
+.masthead-shell .connection-recovery .connection-detail {
+  min-width: 0;
+}
+
+.observability-console .connection-recovery .connection-detail p,
+.masthead-shell .connection-recovery .connection-detail p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.observability-console .connection-recovery .source-token,
+.masthead-shell .connection-recovery .source-token {
+  min-height: 32px;
+  border-radius: 1px;
+  background-color: var(--folded-control-fill);
+  box-shadow:
+    inset 0 1px 0 var(--folded-control-top),
+    inset 0 -1px 0 var(--folded-control-bottom);
+}
+
+.observability-console .connection-recovery .nav-actions,
+.masthead-shell .connection-recovery .nav-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.observability-console .settings-recovery.connection-recovery,
+.masthead-shell .settings-recovery.connection-recovery {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.observability-console .settings-recovery.connection-recovery h2,
+.masthead-shell .settings-recovery.connection-recovery h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.observability-console .settings-recovery.connection-recovery p,
+.masthead-shell .settings-recovery.connection-recovery p {
+  grid-column: 1;
+  margin: 4px 0 0;
+  color: var(--body);
+  text-wrap: pretty;
+}
+
+.observability-console .settings-recovery.connection-recovery .app-button,
+.masthead-shell .settings-recovery.connection-recovery .app-button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+@media (max-width: 760px) {
+  .observability-console .connection-recovery,
+  .masthead-shell .connection-recovery,
+  .observability-console .settings-recovery.connection-recovery,
+  .masthead-shell .settings-recovery.connection-recovery {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .observability-console .connection-recovery .source-token,
+  .masthead-shell .connection-recovery .source-token,
+  .observability-console .connection-recovery .nav-actions,
+  .masthead-shell .connection-recovery .nav-actions,
+  .observability-console .settings-recovery.connection-recovery .app-button,
+  .masthead-shell .settings-recovery.connection-recovery .app-button {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+  }
+
+  .observability-console .connection-recovery .nav-actions,
+  .masthead-shell .connection-recovery .nav-actions {
+    justify-content: flex-start;
+  }
+}
+
+.observability-console .sidebar-group > div,
+.masthead-shell .sidebar-group > div,
+.observability-console .usage-toolbar,
+.masthead-shell .usage-toolbar,
+.observability-console .import-jobs-section,
+.masthead-shell .import-jobs-section {
+  position: relative;
+  isolation: isolate;
+  clip-path: var(--folded-control-clip);
+  border: 1px solid rgba(92, 153, 187, 0.18);
+  border-radius: 1px;
+  background:
+    linear-gradient(180deg, rgba(246, 251, 255, 0.032), transparent),
+    var(--folded-control-texture),
+    var(--toolbar-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(190, 225, 245, 0.048),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.48);
+}
+
+.observability-console .sidebar-group > div,
+.masthead-shell .sidebar-group > div {
+  gap: 6px;
+  padding: 6px;
+}
+
+.observability-console .usage-toolbar,
+.masthead-shell .usage-toolbar {
+  padding: 6px;
+}
+
+.observability-console .import-jobs-section::before,
+.masthead-shell .import-jobs-section::before {
+  background-image: none;
+  opacity: 0;
+}
+
+.observability-console .sidebar-link,
+.masthead-shell .sidebar-link,
+.observability-console .app-button,
+.masthead-shell .app-button,
+.observability-console .toolbar-select,
+.masthead-shell .toolbar-select,
+.observability-console .collapsible-search-trigger,
+.masthead-shell .collapsible-search-trigger,
+.observability-console .observability-toolbar .search-field,
+.masthead-shell .observability-toolbar .search-field,
+.observability-console .filterable-select-search,
+.masthead-shell .filterable-select-search,
+.observability-console .settings-text-input,
+.masthead-shell .settings-text-input,
+.observability-console .settings-delete-controls input,
+.masthead-shell .settings-delete-controls input,
+.observability-console .logbook-date-popover input,
+.masthead-shell .logbook-date-popover input,
+.observability-console .logbook-file-popover input,
+.masthead-shell .logbook-file-popover input,
+.observability-console .dossier-transcript-toolbar input,
+.masthead-shell .dossier-transcript-toolbar input,
+.observability-console .usage-toolbar button,
+.masthead-shell .usage-toolbar button,
+.observability-console .toolbar-select-menu,
+.masthead-shell .toolbar-select-menu,
+.observability-console .logbook-date-popover,
+.masthead-shell .logbook-date-popover,
+.observability-console .logbook-file-popover,
+.masthead-shell .logbook-file-popover {
+  clip-path: var(--folded-control-clip);
+}
+
+.observability-console .sidebar-link,
+.masthead-shell .sidebar-link,
+.observability-console .app-button,
+.masthead-shell .app-button,
+.observability-console .toolbar-select,
+.masthead-shell .toolbar-select,
+.observability-console .collapsible-search-trigger,
+.masthead-shell .collapsible-search-trigger,
+.observability-console .observability-toolbar .search-field,
+.masthead-shell .observability-toolbar .search-field,
+.observability-console .filterable-select-search,
+.masthead-shell .filterable-select-search,
+.observability-console .settings-text-input,
+.masthead-shell .settings-text-input,
+.observability-console .settings-delete-controls input,
+.masthead-shell .settings-delete-controls input,
+.observability-console .logbook-date-popover input,
+.masthead-shell .logbook-date-popover input,
+.observability-console .logbook-file-popover input,
+.masthead-shell .logbook-file-popover input,
+.observability-console .dossier-transcript-toolbar input,
+.masthead-shell .dossier-transcript-toolbar input,
+.observability-console .usage-toolbar button,
+.masthead-shell .usage-toolbar button {
+  border-radius: 1px;
+  background-image: linear-gradient(180deg, rgba(246, 251, 255, 0.032), transparent);
+  box-shadow:
+    inset 0 1px 0 var(--folded-control-top),
+    inset 0 -1px 0 var(--folded-control-bottom);
+}
+
+.observability-console .sidebar-link,
+.masthead-shell .sidebar-link,
+.observability-console .app-button:not(.app-button-primary):not(.app-button-danger),
+.masthead-shell .app-button:not(.app-button-primary):not(.app-button-danger),
+.observability-console .toolbar-select,
+.masthead-shell .toolbar-select,
+.observability-console .collapsible-search-trigger,
+.masthead-shell .collapsible-search-trigger,
+.observability-console .observability-toolbar .search-field,
+.masthead-shell .observability-toolbar .search-field,
+.observability-console .filterable-select-search,
+.masthead-shell .filterable-select-search,
+.observability-console .settings-text-input,
+.masthead-shell .settings-text-input,
+.observability-console .settings-delete-controls input,
+.masthead-shell .settings-delete-controls input,
+.observability-console .logbook-date-popover input,
+.masthead-shell .logbook-date-popover input,
+.observability-console .logbook-file-popover input,
+.masthead-shell .logbook-file-popover input,
+.observability-console .dossier-transcript-toolbar input,
+.masthead-shell .dossier-transcript-toolbar input,
+.observability-console .usage-toolbar button,
+.masthead-shell .usage-toolbar button {
+  background-color: var(--folded-control-fill);
+}
+
+.observability-console .sidebar-link:hover,
+.masthead-shell .sidebar-link:hover,
+.observability-console .app-button:hover:not(:disabled),
+.masthead-shell .app-button:hover:not(:disabled),
+.observability-console .toolbar-select:hover,
+.masthead-shell .toolbar-select:hover,
+.observability-console .usage-toolbar button:hover,
+.masthead-shell .usage-toolbar button:hover {
+  background-color: var(--folded-control-fill-hover);
+}
+
+.observability-console .app-button-danger:hover:not(:disabled),
+.masthead-shell .app-button-danger:hover:not(:disabled) {
+  background-color: #321820;
+}
+
+.observability-console .app-button-primary,
+.masthead-shell .app-button-primary,
+.observability-console .usage-toolbar button.active,
+.masthead-shell .usage-toolbar button.active,
+.observability-console .sidebar-link.active,
+.masthead-shell .sidebar-link.active,
+.observability-console .toolbar-select.open,
+.masthead-shell .toolbar-select.open {
+  border-color: rgba(46, 167, 255, 0.36);
+  background-color: #09263a;
+  box-shadow:
+    inset 0 1px 0 rgba(246, 251, 255, 0.075),
+    inset 0 -1px 0 var(--folded-control-bottom);
+}
+
+.observability-console .collapsible-search.expanded .collapsible-search-trigger,
+.masthead-shell .collapsible-search.expanded .collapsible-search-trigger {
+  background-image: none;
+  box-shadow: none;
+}
+
+.observability-console .toolbar-select-menu,
+.masthead-shell .toolbar-select-menu,
+.observability-console .logbook-date-popover,
+.masthead-shell .logbook-date-popover,
+.observability-console .logbook-file-popover,
+.masthead-shell .logbook-file-popover {
+  border-radius: 1px;
+  background:
+    linear-gradient(180deg, rgba(246, 251, 255, 0.04), transparent),
+    var(--folded-control-fill);
+  box-shadow:
+    0 16px 28px rgba(3, 16, 25, 0.58),
+    inset 0 1px 0 var(--folded-control-top),
+    inset 0 -1px 0 var(--folded-control-bottom);
+}
+
+.observability-console .toolbar-select-menu::after,
+.masthead-shell .toolbar-select-menu::after {
+  background-image: none;
+  opacity: 0;
+}
+
+.observability-console .settings-toggle > span,
+.masthead-shell .settings-toggle > span {
+  clip-path: var(--folded-control-clip);
+  border-radius: 1px;
+  background-color: var(--folded-control-fill);
+  box-shadow:
+    inset 0 1px 0 var(--folded-control-top),
+    inset 0 -1px 0 var(--folded-control-bottom);
+}
+
+.observability-console input[type="checkbox"],
+.observability-console input[type="radio"],
+.masthead-shell input[type="checkbox"],
+.masthead-shell input[type="radio"] {
+  accent-color: var(--blue);
+}
+
+.observability-console .toolbar-select-trigger:focus-visible,
+.masthead-shell .toolbar-select-trigger:focus-visible,
+.observability-console .toolbar-icon-button:focus-visible,
+.masthead-shell .toolbar-icon-button:focus-visible,
+.observability-console .app-button:focus-visible,
+.masthead-shell .app-button:focus-visible,
+.observability-console .collapsible-search-trigger:focus-visible,
+.masthead-shell .collapsible-search-trigger:focus-visible,
+.observability-console .sidebar-link:focus-visible,
+.masthead-shell .sidebar-link:focus-visible {
+  outline: 1px solid rgba(116, 185, 224, 0.46);
+  outline-offset: 2px;
 }
 
 .observability-console .session-card.bottom-variant-card .state-pill,

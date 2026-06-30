@@ -22,7 +22,7 @@ export function ConnectionRecoveryPanel({ connection, onRetry, onStart, retryLab
   const copy = recoveryCopy(connection);
   const message = messageFrom(connection);
   return (
-    <section className={`connection-strip ${copy.tone}`} aria-label="Connection recovery">
+    <section className={`connection-strip connection-recovery observability-toolbar metal-toolbar ${copy.tone}`} aria-label="Connection recovery">
       <div className="connection-primary">
         <span className="connection-dot" aria-hidden="true" />
         <div>

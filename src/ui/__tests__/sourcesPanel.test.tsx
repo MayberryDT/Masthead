@@ -108,6 +108,8 @@ describe("SourcesPanel", () => {
     expect(html).toContain("sources-summary-strip");
     expect(html).toContain("usage-metric");
     expect(html).not.toContain("sources-action-summary");
+    expect(html).not.toContain("Inventory");
+    expect(html).not.toContain("source families indexed");
   });
 
   test("hides Masthead internal provenance from source inventory", () => {

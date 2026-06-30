@@ -33,10 +33,6 @@ export function SourcesConnectedDashboard({
   return (
     <section className="sources-connected-dashboard" aria-label="Connected sources">
       <div className="sources-action-bar sources-toolbar observability-toolbar metal-toolbar">
-        <div className="sources-toolbar-context" aria-label="Source inventory status">
-          <span className="source-state connected">Inventory</span>
-          <span>{rows.length} source {rows.length === 1 ? "family" : "families"} indexed</span>
-        </div>
         <div className="toolbar-select-row sources-action-group" aria-label="Source actions">
           <AppButton type="button" onClick={onAddSource} disabled={busy}>
             Set up more sources
