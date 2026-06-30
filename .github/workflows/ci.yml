@@ -14,6 +14,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # Keep component timestamp snapshots stable across local machines and CI runners.
+      TZ: America/Denver
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
