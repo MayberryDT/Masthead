@@ -1,0 +1,1056 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Masthead Metal Control Directions</title>
+  <style>
+    @font-face {
+      font-display: swap;
+      font-family: "IBM Plex Sans";
+      font-style: normal;
+      font-weight: 400;
+      src: url("../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+    }
+
+    @font-face {
+      font-display: swap;
+      font-family: "IBM Plex Sans";
+      font-style: normal;
+      font-weight: 500;
+      src: url("../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-500-normal.woff2") format("woff2");
+    }
+
+    @font-face {
+      font-display: swap;
+      font-family: "IBM Plex Sans";
+      font-style: normal;
+      font-weight: 600;
+      src: url("../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+    }
+
+    @font-face {
+      font-display: swap;
+      font-family: "IBM Plex Mono";
+      font-style: normal;
+      font-weight: 400;
+      src: url("../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+    }
+
+    @font-face {
+      font-display: swap;
+      font-family: "IBM Plex Mono";
+      font-style: normal;
+      font-weight: 500;
+      src: url("../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+    }
+
+    :root {
+      --primary: #031019;
+      --secondary: #071b28;
+      --toolbar: #051724;
+      --surface: #071b28;
+      --surface-hover: #082130;
+      --control: #061925;
+      --control-raised: #081d2a;
+      --control-raised-hover: #092231;
+      --ink: #f6fbff;
+      --body: #d6e4ef;
+      --mute: #91a8ba;
+      --ash: #61798e;
+      --blue: #2ea7ff;
+      --green: #36d869;
+      --yellow: #ffcf36;
+      --red: #ff483e;
+      --surface-border: rgba(92, 153, 187, 0.18);
+      --surface-border-hover: rgba(112, 173, 205, 0.24);
+      --line: rgba(194, 221, 241, 0.13);
+      --line-strong: rgba(196, 226, 248, 0.2);
+      --blue-line: rgba(46, 167, 255, 0.36);
+      --blue-soft: rgba(45, 168, 255, 0.16);
+      --green-soft: rgba(89, 212, 153, 0.14);
+      --yellow-soft: rgba(247, 201, 72, 0.15);
+      --red-soft: rgba(255, 77, 77, 0.14);
+      --shadow-dark: rgba(3, 16, 25, 0.74);
+      color-scheme: dark;
+      background: var(--primary);
+      color: var(--body);
+      font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-technical: "IBM Plex Mono", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(46, 167, 255, 0.05), transparent 280px),
+        radial-gradient(circle at 70% -80px, rgba(92, 153, 187, 0.12), transparent 320px),
+        var(--primary);
+    }
+
+    .index {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgba(3, 16, 25, 0.94);
+      backdrop-filter: blur(16px);
+      padding: 10px 18px;
+    }
+
+    .index strong {
+      flex: 0 0 auto;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .index a {
+      flex: 0 0 auto;
+      min-height: 30px;
+      border: 1px solid var(--surface-border);
+      border-radius: 3px;
+      color: var(--body);
+      padding: 6px 9px;
+      font-family: var(--font-technical);
+      font-size: 11px;
+      text-decoration: none;
+      transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+    }
+
+    .index a:hover {
+      border-color: var(--blue-line);
+      background: var(--blue-soft);
+      color: var(--ink);
+      transform: translateY(-1px);
+    }
+
+    main {
+      display: grid;
+      gap: 18px;
+      width: min(1480px, calc(100vw - 28px));
+      margin: 0 auto;
+      padding: 18px 0 44px;
+    }
+
+    .brief {
+      display: grid;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+      padding: 8px 0 18px;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 24px;
+      font-weight: 600;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .brief p {
+      max-width: 860px;
+      margin: 0;
+      color: var(--mute);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .options {
+      display: grid;
+      gap: 18px;
+    }
+
+    .option {
+      --radius: 4px;
+      --bevel-top: rgba(246, 251, 255, 0.06);
+      --bevel-bottom: rgba(3, 16, 25, 0.78);
+      --panel-fill: var(--secondary);
+      --control-fill: var(--control-raised);
+      --control-active: var(--control-raised-hover);
+      --frame: var(--surface-border);
+      --frame-strong: var(--blue-line);
+      --texture: repeating-linear-gradient(180deg, rgba(194, 221, 241, 0.025) 0 1px, transparent 1px 10px);
+      scroll-margin-top: 70px;
+      overflow: hidden;
+      border: 1px solid var(--frame);
+      border-radius: 7px;
+      background: var(--panel-fill);
+      box-shadow:
+        inset 0 1px 0 var(--bevel-top),
+        inset 0 -2px 0 var(--bevel-bottom);
+    }
+
+    .option-head {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(246, 251, 255, 0.035), transparent),
+        var(--texture),
+        var(--toolbar);
+      padding: 14px;
+    }
+
+    .number {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid var(--frame-strong);
+      border-radius: var(--radius);
+      background: var(--control-fill);
+      box-shadow: inset 0 1px 0 var(--bevel-top), inset 0 -1px 0 var(--bevel-bottom);
+      color: var(--ink);
+      font-family: var(--font-technical);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 17px;
+      font-weight: 600;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .meta,
+    .note,
+    .mono,
+    .sidebar-group-title,
+    .field-label,
+    .shortcut,
+    .status-badge,
+    .sidebar-usage p {
+      font-family: var(--font-technical);
+      font-size: 10.5px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .meta { margin-top: 4px; color: var(--mute); }
+    .note { justify-self: end; color: var(--ash); }
+
+    .sample-shell {
+      display: grid;
+      grid-template-columns: 215px minmax(0, 1fr);
+      min-height: 520px;
+      background: var(--texture), var(--primary);
+    }
+
+    .sidebar-shell {
+      position: relative;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      gap: 14px;
+      border-right: 1px solid var(--line);
+      background:
+        linear-gradient(90deg, rgba(246, 251, 255, 0.03), transparent 22px),
+        var(--toolbar);
+      padding: 14px;
+    }
+
+    .sidebar-brand {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      min-height: 38px;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .brand-sail {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border: 1px solid var(--frame);
+      border-radius: var(--radius);
+      background: var(--control-fill);
+      box-shadow: inset 0 1px 0 var(--bevel-top), inset 0 -1px 0 var(--bevel-bottom);
+      color: var(--blue);
+      object-fit: contain;
+      padding: 4px;
+    }
+
+    .sidebar-brand strong { display: block; font-size: 13px; }
+    .version-number { display: block; color: var(--ash); font-family: var(--font-technical); font-size: 10px; }
+    .sidebar-group-title { margin: 0 0 7px; color: var(--ash); text-transform: uppercase; }
+    .sidebar-nav { display: grid; gap: 6px; }
+
+    .sidebar-link {
+      display: grid;
+      grid-template-columns: 22px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      color: var(--body);
+      padding: 0 9px;
+      text-decoration: none;
+      transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+    }
+
+    .sidebar-link:hover,
+    .sidebar-link.active {
+      border-color: var(--frame-strong);
+      background: var(--blue-soft);
+      color: var(--ink);
+      box-shadow: inset 0 1px 0 var(--bevel-top), inset 0 -1px 0 var(--bevel-bottom);
+    }
+
+    .sidebar-link:hover { transform: translateX(2px); }
+    .icon {
+      display: block;
+      width: 16px;
+      height: 16px;
+      color: currentColor;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.75;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .icon-sidebar {
+      width: 18px;
+      height: 18px;
+    }
+
+    .icon-inline {
+      width: 14px;
+      height: 14px;
+    }
+
+    .sidebar-icon {
+      display: grid;
+      place-items: center;
+      color: var(--mute);
+    }
+
+    .sidebar-link.active .sidebar-icon .icon {
+      stroke-width: 2.25;
+    }
+    .sidebar-link strong {
+      min-width: 22px;
+      border-radius: 999px;
+      background: var(--control);
+      color: var(--body);
+      padding: 2px 6px;
+      font-family: var(--font-technical);
+      font-size: 10px;
+      text-align: center;
+    }
+
+    .sidebar-usage {
+      display: grid;
+      gap: 7px;
+      border: 1px solid var(--frame);
+      border-radius: var(--radius);
+      background: var(--panel-fill);
+      box-shadow: inset 0 1px 0 var(--bevel-top), inset 0 -2px 0 var(--bevel-bottom);
+      padding: 11px;
+    }
+
+    .sidebar-usage p {
+      margin: 0;
+      color: var(--ash);
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .sidebar-usage-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--mute);
+      font-size: 12px;
+    }
+
+    .sidebar-usage-row strong { color: var(--ink); font-family: var(--font-technical); }
+
+    .workspace {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-width: 0;
+      background: var(--primary);
+    }
+
+    .observability-toolbar {
+      display: grid;
+      grid-template-columns: minmax(230px, 1.2fr) repeat(4, minmax(130px, 1fr));
+      gap: 8px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(246, 251, 255, 0.035), transparent),
+        var(--toolbar);
+      padding: 10px;
+    }
+
+    .search-field,
+    .filterable-select-search,
+    .settings-text-input,
+    .delete-target-input,
+    .date-input,
+    .transcript-search {
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      border: 1px solid var(--frame);
+      border-radius: var(--radius);
+      background: var(--control);
+      box-shadow: inset 0 1px 0 rgba(246, 251, 255, 0.035), inset 0 -1px 0 var(--bevel-bottom);
+      color: var(--body);
+      padding: 0 9px;
+      transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+    }
+
+    .search-field:focus-within,
+    .filterable-select-search:focus-within,
+    .settings-text-input:focus-within,
+    .delete-target-input:focus-within,
+    .date-input:focus-within,
+    .transcript-search:focus-within {
+      border-color: var(--frame-strong);
+      background: var(--control-active);
+      box-shadow:
+        0 0 0 2px rgba(45, 168, 255, 0.16),
+        inset 0 1px 0 rgba(246, 251, 255, 0.05),
+        inset 0 -1px 0 var(--bevel-bottom);
+    }
+
+    input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      font-size: 12px;
+    }
+
+    input::placeholder { color: var(--ash); opacity: 1; }
+
+    .shortcut {
+      border: 1px solid var(--line-strong);
+      border-radius: calc(var(--radius) - 1px);
+      color: var(--mute);
+      padding: 1px 5px;
+      white-space: nowrap;
+    }
+
+    .app-button,
+    .toolbar-select,
+    .usage-window-button,
+    .icon-button {
+      min-height: 38px;
+      border: 1px solid var(--frame);
+      border-radius: var(--radius);
+      background: var(--control-fill);
+      box-shadow: inset 0 1px 0 var(--bevel-top), inset 0 -1px 0 var(--bevel-bottom);
+      color: var(--body);
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+    }
+
+    .app-button,
+    .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 11px;
+      white-space: nowrap;
+    }
+
+    .app-button:hover,
+    .toolbar-select:hover,
+    .toolbar-select.open,
+    .usage-window-button:hover,
+    .icon-button:hover {
+      border-color: var(--frame-strong);
+      background: var(--control-active);
+      color: var(--ink);
+      transform: translateY(-1px);
+    }
+
+    .app-button:active,
+    .toolbar-select:active,
+    .usage-window-button:active,
+    .icon-button:active {
+      transform: scale(0.97);
+    }
+
+    .app-button-primary {
+      border-color: var(--frame-strong);
+      background: var(--blue-soft);
+      color: var(--ink);
+    }
+
+    .app-button-quiet {
+      background: transparent;
+      color: var(--mute);
+    }
+
+    .app-button-danger {
+      border-color: rgba(255, 77, 77, 0.32);
+      background: var(--red-soft);
+      color: var(--ink);
+    }
+
+    .toolbar-select {
+      position: relative;
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr) 18px;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      padding: 0 9px;
+      text-align: left;
+    }
+
+    .toolbar-select span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .select-wrap {
+      position: relative;
+      min-width: 0;
+    }
+
+    .toolbar-select-menu,
+    .logbook-date-popover {
+      position: absolute;
+      top: calc(100% + 7px);
+      left: 0;
+      z-index: 8;
+      display: grid;
+      width: max(100%, 230px);
+      gap: 3px;
+      border: 1px solid var(--frame-strong);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(180deg, rgba(246, 251, 255, 0.04), transparent),
+        var(--texture),
+        var(--control);
+      box-shadow:
+        0 16px 28px rgba(3, 16, 25, 0.58),
+        inset 0 1px 0 var(--bevel-top),
+        inset 0 -1px 0 var(--bevel-bottom);
+      padding: 5px;
+      transform-origin: top left;
+      animation: dropdownIn 320ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .toolbar-select-option,
+    .logbook-date-clear {
+      min-height: 34px;
+      border: 0;
+      border-radius: calc(var(--radius) - 1px);
+      background: transparent;
+      color: var(--body);
+      cursor: pointer;
+      padding: 0 9px;
+      font: inherit;
+      font-size: 12px;
+      text-align: left;
+      transition: transform 140ms ease, background-color 140ms ease, color 140ms ease;
+    }
+
+    .toolbar-select-option:hover,
+    .toolbar-select-option.selected,
+    .logbook-date-clear:hover {
+      background: var(--blue-soft);
+      color: var(--ink);
+      transform: translateX(2px);
+    }
+
+    .filterable-select-search { margin-bottom: 4px; }
+
+    .logbook-date-popover {
+      width: 244px;
+      gap: 7px;
+    }
+
+    .logbook-date-popover label {
+      display: grid;
+      gap: 4px;
+    }
+
+    .date-input {
+      grid-template-columns: 20px minmax(0, 1fr);
+    }
+
+    .surface {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 290px;
+      gap: 12px;
+      padding: 12px;
+      min-width: 0;
+    }
+
+    .component-bank {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .sources-action-group,
+    .settings-delete-controls,
+    .usage-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .usage-toolbar {
+      border: 1px solid var(--frame);
+      border-radius: var(--radius);
+      background: var(--control);
+      box-shadow: inset 0 1px 0 var(--bevel-top), inset 0 -1px 0 var(--bevel-bottom);
+      padding: 5px;
+    }
+
+    .usage-window-button {
+      min-width: 54px;
+      border-color: transparent;
+      background: transparent;
+      box-shadow: none;
+      padding: 0 9px;
+    }
+
+    .usage-window-button.active {
+      border-color: var(--frame-strong);
+      background: var(--blue-soft);
+      color: var(--ink);
+      box-shadow: inset 0 1px 0 var(--bevel-top), inset 0 -1px 0 var(--bevel-bottom);
+    }
+
+    .settings-row,
+    .adapter-row,
+    .transcript-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid var(--frame);
+      border-radius: var(--radius);
+      background: var(--panel-fill);
+      box-shadow: inset 0 1px 0 rgba(246, 251, 255, 0.035), inset 0 -1px 0 var(--bevel-bottom);
+      padding: 10px;
+    }
+
+    .settings-row strong,
+    .adapter-row strong,
+    .transcript-row strong {
+      display: block;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .settings-row p,
+    .adapter-row p,
+    .transcript-row p {
+      margin: 3px 0 0;
+      color: var(--mute);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .settings-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--body);
+      font-size: 12px;
+      user-select: none;
+    }
+
+    .toggle-track {
+      position: relative;
+      width: 38px;
+      height: 22px;
+      border: 1px solid rgba(54, 216, 105, 0.32);
+      border-radius: 999px;
+      background: rgba(54, 216, 105, 0.12);
+      box-shadow: inset 0 1px 0 rgba(246, 251, 255, 0.04), inset 0 -1px 0 var(--bevel-bottom);
+    }
+
+    .toggle-track::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 19px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 1px 2px rgba(3, 16, 25, 0.55);
+    }
+
+    .settings-toggle strong {
+      min-width: 54px;
+      color: var(--body);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .adapter-card-select {
+      display: inline-grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+    }
+
+    .check-metal,
+    .radio-metal {
+      display: grid;
+      width: 16px;
+      height: 16px;
+      place-items: center;
+      border: 1px solid var(--frame-strong);
+      background: var(--control);
+      box-shadow: inset 0 1px 0 var(--bevel-top), inset 0 -1px 0 var(--bevel-bottom);
+    }
+
+    .check-metal { border-radius: 3px; }
+    .radio-metal { border-radius: 50%; }
+
+    .check-metal::after {
+      content: "";
+      width: 8px;
+      height: 5px;
+      border-left: 2px solid var(--ink);
+      border-bottom: 2px solid var(--ink);
+      transform: rotate(-45deg) translate(1px, -1px);
+    }
+
+    .radio-metal::after {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--blue);
+    }
+
+    .side-panel {
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      min-width: 0;
+      border: 1px solid var(--frame);
+      border-radius: var(--radius);
+      background: var(--panel-fill);
+      box-shadow: inset 0 1px 0 var(--bevel-top), inset 0 -2px 0 var(--bevel-bottom);
+      padding: 10px;
+    }
+
+    .field-label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--mute);
+      text-transform: uppercase;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      min-height: 22px;
+      border: 1px solid rgba(89, 212, 153, 0.22);
+      border-radius: 999px;
+      background: var(--green-soft);
+      color: var(--green);
+      padding: 0 8px;
+      font-weight: 500;
+    }
+
+    .status-badge.warning {
+      border-color: rgba(247, 201, 72, 0.24);
+      background: var(--yellow-soft);
+      color: var(--yellow);
+    }
+
+    .delete-target-input { grid-template-columns: minmax(0, 1fr); min-width: 170px; }
+    .settings-text-input { grid-template-columns: minmax(0, 1fr); }
+    .transcript-search { grid-template-columns: 20px minmax(0, 1fr); }
+
+    @keyframes dropdownIn {
+      from { opacity: 0; transform: scale(0.96) translateY(-3px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .d1 { --radius: 3px; --texture: repeating-linear-gradient(180deg, rgba(194, 221, 241, 0.025) 0 1px, transparent 1px 8px); }
+    .d2 { --radius: 2px; --texture: repeating-linear-gradient(90deg, rgba(92, 153, 187, 0.055) 0 1px, transparent 1px 18px); --bevel-top: rgba(246, 251, 255, 0.085); --bevel-bottom: rgba(3, 16, 25, 0.88); }
+    .d2 .app-button, .d2 .toolbar-select, .d2 .search-field, .d2 .settings-row, .d2 .side-panel { border-width: 2px 1px 1px; }
+    .d3 { --radius: 5px; --texture: radial-gradient(circle at 18% 0, rgba(46, 167, 255, 0.08), transparent 32%), repeating-linear-gradient(180deg, rgba(194, 221, 241, 0.018) 0 1px, transparent 1px 12px); }
+    .d3 .app-button, .d3 .toolbar-select, .d3 .search-field { box-shadow: 0 8px 18px rgba(3, 16, 25, 0.34), inset 0 1px 0 var(--bevel-top), inset 0 -2px 0 var(--bevel-bottom); }
+    .d4 { --radius: 1px; --texture: repeating-linear-gradient(135deg, rgba(196, 226, 248, 0.022) 0 1px, transparent 1px 13px); }
+    .d4 .app-button, .d4 .toolbar-select, .d4 .search-field, .d4 .settings-row, .d4 .side-panel { clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%); }
+    .d5 { --radius: 8px; --texture: linear-gradient(180deg, rgba(89, 212, 153, 0.035), transparent), repeating-linear-gradient(180deg, rgba(194, 221, 241, 0.02) 0 1px, transparent 1px 9px); }
+    .d5 .toolbar-select-menu, .d5 .logbook-date-popover { border-radius: 10px; }
+    .d6 { --radius: 4px; --texture: linear-gradient(90deg, rgba(46, 167, 255, 0.055), transparent 18%, transparent 82%, rgba(46, 167, 255, 0.035)); }
+    .d6 .observability-toolbar { grid-template-columns: minmax(260px, 1.4fr) repeat(4, minmax(120px, 1fr)); }
+    .d6 .sidebar-link.active { box-shadow: inset 3px 0 0 var(--blue), inset 0 1px 0 var(--bevel-top), inset 0 -1px 0 var(--bevel-bottom); }
+    .d7 { --radius: 3px; --texture: repeating-linear-gradient(90deg, rgba(194, 221, 241, 0.03) 0 2px, transparent 2px 16px); --control-fill: #061925; }
+    .d7 .app-button, .d7 .toolbar-select, .d7 .search-field { border-left-width: 3px; }
+    .d8 { --radius: 5px; --texture: repeating-linear-gradient(180deg, rgba(3, 16, 25, 0.52) 0 2px, transparent 2px 14px), linear-gradient(180deg, rgba(246, 251, 255, 0.03), transparent); }
+    .d8 .option-head, .d8 .observability-toolbar { border-bottom-width: 2px; }
+    .d9 { --radius: 4px; --texture: radial-gradient(circle at 74% 8%, rgba(92, 153, 187, 0.1), transparent 28%), repeating-linear-gradient(0deg, rgba(194, 221, 241, 0.018) 0 1px, transparent 1px 6px); --panel-fill: #061925; }
+    .d9 .sample-shell { grid-template-columns: 235px minmax(0, 1fr); }
+    .d10 { --radius: 2px; --texture: linear-gradient(180deg, rgba(46, 167, 255, 0.04), transparent 40%), repeating-linear-gradient(90deg, rgba(92, 153, 187, 0.05) 0 1px, transparent 1px 10px); }
+    .d10 .app-button-primary, .d10 .usage-window-button.active, .d10 .sidebar-link.active { background: var(--blue); color: var(--primary); border-color: var(--blue); }
+
+    @media (max-width: 1120px) {
+      .sample-shell,
+      .surface { grid-template-columns: 1fr; }
+      .sidebar-shell { border-right: 0; border-bottom: 1px solid var(--line); }
+      .sidebar-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+      .sidebar-group-title, .note { display: none; }
+      .observability-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 680px) {
+      main { width: min(100vw - 16px, 1480px); }
+      .option-head { grid-template-columns: auto 1fr; }
+      .sidebar-nav,
+      .observability-toolbar { grid-template-columns: 1fr; }
+      .sources-action-group,
+      .settings-delete-controls,
+      .usage-toolbar { align-items: stretch; }
+      .app-button, .toolbar-select, .select-wrap, .usage-window-button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute;overflow:hidden">
+    <symbol id="icon-sessions" viewBox="0 0 24 24">
+      <path d="M3 13h3l2-6 4 12 3-9 2 3h4" />
+    </symbol>
+    <symbol id="icon-logbook" viewBox="0 0 24 24">
+      <path d="M5 4.5h9a4 4 0 0 1 4 4v11H9a4 4 0 0 0-4-4z" />
+      <path d="M5 4.5v15M9 8h5M9 11h6" />
+    </symbol>
+    <symbol id="icon-sources" viewBox="0 0 24 24">
+      <ellipse cx="12" cy="6" rx="7" ry="3" />
+      <path d="M5 6v6c0 1.65 3.13 3 7 3s7-1.35 7-3V6" />
+      <path d="M5 12v6c0 1.65 3.13 3 7 3s7-1.35 7-3v-6" />
+    </symbol>
+    <symbol id="icon-usage" viewBox="0 0 24 24">
+      <path d="M4 15a8 8 0 0 1 16 0" />
+      <path d="M12 15l4-5" />
+      <path d="M6.5 18h11" />
+    </symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24">
+      <path d="M12 8.25A3.75 3.75 0 1 0 12 15.75 3.75 3.75 0 0 0 12 8.25Z" />
+      <path d="M19 13.2v-2.4l-2.2-.7a6.4 6.4 0 0 0-.6-1.45l1.1-2.05-1.7-1.7-2.05 1.1a6.4 6.4 0 0 0-1.45-.6L11.4 3h-2.4l-.7 2.2a6.4 6.4 0 0 0-1.45.6L4.8 4.7 3.1 6.4l1.1 2.05a6.4 6.4 0 0 0-.6 1.45L1.4 10.6v2.4l2.2.7c.14.5.34.98.6 1.45L3.1 17.2l1.7 1.7 2.05-1.1c.47.26.95.46 1.45.6l.7 2.2h2.4l.7-2.2c.5-.14.98-.34 1.45-.6l2.05 1.1 1.7-1.7-1.1-2.05c.26-.47.46-.95.6-1.45z" transform="translate(1.6 .2) scale(.86)" />
+    </symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24">
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="M15.5 15.5 21 21" />
+    </symbol>
+    <symbol id="icon-runtime" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 7v5l3.5 2" />
+    </symbol>
+    <symbol id="icon-project" viewBox="0 0 24 24">
+      <path d="M3.5 6.5h6l2 2h9v9a2 2 0 0 1-2 2h-15z" />
+      <path d="M3.5 8.5v-2a2 2 0 0 1 2-2h3.7l2 2" />
+    </symbol>
+    <symbol id="icon-model" viewBox="0 0 24 24">
+      <rect x="7" y="7" width="10" height="10" rx="1.5" />
+      <path d="M9 2v3M12 2v3M15 2v3M9 19v3M12 19v3M15 19v3M2 9h3M2 12h3M2 15h3M19 9h3M19 12h3M19 15h3" />
+    </symbol>
+    <symbol id="icon-recentActivity" viewBox="0 0 24 24">
+      <path d="M5 9V4H0" transform="translate(4 2)" />
+      <path d="M6.2 7.2A8 8 0 1 1 4 12" />
+      <path d="M12 8v4l3 2" />
+    </symbol>
+    <symbol id="icon-timeRange" viewBox="0 0 24 24">
+      <rect x="4" y="5.5" width="16" height="14" rx="2" />
+      <path d="M8 3.5v4M16 3.5v4M4 10h16" />
+    </symbol>
+    <symbol id="icon-source" viewBox="0 0 24 24">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M7.5 9.5h9M8 13l2 2-2 2M12 17h4" />
+    </symbol>
+    <symbol id="icon-selectChevron" viewBox="0 0 24 24">
+      <path d="m7 10 5 5 5-5" />
+    </symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24">
+      <path d="m5 12.5 4.5 4.5L19 7" />
+    </symbol>
+  </svg>
+  <nav class="index" aria-label="Prototype options">
+    <strong>Masthead metal controls</strong>
+    <a href="#option-1">01</a>
+    <a href="#option-2">02</a>
+    <a href="#option-3">03</a>
+    <a href="#option-4">04</a>
+    <a href="#option-5">05</a>
+    <a href="#option-6">06</a>
+    <a href="#option-7">07</a>
+    <a href="#option-8">08</a>
+    <a href="#option-9">09</a>
+    <a href="#option-10">10</a>
+  </nav>
+  <main>
+    <section class="brief">
+      <h1>Heavy Metal Small-Control Directions</h1>
+      <p>Exactly 10 iterations using only Masthead’s existing palette. Every control in the rack is based on real application UI: sidebar menu links, Logbook search and filters, dropdown and filterable dropdown menus, date inputs, Sources action buttons, Settings text inputs and toggles, Danger Zone controls, adapter selection, transcript search, and Usage window buttons.</p>
+    </section>
+    <div id="options" class="options"></div>
+  </main>
+  <script>
+    const directions = [
+      ["Brushed Steel Navigation Rail", "horizontal grain, machined bevels, existing blue state edge"],
+      ["Riveted Gunmetal Control Deck", "thicker top pressure, hard panel seams, bolted utility mass"],
+      ["Bead-Blasted Raised Plate", "lifted controls, muted brushed texture, dense but softened edges"],
+      ["Folded Sheet-Metal Corner", "clipped corners, folded flanges, angular mechanical affordance"],
+      ["Sealed Green Gasket Console", "rounded compressed seals, enabled states as gasket pressure"],
+      ["Blue-Tempered Edge Channel", "side-channel emphasis, active routes locked into metal rails"],
+      ["Ribbed Intake Control Strip", "vertical ribs, heavier left edges, source/action utility feel"],
+      ["Blackened Steel Crossbar", "deep dark ribs, strong horizontal containment, heavier headers"],
+      ["Recessed Instrument Well", "sunken panels, contained controls, low-glare inspection surface"],
+      ["Stamped Blue Faceplate", "high-contrast stamped active plates, sturdy primary action"]
+    ];
+
+    const icon = (name, className = "") => `<svg class="icon ${className}" aria-hidden="true" focusable="false"><use href="#icon-${name}"></use></svg>`;
+
+    function optionTemplate(direction, index) {
+      const number = String(index + 1).padStart(2, "0");
+      return `
+        <section id="option-${index + 1}" class="option d${index + 1}">
+          <header class="option-head">
+            <div class="number">${number}</div>
+            <div>
+              <h2>${direction[0]}</h2>
+              <div class="meta">${direction[1]}</div>
+            </div>
+            <div class="note">real Masthead control rack</div>
+          </header>
+          <div class="sample-shell">
+            <aside class="sidebar-shell" aria-label="ObservabilitySidebar sample">
+              <a class="sidebar-brand" href="#overview">
+                <img class="brand-sail" src="../src/ui/assets/masthead-logo-sail.png" alt="" aria-hidden="true">
+                <span><strong>Masthead</strong><small class="version-number">0.1.0</small></span>
+              </a>
+              <section>
+                <p class="sidebar-group-title">Workspace</p>
+                <nav class="sidebar-nav" aria-label="Masthead sections">
+                  <a class="sidebar-link" href="#"><span class="sidebar-icon">${icon("sessions", "icon-sidebar")}</span><span>Board</span><strong>7</strong></a>
+                  <a class="sidebar-link active" href="#"><span class="sidebar-icon">${icon("logbook", "icon-sidebar")}</span><span>Logbook</span></a>
+                  <a class="sidebar-link" href="#"><span class="sidebar-icon">${icon("sources", "icon-sidebar")}</span><span>Sources</span></a>
+                  <a class="sidebar-link" href="#"><span class="sidebar-icon">${icon("usage", "icon-sidebar")}</span><span>Usage</span></a>
+                  <a class="sidebar-link" href="#"><span class="sidebar-icon">${icon("settings", "icon-sidebar")}</span><span>Settings</span></a>
+                </nav>
+              </section>
+              <section class="sidebar-usage" aria-label="Today usage">
+                <p>Today</p>
+                <div class="sidebar-usage-row"><span>Sessions</span><strong>7</strong></div>
+                <div class="sidebar-usage-row"><span>Tokens</span><strong>12.5k</strong></div>
+                <div class="sidebar-usage-row"><span>Tools</span><strong>48</strong></div>
+                <div class="sidebar-usage-row"><span>MCP</span><strong>3</strong></div>
+              </section>
+            </aside>
+            <section class="workspace" aria-label="Real control samples">
+              <div class="observability-toolbar" aria-label="Logbook controls">
+                <label class="search-field">${icon("search")}<input value="OAuth callback routing" aria-label="Search sessions"><span class="shortcut">/</span></label>
+                <div class="select-wrap">
+                  <button class="toolbar-select open" type="button">${icon("runtime")}<span>Codex</span>${icon("selectChevron", "icon-inline")}</button>
+                  <div class="toolbar-select-menu" role="listbox" aria-label="Runtime filter">
+                    <button class="toolbar-select-option selected" type="button">Codex</button>
+                    <button class="toolbar-select-option" type="button">Claude Code</button>
+                    <button class="toolbar-select-option" type="button">Gemini CLI</button>
+                    <button class="toolbar-select-option" type="button">OpenCode</button>
+                  </div>
+                </div>
+                <div class="select-wrap">
+                  <button class="toolbar-select" type="button" aria-label="Project filter">${icon("project")}<span>Any project</span>${icon("selectChevron", "icon-inline")}</button>
+                </div>
+                <div class="select-wrap">
+                  <button class="toolbar-select" type="button" aria-label="Model filter">${icon("model")}<span>Any model</span>${icon("selectChevron", "icon-inline")}</button>
+                </div>
+                <div class="select-wrap">
+                  <button class="toolbar-select" type="button" aria-label="Sort sessions">${icon("recentActivity")}<span>Recent</span>${icon("selectChevron", "icon-inline")}</button>
+                </div>
+              </div>
+              <div class="surface">
+                <div class="component-bank">
+                  <div class="sources-action-group" aria-label="Source actions">
+                    <button class="app-button" type="button">${icon("sources")}Set up more sources</button>
+                    <button class="app-button app-button-primary" type="button">${icon("source")}Sync sources</button>
+                    <button class="app-button app-button-quiet" type="button">${icon("recentActivity")}Repair missing data</button>
+                    <button class="app-button app-button-quiet" type="button">${icon("logbook")}Open Logbook</button>
+                  </div>
+                  <div class="usage-toolbar" aria-label="Usage window">
+                    <button class="usage-window-button active" type="button">Today</button>
+                    <button class="usage-window-button" type="button">24h</button>
+                    <button class="usage-window-button" type="button">7d</button>
+                    <button class="usage-window-button" type="button">30d</button>
+                    <button class="usage-window-button" type="button">All</button>
+                    <button class="usage-window-button" type="button">Refresh</button>
+                  </div>
+                  <div class="settings-row">
+                    <div><strong>Transcript import</strong><p>Capture source excerpts for searchable local session memory.</p></div>
+                    <label class="settings-toggle"><span class="toggle-track" aria-hidden="true"></span><strong>Enabled</strong></label>
+                  </div>
+                  <div class="adapter-row">
+                    <label class="adapter-card-select"><span class="check-metal"></span><span><strong>Codex</strong><p>Discovered 142, imported 137, locations 3.</p></span></label>
+                    <span class="status-badge">Connected</span>
+                  </div>
+                  <div class="transcript-row">
+                    <div><strong>Transcript search</strong><p>Search the selected session transcript by command, file, or source excerpt.</p></div>
+                    <label class="transcript-search">${icon("search")}<input value="approval denied" aria-label="Transcript search"></label>
+                  </div>
+                  <div class="settings-delete-controls" aria-label="Danger Zone controls">
+                    <button class="toolbar-select" type="button">${icon("source")}<span>Project</span>${icon("selectChevron", "icon-inline")}</button>
+                    <label class="delete-target-input"><input value="Masthead" aria-label="Delete target"></label>
+                    <button class="app-button app-button-danger" type="button">Delete selected records</button>
+                  </div>
+                </div>
+                <aside class="side-panel" aria-label="Filterable select and inputs">
+                  <span class="status-badge warning">Read-only bridge</span>
+                  <label><span class="field-label">Project filter menu search</span><span class="filterable-select-search">${icon("search")}<input value="Masthead" aria-label="Project filter search"><span class="shortcut">esc</span></span></label>
+                  <label><span class="field-label">From date</span><span class="date-input">${icon("timeRange")}<input type="date" value="2026-06-30" aria-label="From date"></span></label>
+                  <label><span class="field-label">Enrichment API key</span><span class="settings-text-input"><input type="password" value="sk-proj-local" aria-label="Enrichment API key"></span></label>
+                  <label><span class="field-label">Enrichment model</span><span class="settings-text-input"><input value="gpt-5-mini" aria-label="Enrichment model"></span></label>
+                  <label class="adapter-card-select"><span class="radio-metal"></span><span><strong>Read-only MCP access</strong><p>Expose canonical sessions to local agents.</p></span></label>
+                </aside>
+              </div>
+            </section>
+          </div>
+        </section>
+      `;
+    }
+
+    document.getElementById("options").innerHTML = directions.map(optionTemplate).join("");
+  </script>
+</body>
+</html>
