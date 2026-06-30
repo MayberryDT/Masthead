@@ -3026,33 +3026,9 @@ body {
   position: relative;
 }
 
-.sidebar-group::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 8px;
-  top: calc(var(--space-sm) * -1);
-  height: 1px;
-  background: rgba(118, 175, 207, 0.09);
-}
-
-.sidebar-group:first-child::before {
-  top: calc(var(--space-sm) * -1);
-}
-
 .sidebar-group > div {
   display: grid;
   gap: 8px;
-}
-
-.sidebar-group p {
-  margin: 0 0 var(--space-sm) 7px;
-  color: rgba(174, 201, 218, 0.58);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  line-height: 1.2;
-  text-transform: uppercase;
 }
 
 .sidebar-link {
@@ -5498,6 +5474,102 @@ body {
 .masthead-shell .observability-toolbar::after {
   background-image: none;
   opacity: 0;
+}
+
+.observability-console .connection-recovery,
+.masthead-shell .connection-recovery {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.82fr) minmax(220px, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 58px;
+  margin: 0;
+  padding: 10px;
+}
+
+.observability-console .connection-recovery .connection-primary,
+.masthead-shell .connection-recovery .connection-primary,
+.observability-console .connection-recovery .connection-detail,
+.masthead-shell .connection-recovery .connection-detail {
+  min-width: 0;
+}
+
+.observability-console .connection-recovery .connection-detail p,
+.masthead-shell .connection-recovery .connection-detail p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.observability-console .connection-recovery .source-token,
+.masthead-shell .connection-recovery .source-token {
+  min-height: 32px;
+  border-radius: 1px;
+  background-color: var(--folded-control-fill);
+  box-shadow:
+    inset 0 1px 0 var(--folded-control-top),
+    inset 0 -1px 0 var(--folded-control-bottom);
+}
+
+.observability-console .connection-recovery .nav-actions,
+.masthead-shell .connection-recovery .nav-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.observability-console .settings-recovery.connection-recovery,
+.masthead-shell .settings-recovery.connection-recovery {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.observability-console .settings-recovery.connection-recovery h2,
+.masthead-shell .settings-recovery.connection-recovery h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.observability-console .settings-recovery.connection-recovery p,
+.masthead-shell .settings-recovery.connection-recovery p {
+  grid-column: 1;
+  margin: 4px 0 0;
+  color: var(--body);
+  text-wrap: pretty;
+}
+
+.observability-console .settings-recovery.connection-recovery .app-button,
+.masthead-shell .settings-recovery.connection-recovery .app-button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+@media (max-width: 760px) {
+  .observability-console .connection-recovery,
+  .masthead-shell .connection-recovery,
+  .observability-console .settings-recovery.connection-recovery,
+  .masthead-shell .settings-recovery.connection-recovery {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .observability-console .connection-recovery .source-token,
+  .masthead-shell .connection-recovery .source-token,
+  .observability-console .connection-recovery .nav-actions,
+  .masthead-shell .connection-recovery .nav-actions,
+  .observability-console .settings-recovery.connection-recovery .app-button,
+  .masthead-shell .settings-recovery.connection-recovery .app-button {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+  }
+
+  .observability-console .connection-recovery .nav-actions,
+  .masthead-shell .connection-recovery .nav-actions {
+    justify-content: flex-start;
+  }
 }
 
 .observability-console .sidebar-group > div,

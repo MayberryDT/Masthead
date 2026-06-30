@@ -1473,7 +1473,10 @@ export function App() {
       </UsageSurface>
     ) : activeSurface === "settings" ? (
       <SettingsSurface>
-        <OperationsPanel
+        {needsRecoveryPanel ? (
+          recoveryPanel
+        ) : (
+          <OperationsPanel
             baseUrl={activeProjectionUrl}
             connection={connection.state}
             onReconnect={connection.refresh}
@@ -1506,6 +1509,7 @@ export function App() {
             onConfirmDeleteLocalData={handleConfirmDeleteLocalData}
             readOnly={!connection.writable}
           />
+        )}
       </SettingsSurface>
     ) : (
       <NowSurface

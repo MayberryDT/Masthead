@@ -12,6 +12,7 @@ import { DangerZone } from "./settings/DangerZone";
 import { McpSettings } from "./settings/McpSettings";
 import { PrivacySettings } from "./settings/PrivacySettings";
 import { StorageSettings } from "./settings/StorageSettings";
+import { AppButton } from "./primitives/AppButton";
 
 export type DeletionScopeKind = "project" | "session" | "runtime" | "host";
 
@@ -121,12 +122,12 @@ export function OperationsPanel({
     <section id="settings" className="settings-panel" aria-label="Settings">
       {settingsError ? <p className="settings-error">{settingsError}</p> : null}
       {settingsLoadState === "error" && !effectiveSettings ? (
-        <div className="settings-recovery" role="alert">
+        <div className="settings-recovery connection-recovery observability-toolbar metal-toolbar offline" role="alert">
           <h2>Settings unavailable</h2>
           <p>{settingsError ?? "Masthead settings could not be loaded."}</p>
-          <button type="button" className="app-button app-button-primary metal-control" onClick={() => loadSettings()}>
+          <AppButton variant="primary" onClick={() => loadSettings()}>
             Retry settings
-          </button>
+          </AppButton>
         </div>
       ) : null}
 
