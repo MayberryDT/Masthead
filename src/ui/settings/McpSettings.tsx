@@ -109,11 +109,18 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
           <p>{statusSummary(status, loadState, loadError)}</p>
         </div>
         <div className="settings-mcp-actions">
-          <StatusBadge tone={statusTone(status, loadState)}>{statusLabel(status, loadState)}</StatusBadge>
-          <AppButton onClick={() => loadMcp()} variant="quiet">
+          <AppButton className="settings-mcp-refresh-button" onClick={() => loadMcp()} variant="quiet">
             Refresh MCP
           </AppButton>
-          <AppButton disabled={testState === "testing"} onClick={() => void runLaunchTest()} variant="quiet">
+          <StatusBadge className="settings-mcp-status" tone={statusTone(status, loadState)}>
+            {statusLabel(status, loadState)}
+          </StatusBadge>
+          <AppButton
+            className="settings-mcp-test-button"
+            disabled={testState === "testing"}
+            onClick={() => void runLaunchTest()}
+            variant="quiet"
+          >
             {testState === "testing" ? "Testing..." : "Test MCP launch"}
           </AppButton>
         </div>
