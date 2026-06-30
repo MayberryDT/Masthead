@@ -13,6 +13,17 @@ describe("folded sheet-metal control system", () => {
     expect(foldedTokenRule).toContain("--folded-control-clip: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);");
 
     for (const selector of [
+      ".masthead-shell .observability-toolbar::before",
+      ".masthead-shell .sidebar-group > div",
+      ".masthead-shell .usage-toolbar",
+      ".masthead-shell .import-jobs-section"
+    ]) {
+      const plateRule = cssRuleBody(mastheadCss, selector);
+      expect(plateRule, selector).toContain("clip-path: var(--folded-control-clip);");
+      expect(plateRule, selector).toContain("var(--folded-control-texture)");
+    }
+
+    for (const selector of [
       ".masthead-shell .sidebar-link",
       ".masthead-shell .app-button",
       ".masthead-shell .toolbar-select",
@@ -26,6 +37,11 @@ describe("folded sheet-metal control system", () => {
       expect(cssRuleBody(mastheadCss, selector), selector).toContain("clip-path: var(--folded-control-clip);");
     }
 
+    expect(cssRuleBodyContaining(mastheadCss, ".masthead-shell .app-button", "background-image:")).not.toContain("--folded-control-texture");
+    expect(cssRuleBodyContaining(mastheadCss, ".masthead-shell .toolbar-select", "background-image:")).not.toContain("--folded-control-texture");
+    expect(cssRuleBodyContaining(mastheadCss, ".masthead-shell .toolbar-select-menu", "background:")).not.toContain("--folded-control-texture");
+    expect(cssRuleBodyContaining(mastheadCss, ".masthead-shell .toolbar-select-menu::after", "background-image: none;")).toContain("opacity: 0;");
+    expect(cssRuleBody(mastheadCss, ".masthead-shell .import-jobs-summary div")).toContain("background: #071b28;");
     expect(mastheadCss).not.toContain(".masthead-shell .session-card,\n.masthead-shell .app-button");
     expect(cssRuleBody(mastheadCss, ".masthead-shell .collapsible-search.expanded .collapsible-search-trigger")).toContain("background-image: none;");
     expect(cssRuleBody(mastheadCss, ".masthead-shell .collapsible-search.expanded .collapsible-search-trigger")).toContain("box-shadow: none;");
