@@ -3937,6 +3937,8 @@ body {
 }
 
 .observability-card-grid {
+  --layout-dur: 430ms;
+  --layout-ease: cubic-bezier(0.2, 0.84, 0.16, 1);
   view-transition-name: session-card-grid;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4020,7 +4022,7 @@ body {
   .masthead-shell .session-card,
   .observability-console .session-card.is-new-card,
   .masthead-shell .session-card.is-new-card {
-    animation: session-card-created 400ms cubic-bezier(0.17, 0.78, 0.13, 1) both;
+    animation: session-card-created 300ms cubic-bezier(0.17, 0.78, 0.13, 1) both;
     transform-origin: 50% 100%;
   }
 

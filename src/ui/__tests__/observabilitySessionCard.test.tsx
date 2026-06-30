@@ -310,11 +310,55 @@ describe("observability session card", () => {
 
       expect(animations.map((animation) => animation.sessionId).sort()).toEqual(["session-1", "session-2"]);
       expect(JSON.stringify(animations.find((animation) => animation.sessionId === "session-2")?.keyframes)).toContain(
-        "translate(0px, 240px)"
+        "translate(0px, 246px)"
       );
       expect(JSON.stringify(animations.find((animation) => animation.sessionId === "session-1")?.keyframes)).toContain(
-        "translate(0px, -240px)"
+        "translate(0px, -246px)"
       );
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.animate = originalAnimate;
+    }
+  });
+
+  test("animates existing cards when card density changes", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const animations: Array<{ sessionId: string; keyframes: Keyframe[] | PropertyIndexedKeyframes | null }> = [];
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const sessionId = this.dataset.sessionId;
+      if (!sessionId) return originalGetBoundingClientRect.call(this);
+      const isCompact = this.parentElement?.classList.contains("compact") === true;
+      return testRect(0, 0, isCompact ? 240 : 320, isCompact ? 178 : 218);
+    };
+    HTMLElement.prototype.animate = vi.fn(function (
+      this: HTMLElement,
+      keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
+      _options?: number | KeyframeAnimationOptions
+    ) {
+      const sessionId = this.dataset.sessionId;
+      if (sessionId) animations.push({ sessionId, keyframes });
+      return { addEventListener: vi.fn() } as unknown as Animation;
+    });
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[session({ sessionId: "session-1" })]} variant="observability" density="comfortable" />);
+      });
+
+      expect(animations).toEqual([]);
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[session({ sessionId: "session-1" })]} variant="observability" density="compact" />);
+      });
+
+      expect(animations.map((animation) => animation.sessionId)).toEqual(["session-1"]);
+      expect(JSON.stringify(animations[0]?.keyframes)).toContain("translate(0px, 6px)");
+      expect(JSON.stringify(animations[0]?.keyframes)).toContain("scale(1.309");
     } finally {
       await act(async () => root.unmount());
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
@@ -352,7 +396,7 @@ describe("observability session card", () => {
 
       const movedCard = container.querySelector<HTMLElement>('[data-session-id="session-2"]');
       expect(movedCard?.className).toContain("is-layout-animating");
-      expect(movedCard?.style.transform).toContain("translate(0px, 240px)");
+      expect(movedCard?.style.transform).toContain("translate(0px, 246px)");
     } finally {
       await act(async () => root.unmount());
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
@@ -737,9 +781,7 @@ function session(overrides: Partial<SessionCardView> = {}): SessionCardView {
   };
 }
 
-function testRect(left: number, top: number): DOMRect {
-  const width = 320;
-  const height = 218;
+function testRect(left: number, top: number, width = 320, height = 218): DOMRect {
   return {
     x: left,
     y: top,
