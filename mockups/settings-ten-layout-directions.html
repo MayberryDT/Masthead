@@ -58,10 +58,10 @@
     :root {
       --primary: #031019;
       --secondary: #071b28;
-      --toolbar: #051724;
+      --toolbar-bg: #051724;
       --surface: #071b28;
       --surface-hover: #082130;
-      --control: #061925;
+      --control-bg: #061925;
       --control-raised: #081d2a;
       --control-raised-hover: #092231;
       --ink: #f6fbff;
@@ -72,21 +72,13 @@
       --blue: #2ea7ff;
       --yellow: #ffcf36;
       --red: #ff483e;
-      --surface-border: rgba(92, 153, 187, 0.18);
-      --surface-border-hover: rgba(112, 173, 205, 0.24);
       --line: rgba(194, 221, 241, 0.13);
       --line-soft: rgba(194, 221, 241, 0.08);
-      --line-strong: rgba(196, 226, 248, 0.2);
-      --blue-soft: rgba(45, 168, 255, 0.16);
-      --green-soft: rgba(89, 212, 153, 0.14);
-      --yellow-soft: rgba(247, 201, 72, 0.15);
-      --red-soft: rgba(255, 77, 77, 0.14);
-      --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+      --surface-border: rgba(92, 153, 187, 0.18);
       color-scheme: dark;
       background: var(--primary);
       color: var(--body);
-      font-family: var(--font-ui);
+      font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 13px;
       line-height: 1.5;
     }
@@ -102,22 +94,20 @@
     body {
       min-width: 320px;
       margin: 0;
-      background:
-        linear-gradient(180deg, rgba(46, 167, 255, 0.045), transparent 330px),
-        var(--primary);
+      background: var(--primary);
     }
 
     .index {
       position: sticky;
       top: 0;
-      z-index: 30;
+      z-index: 40;
       display: flex;
       align-items: center;
       gap: 10px;
       overflow-x: auto;
       border-bottom: 1px solid var(--line);
-      background: rgba(3, 16, 25, 0.95);
-      backdrop-filter: blur(14px);
+      background: rgba(3, 16, 25, 0.96);
+      backdrop-filter: blur(12px);
       padding: 10px 18px;
     }
 
@@ -133,54 +123,60 @@
       min-height: 30px;
       border: 1px solid var(--surface-border);
       border-radius: 3px;
+      background: var(--control-bg);
       color: var(--body);
       padding: 6px 9px;
-      font-family: var(--font-mono);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       font-size: 11px;
       text-decoration: none;
-      transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+      transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
     }
 
     .index a:hover {
-      border-color: rgba(112, 173, 205, 0.35);
-      background: var(--blue-soft);
+      border-color: rgba(112, 173, 205, 0.28);
+      background: var(--control-raised-hover);
       color: var(--ink);
-      transform: translateY(-1px);
     }
 
     main {
       display: grid;
       gap: 18px;
-      width: min(1520px, calc(100vw - 28px));
+      width: min(1500px, calc(100vw - 28px));
       margin: 0 auto;
-      padding: 18px 0 48px;
+      padding: 18px 0 52px;
     }
 
     .brief {
       display: grid;
       gap: 8px;
+      max-width: 780px;
       border-bottom: 1px solid var(--line);
       padding: 6px 0 18px;
     }
 
-    h1,
-    h2,
-    h3 {
-      letter-spacing: 0;
-    }
-
-    h1 {
+    .brief h1 {
       margin: 0;
       color: var(--ink);
       font-size: 24px;
       font-weight: 600;
       line-height: 1.1;
+      letter-spacing: 0;
     }
 
     .brief p {
-      max-width: 900px;
+      margin: 0;
+      color: var(--body);
+    }
+
+    .mono-label {
       margin: 0;
       color: var(--mute);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0;
+      line-height: 1.3;
+      text-transform: uppercase;
     }
 
     .options {
@@ -189,24 +185,18 @@
     }
 
     .option {
-      scroll-margin-top: 70px;
-      overflow: hidden;
-      border: 1px solid var(--surface-border);
-      border-radius: 7px;
-      background: #061925;
-      box-shadow:
-        inset 0 1px 0 rgba(205, 232, 246, 0.04),
-        0 18px 36px rgba(0, 0, 0, 0.18);
+      scroll-margin-top: 64px;
+      display: grid;
+      gap: 12px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
     }
 
     .option-head {
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
-      align-items: end;
+      grid-template-columns: 42px minmax(0, 760px);
+      align-items: start;
       gap: 12px;
-      border-bottom: 1px solid var(--line);
-      background: var(--toolbar);
-      padding: 14px;
     }
 
     .number {
@@ -214,161 +204,61 @@
       width: 34px;
       height: 34px;
       place-items: center;
-      border: 1px solid rgba(46, 167, 255, 0.34);
+      border: 1px solid rgba(92, 153, 187, 0.18);
       border-radius: 3px;
       background: var(--control-raised);
+      box-shadow:
+        inset 0 1px 0 rgba(205, 232, 246, 0.05),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.42);
       color: var(--ink);
-      font-family: var(--font-mono);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 500;
     }
 
     .option-head h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 600;
-      line-height: 1.18;
+      line-height: 1.25;
+      letter-spacing: 0;
     }
 
     .option-head p {
-      max-width: 760px;
       margin: 4px 0 0;
       color: var(--mute);
       font-size: 12px;
       line-height: 1.4;
     }
 
-    .layout-tag {
-      align-self: center;
-      border: 1px solid var(--surface-border);
-      border-radius: 999px;
-      color: var(--mute);
-      padding: 4px 8px;
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      white-space: nowrap;
-    }
-
-    .screen {
+    .option-stage {
       display: grid;
-      gap: 14px;
+      gap: 12px;
       min-width: 0;
+      max-width: 1320px;
+      align-items: start;
       background: var(--primary);
-      padding: 14px;
     }
 
-    .screen-header {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 16px;
-      min-width: 0;
-      border-bottom: 1px solid var(--line);
-      padding: 0 0 14px;
-    }
-
-    .screen-header h3 {
-      margin: 2px 0 0;
-      color: var(--ink);
-      font-size: 22px;
-      font-weight: 600;
-      line-height: 1.1;
-    }
-
-    .screen-header p,
-    .layout-support p {
-      max-width: 660px;
-      margin: 5px 0 0;
+    .stage-note {
+      max-width: 540px;
       color: var(--mute);
       font-size: 12px;
       line-height: 1.4;
     }
 
-    .mono-label {
-      margin: 0;
-      color: var(--mute);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 500;
-      line-height: 1.3;
-      text-transform: uppercase;
-    }
-
-    .status-strip {
+    .settings-panel {
       display: grid;
-      grid-template-columns: repeat(4, minmax(82px, 1fr));
-      min-width: min(100%, 440px);
-      overflow: hidden;
-      border: 1px solid var(--surface-border);
-      border-radius: 5px;
-      background: var(--secondary);
-    }
-
-    .status-strip div {
+      grid-auto-rows: max-content;
+      align-content: start;
+      gap: 12px;
       min-width: 0;
-      border-right: 1px solid var(--line-soft);
-      padding: 7px 9px;
-    }
-
-    .status-strip div:last-child {
-      border-right: 0;
-    }
-
-    .status-strip dt {
-      color: var(--mute);
-      font-family: var(--font-mono);
-      font-size: 10px;
-      line-height: 1.1;
-    }
-
-    .status-strip dd {
-      margin: 3px 0 0;
-      color: var(--ink);
-      font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 500;
-      line-height: 1.2;
-    }
-
-    .layout-support {
-      min-width: 0;
-      border: 1px solid var(--surface-border);
-      border-radius: 5px;
-      background: var(--secondary);
-      padding: 10px;
-    }
-
-    .support-list {
-      display: grid;
-      gap: 7px;
-      margin: 10px 0 0;
-      padding: 0;
-      list-style: none;
-    }
-
-    .support-list a,
-    .support-list span {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      border-top: 1px solid var(--line-soft);
-      color: var(--body);
-      padding-top: 7px;
-      font-size: 12px;
-      text-decoration: none;
-    }
-
-    .support-list em {
-      color: var(--mute);
-      font-family: var(--font-mono);
-      font-size: 10px;
-      font-style: normal;
-      white-space: nowrap;
     }
 
     .settings-layout {
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       align-items: start;
       gap: 12px;
       min-width: 0;
@@ -380,6 +270,7 @@
       align-content: start;
       gap: 10px;
       min-width: 0;
+      max-width: 520px;
       overflow: hidden;
       border-radius: 5px;
       background: #081d2b;
@@ -398,30 +289,36 @@
       opacity: 0.72;
     }
 
-    .settings-section.danger {
+    .settings-section-danger {
       box-shadow:
         0 0 0 1px rgba(255, 97, 97, 0.22),
         inset 0 1px 0 rgba(255, 210, 210, 0.04);
     }
 
-    .settings-section.danger::before {
+    .settings-section-danger::before {
       background: var(--red);
     }
 
-    .settings-section-head h3 {
+    .settings-section-head h2 {
       margin: 2px 0 0;
       color: var(--ink);
       font-size: 15px;
       font-weight: 600;
       line-height: 1.2;
+      letter-spacing: 0;
     }
 
     .settings-section-head p {
-      max-width: 680px;
+      max-width: 480px;
       margin: 4px 0 0;
       color: var(--mute);
       font-size: 12px;
       line-height: 1.35;
+    }
+
+    .settings-section-head .mono-label {
+      margin: 0;
+      text-transform: uppercase;
     }
 
     .settings-section-body {
@@ -430,16 +327,15 @@
 
     .settings-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(130px, 1fr) minmax(0, 180px);
       align-items: start;
       gap: 8px 12px;
-      min-width: 0;
-      border-bottom: 1px solid var(--line-soft);
+      border-bottom: 1px solid rgba(194, 221, 241, 0.08);
       padding: 8px 0;
     }
 
     .settings-row:last-child,
-    .settings-mcp-config:last-child {
+    .settings-mcp-result:last-child {
       border-bottom: 0;
     }
 
@@ -450,6 +346,7 @@
 
     .settings-row-copy > span,
     .settings-mcp-label {
+      display: block;
       color: var(--ink);
       font-size: 13px;
       font-weight: 600;
@@ -471,7 +368,7 @@
     .settings-row-value {
       grid-column: 2;
       min-width: 0;
-      max-width: min(100%, 300px);
+      max-width: none;
       color: var(--body);
       font-size: 12px;
       justify-self: end;
@@ -486,19 +383,18 @@
     }
 
     .settings-inline-actions,
-    .settings-mcp-actions,
-    .settings-delete-controls {
+    .settings-delete-controls,
+    .settings-mcp-actions {
       display: flex;
       align-items: center;
       flex-wrap: wrap;
-      justify-content: flex-end;
+      justify-content: flex-start;
       gap: 8px;
     }
 
     .app-button {
       display: inline-flex;
       min-height: 40px;
-      min-width: 0;
       align-items: center;
       justify-content: center;
       gap: 8px;
@@ -511,34 +407,34 @@
         0 1px 2px rgba(0, 0, 0, 0.2);
       color: #d9e7f2;
       cursor: default;
+      padding: 0 12px;
       font: inherit;
       font-size: 12px;
       font-weight: 600;
-      padding: 0 12px;
       white-space: nowrap;
     }
 
-    .app-button.quiet {
-      background: transparent;
-      box-shadow: none;
-      color: #b9cde0;
-    }
-
-    .app-button.danger {
+    .app-button-danger {
       border-color: rgba(255, 72, 62, 0.32);
       background: #321820;
       color: #ffd4d1;
     }
 
+    .app-button-quiet {
+      background: transparent;
+      box-shadow: none;
+      color: #b9cde0;
+    }
+
     .settings-text-input,
-    .settings-select {
+    .toolbar-select {
       box-sizing: border-box;
       width: 100%;
       min-height: 36px;
       min-width: 0;
       border: 1px solid rgba(92, 153, 187, 0.18);
       border-radius: 3px;
-      background: var(--control);
+      background: #061925;
       color: var(--ink);
       font: inherit;
       padding: 0 10px;
@@ -618,36 +514,36 @@
       background: rgba(145, 168, 186, 0.14);
       color: var(--body);
       padding: 0 8px;
-      font-family: var(--font-mono);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       font-size: 11px;
       font-weight: 500;
       line-height: 1;
       white-space: nowrap;
     }
 
-    .status-badge.active {
-      background: var(--green-soft);
+    .status-badge-active {
+      background: rgba(89, 212, 153, 0.14);
       color: #9df2b8;
     }
 
-    .status-badge.warning {
-      background: var(--yellow-soft);
+    .status-badge-warning {
+      background: rgba(247, 201, 72, 0.15);
       color: #ffe18a;
     }
 
-    .status-badge.danger {
-      background: var(--red-soft);
+    .status-badge-danger {
+      background: rgba(255, 77, 77, 0.14);
       color: #ffaaa5;
     }
 
     .settings-mcp-summary,
     .settings-mcp-access {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: center;
+      grid-template-columns: minmax(0, 1fr);
+      align-items: stretch;
       gap: 10px 14px;
       min-width: 0;
-      border-bottom: 1px solid var(--line-soft);
+      border-bottom: 1px solid rgba(194, 221, 241, 0.08);
       padding: 8px 0;
     }
 
@@ -655,8 +551,7 @@
       display: grid;
       gap: 10px;
       min-width: 0;
-      border-bottom: 1px solid var(--line-soft);
-      padding: 10px 0;
+      padding-top: 10px;
     }
 
     .settings-mcp-tabs {
@@ -667,7 +562,7 @@
       max-width: 100%;
       border: 1px solid rgba(194, 221, 241, 0.12);
       border-radius: 3px;
-      background: var(--control);
+      background: #061925;
       padding: 2px;
     }
 
@@ -684,7 +579,7 @@
     }
 
     .settings-mcp-tabs button.active {
-      background: var(--control-raised-hover);
+      background: #092231;
       box-shadow: 0 0 0 1px rgba(112, 173, 205, 0.2);
       color: var(--ink);
     }
@@ -696,19 +591,15 @@
     }
 
     .settings-mcp-tab-meta {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      justify-content: space-between;
+      display: grid;
+      align-items: start;
       gap: 10px;
       min-width: 0;
     }
 
-    .settings-mcp-tab-meta .app-button {
-      flex: 0 0 auto;
-    }
-
     .code-block {
+      box-sizing: border-box;
+      max-width: 100%;
       min-width: 0;
       margin: 0;
     }
@@ -716,26 +607,28 @@
     .code-block figcaption {
       margin: 0 0 8px;
       color: var(--mute);
-      font-family: var(--font-mono);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       font-size: 11px;
     }
 
     .code-block pre {
+      box-sizing: border-box;
       width: 100%;
-      max-height: 132px;
+      max-width: 100%;
+      max-height: 150px;
       overflow: auto;
       border: 1px solid var(--line);
-      border-radius: 4px;
-      background: #051622;
+      border-radius: 5px;
+      background: #061925;
       margin: 0;
-      padding: 10px;
+      padding: 12px;
     }
 
     .code-block code {
-      color: var(--body);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      line-height: 1.45;
+      color: #dff4ff;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 11.5px;
+      line-height: 18px;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
@@ -743,363 +636,393 @@
     .settings-mcp-result {
       display: grid;
       gap: 6px;
-      border-top: 1px solid var(--line-soft);
+      border-top: 1px solid rgba(194, 221, 241, 0.08);
       margin-top: 10px;
       padding-top: 10px;
     }
 
     .settings-delete-controls {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
       justify-content: stretch;
       width: 100%;
+      gap: 8px;
     }
 
-    .settings-delete-controls .settings-select,
+    .settings-section-danger .settings-delete-controls {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settings-delete-controls .toolbar-select,
     .settings-delete-controls .app-button,
     .settings-delete-controls input {
       width: 100%;
+      min-width: 0;
     }
 
-    .settings-section.storage { grid-area: storage; }
-    .settings-section.privacy { grid-area: privacy; }
-    .settings-section.enrichment { grid-area: enrichment; }
-    .settings-section.hooks { grid-area: hooks; }
-    .settings-section.mcp { grid-area: mcp; }
-    .settings-section.advanced { grid-area: advanced; }
-    .settings-section.danger { grid-area: danger; }
+    .layout-punched-plate .settings-section.storage,
+    .layout-riveted-rail .settings-section.storage,
+    .layout-dovetail-cabinet .settings-section.storage,
+    .layout-indexed-binder .settings-section.storage,
+    .layout-etched-slate .settings-section.storage { grid-area: storage; }
 
-    .layout-ledger .screen-grid {
+    .layout-punched-plate .settings-section.privacy,
+    .layout-riveted-rail .settings-section.privacy,
+    .layout-dovetail-cabinet .settings-section.privacy,
+    .layout-indexed-binder .settings-section.privacy,
+    .layout-etched-slate .settings-section.privacy { grid-area: privacy; }
+
+    .layout-punched-plate .settings-section.enrichment,
+    .layout-riveted-rail .settings-section.enrichment,
+    .layout-dovetail-cabinet .settings-section.enrichment,
+    .layout-indexed-binder .settings-section.enrichment,
+    .layout-etched-slate .settings-section.enrichment { grid-area: enrichment; }
+
+    .layout-punched-plate .settings-section.hooks,
+    .layout-riveted-rail .settings-section.hooks,
+    .layout-dovetail-cabinet .settings-section.hooks,
+    .layout-indexed-binder .settings-section.hooks,
+    .layout-etched-slate .settings-section.hooks { grid-area: hooks; }
+
+    .layout-punched-plate .settings-section.mcp,
+    .layout-riveted-rail .settings-section.mcp,
+    .layout-dovetail-cabinet .settings-section.mcp,
+    .layout-indexed-binder .settings-section.mcp,
+    .layout-etched-slate .settings-section.mcp { grid-area: mcp; }
+
+    .layout-punched-plate .settings-section.advanced,
+    .layout-riveted-rail .settings-section.advanced,
+    .layout-dovetail-cabinet .settings-section.advanced,
+    .layout-indexed-binder .settings-section.advanced,
+    .layout-etched-slate .settings-section.advanced { grid-area: advanced; }
+
+    .layout-punched-plate .settings-section.danger,
+    .layout-riveted-rail .settings-section.danger,
+    .layout-dovetail-cabinet .settings-section.danger,
+    .layout-indexed-binder .settings-section.danger,
+    .layout-etched-slate .settings-section.danger { grid-area: danger; }
+
+    .settings-combo {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 300px;
       gap: 12px;
-      align-items: start;
+      min-width: 0;
+      max-width: 560px;
     }
 
-    .layout-ledger .settings-layout {
-      order: 1;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .settings-combo .settings-section {
+      max-width: none;
+    }
+
+    .rail-note,
+    .mini-index {
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      max-width: 240px;
+      border: 1px solid var(--surface-border);
+      border-radius: 5px;
+      background: #081d2b;
+      box-shadow:
+        0 0 0 1px rgba(92, 153, 187, 0.08),
+        0 2px 8px rgba(0, 0, 0, 0.12);
+      padding: 10px;
+    }
+
+    .mini-index a,
+    .rail-note span {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      border-top: 1px solid var(--line-soft);
+      color: var(--body);
+      padding-top: 7px;
+      font-size: 12px;
+      text-decoration: none;
+    }
+
+    .mini-index em,
+    .rail-note em {
+      color: var(--mute);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      font-style: normal;
+      white-space: nowrap;
+    }
+
+    .bare-ledger {
+      display: grid;
+      gap: 0;
+      max-width: 560px;
+      border-top: 1px solid var(--line);
+    }
+
+    .bare-ledger .settings-section {
+      max-width: none;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      padding: 14px 0;
+    }
+
+    .bare-ledger .settings-section::before {
+      inset: 0 auto auto 0;
+      width: 48px;
+      height: 2px;
+    }
+
+    .micro-card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      max-width: 760px;
+    }
+
+    .micro-card {
+      position: relative;
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+      border-radius: 5px;
+      background: #081d2b;
+      box-shadow:
+        0 0 0 1px rgba(92, 153, 187, 0.14),
+        inset 0 1px 0 rgba(190, 225, 245, 0.035);
+      padding: 12px;
+    }
+
+    .micro-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 2px;
+      background: var(--blue);
+      opacity: 0.72;
+    }
+
+    .micro-card h3 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .micro-card p {
+      margin: 0;
+      color: var(--mute);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .layout-punched-plate .option-stage {
+      grid-template-columns: repeat(3, minmax(250px, 360px));
       grid-template-areas:
-        "storage storage"
-        "privacy enrichment"
-        "hooks mcp"
-        "advanced mcp"
-        "danger danger";
+        "storage privacy mcp"
+        "advanced enrichment mcp"
+        "hooks danger danger";
     }
 
-    .layout-ledger .support-b {
-      order: 2;
+    .layout-punched-plate .settings-layout {
+      display: contents;
     }
 
-    .layout-spine .screen-grid {
-      display: grid;
-      grid-template-columns: 190px minmax(0, 1fr);
-      gap: 12px;
-      align-items: start;
+    .layout-riveted-rail .option-stage {
+      grid-template-columns: 180px repeat(2, minmax(270px, 430px));
+      grid-template-areas:
+        "rail storage privacy"
+        "rail mcp enrichment"
+        "rail mcp hooks"
+        "rail advanced danger";
     }
 
-    .layout-spine .support-a {
+    .layout-riveted-rail .settings-layout {
+      display: contents;
+    }
+
+    .layout-riveted-rail .mini-index {
+      grid-area: rail;
       position: sticky;
       top: 58px;
     }
 
-    .layout-spine .settings-layout {
-      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-      grid-template-areas:
-        "storage storage"
-        "privacy enrichment"
-        "hooks advanced"
-        "mcp mcp"
-        "danger danger";
+    .layout-dovetail-cabinet .option-stage {
+      grid-template-columns: minmax(260px, 420px) minmax(260px, 420px) minmax(260px, 420px);
     }
 
-    .layout-bands .settings-layout {
-      grid-template-columns: repeat(12, minmax(0, 1fr));
-      grid-template-areas:
-        "storage storage storage storage storage storage mcp mcp mcp mcp mcp mcp"
-        "privacy privacy privacy enrichment enrichment enrichment hooks hooks hooks advanced advanced advanced"
-        "danger danger danger danger danger danger danger danger danger danger danger danger";
-    }
-
-    .layout-bands .settings-section {
-      min-height: 100%;
-    }
-
-    .layout-columns .settings-layout {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+    .layout-dovetail-cabinet .settings-layout {
+      display: grid;
+      grid-template-columns: subgrid;
+      grid-column: 1 / -1;
       grid-template-areas:
         "storage privacy mcp"
         "storage enrichment mcp"
-        "advanced hooks hooks"
-        "danger danger danger";
+        "advanced hooks danger";
     }
 
-    .layout-inspector .screen-grid {
-      display: grid;
-      grid-template-columns: minmax(235px, 0.42fr) minmax(0, 1fr);
-      gap: 12px;
+    @supports not (grid-template-columns: subgrid) {
+      .layout-dovetail-cabinet .settings-layout {
+        grid-template-columns: repeat(3, minmax(260px, 420px));
+      }
+    }
+
+    .layout-exposed-ledger .option-stage {
+      grid-template-columns: minmax(300px, 560px) minmax(260px, 360px);
       align-items: start;
     }
 
-    .layout-inspector .settings-layout {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      grid-template-areas:
-        "mcp mcp"
-        "storage storage"
-        "privacy enrichment"
-        "hooks advanced"
-        "danger danger";
+    .layout-exposed-ledger .rail-note {
+      max-width: 360px;
     }
 
-    .layout-conveyor .settings-layout {
-      grid-template-columns: 1.2fr 0.95fr 1.3fr 0.95fr;
-      grid-template-areas:
-        "storage privacy mcp mcp"
-        "storage enrichment hooks advanced"
-        "danger danger danger danger";
+    .layout-sliding-drawer .option-stage {
+      grid-template-columns: repeat(2, minmax(280px, 470px));
     }
 
-    .layout-conveyor .settings-section {
+    .layout-sliding-drawer .settings-layout {
+      display: contents;
+    }
+
+    .layout-sliding-drawer .settings-combo:nth-child(1) {
+      grid-column: 1;
+    }
+
+    .layout-sliding-drawer .settings-combo:nth-child(2) {
+      grid-column: 2;
+    }
+
+    .layout-sliding-drawer .settings-combo:nth-child(3) {
+      grid-column: 1 / span 2;
+      grid-template-columns: repeat(2, minmax(260px, 460px));
+      max-width: 960px;
+    }
+
+    .layout-stamped-tile .option-stage {
+      grid-template-columns: minmax(0, 760px);
+    }
+
+    .layout-indexed-binder .option-stage {
+      grid-template-columns: repeat(2, minmax(280px, 500px));
+      grid-template-areas:
+        "storage mcp"
+        "privacy mcp"
+        "enrichment hooks"
+        "advanced danger";
+    }
+
+    .layout-indexed-binder .settings-layout {
+      display: contents;
+    }
+
+    .layout-indexed-binder .settings-section {
+      border-left: 3px solid rgba(46, 167, 255, 0.36);
+    }
+
+    .layout-hinged-notebook .option-stage {
+      grid-template-columns: minmax(260px, 380px) minmax(260px, 380px) minmax(260px, 380px);
+      align-items: stretch;
+    }
+
+    .layout-hinged-notebook .settings-layout {
+      display: contents;
+    }
+
+    .layout-hinged-notebook .settings-section {
       min-height: 100%;
     }
 
-    .layout-anchors .screen-grid {
-      display: grid;
-      gap: 12px;
-    }
-
-    .anchor-tabs {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      border: 1px solid var(--surface-border);
-      border-radius: 5px;
-      background: var(--secondary);
-      padding: 8px;
-    }
-
-    .anchor-tabs span {
-      flex: 0 0 auto;
-      border: 1px solid var(--surface-border);
-      border-radius: 3px;
-      background: var(--control);
-      color: var(--body);
-      padding: 6px 9px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-    }
-
-    .layout-anchors .settings-layout {
-      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-      grid-template-areas:
-        "privacy storage"
-        "enrichment storage"
-        "hooks mcp"
-        "advanced mcp"
-        "danger danger";
-    }
-
-    .layout-stepper .screen-grid {
-      display: grid;
-      grid-template-columns: 140px minmax(0, 1fr);
-      gap: 12px;
+    .layout-channel-rack .option-stage {
+      grid-template-columns: repeat(4, minmax(220px, 300px));
       align-items: start;
     }
 
-    .step-rail {
-      display: grid;
-      gap: 8px;
-      border: 1px solid var(--surface-border);
-      border-radius: 5px;
-      background: var(--secondary);
-      padding: 10px;
-      font-family: var(--font-mono);
-      font-size: 11px;
+    .layout-channel-rack .settings-combo {
+      max-width: 300px;
     }
 
-    .step-rail span {
-      display: grid;
-      grid-template-columns: 22px minmax(0, 1fr);
-      gap: 7px;
-      align-items: center;
-      color: var(--body);
-    }
-
-    .step-rail b {
-      display: grid;
-      width: 22px;
-      height: 22px;
-      place-items: center;
-      border: 1px solid var(--surface-border);
-      border-radius: 999px;
-      color: var(--ink);
-      font-size: 10px;
-    }
-
-    .layout-stepper .settings-layout {
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-areas:
-        "storage"
-        "privacy"
-        "enrichment"
-        "hooks"
-        "mcp"
-        "advanced"
-        "danger";
-    }
-
-    .layout-stepper .settings-section {
-      grid-template-columns: 220px minmax(0, 1fr);
-      align-items: start;
-    }
-
-    .layout-stepper .settings-section::before {
-      inset: 0 auto 0 0;
-      width: 2px;
-      height: auto;
-    }
-
-    .layout-stepper .settings-section-body {
-      min-width: 0;
-    }
-
-    .layout-matrix .settings-layout {
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-areas:
-        "storage"
-        "privacy"
-        "enrichment"
-        "hooks"
-        "mcp"
-        "advanced"
-        "danger";
-    }
-
-    .layout-matrix .settings-section {
-      grid-template-columns: 235px minmax(0, 1fr);
-      gap: 14px;
-    }
-
-    .layout-matrix .settings-section::before {
-      inset: 0 auto 0 0;
-      width: 2px;
-      height: auto;
-    }
-
-    .layout-matrix .settings-section-body {
-      min-width: 0;
-    }
-
-    .layout-basin .screen-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 320px;
-      gap: 12px;
-      align-items: start;
-    }
-
-    .layout-basin .settings-layout {
-      order: 1;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .layout-etched-slate .option-stage {
+      grid-template-columns: minmax(260px, 430px) minmax(260px, 430px);
       grid-template-areas:
         "storage privacy"
-        "mcp mcp"
-        "enrichment hooks"
-        "advanced advanced"
-        "danger danger";
+        "mcp enrichment"
+        "mcp hooks"
+        "advanced danger";
     }
 
-    .layout-basin .support-b {
-      order: 2;
-      position: sticky;
-      top: 58px;
+    .layout-etched-slate .settings-layout {
+      display: contents;
+    }
+
+    .layout-etched-slate .settings-section {
+      background:
+        linear-gradient(90deg, rgba(194, 221, 241, 0.035), transparent 38%),
+        #081d2b;
     }
 
     @media (max-width: 1180px) {
-      .layout-ledger .screen-grid,
-      .layout-spine .screen-grid,
-      .layout-inspector .screen-grid,
-      .layout-stepper .screen-grid,
-      .layout-basin .screen-grid {
-        grid-template-columns: 1fr;
+      .layout-punched-plate .option-stage,
+      .layout-riveted-rail .option-stage,
+      .layout-dovetail-cabinet .option-stage,
+      .layout-dovetail-cabinet .settings-layout,
+      .layout-hinged-notebook .option-stage,
+      .layout-channel-rack .option-stage {
+        grid-template-columns: repeat(2, minmax(260px, 1fr));
       }
 
-      .layout-spine .support-a,
-      .layout-basin .support-b {
-        position: static;
-      }
-
-      .layout-bands .settings-layout,
-      .layout-columns .settings-layout,
-      .layout-conveyor .settings-layout,
-      .layout-anchors .settings-layout,
-      .layout-ledger .settings-layout,
-      .layout-spine .settings-layout,
-      .layout-inspector .settings-layout,
-      .layout-basin .settings-layout {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+      .layout-dovetail-cabinet .settings-layout {
         grid-template-areas:
-          "storage storage"
-          "privacy enrichment"
-          "hooks advanced"
-          "mcp mcp"
-          "danger danger";
+          "storage privacy"
+          "storage enrichment"
+          "mcp hooks"
+          "advanced danger";
       }
 
-      .layout-stepper .settings-section,
-      .layout-matrix .settings-section {
-        grid-template-columns: 1fr;
+      .layout-punched-plate .option-stage,
+      .layout-riveted-rail .option-stage,
+      .layout-indexed-binder .option-stage,
+      .layout-etched-slate .option-stage {
+        grid-template-areas:
+          "storage privacy"
+          "mcp enrichment"
+          "mcp hooks"
+          "advanced danger";
       }
 
-      .settings-delete-controls .app-button {
-        min-height: 36px;
-        line-height: 1.15;
-        padding-block: 6px;
-        white-space: normal;
+      .layout-riveted-rail .mini-index {
+        position: static;
+        grid-area: auto;
+        grid-column: 1 / -1;
+        max-width: 100%;
+      }
+
+      .layout-sliding-drawer .settings-combo:nth-child(3) {
+        grid-column: 1 / -1;
       }
     }
 
     @media (max-width: 760px) {
       main {
-        width: min(100vw - 18px, 1520px);
+        width: min(100vw - 18px, 1500px);
       }
 
       .option-head,
-      .screen-header {
-        grid-template-columns: 1fr;
-        align-items: start;
+      .layout-punched-plate .option-stage,
+      .layout-riveted-rail .option-stage,
+      .layout-dovetail-cabinet .option-stage,
+      .layout-dovetail-cabinet .settings-layout,
+      .layout-exposed-ledger .option-stage,
+      .layout-sliding-drawer .option-stage,
+      .layout-sliding-drawer .settings-combo:nth-child(3),
+      .layout-indexed-binder .option-stage,
+      .layout-hinged-notebook .option-stage,
+      .layout-channel-rack .option-stage,
+      .layout-etched-slate .option-stage {
+        grid-template-columns: minmax(0, 1fr);
       }
 
-      .option-head,
-      .screen-header {
-        display: grid;
-      }
-
-      .layout-tag {
-        justify-self: start;
-      }
-
-      .screen,
-      .option-head {
-        padding: 10px;
-      }
-
-      .status-strip {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        width: 100%;
-      }
-
-      .settings-layout,
-      .layout-bands .settings-layout,
-      .layout-columns .settings-layout,
-      .layout-conveyor .settings-layout,
-      .layout-anchors .settings-layout,
-      .layout-ledger .settings-layout,
-      .layout-spine .settings-layout,
-      .layout-inspector .settings-layout,
-      .layout-basin .settings-layout,
-      .layout-stepper .settings-layout,
-      .layout-matrix .settings-layout {
-        grid-template-columns: 1fr;
+      .layout-punched-plate .option-stage,
+      .layout-riveted-rail .option-stage,
+      .layout-dovetail-cabinet .settings-layout,
+      .layout-indexed-binder .option-stage,
+      .layout-etched-slate .option-stage {
         grid-template-areas:
           "storage"
           "privacy"
@@ -1110,9 +1033,19 @@
           "danger";
       }
 
-      .layout-stepper .settings-section,
-      .layout-matrix .settings-section {
-        grid-template-columns: 1fr;
+      .layout-sliding-drawer .settings-combo:nth-child(1),
+      .layout-sliding-drawer .settings-combo:nth-child(2),
+      .layout-sliding-drawer .settings-combo:nth-child(3) {
+        grid-column: auto;
+      }
+
+      .settings-section,
+      .settings-combo,
+      .rail-note,
+      .mini-index,
+      .bare-ledger,
+      .micro-card-grid {
+        max-width: none;
       }
 
       .settings-row,
@@ -1140,16 +1073,12 @@
         width: 100%;
       }
 
-      .settings-delete-controls {
-        grid-template-columns: minmax(0, 1fr);
+      .settings-toggle {
+        justify-content: flex-start;
       }
 
       .settings-mcp-tab-meta {
         display: grid;
-      }
-
-      .settings-toggle {
-        justify-content: flex-start;
       }
     }
   </style>
@@ -1170,126 +1099,72 @@
   </nav>
   <main>
     <header class="brief">
-      <p class="mono-label">Masthead / Settings spatial exploration</p>
-      <h1>Ten layout directions for the existing Settings language</h1>
-      <p>Each option uses the same settings sections, rows, toggles, buttons, status badges, MCP config block, hooks concepts, and danger controls. The differences are page-level layout, grouping, density, column logic, anchors, and responsive behavior.</p>
+      <p class="mono-label">Masthead / Settings spatial rewrite</p>
+      <h1>Ten Settings layouts using the current app styling</h1>
+      <p>These options keep Masthead's current Settings sections, rows, controls, badges, code blocks, and dark metal surface language. The experiment is composition: fewer cards, no cards, more cards, tighter cards, rail systems, clusters, and non-full-width reading lanes.</p>
     </header>
-    <section id="options" class="options" aria-label="Settings layout directions"></section>
+    <section class="options" id="options" aria-label="Settings layout directions"></section>
   </main>
+
   <script>
-    const sections = {
+    const sectionTemplates = {
       storage: `
         <section class="settings-section storage" aria-labelledby="storage-title">
           <header class="settings-section-head">
-            <p class="mono-label">Storage</p>
-            <h3 id="storage-title">Storage</h3>
+            <div><p class="mono-label">Storage</p><h2 id="storage-title">Storage</h2></div>
           </header>
           <div class="settings-section-body">
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Database</span></div>
-              <div class="settings-row-value">/Users/tyler/Library/Application Support/Masthead/masthead.sqlite</div>
-              <div class="settings-row-control"><button class="app-button quiet">Open folder</button></div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Data directory</span></div>
-              <div class="settings-row-value">~/Library/Application Support/Masthead</div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Database ID</span></div>
-              <div class="settings-row-value">local-masthead-7e4c</div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Runtime</span></div>
-              <div class="settings-row-value">primary / writable / API 1 / schema 2</div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Source copies</span><p>Keeps normalized session metadata, summaries, and search records.</p></div>
-              <div class="settings-row-value">18,432</div>
-              <div class="settings-row-control"><button class="app-button danger">Delete raw copies</button></div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Export</span><p>Export the local Masthead database graph.</p></div>
-              <div class="settings-row-control"><button class="app-button">Export data</button></div>
-            </div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Database</span></div><div class="settings-row-value">~/Library/Application Support/Masthead/masthead.sqlite</div><div class="settings-row-control"><button class="app-button app-button-quiet">Open folder</button></div></div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Data directory</span></div><div class="settings-row-value">~/Library/Application Support/Masthead</div></div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Database ID</span></div><div class="settings-row-value">local-masthead-7e4c</div></div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Runtime</span></div><div class="settings-row-value">primary / writable / API 1 / schema 2</div></div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Source copies</span><p>Keeps normalized session metadata, summaries, and search records.</p></div><div class="settings-row-value">18,432</div><div class="settings-row-control"><button class="app-button app-button-danger">Delete raw copies</button></div></div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Export</span><p>Export the local Masthead database graph.</p></div><div class="settings-row-control"><button class="app-button">Export data</button></div></div>
           </div>
         </section>`,
       privacy: `
         <section class="settings-section privacy" aria-labelledby="privacy-title">
           <header class="settings-section-head">
-            <p class="mono-label">Privacy</p>
-            <h3 id="privacy-title">Data boundaries</h3>
+            <div><p class="mono-label">Privacy</p><h2 id="privacy-title">Data boundaries</h2></div>
           </header>
           <div class="settings-section-body">
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Transcript import</span><p>Allow source transcript import into the local Masthead database.</p></div>
-              <div class="settings-row-control"><label class="settings-toggle checked"><input type="checkbox" checked readonly><span></span><strong>Enabled</strong></label></div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Redaction</span><p>Redact sensitive values before storing or showing imported session text.</p></div>
-              <div class="settings-row-control"><label class="settings-toggle checked"><input type="checkbox" checked readonly><span></span><strong>Enabled</strong></label></div>
-            </div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Transcript import</span><p>Allow source transcript import into the local Masthead database.</p></div><div class="settings-row-control"><label class="settings-toggle checked"><input type="checkbox" checked readonly><span></span><strong>Enabled</strong></label></div></div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Redaction</span><p>Redact sensitive values before storing or showing imported session text.</p></div><div class="settings-row-control"><label class="settings-toggle checked"><input type="checkbox" checked readonly><span></span><strong>Enabled</strong></label></div></div>
           </div>
         </section>`,
       enrichment: `
         <section class="settings-section enrichment" aria-labelledby="enrichment-title">
           <header class="settings-section-head">
-            <p class="mono-label">Enrichment</p>
-            <h3 id="enrichment-title">Enrichment model</h3>
-            <p>Add a remote model key when local enrichment is not enough. Use a fast, lightweight model.</p>
+            <div><p class="mono-label">Enrichment</p><h2 id="enrichment-title">Enrichment model</h2><p>Add a remote model key when local enrichment is not enough. Use a fast, lightweight model.</p></div>
           </header>
           <div class="settings-section-body">
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>API key</span><p>Stored locally when enrichment setup is completed.</p></div>
-              <div class="settings-row-control"><input class="settings-text-input" type="password" value="••••••••••••••••" aria-label="Enrichment API key"></div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Model</span><p>Prefer a small, low-latency model for labels, summaries, and search hints.</p></div>
-              <div class="settings-row-control"><input class="settings-text-input" type="text" value="gpt-4.1-mini" aria-label="Enrichment model"></div>
-            </div>
+            <div class="settings-row"><div class="settings-row-copy"><span>API key</span><p>Stored locally when enrichment setup is completed.</p></div><div class="settings-row-control"><input class="settings-text-input" type="password" value="••••••••••••••••" aria-label="Enrichment API key"></div></div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Model</span><p>Prefer a small, low-latency model for labels, summaries, and search hints.</p></div><div class="settings-row-control"><input class="settings-text-input" type="text" value="gpt-4.1-mini" aria-label="Enrichment model"></div></div>
           </div>
         </section>`,
       hooks: `
         <section class="settings-section hooks" aria-labelledby="hooks-title">
           <header class="settings-section-head">
-            <p class="mono-label">Hooks</p>
-            <h3 id="hooks-title">Codex hooks</h3>
-            <p>Local shell hooks keep active sessions visible without changing harness files.</p>
+            <div><p class="mono-label">Hooks</p><h2 id="hooks-title">Codex hooks</h2><p>Local shell hooks keep active sessions visible without changing harness files.</p></div>
           </header>
           <div class="settings-section-body">
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Hook status</span><p>Project hook integration for the active Masthead database.</p></div>
-              <div class="settings-row-value"><span class="status-badge active">Installed</span></div>
-              <div class="settings-row-control"><button class="app-button quiet">Repair hooks</button></div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Capture mode</span><p>Session metadata and redacted command events only.</p></div>
-              <div class="settings-row-control"><label class="settings-toggle checked"><input type="checkbox" checked readonly><span></span><strong>Enabled</strong></label></div>
-            </div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Hook status</span><p>Project hook integration for the active Masthead database.</p></div><div class="settings-row-value"><span class="status-badge status-badge-active">Installed</span></div><div class="settings-row-control"><button class="app-button app-button-quiet">Repair hooks</button></div></div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Capture mode</span><p>Session metadata and redacted command events only.</p></div><div class="settings-row-control"><label class="settings-toggle checked"><input type="checkbox" checked readonly><span></span><strong>Enabled</strong></label></div></div>
           </div>
         </section>`,
       mcp: `
         <section class="settings-section mcp" aria-labelledby="mcp-title">
           <header class="settings-section-head">
-            <p class="mono-label">MCP</p>
-            <h3 id="mcp-title">MCP server</h3>
-            <p>Read-only local session retrieval for agents that support MCP.</p>
+            <div><p class="mono-label">MCP</p><h2 id="mcp-title">MCP server</h2><p>Read-only local session retrieval for agents that support MCP.</p></div>
           </header>
           <div class="settings-section-body">
-            <div class="settings-mcp-summary">
-              <div><span class="settings-mcp-label">Status</span><p>9 read-only tools available. Database: /Users/tyler/Library/Application Support/Masthead/masthead.sqlite</p></div>
-              <div class="settings-mcp-actions"><span class="status-badge active">Ready</span><button class="app-button quiet">Refresh MCP</button><button class="app-button quiet">Test MCP launch</button></div>
-            </div>
-            <div class="settings-mcp-access">
-              <div><span class="settings-mcp-label">MCP access</span><p>Allow read-only MCP clients to query sessions that are not excluded by source or session policy.</p></div>
-              <label class="settings-toggle checked"><input type="checkbox" checked readonly><span></span><strong>Enabled</strong></label>
-            </div>
-            <div class="settings-mcp-config" aria-label="MCP config formats">
+            <div class="settings-mcp-summary"><div><span class="settings-mcp-label">Status</span><p>9 read-only tools available. Database: ~/Library/Application Support/Masthead/masthead.sqlite</p></div><div class="settings-mcp-actions"><span class="status-badge status-badge-active">Ready</span><button class="app-button app-button-quiet">Refresh MCP</button><button class="app-button app-button-quiet">Test MCP launch</button></div></div>
+            <div class="settings-mcp-access"><div><span class="settings-mcp-label">MCP access</span><p>Allow read-only MCP clients to query sessions that are not excluded by source or session policy.</p></div><label class="settings-toggle checked"><input type="checkbox" checked readonly><span></span><strong>Enabled</strong></label></div>
+            <div class="settings-mcp-config">
               <div class="settings-mcp-tabs"><button class="active">MCP JSON</button><button>Codex TOML</button><button>stdio</button></div>
               <div class="settings-mcp-tab-panel">
-                <div class="settings-mcp-tab-meta"><p>Works for Claude Code, Cursor, and most MCP clients.</p><button class="app-button quiet">Copy config</button></div>
-                <figure class="code-block">
-                  <figcaption>MCP JSON</figcaption>
-                  <pre><code>{
+                <div class="settings-mcp-tab-meta"><p>Works for Claude Code, Cursor, and most MCP clients.</p><button class="app-button app-button-quiet">Copy config</button></div>
+                <figure class="code-block"><figcaption>MCP JSON</figcaption><pre><code>{
   "mcpServers": {
     "masthead": {
       "command": "/Applications/Masthead.app/Contents/Resources/node",
@@ -1297,21 +1172,16 @@
       "env": { "MASTHEAD_DATABASE_ID": "local-masthead-7e4c" }
     }
   }
-}</code></pre>
-                </figure>
+}</code></pre></figure>
               </div>
             </div>
-            <div class="settings-mcp-result" role="status">
-              <span class="status-badge active">Launch passed</span>
-              <p>MCP launch responded using the active canonical database. 9 MCP tools responded.</p>
-            </div>
+            <div class="settings-mcp-result"><span class="status-badge status-badge-active">Launch passed</span><p>MCP launch responded using the active canonical database. 9 MCP tools responded.</p></div>
           </div>
         </section>`,
       advanced: `
         <section class="settings-section advanced" aria-labelledby="advanced-title">
           <header class="settings-section-head">
-            <p class="mono-label">Advanced</p>
-            <h3 id="advanced-title">Advanced runtime</h3>
+            <div><p class="mono-label">Advanced</p><h2 id="advanced-title">Advanced runtime</h2></div>
           </header>
           <div class="settings-section-body">
             <div class="settings-row"><div class="settings-row-copy"><span>Database ID</span></div><div class="settings-row-value">local-masthead-7e4c</div></div>
@@ -1322,168 +1192,134 @@
           </div>
         </section>`,
       danger: `
-        <section class="settings-section danger" aria-labelledby="danger-title">
+        <section class="settings-section settings-section-danger danger" aria-labelledby="danger-title">
           <header class="settings-section-head">
-            <p class="mono-label">Danger zone</p>
-            <h3 id="danger-title">Danger zone</h3>
-            <p>These actions only mutate Masthead's local database and generated indexes. Original harness files are untouched.</p>
+            <div><p class="mono-label">Danger zone</p><h2 id="danger-title">Danger zone</h2><p>These actions only mutate Masthead's local database and generated indexes. Original harness files are untouched.</p></div>
           </header>
           <div class="settings-section-body">
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Target database</span><p>/Users/tyler/Library/Application Support/Masthead/masthead.sqlite</p></div>
-              <div class="settings-row-value">local-masthead-7e4c</div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Delete scoped records</span><p>Project, runtime, and host deletion targets are populated from canonical session data.</p></div>
-              <div class="settings-row-control">
-                <div class="settings-delete-controls">
-                  <select class="settings-select" aria-label="Delete scope"><option>Project</option><option>Session</option><option>Runtime</option><option>Host</option></select>
-                  <select class="settings-select" aria-label="Delete target"><option>~/code/masthead</option></select>
-                  <button class="app-button danger">Delete selected records</button>
-                </div>
-              </div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy"><span>Delete all</span><p>Clears canonical sessions, enrichments, source policies, indexes, and MCP audit rows.</p></div>
-              <div class="settings-row-control"><button class="app-button danger">Delete all Masthead data</button></div>
-            </div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Target database</span><p>~/Library/Application Support/Masthead/masthead.sqlite</p></div><div class="settings-row-value">local-masthead-7e4c</div></div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Delete scoped records</span><p>Project, runtime, and host deletion targets are populated from canonical session data.</p></div><div class="settings-row-control"><div class="settings-delete-controls"><select class="toolbar-select" aria-label="Delete scope"><option>Project</option><option>Session</option><option>Runtime</option><option>Host</option></select><select class="toolbar-select" aria-label="Delete target"><option>~/code/masthead</option></select><button class="app-button app-button-danger">Delete selected records</button></div></div></div>
+            <div class="settings-row"><div class="settings-row-copy"><span>Delete all</span><p>Clears canonical sessions, enrichments, source policies, indexes, and MCP audit rows.</p></div><div class="settings-row-control"><button class="app-button app-button-danger">Delete all Masthead data</button></div></div>
           </div>
         </section>`
     };
 
+    const sectionOrder = ["storage", "privacy", "enrichment", "hooks", "mcp", "advanced", "danger"];
+    const sectionMarkup = (keys = sectionOrder) => keys.map((key) => sectionTemplates[key]).join("");
+    const standardLayout = (keys = sectionOrder) => `<div class="settings-layout">${sectionMarkup(keys)}</div>`;
+
+    function miniIndex() {
+      return `<aside class="mini-index" aria-label="Settings section index"><p class="mono-label">Index</p><a href="#"><span>Storage</span><em>local</em></a><a href="#"><span>Privacy</span><em>policy</em></a><a href="#"><span>Enrichment</span><em>model</em></a><a href="#"><span>Hooks</span><em>capture</em></a><a href="#"><span>MCP</span><em>agent</em></a><a href="#"><span>Danger</span><em>delete</em></a></aside>`;
+    }
+
+    function railNote() {
+      return `<aside class="rail-note"><p class="mono-label">Active database</p><span>Mode <em>writable</em></span><span>MCP <em>ready</em></span><span>Hooks <em>installed</em></span><span>Rows <em>18,432</em></span></aside>`;
+    }
+
+    function combo(groups) {
+      return groups.map((group) => `<div class="settings-combo">${sectionMarkup(group)}</div>`).join("");
+    }
+
+    function microCards() {
+      const rows = [
+        ["Database", "Open local canonical store", "Open folder"],
+        ["Source copies", "18,432 raw source rows", "Delete raw copies"],
+        ["Transcript import", "Local transcript import enabled", "Enabled"],
+        ["Redaction", "Sensitive values redacted", "Enabled"],
+        ["API key", "Remote enrichment key is stored locally", "Configured"],
+        ["Model", "Fast lightweight labels and summaries", "gpt-4.1-mini"],
+        ["Hook status", "Project hook integration", "Installed"],
+        ["MCP status", "9 read-only tools available", "Ready"],
+        ["MCP config", "JSON, TOML, and stdio launch formats", "Copy config"],
+        ["Retention", "raw scoped, canonical kept, audit 90 days", "3 classes"],
+        ["Scoped delete", "Project, session, runtime, or host", "Delete selected"],
+        ["Delete all", "Clears local Masthead database graph", "Danger"]
+      ];
+      return `<div class="micro-card-grid">${rows.map(([title, body, meta]) => `<article class="micro-card"><p class="mono-label">${meta}</p><h3>${title}</h3><p>${body}</p></article>`).join("")}</div>`;
+    }
+
     const options = [
       {
-        name: "Laminated Ledger Stack",
-        tag: "two-column ledger",
-        layout: "layout-ledger",
-        note: "Storage and MCP get the largest ledger blocks while policy, enrichment, hooks, and runtime stay in compact paired rows.",
-        support: "summary"
+        name: "Punched Plate Matrix",
+        tag: "same cards / no wide rows",
+        className: "layout-punched-plate",
+        note: "Current Settings cards are punched into three compact columns so no label/value pair travels across the screen.",
+        body: standardLayout()
       },
       {
-        name: "Routed Spine Tray",
-        tag: "sticky local index",
-        layout: "layout-spine",
-        note: "A fixed spine turns Settings into a navigable tray, keeping section names and status counts visible while the right side carries the forms.",
-        support: "nav"
+        name: "Riveted Rail Loom",
+        tag: "index rail / compact cards",
+        className: "layout-riveted-rail",
+        note: "A narrow section rail sits beside two bounded card lanes, using the current cards without making the cards behave like full-width slabs.",
+        body: `${miniIndex()}${standardLayout()}`
       },
       {
-        name: "Pressed Priority Bands",
-        tag: "risk bands",
-        layout: "layout-bands",
-        note: "High-impact Storage and MCP sit in the first band, low-risk settings compress beneath them, and destructive actions land in a full-width base band."
+        name: "Dovetailed Cabinet Grid",
+        tag: "same cards / cabinet fit",
+        className: "layout-dovetail-cabinet",
+        note: "The same cards fit like cabinet drawers: storage and MCP get depth, small policy cards dock around them.",
+        body: standardLayout()
       },
       {
-        name: "Cast Service Columns",
-        tag: "domain columns",
-        layout: "layout-columns",
-        note: "Three service columns separate local data, permissions, and agent access without changing the individual cards or rows."
+        name: "Exposed Ledger Sheet",
+        tag: "no cards / current rows",
+        className: "layout-exposed-ledger",
+        note: "Cards are removed entirely. The current section headers, rows, controls, and dividers become a narrow ledger with database evidence pinned beside it.",
+        body: `<div class="bare-ledger">${sectionMarkup()}</div>${railNote()}`
       },
       {
-        name: "Hinged Inspector Plate",
-        tag: "split inspector",
-        layout: "layout-inspector",
-        note: "A left evidence panel summarizes the local database, while the right pane keeps the complete settings stack in a larger inspection plane.",
-        support: "inspector"
+        name: "Sliding Drawer Stack",
+        tag: "fewer larger groups",
+        className: "layout-sliding-drawer",
+        note: "Related settings collapse into three drawer stacks: local data, policy setup, and agent access plus deletion.",
+        body: combo([["storage", "advanced"], ["privacy", "enrichment", "hooks"], ["mcp", "danger"]])
       },
       {
-        name: "Conveyor Rail Modules",
-        tag: "wide scanning grid",
-        layout: "layout-conveyor",
-        note: "A wide modular grid places related settings side by side for desktop scanning, with the danger zone locked as the final rail."
+        name: "Stamped Tile Mosaic",
+        tag: "more cards / row atoms",
+        className: "layout-stamped-tile",
+        note: "The card system goes smaller instead of larger: key rows become compact tiles using Masthead's same metal card surface.",
+        body: microCards()
       },
       {
-        name: "Tabbed Anchor Sheet",
-        tag: "anchor row",
-        layout: "layout-anchors",
-        note: "A compact anchor sheet gives fast jumps across dense settings while keeping all content expanded for direct comparison.",
-        support: "tabs"
+        name: "Indexed Binder Leaves",
+        tag: "same cards / binder tabs",
+        className: "layout-indexed-binder",
+        note: "Cards become binder leaves with a stronger left edge and a two-column reading lane for repeated scanning.",
+        body: standardLayout()
       },
       {
-        name: "Numbered Assembly Stack",
-        tag: "step flow",
-        layout: "layout-stepper",
-        note: "Settings read as an ordered local setup sequence: storage, boundaries, enrichment, hooks, MCP, runtime, and deletion safeguards.",
-        support: "steps"
+        name: "Hinged Notebook Panels",
+        tag: "three bounded pages",
+        className: "layout-hinged-notebook",
+        note: "The screen breaks into three notebook pages: local data, setup controls, and agent/risk controls. Every page stays narrow.",
+        body: combo([["storage", "advanced"], ["privacy", "enrichment", "hooks"], ["mcp", "danger"]])
       },
       {
-        name: "Milled Matrix Rows",
-        tag: "table-like bands",
-        layout: "layout-matrix",
-        note: "Each section becomes a row in a settings matrix, giving long labels and values more horizontal structure while preserving row controls."
+        name: "Channel Rack Slots",
+        tag: "less hierarchy / vertical slots",
+        className: "layout-channel-rack",
+        note: "Settings sit in four narrow vertical rack channels, trading broad panels for shorter eye travel and faster comparison.",
+        body: combo([["storage"], ["privacy", "enrichment"], ["hooks", "advanced"], ["mcp", "danger"]])
       },
       {
-        name: "Settling Basin Layout",
-        tag: "main plus side basin",
-        layout: "layout-basin",
-        note: "Most settings stay in a broad main basin, while runtime evidence is pinned in a secondary side basin for repeated checks.",
-        support: "runtime"
+        name: "Etched Slate Pairs",
+        tag: "paired cards / quiet texture",
+        className: "layout-etched-slate",
+        note: "Cards pair into short slate blocks with the app's current surface styling and a subtle inset texture, keeping the whole screen dense but readable.",
+        body: standardLayout()
       }
     ];
 
-    const order = ["storage", "privacy", "enrichment", "hooks", "mcp", "advanced", "danger"];
-
-    function statusStrip() {
-      return `
-        <dl class="status-strip" aria-label="Settings state summary">
-          <div><dt>Database</dt><dd>Writable</dd></div>
-          <div><dt>MCP</dt><dd>Ready</dd></div>
-          <div><dt>Hooks</dt><dd>Installed</dd></div>
-          <div><dt>Raw rows</dt><dd>18,432</dd></div>
-        </dl>`;
-    }
-
-    function support(kind) {
-      if (kind === "nav") {
-        return `<aside class="layout-support support-a"><p class="mono-label">Section index</p><ul class="support-list"><li><a href="#"><span>Storage</span><em>local</em></a></li><li><a href="#"><span>Privacy</span><em>policy</em></a></li><li><a href="#"><span>Enrichment</span><em>model</em></a></li><li><a href="#"><span>Hooks</span><em>capture</em></a></li><li><a href="#"><span>MCP</span><em>access</em></a></li><li><a href="#"><span>Danger zone</span><em>delete</em></a></li></ul></aside>`;
-      }
-      if (kind === "inspector") {
-        return `<aside class="layout-support support-a"><p class="mono-label">Local database evidence</p><p>Canonical session graph is local, writable, and exposed through read-only MCP tools.</p><ul class="support-list"><li><span>Database ID</span><em>7e4c</em></li><li><span>Schema</span><em>2</em></li><li><span>API</span><em>1</em></li><li><span>MCP audit rows</span><em>214</em></li></ul></aside>`;
-      }
-      if (kind === "tabs") {
-        return `<div class="anchor-tabs support-a" aria-label="Settings anchors"><span>Storage</span><span>Privacy</span><span>Enrichment</span><span>Hooks</span><span>MCP</span><span>Advanced</span><span>Danger</span></div>`;
-      }
-      if (kind === "steps") {
-        return `<aside class="step-rail support-a" aria-label="Settings sequence"><span><b>1</b>Storage</span><span><b>2</b>Privacy</span><span><b>3</b>Enrichment</span><span><b>4</b>Hooks</span><span><b>5</b>MCP</span><span><b>6</b>Advanced</span><span><b>7</b>Danger</span></aside>`;
-      }
-      if (kind === "runtime") {
-        return `<aside class="layout-support support-b"><p class="mono-label">Runtime basin</p><p>Persistent evidence for the active canonical database remains visible while the main settings groups scroll.</p><ul class="support-list"><li><span>Runtime</span><em>primary</em></li><li><span>Writes</span><em>enabled</em></li><li><span>Connector</span><em>local</em></li><li><span>Bridge</span><em>none</em></li></ul></aside>`;
-      }
-      if (kind === "summary") {
-        return `<aside class="layout-support support-b"><p class="mono-label">Settings map</p><p>Local-first database controls lead, policy and agent access follow, deletion remains visually quarantined.</p><ul class="support-list"><li><span>Primary</span><em>Storage</em></li><li><span>Access</span><em>MCP</em></li><li><span>Capture</span><em>Hooks</em></li><li><span>Risk</span><em>Danger</em></li></ul></aside>`;
-      }
-      return "";
-    }
-
-    function settingsMarkup() {
-      return `<div class="settings-layout">${order.map((key) => sections[key]).join("")}</div>`;
-    }
-
     function optionMarkup(option, index) {
-      const supportMarkup = support(option.support);
-      const gridClass = supportMarkup ? "screen-grid" : "";
       return `
-        <article class="option" id="option-${index + 1}">
+        <article class="option ${option.className}" id="option-${index + 1}">
           <header class="option-head">
             <div class="number">${String(index + 1).padStart(2, "0")}</div>
-            <div>
-              <h2>${option.name}</h2>
-              <p>${option.note}</p>
-            </div>
-            <span class="layout-tag">${option.tag}</span>
+            <div><p class="mono-label">${option.tag}</p><h2>${option.name}</h2><p>${option.note}</p></div>
           </header>
-          <section class="screen ${option.layout}" aria-label="${option.name}">
-            <header class="screen-header">
-              <div>
-                <p class="mono-label">Settings</p>
-                <h3>Local session data settings</h3>
-                <p>Configure storage, boundaries, enrichment, hooks, and read-only agent access for the active Masthead database.</p>
-              </div>
-              ${statusStrip()}
-            </header>
-            <div class="${gridClass}">
-              ${supportMarkup}
-              ${settingsMarkup()}
-            </div>
+          <section class="option-stage" aria-label="${option.name}">
+            ${option.body}
           </section>
         </article>`;
     }
