@@ -13,7 +13,11 @@ daemon.server.listen(config.port, config.host, () => {
   console.log(`GET live projection at http://${config.host}:${boundPort}/projection`);
   console.log(`Persisting normalized events to ${config.storePath}`);
   if (config.gitRefreshMs > 0) console.log(`Refreshing known Git sessions every ${config.gitRefreshMs}ms`);
-  daemon.startBackgroundHydration();
+  if (process.env.MASTHEAD_SKIP_BACKGROUND_HYDRATION === "1") {
+    console.log("Skipping background legacy hydration for this daemon run.");
+  } else {
+    daemon.startBackgroundHydration();
+  }
 });
 
 process.on("SIGINT", () => {

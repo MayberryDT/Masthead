@@ -4,6 +4,7 @@ import {
   upsertSessionEnrichment
 } from "../daemon/db/enrichmentRepository.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
+import { createEnrichmentAuditLogger, type EnrichmentAuditLogger } from "./enrichmentAudit.ts";
 import { buildSessionFacts } from "./sessionFacts.ts";
 import {
   fingerprintSessionFacts,
@@ -12,7 +13,7 @@ import {
   SESSION_CAPSULE_PROMPT_VERSION,
   type SessionFacts
 } from "./sessionCompiler.ts";
-import type { SessionEnrichmentProvider } from "./provider.ts";
+import type { EnrichmentProviderResult, EnrichmentProviderStatus, SessionEnrichmentProvider } from "./provider.ts";
 import type { SessionCapsule, SessionEnrichmentKind, SessionEnrichmentRecord } from "./types.ts";
 
 export type EnrichmentCoordinator = {
@@ -20,13 +21,106 @@ export type EnrichmentCoordinator = {
   ensureCurrent(sessionId: string): Promise<SessionEnrichmentRecord>;
 };
 
-export function createEnrichmentCoordinator(db: MastheadDatabase, provider: SessionEnrichmentProvider): EnrichmentCoordinator {
+export class EnrichmentFailedError extends Error {
+  readonly provider?: string;
+  readonly model?: string;
+  readonly status: EnrichmentProviderStatus;
+  readonly failureMessage?: string;
+  readonly record?: SessionEnrichmentRecord;
+
+  constructor(input: {
+    provider?: string;
+    model?: string;
+    status: EnrichmentProviderStatus;
+    failureMessage?: string;
+    record?: SessionEnrichmentRecord;
+  }) {
+    super(input.failureMessage ?? `Session enrichment failed with status ${input.status}.`);
+    this.name = "EnrichmentFailedError";
+    this.provider = input.provider;
+    this.model = input.model;
+    this.status = input.status;
+    this.failureMessage = input.failureMessage;
+    this.record = input.record;
+  }
+}
+
+export function createEnrichmentCoordinator(
+  db: MastheadDatabase,
+  provider: SessionEnrichmentProvider,
+  audit: EnrichmentAuditLogger = createEnrichmentAuditLogger()
+): EnrichmentCoordinator {
   return {
     async enrich(sessionId) {
       const facts = buildSessionFacts(db, sessionId);
       const fingerprint = fingerprintSessionFacts(facts);
-      const capsule = applyTitleQuality(await provider.enrich({ facts }), facts);
+      audit.record({
+        inputFingerprint: fingerprint,
+        kind: "durable.started",
+        model: provider.model,
+        provider: provider.id,
+        runtime: facts.narrative?.runtime,
+        sessionId,
+        sourceSessionId: facts.sourceSessionId
+      });
+      audit.record({
+        details: facts,
+        inputFingerprint: fingerprint,
+        kind: "durable.facts",
+        model: provider.model,
+        provider: provider.id,
+        runtime: facts.narrative?.runtime,
+        sessionId,
+        sourceSessionId: facts.sourceSessionId
+      });
+      const providerResult = await provider.enrich({ facts });
       const generatedAt = new Date().toISOString();
+      audit.record({
+        details: providerResult,
+        inputFingerprint: fingerprint,
+        kind: "durable.provider_response",
+        latencyMs: providerResult.latencyMs,
+        model: providerResult.model,
+        provider: providerResult.provider,
+        runtime: facts.narrative?.runtime,
+        sessionId,
+        sourceSessionId: facts.sourceSessionId,
+        status: providerResult.status
+      });
+
+      if (providerResult.status !== "success" || !providerResult.capsule) {
+        const record = writeFailedEnrichment(db, {
+          facts,
+          fingerprint,
+          generatedAt,
+          providerResult,
+          sessionId
+        });
+        audit.record({
+          details: {
+            enrichmentId: record.enrichmentId,
+            failureCode: record.failureCode,
+            failureMessage: record.failureMessage
+          },
+          inputFingerprint: fingerprint,
+          kind: "durable.failed",
+          model: providerResult.model,
+          provider: providerResult.provider,
+          runtime: facts.narrative?.runtime,
+          sessionId,
+          sourceSessionId: facts.sourceSessionId,
+          status: providerResult.status
+        });
+        throw new EnrichmentFailedError({
+          failureMessage: providerResult.failureMessage,
+          model: providerResult.model,
+          provider: providerResult.provider,
+          record,
+          status: providerResult.status
+        });
+      }
+
+      const capsule = applyTitleQuality(providerResult.capsule, facts);
 
       db.exec("BEGIN IMMEDIATE;");
       try {
@@ -58,6 +152,17 @@ export function createEnrichmentCoordinator(db: MastheadDatabase, provider: Sess
           sourceRefs: facts.evidence
         });
         db.exec("COMMIT;");
+        audit.record({
+          details: { enrichmentId: capsuleId },
+          inputFingerprint: fingerprint,
+          kind: "durable.persisted",
+          model: providerResult.model,
+          provider: providerResult.provider,
+          runtime: facts.narrative?.runtime,
+          sessionId,
+          sourceSessionId: facts.sourceSessionId,
+          status: "current"
+        });
 
         return {
           content: capsule,
@@ -65,9 +170,9 @@ export function createEnrichmentCoordinator(db: MastheadDatabase, provider: Sess
           enrichmentId: capsuleId,
           enrichmentKind: "session_capsule",
           generatedAt,
-          model: provider.model,
+          model: providerResult.model,
           promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
-          provider: provider.id,
+          provider: providerResult.provider,
           sessionId,
           sourceRefs: facts.evidence,
           status: "current"
@@ -84,6 +189,37 @@ export function createEnrichmentCoordinator(db: MastheadDatabase, provider: Sess
       if (current?.contentFingerprint === fingerprint) return current;
       return this.enrich(sessionId);
     }
+  };
+}
+
+function writeFailedEnrichment(
+  db: MastheadDatabase,
+  options: {
+    facts: SessionFacts;
+    fingerprint: string;
+    generatedAt: string;
+    providerResult: EnrichmentProviderResult;
+    sessionId: string;
+  }
+): SessionEnrichmentRecord {
+  const failureFingerprint = `${options.fingerprint}:failed:${options.providerResult.status}:${options.generatedAt}`;
+  const recordWithoutId: Omit<SessionEnrichmentRecord, "enrichmentId"> = {
+    contentFingerprint: failureFingerprint,
+    enrichmentKind: "session_capsule",
+    failureCode: options.providerResult.status,
+    failureMessage: options.providerResult.failureMessage,
+    generatedAt: options.generatedAt,
+    model: options.providerResult.model,
+    promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
+    provider: options.providerResult.provider,
+    sessionId: options.sessionId,
+    sourceRefs: options.facts.evidence,
+    status: "failed"
+  };
+  const enrichmentId = upsertSessionEnrichment(db, recordWithoutId);
+  return {
+    ...recordWithoutId,
+    enrichmentId
   };
 }
 

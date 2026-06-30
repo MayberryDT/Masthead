@@ -1,0 +1,5 @@
+{
+  "name": "board refresh same session twice",
+  "sessionId": "session-board-refresh",
+  "refreshes": 2
+}

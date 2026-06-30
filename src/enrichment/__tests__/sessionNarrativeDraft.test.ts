@@ -8,7 +8,7 @@ describe("session narrative draft", () => {
     const draft = draftNarrativeFromFacts(narrativeFacts());
 
     expect(draft.title).toBe("MCP launch config validation");
-    expect(draft.liveSummary).toBe("MCP launch config validation is being fixed for Masthead.");
+    expect(draft.liveSummary).toBe("Added validation and tools-list test for MCP launch config.");
     expect(draft.outcome).toBe("Added validation and tools-list test for MCP launch config.");
     expect(draft.searchSummary).toContain("Masthead session for MCP launch config validation.");
     expect(draft.filesChangedSummary).toContain("Agent Access Panel");
@@ -22,7 +22,7 @@ describe("session narrative draft", () => {
 
     expect(capsule.title).toBe("MCP launch config validation");
     expect(capsule.titleSource).toBe("deterministic");
-    expect(capsule.liveSummary).toBe("MCP launch config validation is being fixed for Masthead.");
+    expect(capsule.liveSummary).toBe("Added validation and tools-list test for MCP launch config.");
     expect(capsule.searchSummary).toContain("Verification: tests passed.");
     expect(capsule.searchPhrases).toEqual(expect.arrayContaining(["MCP launch config validation", "Agent Access Panel"]));
     expect(capsule.searchPhrases.join(" ")).not.toContain("src/ui/AgentAccessPanel.tsx");
@@ -57,6 +57,16 @@ function narrativeFacts(): SessionNarrativeFacts {
         status: "succeeded"
       }
     ],
+    coverage: {
+      assistantMessages: 1,
+      fileEffects: 2,
+      hasUsableTranscript: true,
+      level: "complete",
+      messageCount: 2,
+      tokenUsageRows: 0,
+      toolCalls: 1,
+      userMessages: 1
+    },
     deployMentioned: false,
     eventSummaries: [],
     fileBasenames: ["Agent Access Panel", "mcp Status Service"],

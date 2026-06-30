@@ -133,9 +133,9 @@ describe("session copy", () => {
       claims: ["claims_complete", "mentions_tests"]
     });
     expect(buildDeterministicSessionCopy(input)).toMatchObject({
-      headline: "OAuth callback changes report completion and need review.",
+      headline: "OAuth callback changes have a recent completion note.",
       status: "Session reports completion.",
-      reason: "The latest feedback mentions completion and verification, while deterministic state still needs review."
+      reason: "The latest feedback mentions completion and verification evidence."
     });
   });
 
@@ -167,6 +167,50 @@ describe("session copy", () => {
     );
   });
 
+  test("uses latest activity summary for idle cards instead of lifecycle templates", () => {
+    const input = toSessionCopyInput(
+      cardView({
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        latestFeedbackSignal: {
+          present: true,
+          source: "stop_hook",
+          observedAt: "2026-06-30T10:00:00.000Z",
+          claims: ["mentions_files"],
+          summary: "Moved the File button to the far right of the Logbook toolbar."
+        }
+      }),
+      [],
+      []
+    );
+
+    expect(buildDeterministicSessionCopy(input).headline).toBe(
+      "Moved the File button to the far right of the Logbook toolbar."
+    );
+  });
+
+  test("neutralizes simple first-person latest feedback before using it as a headline", () => {
+    const input = toSessionCopyInput(
+      cardView({
+        lifecycle: "running",
+        primaryStatus: "editing",
+        latestFeedbackSignal: {
+          present: true,
+          source: "stop_hook",
+          observedAt: "2026-06-30T10:00:00.000Z",
+          claims: ["mentions_files"],
+          summary: "I checked the learning workspace and the GBrain closeout at sessions."
+        }
+      }),
+      [],
+      []
+    );
+
+    expect(buildDeterministicSessionCopy(input).headline).toBe(
+      "Checked the learning workspace and the GBrain closeout at sessions."
+    );
+  });
+
   test("describes completed activity instead of using review status as the headline", () => {
     const input = toSessionCopyInput(
       cardView({
@@ -184,10 +228,11 @@ describe("session copy", () => {
     );
     const copy = buildDeterministicSessionCopy(input);
 
-    expect(copy.headline).toBe("Documentation changes are ready for review.");
+    expect(copy.headline).toBe("Documentation changes had recent activity.");
     expect(copy.headline).toMatch(/[.!?]$/);
     expect(copy.headline).not.toBe("Documentation work");
     expect(copy.headline).not.toContain("waiting for review");
+    expect(copy.headline).not.toContain("ready for review");
   });
 
   test("turns useful latest feedback fragments into sentence headlines", () => {
@@ -233,7 +278,7 @@ describe("session copy", () => {
       []
     );
 
-    expect(buildDeterministicSessionCopy(input).headline).toBe("Auth changes are ready for review.");
+    expect(buildDeterministicSessionCopy(input).headline).toBe("Auth changes had recent activity.");
   });
 
   test("rejects dangling transition feedback summaries before building the headline", () => {
@@ -285,7 +330,7 @@ describe("session copy", () => {
       []
     );
 
-    expect(buildDeterministicSessionCopy(input).headline).toBe("UI changes report completion and need review.");
+    expect(buildDeterministicSessionCopy(input).headline).toBe("UI changes have a recent completion note.");
   });
 
   test("rejects generic updated feedback summaries before building the headline", () => {
@@ -311,7 +356,7 @@ describe("session copy", () => {
       []
     );
 
-    expect(buildDeterministicSessionCopy(input).headline).toBe("Documentation changes are ready for review.");
+    expect(buildDeterministicSessionCopy(input).headline).toBe("Documentation changes had recent activity.");
   });
 
   test("rejects model headlines that are category labels instead of sentences", () => {
@@ -392,6 +437,46 @@ describe("session copy", () => {
         runningInput
       )
     ).toEqual({ ok: false, reason: "unsupported_claim" });
+  });
+
+  test("rejects repetitive status templates when concrete latest activity exists", () => {
+    const input = toSessionCopyInput(
+      cardView({
+        lifecycle: "ended",
+        primaryStatus: "completed_unreviewed",
+        latestFeedbackSignal: {
+          present: true,
+          source: "stop_hook",
+          observedAt: "2026-06-30T10:00:00.000Z",
+          claims: ["mentions_files"],
+          summary: "Moved the File button to the far right of the Logbook toolbar."
+        }
+      }),
+      [],
+      []
+    );
+
+    expect(
+      validateSessionCopy(
+        {
+          headline: "UI changes are ready for review.",
+          status: "Review is pending.",
+          reason: "This session ended and still needs a quick review."
+        },
+        input
+      )
+    ).toEqual({ ok: false, reason: "invalid_shape" });
+
+    expect(
+      validateSessionCopy(
+        {
+          headline: "Codex hook event is being fixed for Masthead.",
+          status: "Work is active.",
+          reason: "This session is active and has recent activity."
+        },
+        input
+      )
+    ).toEqual({ ok: false, reason: "unsafe_copy" });
   });
 
   test("uses stable cache keys for equivalent sanitized inputs", () => {

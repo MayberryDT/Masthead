@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { StoreRecord } from "../../core/store.ts";
+import { codexHookSource } from "../../adapters/codex/hookAdapter.ts";
 import type { DaemonConfig } from "../config.ts";
+import { createRawEventRepository } from "../db/rawEventRepository.ts";
+import { migrateDatabase } from "../db/schema.ts";
+import { openMastheadDatabase } from "../db/sqlite.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 
@@ -57,6 +61,23 @@ describe("canonical store ownership", () => {
     expect(migrationMarkerCount(secondDaemon.database)).toBe(1);
     expect(migrationMarkerDetails(secondDaemon.database)).toEqual(firstMarker);
   });
+
+  test("startup replays only the bounded recent live window from canonical raw events", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-canonical-replay-window-"));
+    tempDirs.push(tempDir);
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const storePath = join(tempDir, "events.ndjson");
+    await seedCanonicalRawEvents(databasePath, 1_005);
+
+    const daemon = await createTestDaemon(tempDir, databasePath, storePath);
+    daemons.push(daemon);
+    const baseUrl = await listen(daemon);
+    const events = await getJson(baseUrl, "/events");
+
+    expect((events.events as unknown[]).length).toBe(1_000);
+    expect(JSON.stringify(events.events)).not.toContain("session:seed-0");
+    expect(JSON.stringify(events.events)).toContain("session:seed-1004");
+  });
 });
 
 async function createTestHarness(prefix: string): Promise<{ daemon: MastheadDaemon; databasePath: string; storePath: string; tempDir: string }> {
@@ -100,6 +121,40 @@ async function postJson(baseUrl: string, path: string, body: unknown): Promise<R
   return response.json() as Promise<Record<string, unknown>>;
 }
 
+async function getJson(baseUrl: string, path: string): Promise<Record<string, unknown>> {
+  const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" } });
+  expect(response.status).toBe(200);
+  return response.json() as Promise<Record<string, unknown>>;
+}
+
+async function seedCanonicalRawEvents(databasePath: string, count: number): Promise<void> {
+  const db = await openMastheadDatabase(databasePath);
+  try {
+    migrateDatabase(db);
+    const repository = createRawEventRepository(db, {
+      adapter: codexHookSource.runtime,
+      confidence: codexHookSource.confidence,
+      endpoint: codexHookSource.endpoint,
+      runtimeVersion: codexHookSource.runtimeVersion,
+      schemaVersion: codexHookSource.schemaVersion,
+      sourceId: codexHookSource.sourceId,
+      sourceKind: codexHookSource.sourceKind
+    });
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      for (let index = 0; index < count; index += 1) {
+        repository.appendStoreRecord(eventRecord(`seed-${index}`, new Date(Date.parse("2026-06-25T12:00:00.000Z") + index * 1_000).toISOString()));
+      }
+      db.exec("COMMIT;");
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
+  } finally {
+    db.close();
+  }
+}
+
 async function writeStoreRecords(path: string, records: StoreRecord[]): Promise<void> {
   await writeFile(path, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
 }
@@ -122,8 +177,7 @@ function liveApprovalPayload(providerEventId: string): Record<string, unknown> {
   };
 }
 
-function eventRecord(id: string): StoreRecord {
-  const observedAt = "2026-06-25T12:00:00.000Z";
+function eventRecord(id: string, observedAt = "2026-06-25T12:00:00.000Z"): StoreRecord {
   return {
     observedAt,
     recordId: `event:${id}`,

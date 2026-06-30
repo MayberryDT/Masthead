@@ -6,7 +6,13 @@ export function createDeterministicEnrichmentProvider(): SessionEnrichmentProvid
     id: "deterministic",
     model: "local-rules",
     async enrich(input) {
-      return deterministicCapsuleFromFacts(input.facts);
+      return {
+        capsule: deterministicCapsuleFromFacts(input.facts),
+        model: "local-rules",
+        provider: "deterministic",
+        source: "deterministic",
+        status: "success"
+      };
     }
   };
 }

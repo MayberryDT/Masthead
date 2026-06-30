@@ -18,7 +18,7 @@ export type SessionFacts = {
   narrative?: SessionNarrativeFacts;
 };
 
-export const SESSION_CAPSULE_PROMPT_VERSION = "session-capsule-v2";
+export const SESSION_CAPSULE_PROMPT_VERSION = "session-capsule-v3";
 
 export function fingerprintSessionFacts(facts: SessionFacts): string {
   return createHash("sha256")
@@ -46,8 +46,11 @@ export function deterministicCapsuleFromFacts(facts: SessionFacts): SessionCapsu
   const titleSelection = selectSessionTitle(facts);
   const capsule = {
     candidateDecisions: [],
+    confidence: "medium",
     liveSummary: `${facts.project}: ${titleSelection.title}`,
+    missingEvidence: ["narrative facts"],
     objective: facts.objective,
+    providerStatus: "success",
     searchPhrases: unique([facts.project, titleSelection.title, facts.objective, ...facts.commands, ...facts.files].filter(isString)),
     technologies: unique(facts.files.map(technologyFromPath).filter(isString)),
     title: titleSelection.title,
@@ -64,11 +67,14 @@ function capsuleFromNarrativeFacts(facts: SessionFacts): SessionCapsule {
     action: draft.action,
     candidateDecisions: [],
     commandsSummary: draft.commandsSummary,
+    confidence: confidenceFromNarrativeCoverage(facts.narrative),
     filesChangedSummary: draft.filesChangedSummary,
     liveSummary: draft.liveSummary,
     objective: facts.objective,
     object: draft.object,
     outcome: draft.outcome,
+    missingEvidence: missingEvidenceFromNarrativeCoverage(facts.narrative),
+    providerStatus: "success",
     searchPhrases: unique([...draft.searchPhrases, facts.objective, facts.project].filter(isString)),
     searchSummary: draft.searchSummary,
     subject: draft.subject,
@@ -80,6 +86,24 @@ function capsuleFromNarrativeFacts(facts: SessionFacts): SessionCapsule {
     validationWarnings: draft.validationWarnings,
     verificationSummary: draft.verificationSummary
   };
+}
+
+function confidenceFromNarrativeCoverage(narrative: SessionNarrativeFacts | undefined): "high" | "medium" | "low" {
+  if (narrative?.coverage?.level === "complete") return "high";
+  if (narrative?.coverage?.level === "partial") return "medium";
+  if (narrative?.coverage?.level === "hook_only" || narrative?.coverage?.level === "metadata_only") return "low";
+  return "medium";
+}
+
+function missingEvidenceFromNarrativeCoverage(narrative: SessionNarrativeFacts | undefined): string[] {
+  const coverage = narrative?.coverage;
+  if (!coverage) return ["coverage facts"];
+  const missing: string[] = [];
+  if (!coverage.hasUsableTranscript) missing.push("transcript");
+  if (coverage.fileEffects === 0) missing.push("file effects");
+  if (coverage.toolCalls === 0) missing.push("commands");
+  if (coverage.tokenUsageRows === 0) missing.push("token usage");
+  return missing;
 }
 
 export function selectSessionTitle(facts: SessionFacts): { title: string; source: SessionTitleSource } {
@@ -125,6 +149,7 @@ export function isMeaningfulSessionTitle(value: string | undefined, facts: Pick<
   if (normalized === facts.sessionId.toLowerCase() || normalized === facts.sourceSessionId?.toLowerCase()) return false;
   if (isInstructionWrapper(cleaned)) return false;
   if (isGenericSessionTitle(cleaned, facts.project)) return false;
+  if (isWeakGeneratedTitle(cleaned)) return false;
   if (isOpaqueIdentifier(cleaned)) return false;
   if (looksLikeSerializedPayload(cleaned)) return false;
   return true;
@@ -146,6 +171,16 @@ function isGenericSessionTitle(value: string, project: string | undefined): bool
   if (genericTitles.has(normalized)) return true;
   if (projectPrefix && (normalized === `${projectPrefix} session` || normalized === `${projectPrefix} codex session`)) return true;
   return /^(codex|claude|cursor|masthead)?\s*(work\s*)?session\s*\d*$/i.test(value);
+}
+
+function isWeakGeneratedTitle(value: string): boolean {
+  const normalized = value.replace(/[.!?]+$/g, "").trim();
+  return (
+    /^codex hook event\b/i.test(normalized) ||
+    /\b(?:ready for review|needs review|need review|work is focused on)\b/i.test(normalized) ||
+    /\bhas recent (?:[\w .-]+\s+)?activity\b/i.test(normalized) ||
+    /\bbeing (?:fixed|updated|reviewed|validated) for\b/i.test(normalized)
+  );
 }
 
 function isOpaqueIdentifier(value: string): boolean {

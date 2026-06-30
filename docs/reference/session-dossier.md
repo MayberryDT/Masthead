@@ -44,6 +44,10 @@ Transcript items are role/type filterable and paginated. Hook-only sessions show
 
 If the transcript is missing, use Sources to enable transcript import and sync supported harness history. The detail view only routes to Sources; it does not automatically import transcripts or open source applications.
 
+## Enrichment Provenance
+
+Advanced dossier provenance shows enrichment provider, model, prompt version, provider status, confidence, missing evidence, source references, and latest failed enrichment attempt when available. If remote enrichment fails, the dossier should state the failure instead of presenting local deterministic copy as a successful model result.
+
 ## UI Rules
 
 Board and Logbook use the same `SessionDossier` component inside their existing modal shells. Unsupported source-opening actions are intentionally hidden. The dossier can copy context or ids, but it does not open source apps, mutate Git, run commands, approve requests, or steer agents.

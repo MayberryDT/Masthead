@@ -29,6 +29,8 @@ export type LiveHealthCounts = {
   diagnostics: number;
   events: number;
   gitSnapshots: number;
+  sessions: number;
+  sources: number;
 };
 
 export function buildMastheadHealth(
@@ -58,15 +60,11 @@ export function buildMastheadHealth(
       databasePath: config.databasePath,
       databaseId: getOrCreateDatabaseIdentity(database),
       migrationState: "ready",
-      sessions: countRows(database, "sessions"),
-      sources: countRows(database, "ingest_sources")
+      sessions: live.sessions,
+      sources: live.sources
     },
     live
   };
-}
-
-function countRows(database: MastheadDatabase, table: string): number {
-  return (database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
 }
 
 function buildVersion(): string {

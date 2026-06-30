@@ -81,10 +81,20 @@ describe("session dossier repository", () => {
     );
     expect(dossier?.reuse.copyableContext).toContain("# Masthead Session Context");
     expect(dossier?.reuse.copyableContext).toContain("Canonical session: session-1");
-    expect(dossier?.reuse.copyableContext).toContain("MCP included: yes");
+    expect(dossier?.reuse.copyableContext).toContain("Summary: Implemented the dossier repository.");
+    expect(dossier?.reuse.copyableContext).toContain("Agent retrieval: included");
+    expect(dossier?.reuse.copyableContext).not.toContain("Objective:");
+    expect(dossier?.reuse.copyableContext).not.toContain("Outcome:");
+    expect(dossier?.reuse.copyableContext).not.toContain("MCP included");
     expect(dossier?.narrative.narrativeDebug).toMatchObject({
+      confidence: "medium",
+      failureCode: "timeout",
+      failureMessage: "OpenAI enrichment timed out. No fallback was persisted.",
+      latestFailedAttemptAt: "2026-06-26T12:12:00.000Z",
+      missingEvidence: ["verification"],
       model: "gpt-5-nano",
-      promptVersion: "session-capsule-v2",
+      promptVersion: "session-capsule-v3",
+      providerStatus: "success",
       provider: "openai",
       subjectConfidence: "high",
       titleSource: "llm"
@@ -210,8 +220,11 @@ function seedDossierSession(db: MastheadDatabase, options: { sessionId?: string 
   upsertSessionEnrichment(db, {
     content: {
       candidateDecisions: [],
+      confidence: "medium",
+      missingEvidence: ["verification"],
       objective: "Create session dossiers",
       outcome: "Dossier repository ready.",
+      providerStatus: "success",
       searchPhrases: ["session dossier"],
       subject: { confidence: "high", label: "Session dossier", source: "objective" },
       technologies: ["TypeScript"],
@@ -225,11 +238,24 @@ function seedDossierSession(db: MastheadDatabase, options: { sessionId?: string 
     enrichmentKind: "session_capsule",
     generatedAt: "2026-06-26T12:11:00.000Z",
     model: "gpt-5-nano",
-    promptVersion: "session-capsule-v2",
+    promptVersion: "session-capsule-v3",
     provider: "openai",
     sessionId,
     sourceRefs: [{ id: "m1", kind: "event", observedAt: "2026-06-26T12:00:00.000Z", source: "fixture" }],
     status: "current"
+  });
+  upsertSessionEnrichment(db, {
+    contentFingerprint: `${sessionId}:fingerprint:failed:timeout:2026-06-26T12:12:00.000Z`,
+    enrichmentKind: "session_capsule",
+    failureCode: "timeout",
+    failureMessage: "OpenAI enrichment timed out. No fallback was persisted.",
+    generatedAt: "2026-06-26T12:12:00.000Z",
+    model: "gpt-5-nano",
+    promptVersion: "session-capsule-v3",
+    provider: "openai",
+    sessionId,
+    sourceRefs: [{ id: "m1", kind: "event", observedAt: "2026-06-26T12:00:00.000Z", source: "fixture" }],
+    status: "failed"
   });
 }
 

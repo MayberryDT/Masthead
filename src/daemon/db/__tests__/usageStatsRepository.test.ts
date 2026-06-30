@@ -215,6 +215,28 @@ describe("usage stats repository", () => {
     expect([...getSessionTokenTotals(db, ["source-session", "deleted-source", "missing-session"])]).toEqual([["source-session", 180]]);
     db.close();
   });
+
+  test("plans session token totals without scanning all model usage", async () => {
+    const db = await openTestDatabase();
+    const plan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+        SELECT COALESCE(sessions.source_session_id, sessions.session_id) AS sessionId,
+          COALESCE(SUM(COALESCE(model_usage.total_tokens, COALESCE(model_usage.input_tokens, 0) + COALESCE(model_usage.output_tokens, 0))), 0) AS totalTokens
+        FROM sessions
+        JOIN model_usage ON model_usage.session_id = sessions.session_id
+        WHERE sessions.deleted_at IS NULL
+          AND (sessions.source_session_id IN (?) OR sessions.session_id IN (?))
+          AND (model_usage.total_tokens IS NOT NULL OR model_usage.input_tokens IS NOT NULL OR model_usage.output_tokens IS NOT NULL)
+        GROUP BY COALESCE(sessions.source_session_id, sessions.session_id)`
+      )
+      .all("source-session", "canonical-session") as Array<{ detail: string }>;
+    const details = plan.map((row) => row.detail);
+
+    expect(details).toEqual(expect.arrayContaining([expect.stringContaining("model_usage_session_idx")]));
+    expect(details).not.toEqual(expect.arrayContaining([expect.stringContaining("SCAN model_usage")]));
+    db.close();
+  });
 });
 
 async function openTestDatabase(): Promise<MastheadDatabase> {

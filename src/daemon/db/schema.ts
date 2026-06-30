@@ -35,6 +35,16 @@ const migrations = [
     version: 6,
     name: "006_source_setup",
     path: resolve(currentDir, "migrations/006_source_setup.sql")
+  },
+  {
+    version: 7,
+    name: "007_live_projection_enrichment_indexes",
+    path: resolve(currentDir, "migrations/007_live_projection_enrichment_indexes.sql")
+  },
+  {
+    version: 8,
+    name: "008_live_projection_usage_indexes",
+    path: resolve(currentDir, "migrations/008_live_projection_usage_indexes.sql")
   }
 ];
 

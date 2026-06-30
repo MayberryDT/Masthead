@@ -1,4 +1,5 @@
 import { attentionPriority, deriveAttentionItems } from "./attention.ts";
+import { buildBoardLiveCopyFacts, isLowValueLiveCopyText } from "./boardLiveCopyFacts.ts";
 import { buildBoardBrief } from "./boardBrief.ts";
 import { isFailedCommandEvent } from "./commandStatus.ts";
 import { detectConflicts, detectSharedResourceConflicts } from "./conflicts.ts";
@@ -45,6 +46,18 @@ type ProjectFixtureOptions = {
 export type LiveSessionEnrichment = {
   title?: string;
   liveSummary?: string;
+  subject?: string;
+  action?: string;
+  object?: string;
+  outcome?: string;
+  filesChangedSummary?: string;
+  commandsSummary?: string;
+  verificationSummary?: string;
+  topics?: string[];
+  technologies?: string[];
+  provider?: string;
+  model?: string;
+  status?: string;
 };
 
 export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOptions = {}): LiveBoardProjection {
@@ -188,7 +201,9 @@ function toCard(
     ])
   );
   const startedAt = firstSessionTimestamp(session.sessionId, events);
-  const title = enrichment?.title ?? session.title;
+  const evidenceTexts = liveCardEvidenceTexts(sessionEvents, sessionSnapshots, feedbackSignal, branchOrWorktree);
+  const cardEnrichment = sanitizeLiveCardEnrichment(enrichment, evidenceTexts);
+  const title = sanitizeLiveCardTitle(cardEnrichment?.title ?? session.title, evidenceTexts, session.title, session.project);
   const workContext = deriveWorkContext({
     title,
     branchOrWorktree,
@@ -225,15 +240,46 @@ function toCard(
     latestFeedbackSignal: feedbackSignal
   };
 
+  const copyInput = toSessionCopyInput(card, sessionAttention, sessionConflicts, {
+    facts: buildBoardLiveCopyFacts({
+      attentionItems: sessionAttention,
+      card,
+      canonicalEnrichment: cardEnrichment,
+      conflicts: sessionConflicts,
+      events: sessionEvents,
+      gitSnapshots: sessionSnapshots
+    }),
+    recentDelta: recentDeltaFromEvents(sessionEvents, sessionSnapshots)
+  });
   const enrichedCard = {
     ...card,
-    copy: buildDeterministicSessionCopy(toSessionCopyInput(card, sessionAttention, sessionConflicts))
+    copy: buildDeterministicSessionCopy(copyInput),
+    copyInput
   };
-  return withEnrichmentCopy(enrichedCard, enrichment);
+  return withEnrichmentCopy(enrichedCard, cardEnrichment);
+}
+
+function recentDeltaFromEvents(sessionEvents: NormalizedEvent[], sessionSnapshots: GitSnapshot[]): NonNullable<Parameters<typeof toSessionCopyInput>[3]>["recentDelta"] {
+  const recent = sessionEvents.toSorted((left, right) => right.occurredAt.localeCompare(left.occurredAt)).slice(0, 8);
+  return {
+    eventsSinceLastRefresh: sessionEvents.length,
+    latestEventSummaries: recent.map((event) => event.summary).filter((summary) => !isLowValueLiveCopyText(summary)).slice(0, 8),
+    latestFileBasenames: sessionSnapshots.flatMap((snapshot) => snapshot.changedPaths.map((path) => path.path.split("/").at(-1) ?? "")).filter(Boolean).slice(0, 8),
+    latestToolNames: recent.map(toolNameFromLiveEvent).filter((value): value is string => Boolean(value)).slice(0, 8)
+  };
+}
+
+function toolNameFromLiveEvent(event: NormalizedEvent): string | undefined {
+  if (event.type !== "command.started" && event.type !== "command.finished") return undefined;
+  const value = event.payload.normalizedCommand ?? event.payload.command ?? event.payload.toolName ?? event.payload.commandId;
+  if (typeof value !== "string") return undefined;
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (/^(bash|edit|glob|grep|ls|read|shell|write|apply_patch|multi_tool_use\.parallel)$/i.test(cleaned)) return undefined;
+  return cleaned.slice(0, 120);
 }
 
 function withEnrichmentCopy(card: SessionCardView, enrichment: LiveSessionEnrichment | undefined): SessionCardView {
-  const headline = cleanLiveSummary(enrichment?.liveSummary) ?? cleanLiveTitle(enrichment?.title);
+  const headline = cleanLiveSummary(enrichment?.liveSummary) ?? cleanConcreteLiveTitle(enrichment?.title);
   if (!headline) return card;
   return {
     ...card,
@@ -260,11 +306,129 @@ function cleanLiveTitle(value: string | undefined): string | undefined {
   return normalized;
 }
 
+function cleanConcreteLiveTitle(value: string | undefined): string | undefined {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  if (!normalized || /[.!?]$/.test(normalized)) return cleanLiveTitle(normalized);
+  if (!isConcreteEnrichmentTitle(normalized)) return undefined;
+  if (looksLikeCompleteSentenceFragment(normalized)) return `${normalized}.`;
+  return undefined;
+}
+
+function isConcreteEnrichmentTitle(value: string): boolean {
+  const normalized = value.toLowerCase();
+  if (["codex hook event", "codex session", "untitled session", "new session", "session narrative", "session"].includes(normalized)) return false;
+  if (/^(?:browser is (?:connected|reconnected)|there is\b|updated\b)/i.test(value)) return false;
+  if (/^[\w .-]+\s+mcp$/i.test(value)) return false;
+  if (/^[0-9a-f]{12,}$/i.test(value) || /^session[-_:][a-z0-9][a-z0-9_-]{5,}$/i.test(value)) return false;
+  return value.length >= 10 && /[a-z]/i.test(value);
+}
+
+function looksLikeCompleteSentenceFragment(value: string): boolean {
+  return /\b(?:added|blocked|checked|configured|corrected|created|deployed|documented|ended|filed|fixed|has|have|implemented|installed|is|logged|moved|patched|published|recorded|removed|rendered|report|reports|reworked|rewrote|showing|shows|started|stopped|updated|uses|verified|was|were)\b/i.test(
+    value
+  );
+}
+
+function sanitizeLiveCardEnrichment(
+  enrichment: LiveSessionEnrichment | undefined,
+  evidenceTexts: string[]
+): LiveSessionEnrichment | undefined {
+  if (!enrichment) return undefined;
+  const enrichmentTexts = [
+    enrichment.title,
+    enrichment.liveSummary,
+    enrichment.subject,
+    enrichment.action,
+    enrichment.object,
+    enrichment.outcome,
+    enrichment.filesChangedSummary,
+    enrichment.commandsSummary,
+    enrichment.verificationSummary,
+    ...(enrichment.topics ?? []),
+    ...(enrichment.technologies ?? [])
+  ].filter(isNonEmptyString);
+  if (enrichmentTexts.some(mentionsMcp) && !evidenceTexts.some(mentionsMcp)) return undefined;
+  return enrichment;
+}
+
+function sanitizeLiveCardTitle(title: string, evidenceTexts: string[], fallbackTitle: string, fallbackProject: string): string {
+  if (isLowValueLiveTitle(title)) return safeFallbackTitle(fallbackTitle, fallbackProject);
+  if (mentionsMcp(title) && !evidenceTexts.some(mentionsMcp)) {
+    if (!mentionsMcp(fallbackTitle) && isSafeFallbackTitle(fallbackTitle)) return fallbackTitle;
+    if (!mentionsMcp(fallbackProject) && isSafeFallbackTitle(fallbackProject)) return fallbackProject;
+    return "Session";
+  }
+  return title;
+}
+
+function isLowValueLiveTitle(value: string): boolean {
+  return /^(?:codex hook event|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(value.trim());
+}
+
+function isSafeFallbackTitle(value: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized || /^unknown project$/i.test(normalized)) return false;
+  if (/^[a-z0-9]+(?:-[a-z0-9]+){2,}$/i.test(normalized)) return false;
+  return normalized.length <= 36 && /[a-z]/i.test(normalized);
+}
+
+function safeFallbackTitle(fallbackTitle: string, fallbackProject: string): string {
+  if (isSafeFallbackTitle(fallbackTitle)) return fallbackTitle;
+  if (isSafeFallbackTitle(fallbackProject)) return fallbackProject;
+  return "Session";
+}
+
+function liveCardEvidenceTexts(
+  sessionEvents: NormalizedEvent[],
+  sessionSnapshots: GitSnapshot[],
+  feedbackSignal: LatestFeedbackSignal | undefined,
+  branchOrWorktree: string | undefined
+): string[] {
+  return [
+    branchOrWorktree,
+    feedbackSignal?.summary,
+    ...sessionEvents.flatMap((event) => [
+      event.summary,
+      stringPayload(event, "summary"),
+      stringPayload(event, "cwd"),
+      stringPayload(event, "repoRoot"),
+      stringPayload(event, "command"),
+      stringPayload(event, "normalizedCommand")
+    ]),
+    ...sessionSnapshots.flatMap((snapshot) => [
+      snapshot.repoRoot,
+      snapshot.worktreePath,
+      snapshot.branch,
+      ...snapshot.changedPaths.map((path) => path.path)
+    ])
+  ].filter(isNonEmptyString);
+}
+
+function stringPayload(event: NormalizedEvent, key: string): string | undefined {
+  const value = event.payload[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function mentionsMcp(value: string): boolean {
+  return /\bmodel context protocol\b|(?:^|[\s/_.-])mcp(?:$|[\s/_.-])|mcp[A-Z_-]/i.test(value);
+}
+
 function isWeakEnrichmentHeadline(value: string): boolean {
   const normalized = value.replace(/[.!?]+$/g, "").trim();
+  if (/^codex hook event\b/i.test(normalized)) return true;
   if (/^updated\b/i.test(normalized)) return true;
+  if (/\b(?:ready for review|needs review|need review|work is focused on)\b/i.test(normalized)) return true;
+  if (/\bhas recent (?:[\w .-]+\s+)?activity\b/i.test(normalized)) return true;
+  if (/\bbeing (?:fixed|updated|reviewed|validated) for\b/i.test(normalized)) return true;
   if (/^(?:[\w .-]+\s+)?work is being (?:updated|fixed|changed) around [\w .-]+$/i.test(normalized)) return true;
-  if (/^(?:codex hook event|[\w .-]+ work|session narrative|[\w .-]+ session) is being updated for [\w .-]+$/i.test(normalized)) return true;
+  if (/^(?:codex hook event|session narrative|[\w .-]+ session) is being (?:fixed|updated|reviewed|validated) for [\w .-]+$/i.test(normalized)) return true;
+  if (/^(?:browser is (?:connected|reconnected)|there is [\w .-]+|[\w .-]+) is being (?:fixed|updated|reviewed|validated) for [A-Z][\w .-]+$/i.test(normalized)) {
+    return true;
+  }
   return false;
 }
 

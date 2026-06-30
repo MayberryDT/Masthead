@@ -54,6 +54,7 @@ export function SessionCard({ session, onToggle, demoTelemetry, isNew = false, n
       </header>
 
       <AnimatedHeadline isNew={isNew} staggerIndex={headlineUpdateIndex} text={headline} />
+      <CopyRefreshBadge session={session} />
 
       <dl className="observability-card-facts">
         <Fact icon="runtime" label="Runtime" value={harness} valueClassName="runtime-value" />
@@ -74,6 +75,19 @@ export function SessionCard({ session, onToggle, demoTelemetry, isNew = false, n
         </span>
       </footer>
     </article>
+  );
+}
+
+function CopyRefreshBadge({ session }: { session: SessionCardView }) {
+  const refresh = session.copyRefresh;
+  if (!refresh || refresh.status === "success" || refresh.status === "disabled") return null;
+  const label = refresh.status === "not_configured" ? "AI headline not configured" : "AI headline failed";
+  const detail = [refresh.status, refresh.failureMessage].filter(Boolean).join(" · ");
+  return (
+    <span className="copy-refresh-badge" title={detail}>
+      {label}
+      <span aria-hidden="true">{refresh.status}</span>
+    </span>
   );
 }
 

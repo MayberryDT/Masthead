@@ -1,0 +1,7 @@
+{
+  "name": "failed tests",
+  "project": "Masthead",
+  "commands": ["npm test"],
+  "status": "failed",
+  "exitCode": 1
+}

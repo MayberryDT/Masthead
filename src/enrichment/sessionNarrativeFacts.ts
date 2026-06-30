@@ -1,5 +1,6 @@
 import { basename, extname } from "node:path/posix";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
+import { getTranscriptCoverage } from "../daemon/db/sessionTranscriptRepository.ts";
 import { classifyWorkSubject, normalizeTopic, topicFromEvidence } from "./workSubject.ts";
 
 export type NarrativeFileFact = {
@@ -14,6 +15,21 @@ export type NarrativeCommandFact = {
   name: string;
   category?: string;
   status?: string;
+  exitCode?: number;
+  outputPreview?: string;
+  startedAt?: string;
+  completedAt?: string;
+};
+
+export type SessionNarrativeCoverageFacts = {
+  hasUsableTranscript: boolean;
+  messageCount: number;
+  userMessages: number;
+  assistantMessages: number;
+  toolCalls: number;
+  fileEffects: number;
+  tokenUsageRows: number;
+  level: "complete" | "partial" | "hook_only" | "metadata_only";
 };
 
 export type SessionNarrativeFacts = {
@@ -36,6 +52,7 @@ export type SessionNarrativeFacts = {
   fileDirectories: string[];
   fileBasenames: string[];
   commands: NarrativeCommandFact[];
+  coverage: SessionNarrativeCoverageFacts;
   testsPassed: boolean;
   testsFailed: boolean;
   buildPassed: boolean;
@@ -61,7 +78,15 @@ type NarrativeSessionRow = {
 
 type TextRow = { text: string };
 type FileRow = { path: string; operation: string | null };
-type CommandRow = { name: string; category: string | null; status: string | null };
+type CommandRow = {
+  name: string;
+  category: string | null;
+  status: string | null;
+  exitCode: number | null;
+  outputPreview: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+};
 
 export function buildSessionNarrativeFacts(db: MastheadDatabase, sessionId: string): SessionNarrativeFacts {
   const session = db
@@ -100,7 +125,7 @@ export function buildSessionNarrativeFacts(db: MastheadDatabase, sessionId: stri
     db,
     "SELECT title AS text FROM runtime_signals WHERE session_id = ? ORDER BY observed_at DESC LIMIT 10",
     sessionId
-  );
+  ).filter((summary) => !isLowValueRuntimeSignal(summary));
   const latestFeedbackSummary = eventSummaries.find((summary) => /feedback|completion|done|review/i.test(summary));
 
   const files = (
@@ -113,7 +138,11 @@ export function buildSessionNarrativeFacts(db: MastheadDatabase, sessionId: stri
       `SELECT DISTINCT
         tool_calls.tool_name AS name,
         NULL AS category,
-        COALESCE(tool_results.status, '') AS status
+        COALESCE(tool_results.status, '') AS status,
+        tool_results.exit_code AS exitCode,
+        tool_results.output_redacted AS outputPreview,
+        tool_calls.started_at AS startedAt,
+        tool_results.completed_at AS completedAt
       FROM tool_calls
       LEFT JOIN tool_results ON tool_results.tool_call_id = tool_calls.tool_call_id
       WHERE tool_calls.session_id = ?
@@ -124,6 +153,7 @@ export function buildSessionNarrativeFacts(db: MastheadDatabase, sessionId: stri
 
   const commandText = commands.map((command) => `${command.name} ${command.status ?? ""}`).join(" ");
   const summaryText = [session.objective, firstUserPrompt, finalAssistantMessage, latestFeedbackSummary, ...checkpointSummaries, ...eventSummaries].join(" ");
+  const coverage = buildCoverageFacts(db, sessionId);
   const topics = unique([
     ...[summaryText, ...files.map((file) => `${file.directory} ${file.basename}`)].map(topicFromEvidence).filter(isString),
     ...topDirectories(files).map(normalizeTopic)
@@ -136,9 +166,14 @@ export function buildSessionNarrativeFacts(db: MastheadDatabase, sessionId: stri
     checkpointSummaries,
     commands: commands.map((command) => ({
       category: command.category ?? commandCategory(command.name),
+      ...(command.completedAt ? { completedAt: command.completedAt } : {}),
+      ...(command.exitCode !== null ? { exitCode: command.exitCode } : {}),
       name: command.name,
+      ...(command.outputPreview ? { outputPreview: safeOutputPreview(command.outputPreview) } : {}),
+      ...(command.startedAt ? { startedAt: command.startedAt } : {}),
       status: command.status || undefined
     })),
+    coverage,
     deployMentioned: /\bdeploy|deployed|deployment|netlify|vercel\b/i.test(`${summaryText} ${commandText}`),
     eventSummaries,
     fileBasenames: unique(files.map((file) => file.basename)),
@@ -162,6 +197,10 @@ export function buildSessionNarrativeFacts(db: MastheadDatabase, sessionId: stri
     topics,
     worktreePath: session.worktreePath ?? undefined
   };
+}
+
+export function isLowValueRuntimeSignal(value: string): boolean {
+  return /^(codex hook event|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(value.trim());
 }
 
 export function fileFactFromPath(path: string, operation?: string): NarrativeFileFact {
@@ -246,6 +285,52 @@ function commandCategory(name: string): string | undefined {
   if (/build|tsc|cargo/i.test(name)) return "build";
   if (/deploy|netlify|vercel/i.test(name)) return "deploy";
   return undefined;
+}
+
+function buildCoverageFacts(db: MastheadDatabase, sessionId: string): SessionNarrativeCoverageFacts {
+  const transcript = getTranscriptCoverage(db, sessionId);
+  const tokenUsageRows = countRows(db, "model_usage", sessionId);
+  const level = coverageLevel({
+    fileEffects: transcript.fileEffects,
+    hasUsableTranscript: transcript.hasUsableTranscript,
+    runtimeSignals: transcript.runtimeSignals,
+    toolCalls: transcript.toolCalls
+  });
+  return {
+    assistantMessages: transcript.assistantMessages,
+    fileEffects: transcript.fileEffects,
+    hasUsableTranscript: transcript.hasUsableTranscript,
+    level,
+    messageCount: transcript.messages,
+    tokenUsageRows,
+    toolCalls: transcript.toolCalls,
+    userMessages: transcript.userMessages
+  };
+}
+
+function coverageLevel(input: {
+  hasUsableTranscript: boolean;
+  fileEffects: number;
+  toolCalls: number;
+  runtimeSignals: number;
+}): SessionNarrativeCoverageFacts["level"] {
+  if (input.hasUsableTranscript && input.fileEffects > 0 && input.toolCalls > 0) return "complete";
+  if (input.hasUsableTranscript || input.fileEffects > 0 || input.toolCalls > 0) return "partial";
+  if (input.runtimeSignals > 0) return "hook_only";
+  return "metadata_only";
+}
+
+function countRows(db: MastheadDatabase, table: string, sessionId: string): number {
+  return (db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE session_id = ?`).get(sessionId) as { count: number }).count;
+}
+
+function safeOutputPreview(value: string): string {
+  return value
+    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted-secret]")
+    .replace(/\/home\/[^/\s"'`]+(?:\/[^\s"'`]*)?/g, "[redacted-path]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
 }
 
 function readablePhrase(value: string): string {

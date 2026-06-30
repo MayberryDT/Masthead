@@ -239,6 +239,7 @@ describe("Live Board projection", () => {
     );
 
     expect(board.cards[0]).toMatchObject({
+      title: "Masthead UI work",
       copy: {
         headline: "UI changes are active now.",
         source: "deterministic"
@@ -275,11 +276,222 @@ describe("Live Board projection", () => {
     );
 
     expect(board.cards[0]).toMatchObject({
+      title: "Masthead UI work",
       copy: {
         headline: "UI changes are active now.",
         source: "deterministic"
       }
     });
+  });
+
+  test("ignores hook-event active-in enrichment for card headlines and titles", () => {
+    const board = projectFixture(
+      {
+        events: [
+          event("start", "hook-active-session", "session.started", "2026-06-23T02:00:00.000Z", {
+            project: "Masthead",
+            title: "Masthead UI work"
+          })
+        ],
+        gitSnapshots: [snapshot("snapshot-hook-active", "hook-active-session", "src/app/App.tsx")]
+      },
+      {
+        now: new Date("2026-06-23T02:04:30.000Z"),
+        sessionEnrichments: new Map([
+          [
+            "hook-active-session",
+            {
+              liveSummary: "Codex hook event is active in sources.",
+              title: "Codex hook event"
+            }
+          ]
+        ])
+      }
+    );
+
+    expect(board.cards[0]).toMatchObject({
+      title: "Masthead UI work",
+      copy: {
+        headline: "UI changes are active now.",
+        source: "deterministic"
+      }
+    });
+    expect(JSON.stringify(board.cards[0])).not.toMatch(/codex hook event/i);
+  });
+
+  test("ignores generic is-being-fixed enrichment for card headlines", () => {
+    const board = projectFixture(
+      {
+        events: [
+          event("start", "fixed-for-session", "session.started", "2026-06-23T02:00:00.000Z", {
+            project: "Masthead",
+            title: "Masthead UI work"
+          })
+        ],
+        gitSnapshots: [snapshot("snapshot-fixed-for", "fixed-for-session", "src/app/App.tsx")]
+      },
+      {
+        now: new Date("2026-06-23T02:04:30.000Z"),
+        sessionEnrichments: new Map([
+          [
+            "fixed-for-session",
+            {
+              liveSummary: "Codex hook event is being fixed for Masthead.",
+              title: "Codex hook event"
+            }
+          ]
+        ])
+      }
+    );
+
+    expect(board.cards[0]).toMatchObject({
+      copy: {
+        headline: "UI changes are active now.",
+        source: "deterministic"
+      }
+    });
+  });
+
+  test("ignores stale review-status enrichment when latest activity is concrete", () => {
+    const board = projectFixture(
+      {
+        events: [
+          event("start", "review-template-session", "session.started", "2026-06-23T02:00:00.000Z", {
+            project: "Masthead",
+            title: "Masthead UI work"
+          }),
+          {
+            ...event("latest", "review-template-session", "file.changed", "2026-06-23T02:03:00.000Z"),
+            summary: "Reworked the card copy path to summarize the latest assistant output."
+          }
+        ],
+        gitSnapshots: [snapshot("snapshot-review-template", "review-template-session", "src/core/sessionCopy.ts")]
+      },
+      {
+        now: new Date("2026-06-23T02:04:30.000Z"),
+        sessionEnrichments: new Map([
+          [
+            "review-template-session",
+            {
+              liveSummary: "Masthead UI work is ready for review.",
+              title: "Masthead UI work"
+            }
+          ]
+        ])
+      }
+    );
+
+    expect(board.cards[0]).toMatchObject({
+      copy: {
+        headline: "Reworked the card copy path to summarize the latest assistant output.",
+        source: "deterministic"
+      }
+    });
+  });
+
+  test("does not append recent activity copy to sentence-like enrichment titles", () => {
+    const board = projectFixture(
+      {
+        events: [
+          event("start", "patched-title-session", "session.started", "2026-06-23T02:00:00.000Z", {
+            project: "Masthead",
+            title: "Masthead settings work"
+          })
+        ],
+        gitSnapshots: [snapshot("snapshot-patched-title", "patched-title-session", "scripts/masthead-live-dev.js")]
+      },
+      {
+        now: new Date("2026-06-23T02:04:30.000Z"),
+        sessionEnrichments: new Map([
+          [
+            "patched-title-session",
+            {
+              liveSummary: "Launcher cleanup path is patched has recent Masthead activity.",
+              title: "Launcher cleanup path is patched"
+            }
+          ]
+        ])
+      }
+    );
+
+    expect(board.cards[0]?.copy.headline).toBe("Launcher cleanup path is patched.");
+    expect(board.cards[0]?.copy.headline).not.toContain("patched has recent");
+  });
+
+  test("ignores stale MCP enrichment when current activity is unrelated", () => {
+    const board = projectFixture(
+      {
+        events: [
+          event("start", "stale-topic-session", "session.started", "2026-06-23T02:00:00.000Z", {
+            project: "Masthead",
+            title: "Live card copy work"
+          }),
+          {
+            ...event("latest", "stale-topic-session", "file.changed", "2026-06-23T02:03:00.000Z"),
+            summary: "Reworked the card copy path to summarize the latest assistant output."
+          }
+        ],
+        gitSnapshots: [snapshot("snapshot-stale-topic", "stale-topic-session", "src/core/sessionCopy.ts")]
+      },
+      {
+        now: new Date("2026-06-23T02:04:30.000Z"),
+        sessionEnrichments: new Map([
+          [
+            "stale-topic-session",
+            {
+              liveSummary: "MCP launch config validation has passing tools-list coverage.",
+              title: "MCP launch config validation",
+              topics: ["mcp"]
+            }
+          ]
+        ])
+      }
+    );
+
+    expect(board.cards[0]?.title).toBe("Live card copy work");
+    expect(board.cards[0]?.copy).toMatchObject({
+      headline: "Reworked the card copy path to summarize the latest assistant output.",
+      source: "deterministic"
+    });
+    expect(JSON.stringify(board.cards[0])).not.toMatch(/\bmcp\b/i);
+  });
+
+  test("does not treat a title-only MCP label as current MCP evidence", () => {
+    const board = projectFixture(
+      {
+        events: [
+          event("start", "title-only-topic-session", "session.started", "2026-06-23T02:00:00.000Z", {
+            project: "Masthead",
+            title: "Masthead mcp"
+          }),
+          {
+            ...event("latest", "title-only-topic-session", "file.changed", "2026-06-23T02:03:00.000Z"),
+            summary: "Reworked the card copy path to summarize the latest assistant output."
+          }
+        ],
+        gitSnapshots: [snapshot("snapshot-title-only-topic", "title-only-topic-session", "src/core/sessionCopy.ts")]
+      },
+      {
+        now: new Date("2026-06-23T02:04:30.000Z"),
+        sessionEnrichments: new Map([
+          [
+            "title-only-topic-session",
+            {
+              liveSummary: "Masthead work is focused on mcp.",
+              title: "Masthead mcp",
+              topics: ["mcp"]
+            }
+          ]
+        ])
+      }
+    );
+
+    expect(board.cards[0]?.title).toBe("Masthead");
+    expect(board.cards[0]?.copy).toMatchObject({
+      headline: "Reworked the card copy path to summarize the latest assistant output.",
+      source: "deterministic"
+    });
+    expect(JSON.stringify(board.cards[0])).not.toMatch(/\bmcp\b/i);
   });
 
   test("uses high-quality enrichment for running session headlines", () => {
@@ -288,10 +500,14 @@ describe("Live Board projection", () => {
         events: [
           event("start", "running-enriched-session", "session.started", "2026-06-23T02:00:00.000Z", {
             project: "Masthead",
-            title: "Masthead UI work"
-          })
+            title: "MCP launch config validation"
+          }),
+          {
+            ...event("latest", "running-enriched-session", "file.changed", "2026-06-23T02:03:00.000Z"),
+            summary: "MCP launch config validation has passing tools-list coverage."
+          }
         ],
-        gitSnapshots: [snapshot("snapshot-running-enriched", "running-enriched-session", "src/app/App.tsx")]
+        gitSnapshots: [snapshot("snapshot-running-enriched", "running-enriched-session", "src/mcp/launchConfig.ts")]
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
@@ -299,7 +515,7 @@ describe("Live Board projection", () => {
           [
             "running-enriched-session",
             {
-              liveSummary: "MCP launch config validation is being fixed for Masthead.",
+              liveSummary: "MCP launch config validation has passing tools-list coverage.",
               title: "MCP launch config validation"
             }
           ]
@@ -309,12 +525,12 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]).toMatchObject({
       copy: {
-        headline: "MCP launch config validation is being fixed for Masthead.",
+        headline: "MCP launch config validation has passing tools-list coverage.",
         source: "enrichment"
       },
       lifecycle: "running",
       workContext: {
-        label: "UI work"
+        label: "Session work"
       }
     });
   });

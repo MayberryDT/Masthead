@@ -7,9 +7,12 @@ export type WorkSubjectSignal = {
 };
 
 const AREA_PATTERNS: Array<{ area: WorkArea; patterns: RegExp[] }> = [
-  { area: "MCP", patterns: [/mcp/i, /agent access/i, /\btool/i] },
+  { area: "MCP", patterns: [/mcp/i, /agent access/i] },
   { area: "Logbook", patterns: [/logbook/i, /history/i, /session library/i, /search/i] },
-  { area: "Sources", patterns: [/source/i, /adapter/i, /import/i, /codex/i, /transcript/i] },
+  {
+    area: "Sources",
+    patterns: [/source adapter/i, /source discovery/i, /sources onboarding/i, /\badapter(s)?\b/i, /\bimport (job|workflow|source|transcript|metadata)\b/i, /\btranscript import\b/i, /transcript/i]
+  },
   { area: "Settings", patterns: [/settings/i, /privacy/i, /storage/i, /delete/i, /retention/i] },
   { area: "Daemon", patterns: [/daemon/i, /health/i, /protocol/i, /connector/i, /bridge/i] },
   { area: "CI", patterns: [/workflow/i, /github actions/i, /\bci\b/i, /codeql/i] },

@@ -2,11 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { readSessionEnrichment } from "../../daemon/db/enrichmentRepository.ts";
+import { readCurrentSessionEnrichment, readSessionEnrichment } from "../../daemon/db/enrichmentRepository.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { createDeterministicEnrichmentProvider } from "../deterministicProvider.ts";
-import { createEnrichmentCoordinator } from "../enrichmentCoordinator.ts";
+import { createEnrichmentCoordinator, EnrichmentFailedError } from "../enrichmentCoordinator.ts";
+import type { SessionEnrichmentProvider } from "../provider.ts";
 
 const tempDirs: string[] = [];
 
@@ -30,6 +31,63 @@ describe("enrichment coordinator", () => {
     expect(readSessionEnrichment(db, first.enrichmentId)?.status).toBe("stale");
     expect(second.status).toBe("current");
     db.close();
+  });
+
+  test("failed provider result writes a failed capsule without replacing current summaries", async () => {
+    const db = await openTestDatabase();
+    seedSession(db);
+    const successCoordinator = createEnrichmentCoordinator(db, createDeterministicEnrichmentProvider());
+    const current = await successCoordinator.enrich("session-1");
+    const currentLiveSummary = readCurrentSessionEnrichment(db, "session-1", "live_summary", current.promptVersion);
+    const currentSearchProjection = readCurrentSessionEnrichment(db, "session-1", "search_projection", current.promptVersion);
+
+    const failureCoordinator = createEnrichmentCoordinator(db, failingProvider("timeout"));
+
+    await expect(failureCoordinator.enrich("session-1")).rejects.toMatchObject({
+      name: "EnrichmentFailedError",
+      status: "timeout"
+    });
+
+    expect(readSessionEnrichment(db, current.enrichmentId)?.status).toBe("current");
+    expect(readCurrentSessionEnrichment(db, "session-1", "live_summary", current.promptVersion)?.enrichmentId).toBe(
+      currentLiveSummary?.enrichmentId
+    );
+    expect(readCurrentSessionEnrichment(db, "session-1", "search_projection", current.promptVersion)?.enrichmentId).toBe(
+      currentSearchProjection?.enrichmentId
+    );
+    const failedRows = db
+      .prepare(
+        `SELECT status, failure_code AS failureCode, failure_message AS failureMessage, content_fingerprint AS fingerprint
+        FROM session_enrichments
+        WHERE session_id = ? AND enrichment_kind = 'session_capsule' AND status = 'failed'`
+      )
+      .all("session-1") as Array<{ status: string; failureCode: string; failureMessage: string; fingerprint: string }>;
+    expect(failedRows).toEqual([
+      {
+        failureCode: "timeout",
+        failureMessage: "Provider timed out.",
+        fingerprint: expect.stringContaining(":failed:timeout"),
+        status: "failed"
+      }
+    ]);
+    db.close();
+  });
+
+  test("typed enrichment failure exposes provider status for diagnostics", () => {
+    const error = new EnrichmentFailedError({
+      failureMessage: "Provider timed out.",
+      model: "test-model",
+      provider: "test-provider",
+      status: "timeout"
+    });
+
+    expect(error).toMatchObject({
+      failureMessage: "Provider timed out.",
+      model: "test-model",
+      name: "EnrichmentFailedError",
+      provider: "test-provider",
+      status: "timeout"
+    });
   });
 });
 
@@ -66,4 +124,20 @@ function appendMessage(db: MastheadDatabase, sessionId: string, role: string, te
       message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(`message:${role}:${text}`, sessionId, role, text, `${role}:${text}`, observedAt, "{}", "authoritative");
+}
+
+function failingProvider(status: "timeout" | "api_error"): SessionEnrichmentProvider {
+  return {
+    id: "test-provider",
+    model: "test-model",
+    async enrich() {
+      return {
+        failureMessage: "Provider timed out.",
+        model: "test-model",
+        provider: "test-provider",
+        source: "none",
+        status
+      };
+    }
+  };
 }

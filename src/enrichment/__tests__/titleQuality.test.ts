@@ -59,13 +59,19 @@ describe("session title quality", () => {
       model: "fixture-model",
       async enrich() {
         return {
-          candidateDecisions: [],
-          liveSummary: "Useful live summary from provider.",
-          searchPhrases: [],
-          technologies: [],
-          title: "Codex session",
-          topics: [],
-          unresolved: []
+          capsule: {
+            candidateDecisions: [],
+            liveSummary: "Useful live summary from provider.",
+            searchPhrases: [],
+            technologies: [],
+            title: "Codex session",
+            topics: [],
+            unresolved: []
+          },
+          model: "fixture-model",
+          provider: "fixture-provider",
+          source: "llm",
+          status: "success"
         };
       }
     });
@@ -102,7 +108,7 @@ describe("session title quality", () => {
         timestamp: "2026-06-25T12:00:30.000Z",
         cwd: "/workspace/masthead",
         project: "Masthead",
-        summary: "Title quality work is ready for review."
+        summary: "Title quality fallback uses the provider summary."
       },
       { receivedAt: "2026-06-25T12:00:30.010Z" }
     );
@@ -110,12 +116,12 @@ describe("session title quality", () => {
     const envelope = projectLiveEvents([started, completed], [], {
       generatedAt: "2026-06-25T12:00:31.000Z",
       sessionEnrichments: new Map([
-        ["title-quality-live", { liveSummary: "Title quality work is ready for review.", title: "Codex session" }]
+        ["title-quality-live", { liveSummary: "Title quality fallback uses the provider summary.", title: "Codex session" }]
       ])
     });
 
     expect(envelope.projection.cards[0]?.title).toBe("Masthead Codex session");
-    expect(envelope.projection.cards[0]?.copy.headline).toBe("Title quality work is ready for review.");
+    expect(envelope.projection.cards[0]?.copy.headline).toBe("Title quality fallback uses the provider summary.");
   });
 
   test("Logbook list titles use liveSummary before bad stored titles", async () => {
@@ -142,6 +148,44 @@ describe("session title quality", () => {
       "2026-06-25T12:00:00.000Z",
       JSON.stringify({
         candidateDecisions: [],
+        liveSummary: "Title quality fallback uses the provider summary.",
+        searchPhrases: [],
+        technologies: [],
+        title: "Codex session",
+        topics: [],
+        unresolved: []
+      }),
+      "[]"
+    );
+
+    expect(querySessions(db, { limit: 10 }).sessions[0]?.title).toBe("Title quality fallback uses the provider summary.");
+    db.close();
+  });
+
+  test("Logbook list titles reject weak review-template live summaries", async () => {
+    const db = await openTestDatabase();
+    seedSession(db, {
+      objective: undefined,
+      sessionId: "session-logbook-review-template",
+      title: "Codex session"
+    });
+    db.prepare(
+      `INSERT INTO session_enrichments (
+        enrichment_id, session_id, enrichment_kind, status, content_fingerprint, prompt_version,
+        provider, model, generated_at, content_json, source_refs_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "enrichment:logbook-review-template",
+      "session-logbook-review-template",
+      "session_capsule",
+      "current",
+      "fingerprint:logbook-review-template",
+      "session-capsule-v1",
+      "fixture",
+      "fixture",
+      "2026-06-25T12:00:00.000Z",
+      JSON.stringify({
+        candidateDecisions: [],
         liveSummary: "Title quality work is ready for review.",
         searchPhrases: [],
         technologies: [],
@@ -152,7 +196,7 @@ describe("session title quality", () => {
       "[]"
     );
 
-    expect(querySessions(db, { limit: 10 }).sessions[0]?.title).toBe("Title quality work is ready for review.");
+    expect(querySessions(db, { limit: 10 }).sessions[0]?.title).toBe("Masthead session");
     db.close();
   });
 });

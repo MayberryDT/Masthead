@@ -41,6 +41,12 @@ export type SessionDossierNarrative = {
     provider?: string;
     model?: string;
     promptVersion?: string;
+    providerStatus?: string;
+    confidence?: "high" | "medium" | "low";
+    missingEvidence?: string[];
+    failureCode?: string;
+    failureMessage?: string;
+    latestFailedAttemptAt?: string;
     validationWarnings?: string[];
     sourceRefs: EvidenceRef[];
   };

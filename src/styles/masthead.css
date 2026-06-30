@@ -4200,6 +4200,40 @@ body {
   line-height: 1.28;
 }
 
+.copy-refresh-badge {
+  position: absolute;
+  z-index: 2;
+  top: 96px;
+  left: var(--space-md);
+  display: inline-flex;
+  max-width: calc(100% - (var(--space-md) * 2));
+  min-height: 22px;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 207, 54, 0.28);
+  border-radius: var(--radius-full);
+  background: rgba(247, 201, 72, 0.15);
+  color: #f8db78;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 3px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-refresh-badge span {
+  color: #91a8ba;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.observability-card-grid.compact .copy-refresh-badge {
+  top: 84px;
+  min-height: 20px;
+  padding: 2px 7px;
+}
+
 .observability-card-facts {
   position: absolute;
   z-index: 2;
@@ -4750,17 +4784,22 @@ body {
   .observability-console,
   .masthead-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    height: 100vh;
+    overflow: auto;
   }
 
   .observability-workspace,
   .masthead-workspace {
     grid-row: 1;
+    min-height: 100vh;
+    overflow: visible;
   }
 
   .observability-sidebar,
   .masthead-sidebar {
     grid-row: 2;
-    min-height: auto;
+    min-height: 520px;
     border-right: 0;
   }
 

@@ -65,7 +65,9 @@ describe("daemon database schema", () => {
       { version: 3, name: "003_session_sources" },
       { version: 4, name: "004_cursor_context" },
       { version: 5, name: "005_import_progress" },
-      { version: 6, name: "006_source_setup" }
+      { version: 6, name: "006_source_setup" },
+      { version: 7, name: "007_live_projection_enrichment_indexes" },
+      { version: 8, name: "008_live_projection_usage_indexes" }
     ]);
     expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     expect((db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toBe("wal");
