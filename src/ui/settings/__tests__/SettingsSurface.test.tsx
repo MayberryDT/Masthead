@@ -82,6 +82,13 @@ describe("Settings surface", () => {
     expect(css).toMatch(/\.settings-toggle > span\s*\{[\s\S]*width: 42px;[\s\S]*height: 24px;/);
     expect(css).toMatch(/\.settings-toggle\.checked > span::after\s*\{[\s\S]*transform: translateX\(20px\);/);
   });
+
+  test("uses shared card entrance motion for settings sections", () => {
+    const css = readFileSync("src/styles/masthead.css", "utf8");
+
+    expect(css).toMatch(/\.usage-summary-strip \.usage-metric,[\s\S]*\.settings-section,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: usage-card-enter/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.settings-section,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: none/);
+  });
 });
 
 const settings: SettingsStateDto = {

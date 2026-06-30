@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import type { UsageStatsDto } from "../../../app/daemonClient";
@@ -35,6 +36,17 @@ describe("UsagePanel", () => {
     expect(html).toContain("Today");
     expect(html).toContain("24h");
     expect(onWindowChange).not.toHaveBeenCalled();
+  });
+
+  test("centers a compact usage toolbar", () => {
+    const css = readFileSync("src/styles/masthead.css", "utf8");
+    const toolbarRule = css.match(/\.usage-toolbar\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+
+    expect(toolbarRule).toContain("justify-self: center;");
+    expect(toolbarRule).toContain("width: fit-content;");
+    expect(toolbarRule).toContain("max-width: 100%;");
+    expect(toolbarRule).toContain("justify-content: center;");
+    expect(toolbarRule).toContain("margin: 0 auto;");
   });
 });
 
