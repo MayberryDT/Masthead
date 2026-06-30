@@ -5434,7 +5434,7 @@ body {
 .observability-console,
 .masthead-shell {
   --folded-control-clip: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
-  --folded-control-texture: repeating-linear-gradient(135deg, rgba(196, 226, 248, 0.022) 0 1px, transparent 1px 13px);
+  --folded-control-texture: repeating-linear-gradient(135deg, rgba(196, 226, 248, 0.012) 0 1px, transparent 1px 18px);
   --folded-control-fill: #04131f;
   --folded-control-fill-hover: #061925;
   --folded-control-top: rgba(246, 251, 255, 0.06);

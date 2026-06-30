@@ -9,8 +9,9 @@ describe("folded sheet-metal control system", () => {
     const option4Rule = cssRuleBody(prototypeHtml, ".d4");
     const foldedTokenRule = cssRuleBodyContaining(mastheadCss, ".masthead-shell", "--folded-control-texture");
 
-    expect(foldedTokenRule).toContainDeclaration(cssDeclaration(option4Rule, "--texture"));
     expect(foldedTokenRule).toContain("--folded-control-clip: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);");
+    expect(cssDeclaration(option4Rule, "--texture")).toContain("repeating-linear-gradient(135deg");
+    expect(foldedTokenRule).toContain("--folded-control-texture: repeating-linear-gradient(135deg, rgba(196, 226, 248, 0.012) 0 1px, transparent 1px 18px);");
 
     for (const selector of [
       ".masthead-shell .observability-toolbar::before",
@@ -104,20 +105,4 @@ function cssDeclaration(ruleBody: string, property: string): string {
     .find((value) => value.startsWith(`${property}:`));
   if (!declaration) throw new Error(`Expected CSS declaration for ${property}`);
   return declaration.replace("--texture", "--folded-control-texture") + ";";
-}
-
-expect.extend({
-  toContainDeclaration(received: string, expected: string) {
-    const pass = received.includes(expected);
-    return {
-      message: () => `expected CSS rule to contain declaration:\n${expected}`,
-      pass
-    };
-  }
-});
-
-declare module "vitest" {
-  interface Assertion<T = any> {
-    toContainDeclaration(expected: string): T;
-  }
 }

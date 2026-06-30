@@ -74,6 +74,11 @@ describe("HistoryPanel", () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("logbook-summary-strip");
     expect(html).toContain("usage-metric sessions");
+    expect(html).toContain("Messages");
+    expect(html).toContain("Tool calls");
+    expect(html).toContain("Date range");
+    expect(html).not.toContain("Records</dt>");
+    expect((html.match(/class="usage-metric /g) ?? []).length).toBe(6);
     expect(html).not.toContain("stat-strip");
     expect(html).not.toContain('<script>alert("x")</script>');
     expect(html).not.toContain("Showing 1 of 1");
@@ -194,8 +199,14 @@ describe("HistoryPanel", () => {
     expect(html).toContain("<table");
     expect(html).toContain("SESSION / MATCH");
     expect(html).toContain("PROJECT");
+    expect(html).toContain("Messages");
+    expect(html).toContain("Tool calls");
+    expect(html).toContain("Date range");
+    expect(html).not.toContain("Records</dt>");
+    expect((html.match(/class="usage-metric /g) ?? []).length).toBe(6);
     expect(html).toContain("logbook-loading-inspector");
-    expect(html).toContain("logbook-skeleton-footer");
+    expect(html).toContain("logbook-footer observability-toolbar metal-toolbar logbook-skeleton-footer");
+    expect(html).toContain("logbook-page-button toolbar-icon-button");
     expect(html).toContain("logbook-skeleton-table-frame");
     expect((html.match(/logbook-skeleton-row/g) ?? []).length).toBe(24);
     expect(html).not.toContain("No sessions");

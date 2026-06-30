@@ -208,6 +208,15 @@ export function HistoryPanel({
     sourceSummary
   });
   const summaryItems = summaryItemsFor(summary, visibleTotal, recordCount);
+  const logbookFooterClassName = [
+    "logbook-footer",
+    "observability-toolbar",
+    "metal-toolbar",
+    showPagination ? "has-pagination" : "",
+    isFirstRunLoading ? "logbook-skeleton-footer" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <section id="history" className="history-panel logbook-panel surface-panel" aria-label="Logbook">
@@ -246,7 +255,7 @@ export function HistoryPanel({
       )}
 
       {!errorState && (showPagination || isFirstRunLoading) ? (
-        <div className={`logbook-footer observability-toolbar metal-toolbar ${showPagination ? "has-pagination" : ""} ${isFirstRunLoading ? "logbook-skeleton-footer" : ""}`.trim()}>
+        <div className={logbookFooterClassName}>
           {isFirstRunLoading ? (
             <LogbookPaginationSkeleton />
           ) : showPagination ? (
@@ -588,7 +597,9 @@ function summaryItemsFor(summary: LogbookSummary | undefined, visibleTotal: numb
       { label: "Sessions", value: formatCount(visibleTotal), tone: "sessions" },
       { label: "Projects", value: "n/a", tone: "projects" },
       { label: "Harnesses", value: "n/a", tone: "runtime" },
-      { label: "Records", value: formatCount(recordCount), tone: "messages" }
+      { label: "Messages", value: formatCount(recordCount), tone: "messages" },
+      { label: "Tool calls", value: "n/a", tone: "tools" },
+      { label: "Date range", value: "n/a", tone: "range" }
     ];
   }
 
