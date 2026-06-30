@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { SettingsStateDto } from "../../../app/daemonClient";
@@ -72,6 +73,14 @@ describe("Settings surface", () => {
     expect(html).toContain("31 sessions");
     expect(html).toContain("7,657 raw source copies");
     expect(html).toContain("Cancel");
+  });
+
+  test("keeps Priority Bay fluid and gives square toggles breathing room", () => {
+    const css = readFileSync("src/styles/settings.css", "utf8");
+
+    expect(css).toMatch(/\.settings-layout-priority-bay\s*\{[\s\S]*max-width: none;/);
+    expect(css).toMatch(/\.settings-toggle > span\s*\{[\s\S]*width: 42px;[\s\S]*height: 24px;/);
+    expect(css).toMatch(/\.settings-toggle\.checked > span::after\s*\{[\s\S]*transform: translateX\(20px\);/);
   });
 });
 

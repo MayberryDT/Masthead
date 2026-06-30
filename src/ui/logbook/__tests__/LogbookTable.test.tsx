@@ -98,6 +98,33 @@ describe("LogbookTable", () => {
     expect(css).toContain("calc(var(--logbook-row-entry-delay) + var(--logbook-row-index) * 14ms)");
   });
 
+  test("renders lifecycle state tokens with explicit semantic classes", () => {
+    const html = renderToStaticMarkup(
+      <LogbookTable
+        density="compact"
+        sessions={[
+          { lifecycle: "running", project: "Masthead", runtime: "codex", sessionId: "running-session", title: "Running session" },
+          { lifecycle: "ended", project: "Masthead", runtime: "codex", sessionId: "ended-session", title: "Ended session" },
+          { lifecycle: "unknown", project: "Masthead", runtime: "codex", sessionId: "unknown-session", title: "Unknown session" },
+          { lifecycle: "blocked", project: "Masthead", runtime: "codex", sessionId: "blocked-session", title: "Blocked session" }
+        ]}
+        onSelect={() => undefined}
+      />
+    );
+
+    expect(html).toContain('class="state-token running"');
+    expect(html).toContain('class="state-token ended"');
+    expect(html).toContain('class="state-token unknown"');
+    expect(html).toContain('class="state-token blocked"');
+  });
+
+  test("uses folded metal lifecycle chips with ended mapped to blue", () => {
+    const css = readFileSync("src/styles/logbook.css", "utf8");
+
+    expect(css).toMatch(/\.logbook-col-state \.state-token\s*\{[\s\S]*border-radius: 1px;[\s\S]*clip-path: var\(--folded-control-clip/);
+    expect(css).toMatch(/\.logbook-col-state \.state-token\.ended\s*\{[\s\S]*border-color: rgba\(46, 167, 255, 0\.34\);[\s\S]*color: #a9d7ff;/);
+  });
+
   test("opens the session when any non-control cell in the row is clicked", async () => {
     const onSelect = vi.fn();
     await renderTable(onSelect);

@@ -144,7 +144,25 @@ function statusLabel(value: string): string {
 
 function stateToneClass(value: string | undefined): string {
   const normalized = value?.toLowerCase() ?? "";
-  if (normalized.includes("fail") || normalized.includes("attention") || normalized.includes("blocked")) return "attention";
-  if (normalized.includes("unknown") || normalized.includes("pending")) return "neutral";
-  return "";
+  if (
+    normalized.includes("fail") ||
+    normalized.includes("attention") ||
+    normalized.includes("blocked") ||
+    normalized.includes("approval")
+  ) {
+    return "blocked";
+  }
+  if (normalized.includes("running") || normalized.includes("active") || normalized.includes("importing") || normalized.includes("editing")) {
+    return "running";
+  }
+  if (
+    normalized.includes("ended") ||
+    normalized.includes("complete") ||
+    normalized.includes("success") ||
+    normalized.includes("indexed")
+  ) {
+    return "ended";
+  }
+  if (normalized.includes("unknown") || normalized.includes("pending")) return "unknown";
+  return "unknown";
 }

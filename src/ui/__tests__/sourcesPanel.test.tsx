@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { SourcesSetupDto } from "../../shared/sourcesSetup";
@@ -281,6 +282,13 @@ describe("SourcesPanel", () => {
     expect(html).toContain("20 sessions");
     expect(html).not.toContain("Source 12");
     expect(html).not.toContain("Source 13");
+  });
+
+  test("uses folded metal box chips for source cards and import queue statuses", () => {
+    const css = readFileSync("src/styles/sources.css", "utf8");
+
+    expect(css).toMatch(/\.source-state\s*\{[\s\S]*border-radius: 1px;[\s\S]*clip-path: var\(--folded-control-clip/);
+    expect(css).toMatch(/\.sources-management \.status-badge\s*\{[\s\S]*border-radius: 1px;[\s\S]*clip-path: var\(--folded-control-clip/);
   });
 });
 
