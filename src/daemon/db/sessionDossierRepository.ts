@@ -18,7 +18,7 @@ import type {
   SessionDossierVerification
 } from "../../shared/sessionDossier.ts";
 import type { SessionTranscriptCoverage } from "../../shared/sessionTranscript.ts";
-import { readCurrentSessionEnrichment } from "./enrichmentRepository.ts";
+import { readCurrentSessionEnrichment, readLatestFailedSessionEnrichment } from "./enrichmentRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 import { getTranscriptCoverage } from "./sessionTranscriptRepository.ts";
 
@@ -436,6 +436,7 @@ function getNarrative(
   messages: MessageRow[]
 ): SessionDossierNarrative {
   const enrichment = readCurrentSessionEnrichment(db, sessionId, "session_capsule");
+  const latestFailure = readLatestFailedSessionEnrichment(db, sessionId, "session_capsule");
   const capsule = enrichment?.content as SessionCapsule | undefined;
   const userMessages = messages.filter((message) => message.role === "user");
   const assistantMessages = messages.filter((message) => message.role === "assistant");
@@ -449,13 +450,30 @@ function getNarrative(
           model: enrichment.model,
           promptVersion: enrichment.promptVersion,
           provider: enrichment.provider,
+          providerStatus: capsule?.providerStatus ?? enrichment.status,
+          confidence: capsule?.confidence,
+          missingEvidence: capsule?.missingEvidence,
+          failureCode: latestFailure?.failureCode,
+          failureMessage: latestFailure?.failureMessage,
+          latestFailedAttemptAt: latestFailure?.generatedAt,
           sourceRefs: enrichment.sourceRefs,
           subjectConfidence: capsule?.subject?.confidence,
           subjectSource: capsule?.subject?.source,
           titleSource: capsule?.titleSource,
           validationWarnings: capsule?.validationWarnings
         }
-      : undefined,
+      : latestFailure
+        ? {
+            failureCode: latestFailure.failureCode,
+            failureMessage: latestFailure.failureMessage,
+            latestFailedAttemptAt: latestFailure.generatedAt,
+            model: latestFailure.model,
+            promptVersion: latestFailure.promptVersion,
+            provider: latestFailure.provider,
+            providerStatus: latestFailure.failureCode ?? latestFailure.status,
+            sourceRefs: latestFailure.sourceRefs
+          }
+        : undefined,
     objective: capsule?.objective ?? getSessionObjective(db, sessionId),
     outcome: capsule?.outcome ?? identity.outcome,
     technologies: capsule?.technologies ?? [],
@@ -687,6 +705,7 @@ function isMcpIncluded(db: MastheadDatabase, sessionId: string): boolean {
 }
 
 function buildCopyableContext(dossier: DossierWithoutReuse, mcpIncluded: boolean): string {
+  const summary = contextSummary(dossier);
   const lines = [
     "# Masthead Session Context",
     "",
@@ -698,8 +717,8 @@ function buildCopyableContext(dossier: DossierWithoutReuse, mcpIncluded: boolean
     `Source session: ${dossier.identity.sourceSessionId}`,
     `Canonical session: ${dossier.identity.sessionId}`,
     "",
-    dossier.narrative.objective ? `Objective: ${dossier.narrative.objective}` : undefined,
-    dossier.narrative.outcome ? `Outcome: ${dossier.narrative.outcome}` : undefined,
+    summary ? `Summary: ${summary}` : undefined,
+    dossier.narrative.latestUserPrompt ? `Latest prompt: ${dossier.narrative.latestUserPrompt}` : undefined,
     "",
     "Files:",
     ...(dossier.files.length > 0 ? dossier.files.slice(0, 12).map((file) => `- ${file.displayPath}`) : ["- None captured"]),
@@ -708,9 +727,19 @@ function buildCopyableContext(dossier: DossierWithoutReuse, mcpIncluded: boolean
     ...(dossier.tools.length > 0 ? dossier.tools.slice(0, 12).map((tool) => `- ${tool.toolName}: ${tool.status ?? "unknown"}`) : ["- None captured"]),
     "",
     `Verification: ${dossier.verification.status}`,
-    `MCP included: ${mcpIncluded ? "yes" : "no"}`
+    `Agent retrieval: ${mcpIncluded ? "included" : "excluded"}`
   ];
   return lines.filter((line): line is string => line !== undefined).join("\n");
+}
+
+function contextSummary(dossier: DossierWithoutReuse): string | undefined {
+  return (
+    dossier.narrative.finalAssistantMessage ??
+    dossier.narrative.liveSummary ??
+    dossier.narrative.outcome ??
+    dossier.narrative.objective ??
+    dossier.identity.title
+  );
 }
 
 function displayPath(path: string): string {

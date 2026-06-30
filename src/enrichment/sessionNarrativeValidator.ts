@@ -68,6 +68,8 @@ function isGeneric(value: string): boolean {
     "masthead session",
     "session is complete",
     "session update",
+    "codex hook event",
+    "runtime signal",
     "recent activity",
     "masthead session had recent activity",
     "updated files",
@@ -87,7 +89,12 @@ function isWeakUpdatedPhrase(value: string): boolean {
   return (
     /^updated\s+(files?|changes?|done|deployed|complete|completed|session|work|recent activity)(?:\s+.*)?[.!?]?$/i.test(
       value
-    ) || /^changed\s+files?\s+were\s+updated(?:\s+.*)?[.!?]?$/i.test(value)
+    ) ||
+    /^codex hook event\b/i.test(value) ||
+    /^changed\s+files?\s+were\s+updated(?:\s+.*)?[.!?]?$/i.test(value) ||
+    /\bwork is focused on\b/i.test(value) ||
+    /\bbeing (?:fixed|updated|reviewed|validated) for\b/i.test(value) ||
+    /\bhas recent (?:[\w .-]+\s+)?activity\b/i.test(value)
   );
 }
 

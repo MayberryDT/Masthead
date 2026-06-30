@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { deterministicCapsuleFromFacts, fingerprintSessionFacts } from "../sessionCompiler.ts";
+import { deterministicCapsuleFromFacts, fingerprintSessionFacts, SESSION_CAPSULE_PROMPT_VERSION } from "../sessionCompiler.ts";
 
 describe("session compiler", () => {
   test("creates deterministic capsule without assigning process truth to the model", () => {
@@ -16,7 +16,14 @@ describe("session compiler", () => {
     const capsule = deterministicCapsuleFromFacts(facts);
 
     expect(capsule.title).toBe("Masthead data layer");
+    expect(capsule.confidence).toBe("medium");
+    expect(capsule.missingEvidence).toContain("narrative facts");
+    expect(capsule.providerStatus).toBe("success");
     expect(capsule.searchPhrases).toEqual(expect.arrayContaining(["Masthead", "src/daemon/main.ts"]));
     expect(fingerprintSessionFacts(facts)).toHaveLength(64);
+  });
+
+  test("uses v3 capsule prompt contract", () => {
+    expect(SESSION_CAPSULE_PROMPT_VERSION).toBe("session-capsule-v3");
   });
 });

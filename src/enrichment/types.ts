@@ -28,6 +28,9 @@ export type SessionNarrativeSubject = {
 export type SessionCapsule = {
   title: string;
   titleSource?: SessionTitleSource;
+  confidence?: "high" | "medium" | "low";
+  missingEvidence?: string[];
+  providerStatus?: string;
   subject?: SessionNarrativeSubject;
   action?: string;
   object?: string;

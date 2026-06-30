@@ -30,6 +30,29 @@ describe("session narrative facts", () => {
     expect(facts.technologies).toContain("TypeScript");
     expect(facts.testsPassed).toBe(true);
     expect(facts.topics).toContain("mcp");
+    expect(facts.commands[0]).toMatchObject({
+      exitCode: 0,
+      name: "npm test -- --run src/mcp/__tests__/toolsList.test.ts",
+      outputPreview: expect.stringContaining("adapter tests passed"),
+      status: "succeeded"
+    });
+    expect(facts.commands[0]?.outputPreview).not.toContain("/home/tyler");
+    expect(facts.commands[0]?.outputPreview).not.toContain("sk-secret");
+    expect(facts.commands[0]?.outputPreview?.length).toBeLessThanOrEqual(240);
+    expect(facts.coverage).toMatchObject({
+      fileEffects: 3,
+      hasUsableTranscript: true,
+      level: "complete",
+      messageCount: 2,
+      toolCalls: 1,
+      userMessages: 1,
+      assistantMessages: 1
+    });
+    expect(facts.eventSummaries).toContain("MCP launch validation passed");
+    expect(facts.eventSummaries).not.toContain("Codex hook event");
+    expect(facts.eventSummaries).not.toContain("P3");
+    expect(facts.latestFeedbackSummary).toBeUndefined();
+    expect(facts.topics).not.toContain("sources");
 
     db.close();
   });
@@ -111,7 +134,28 @@ function seedNarrativeSession(db: MastheadDatabase): void {
   ).run("tool:test", "session-narrative-facts", "npm test -- --run src/mcp/__tests__/toolsList.test.ts", now, "{}");
   db.prepare(
     `INSERT INTO tool_results (
-      tool_result_id, tool_call_id, session_id, status, exit_code, completed_at, source_ref_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("result:test", "tool:test", "session-narrative-facts", "succeeded", 0, "2026-06-26T14:03:00.000Z", "{}");
+      tool_result_id, tool_call_id, session_id, status, output_redacted, output_hash, exit_code, completed_at, source_ref_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "result:test",
+    "tool:test",
+    "session-narrative-facts",
+    "succeeded",
+    `adapter tests passed from /home/tyler/private with key sk-secret ${"x".repeat(260)}`,
+    "hash:output",
+    0,
+    "2026-06-26T14:03:00.000Z",
+    "{}"
+  );
+  for (const [id, title] of [
+    ["signal:hook", "Codex hook event"],
+    ["signal:p3", "P3"],
+    ["signal:useful", "MCP launch validation passed"]
+  ]) {
+    db.prepare(
+      `INSERT INTO runtime_signals (
+        signal_id, session_id, signal_kind, severity, title, details_json, observed_at, source_ref_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, "session-narrative-facts", "status", "info", title, "{}", now, "{}");
+  }
 }

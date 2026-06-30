@@ -11,4 +11,9 @@ describe("daemon config", () => {
     expect(config.allowedOrigins).toContain("http://localhost:5180");
     expect(config.allowedOrigins).toContain("masthead://app");
   });
+
+  test("maps migration quick-check skip from the environment", () => {
+    expect(daemonConfigFromEnv({}).skipMigrationQuickCheck).toBe(false);
+    expect(daemonConfigFromEnv({ MASTHEAD_SKIP_MIGRATION_QUICK_CHECK: "1" }).skipMigrationQuickCheck).toBe(true);
+  });
 });

@@ -34,6 +34,12 @@ Good session copy is:
 
 A string may mention only facts present in normalized rows, source metadata, file effects, command/tool records, checkpoints, latest feedback summaries, or LLM output that is linked to those inputs.
 
+## Board live copy
+
+Board live copy attempts a fresh rewrite on each configured Board refresh when remote live copy is enabled and configured. The default Board cadence is 10 seconds, and the live copy cache is disabled by default. Failures keep the local baseline copy visible but attach refresh metadata such as `timeout`, `api_error`, `invalid_output`, or `validation_failed`; they are not labeled as successful LLM copy.
+
+Each projection can include `copyRefreshSummary`, and each card can include `copyRefresh`. Failed refreshes appear on cards as AI headline failure state.
+
 ## Dossier reuse
 
 The session dossier may reuse `title`, `liveSummary`, and `outcome` from the current session enrichment, but its copyable context packet must stay canonical and evidence-backed. It should combine the enriched narrative with canonical identity, source session ID, file effects, tools, verification status, token usage, MCP inclusion, and provenance rather than exposing raw transcript JSON or full command output.

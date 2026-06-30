@@ -1,0 +1,163 @@
+import { describe, expect, test } from "vitest";
+import { buildBoardLiveCopyFacts } from "../boardLiveCopyFacts";
+import type { GitSnapshot, NormalizedEvent, SessionCardView } from "../types";
+
+describe("board live copy facts", () => {
+  test("collects recent events while filtering low-value hook noise", () => {
+    const facts = buildBoardLiveCopyFacts({
+      attentionItems: [
+        {
+          affectedCommandIds: ["cmd-test"],
+          affectedPaths: [],
+          createdAt: "2026-06-29T12:01:00.000Z",
+          evidence: [],
+          itemId: "attention-1",
+          project: "Masthead",
+          sessionId: "session-1",
+          severity: "P2",
+          suggestedNextAction: "Review failed command.",
+          support: "deterministic",
+          title: "Test command failed",
+          type: "command_failed"
+        }
+      ],
+      card: card(),
+      conflicts: [],
+      events: [
+        event("event-hook", "session.started", "Codex hook event"),
+        event("event-p3", "command.finished", "P3", { exitCode: 0, normalizedCommand: "shell" }),
+        event("event-failed", "command.finished", "npm test failed", { exitCode: 1, normalizedCommand: "npm test" }),
+        event("event-file", "file.changed", "Updated session dossier", { path: "src/ui/session-dossier/SessionDossier.tsx" })
+      ],
+      gitSnapshots: [snapshot()]
+    });
+
+    expect(facts.recentEvents.map((event) => event.summary)).toEqual(["Updated session dossier", "npm test failed"]);
+    expect(facts.recentToolNames).toContain("npm test");
+    expect(facts.recentToolNames).not.toContain("shell");
+    expect(facts.recentFileBasenames).toEqual(expect.arrayContaining(["SessionDossier.tsx", "enrichmentCoordinator.ts"]));
+    expect(facts.recentCommandFailures).toEqual(["npm test failed"]);
+    expect(facts.attentionTitles).toEqual(["Test command failed"]);
+  });
+
+  test("filters generic harness tool names out of copy facts", () => {
+    const facts = buildBoardLiveCopyFacts({
+      attentionItems: [],
+      card: card(),
+      conflicts: [],
+      events: [
+        event("event-read", "command.finished", "Read completed", { toolName: "Read" }),
+        event("event-grep", "command.finished", "Grep completed", { toolName: "Grep" }),
+        event("event-command", "command.finished", "Typecheck completed", { normalizedCommand: "npm run typecheck" })
+      ],
+      gitSnapshots: []
+    });
+
+    expect(facts.recentToolNames).toEqual(["npm run typecheck"]);
+  });
+
+  test("drops stale MCP-only canonical enrichment when current activity is unrelated", () => {
+    const facts = buildBoardLiveCopyFacts({
+      attentionItems: [],
+      canonicalEnrichment: {
+        liveSummary: "MCP launch config validation is being reviewed for Masthead.",
+        title: "MCP launch config validation",
+        topics: ["mcp"]
+      },
+      card: card(),
+      conflicts: [],
+      events: [event("event-copy", "file.changed", "Reworked live card copy for the Now surface.")],
+      gitSnapshots: [snapshot()]
+    });
+
+    expect(facts.canonicalEnrichment).toBeUndefined();
+  });
+
+  test("keeps MCP canonical enrichment when current activity explicitly mentions MCP", () => {
+    const facts = buildBoardLiveCopyFacts({
+      attentionItems: [],
+      canonicalEnrichment: {
+        liveSummary: "MCP launch config validation has passing tools-list coverage.",
+        title: "MCP launch config validation",
+        topics: ["mcp"]
+      },
+      card: card(),
+      conflicts: [],
+      events: [event("event-mcp", "file.changed", "Verified MCP tools-list coverage.")],
+      gitSnapshots: []
+    });
+
+    expect(facts.canonicalEnrichment).toMatchObject({
+      liveSummary: "MCP launch config validation has passing tools-list coverage.",
+      title: "MCP launch config validation"
+    });
+  });
+});
+
+function card(): SessionCardView {
+  return {
+    changedFileCount: 2,
+    copy: {
+      headline: "Dossier enrichment is active now.",
+      reason: "This session is active and has recent activity.",
+      source: "deterministic",
+      status: "Work is active."
+    },
+    durationLabel: "2m",
+    identityConfidence: "direct",
+    indicators: [],
+    isExpanded: false,
+    lastActivity: "2026-06-29T12:02:00.000Z",
+    lastActivityLabel: "now",
+    lifecycle: "running",
+    primaryStatus: "editing",
+    priorityRank: 50,
+    project: "Masthead",
+    safeActions: ["open_source_session"],
+    sessionId: "session-1",
+    stateLabel: "Running",
+    title: "Dossier enrichment"
+  };
+}
+
+function event(
+  eventId: string,
+  type: NormalizedEvent["type"],
+  summary: string,
+  payload: Record<string, unknown> = {}
+): NormalizedEvent {
+  return {
+    eventId,
+    evidence: [],
+    occurredAt: `2026-06-29T12:0${eventId.length % 4}:00.000Z`,
+    payload,
+    payloadHash: `hash:${eventId}`,
+    receivedAt: "2026-06-29T12:00:00.000Z",
+    schemaVersion: 1,
+    sensitivity: "metadata",
+    sessionId: "session-1",
+    source: { adapter: "codex", surface: "fixture" },
+    summary,
+    type
+  };
+}
+
+function snapshot(): GitSnapshot {
+  return {
+    branch: "main",
+    changedPaths: [
+      {
+        path: "src/enrichment/enrichmentCoordinator.ts",
+        sensitivity: "metadata",
+        staged: false,
+        status: "modified"
+      }
+    ],
+    gitCommonDir: "/repo/.git",
+    observedAt: "2026-06-29T12:02:00.000Z",
+    repoRoot: "/repo",
+    sessionId: "session-1",
+    snapshotId: "snapshot-1",
+    worktreePath: "/repo"
+  };
+}

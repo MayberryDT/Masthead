@@ -361,6 +361,13 @@
   line-height: 1.4;
 }
 
+.dossier-warning {
+  margin: 0;
+  color: var(--yellow);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .dossier-filter-row,
 .dossier-hero-actions,
 .dossier-copy-actions {

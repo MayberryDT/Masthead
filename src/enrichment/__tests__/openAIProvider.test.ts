@@ -1,15 +1,31 @@
 import { describe, expect, test, vi } from "vitest";
+import { createDeterministicEnrichmentProvider } from "../deterministicProvider.ts";
 import { createOpenAIEnrichmentProvider } from "../openAIProvider.ts";
 import type { SessionFacts } from "../sessionCompiler.ts";
 
 describe("OpenAI enrichment provider", () => {
   test("uses validated Responses output when enabled and configured", async () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as { input: string };
+      const body = JSON.parse(String(init?.body)) as {
+        input: string;
+        text: { format: { schema: { required: string[] } } };
+      };
       expect(body.input).not.toContain("/home/tyler");
       expect(body.input).not.toContain("OPENAI_API_KEY");
+      expect(body.text.format.schema.required).toEqual(["title", "liveSummary", "searchSummary", "confidence", "missingEvidence"]);
+      expect(JSON.parse(body.input).facts.coverage).toMatchObject({
+        level: "complete",
+        messageCount: 2
+      });
+      expect(JSON.parse(body.input).facts.commands[0]).toMatchObject({
+        exitCode: 0,
+        name: "npm test -- --run src/mcp/__tests__/toolsList.test.ts",
+        status: "succeeded"
+      });
       return responseWithOutput({
-        liveSummary: "MCP launch config validation is being reviewed for Masthead.",
+        confidence: "high",
+        liveSummary: "MCP launch config validation has tools-list coverage.",
+        missingEvidence: [],
         outcome: "Added validation and tools-list coverage for MCP launch config.",
         searchSummary: "Masthead session for MCP launch config validation with tools-list coverage.",
         title: "MCP launch config validation"
@@ -22,18 +38,24 @@ describe("OpenAI enrichment provider", () => {
       model: "test-model"
     });
 
-    const capsule = await provider.enrich({ facts: facts() });
+    const result = await provider.enrich({ facts: facts() });
 
     expect(provider.id).toBe("openai");
     expect(provider.model).toBe("test-model");
-    expect(capsule.title).toBe("MCP launch config validation");
-    expect(capsule.titleSource).toBe("llm");
-    expect(capsule.liveSummary).toBe("MCP launch config validation is being reviewed for Masthead.");
-    expect(capsule.searchSummary).toContain("tools-list coverage");
+    expect(result.status).toBe("success");
+    expect(result.source).toBe("llm");
+    expect(result.provider).toBe("openai");
+    expect(result.model).toBe("test-model");
+    expect(result.capsule?.title).toBe("MCP launch config validation");
+    expect(result.capsule?.titleSource).toBe("llm");
+    expect(result.capsule?.confidence).toBe("high");
+    expect(result.capsule?.missingEvidence).toEqual([]);
+    expect(result.capsule?.liveSummary).toBe("MCP launch config validation has tools-list coverage.");
+    expect(result.capsule?.searchSummary).toContain("tools-list coverage");
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  test("falls back to deterministic output when Responses output is invalid", async () => {
+  test("returns validation failure without deterministic fallback when Responses output is invalid", async () => {
     const provider = createOpenAIEnrichmentProvider({
       apiKey: "test-key",
       enabled: true,
@@ -46,13 +68,15 @@ describe("OpenAI enrichment provider", () => {
       )
     });
 
-    const capsule = await provider.enrich({ facts: facts() });
+    const result = await provider.enrich({ facts: facts() });
 
-    expect(capsule.titleSource).toBe("deterministic");
-    expect(capsule.title).toBe("MCP launch config validation");
+    expect(result.status).toBe("validation_failed");
+    expect(result.source).toBe("none");
+    expect(result.capsule).toBeUndefined();
+    expect(result.validationFailures).toContain("title");
   });
 
-  test("does not call Responses when disabled", async () => {
+  test("returns disabled without deterministic fallback when OpenAI enrichment is disabled", async () => {
     const fetchImpl = vi.fn();
     const provider = createOpenAIEnrichmentProvider({
       apiKey: "test-key",
@@ -60,11 +84,42 @@ describe("OpenAI enrichment provider", () => {
       fetchImpl
     });
 
-    const capsule = await provider.enrich({ facts: facts() });
+    const result = await provider.enrich({ facts: facts() });
 
-    expect(provider.id).toBe("deterministic");
-    expect(capsule.titleSource).toBe("deterministic");
+    expect(provider.id).toBe("openai");
+    expect(result.status).toBe("disabled");
+    expect(result.source).toBe("none");
+    expect(result.capsule).toBeUndefined();
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  test("returns not_configured when OpenAI enrichment is enabled without an API key", async () => {
+    const fetchImpl = vi.fn();
+    const provider = createOpenAIEnrichmentProvider({
+      enabled: true,
+      fetchImpl
+    });
+
+    const result = await provider.enrich({ facts: facts() });
+
+    expect(result.status).toBe("not_configured");
+    expect(result.source).toBe("none");
+    expect(result.provider).toBe("openai");
+    expect(result.capsule).toBeUndefined();
+    expect(result.failureMessage).toContain("no API key");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  test("deterministic provider is explicit local enrichment", async () => {
+    const result = await createDeterministicEnrichmentProvider().enrich({ facts: facts() });
+
+    expect(result).toMatchObject({
+      status: "success",
+      source: "deterministic",
+      provider: "deterministic",
+      model: "local-rules"
+    });
+    expect(result.capsule?.titleSource).toBe("deterministic");
   });
 });
 
@@ -78,7 +133,25 @@ function facts(): SessionFacts {
       buildFailed: false,
       buildPassed: false,
       checkpointSummaries: [],
-      commands: [{ category: "test", name: "npm test -- --run src/mcp/__tests__/toolsList.test.ts", status: "succeeded" }],
+      commands: [
+        {
+          category: "test",
+          exitCode: 0,
+          name: "npm test -- --run src/mcp/__tests__/toolsList.test.ts",
+          outputPreview: "tools-list coverage passed",
+          status: "succeeded"
+        }
+      ],
+      coverage: {
+        assistantMessages: 1,
+        fileEffects: 1,
+        hasUsableTranscript: true,
+        level: "complete",
+        messageCount: 2,
+        toolCalls: 1,
+        tokenUsageRows: 0,
+        userMessages: 1
+      },
       deployMentioned: false,
       eventSummaries: [],
       fileBasenames: ["Agent Access Panel"],
@@ -106,7 +179,7 @@ function facts(): SessionFacts {
   };
 }
 
-function responseWithOutput(output: Record<string, string>): Response {
+function responseWithOutput(output: Record<string, unknown>): Response {
   return {
     ok: true,
     json: async () => ({

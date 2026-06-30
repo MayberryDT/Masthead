@@ -161,10 +161,14 @@ describe("SessionDossier", () => {
     expect(html).toContain("Total tokens");
     expect(html).toContain("Input tokens");
     expect(html).toContain("Output tokens");
-    expect(html).toContain("Enrichment");
+    expect(html).toContain("Session summary");
     expect(html).toContain("dossier-panel-primary");
-    expect(html).toContain("Objective: Fix the OAuth return path. Outcome: OAuth route still fails in one edge case.");
-    expect(html).toContain("Fix the OAuth return path.");
+    expect(html).toContain("Transcript summary");
+    expect(html).toContain("OAuth route still fails for missing state.");
+    expect(html).not.toContain("Objective:");
+    expect(html).not.toContain("Outcome:");
+    expect(html).not.toContain(">Objective<");
+    expect(html).not.toContain(">Outcome<");
     expect(html).toContain("Transcript");
     expect(html).toContain("dossier-panel-transcript");
     expect(html).toContain("dossier-transcript-results");
@@ -445,7 +449,7 @@ describe("SessionDossier", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(writeText).toHaveBeenCalledWith("# Masthead Session Context\nMCP included: yes");
+    expect(writeText).toHaveBeenCalledWith("# Masthead Session Context\nSummary: OAuth route still fails in one edge case.\nAgent retrieval: included");
     expect(host.textContent).toContain("Copied.");
     root.unmount();
   });
@@ -679,7 +683,7 @@ function dossier(): SessionDossierDto {
     ],
     reuse: {
       canonicalSessionId: "canonical-session-1",
-      copyableContext: "# Masthead Session Context\nMCP included: yes",
+      copyableContext: "# Masthead Session Context\nSummary: OAuth route still fails in one edge case.\nAgent retrieval: included",
       mcpIncluded: true,
       sourceConfidence: "authoritative",
       sourceRuntime: "codex",

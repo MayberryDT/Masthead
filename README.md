@@ -37,7 +37,9 @@ Live Now is a view over collected session data, not the product category.
   bounded scanners.
 - Transcript import breadth and exclusion policy tuning.
 - Optional remote enrichment. It is off by default and must stay scoped,
-  redacted, previewable, and auditable when enabled.
+  redacted, previewable, strict, and auditable when enabled. Remote provider
+  failures are surfaced in diagnostics and dossier provenance instead of being
+  silently replaced by local copy.
 - Longer packaged desktop release-smoke automation.
 
 ## Install

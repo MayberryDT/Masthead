@@ -1,10 +1,21 @@
-import { describe, expect, test, vi } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   createOpenAISessionCopyEnricher,
   rewriteSessionCopyWithOpenAI
 } from "../openaiSessionCopy";
+import { createEnrichmentAuditLogger } from "../../enrichment/enrichmentAudit";
 import { buildDeterministicSessionCopy, toSessionCopyInput } from "../sessionCopy";
 import type { LiveBoardProjection, SessionCardView } from "../types";
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
+  tempDirs.length = 0;
+});
 
 describe("OpenAI session copy", () => {
   test("does not call OpenAI when disabled or missing a key", async () => {
@@ -13,11 +24,10 @@ describe("OpenAI session copy", () => {
     const fetchImpl = vi.fn();
 
     await expect(rewriteSessionCopyWithOpenAI(input, fallback, { enabled: false, apiKey: "present", fetchImpl })).resolves.toMatchObject({
-      copy: fallback,
       status: "disabled"
     });
     await expect(rewriteSessionCopyWithOpenAI(input, fallback, { enabled: true, fetchImpl })).resolves.toMatchObject({
-      copy: fallback,
+      failureMessage: expect.stringContaining("not configured"),
       status: "not_configured"
     });
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -54,9 +64,9 @@ describe("OpenAI session copy", () => {
               {
                 type: "output_text",
                 text: JSON.stringify({
-                  headline: "OAuth callback changes report completion and need review.",
+                  headline: "OAuth callback changes have a recent completion note.",
                   status: "Session reports completion.",
-                  reason: "The latest feedback mentions completion, while deterministic state still needs review."
+                  reason: "The latest feedback mentions completion evidence."
                 })
               }
             ]
@@ -75,7 +85,7 @@ describe("OpenAI session copy", () => {
     expect(result).toMatchObject({
       status: "llm",
       copy: {
-        headline: "OAuth callback changes report completion and need review.",
+        headline: "OAuth callback changes have a recent completion note.",
         source: "llm"
       }
     });
@@ -155,7 +165,7 @@ describe("OpenAI session copy", () => {
     expect(body.input).not.toContain("Tyler must act");
   });
 
-  test("falls back on invalid output", async () => {
+  test("returns validation failure without fallback copy on invalid output", async () => {
     const input = toSessionCopyInput(cardView({ lifecycle: "running", primaryStatus: "editing" }), [], []);
     const fallback = buildDeterministicSessionCopy(input);
     const fetchImpl = vi.fn().mockResolvedValue({
@@ -170,13 +180,16 @@ describe("OpenAI session copy", () => {
       })
     });
 
-    await expect(rewriteSessionCopyWithOpenAI(input, fallback, { enabled: true, apiKey: "key", fetchImpl })).resolves.toMatchObject({
-      copy: fallback,
-      status: "invalid_output"
+    const result = await rewriteSessionCopyWithOpenAI(input, fallback, { enabled: true, apiKey: "key", fetchImpl });
+
+    expect(result).toMatchObject({
+      status: "validation_failed",
+      validationReason: "invalid_shape"
     });
+    expect(result.copy).toBeUndefined();
   });
 
-  test("caches successful copy overlays by sanitized input", async () => {
+  test("rewrites every projection by default instead of using a 10 minute cache", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -210,8 +223,182 @@ describe("OpenAI session copy", () => {
 
     expect(first.cards[0]?.copy.source).toBe("llm");
     expect(second.cards[0]?.copy.source).toBe("llm");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(first.cards[0]?.copyRefresh).toMatchObject({ status: "success" });
+    expect(second.cards[0]?.copyRefresh).toMatchObject({ status: "success" });
+    expect(enricher.status()).toMatchObject({ enabled: true, configured: true, cacheEntries: 0 });
+  });
+
+  test("uses the card copy input evidence when refreshing live copy", async () => {
+    const copyInput = toSessionCopyInput(cardView(), [], [], {
+      facts: {
+        attentionTitles: [],
+        changedFileCount: 0,
+        conflictTitles: [],
+        lifecycle: "running",
+        primaryStatus: "editing",
+        project: "Masthead",
+        recentCommandFailures: [],
+        recentEvents: [
+          {
+            occurredAt: "2026-06-30T10:00:00.000Z",
+            summary: "Moved the File button to the far right of the Logbook toolbar.",
+            type: "session.completed"
+          }
+        ],
+        recentFileBasenames: ["LogbookToolbar.tsx"],
+        recentToolNames: [],
+        sessionId: "session-1"
+      }
+    });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  headline: "This session is active now.",
+                  status: "Working now",
+                  reason: "This session is active and has recent activity."
+                })
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const enricher = createOpenAISessionCopyEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      now: () => 1_000
+    });
+    const projection = liveProjection([{ ...cardView(), copyInput } as SessionCardView & { copyInput: typeof copyInput }]);
+
+    await enricher.enrichProjection(projection);
+
+    const [, request] = fetchImpl.mock.calls[0]!;
+    expect(JSON.parse(request.body).input).toContain("Moved the File button to the far right of the Logbook toolbar.");
+  });
+
+  test("cache is opt-in for successful copy overlays", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  headline: "This session is active now.",
+                  status: "Working now",
+                  reason: "This session is active and has recent activity."
+                })
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const enricher = createOpenAISessionCopyEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      now: () => 1_000,
+      ttlMs: 10 * 60_000
+    });
+    const projection = liveProjection([cardView()]);
+
+    const first = await enricher.enrichProjection(projection);
+    const second = await enricher.enrichProjection(first);
+
+    expect(first.cards[0]?.copy.source).toBe("llm");
+    expect(second.cards[0]?.copy.source).toBe("llm");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(enricher.status()).toMatchObject({ enabled: true, configured: true, cacheEntries: 1 });
+  });
+
+  test("provider failure keeps baseline copy and surfaces refresh metadata", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    const enricher = createOpenAISessionCopyEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      now: () => 1_000
+    });
+    const projection = liveProjection([cardView()]);
+
+    const enriched = await enricher.enrichProjection(projection);
+
+    expect(enriched.cards[0]?.copy).toEqual(projection.cards[0]?.copy);
+    expect(enriched.cards[0]?.copy.source).toBe("deterministic");
+    expect(enriched.cards[0]?.copyRefresh).toMatchObject({
+      failureMessage: "OpenAI live copy request failed with HTTP 500.",
+      provider: "openai",
+      status: "api_error"
+    });
+    expect(enriched.copyRefreshSummary).toMatchObject({
+      requested: 1,
+      succeeded: 0,
+      failed: 1,
+      disabled: 0
+    });
+  });
+
+  test("writes board audit events for each refresh when enabled", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-board-audit-"));
+    tempDirs.push(tempDir);
+    const auditFile = join(tempDir, "audit.jsonl");
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  headline: "This session is active now.",
+                  status: "Working now",
+                  reason: "This session is active and has recent activity."
+                })
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const enricher = createOpenAISessionCopyEnricher({
+      auditLogger: createEnrichmentAuditLogger({
+        MASTHEAD_ENRICHMENT_AUDIT: "1",
+        MASTHEAD_ENRICHMENT_AUDIT_FILE: auditFile
+      }),
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      now: (() => {
+        let value = 1_000;
+        return () => {
+          value += 1;
+          return value;
+        };
+      })()
+    });
+    const projection = liveProjection([cardView()]);
+
+    await enricher.enrichProjection(projection);
+    await enricher.enrichProjection(projection);
+
+    const events = (await readFile(auditFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { kind: string });
+    expect(events.filter((event) => event.kind === "board.started")).toHaveLength(2);
+    expect(events.filter((event) => event.kind === "board.applied")).toHaveLength(2);
   });
 });
 

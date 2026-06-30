@@ -1,0 +1,6 @@
+{
+  "name": "files and commands",
+  "project": "Masthead",
+  "files": ["src/mcp/server.ts"],
+  "commands": ["npm test -- --run src/mcp/__tests__/tools.test.ts"]
+}

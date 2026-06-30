@@ -675,6 +675,51 @@ describe("observability session card", () => {
     expect(html).not.toContain("Hermes");
   });
 
+  test("renders live copy refresh failures without labeling local copy as LLM output", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          copy: {
+            headline: "Refactor auth flow",
+            reason: "Work is moving through implementation.",
+            source: "deterministic",
+            status: "Added token refresh logic"
+          },
+          copyRefresh: {
+            failureMessage: "OpenAI live copy request failed with HTTP 500.",
+            provider: "openai",
+            requestedAt: "2026-06-23T02:04:00.000Z",
+            status: "api_error"
+          }
+        })}
+        onToggle={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Refactor auth flow");
+    expect(html).toContain("AI headline failed");
+    expect(html).toContain("api_error");
+    expect(html).not.toContain("source: llm");
+  });
+
+  test("does not render a live copy badge for successful refreshes", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          copyRefresh: {
+            provider: "openai",
+            requestedAt: "2026-06-23T02:04:00.000Z",
+            status: "success"
+          }
+        })}
+        onToggle={() => undefined}
+      />
+    );
+
+    expect(html).not.toContain("AI headline failed");
+    expect(html).not.toContain("AI headline not configured");
+  });
+
   test("does not render captured thinking values as a primary card fact", () => {
     const html = renderToStaticMarkup(
       <SessionBoard cards={[session({ thinkingLevel: "Extra High" })]} variant="observability" onOpenSession={() => undefined} />

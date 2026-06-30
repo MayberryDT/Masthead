@@ -5,7 +5,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import type { AdapterMaturity } from "../adapters/capabilities.ts";
 import { adapterRecordFromCodexHook, codexHookSource } from "../adapters/codex/hookAdapter.ts";
 import { adapterForRuntime } from "../adapters/registry.ts";
-import { createEnrichmentCoordinator } from "../enrichment/enrichmentCoordinator.ts";
+import { createDeterministicEnrichmentProvider } from "../enrichment/deterministicProvider.ts";
+import { createEnrichmentCoordinator, EnrichmentFailedError } from "../enrichment/enrichmentCoordinator.ts";
 import { createOpenAIEnrichmentProvider } from "../enrichment/openAIProvider.ts";
 import { RUNTIME_KINDS, type AdapterDiagnostic, type RuntimeKind } from "../adapters/types.ts";
 import type { DiscoveredSource } from "../adapters/types.ts";
@@ -115,7 +116,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         await backupDatabaseBeforeMigration(config.databasePath);
       }
       migrateDatabase(database);
-      if (pendingMigrations) quickCheckMastheadDatabase(database);
+      if (pendingMigrations && !config.skipMigrationQuickCheck) quickCheckMastheadDatabase(database);
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
       markInterruptedImportJobs(database);
 
@@ -146,16 +147,20 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const sessionCopyEnricher = createOpenAISessionCopyEnricher({
       enabled: config.llmCopyEnabled,
       apiKey: config.openaiApiKey,
-      model: config.openaiModel
+      model: config.openaiModel,
+      ttlMs: config.liveCopyCacheMs,
+      timeoutMs: config.liveCopyTimeoutMs,
+      projectionBudgetMs: config.liveCopyProjectionBudgetMs,
+      maxConcurrent: config.liveCopyMaxConcurrent && config.liveCopyMaxConcurrent > 0 ? config.liveCopyMaxConcurrent : undefined
     });
-    const enrichment = createEnrichmentCoordinator(
-      database,
-      createOpenAIEnrichmentProvider({
-        apiKey: config.openaiApiKey,
-        enabled: config.llmCopyEnabled,
-        model: config.openaiModel
-      })
-    );
+    const enrichmentProvider = config.llmCopyEnabled
+      ? createOpenAIEnrichmentProvider({
+          apiKey: config.openaiApiKey,
+          enabled: true,
+          model: config.openaiModel
+        })
+      : createDeterministicEnrichmentProvider();
+    const enrichment = createEnrichmentCoordinator(database, enrichmentProvider);
     const queuedEnrichmentSessionIds = new Set<string>();
     let enrichmentQueueScheduled = false;
     const daemonInstanceId = randomUUID();
@@ -186,7 +191,22 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         await enrichment.ensureCurrent(sessionId);
         indexCanonicalSessionSearch(database, sessionId);
       } catch (error) {
-        console.error("[masthead] session enrichment failed", { sessionId, error });
+        recordRuntimeDiagnostic({
+          details:
+            error instanceof EnrichmentFailedError
+              ? {
+                  failureCode: error.status,
+                  failureMessage: error.failureMessage,
+                  model: error.model,
+                  provider: error.provider,
+                  sessionId,
+                  status: error.status
+                }
+              : { error, sessionId },
+          kind: "enrichment_failed",
+          message: `Session enrichment failed for ${sessionId}`,
+          severity: "warning"
+        });
       }
       if ((index + 1) % 5 === 0) await yieldToEventLoop();
     }
@@ -196,6 +216,66 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         void flushEnrichmentQueue();
       });
     }
+  }
+
+  async function rebuildEnrichments(input: Record<string, unknown>): Promise<{
+    requested: number;
+    succeeded: number;
+    failed: number;
+    sessions: Array<{ sessionId: string; status: "succeeded" | "failed"; failureCode?: string; failureMessage?: string }>;
+  }> {
+    const limit = parseBoundedInteger(String(input.limit ?? "100"), 100, 1, 500);
+    if (!limit.ok) throw new Error("invalid_limit");
+    const sessionIds = selectEnrichmentRebuildSessionIds(database, input, limit.value);
+    const sessions: Array<{ sessionId: string; status: "succeeded" | "failed"; failureCode?: string; failureMessage?: string }> = [];
+    let succeeded = 0;
+    let failed = 0;
+    for (const sessionId of sessionIds) {
+      try {
+        await enrichment.enrich(sessionId);
+        indexCanonicalSessionSearch(database, sessionId);
+        succeeded += 1;
+        sessions.push({ sessionId, status: "succeeded" });
+      } catch (error) {
+        failed += 1;
+        if (error instanceof EnrichmentFailedError) {
+          recordRuntimeDiagnostic({
+            details: {
+              failureCode: error.status,
+              failureMessage: error.failureMessage,
+              model: error.model,
+              provider: error.provider,
+              sessionId,
+              status: error.status
+            },
+            kind: "enrichment_failed",
+            message: `Session enrichment failed for ${sessionId}`,
+            severity: "warning"
+          });
+          sessions.push({
+            failureCode: error.status,
+            failureMessage: error.failureMessage,
+            sessionId,
+            status: "failed"
+          });
+        } else {
+          recordRuntimeDiagnostic({
+            details: { error, sessionId },
+            kind: "enrichment_failed",
+            message: `Session enrichment failed for ${sessionId}`,
+            severity: "warning"
+          });
+          sessions.push({ failureMessage: error instanceof Error ? error.message : String(error), sessionId, status: "failed" });
+        }
+      }
+      await yieldToEventLoop();
+    }
+    return {
+      failed,
+      requested: sessionIds.length,
+      sessions,
+      succeeded
+    };
   }
 
   function appendStoreRecordToRawJournal(record: StoreRecord): void {
@@ -729,7 +809,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         {
           events: state.events.length,
           diagnostics: state.diagnostics.length,
-          gitSnapshots: gitSnapshots.length
+          gitSnapshots: gitSnapshots.length,
+          sessions: liveSessionCount(state.events),
+          sources: 0
         }
       );
       sendJson(request, response, config.allowedOrigins, 200, {
@@ -990,7 +1072,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
       const liveEnvelope = projectLiveEvents(projectionEvents, projectionGitSnapshots, {
         selectedSessionId,
-        sessionEnrichments: liveProjectionEnrichments(database),
+        sessionEnrichments: liveProjectionEnrichments(database, projectionSessionIds),
         diagnostics: state.diagnostics.length
       });
       liveEnvelope.events = state.events.length;
@@ -1002,6 +1084,23 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       });
       liveEnvelope.projection = withSessionTokenTotals(database, liveEnvelope.projection);
       sendJson(request, response, config.allowedOrigins, 200, liveEnvelope);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/enrichment/rebuild") {
+      try {
+        const body = objectRecord(await optionalJsonBody(request));
+        const result = await rebuildEnrichments(body);
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          ...result
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
       return;
     }
 
@@ -1853,35 +1952,88 @@ async function optionalJsonBody(request: IncomingMessage): Promise<unknown> {
   return body ? JSON.parse(body) : undefined;
 }
 
+function selectEnrichmentRebuildSessionIds(
+  db: MastheadDatabase,
+  input: Record<string, unknown>,
+  limit: number
+): string[] {
+  const scope = typeof input.scope === "string" ? input.scope : input.recent ? "recent" : "recent";
+  const baseSelect = `SELECT sessions.session_id AS sessionId
+    FROM sessions
+    JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id`;
+  const orderLimit = "AND sessions.deleted_at IS NULL ORDER BY COALESCE(sessions.last_activity_at, sessions.updated_at, sessions.created_at, '') DESC LIMIT ?";
+  if (scope === "all" || scope === "recent") {
+    return (
+      db.prepare(`${baseSelect} WHERE 1 = 1 ${orderLimit}`).all(limit) as Array<{ sessionId: string }>
+    ).map((row) => row.sessionId);
+  }
+  if (scope === "session") {
+    const sessionId = stringInput(input.sessionId, "sessionId");
+    return (
+      db.prepare(`${baseSelect} WHERE (sessions.session_id = ? OR sessions.source_session_id = ?) ${orderLimit}`).all(sessionId, sessionId, limit) as Array<{
+        sessionId: string;
+      }>
+    ).map((row) => row.sessionId);
+  }
+  if (scope === "project") {
+    const project = stringInput(input.project, "project");
+    return (
+      db.prepare(`${baseSelect} WHERE sessions.project_label = ? ${orderLimit}`).all(project, limit) as Array<{ sessionId: string }>
+    ).map((row) => row.sessionId);
+  }
+  if (scope === "runtime") {
+    const runtime = stringInput(input.runtime, "runtime");
+    return (
+      db
+        .prepare(`${baseSelect} WHERE (runtimes.runtime_id = ? OR runtimes.runtime_kind = ?) ${orderLimit}`)
+        .all(runtime, runtime, limit) as Array<{ sessionId: string }>
+    ).map((row) => row.sessionId);
+  }
+  throw new Error("invalid_scope");
+}
+
+function stringInput(value: unknown, name: string): string {
+  if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  throw new Error(`missing_${name}`);
+}
+
 const rawSourceRetentionPolicy = {
   keepLatest: 0,
   keepUnresolvedAttention: false,
   recordTypes: ["event", "git_snapshot", "attention_item", "conflict_card"] as Array<StoreRecord["recordType"]>
 };
 
+const CANONICAL_LIVE_REPLAY_LIMIT = 1_000;
+const LIVE_PROJECTION_SESSION_LIMIT = 24;
+
 function canonicalLiveEvents(database: MastheadDatabase): NormalizedEvent[] {
-  return canonicalStoreRecords(database, [codexHookSource.sourceId])
+  return canonicalStoreRecords(database, [codexHookSource.sourceId], CANONICAL_LIVE_REPLAY_LIMIT)
     .filter((record): record is Extract<StoreRecord, { recordType: "event" }> => record.recordType === "event")
     .map((record) => record.value);
 }
 
 function canonicalGitSnapshots(database: MastheadDatabase): GitSnapshot[] {
-  return canonicalStoreRecords(database, ["masthead-git-observer"])
+  return canonicalStoreRecords(database, ["masthead-git-observer"], CANONICAL_LIVE_REPLAY_LIMIT)
     .filter((record): record is Extract<StoreRecord, { recordType: "git_snapshot" }> => record.recordType === "git_snapshot")
     .map((record) => record.value);
 }
 
-function canonicalStoreRecords(database: MastheadDatabase, sourceIds: string[]): StoreRecord[] {
+function canonicalStoreRecords(database: MastheadDatabase, sourceIds: string[], limit: number): StoreRecord[] {
   if (sourceIds.length === 0) return [];
   const placeholders = sourceIds.map(() => "?").join(", ");
   const rows = database
     .prepare(
       `SELECT payload_json
-      FROM raw_events
-      WHERE source_id IN (${placeholders})
+      FROM (
+        SELECT raw_event_id, observed_at, payload_json
+        FROM raw_events
+        WHERE source_id IN (${placeholders})
+        ORDER BY observed_at DESC, raw_event_id DESC
+        LIMIT ?
+      )
       ORDER BY observed_at ASC, raw_event_id ASC`
     )
-    .all(...sourceIds) as Array<{ payload_json: string }>;
+    .all(...sourceIds, limit) as Array<{ payload_json: string }>;
   return rows.map((row) => parseStoreRecord(row.payload_json)).filter((record): record is StoreRecord => Boolean(record));
 }
 
@@ -1907,11 +2059,15 @@ function parseStoreRecord(payloadJson: string): StoreRecord | undefined {
 function latestProjectionSessionIds(events: NormalizedEvent[], selectedSessionId: string | undefined): Set<string> {
   const sessionIds = new Set<string>();
   if (selectedSessionId) sessionIds.add(selectedSessionId);
-  for (let index = events.length - 1; index >= 0 && sessionIds.size < 60; index -= 1) {
+  for (let index = events.length - 1; index >= 0 && sessionIds.size < LIVE_PROJECTION_SESSION_LIMIT; index -= 1) {
     const sessionId = events[index]?.sessionId;
     if (sessionId) sessionIds.add(sessionId);
   }
   return sessionIds;
+}
+
+function liveSessionCount(events: NormalizedEvent[]): number {
+  return new Set(events.map((event) => event.sessionId).filter((sessionId): sessionId is string => Boolean(sessionId))).size;
 }
 
 function isRawSourceStoreRecord(record: StoreRecord): boolean {

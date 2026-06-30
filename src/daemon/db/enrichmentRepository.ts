@@ -128,6 +128,42 @@ export function readCurrentSessionEnrichment(
   return row ? rowToRecord(row) : undefined;
 }
 
+export function readLatestFailedSessionEnrichment(
+  db: MastheadDatabase,
+  sessionId: string,
+  enrichmentKind: SessionEnrichmentRecord["enrichmentKind"],
+  promptVersion?: string
+): SessionEnrichmentRecord | undefined {
+  const promptClause = promptVersion ? "AND prompt_version = ?" : "";
+  const params = promptVersion ? [sessionId, enrichmentKind, promptVersion] : [sessionId, enrichmentKind];
+  const row = db
+    .prepare(
+      `SELECT
+        enrichment_id AS enrichmentId,
+        session_id AS sessionId,
+        enrichment_kind AS enrichmentKind,
+        status,
+        content_fingerprint AS contentFingerprint,
+        prompt_version AS promptVersion,
+        provider,
+        model,
+        generated_at AS generatedAt,
+        content_json AS contentJson,
+        source_refs_json AS sourceRefsJson,
+        failure_code AS failureCode,
+        failure_message AS failureMessage
+      FROM session_enrichments
+      WHERE session_id = ?
+        AND enrichment_kind = ?
+        AND status = 'failed'
+        ${promptClause}
+      ORDER BY COALESCE(generated_at, '') DESC, enrichment_id DESC
+      LIMIT 1`
+    )
+    .get(...params) as SessionEnrichmentRow | undefined;
+  return row ? rowToRecord(row) : undefined;
+}
+
 export function markStaleCurrentSessionEnrichments(
   db: MastheadDatabase,
   options: {

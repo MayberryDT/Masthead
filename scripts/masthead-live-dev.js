@@ -9,6 +9,7 @@ const plan = await buildLiveDevPlan(process.env);
 const children = new Set();
 const bridges = new Set();
 let shuttingDown = false;
+const healthTimeoutMs = Number.parseInt(process.env.MASTHEAD_DEV_HEALTH_TIMEOUT_MS ?? "60000", 10);
 
 console.log("Starting Masthead live app");
 console.log(`App:       ${plan.uiUrl}`);
@@ -27,10 +28,15 @@ if (plan.connector.mode === "primary" || plan.connector.mode === "isolated_prima
     MASTHEAD_DIAGNOSTIC_LOG_FILE: join(plan.connector.dataDirectory, "runtime", "daemon.log"),
     MASTHEAD_HOST: plan.host,
     MASTHEAD_PORT: String(plan.connector.port),
-    MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins
+    MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins,
+    MASTHEAD_GIT_REFRESH_MS: process.env.MASTHEAD_GIT_REFRESH_MS ?? "0",
+    MASTHEAD_LLM_COPY: process.env.MASTHEAD_LLM_COPY ?? "0",
+    MASTHEAD_SKIP_MIGRATION_QUICK_CHECK: process.env.MASTHEAD_SKIP_MIGRATION_QUICK_CHECK ?? "1",
+    MASTHEAD_SKIP_BACKGROUND_HYDRATION: process.env.MASTHEAD_SKIP_BACKGROUND_HYDRATION ?? "1",
+    NODE_OPTIONS: process.env.MASTHEAD_DEV_NODE_OPTIONS ?? ""
   });
 
-  activeHealth = await waitForHealth(`${plan.connector.baseUrl}/health`, 8_000);
+  activeHealth = await waitForHealth(`${plan.connector.baseUrl}/health`, healthTimeoutMs);
   ownershipPath = await writeOwnership(plan.connector.baseUrl, activeHealth);
 } else {
   console.log(`Connector: ${plan.connector.baseUrl} (read-only worktree bridge)`);
@@ -42,13 +48,14 @@ if (plan.connector.mode === "primary" || plan.connector.mode === "isolated_prima
     upstreamBaseUrl: plan.connector.upstreamBaseUrl
   });
   bridges.add(bridge);
-  activeHealth = await waitForHealth(`${bridge.baseUrl}/health`, 8_000);
+  activeHealth = await waitForHealth(`${bridge.baseUrl}/health`, healthTimeoutMs);
 }
 
 printStartupIdentity(plan, activeHealth);
 
 const viteBin = resolve("node_modules/vite/bin/vite.js");
 start("ui", process.execPath, [viteBin, "--host", plan.host, "--port", String(plan.uiPort), "--strictPort"], {
+  NODE_OPTIONS: process.env.MASTHEAD_DEV_NODE_OPTIONS ?? "",
   VITE_MASTHEAD_PROJECTION_URL: plan.projectionUrl
 });
 
@@ -132,7 +139,7 @@ function writePrefixed(label, chunk) {
   }
 }
 
-function stopAll(exitCode = 0) {
+function stopAll(exitCodeOrSignal = 0) {
   shuttingDown = true;
   for (const child of children) {
     child.kill("SIGTERM");
@@ -141,5 +148,13 @@ function stopAll(exitCode = 0) {
     void bridge.close();
   }
   void removeDaemonOwnershipMetadata(ownershipPath);
+  const exitCode = signalExitCode(exitCodeOrSignal);
   setTimeout(() => process.exit(exitCode), 250).unref();
+}
+
+function signalExitCode(value) {
+  if (typeof value === "number") return value;
+  if (value === "SIGINT") return 130;
+  if (value === "SIGTERM") return 143;
+  return 1;
 }

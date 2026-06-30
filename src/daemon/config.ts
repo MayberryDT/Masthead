@@ -14,8 +14,13 @@ export type DaemonConfig = {
   databasePath: string;
   legacyDataDirectory?: string;
   llmCopyEnabled: boolean;
+  liveCopyCacheMs?: number;
+  liveCopyTimeoutMs?: number;
+  liveCopyProjectionBudgetMs?: number;
+  liveCopyMaxConcurrent?: number;
   openaiApiKey?: string;
   openaiModel?: string;
+  skipMigrationQuickCheck?: boolean;
 };
 
 export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
@@ -40,9 +45,19 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     databasePath: dataPaths.databasePath,
     legacyDataDirectory: env.MASTHEAD_LEGACY_DATA_DIR ? resolve(env.MASTHEAD_LEGACY_DATA_DIR) : undefined,
     llmCopyEnabled: env.MASTHEAD_LLM_COPY === "1",
+    liveCopyCacheMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_CACHE_MS),
+    liveCopyTimeoutMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_TIMEOUT_MS),
+    liveCopyProjectionBudgetMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_PROJECTION_BUDGET_MS),
+    liveCopyMaxConcurrent: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_MAX_CONCURRENT),
     openaiApiKey: env.OPENAI_API_KEY,
-    openaiModel: env.MASTHEAD_OPENAI_MODEL
+    openaiModel: env.MASTHEAD_OPENAI_MODEL,
+    skipMigrationQuickCheck: env.MASTHEAD_SKIP_MIGRATION_QUICK_CHECK === "1"
   };
+}
+
+function optionalPositiveInteger(value: string | undefined): number | undefined {
+  const parsed = Number.parseInt(value || "", 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function defaultAllowedOrigins(): string[] {

@@ -27,6 +27,11 @@ export function draftNarrativeFromFacts(facts: SessionNarrativeFacts): SessionNa
   const filesChangedSummary = filesChangedSummaryFromFacts(facts);
   const commandsSummary = commandsSummaryFromFacts(facts);
   const verificationSummary = verificationSummaryFromFacts(facts);
+  const outcome = firstValid("outcome", [
+    outcomeFromFacts(facts),
+    `${pastAction(action)} ${object} for ${subject.label}.`,
+    `${pastAction(action)} ${subject.label} in ${facts.project ?? "this project"}.`
+  ], true);
   const title = firstValid("title", [
     subject.label,
     `${subject.label} ${object}`,
@@ -34,15 +39,11 @@ export function draftNarrativeFromFacts(facts: SessionNarrativeFacts): SessionNa
     `${facts.project ?? "Project"} work summary`
   ]);
   const liveSummary = firstValid("liveSummary", [
+    outcome,
     liveSummaryTemplate(facts, subject.label, action, object),
     `${subject.label} is active in ${facts.project ?? "this project"}.`,
-    `${facts.project ?? "Project"} work is focused on ${object}.`
+    `${facts.project ?? "Project"} session has recent activity.`
   ]);
-  const outcome = firstValid("outcome", [
-    outcomeFromFacts(facts),
-    `${pastAction(action)} ${object} for ${subject.label}.`,
-    `${pastAction(action)} ${subject.label} in ${facts.project ?? "this project"}.`
-  ], true);
   const searchSummary = firstValid("searchSummary", [
     [
       `${facts.project ?? "Project"} session for ${subject.label}.`,
@@ -162,12 +163,23 @@ function labelForArea(area: string, facts: SessionNarrativeFacts): string {
 }
 
 function liveSummaryTemplate(facts: SessionNarrativeFacts, subject: string, action: string, object: string): string {
-  if (action === "validate") return `${subject} is being validated against current Masthead evidence.`;
-  if (action === "document") return `${subject} is being documented for ${facts.project ?? "this project"}.`;
-  if (action === "verify") return `${subject} is being verified with ${facts.commands[0]?.name ?? "recorded checks"}.`;
-  if (action === "configure deployment") return `${subject} is being configured for deployment.`;
-  if (action === "update") return `${subject} is active in ${facts.project ?? object}.`;
-  return `${subject} is being ${pastParticiple(action)} for ${facts.project ?? object}.`;
+  if (looksLikeCompleteSentenceFragment(subject)) return sentence(subject);
+  const scope = facts.project ? `${facts.project} activity` : `${object} activity`;
+  if (action === "document") return `${subject} has recent documentation activity.`;
+  if (action === "verify") return `${subject} has recent verification activity.`;
+  if (action === "configure deployment") return `${subject} has recent deployment activity.`;
+  return `${subject} has recent ${scope}.`;
+}
+
+function sentence(value: string): string {
+  const trimmed = value.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function looksLikeCompleteSentenceFragment(value: string): boolean {
+  return /\b(?:added|blocked|checked|configured|corrected|created|deployed|documented|ended|filed|fixed|has|have|implemented|installed|is|logged|moved|patched|published|recorded|removed|rendered|report|reports|reworked|rewrote|showing|shows|started|stopped|updated|uses|verified|was|were)\b/i.test(
+    value
+  );
 }
 
 function outcomeFromFacts(facts: SessionNarrativeFacts): string | undefined {

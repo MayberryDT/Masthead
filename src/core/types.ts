@@ -262,6 +262,24 @@ export type SessionPlainCopy = {
   source: SessionCopySource;
 };
 
+export type SessionCopyRefreshStatus =
+  | "success"
+  | "disabled"
+  | "not_configured"
+  | "timeout"
+  | "api_error"
+  | "invalid_output"
+  | "validation_failed";
+
+export type SessionCopyRefreshState = {
+  requestedAt: string;
+  status: SessionCopyRefreshStatus;
+  provider?: string;
+  model?: string;
+  latencyMs?: number;
+  failureMessage?: string;
+};
+
 export type SessionCardView = {
   sessionId: string;
   canonicalSessionId?: string;
@@ -294,6 +312,8 @@ export type SessionCardView = {
   isExpanded: boolean;
   workContext?: WorkAreaContext;
   latestFeedbackSignal?: LatestFeedbackSignal;
+  copyInput?: unknown;
+  copyRefresh?: SessionCopyRefreshState;
 };
 
 export type SessionDetailView = SessionCardView & {
@@ -351,6 +371,13 @@ export type LiveBoardProjection = {
   expandedSession?: ExpandedSessionView;
   selectedSession?: SessionDetailView;
   brief?: BoardBrief;
+  copyRefreshSummary?: {
+    requested: number;
+    succeeded: number;
+    failed: number;
+    disabled: number;
+    generatedAt: string;
+  };
   attentionQueue: AttentionItem[];
   conflicts: ConflictCard[];
 };

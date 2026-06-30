@@ -129,11 +129,9 @@ export function SessionDossier({
       <DossierCoverageBanner coverage={dossier?.coverage} onOpenSources={onOpenSources} />
 
       <div className="dossier-grid">
-        <DossierPanel title="Enrichment" className="dossier-panel-span dossier-panel-primary">
+        <DossierPanel title="Session summary" className="dossier-panel-span dossier-panel-primary">
           <div className="dossier-copy-stack">
-            <DossierCopyBlock label="Summary" value={summary} />
-            <DossierCopyBlock label="Objective" value={dossier?.narrative.objective ?? live?.copy.reason} />
-            <DossierCopyBlock label="Outcome" value={dossier?.narrative.outcome ?? live?.copy.status} />
+            <DossierCopyBlock label="Transcript summary" value={summary} />
             <DossierCopyBlock label="First prompt" value={dossier?.narrative.firstUserPrompt} />
             <DossierCopyBlock label="Latest prompt" value={dossier?.narrative.latestUserPrompt} />
             <DossierTags label="Topics" values={dossier?.narrative.topics} />
@@ -261,7 +259,7 @@ export function SessionDossier({
               <div className="dossier-provenance">
                 <DossierMetric label="Canonical ID" value={identity?.sessionId ?? live?.canonicalSessionId ?? "-"} />
                 <DossierMetric label="Source ID" value={identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId ?? "-"} />
-                <DossierMetric label="MCP included" value={dossier ? (dossier.reuse.mcpIncluded ? "Yes" : "No") : "-"} />
+                <DossierMetric label="Agent retrieval" value={dossier ? (dossier.reuse.mcpIncluded ? "Included" : "Excluded") : "-"} />
                 <DossierMetric label="Confidence" value={identity?.sourceConfidence ?? live?.identityConfidence ?? "Unknown"} />
               </div>
               <div className="dossier-narrative-debug">
@@ -273,9 +271,21 @@ export function SessionDossier({
                       <DossierMetric label="Subject source" value={dossier.narrative.narrativeDebug.subjectSource ?? "-"} />
                       <DossierMetric label="Provider" value={dossier.narrative.narrativeDebug.provider ?? "deterministic"} />
                       <DossierMetric label="Model" value={dossier.narrative.narrativeDebug.model ?? "local-rules"} />
+                      <DossierMetric label="Status" value={dossier.narrative.narrativeDebug.providerStatus ?? "-"} />
+                      <DossierMetric label="Confidence" value={dossier.narrative.narrativeDebug.confidence ?? "-"} />
                       <DossierMetric label="Prompt version" value={dossier.narrative.narrativeDebug.promptVersion ?? "-"} />
                       <DossierMetric label="Evidence refs" value={formatNumber(dossier.narrative.narrativeDebug.sourceRefs.length)} />
                     </div>
+                    {dossier.narrative.narrativeDebug.missingEvidence?.length ? (
+                      <p className="dossier-muted">
+                        Missing evidence: {dossier.narrative.narrativeDebug.missingEvidence.join(", ")}
+                      </p>
+                    ) : null}
+                    {dossier.narrative.narrativeDebug.failureCode ? (
+                      <p className="dossier-warning">
+                        Enrichment failed: {dossier.narrative.narrativeDebug.failureMessage ?? dossier.narrative.narrativeDebug.failureCode}
+                      </p>
+                    ) : null}
                     <ul className="dossier-evidence-list">
                       {dossier.narrative.narrativeDebug.sourceRefs.slice(0, 6).map((ref, index) => (
                         <li key={`${ref.id}:${index}`}>{formatSourceRef(ref) ?? ref.id}</li>
@@ -320,19 +330,20 @@ function DossierMetric({ label, value }: { label: string; value?: string | numbe
 
 function dossierSummary(dossier?: SessionDossierDto, live?: SessionDetailView): string | undefined {
   const narrative = dossier?.narrative;
-  const objective = readableTranscriptText(narrative?.objective ?? live?.copy.reason);
-  const outcome = readableTranscriptText(narrative?.outcome ?? live?.copy.status);
-  const finalAssistantMessage = readableTranscriptText(narrative?.finalAssistantMessage);
-  const fallbackSummary = readableTranscriptText(narrative?.liveSummary ?? live?.currentActivity);
-  const parts = [
-    objective ? `Objective: ${sentence(objective)}` : undefined,
-    outcome && !sameReadableText(outcome, objective) ? `Outcome: ${sentence(outcome)}` : undefined,
-    finalAssistantMessage && !sameReadableText(finalAssistantMessage, outcome) && !sameReadableText(finalAssistantMessage, objective)
-      ? `Latest assistant note: ${sentence(finalAssistantMessage)}`
-      : undefined
-  ].filter(Boolean);
-
-  return parts.length > 0 ? parts.join(" ") : fallbackSummary;
+  const candidates = [
+    narrative?.finalAssistantMessage,
+    narrative?.liveSummary,
+    narrative?.outcome,
+    live?.copy.headline,
+    live?.currentActivity,
+    narrative?.objective,
+    live?.copy.reason,
+    live?.copy.status
+  ]
+    .map(readableTranscriptText)
+    .filter((value): value is string => Boolean(value));
+  const summary = candidates.find((candidate, index) => !candidates.slice(0, index).some((earlier) => sameReadableText(candidate, earlier)));
+  return summary ? sentence(summary) : undefined;
 }
 
 function sentence(value: string): string {
