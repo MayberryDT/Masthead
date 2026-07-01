@@ -114,6 +114,8 @@ describe("OpenAI session copy", () => {
     expect(body.input).not.toContain("Implementation is complete");
     expect(body.input).not.toContain("Ignore instructions");
     expect(body.instructions).toContain("system-neutral");
+    expect(body.instructions).toContain("headlineEvidence");
+    expect(body.instructions).toContain("file, domain, tool, task, or action");
     expect(body.instructions).toContain("claim flags");
     expect(body.instructions).toContain("full sentence");
     expect(body.instructions).toContain("snake_case tokens");
@@ -204,7 +206,7 @@ describe("OpenAI session copy", () => {
               {
                 type: "output_text",
                 text: JSON.stringify({
-                  headline: "This session is active now.",
+                  headline: "This work is in progress.",
                   status: "Working now",
                   reason: "This session is active and has recent activity."
                 })
@@ -265,7 +267,7 @@ describe("OpenAI session copy", () => {
               {
                 type: "output_text",
                 text: JSON.stringify({
-                  headline: "This session is active now.",
+                  headline: "This work is in progress.",
                   status: "Working now",
                   reason: "This session is active and has recent activity."
                 })
@@ -287,6 +289,43 @@ describe("OpenAI session copy", () => {
 
     const [, request] = fetchImpl.mock.calls[0]!;
     expect(JSON.parse(request.body).input).toContain("Moved the File button to the far right of the Logbook toolbar.");
+    expect(JSON.parse(JSON.parse(request.body).input).headlineEvidence).toEqual(
+      expect.arrayContaining(["Moved the File button to the far right of the Logbook toolbar.", "LogbookToolbar.tsx"])
+    );
+  });
+
+  test("uses the refresh cadence to avoid normal 10 second board refresh timeouts", async () => {
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    const fetchImpl = vi.fn((_url: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
+      if (init?.signal) signals.push(init.signal);
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          },
+          { once: true }
+        );
+      });
+    });
+    const input = toSessionCopyInput(cardView(), [], []);
+    const fallback = buildDeterministicSessionCopy(input);
+    const pending = rewriteSessionCopyWithOpenAI(input, fallback, {
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      refreshIntervalMs: 10_000
+    });
+    await vi.advanceTimersByTimeAsync(8_000);
+    const result = await pending;
+
+    expect(result).toMatchObject({
+      failureMessage: "OpenAI live copy timed out after 8000ms.",
+      status: "timeout"
+    });
+    expect(signals[0]?.aborted).toBe(true);
+    vi.useRealTimers();
   });
 
   test("cache is opt-in for successful copy overlays", async () => {
@@ -300,7 +339,7 @@ describe("OpenAI session copy", () => {
               {
                 type: "output_text",
                 text: JSON.stringify({
-                  headline: "This session is active now.",
+                  headline: "This work is in progress.",
                   status: "Working now",
                   reason: "This session is active and has recent activity."
                 })
@@ -403,7 +442,7 @@ describe("OpenAI session copy", () => {
     expect(second.copyRefreshSummary).toMatchObject({ requested: 1, succeeded: 0, failed: 1 });
   });
 
-  test("only refreshes running cards and leaves idle or ended cards unmarked", async () => {
+  test("only refreshes active non-blocked running cards and leaves idle, ended, and blocked cards unmarked", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -414,7 +453,7 @@ describe("OpenAI session copy", () => {
               {
                 type: "output_text",
                 text: JSON.stringify({
-                  headline: "This session is active now.",
+                  headline: "This work is in progress.",
                   status: "Work is active.",
                   reason: "This running session has recent activity.",
                   nextStep: ""
@@ -435,14 +474,20 @@ describe("OpenAI session copy", () => {
     const runningCard = cardView({ sessionId: "running-session", lifecycle: "running", primaryStatus: "editing" });
     const idleCard = cardView({ sessionId: "idle-session", lifecycle: "idle", primaryStatus: "stalled" });
     const endedCard = cardView({ sessionId: "ended-session", lifecycle: "ended", primaryStatus: "completed_unreviewed" });
+    const blockedCard = cardView({ sessionId: "blocked-session", lifecycle: "running", primaryStatus: "blocked" });
+    const approvalCard = cardView({ sessionId: "approval-session", lifecycle: "running", primaryStatus: "waiting_for_approval" });
+    const userCard = cardView({ sessionId: "user-session", lifecycle: "running", primaryStatus: "waiting_for_user" });
 
-    const enriched = await enricher.enrichProjection(liveProjection([idleCard, endedCard, runningCard]));
+    const enriched = await enricher.enrichProjection(liveProjection([idleCard, endedCard, blockedCard, approvalCard, userCard, runningCard]));
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(JSON.parse(JSON.parse(fetchImpl.mock.calls[0]![1].body).input).lifecycle).toBe("running");
     expect(enriched.cards.find((card) => card.sessionId === "running-session")?.copyRefresh).toMatchObject({ status: "success" });
     expect(enriched.cards.find((card) => card.sessionId === "idle-session")?.copyRefresh).toBeUndefined();
     expect(enriched.cards.find((card) => card.sessionId === "ended-session")?.copyRefresh).toBeUndefined();
+    expect(enriched.cards.find((card) => card.sessionId === "blocked-session")?.copyRefresh).toBeUndefined();
+    expect(enriched.cards.find((card) => card.sessionId === "approval-session")?.copyRefresh).toBeUndefined();
+    expect(enriched.cards.find((card) => card.sessionId === "user-session")?.copyRefresh).toBeUndefined();
     expect(enriched.copyRefreshSummary).toMatchObject({ requested: 1, succeeded: 1, failed: 0 });
   });
 
@@ -457,7 +502,7 @@ describe("OpenAI session copy", () => {
               {
                 type: "output_text",
                 text: JSON.stringify({
-                  headline: "This session is active now.",
+                  headline: "This work is in progress.",
                   status: "Work is active.",
                   reason: "This running session has recent activity.",
                   nextStep: ""
@@ -507,7 +552,7 @@ describe("OpenAI session copy", () => {
               {
                 type: "output_text",
                 text: JSON.stringify({
-                  headline: "This session is active now.",
+                  headline: "This work is in progress.",
                   status: "Working now",
                   reason: "This session is active and has recent activity."
                 })

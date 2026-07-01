@@ -43,7 +43,7 @@ describe("session copy", () => {
 
   test("builds deterministic plain copy for running, ended action, and completed history states", () => {
     expect(buildDeterministicSessionCopy(toSessionCopyInput(cardView({ lifecycle: "running", primaryStatus: "editing" }), [], []))).toMatchObject({
-      headline: "App session is active now.",
+      headline: "This work is in progress.",
       status: "Work is active.",
       source: "deterministic"
     });
@@ -57,7 +57,7 @@ describe("session copy", () => {
         )
       )
     ).toMatchObject({
-      headline: "App session ended after a failure signal.",
+      headline: "This work ended after a failure signal.",
       status: "Follow-up is pending."
     });
 
@@ -66,7 +66,7 @@ describe("session copy", () => {
         toSessionCopyInput(cardView({ lifecycle: "ended", primaryStatus: "completed_unreviewed" }), [], [])
       )
     ).toMatchObject({
-      headline: "App session had recent activity.",
+      headline: "This work is pending review.",
       status: "Review is pending."
     });
 
@@ -79,7 +79,7 @@ describe("session copy", () => {
         )
       )
     ).toMatchObject({
-      headline: "App session is filed in history.",
+      headline: "This work is filed in history.",
       status: "Filed in history."
     });
   });
@@ -228,7 +228,7 @@ describe("session copy", () => {
     );
     const copy = buildDeterministicSessionCopy(input);
 
-    expect(copy.headline).toBe("Documentation changes had recent activity.");
+    expect(copy.headline).toBe("Documentation changes are pending review.");
     expect(copy.headline).toMatch(/[.!?]$/);
     expect(copy.headline).not.toBe("Documentation work");
     expect(copy.headline).not.toContain("waiting for review");
@@ -252,7 +252,7 @@ describe("session copy", () => {
       []
     );
 
-    expect(buildDeterministicSessionCopy(input).headline).toBe("App session had recent activity.");
+    expect(buildDeterministicSessionCopy(input).headline).toBe("This work is pending review.");
   });
 
   test("rejects broken first-person feedback summaries before building the headline", () => {
@@ -278,7 +278,7 @@ describe("session copy", () => {
       []
     );
 
-    expect(buildDeterministicSessionCopy(input).headline).toBe("Auth changes had recent activity.");
+    expect(buildDeterministicSessionCopy(input).headline).toBe("Auth changes are pending review.");
   });
 
   test("rejects dangling transition feedback summaries before building the headline", () => {
@@ -304,7 +304,7 @@ describe("session copy", () => {
       []
     );
 
-    expect(buildDeterministicSessionCopy(input).headline).toBe("UI changes are active now.");
+    expect(buildDeterministicSessionCopy(input).headline).toBe("UI changes are in progress.");
   });
 
   test("rejects citation-only feedback summaries before building the headline", () => {
@@ -356,7 +356,109 @@ describe("session copy", () => {
       []
     );
 
-    expect(buildDeterministicSessionCopy(input).headline).toBe("Documentation changes had recent activity.");
+    expect(buildDeterministicSessionCopy(input).headline).toBe("Documentation changes are pending review.");
+  });
+
+  test("adds ranked concrete headline evidence from safe session facts", () => {
+    const input = toSessionCopyInput(cardView({ lifecycle: "running", primaryStatus: "editing" }), [], [], {
+      facts: {
+        attentionTitles: [],
+        changedFileCount: 2,
+        conflictTitles: [],
+        lifecycle: "running",
+        primaryStatus: "editing",
+        project: "Masthead",
+        recentCommandFailures: [],
+        recentEvents: [
+          {
+            occurredAt: "2026-06-30T10:00:00.000Z",
+            summary: "Moved the File button to the far right of the Logbook toolbar.",
+            type: "file.changed"
+          }
+        ],
+        recentFileBasenames: ["LogbookToolbar.tsx"],
+        recentToolNames: [],
+        sessionId: "session-1"
+      }
+    });
+
+    expect(input.headlineEvidence).toEqual(
+      expect.arrayContaining(["Moved the File button to the far right of the Logbook toolbar.", "LogbookToolbar.tsx"])
+    );
+    expect(buildDeterministicSessionCopy(input).headline).toBe("Moved the File button to the far right of the Logbook toolbar.");
+  });
+
+  test("uses newer concrete event summaries ahead of stale feedback summaries", () => {
+    const input = toSessionCopyInput(
+      cardView({
+        lifecycle: "running",
+        primaryStatus: "editing",
+        latestFeedbackSignal: {
+          present: true,
+          source: "stop_hook",
+          observedAt: "2026-06-30T08:00:00.000Z",
+          claims: ["mentions_files"],
+          summary: "Implemented the board headline refresh and animation fix."
+        }
+      }),
+      [],
+      [],
+      {
+        recentDelta: {
+          eventsSinceLastRefresh: 1,
+          latestEventSummaries: ["Removed project-name boilerplate from board headlines."],
+          latestFileBasenames: [],
+          latestToolNames: []
+        },
+        facts: {
+          attentionTitles: [],
+          changedFileCount: 1,
+          conflictTitles: [],
+          lifecycle: "running",
+          primaryStatus: "editing",
+          project: "Masthead",
+          recentCommandFailures: [],
+          recentEvents: [
+            {
+              occurredAt: "2026-07-01T08:00:00.000Z",
+              summary: "Removed project-name boilerplate from board headlines.",
+              type: "command.finished"
+            }
+          ],
+          recentFileBasenames: [],
+          recentToolNames: [],
+          sessionId: "session-1"
+        }
+      }
+    );
+
+    expect(buildDeterministicSessionCopy(input).headline).toBe("Removed project-name boilerplate from board headlines.");
+  });
+
+  test("does not use numeric data-summary fragments as headlines", () => {
+    const input = toSessionCopyInput(
+      cardView({
+        lifecycle: "ended",
+        primaryStatus: "completed_unreviewed",
+        workContext: {
+          label: "Changed-file review",
+          confidence: "path_cluster",
+          pathClusters: ["core"],
+          sourceSignals: ["path:core"]
+        },
+        latestFeedbackSignal: {
+          present: true,
+          source: "stop_hook",
+          observedAt: "2026-07-01T08:00:00.000Z",
+          claims: ["mentions_files"],
+          summary: "reports 383 sessions, 12,272 messages, 334..."
+        }
+      }),
+      [],
+      []
+    );
+
+    expect(buildDeterministicSessionCopy(input).headline).toBe("Changed files are pending review.");
   });
 
   test("rejects model headlines that are category labels instead of sentences", () => {
@@ -380,7 +482,7 @@ describe("session copy", () => {
     expect(
       validateSessionCopy(
         {
-          headline: "Masthead session is active with editing in progress",
+          headline: "Settings UI changes are in progress",
           status: "Work is active",
           reason: "Recent activity includes changed files and test updates",
           nextStep: "",
@@ -391,7 +493,7 @@ describe("session copy", () => {
     ).toEqual({
       ok: true,
       copy: {
-        headline: "Masthead session is active with editing in progress.",
+        headline: "Settings UI changes are in progress.",
         status: "Work is active.",
         reason: "Recent activity includes changed files and test updates.",
         source: "llm"
@@ -399,7 +501,7 @@ describe("session copy", () => {
     });
   });
 
-  test("cleans benign internal source tokens from valid model copy", () => {
+  test("rejects project and harness boilerplate in model headlines", () => {
     const input = toSessionCopyInput(cardView({ lifecycle: "running", primaryStatus: "editing" }), [], []);
 
     expect(
@@ -413,21 +515,16 @@ describe("session copy", () => {
         },
         input
       )
-    ).toMatchObject({
-      ok: true,
-      copy: {
-        reason: "Active session shows ongoing work in Masthead, with recent file changes and no detected secrets as per latest feedback."
-      }
-    });
+    ).toEqual({ ok: false, reason: "invalid_shape" });
   });
 
-  test("allows reported completion wording for ended unreviewed sessions", () => {
+  test("allows reported completion wording without repeating project names", () => {
     const input = toSessionCopyInput(cardView({ lifecycle: "ended", primaryStatus: "completed_unreviewed" }), [], []);
 
     expect(
       validateSessionCopy(
         {
-          headline: "Halla session has ended with completion reported.",
+          headline: "Session has ended with completion reported.",
           status: "Review is still pending.",
           reason: "The session is no longer active, and the completion note has not been reviewed.",
           nextStep: "Review the evidence before filing it away.",
@@ -438,7 +535,7 @@ describe("session copy", () => {
     ).toMatchObject({
       ok: true,
       copy: {
-        headline: "Halla session has ended with completion reported."
+        headline: "Session has ended with completion reported."
       }
     });
   });
@@ -530,7 +627,8 @@ describe("session copy", () => {
         {
           headline: "UI changes are ready for review.",
           status: "Review is pending.",
-          reason: "This session ended and still needs a quick review."
+          reason: "This session ended and still needs a quick review.",
+          nextStep: ""
         },
         input
       )
@@ -541,11 +639,24 @@ describe("session copy", () => {
         {
           headline: "Codex hook event is being fixed for Masthead.",
           status: "Work is active.",
-          reason: "This session is active and has recent activity."
+          reason: "This session is active and has recent activity.",
+          nextStep: ""
         },
         input
       )
     ).toEqual({ ok: false, reason: "unsafe_copy" });
+
+    expect(
+      validateSessionCopy(
+        {
+          headline: "Changed files had recent activity.",
+          status: "Work is active.",
+          reason: "The session includes concrete file and activity evidence.",
+          nextStep: ""
+        },
+        input
+      )
+    ).toEqual({ ok: false, reason: "invalid_shape" });
   });
 
   test("uses stable cache keys for equivalent sanitized inputs", () => {

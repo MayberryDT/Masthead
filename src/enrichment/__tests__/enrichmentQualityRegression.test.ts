@@ -95,7 +95,7 @@ describe("enrichment quality regressions", () => {
             content: [
               {
                 text: JSON.stringify({
-                  headline: "This session is active now.",
+                  headline: "This work is in progress.",
                   reason: "This session is active and has recent activity.",
                   status: "Working now"
                 }),
@@ -169,7 +169,7 @@ function card(): SessionCardView {
   return {
     changedFileCount: 0,
     copy: {
-      headline: "Masthead session is active now.",
+      headline: "This work is in progress.",
       reason: "This session is active and has recent activity.",
       source: "deterministic",
       status: "Work is active."

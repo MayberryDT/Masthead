@@ -44,7 +44,7 @@ describe("observability session card", () => {
     expect(html).not.toContain("Demo data");
   });
 
-  test("marks changed headlines for the magnetic slug lock refresh", () => {
+  test("sets headline refresh stagger values without rendering legacy cursor chrome", () => {
     const host = document.createElement("div");
     host.innerHTML = renderToStaticMarkup(
       <SessionCard
@@ -57,7 +57,7 @@ describe("observability session card", () => {
     );
 
     const card = host.querySelector<HTMLElement>(".session-card");
-    expect(card?.classList.contains("is-headline-refreshing")).toBe(true);
+    expect(card?.classList.contains("is-headline-refreshing")).toBe(false);
     expect(card?.style.getPropertyValue("--headline-refresh-index")).toBe("2");
     expect(card?.querySelector(".headline-text.headline-current")?.textContent).toBe("Magnetic slug lock copy");
     expect(card?.querySelector(".card-headline-cursor")).toBeNull();
@@ -525,7 +525,8 @@ describe("observability session card", () => {
     }
   });
 
-  test("updates mockup headlines immediately on existing cards", async () => {
+  test("delays visible headline text until the refresh animation is nearly complete", async () => {
+    vi.useFakeTimers();
     const container = document.createElement("div");
     const root = createRoot(container);
     const first = session({
@@ -555,13 +556,21 @@ describe("observability session card", () => {
       });
 
       const headlines = Array.from(container.querySelectorAll<HTMLElement>(".headline"));
-      expect(headlines[0]?.textContent).toContain("First updated headline");
-      expect(headlines[1]?.textContent).toContain("Second updated headline");
+      expect(headlines[0]?.querySelector(".headline-text.headline-current")?.textContent).toBe("First old headline");
+      expect(headlines[1]?.querySelector(".headline-text.headline-current")?.textContent).toBe("Second old headline");
       expect(container.querySelectorAll(".session-card.is-headline-refreshing")).toHaveLength(2);
-      expect(headlines[0]?.querySelector(".headline-text.headline-current")?.textContent).toContain("First updated headline");
+      expect(headlines[0]?.querySelector(".headline-previous")?.textContent).toBe("First old headline");
       expect(container.querySelector(".card-headline-cursor")).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_850);
+      });
+
+      expect(headlines[0]?.querySelector(".headline-text.headline-current")?.textContent).toBe("First updated headline");
+      expect(headlines[1]?.querySelector(".headline-text.headline-current")?.textContent).toBe("Second updated headline");
     } finally {
       await act(async () => root.unmount());
+      vi.useRealTimers();
     }
   });
 
@@ -587,9 +596,8 @@ describe("observability session card", () => {
       const headline = card?.querySelector<HTMLElement>(".headline");
       expect(card?.classList.contains("is-headline-refreshing")).toBe(true);
       expect(headline?.querySelector(".headline-previous")?.textContent).toBe("Outgoing board headline");
-      expect(headline?.querySelector(".headline-current")?.textContent).toBe("Incoming board headline");
+      expect(headline?.querySelector(".headline-current")?.textContent).toBe("Outgoing board headline");
       expect(headline?.textContent).toContain("Outgoing board headline");
-      expect(headline?.textContent).toContain("Incoming board headline");
     } finally {
       await act(async () => root.unmount());
     }
@@ -638,6 +646,7 @@ describe("observability session card", () => {
   });
 
   test("keeps the mockup headline stable after a same-text board refresh", async () => {
+    vi.useFakeTimers();
     const container = document.createElement("div");
     const root = createRoot(container);
     const original = session({
@@ -655,19 +664,26 @@ describe("observability session card", () => {
         root.render(<SessionBoard cards={[updated]} variant="observability" />);
       });
 
-      const headline = container.querySelector<HTMLElement>(".headline");
-      expect(headline?.querySelector(".headline-current")?.textContent).toBe("Updated board headline");
-      expect(headline?.querySelector(".card-headline-cursor")).toBeNull();
+      expect(container.querySelector<HTMLElement>(".headline .headline-current")?.textContent).toBe("Old board headline");
+      expect(container.querySelector(".card-headline-cursor")).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_850);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(850);
+      });
 
       await act(async () => {
         root.render(<SessionBoard cards={[updated]} variant="observability" />);
       });
 
-      expect(headline?.textContent).toContain("Updated board headline");
-      expect(headline?.querySelector(".card-headline-cursor")).toBeNull();
+      expect(container.querySelector<HTMLElement>(".headline")?.textContent).toContain("Updated board headline");
+      expect(container.querySelector(".card-headline-cursor")).toBeNull();
       expect(container.querySelector(".session-card.is-headline-refreshing")).toBeNull();
     } finally {
       await act(async () => root.unmount());
+      vi.useRealTimers();
     }
   });
 

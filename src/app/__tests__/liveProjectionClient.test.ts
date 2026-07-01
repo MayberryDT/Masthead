@@ -152,10 +152,10 @@ describe("live projection client helpers", () => {
     expect(projection.lanes?.map((lane) => lane.laneId)).toEqual(["running", "idle", "needs_action", "history"]);
     expect(projection.summary.running).toBe(1);
     expect(projection.summary.needsAction).toBe(1);
-    expect(projection.cards[0].copy.headline).toBe("Masthead session is paused for approval.");
+    expect(projection.cards[0].copy.headline).toBe("This work is paused for approval.");
     expect(projection.cards[0].copy.source).toBe("fallback");
-    expect(projection.cards[1].copy.headline).toBe("Masthead session had recent activity.");
-    expect(projection.selectedSession?.copy.headline).toBe("Masthead session had recent activity.");
+    expect(projection.cards[1].copy.headline).toBe("This work is pending review.");
+    expect(projection.selectedSession?.copy.headline).toBe("This work is pending review.");
     expect(projection.brief).toMatchObject({
       text: "Approval is pending in one active session. One session is running overall.",
       source: "fallback",
@@ -186,7 +186,7 @@ describe("live projection client helpers", () => {
       sessionId: "running-session",
       currentActivity: "Work is active.",
       copy: {
-        headline: "Masthead session is active now.",
+        headline: "This work is in progress.",
         status: "Work is active."
       }
     });
@@ -221,7 +221,7 @@ describe("live projection client helpers", () => {
       conflicts: []
     } as unknown as LiveBoardProjection);
 
-    expect(projection.cards[0].copy.headline).toBe("UI changes are active now.");
+    expect(projection.cards[0].copy.headline).toBe("UI changes are in progress.");
     expect(projection.cards[0].copy.source).toBe("fallback");
   });
 

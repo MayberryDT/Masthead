@@ -76,11 +76,11 @@ body {
 }
 
 .masthead-shell[data-motion-mode="daily"] {
-  --headline-semantic-dur: 520ms;
+  --headline-semantic-dur: 2400ms;
 }
 
 .masthead-shell[data-motion-mode="presentation"] {
-  --headline-semantic-dur: 680ms;
+  --headline-semantic-dur: 2800ms;
 }
 
 #root {
@@ -5001,7 +5001,6 @@ body {
   --state-border: rgba(54, 216, 105, 0.42);
   --border: var(--surface-border);
   --border-hover: var(--surface-border-hover);
-  --headline-semantic-dur: 520ms;
   --highlight: var(--edge-highlight);
   --radius-card: 5px;
   --radius-control: 3px;
@@ -5256,12 +5255,12 @@ body {
 
 @keyframes magnetic-headline-release {
   0%,
-  38% {
+  62% {
     opacity: 1;
     transform: translateX(0) scale(1);
   }
 
-  54%,
+  84%,
   100% {
     opacity: 0;
     transform: translateX(-6px) scale(0.992);
@@ -5270,12 +5269,12 @@ body {
 
 @keyframes magnetic-headline-lock {
   0%,
-  42% {
+  76% {
     opacity: 0;
     transform: translateX(10px) scale(0.992);
   }
 
-  72% {
+  90% {
     opacity: 1;
     transform: translateX(-1px) scale(1.004);
   }
