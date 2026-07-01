@@ -108,12 +108,12 @@ wait_for_port_to_close() {
 
 daemon_is_healthy() {
   local port="$1"
-  curl -fsS --max-time 1 "http://127.0.0.1:$port/health" >/dev/null 2>&1
+  curl -fsS --max-time 5 "http://127.0.0.1:$port/health" >/dev/null 2>&1
 }
 
 daemon_is_compatible() {
   local port="$1" health
-  health="$(curl -fsS --max-time 1 "http://127.0.0.1:$port/health" 2>/dev/null)" || return 1
+  health="$(curl -fsS --max-time 5 "http://127.0.0.1:$port/health" 2>/dev/null)" || return 1
   EXPECTED_DATA_DIR="$DATA_DIR" "$NODE_BIN" -e 'let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { try { const j = JSON.parse(input); process.exit(j?.data?.dataDirectory === process.env.EXPECTED_DATA_DIR ? 0 : 1); } catch { process.exit(1); } });' <<<"$health"
 }
 
@@ -219,7 +219,7 @@ start_dev_daemon() {
     return 0
   fi
 
-  if daemon_is_healthy "$port"; then
+  if daemon_is_healthy "$port" || port_is_listening "$port"; then
     log "Port 17373 is occupied by a Masthead daemon with a different data directory; using an isolated dev daemon port."
     port="$(find_available_daemon_port 17374)"
   else

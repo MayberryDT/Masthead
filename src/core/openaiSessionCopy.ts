@@ -37,6 +37,7 @@ export type OpenAISessionCopyResult = {
 export type OpenAISessionCopyEnricherConfig = OpenAISessionCopyConfig & {
   now?: () => number;
   ttlMs?: number;
+  failureCooldownMs?: number;
   maxEntries?: number;
   maxConcurrent?: number;
   projectionBudgetMs?: number;
@@ -57,9 +58,10 @@ export type OpenAISessionCopyEnricher = {
 const DEFAULT_MODEL = "gpt-5-nano-2025-08-07";
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_TTL_MS = 0;
+const DEFAULT_FAILURE_COOLDOWN_MS = 60_000;
 const DEFAULT_MAX_ENTRIES = 500;
 const DEFAULT_MAX_CONCURRENT = 2;
-const DEFAULT_PROJECTION_BUDGET_MS = 8_500;
+const DEFAULT_PROJECTION_BUDGET_MS = 750;
 
 export async function rewriteSessionCopyWithOpenAI(
   input: SessionCopyInput,
@@ -188,11 +190,13 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
   const apiKey = config.apiKey;
   const now = config.now ?? Date.now;
   const ttlMs = config.ttlMs ?? DEFAULT_TTL_MS;
+  const failureCooldownMs = config.failureCooldownMs ?? DEFAULT_FAILURE_COOLDOWN_MS;
   const maxEntries = config.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const maxConcurrent = config.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
   const projectionBudgetMs = config.projectionBudgetMs ?? DEFAULT_PROJECTION_BUDGET_MS;
   const auditLogger = config.auditLogger ?? createEnrichmentAuditLogger();
   const cache = new Map<string, { copy: SessionPlainCopy; expiresAt: number }>();
+  const failedResults = new Map<string, { expiresAt: number; result: OpenAISessionCopyResult }>();
   const inFlight = new Map<string, Promise<OpenAISessionCopyResult>>();
   const lastSuccessfulCopies = new Map<string, SessionPlainCopy>();
 
@@ -205,6 +209,9 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
     const key = sessionCopyCacheKey({ ...input, refresh: undefined }, model);
     const cached = ttlMs > 0 ? cache.get(key) : undefined;
     if (cached && cached.expiresAt > now()) return { copy: cached.copy, latencyMs: 0, status: "llm" };
+    const failed = failureCooldownMs > 0 ? failedResults.get(key) : undefined;
+    if (failed && failed.expiresAt > now()) return { ...failed.result, latencyMs: 0 };
+    if (failed) failedResults.delete(key);
 
     const existing = ttlMs > 0 ? inFlight.get(key) : undefined;
     if (existing) return existing;
@@ -220,6 +227,12 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
       if (ttlMs > 0 && result.status === "llm" && result.copy) {
         cache.set(key, { copy: result.copy, expiresAt: now() + ttlMs });
         trimCache(cache, maxEntries);
+      }
+      if (result.status === "llm") {
+        failedResults.delete(key);
+      } else if (failureCooldownMs > 0) {
+        failedResults.set(key, { expiresAt: now() + failureCooldownMs, result });
+        trimFailureMap(failedResults, maxEntries);
       }
       return result;
     }).finally(() => {
@@ -440,6 +453,14 @@ function trimCache(cache: Map<string, { copy: SessionPlainCopy; expiresAt: numbe
 }
 
 function trimSessionCopyMap(cache: Map<string, SessionPlainCopy>, maxEntries: number): void {
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (!oldestKey) return;
+    cache.delete(oldestKey);
+  }
+}
+
+function trimFailureMap(cache: Map<string, { expiresAt: number; result: OpenAISessionCopyResult }>, maxEntries: number): void {
   while (cache.size > maxEntries) {
     const oldestKey = cache.keys().next().value as string | undefined;
     if (!oldestKey) return;

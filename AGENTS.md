@@ -16,6 +16,12 @@ The product hierarchy is:
 
 Observability is a view over continuously collected session data.
 
+## Read-Only Run Exceptions
+
+When Tyler asks for a read-only run, do not change product code, data, or runtime state.
+Writing implementation plans and concise GBrain session closeouts is still allowed unless Tyler
+explicitly excludes them.
+
 ## Design Source Of Truth
 
 Read `design.md` before Masthead UI work. It is the single master design source for this repo and follows Google's DESIGN.md structure while preserving this project's lowercase filename.

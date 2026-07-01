@@ -122,6 +122,35 @@ describe("session query repository", () => {
     db.close();
   });
 
+  test("does not fall back to weak source titles in logbook rows", async () => {
+    const db = await openTestDatabase();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "",
+      sessionId: "session-weak-source",
+      title: "session narrative"
+    });
+    db.prepare("DELETE FROM session_enrichments WHERE session_id = ?").run("session-weak-source");
+    db.prepare(
+      `UPDATE sessions
+      SET source_session_id = ?,
+        project_label = NULL,
+        objective = NULL,
+        last_activity_at = ?,
+        updated_at = ?
+      WHERE session_id = ?`
+    ).run("session narrative", "2026-07-01T10:38:00.000Z", "2026-07-01T10:38:00.000Z", "session-weak-source");
+
+    expect(querySessions(db, { limit: 25 }).sessions[0]).toEqual(
+      expect.objectContaining({
+        sourceSessionId: "session narrative",
+        title: "Codex session · 2026-07-01 10:38"
+      })
+    );
+    db.close();
+  });
+
   test("searches seeded canonical SQLite rows and reduces with filters", async () => {
     const db = await openTestDatabase();
     seedQueryableSession(db, {

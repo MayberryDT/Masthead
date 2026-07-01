@@ -86,7 +86,7 @@ describe("enrichment quality regressions", () => {
     expect(result.source).toBe("none");
   });
 
-  test("board live copy attempts the same session on every refresh", async () => {
+  test("board live copy backs off unchanged validation failures", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -95,9 +95,10 @@ describe("enrichment quality regressions", () => {
             content: [
               {
                 text: JSON.stringify({
-                  headline: "This work is in progress.",
-                  reason: "This session is active and has recent activity.",
-                  status: "Working now"
+                  headline: "Recent activity.",
+                  nextStep: "",
+                  reason: "Recent activity.",
+                  status: "running"
                 }),
                 type: "output_text"
               }
@@ -109,10 +110,12 @@ describe("enrichment quality regressions", () => {
     const enricher = createOpenAISessionCopyEnricher({ apiKey: "key", enabled: true, fetchImpl });
     const projection = liveProjection(card());
 
-    await enricher.enrichProjection(projection);
-    await enricher.enrichProjection(projection);
+    const first = await enricher.enrichProjection(projection);
+    const second = await enricher.enrichProjection(projection);
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(first.copyRefreshSummary).toMatchObject({ failed: 1, requested: 1 });
+    expect(second.copyRefreshSummary).toMatchObject({ failed: 1, requested: 1 });
   });
 });
 

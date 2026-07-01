@@ -14,6 +14,7 @@ import { listProjects } from "./db/sessionQueryRepository.ts";
 import { sourcePolicyEnabled } from "./db/sourcePolicyRepository.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
 import type { DaemonConfig } from "./config.ts";
+import { isWeakSessionTitle } from "../shared/sessionTextQuality.ts";
 
 export type SettingsOptionDto = {
   value: string;
@@ -73,7 +74,11 @@ export type SettingsStateDto = SettingsRuntimeIdentityDto & {
       queued: number;
       failed: number;
       disabled: number;
+      gitSnapshotsWithoutFileEffects?: number;
+      repeatedFailedFingerprints?: number;
+      sessionsWithMessagesButNoEffects?: number;
       status: "complete" | "partial" | "disabled";
+      weakCurrentTitles?: number;
     };
   };
   privacy: {
@@ -146,8 +151,8 @@ export async function getSettingsState(db: MastheadDatabase, config: DaemonConfi
       currentEnrichments: dataSummary.enrichments,
       health: enrichmentHealth(db, dataSummary.sessions),
       model: config.openaiModel ?? "deterministic",
-      provider: config.llmCopyEnabled && config.openaiApiKey ? "OpenAI" : "Deterministic fallback",
-      remoteModelEnabled: Boolean(config.llmCopyEnabled && config.openaiApiKey),
+      provider: config.remoteEnrichmentEnabled && config.openaiApiKey ? "OpenAI" : "Deterministic fallback",
+      remoteModelEnabled: Boolean(config.remoteEnrichmentEnabled && config.openaiApiKey),
       sessionCount: dataSummary.sessions
     },
     hooks: await getCodexHookSettings(db, config),
@@ -186,9 +191,93 @@ function enrichmentHealth(db: MastheadDatabase, sessionCount: number): SettingsS
     complete,
     disabled,
     failed,
+    gitSnapshotsWithoutFileEffects: gitSnapshotsWithoutFileEffects(db),
     queued: Math.max(0, sessionCount - complete - failed - disabled),
-    status: sessionCount === 0 || complete >= sessionCount ? "complete" : disabled >= sessionCount ? "disabled" : "partial"
+    repeatedFailedFingerprints: repeatedFailedFingerprints(db),
+    sessionsWithMessagesButNoEffects: sessionsWithMessagesButNoEffects(db),
+    status: sessionCount === 0 || complete >= sessionCount ? "complete" : disabled >= sessionCount ? "disabled" : "partial",
+    weakCurrentTitles: weakCurrentTitles(db)
   };
+}
+
+function weakCurrentTitles(db: MastheadDatabase): number {
+  const rows = db
+    .prepare(
+      `SELECT
+        sessions.session_id AS sessionId,
+        sessions.source_session_id AS sourceSessionId,
+        sessions.project_label AS project,
+        session_enrichments.content_json AS contentJson
+      FROM session_enrichments
+      JOIN sessions ON sessions.session_id = session_enrichments.session_id
+      WHERE session_enrichments.enrichment_kind = 'session_capsule'
+        AND session_enrichments.status = 'current'`
+    )
+    .all() as Array<{ contentJson: string | null; project: string | null; sessionId: string; sourceSessionId: string }>;
+  return rows.filter((row) => {
+    const content = parseJson(row.contentJson);
+    const title = isRecord(content) && typeof content.title === "string" ? content.title : undefined;
+    return isWeakSessionTitle(title, {
+      project: row.project ?? undefined,
+      sessionId: row.sessionId,
+      sourceSessionId: row.sourceSessionId
+    });
+  }).length;
+}
+
+function sessionsWithMessagesButNoEffects(db: MastheadDatabase): number {
+  return (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS count
+        FROM sessions
+        WHERE deleted_at IS NULL
+          AND EXISTS (SELECT 1 FROM messages WHERE messages.session_id = sessions.session_id)
+          AND NOT EXISTS (SELECT 1 FROM file_effects WHERE file_effects.session_id = sessions.session_id)`
+      )
+      .get() as { count: number }
+  ).count;
+}
+
+function repeatedFailedFingerprints(db: MastheadDatabase): number {
+  return (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS count
+        FROM (
+          SELECT session_id, enrichment_kind, prompt_version, content_fingerprint
+          FROM session_enrichments
+          WHERE status = 'failed'
+          GROUP BY session_id, enrichment_kind, prompt_version, content_fingerprint
+          HAVING COUNT(*) > 1
+        )`
+      )
+      .get() as { count: number }
+  ).count;
+}
+
+function gitSnapshotsWithoutFileEffects(db: MastheadDatabase): number {
+  const gitSnapshots = (
+    db.prepare("SELECT COUNT(*) AS count FROM raw_events WHERE source_id = 'masthead-git-observer'").get() as { count: number }
+  ).count;
+  if (gitSnapshots === 0) return 0;
+  const gitFileEffects = (
+    db.prepare("SELECT COUNT(*) AS count FROM file_effects WHERE source_ref_json LIKE '%git_snapshot%'").get() as { count: number }
+  ).count;
+  return Math.max(0, gitSnapshots - gitFileEffects);
+}
+
+function parseJson(value: string | null): unknown {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 export async function getCodexHookSettings(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {

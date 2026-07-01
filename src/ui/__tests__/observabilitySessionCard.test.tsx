@@ -151,6 +151,32 @@ describe("observability session card", () => {
     expect(html).not.toContain("Codex hook event");
   });
 
+  test("uses work context as headline fallback when copy and title are weak", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          copy: {
+            headline: "Recent activity.",
+            reason: "Recent activity.",
+            source: "deterministic",
+            status: "Work is active."
+          },
+          title: "Codex hook event",
+          workContext: {
+            label: "Headline enrichment reliability",
+            confidence: "event_summary",
+            pathClusters: ["enrichment"],
+            sourceSignals: ["event:headline"]
+          }
+        })}
+        onToggle={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Headline enrichment reliability");
+    expect(html).not.toContain("Masthead session update");
+  });
+
   test("uses context in the header when the stored card title is an opaque session id", () => {
     const html = renderToStaticMarkup(
       <SessionCard
@@ -822,8 +848,8 @@ describe("observability session card", () => {
     );
 
     expect(html).toContain("Refactor auth flow");
-    expect(html).toContain("AI headline failed");
-    expect(html).toContain("api_error");
+    expect(html).not.toContain("AI headline failed");
+    expect(html).not.toContain("api_error");
     expect(html).not.toContain("source: llm");
   });
 

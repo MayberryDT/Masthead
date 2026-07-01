@@ -1,4 +1,5 @@
 import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
+import { cleanSessionText, isUsefulSessionTitle, isWeakLiveSummary } from "../../shared/sessionTextQuality";
 import type { LogbookSession } from "../HistoryPanel";
 
 type Props = {
@@ -13,6 +14,7 @@ export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, 
   const primaryModel = session.models?.[0] ?? session.model ?? "Not captured";
   const lifecycle = session.lifecycle ?? session.state ?? "indexed";
   const title = sessionTitle(session);
+  const subtitle = sessionSubtitle(session, title);
   const style = {
     "--logbook-row-index": Math.min(rowIndex, 12)
   } as CSSProperties & { "--logbook-row-index": number };
@@ -53,7 +55,7 @@ export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, 
           aria-pressed={selected}
         >
           <strong>{title}</strong>
-          {session.snippet ? <HighlightedSnippet snippet={session.snippet} /> : <span>{session.objective ?? session.outcome ?? session.sourceSessionId}</span>}
+          {session.snippet ? <HighlightedSnippet snippet={session.snippet} /> : subtitle ? <span>{subtitle}</span> : null}
         </button>
       </td>
       <td className="logbook-col-project" title={session.project ?? ""}>{session.project ?? "Not captured"}</td>
@@ -101,6 +103,30 @@ function HighlightedSnippet({ snippet }: { snippet: string }) {
 
 function sessionTitle(session: LogbookSession): string {
   return session.title || session.objective || session.project || `${runtimeLabel(session.runtime)} session`;
+}
+
+function sessionSubtitle(session: LogbookSession, title: string): string | undefined {
+  const context = {
+    project: session.project,
+    sessionId: session.sessionId,
+    sourceSessionId: session.sourceSessionId
+  };
+  for (const candidate of [session.objective, session.outcome]) {
+    const cleaned = cleanSessionText(candidate, 120);
+    if (!cleaned || sameText(cleaned, title) || isLifecycleLabel(cleaned) || isWeakLiveSummary(cleaned)) continue;
+    return cleaned;
+  }
+  const sourceSessionId = cleanSessionText(session.sourceSessionId, 120);
+  if (sourceSessionId && !sameText(sourceSessionId, title) && isUsefulSessionTitle(sourceSessionId, context)) return sourceSessionId;
+  return undefined;
+}
+
+function sameText(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+function isLifecycleLabel(value: string): boolean {
+  return /^(completed|complete|running|ended|indexed|active|idle|blocked|unknown|not captured)$/i.test(value.trim());
 }
 
 function formatDate(value: string | undefined): string {

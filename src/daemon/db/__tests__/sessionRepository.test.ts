@@ -103,6 +103,34 @@ describe("session repository", () => {
     db.close();
   });
 
+  test("keeps live ingestion idempotent when a hook event id is replayed with changed message fields", async () => {
+    const db = await openMigratedDatabase();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "codex",
+      runtimeVersion: "codex-test"
+    });
+    const original = liveEvent("start", "session.started", {
+      title: "Original hook title"
+    });
+    const replayed = {
+      ...original,
+      occurredAt: "2026-06-24T15:09:00.000Z",
+      payload: { title: "Replayed hook title" },
+      receivedAt: "2026-06-24T15:09:00.000Z",
+      summary: "Replayed hook title"
+    };
+
+    repository.upsertLiveEvent(original);
+    repository.upsertLiveEvent(replayed);
+
+    expect(db.prepare("SELECT role, text_redacted FROM messages").all()).toEqual([
+      { role: "system", text_redacted: "Original hook title" }
+    ]);
+    db.close();
+  });
+
   test("materializes Board projection state for canonical sessions", async () => {
     const db = await openMigratedDatabase();
     const repository = createSessionRepository(db, {
@@ -215,6 +243,56 @@ describe("session repository", () => {
 
     expect(db.prepare("SELECT tool_name FROM tool_calls").all()).toEqual([{ tool_name: "bash" }]);
     expect(db.prepare("SELECT model, output_tokens FROM model_usage").all()).toEqual([{ model: "gpt-5.5", output_tokens: 12 }]);
+    db.close();
+  });
+
+  test("derives transcript file effects from structured tool calls without storing unsafe absolute paths", async () => {
+    const db = await openMigratedDatabase();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "codex",
+      runtimeVersion: "local-jsonl"
+    });
+    const patchRecord = transcriptRecord("tool_call", {
+      arguments: {
+        patch: [
+          "*** Begin Patch",
+          "*** Update File: src/ui/SessionCard.tsx",
+          "@@",
+          "-old",
+          "+new",
+          "*** Update File: /home/tyler/.ssh/config",
+          "@@",
+          "-secret",
+          "+secret",
+          "*** End Patch"
+        ].join("\n")
+      },
+      callId: "call-patch",
+      name: "apply_patch",
+      session_id: "historical-session",
+      timestamp: "2026-06-24T12:11:00.000Z"
+    });
+    const fileArgRecord = transcriptRecord("tool_call", {
+      arguments: {
+        filePath: "/workspace/masthead/src/enrichment/enrichmentCoordinator.ts",
+        cwd: "/workspace/masthead"
+      },
+      callId: "call-edit",
+      name: "edit",
+      session_id: "historical-session",
+      timestamp: "2026-06-24T12:12:00.000Z"
+    });
+
+    repository.upsertTranscriptRecord(patchRecord);
+    repository.upsertTranscriptRecord(patchRecord);
+    repository.upsertTranscriptRecord(fileArgRecord);
+
+    expect(db.prepare("SELECT path, effect_kind FROM file_effects ORDER BY path").all()).toEqual([
+      { effect_kind: "modified", path: "src/enrichment/enrichmentCoordinator.ts" },
+      { effect_kind: "modified", path: "src/ui/SessionCard.tsx" }
+    ]);
     db.close();
   });
 

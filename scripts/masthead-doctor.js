@@ -5,6 +5,7 @@ import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { findHookTranscriptStuckSessions } from "./masthead-doctor-hook-capture.js";
 
 const REQUIRED_HOOK_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"];
 const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
@@ -64,6 +65,7 @@ checks.push(await checkMcp());
 checks.push(await checkMcpStdio());
 checks.push(await checkLogbook());
 checks.push(await checkUsage());
+checks.push(await checkHookTranscriptCapture());
 checks.push(await checkSettings());
 checks.push(await checkDestructivePreviewSafety());
 checks.push(await checkHooks());
@@ -466,10 +468,14 @@ async function checkSourcesPipeline() {
           currentEnrichments,
           complete: enrichmentComplete,
           failed: enrichmentHealth.failed,
+          gitSnapshotsWithoutFileEffects: enrichmentHealth.gitSnapshotsWithoutFileEffects,
           queued: enrichmentHealth.queued,
           remoteModelEnabled: enrichment.remoteModelEnabled,
+          repeatedFailedFingerprints: enrichmentHealth.repeatedFailedFingerprints,
+          sessionsWithMessagesButNoEffects: enrichmentHealth.sessionsWithMessagesButNoEffects,
           status: enrichmentHealth.status,
-          sessions: enrichmentSessions
+          sessions: enrichmentSessions,
+          weakCurrentTitles: enrichmentHealth.weakCurrentTitles
         },
         importFailures: {
           failedPageCount: failedImports.length,
@@ -600,6 +606,63 @@ async function checkUsage() {
     };
   } catch (error) {
     return { id: "usage-summary", label: "usage summary", status: "fail", message: errorMessage(error), details: { baseUrl } };
+  }
+}
+
+async function checkHookTranscriptCapture() {
+  const data = isRecord(health?.data) ? health.data : {};
+  const databasePath = stringValue(data.databasePath);
+  if (!databasePath) {
+    return {
+      id: "hook-transcript-capture",
+      label: "hook transcript capture",
+      status: "warn",
+      message: "Health did not expose a database path for hook transcript capture checks.",
+      details: { baseUrl }
+    };
+  }
+
+  let db;
+  try {
+    db = new DatabaseSync(databasePath, { readOnly: true });
+    const { checkedCandidates, stuckSessions } = findHookTranscriptStuckSessions(db, { candidateLimit: 10, stuckLimit: 10 });
+
+    if (stuckSessions.length === 0) {
+      return {
+        id: "hook-transcript-capture",
+        label: "hook transcript capture",
+        status: "ok",
+        message: "Recent Codex hooks with transcript paths are not stuck in a hook-only tokenless state.",
+        details: { checkedHookTranscriptCandidates: checkedCandidates, databasePath, stuckSessions: [] }
+      };
+    }
+
+    return {
+      id: "hook-transcript-capture",
+      label: "hook transcript capture",
+      status: "warn",
+      message: `${stuckSessions.length} recent Codex session${stuckSessions.length === 1 ? "" : "s"} have hook transcript paths but no useful transcript messages or token rows.`,
+      details: {
+        checkedHookTranscriptCandidates: checkedCandidates,
+        databasePath,
+        repairRecommendations: [
+          "Confirm transcript import is approved in Sources.",
+          "Restart npm run dev without MASTHEAD_HOOK_TRANSCRIPT_CATCHUP=0.",
+          "If the warning is for old rows only, run approved transcript import from Sources."
+        ],
+        stuckSessions
+      }
+    };
+  } catch (error) {
+    return {
+      id: "hook-transcript-capture",
+      label: "hook transcript capture",
+      status: "warn",
+      message: errorMessage(error),
+      details: { databasePath }
+    };
+  } finally {
+    if (db) db.close();
   }
 }
 

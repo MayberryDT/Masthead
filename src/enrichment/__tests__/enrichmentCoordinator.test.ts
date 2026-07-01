@@ -73,6 +73,56 @@ describe("enrichment coordinator", () => {
     db.close();
   });
 
+  test("repeated failed provider results dedupe by stable failed fingerprint", async () => {
+    const db = await openTestDatabase();
+    seedSession(db);
+    const provider = countingFailingProvider("timeout");
+    const coordinator = createEnrichmentCoordinator(db, provider);
+
+    await expect(coordinator.enrich("session-1")).rejects.toMatchObject({ status: "timeout" });
+    await expect(coordinator.enrich("session-1")).rejects.toMatchObject({ status: "timeout" });
+
+    const failedRows = db
+      .prepare(
+        `SELECT content_fingerprint AS fingerprint, failure_code AS failureCode
+        FROM session_enrichments
+        WHERE session_id = ? AND enrichment_kind = 'session_capsule' AND status = 'failed'`
+      )
+      .all("session-1") as Array<{ failureCode: string; fingerprint: string }>;
+
+    expect(provider.calls()).toBe(2);
+    expect(failedRows).toHaveLength(1);
+    expect(failedRows[0]).toMatchObject({
+      failureCode: "timeout",
+      fingerprint: expect.stringMatching(/:failed:timeout$/)
+    });
+    db.close();
+  });
+
+  test("ensureCurrent backs off recent failed enrichment for unchanged facts", async () => {
+    const db = await openTestDatabase();
+    seedSession(db);
+    const provider = countingFailingProvider("validation_failed");
+    let now = Date.parse("2026-06-25T12:00:00.000Z");
+    const coordinator = createEnrichmentCoordinator(db, provider, {
+      failureBackoffMs: 10 * 60_000,
+      now: () => now
+    });
+
+    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+    const backedOff = await coordinator.ensureCurrent("session-1");
+
+    now += 10 * 60_000 + 1;
+    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+
+    expect(backedOff).toMatchObject({
+      failureCode: "validation_failed",
+      status: "failed"
+    });
+    expect(provider.calls()).toBe(2);
+    db.close();
+  });
+
   test("typed enrichment failure exposes provider status for diagnostics", () => {
     const error = new EnrichmentFailedError({
       failureMessage: "Provider timed out.",
@@ -133,6 +183,25 @@ function failingProvider(status: "timeout" | "api_error"): SessionEnrichmentProv
     async enrich() {
       return {
         failureMessage: "Provider timed out.",
+        model: "test-model",
+        provider: "test-provider",
+        source: "none",
+        status
+      };
+    }
+  };
+}
+
+function countingFailingProvider(status: "timeout" | "api_error" | "validation_failed"): SessionEnrichmentProvider & { calls(): number } {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    id: "test-provider",
+    model: "test-model",
+    async enrich() {
+      calls += 1;
+      return {
+        failureMessage: status === "validation_failed" ? "Provider output failed validation." : "Provider timed out.",
         model: "test-model",
         provider: "test-provider",
         source: "none",

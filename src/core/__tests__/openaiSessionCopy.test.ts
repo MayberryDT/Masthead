@@ -328,6 +328,39 @@ describe("OpenAI session copy", () => {
     vi.useRealTimers();
   });
 
+  test("default projection budget does not let live copy block the board", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn((_url: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          },
+          { once: true }
+        );
+      });
+    });
+    const enricher = createOpenAISessionCopyEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      maxConcurrent: 1
+    });
+    const projection = liveProjection([cardView({ lifecycle: "running", primaryStatus: "editing", sessionId: "running-session" })]);
+
+    const pending = enricher.enrichProjection(projection);
+    await vi.advanceTimersByTimeAsync(750);
+    const enriched = await pending;
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(enriched.cards[0]?.copyRefresh).toMatchObject({
+      failureMessage: "OpenAI live copy timed out after 750ms.",
+      status: "timeout"
+    });
+    vi.useRealTimers();
+  });
+
   test("cache is opt-in for successful copy overlays", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,

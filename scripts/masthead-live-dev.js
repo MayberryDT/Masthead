@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { removeDaemonOwnershipMetadata, writeDaemonOwnershipMetadata } from "../dist/daemon/src/core/daemonOwnership.js";
+import { buildLiveDevDaemonEnv } from "../dist/daemon/src/core/liveDevDaemonEnv.js";
 import { buildLiveDevPlan, startReadOnlyConnectorBridge } from "../dist/daemon/src/core/worktreeConnector.js";
 import { classifyDaemonHealth } from "../dist/daemon/src/shared/protocol.js";
 
@@ -32,19 +33,19 @@ try {
       writeLine("Starting current daemon on an isolated port.", "warn");
     }
     writeLine(`Connector: ${plan.connector.baseUrl} (${plan.connector.mode === "primary" ? "primary" : "isolated primary"})`);
-    collector = start("collector", process.execPath, ["dist/daemon/src/daemon/main.js"], {
-      MASTHEAD_DATA_DIR: plan.connector.dataDirectory,
-      MASTHEAD_DIAGNOSTIC_LOG_FILE: join(plan.connector.dataDirectory, "runtime", "daemon.log"),
-      MASTHEAD_HOST: plan.host,
-      MASTHEAD_PORT: String(plan.connector.port),
-      MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins,
-      MASTHEAD_GIT_REFRESH_MS: process.env.MASTHEAD_GIT_REFRESH_MS ?? "0",
-      MASTHEAD_HOOK_TRANSCRIPT_CATCHUP: process.env.MASTHEAD_HOOK_TRANSCRIPT_CATCHUP ?? "0",
-      MASTHEAD_LLM_COPY: process.env.MASTHEAD_LLM_COPY ?? (process.env.OPENAI_API_KEY ? "1" : "0"),
-      MASTHEAD_SKIP_MIGRATION_QUICK_CHECK: process.env.MASTHEAD_SKIP_MIGRATION_QUICK_CHECK ?? "1",
-      MASTHEAD_SKIP_BACKGROUND_HYDRATION: process.env.MASTHEAD_SKIP_BACKGROUND_HYDRATION ?? "1",
-      NODE_OPTIONS: process.env.MASTHEAD_DEV_NODE_OPTIONS ?? ""
-    });
+    collector = start(
+      "collector",
+      process.execPath,
+      ["dist/daemon/src/daemon/main.js"],
+      buildLiveDevDaemonEnv({
+        allowedOrigins: plan.allowedOrigins,
+        dataDirectory: plan.connector.dataDirectory,
+        diagnosticLogFile: join(plan.connector.dataDirectory, "runtime", "daemon.log"),
+        env: process.env,
+        host: plan.host,
+        port: plan.connector.port
+      })
+    );
 
     activeHealth = await waitForHealth(`${plan.connector.baseUrl}/health`, healthTimeoutMs);
     ownershipPath = await writeOwnership(plan.connector.baseUrl, activeHealth);

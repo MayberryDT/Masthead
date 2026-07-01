@@ -25,6 +25,8 @@ describe("Masthead Dev launcher template", () => {
     expect(source).toContain("load_local_env");
     expect(source).toContain('"$APP_DIR/.env" "$APP_DIR/.env.local"');
     expect(source).toContain("daemon_is_compatible");
+    expect(source).toContain('curl -fsS --max-time 5 "http://127.0.0.1:$port/health"');
+    expect(source).toContain('if daemon_is_healthy "$port" || port_is_listening "$port"; then');
     expect(source).toContain("j?.data?.dataDirectory === process.env.EXPECTED_DATA_DIR");
     expect(source).toContain('ACTIVE_PROJECTION_URL="$ACTIVE_DAEMON_BASE_URL/projection"');
     expect(source).toContain('VITE_MASTHEAD_PROJECTION_URL="$ACTIVE_PROJECTION_URL"');

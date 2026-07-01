@@ -5,6 +5,7 @@ import { redactText } from "../../core/redaction.ts";
 import type { LiveBoardProjection, NormalizedEvent } from "../../core/types.ts";
 import { upsertSessionSource } from "./sessionSourceRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
+import { deriveTranscriptFileEffects } from "./transcriptEffects.ts";
 
 export type SessionRepositoryContext = {
   hostId: string;
@@ -215,7 +216,7 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
       db.prepare(
         `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(session_id, text_hash, observed_at, role) DO NOTHING`
+        ON CONFLICT DO NOTHING`
       ).run(
         messageId(sessionId, record.sourceRecordKey, value.role),
         sessionId,
@@ -241,6 +242,7 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
         observedAt,
         transcriptSourceRefJson(record)
       );
+      upsertTranscriptFileEffects(record, sessionId, value);
       return sessionId;
     }
     if (record.normalized.kind === "usage") {
@@ -415,7 +417,7 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
     db.prepare(
       `INSERT INTO messages (message_id, session_id, turn_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(session_id, text_hash, observed_at, role) DO NOTHING`
+      ON CONFLICT DO NOTHING`
     ).run(messageId(sessionId, event.eventId, role), sessionId, turnId(sessionId, event.eventId), role, text, hash(text), event.occurredAt, sourceRefJson(event), "authoritative");
   };
 
@@ -469,6 +471,35 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
     );
     for (const path of paths) {
       insert.run(fileEffectId(sessionId, event, path), sessionId, path, stringPayload(event, ["effectKind", "status"]) ?? "modified", 0, null, null, event.occurredAt, sourceRefJson(event));
+    }
+  };
+
+  const upsertTranscriptFileEffects = (record: AdapterRecord, sessionId: string, value: ReturnType<typeof transcriptValue>): void => {
+    const effects = deriveTranscriptFileEffects({
+      arguments: value.arguments,
+      cwd: value.cwd,
+      repoRoot: value.repoRoot,
+      toolName: value.toolName,
+      worktreePath: value.worktreePath
+    });
+    if (effects.length === 0) return;
+    const insert = db.prepare(
+      `INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, staged, additions, deletions, observed_at, source_ref_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(session_id, path, effect_kind, observed_at) DO NOTHING`
+    );
+    for (const effect of effects) {
+      insert.run(
+        transcriptFileEffectId(sessionId, record, effect.path, effect.effectKind),
+        sessionId,
+        effect.path,
+        effect.effectKind,
+        0,
+        null,
+        null,
+        value.observedAt ?? record.observedAt,
+        transcriptSourceRefJson(record)
+      );
     }
   };
 
@@ -842,12 +873,14 @@ function transcriptValue(
   sourcePath: string | undefined
 ): {
   arguments?: unknown;
+  cwd?: string;
   inputTokens?: number;
   model?: string;
   observedAt?: string;
   project?: string;
   outputTokens?: number;
   provider?: string;
+  repoRoot?: string;
   role?: string;
   sessionId?: string;
   callId?: string;
@@ -863,6 +896,7 @@ function transcriptValue(
   text?: string;
   toolName?: string;
   totalTokens?: number;
+  worktreePath?: string;
 } {
   if (typeof value !== "object" || value === null) return {};
   const record = value as Record<string, unknown>;
@@ -876,6 +910,9 @@ function transcriptValue(
       stringValue(record.conversationId) ??
       (sourcePath?.endsWith(".jsonl") ? basename(sourcePath, ".jsonl") : undefined),
     project: stringValue(record.project) ?? projectLabelFromPath(stringValue(record.cwd) ?? stringValue(record.repoRoot) ?? stringValue(record.repo_root)),
+    cwd: stringValue(record.cwd),
+    repoRoot: stringValue(record.repoRoot) ?? stringValue(record.repo_root),
+    worktreePath: stringValue(record.worktreePath) ?? stringValue(record.worktree_path),
     text: stringValue(record.content) ?? stringValue(record.text) ?? stringValue(record.message),
     toolName: stringValue(record.name) ?? stringValue(record.tool_name) ?? stringValue(record.toolName),
     arguments: record.arguments ?? record.args ?? record.input,
@@ -927,6 +964,10 @@ function transcriptSignalIdFromRecord(sessionId: string, record: AdapterRecord):
 
 function transcriptCheckpointIdFromRecord(sessionId: string, record: AdapterRecord, checkpointId: string | undefined): string {
   return `checkpoint:${hash(`${sessionId}\0${checkpointId ?? record.sourceRecordKey}`)}`;
+}
+
+function transcriptFileEffectId(sessionId: string, record: AdapterRecord, path: string, effectKind: string): string {
+  return `file_effect:${hash(`${sessionId}\0${record.sourceRecordKey}\0${path}\0${effectKind}`)}`;
 }
 
 function modelUsageIdFromRecord(sessionId: string, record: AdapterRecord): string {

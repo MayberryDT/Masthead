@@ -196,7 +196,7 @@ describe("session title quality", () => {
       "[]"
     );
 
-    expect(querySessions(db, { limit: 10 }).sessions[0]?.title).toBe("Masthead session");
+    expect(querySessions(db, { limit: 10 }).sessions[0]?.title).toBe("Masthead · 2026-06-25 12:00");
     db.close();
   });
 });

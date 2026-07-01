@@ -54,6 +54,10 @@ function parseArgs(args) {
       index += 1;
     } else if (arg === "--all") {
       body.scope = "all";
+    } else if (arg === "--dry-run") {
+      body.dryRun = true;
+    } else if (arg === "--deterministic-only") {
+      body.deterministicOnly = true;
     } else if (arg === "--limit") {
       if (!value) throw new Error("Missing value for --limit");
       body.limit = parsePositiveInteger(value, "--limit");
@@ -90,6 +94,8 @@ Options:
   --runtime <kind>    Re-enrich sessions for one runtime id or kind
   --all               Re-enrich newest sessions across all scopes
   --limit <number>    Limit for --all/project/runtime (default: 100)
+  --dry-run           Preview the selected sessions without writing enrichments
+  --deterministic-only Rebuild with local deterministic enrichment even if remote is configured
   --help              Show this help
 `);
 }
