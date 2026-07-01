@@ -51,6 +51,7 @@ export type SessionCopyInput = {
   project?: string;
   workContext?: WorkAreaContext;
   latestFeedback?: LatestFeedbackSignal;
+  headlineEvidence?: string[];
   refresh?: SessionCopyRefreshContext;
   recentDelta?: SessionCopyRecentDelta;
   facts?: BoardLiveCopyFacts;
@@ -120,6 +121,7 @@ export function toSessionCopyInput(
           }
         }
       : {}),
+    ...headlineEvidenceField(options.facts, options.recentDelta),
     ...(options.refresh ? { refresh: options.refresh } : {}),
     ...(options.recentDelta ? { recentDelta: options.recentDelta } : {}),
     ...(options.facts ? { facts: options.facts } : {})
@@ -258,6 +260,7 @@ export function validateSessionCopy(
 
   const serialized = [copy.headline, copy.status, copy.reason, copy.nextStep ?? ""].join(" ");
   if (unsafeCopyPattern.test(serialized)) return { ok: false, reason: "unsafe_copy" };
+  if (isProjectOrHarnessBoilerplate(copy.headline, input)) return { ok: false, reason: "invalid_shape" };
   if (isRepetitiveStatusTemplate(copy.headline, input)) return { ok: false, reason: "invalid_shape" };
 
   if (
@@ -375,7 +378,7 @@ function headlineForInput(input: SessionCopyInput): string {
   const activityHeadline = latestActivityHeadline(input);
   if (activityHeadline) return activityHeadline;
 
-  const subject = headlineSubject(input.workContext?.label, input.project);
+  const subject = headlineSubject(input.workContext?.label);
   const be = subject.plural ? "are" : "is";
 
   if (input.latestFeedback?.claims.includes("claims_complete") && !(input.lifecycle === "ended" && input.outcomeLabel === "completed")) {
@@ -386,10 +389,10 @@ function headlineForInput(input: SessionCopyInput): string {
     if (input.signals.includes("approval_waiting")) return `${subject.text} ${be} paused for approval.`;
     if (input.signals.includes("user_reply_waiting")) return `${subject.text} ${be} waiting for input.`;
     if (input.signals.includes("command_failed")) return `${subject.text} ${be} showing a command failure.`;
-    return `${subject.text} ${be} active now.`;
+    return `${subject.text} ${be} in progress.`;
   }
 
-  if (input.lifecycle === "idle") return `${subject.text} ${be} quiet but still open.`;
+  if (input.lifecycle === "idle") return `${subject.text} ${be} open with no new evidence.`;
 
   if (input.primaryStatus === "completed_unreviewed") return completedActivityHeadline(subject);
   if (input.outcomeLabel === "completed" || input.primaryStatus === "completed_reviewed") return `${subject.text} ${be} filed in history.`;
@@ -410,7 +413,7 @@ function isSentenceHeadline(value: string): boolean {
   return (
     /[.!?]$/.test(value) &&
     /\s/.test(value) &&
-    /\b(added|blocked|checked|configured|corrected|created|deployed|documented|ended|filed|fixed|has|have|implemented|installed|is|logged|moved|need|needs|paused|published|quiet|receive|receives|recorded|removed|rendered|report|reports|reworked|rewrote|showing|shows|started|stopped|updated|uses|verified|waiting|was|were)\b/i.test(
+    /\b(added|are|blocked|checked|configured|corrected|created|deployed|documented|ended|filed|fixed|has|have|implemented|installed|is|logged|moved|need|needs|paused|published|quiet|receive|receives|recorded|removed|rendered|report|reports|reworked|rewrote|showing|shows|started|stopped|updated|uses|verified|waiting|was|were)\b/i.test(
       value
     )
   );
@@ -418,9 +421,12 @@ function isSentenceHeadline(value: string): boolean {
 
 function latestActivityHeadline(input: SessionCopyInput): string | undefined {
   return (
-    latestFeedbackHeadline(input.latestFeedback?.summary) ??
+    input.recentDelta?.latestEventSummaries.map(latestFeedbackHeadline).find(isString) ??
     latestFeedbackHeadline(input.facts?.recentEvents[0]?.summary) ??
-    input.recentDelta?.latestEventSummaries.map(latestFeedbackHeadline).find(isString)
+    latestFeedbackHeadline(input.latestFeedback?.summary) ??
+    latestFeedbackHeadline(input.facts?.canonicalEnrichment?.liveSummary) ??
+    latestFeedbackHeadline(input.facts?.canonicalEnrichment?.title) ??
+    concreteFactHeadline(input.headlineEvidence)
   );
 }
 
@@ -443,6 +449,7 @@ function cleanLatestFeedbackHeadline(value: string | undefined): string | undefi
   if (/\bis\s*,/i.test(cleaned) || /\bgenerated\s*\./i.test(cleaned) || /(?:^|[\s:-])[-,]\s*[.!?]?$/i.test(cleaned)) return undefined;
   if (/\[[^\]]+\]\([^)]*\)/.test(cleaned)) return undefined;
   if (/\b(now|then|before|after):[.!?]?$/i.test(cleaned)) return undefined;
+  if (/^(?:reports|shows|contains|includes)\s+\d[\d,]*(?:\s+\w+){0,4}(?:[.!?]|$)/i.test(cleaned)) return undefined;
   return cleaned;
 }
 
@@ -457,7 +464,11 @@ function isLowQualitySessionHeadline(value: string): boolean {
   const normalized = value.replace(/[.!?]+$/g, "").trim().toLowerCase();
   if (["codex session", "untitled session", "new session", "session", "chat session"].includes(normalized)) return true;
   if (/^[\w .-]+\s+codex session$/i.test(normalized)) return true;
+  if (/\bcodex session\b/i.test(normalized)) return true;
+  if (/^(?:this|the|[\w .-]+)\s+session\s+is\s+(?:currently\s+)?(?:active|in progress|reading|editing|working)\b/i.test(normalized)) return true;
+  if (/^(?:this|the|[\w .-]+)\s+session\s+has\s+(?:recent\s+)?activity\b/i.test(normalized)) return true;
   if (/^updated\b/i.test(normalized)) return true;
+  if (/^(?:reports|shows|contains|includes)\s+\d[\d,]*(?:\s+\w+){0,4}/i.test(normalized)) return true;
   if (/\b(?:ready for review|needs review|need review|work is focused on)\b/i.test(normalized)) return true;
   if (/^updated\s+(codex|untitled|new|chat)?\s*session$/i.test(normalized)) return true;
   if (/^[0-9a-f]{12,}$/i.test(normalized) || /^session[-_:][a-z0-9][a-z0-9_-]{5,}$/i.test(normalized)) return true;
@@ -472,10 +483,24 @@ function sentenceFromFeedbackFragment(value: string): string | undefined {
 }
 
 function hasConcreteActivityEvidence(input: SessionCopyInput): boolean {
-  return Boolean(input.latestFeedback?.summary || input.facts?.recentEvents.length || input.recentDelta?.latestEventSummaries.length);
+  return Boolean(
+    input.latestFeedback?.summary ||
+      input.headlineEvidence?.length ||
+      input.facts?.recentEvents.length ||
+      input.recentDelta?.latestEventSummaries.length ||
+      input.facts?.canonicalEnrichment
+  );
 }
 
 function isRepetitiveStatusTemplate(value: string, input: SessionCopyInput): boolean {
+  if (
+    hasConcreteActivityEvidence(input) &&
+    /\b(?:had recent activity|has recent activity|have recent activity|is active now|are active now|is quiet but still open|are quiet but still open|changes are quiet but open|session is currently|session is active|session is in progress)\b/i.test(
+      value
+    )
+  ) {
+    return true;
+  }
   if (
     /\b(?:ready for review|needs review|need review|report(?:s)? completion and need(?:s)? review|being (?:fixed|updated|reviewed|validated) for)\b/i.test(
       value
@@ -487,11 +512,11 @@ function isRepetitiveStatusTemplate(value: string, input: SessionCopyInput): boo
 }
 
 function completedActivityHeadline(subject: { text: string; plural: boolean }): string {
-  return `${subject.text} had recent activity.`;
+  return `${subject.text} ${subject.plural ? "are" : "is"} pending review.`;
 }
 
-function headlineSubject(label: string | undefined, project: string | undefined): { text: string; plural: boolean } {
-  if (!label || label === "Session work") return { text: project ? `${project} session` : "This session", plural: false };
+function headlineSubject(label: string | undefined): { text: string; plural: boolean } {
+  if (!label || label === "Session work") return { text: "This work", plural: false };
   if (label === "Changed-file review") return { text: "Changed files", plural: true };
   if (label === "Verification follow-up") return { text: "Verification follow-up", plural: false };
   if (label === "Test repair work" || label === "Test work") return { text: "Test repairs", plural: true };
@@ -522,6 +547,65 @@ function projectField(project: string | undefined): Pick<SessionCopyInput, "proj
   return label ? { project: label } : {};
 }
 
+function headlineEvidenceField(
+  facts: BoardLiveCopyFacts | undefined,
+  recentDelta: SessionCopyRecentDelta | undefined
+): Pick<SessionCopyInput, "headlineEvidence"> {
+  const values = [
+    facts?.latestFeedback?.summary,
+    facts?.canonicalEnrichment?.liveSummary,
+    facts?.canonicalEnrichment?.title,
+    facts?.canonicalEnrichment?.subject,
+    facts?.canonicalEnrichment?.action,
+    facts?.canonicalEnrichment?.object,
+    facts?.canonicalEnrichment?.outcome,
+    facts?.canonicalEnrichment?.filesChangedSummary,
+    facts?.canonicalEnrichment?.commandsSummary,
+    facts?.canonicalEnrichment?.verificationSummary,
+    facts?.title,
+    facts?.workContext?.label,
+    ...(facts?.recentEvents.map((event) => event.summary) ?? []),
+    ...(recentDelta?.latestEventSummaries ?? []),
+    ...(facts?.recentFileBasenames ?? []),
+    ...(recentDelta?.latestFileBasenames ?? []),
+    ...(facts?.recentToolNames ?? []),
+    ...(recentDelta?.latestToolNames ?? []),
+    ...(facts?.recentCommandFailures ?? []),
+    ...(facts?.attentionTitles ?? []),
+    ...(facts?.conflictTitles ?? [])
+  ];
+  const headlineEvidence = unique(values.map(safeHeadlineEvidence).filter(isString)).slice(0, 12);
+  return headlineEvidence.length > 0 ? { headlineEvidence } : {};
+}
+
+function safeHeadlineEvidence(value: string | undefined): string | undefined {
+  const label = value?.replace(/\s+/g, " ").trim();
+  if (!label || isLowQualitySessionHeadline(label) || unsafeCopyPattern.test(label)) return undefined;
+  if (label.length < 3) return undefined;
+  return label.slice(0, 120);
+}
+
+function concreteFactHeadline(values: string[] | undefined): string | undefined {
+  const concrete = values?.map(safeHeadlineEvidence).find(isString);
+  if (!concrete) return undefined;
+  const sentence = isSentenceHeadline(concrete) ? concrete : sentenceFromFeedbackFragment(concrete);
+  return sentence && !isLowQualitySessionHeadline(sentence) ? sentence : undefined;
+}
+
+function isProjectOrHarnessBoilerplate(value: string, input: SessionCopyInput): boolean {
+  const normalized = value.replace(/[.!?]+$/g, "").trim();
+  if (/\bcodex session\b/i.test(normalized)) return true;
+  if (/^(?:codex|claude|openai|gpt[-\w.]*)\b/i.test(normalized)) return true;
+
+  const project = input.project?.replace(/\s+/g, " ").trim();
+  if (project && normalized.toLowerCase().startsWith(`${project.toLowerCase()} `)) {
+    const rest = normalized.slice(project.length).trim();
+    if (/^(?:codex\s+)?session\b/i.test(rest)) return true;
+    if (input.workContext?.label && rest.toLowerCase().startsWith(input.workContext.label.toLowerCase())) return true;
+  }
+  return false;
+}
+
 function capitalizeFirst(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -532,6 +616,10 @@ function lowercaseFirst(value: string): string {
 
 function isString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function stableSessionCopyInput(input: SessionCopyInput): SessionCopyInput {

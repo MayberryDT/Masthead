@@ -241,7 +241,7 @@ describe("Live Board projection", () => {
     expect(board.cards[0]).toMatchObject({
       title: "Masthead UI work",
       copy: {
-        headline: "UI changes are active now.",
+        headline: "UI changes are in progress.",
         source: "deterministic"
       },
       workContext: {
@@ -278,7 +278,7 @@ describe("Live Board projection", () => {
     expect(board.cards[0]).toMatchObject({
       title: "Masthead UI work",
       copy: {
-        headline: "UI changes are active now.",
+        headline: "UI changes are in progress.",
         source: "deterministic"
       }
     });
@@ -312,7 +312,7 @@ describe("Live Board projection", () => {
     expect(board.cards[0]).toMatchObject({
       title: "Masthead UI work",
       copy: {
-        headline: "UI changes are active now.",
+        headline: "UI changes are in progress.",
         source: "deterministic"
       }
     });
@@ -346,7 +346,7 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]).toMatchObject({
       copy: {
-        headline: "UI changes are active now.",
+        headline: "UI changes are in progress.",
         source: "deterministic"
       }
     });

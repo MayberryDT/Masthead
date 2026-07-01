@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { SessionCardView } from "../core/types";
 import { isBlockedSessionCard } from "./format";
 import type { DemoSessionTelemetry } from "./observabilityDemo";
@@ -15,6 +15,9 @@ type Props = {
 
 type SessionVisualTier = "quiet" | "live" | "action";
 
+const HEADLINE_TEXT_SWAP_MS = 1_850;
+const HEADLINE_ANIMATION_CLEANUP_MS = 2_700;
+
 export function SessionCard({
   session,
   onToggle,
@@ -30,12 +33,13 @@ export function SessionCard({
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Codex";
   const worktree = session.branchOrWorktree ?? "None";
   const headline = sessionHeadline(session);
+  const [visibleHeadline, setVisibleHeadline] = useState(headline);
+  const [outgoingHeadline, setOutgoingHeadline] = useState<string | undefined>();
+  const visibleHeadlineRef = useRef(headline);
+  const latestHeadlineRef = useRef(headline);
   const sessionName = sessionHeaderName(session);
-  const isHeadlineRefreshing = headlineUpdateIndex !== undefined;
+  const isHeadlineRefreshing = outgoingHeadline !== undefined || (headlineUpdateIndex !== undefined && visibleHeadline !== headline);
   const isRefreshPulsing = refreshPulseIndex !== undefined && !isHeadlineRefreshing;
-  const previousHeadlineRef = useRef(headline);
-  const previousHeadline = previousHeadlineRef.current;
-  const outgoingHeadline = isHeadlineRefreshing ? previousHeadline : undefined;
   const style = {
     viewTransitionName: `session-card-${viewTransitionNamePart(session.sessionId)}`,
     "--new-card-index": Math.min(newCardIndex, 4),
@@ -44,8 +48,38 @@ export function SessionCard({
   } as CSSProperties & { "--new-card-index": number; "--headline-refresh-index": number; "--refresh-pulse-index": number };
 
   useEffect(() => {
-    previousHeadlineRef.current = headline;
-  }, [headline]);
+    visibleHeadlineRef.current = visibleHeadline;
+  }, [visibleHeadline]);
+
+  useEffect(() => {
+    if (headline === latestHeadlineRef.current) return undefined;
+
+    const previousHeadline = visibleHeadlineRef.current;
+    latestHeadlineRef.current = headline;
+
+    if (headlineUpdateIndex === undefined || prefersReducedMotion()) {
+      setOutgoingHeadline(undefined);
+      setVisibleHeadline(headline);
+      return undefined;
+    }
+
+    setOutgoingHeadline(previousHeadline);
+
+    const swapTimer = window.setTimeout(() => {
+      setVisibleHeadline(headline);
+    }, HEADLINE_TEXT_SWAP_MS);
+    const cleanupTimer = window.setTimeout(
+      () => {
+        setOutgoingHeadline(undefined);
+      },
+      HEADLINE_ANIMATION_CLEANUP_MS + Math.min(headlineUpdateIndex, 4) * 55
+    );
+
+    return () => {
+      window.clearTimeout(swapTimer);
+      window.clearTimeout(cleanupTimer);
+    };
+  }, [headline, headlineUpdateIndex]);
 
   return (
     <article
@@ -89,7 +123,7 @@ export function SessionCard({
             {outgoingHeadline}
           </span>
         ) : null}
-        <span className="headline-text headline-current">{headline}</span>
+        <span className="headline-text headline-current">{visibleHeadline}</span>
       </h3>
       <CopyRefreshBadge session={session} />
 
@@ -238,6 +272,10 @@ function looksSerialized(label: string): boolean {
 
 function looksLikeRawCommand(label: string): boolean {
   return /^(?:npm|pnpm|yarn|node|python|python3|bash|sh|zsh|git|curl|cat|sed|rg|grep)\s+/.test(label);
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
 function cleanProjectName(value: string): string {

@@ -55,11 +55,11 @@ export type OpenAISessionCopyEnricher = {
 };
 
 const DEFAULT_MODEL = "gpt-5-nano-2025-08-07";
-const DEFAULT_TIMEOUT_MS = 2_500;
+const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_TTL_MS = 0;
 const DEFAULT_MAX_ENTRIES = 500;
 const DEFAULT_MAX_CONCURRENT = 2;
-const DEFAULT_PROJECTION_BUDGET_MS = 3_500;
+const DEFAULT_PROJECTION_BUDGET_MS = 8_500;
 
 export async function rewriteSessionCopyWithOpenAI(
   input: SessionCopyInput,
@@ -91,8 +91,12 @@ export async function rewriteSessionCopyWithOpenAI(
         instructions: [
           "Rewrite Masthead session metadata into calm, system-neutral plain English for an operations brief.",
           "Only restate the facts in the input.",
-          "For running sessions, summarize the latest concrete activity in one sentence when latestFeedback, facts.recentEvents, or recentDelta.latestEventSummaries are present.",
-          "Prefer latest activity evidence over lifecycle, status, project, or review-state wording.",
+          "For running sessions, write the headline from headlineEvidence first when it is present.",
+          "Prefer concrete work evidence in this order: latestFeedback.summary, headlineEvidence, facts.recentEvents, recentDelta.latestEventSummaries, canonicalEnrichment, recentFileBasenames, recentToolNames, and attention or conflict titles.",
+          "Headlines should name the concrete work, file, domain, tool, task, or action when the input contains one.",
+          "Use lifecycle, status, project, or review-state wording only when no concrete work evidence is present.",
+          "Project, harness, and runtime names already appear outside the headline. Do not start with or repeat project names, Codex, Claude, model names, or generic session labels.",
+          "Do not summarize concrete evidence as recent activity, active now, quiet but open, or changed files.",
           "Do not mention MCP, Model Context Protocol, or MCP servers unless the input explicitly contains MCP, Model Context Protocol, or an mcp path/topic.",
           "Never use repeated templates such as ready for review, needs review, work is focused on, or being fixed for a project.",
           "Do not infer lifecycle, outcome, urgency, identity, or completion.",
@@ -392,8 +396,24 @@ function extractOutputText(value: unknown): string | undefined {
 function refreshableProjectionCards(cards: LiveBoardProjection["cards"]): Array<{ card: LiveBoardProjection["cards"][number]; cardIndex: number }> {
   return cards
     .map((card, cardIndex) => ({ card, cardIndex }))
-    .filter(({ card }) => card.lifecycle === "running")
+    .filter(({ card }) => isRefreshableActiveCard(card))
     .toSorted((a, b) => a.card.priorityRank - b.card.priorityRank || a.cardIndex - b.cardIndex);
+}
+
+function isRefreshableActiveCard(card: LiveBoardProjection["cards"][number]): boolean {
+  return (
+    card.lifecycle === "running" &&
+    card.primaryStatus !== "blocked" &&
+    card.primaryStatus !== "waiting_for_approval" &&
+    card.primaryStatus !== "waiting_for_user" &&
+    card.primaryStatus !== "stalled" &&
+    card.primaryStatus !== "failed" &&
+    card.primaryStatus !== "completed_reviewed" &&
+    card.primaryStatus !== "completed_unreviewed" &&
+    card.primaryStatus !== "abandoned" &&
+    card.outcomeLabel !== "blocked" &&
+    card.endReason !== "blocked"
+  );
 }
 
 function withOverlayCopy<T extends { sessionId: string; copy: SessionPlainCopy; copyRefresh?: LiveBoardProjection["cards"][number]["copyRefresh"] }>(
@@ -447,6 +467,6 @@ function isSessionCopyInput(value: unknown): value is SessionCopyInput {
 
 function effectiveTimeoutMs(configuredTimeoutMs: number, refreshIntervalMs: number | undefined): number {
   if (!refreshIntervalMs || refreshIntervalMs <= 0) return configuredTimeoutMs;
-  const capped = Math.min(configuredTimeoutMs, Math.floor(refreshIntervalMs * 0.6));
-  return Math.max(800, capped);
+  const capped = Math.min(configuredTimeoutMs, Math.floor(refreshIntervalMs * 0.8));
+  return Math.max(1_500, capped);
 }
