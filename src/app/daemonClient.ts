@@ -1,4 +1,5 @@
 import { defaultLiveProjectionUrl } from "./liveProjectionClient";
+import { getJson, postJson } from "./httpJsonClient";
 import type { ReviewDisposition } from "../core/store";
 import type { SessionDossierDto } from "../shared/sessionDossier";
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
@@ -575,12 +576,7 @@ async function postSourcesSetupAction(baseUrl: string, pathname: string, input?:
 }
 
 export async function listSources(baseUrl = defaultLiveProjectionUrl()): Promise<SourceStatus[]> {
-  const url = new URL(baseUrl);
-  url.pathname = "/sources";
-  url.search = "";
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`sources request failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; sources: SourceStatus[] };
+  const body = await getJson<{ ok: true; sources: SourceStatus[] }>(baseUrl, "/sources", { label: "sources request" });
   return body.sources;
 }
 
@@ -588,13 +584,10 @@ export async function listAdapters(
   baseUrl = defaultLiveProjectionUrl(),
   options: { includeLocations?: boolean } = {}
 ): Promise<AdapterStatus[]> {
-  const url = new URL(baseUrl);
-  url.pathname = "/adapters";
-  url.search = "";
-  if (options.includeLocations !== undefined) url.searchParams.set("includeLocations", String(options.includeLocations));
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`adapters request failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; adapters: AdapterStatus[] };
+  const body = await getJson<{ ok: true; adapters: AdapterStatus[] }>(baseUrl, "/adapters", {
+    label: "adapters request",
+    query: { includeLocations: options.includeLocations }
+  });
   return body.adapters;
 }
 
@@ -603,14 +596,15 @@ export async function listAdapterSources(
   baseUrl = defaultLiveProjectionUrl(),
   options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
 ): Promise<SourceStatusPage> {
-  const url = new URL(baseUrl);
-  url.pathname = `/adapters/${encodeURIComponent(runtime)}/sources`;
-  url.search = "";
-  if (options.limit !== undefined) url.searchParams.set("limit", String(options.limit));
-  if (options.offset !== undefined) url.searchParams.set("offset", String(options.offset));
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`adapter sources request failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; limit: number; offset: number; sources: SourceStatus[]; total: number };
+  const body = await getJson<{ ok: true; limit: number; offset: number; sources: SourceStatus[]; total: number }>(
+    baseUrl,
+    `/adapters/${encodeURIComponent(runtime)}/sources`,
+    {
+      label: "adapter sources request",
+      query: { limit: options.limit, offset: options.offset },
+      signal: options.signal
+    }
+  );
   return {
     limit: body.limit,
     offset: body.offset,
@@ -620,12 +614,7 @@ export async function listAdapterSources(
 }
 
 export async function scanSources(baseUrl = defaultLiveProjectionUrl()): Promise<SourceScanResult> {
-  const url = new URL(baseUrl);
-  url.pathname = "/sources/scan";
-  url.search = "";
-  const response = await fetch(url.toString(), { method: "POST", headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`source scan failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; scan: SourceScanResult };
+  const body = await postJson<{ ok: true; scan: SourceScanResult }>(baseUrl, "/sources/scan", { label: "source scan" });
   return body.scan;
 }
 
@@ -639,16 +628,7 @@ export async function connectSources(
   },
   baseUrl = defaultLiveProjectionUrl()
 ): Promise<ConnectSourcesResult> {
-  const url = new URL(baseUrl);
-  url.pathname = "/sources/connect";
-  url.search = "";
-  const response = await fetch(url.toString(), {
-    body: JSON.stringify(input),
-    headers: { accept: "application/json", "content-type": "application/json" },
-    method: "POST"
-  });
-  if (!response.ok) throw new Error(`source connect failed: ${response.status}`);
-  return response.json() as Promise<ConnectSourcesResult>;
+  return postJson<ConnectSourcesResult>(baseUrl, "/sources/connect", { body: input, label: "source connect" });
 }
 
 export async function importAdapterMetadata(
@@ -681,16 +661,7 @@ export async function startImport(
   input: { sourceId: string; kind: ImportJob["importKind"] },
   baseUrl = defaultLiveProjectionUrl()
 ): Promise<ImportJob> {
-  const url = new URL(baseUrl);
-  url.pathname = "/imports";
-  url.search = "";
-  const response = await fetch(url.toString(), {
-    body: JSON.stringify(input),
-    headers: { accept: "application/json", "content-type": "application/json" },
-    method: "POST"
-  });
-  if (!response.ok) throw new Error(`import request failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; job: ImportJob };
+  const body = await postJson<{ ok: true; job: ImportJob }>(baseUrl, "/imports", { body: input, label: "import request" });
   return body.job;
 }
 
@@ -705,17 +676,17 @@ export async function listImports(
     status?: ImportJob["status"] | "active";
   } = {}
 ): Promise<ImportJobPage> {
-  const url = new URL(baseUrl);
-  url.pathname = "/imports";
-  url.search = "";
-  if (options.limit !== undefined) url.searchParams.set("limit", String(options.limit));
-  if (options.offset !== undefined) url.searchParams.set("offset", String(options.offset));
-  if (options.adapterId) url.searchParams.set("adapterId", options.adapterId);
-  if (options.sourceId) url.searchParams.set("sourceId", options.sourceId);
-  if (options.status) url.searchParams.set("status", options.status);
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`imports request failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; imports: ImportJob[]; limit?: number; offset?: number; total?: number };
+  const body = await getJson<{ ok: true; imports: ImportJob[]; limit?: number; offset?: number; total?: number }>(baseUrl, "/imports", {
+    label: "imports request",
+    query: {
+      limit: options.limit,
+      offset: options.offset,
+      adapterId: options.adapterId,
+      sourceId: options.sourceId,
+      status: options.status
+    },
+    signal: options.signal
+  });
   return {
     imports: body.imports,
     limit: body.limit ?? body.imports.length,
@@ -738,12 +709,7 @@ async function postAdapterImportAction(
   label: string,
   baseUrl: string
 ): Promise<AdapterImportActionResult> {
-  const url = new URL(baseUrl);
-  url.pathname = `/adapters/${encodeURIComponent(runtime)}/${action}`;
-  url.search = "";
-  const response = await fetch(url.toString(), { method: "POST", headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`${label} failed: ${response.status}`);
-  return response.json() as Promise<AdapterImportActionResult>;
+  return postJson<AdapterImportActionResult>(baseUrl, `/adapters/${encodeURIComponent(runtime)}/${action}`, { label });
 }
 
 async function postImportJobAction(
@@ -752,25 +718,12 @@ async function postImportJobAction(
   label: string,
   baseUrl: string
 ): Promise<ImportJob> {
-  const url = new URL(baseUrl);
-  url.pathname = `/imports/${encodeURIComponent(importJobId)}/${action}`;
-  url.search = "";
-  const response = await fetch(url.toString(), { method: "POST", headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`${label} failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; job: ImportJob };
+  const body = await postJson<{ ok: true; job: ImportJob }>(baseUrl, `/imports/${encodeURIComponent(importJobId)}/${action}`, { label });
   return body.job;
 }
 
 export async function addSourceExclusion(input: SourceExclusionInput, baseUrl = defaultLiveProjectionUrl()): Promise<void> {
-  const url = new URL(baseUrl);
-  url.pathname = "/sources/exclusions";
-  url.search = "";
-  const response = await fetch(url.toString(), {
-    body: JSON.stringify(input),
-    headers: { accept: "application/json", "content-type": "application/json" },
-    method: "POST"
-  });
-  if (!response.ok) throw new Error(`source exclusion failed: ${response.status}`);
+  await postJson<unknown>(baseUrl, "/sources/exclusions", { body: input, label: "source exclusion" });
 }
 
 export async function searchLogbook(
