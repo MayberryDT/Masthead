@@ -12,4 +12,14 @@ describe("App component architecture", () => {
     expect(appSource).not.toContain("const loadSourceInventory");
     expect(appSource).not.toContain("const handleImportMetadata");
   });
+
+  test("keeps Logbook loading orchestration out of App.tsx", async () => {
+    const appPath = fileURLToPath(new URL("../App.tsx", import.meta.url));
+    const appSource = await readFile(appPath, "utf8");
+
+    expect(appSource).not.toContain("searchLogbook,");
+    expect(appSource).not.toContain("getLogbookSession,");
+    expect(appSource).not.toContain("const handleLogbookQueryChange");
+    expect(appSource).not.toContain("const handleLoadMoreLogbookTranscript");
+  });
 });

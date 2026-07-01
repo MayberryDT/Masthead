@@ -11,7 +11,7 @@ import type { ReviewDisposition } from "../core/store";
 import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent, SafeAction, SessionDetailView } from "../core/types";
 import { AttentionQueue } from "../ui/AttentionQueue";
 import { AppShell } from "../ui/AppShell";
-import { HistoryPanel, type LogbookFilterState, type LogbookLoadState } from "../ui/HistoryPanel";
+import { HistoryPanel } from "../ui/HistoryPanel";
 import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
 import { OperationsPanel, type DeletionScopeKind } from "../ui/OperationsPanel";
@@ -44,21 +44,11 @@ import {
   deleteMastheadData as deleteCanonicalMastheadData,
   exportMastheadData,
   getDataSummary,
-  getLogbookSummary,
-  getLogbookSession,
-  getLogbookSessionExcerpts,
   getSessionDossier,
   getSessionTranscript,
   getUsageStats,
-  listProjects,
   listReviewDispositions,
   saveReviewDisposition,
-  searchLogbook,
-  type LogbookExcerpt,
-  type LogbookSearchResult,
-  type LogbookSessionDetail,
-  type LogbookSort,
-  type LogbookSummary,
   type SessionTranscriptKindFilter,
   type SessionTranscriptResult,
   type UsageStatsDto,
@@ -76,13 +66,8 @@ import { UsageSurface } from "./surfaces/UsageSurface";
 import { UsagePanel } from "../ui/usage/UsagePanel";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
+import { useLogbookController } from "./logbook/useLogbookController";
 import { useSourcesController } from "./sources/useSourcesController";
-import {
-  logbookPageSearchFilters,
-  readCachedLogbookPage,
-  writeCachedLogbookPage,
-  type LogbookPageCacheRequest
-} from "./logbookPageCache";
 
 type ConnectorActionState =
   | { state: "idle"; message?: string }
@@ -95,7 +80,6 @@ type CardLayoutSnapshot = Map<string, DOMRect>;
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
-const LOGBOOK_PAGE_SIZE = 50;
 
 const emptyLiveBoard: LiveBoardProjection = {
   summary: {
@@ -122,7 +106,6 @@ export function App() {
   const [activeSurface, setActiveSurface] = useState<AppSurface>("now");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [historyQuery, setHistoryQuery] = useState("");
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [harnessFilter, setHarnessFilter] = useState<HarnessFilter>("all");
   const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("all");
@@ -151,20 +134,17 @@ export function App() {
   const activeProjectionUrl = connection.baseUrl;
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
-  const [logbookResult, setLogbookResult] = useState<LogbookSearchResult>();
-  const [logbookSummary, setLogbookSummary] = useState<LogbookSummary>();
-  const [logbookLoading, setLogbookLoading] = useState(false);
-  const [logbookError, setLogbookError] = useState<string>();
-  const [logbookRetryKey, setLogbookRetryKey] = useState(0);
-  const handleSourceLibraryChanged = useCallback(() => setLogbookRetryKey((current) => current + 1), []);
+  const [sourceLibraryRefreshKey, setSourceLibraryRefreshKey] = useState(0);
+  const isLiveConnection =
+    connection.state.state !== "offline" &&
+    connection.state.state !== "incompatible" &&
+    connection.state.state !== "probing" &&
+    liveConnection.state === "live";
+  const handleSourceLibraryChanged = useCallback(() => setSourceLibraryRefreshKey((current) => current + 1), []);
   const sourcesController = useSourcesController({
     activeProjectionUrl,
     activeSurface,
-    isLive:
-      connection.state.state !== "offline" &&
-      connection.state.state !== "incompatible" &&
-      connection.state.state !== "probing" &&
-      liveConnection.state === "live",
+    isLive: isLiveConnection,
     onLibraryChanged: handleSourceLibraryChanged
   });
   const {
@@ -192,8 +172,13 @@ export function App() {
     syncAll: handleSyncSources,
     syncRuntime: handleSyncAdapter
   } = sourcesController;
-  const [logbookSort, setLogbookSort] = useState<LogbookSort>("recent");
-  const [logbookPageIndex, setLogbookPageIndex] = useState(0);
+  const logbook = useLogbookController({
+    activeProjectionUrl,
+    activeSurface,
+    adapters,
+    externalRefreshKey: sourceLibraryRefreshKey,
+    isLive: isLiveConnection
+  });
   const [usageWindow, setUsageWindow] = useState<UsageWindow>("today");
   const [usageStats, setUsageStats] = useState<UsageStatsDto>();
   const [usageLoading, setUsageLoading] = useState(false);
@@ -201,24 +186,6 @@ export function App() {
   const [sidebarUsageStats, setSidebarUsageStats] = useState<UsageStatsDto>();
   const [sidebarUsageLoading, setSidebarUsageLoading] = useState(false);
   const [sidebarUsageError, setSidebarUsageError] = useState<string>();
-  const logbookPageCacheRef = useRef(new Map<string, LogbookSearchResult>());
-  const [logbookProjectOptions, setLogbookProjectOptions] = useState<string[]>([]);
-  const [logbookFilters, setLogbookFilters] = useState<LogbookFilterState>({});
-  const [selectedLogbookSessionId, setSelectedLogbookSessionId] = useState<string>();
-  const [selectedLogbookSession, setSelectedLogbookSession] = useState<LogbookSessionDetail>();
-  const [selectedLogbookExcerpts, setSelectedLogbookExcerpts] = useState<LogbookExcerpt[]>([]);
-  const [logbookDetailLoading, setLogbookDetailLoading] = useState(false);
-  const [logbookDossierRetryKey, setLogbookDossierRetryKey] = useState(0);
-  const [selectedLogbookDossier, setSelectedLogbookDossier] = useState<SessionDossierDto>();
-  const [selectedLogbookDossierLoading, setSelectedLogbookDossierLoading] = useState(false);
-  const [selectedLogbookDossierError, setSelectedLogbookDossierError] = useState<string>();
-  const [logbookTranscriptRetryKey, setLogbookTranscriptRetryKey] = useState(0);
-  const [selectedLogbookTranscript, setSelectedLogbookTranscript] = useState<SessionTranscriptResult>();
-  const [selectedLogbookTranscriptLoading, setSelectedLogbookTranscriptLoading] = useState(false);
-  const [selectedLogbookTranscriptError, setSelectedLogbookTranscriptError] = useState<string>();
-  const [selectedLogbookTranscriptFilter, setSelectedLogbookTranscriptFilter] = useState<SessionTranscriptKindFilter>("all");
-  const [selectedLogbookTranscriptQuery, setSelectedLogbookTranscriptQuery] = useState("");
-  const [selectedLogbookTranscriptDebouncedQuery, setSelectedLogbookTranscriptDebouncedQuery] = useState("");
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
   const [localDataStatus, setLocalDataStatus] = useState<{
     state:
@@ -278,43 +245,6 @@ export function App() {
     harnessFilter !== "all" ||
     lifecycleFilter !== "all" ||
     activityWindow !== "24h";
-  const logbookLoadState = useMemo<LogbookLoadState>(() => {
-    if (logbookResult) {
-      return {
-        state: "ready",
-        sessions: logbookResult.sessions,
-        total: logbookResult.total,
-        nextCursor: logbookResult.nextCursor
-      };
-    }
-    if (logbookError) return { state: "error", message: logbookError };
-    return { state: "loading" };
-  }, [logbookError, logbookResult]);
-  const logbookFilterOptions = useMemo(
-    () => ({
-      models: Array.from(new Set(logbookSummary?.models.map((item) => item.model).filter(Boolean) ?? [])),
-      projects: logbookProjectOptions,
-      runtimes: Array.from(
-        new Set([
-          ...(logbookSummary?.runtimes.map((item) => item.runtime).filter(Boolean) ?? []),
-          ...adapters.map((adapter) => adapter.runtime).filter(Boolean)
-        ])
-      )
-    }),
-    [adapters, logbookProjectOptions, logbookSummary]
-  );
-  const logbookPageRequest = useMemo<LogbookPageCacheRequest>(
-    () => ({
-      baseUrl: activeProjectionUrl,
-      filters: logbookFilters,
-      pageIndex: logbookPageIndex,
-      pageSize: LOGBOOK_PAGE_SIZE,
-      query: historyQuery,
-      retryKey: logbookRetryKey,
-      sort: logbookSort
-    }),
-    [activeProjectionUrl, historyQuery, logbookFilters, logbookPageIndex, logbookRetryKey, logbookSort]
-  );
   const filteredAttentionItems = useMemo(
     () => filterAttentionItemsForCards(board.attentionQueue, filteredCards),
     [board.attentionQueue, filteredCards]
@@ -340,11 +270,6 @@ export function App() {
     const timeout = window.setTimeout(() => setSelectedBoardTranscriptDebouncedQuery(selectedBoardTranscriptQuery), 200);
     return () => window.clearTimeout(timeout);
   }, [selectedBoardTranscriptQuery]);
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setSelectedLogbookTranscriptDebouncedQuery(selectedLogbookTranscriptQuery), 200);
-    return () => window.clearTimeout(timeout);
-  }, [selectedLogbookTranscriptQuery]);
 
   useEffect(() => {
     if (!detailModalOpen || showDemoData || !selectedBoardCanonicalSessionId) {
@@ -568,14 +493,14 @@ export function App() {
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [effectiveLiveConnection.state, loadSidebarUsageStats, logbookRetryKey]);
+  }, [effectiveLiveConnection.state, loadSidebarUsageStats, sourceLibraryRefreshKey]);
 
   useEffect(() => {
     if (activeSurface !== "usage" || effectiveLiveConnection.state !== "live") return;
     const controller = new AbortController();
     void loadUsageStats(usageWindow, { signal: controller.signal });
     return () => controller.abort();
-  }, [activeSurface, effectiveLiveConnection.state, loadUsageStats, logbookRetryKey, usageWindow]);
+  }, [activeSurface, effectiveLiveConnection.state, loadUsageStats, sourceLibraryRefreshKey, usageWindow]);
 
   const handleOpenSession = (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -606,156 +531,6 @@ export function App() {
       });
     }
   };
-
-  useEffect(() => {
-    if (activeSurface !== "logbook" || effectiveLiveConnection.state !== "live") return;
-    const cachedResult = readCachedLogbookPage(logbookPageCacheRef.current, logbookPageRequest);
-    if (cachedResult) {
-      setLogbookResult(cachedResult);
-      setLogbookError(undefined);
-      setLogbookLoading(false);
-      return undefined;
-    }
-
-    const controller = new AbortController();
-    setLogbookLoading(true);
-    setLogbookError(undefined);
-    void searchLogbook(
-      logbookPageSearchFilters(logbookPageRequest),
-      activeProjectionUrl,
-      { signal: controller.signal }
-    )
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        writeCachedLogbookPage(logbookPageCacheRef.current, logbookPageRequest, result);
-        setLogbookResult(result);
-        setLogbookError(undefined);
-        setSelectedLogbookSessionId(undefined);
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          console.error("[masthead] Logbook search failed", error);
-          setLogbookError(error instanceof Error ? error.message : String(error));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLogbookLoading(false);
-      });
-    return () => {
-      controller.abort();
-    };
-  }, [activeProjectionUrl, activeSurface, effectiveLiveConnection.state, logbookPageRequest]);
-  useEffect(() => {
-    if (activeSurface !== "logbook") return;
-    const controller = new AbortController();
-    void Promise.all([getLogbookSummary(activeProjectionUrl, { signal: controller.signal }), listProjects(activeProjectionUrl, { signal: controller.signal })])
-      .then(([summary, projects]) => {
-        setLogbookSummary(summary);
-        setLogbookProjectOptions(projects.map((project) => project.project));
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) console.error("[masthead] Logbook metadata failed", error);
-      });
-    return () => controller.abort();
-  }, [activeProjectionUrl, activeSurface, logbookRetryKey]);
-
-  useEffect(() => {
-    if (activeSurface !== "logbook" || !selectedLogbookSessionId) {
-      setSelectedLogbookSession(undefined);
-      setSelectedLogbookExcerpts([]);
-      return;
-    }
-    const controller = new AbortController();
-    setLogbookDetailLoading(true);
-    void Promise.all([
-      getLogbookSession(selectedLogbookSessionId, activeProjectionUrl, { signal: controller.signal }),
-      getLogbookSessionExcerpts(selectedLogbookSessionId, { limit: 8, q: historyQuery }, activeProjectionUrl, { signal: controller.signal })
-    ])
-      .then(([session, excerpts]) => {
-        setSelectedLogbookSession(session);
-        setSelectedLogbookExcerpts(excerpts);
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          console.error("[masthead] Logbook detail failed", error);
-          setSelectedLogbookSession(undefined);
-          setSelectedLogbookExcerpts([]);
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLogbookDetailLoading(false);
-      });
-    return () => controller.abort();
-  }, [activeProjectionUrl, activeSurface, selectedLogbookSessionId, historyQuery]);
-
-  useEffect(() => {
-    if (activeSurface !== "logbook" || !selectedLogbookSessionId) {
-      setSelectedLogbookDossier(undefined);
-      setSelectedLogbookDossierError(undefined);
-      setSelectedLogbookDossierLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    setSelectedLogbookDossierLoading(true);
-    setSelectedLogbookDossierError(undefined);
-    void getSessionDossier(selectedLogbookSessionId, activeProjectionUrl, { signal: controller.signal })
-      .then((dossier) => {
-        setSelectedLogbookDossier(dossier);
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          setSelectedLogbookDossier(undefined);
-          setSelectedLogbookDossierError(error instanceof Error ? error.message : String(error));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setSelectedLogbookDossierLoading(false);
-      });
-    return () => controller.abort();
-  }, [activeProjectionUrl, activeSurface, logbookDossierRetryKey, selectedLogbookSessionId]);
-
-  useEffect(() => {
-    if (activeSurface !== "logbook" || !selectedLogbookSessionId) {
-      setSelectedLogbookTranscript(undefined);
-      setSelectedLogbookTranscriptError(undefined);
-      setSelectedLogbookTranscriptLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    setSelectedLogbookTranscript(undefined);
-    setSelectedLogbookTranscriptLoading(true);
-    setSelectedLogbookTranscriptError(undefined);
-    void getSessionTranscript(
-      selectedLogbookSessionId,
-      {
-        kind: selectedLogbookTranscriptFilter,
-        limit: 100,
-        q: selectedLogbookTranscriptDebouncedQuery
-      },
-      activeProjectionUrl,
-      { signal: controller.signal }
-    )
-      .then((transcript) => {
-        setSelectedLogbookTranscript(transcript);
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          setSelectedLogbookTranscript(undefined);
-          setSelectedLogbookTranscriptError(error instanceof Error ? error.message : String(error));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setSelectedLogbookTranscriptLoading(false);
-      });
-    return () => controller.abort();
-  }, [
-    activeProjectionUrl,
-    activeSurface,
-    logbookTranscriptRetryKey,
-    selectedLogbookSessionId,
-    selectedLogbookTranscriptDebouncedQuery,
-    selectedLogbookTranscriptFilter
-  ]);
 
   const handleExportLocalData = async () => {
     setLocalDataStatus({ state: "busy", message: "Preparing local export..." });
@@ -990,40 +765,6 @@ export function App() {
     }
   };
 
-  const handleLogbookQueryChange = (nextQuery: string) => {
-    setHistoryQuery(nextQuery);
-    setLogbookPageIndex(0);
-    setLogbookResult(undefined);
-    setLogbookError(undefined);
-    setSelectedLogbookSessionId(undefined);
-  };
-
-  const handleLogbookFilterChange = (nextFilters: LogbookFilterState) => {
-    setLogbookFilters(nextFilters);
-    setLogbookPageIndex(0);
-    setLogbookResult(undefined);
-    setLogbookError(undefined);
-    setSelectedLogbookSessionId(undefined);
-  };
-
-  const handleLogbookPageChange = (nextPageIndex: number) => {
-    if (nextPageIndex === logbookPageIndex) return;
-    const nextPageRequest = {
-      ...logbookPageRequest,
-      pageIndex: nextPageIndex
-    };
-    const cachedResult = readCachedLogbookPage(logbookPageCacheRef.current, nextPageRequest);
-    setLogbookPageIndex(nextPageIndex);
-    if (cachedResult) {
-      setLogbookResult(cachedResult);
-      setLogbookLoading(false);
-    } else {
-      setLogbookLoading(true);
-    }
-    setLogbookError(undefined);
-    setSelectedLogbookSessionId(undefined);
-  };
-
   const handleLoadMoreBoardTranscript = async () => {
     if (!selectedBoardCanonicalSessionId || !selectedBoardTranscript?.nextCursor || selectedBoardTranscriptLoading) return;
     setSelectedBoardTranscriptLoading(true);
@@ -1044,29 +785,6 @@ export function App() {
       setSelectedBoardTranscriptError(error instanceof Error ? error.message : String(error));
     } finally {
       setSelectedBoardTranscriptLoading(false);
-    }
-  };
-
-  const handleLoadMoreLogbookTranscript = async () => {
-    if (!selectedLogbookSessionId || !selectedLogbookTranscript?.nextCursor || selectedLogbookTranscriptLoading) return;
-    setSelectedLogbookTranscriptLoading(true);
-    setSelectedLogbookTranscriptError(undefined);
-    try {
-      const next = await getSessionTranscript(
-        selectedLogbookSessionId,
-        {
-          cursor: selectedLogbookTranscript.nextCursor,
-          kind: selectedLogbookTranscriptFilter,
-          limit: 100,
-          q: selectedLogbookTranscriptDebouncedQuery
-        },
-        activeProjectionUrl
-      );
-      setSelectedLogbookTranscript((current) => (current ? { ...next, items: [...current.items, ...next.items] } : next));
-    } catch (error) {
-      setSelectedLogbookTranscriptError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSelectedLogbookTranscriptLoading(false);
     }
   };
 
@@ -1112,54 +830,49 @@ export function App() {
             records={showDemoData ? historyRecords : undefined}
             adapters={adapters}
             connectionState={connection.state.state === "offline" ? "offline" : connection.state.state === "incompatible" ? "incompatible" : effectiveLiveConnection.state === "live" ? "live" : "connecting"}
-            filterOptions={logbookFilterOptions}
-            filters={logbookFilters}
+            filterOptions={logbook.filterOptions}
+            filters={logbook.filters}
             imports={imports}
             importBusy={sourcesBusy}
-            pageIndex={logbookPageIndex}
-            pageSize={LOGBOOK_PAGE_SIZE}
-            query={historyQuery}
+            pageIndex={logbook.pageIndex}
+            pageSize={logbook.pageSize}
+            query={logbook.query}
             density="compact"
-            loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbookLoadState}
-            refreshError={logbookResult ? logbookError : undefined}
-            selectedSessionId={selectedLogbookSessionId}
-            sort={logbookSort}
+            loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbook.loadState}
+            refreshError={logbook.refreshError}
+            selectedSessionId={logbook.selectedSessionId}
+            sort={logbook.sort}
             sources={sources}
-            summary={logbookSummary}
-            onFilterChange={handleLogbookFilterChange}
+            summary={logbook.summary}
+            onFilterChange={logbook.changeFilters}
             onImportMetadata={handleImportMetadata}
             onOpenSources={() => setActiveSurface("sources")}
-            onQueryChange={handleLogbookQueryChange}
-            onPageChange={handleLogbookPageChange}
-            onRetry={() => setLogbookRetryKey((current) => current + 1)}
-            onSessionSelect={setSelectedLogbookSessionId}
-            onSortChange={(nextSort) => {
-              setLogbookSort(nextSort);
-              setLogbookPageIndex(0);
-              setLogbookResult(undefined);
-              setSelectedLogbookSessionId(undefined);
-            }}
+            onQueryChange={logbook.changeQuery}
+            onPageChange={logbook.changePage}
+            onRetry={logbook.retry}
+            onSessionSelect={logbook.selectSession}
+            onSortChange={logbook.changeSort}
           />
-          {selectedLogbookSessionId ? (
+          {logbook.selectedSessionId ? (
             <SessionLibraryDetail
-              session={selectedLogbookSession}
-              excerpts={selectedLogbookExcerpts}
-              loading={logbookDetailLoading}
-              dossier={selectedLogbookDossier}
-              dossierLoading={selectedLogbookDossierLoading}
-              dossierError={selectedLogbookDossierError}
-              onRetryDossier={() => setLogbookDossierRetryKey((current) => current + 1)}
-              transcript={selectedLogbookTranscript}
-              transcriptLoading={selectedLogbookTranscriptLoading}
-              transcriptError={selectedLogbookTranscriptError}
-              transcriptFilter={selectedLogbookTranscriptFilter}
-              transcriptQuery={selectedLogbookTranscriptQuery}
-              onTranscriptFilterChange={setSelectedLogbookTranscriptFilter}
-              onTranscriptQueryChange={setSelectedLogbookTranscriptQuery}
-              onTranscriptLoadMore={() => void handleLoadMoreLogbookTranscript()}
-              onRetryTranscript={() => setLogbookTranscriptRetryKey((current) => current + 1)}
+              session={logbook.selectedSession}
+              excerpts={logbook.excerpts}
+              loading={logbook.detailLoading}
+              dossier={logbook.dossier}
+              dossierLoading={logbook.dossierLoading}
+              dossierError={logbook.dossierError}
+              onRetryDossier={logbook.retryDossier}
+              transcript={logbook.transcript}
+              transcriptLoading={logbook.transcriptLoading}
+              transcriptError={logbook.transcriptError}
+              transcriptFilter={logbook.transcriptFilter}
+              transcriptQuery={logbook.transcriptQuery}
+              onTranscriptFilterChange={logbook.setTranscriptFilter}
+              onTranscriptQueryChange={logbook.setTranscriptQuery}
+              onTranscriptLoadMore={() => void logbook.loadMoreTranscript()}
+              onRetryTranscript={logbook.retryTranscript}
               onOpenSources={() => setActiveSurface("sources")}
-              onClose={() => setSelectedLogbookSessionId(undefined)}
+              onClose={logbook.closeSession}
             />
           ) : null}
         </>
