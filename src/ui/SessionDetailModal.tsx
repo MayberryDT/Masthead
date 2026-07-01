@@ -54,12 +54,14 @@ export function SessionDetailModal({
     "session-dossier-modal",
     "t-modal",
     modalState === "closing" ? "is-closing" : "",
-    modalState === "open" ? "is-open" : ""
+    modalState === "open" ? "is-open" : "",
+    modalState === "opening" ? "is-opening" : ""
   ]
     .filter(Boolean)
     .join(" ");
   const backdropClassName = [
     "modal-backdrop",
+    "session-dossier-backdrop",
     "t-modal-backdrop",
     modalState === "closing" ? "is-closing" : "",
     modalState === "open" ? "is-open" : "",

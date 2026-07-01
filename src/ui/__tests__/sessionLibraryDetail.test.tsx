@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import type { LogbookExcerpt, LogbookSessionDetail } from "../../app/daemonClient";
 import type { SessionDossierDto } from "../../shared/sessionDossier";
@@ -12,7 +13,7 @@ describe("SessionLibraryDetail", () => {
 
     expect(html).toContain('role="dialog"');
     expect(html).toContain('aria-modal="true"');
-    expect(html).toContain("modal-backdrop t-modal-backdrop is-opening");
+    expect(html).toContain("modal-backdrop session-dossier-backdrop t-modal-backdrop is-opening");
     expect(html).toContain("session-detail-modal session-dossier-modal logbook-detail-modal t-modal is-opening");
     expect(html).not.toContain("is-closing");
     expect(html).toContain("modal-scroll-frame");
@@ -29,7 +30,65 @@ describe("SessionLibraryDetail", () => {
     expect(html).toContain("close");
     expect(html).not.toContain("surface-inline-action");
   });
+
+  test("keeps dossier modal motion snappy and separate from the hinge modal animation", () => {
+    const css = readFileSync("src/styles/masthead.css", "utf8");
+    const openRule = cssRuleBody(css, ".session-detail-modal.session-dossier-modal.t-modal.is-open");
+    const closingRule = cssRuleBody(css, ".session-detail-modal.session-dossier-modal.t-modal.is-closing");
+    const backdropRule = cssRuleBody(css, ".session-dossier-backdrop.t-modal-backdrop.is-open,\n.session-dossier-backdrop.t-modal-backdrop.is-closing");
+    const reducedMotionRule = cssRuleBodyContaining(
+      css,
+      "@media (prefers-reduced-motion: reduce)",
+      ".session-detail-modal.session-dossier-modal.t-modal.is-closing"
+    );
+
+    expect(css).toContain("--modal-open-dur: 400ms;");
+    expect(css).toContain("--modal-close-dur: 400ms;");
+    expect(openRule).toContain("transform: translateY(0) scale(1);");
+    expect(openRule).toContain("animation: usage-card-enter var(--modal-open-dur) cubic-bezier(0.17, 0.78, 0.13, 1) both;");
+    expect(closingRule).toContain("transform: translateY(9px) scale(var(--modal-scale-close));");
+    expect(closingRule).toContain("animation: session-dossier-card-exit var(--modal-close-dur) cubic-bezier(0.17, 0.78, 0.13, 1) both;");
+    expect(backdropRule).toContain("animation: none;");
+    expect(reducedMotionRule).toContain("transform: none !important;");
+    expect(css).toMatch(/@keyframes session-dossier-card-exit\s*\{[\s\S]*transform: translateY\(0\) scale\(1\);[\s\S]*transform: translateY\(1px\) scale\(0\.999\);[\s\S]*transform: translateY\(-1px\) scale\(1\.004\);[\s\S]*transform: translateY\(9px\) scale\(0\.968\);/);
+  });
 });
+
+function cssRuleBody(css: string, selector: string): string {
+  const selectorIndex = css.indexOf(`${selector} {`);
+  if (selectorIndex === -1) throw new Error(`Expected CSS rule for ${selector}`);
+  const openBraceIndex = css.indexOf("{", selectorIndex + selector.length);
+  if (openBraceIndex === -1) throw new Error(`Expected CSS rule for ${selector} to have a body`);
+  let depth = 0;
+  for (let index = openBraceIndex; index < css.length; index += 1) {
+    const character = css[index];
+    if (character === "{") depth += 1;
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return css.slice(openBraceIndex + 1, index);
+    }
+  }
+  throw new Error(`Expected CSS rule for ${selector} to close`);
+}
+
+function cssRuleBodyContaining(css: string, ancestor: string, selector: string): string {
+  const ancestorIndex = css.indexOf(ancestor);
+  if (ancestorIndex === -1) throw new Error(`Expected CSS ancestor ${ancestor}`);
+  const selectorIndex = css.indexOf(selector, ancestorIndex);
+  if (selectorIndex === -1) throw new Error(`Expected CSS rule for ${selector} inside ${ancestor}`);
+  const openBraceIndex = css.indexOf("{", selectorIndex + selector.length);
+  if (openBraceIndex === -1) throw new Error(`Expected CSS rule for ${selector} to have a body`);
+  let depth = 0;
+  for (let index = openBraceIndex; index < css.length; index += 1) {
+    const character = css[index];
+    if (character === "{") depth += 1;
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return css.slice(openBraceIndex + 1, index);
+    }
+  }
+  throw new Error(`Expected CSS rule for ${selector} to close`);
+}
 
 function session(): LogbookSessionDetail {
   return {

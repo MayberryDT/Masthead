@@ -62,6 +62,7 @@ export function SessionLibraryDetail({
     .join(" ");
   const backdropClassName = [
     "modal-backdrop",
+    "session-dossier-backdrop",
     "t-modal-backdrop",
     modalState === "closing" ? "is-closing" : "",
     modalState === "open" ? "is-open" : "",

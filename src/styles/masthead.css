@@ -1202,6 +1202,16 @@ main {
   transform-style: preserve-3d;
 }
 
+.session-detail-modal.session-dossier-modal.t-modal {
+  --modal-open-dur: 400ms;
+  --modal-close-dur: 400ms;
+  --modal-scale: 0.968;
+  --modal-scale-close: 0.968;
+
+  transform-origin: 50% 100%;
+  transform-style: flat;
+}
+
 .t-modal.is-opening {
   transform: scale(var(--modal-scale));
   opacity: 0;
@@ -1218,6 +1228,17 @@ main {
   animation: counterweight-hinge-in var(--modal-open-dur) var(--modal-ease) both;
 }
 
+.session-detail-modal.session-dossier-modal.t-modal.is-opening {
+  transform: translateY(9px) scale(var(--modal-scale));
+  opacity: 1;
+}
+
+.session-detail-modal.session-dossier-modal.t-modal.is-open {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+  animation: usage-card-enter var(--modal-open-dur) cubic-bezier(0.17, 0.78, 0.13, 1) both;
+}
+
 .t-modal.is-closing {
   transform: scale(var(--modal-scale-close));
   opacity: 0;
@@ -1229,6 +1250,17 @@ main {
 
 .session-detail-modal.t-modal.is-closing {
   animation: counterweight-hinge-out var(--modal-close-dur) cubic-bezier(0.48, 0, 0.82, 0.28) both;
+}
+
+.session-detail-modal.session-dossier-modal.t-modal.is-closing {
+  transform: translateY(9px) scale(var(--modal-scale-close));
+  opacity: 1;
+  animation: session-dossier-card-exit var(--modal-close-dur) cubic-bezier(0.17, 0.78, 0.13, 1) both;
+}
+
+.session-dossier-backdrop.t-modal-backdrop.is-open,
+.session-dossier-backdrop.t-modal-backdrop.is-closing {
+  animation: none;
 }
 
 @keyframes modal-backdrop-in {
@@ -1252,6 +1284,31 @@ main {
   0% { opacity: 1; transform: rotateX(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
   88% { opacity: 1; transform: rotateX(-44deg) translate3d(0, -22px, 0) scale3d(0.95, 0.95, 1); }
   100% { opacity: 0; transform: rotateX(-54deg) translate3d(0, -28px, 0) scale3d(0.94, 0.94, 1); }
+}
+
+@keyframes session-dossier-card-exit {
+  0% {
+    opacity: 1;
+    filter: brightness(1);
+    transform: translateY(0) scale(1);
+  }
+
+  16% {
+    opacity: 1;
+    transform: translateY(1px) scale(0.999);
+  }
+
+  34% {
+    opacity: 1;
+    filter: brightness(1.012);
+    transform: translateY(-1px) scale(1.004);
+  }
+
+  100% {
+    opacity: 1;
+    filter: brightness(0.992);
+    transform: translateY(9px) scale(0.968);
+  }
 }
 
 .session-detail-modal::after {
@@ -6137,6 +6194,13 @@ body {
     animation: none !important;
     transition-duration: 1ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .session-detail-modal.session-dossier-modal.t-modal,
+  .session-detail-modal.session-dossier-modal.t-modal.is-opening,
+  .session-detail-modal.session-dossier-modal.t-modal.is-open,
+  .session-detail-modal.session-dossier-modal.t-modal.is-closing {
+    transform: none !important;
   }
 
   .observability-console .metal-surface,
