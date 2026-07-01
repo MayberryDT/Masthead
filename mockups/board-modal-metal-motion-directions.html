@@ -377,7 +377,8 @@
         pointer-events: auto;
       }
 
-      .modal-shell.is-open {
+      .modal-shell.is-open,
+      .modal-shell.is-closing {
         opacity: 1;
       }
 
@@ -509,15 +510,15 @@
       }
 
       .is-open .modal-backdrop {
-        animation: backdrop-in 260ms linear both;
+        animation: backdrop-in 300ms linear both;
       }
 
       .is-closing .modal-backdrop {
-        animation: backdrop-out 180ms linear both;
+        animation: backdrop-out 300ms linear both;
       }
 
-      .is-open.motion-1 .modal-panel { animation: forged-plate-in 560ms var(--ease-weight) both; }
-      .is-closing.motion-1 .modal-panel { animation: forged-plate-out 280ms cubic-bezier(0.48, 0, 0.82, 0.28) both; }
+      .is-open.motion-1 .modal-panel { animation: forged-plate-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-1 .modal-panel { animation: forged-plate-out 300ms cubic-bezier(0.48, 0, 0.82, 0.28) both; }
       .motion-1 .modal-assembly::before {
         inset: -8px 12px auto;
         height: 8px;
@@ -525,7 +526,7 @@
         background: #020b12;
       }
 
-      .is-open.motion-2 .modal-panel { animation: rail-gauge-in 620ms var(--ease-weight) both; }
+      .is-open.motion-2 .modal-panel { animation: rail-gauge-in 300ms var(--ease-weight) both; }
       .is-closing.motion-2 .modal-panel { animation: rail-gauge-out 300ms cubic-bezier(0.52, 0, 0.82, 0.28) both; }
       .motion-2 .modal-assembly::before,
       .motion-2 .modal-assembly::after {
@@ -537,12 +538,12 @@
       .motion-2 .modal-assembly::before { left: -12px; }
       .motion-2 .modal-assembly::after { right: -12px; }
 
-      .is-open.motion-3 .modal-panel { animation: counterweight-hinge-in 640ms var(--ease-weight) both; }
-      .is-closing.motion-3 .modal-panel { animation: counterweight-hinge-out 320ms cubic-bezier(0.48, 0, 0.82, 0.28) both; }
+      .is-open.motion-3 .modal-panel { animation: counterweight-hinge-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-3 .modal-panel { animation: counterweight-hinge-out 300ms cubic-bezier(0.48, 0, 0.82, 0.28) both; }
       .motion-3 .modal-panel { transform-origin: 50% 0%; }
 
-      .is-open.motion-4 .modal-panel { animation: magnetic-seat-in 700ms var(--ease-weight) both; }
-      .is-closing.motion-4 .modal-panel { animation: magnetic-seat-out 320ms cubic-bezier(0.54, 0, 0.88, 0.34) both; }
+      .is-open.motion-4 .modal-panel { animation: magnetic-seat-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-4 .modal-panel { animation: magnetic-seat-out 300ms cubic-bezier(0.54, 0, 0.88, 0.34) both; }
       .motion-4 .modal-assembly::before {
         inset: -10px;
         border: 1px solid rgba(46, 167, 255, 0.12);
@@ -550,17 +551,16 @@
         transform: scale(0.985);
       }
 
-      .is-open.motion-5 .modal-panel { animation: telescoping-drawer-in 680ms var(--ease-weight) both; }
-      .is-closing.motion-5 .modal-panel { animation: telescoping-drawer-out 340ms cubic-bezier(0.5, 0, 0.88, 0.32) both; }
-      .is-open.motion-5 .modal-body .dossier-section { animation: drawer-content-in 520ms var(--ease-seat) both; }
-      .is-open.motion-5 .modal-body .dossier-section:nth-child(2) { animation-delay: 80ms; }
+      .is-open.motion-5 .modal-panel { animation: telescoping-drawer-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-5 .modal-panel { animation: telescoping-drawer-out 300ms cubic-bezier(0.5, 0, 0.88, 0.32) both; }
+      .is-open.motion-5 .modal-body .dossier-section { animation: drawer-content-in 300ms var(--ease-seat) both; }
 
-      .is-open.motion-6 .modal-panel { animation: vault-door-in 660ms var(--ease-weight) both; }
-      .is-closing.motion-6 .modal-panel { animation: vault-door-out 340ms cubic-bezier(0.5, 0, 0.86, 0.28) both; }
+      .is-open.motion-6 .modal-panel { animation: vault-door-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-6 .modal-panel { animation: vault-door-out 300ms cubic-bezier(0.5, 0, 0.86, 0.28) both; }
       .motion-6 .modal-panel { transform-origin: 0% 50%; }
 
-      .is-open.motion-7 .modal-panel { animation: hydraulic-press-in 690ms var(--ease-weight) both; }
-      .is-closing.motion-7 .modal-panel { animation: hydraulic-press-out 330ms cubic-bezier(0.48, 0, 0.86, 0.3) both; }
+      .is-open.motion-7 .modal-panel { animation: hydraulic-press-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-7 .modal-panel { animation: hydraulic-press-out 300ms cubic-bezier(0.48, 0, 0.86, 0.3) both; }
       .motion-7 .modal-assembly::before {
         left: 50%;
         top: -46px;
@@ -571,7 +571,7 @@
         transform: translateX(-50%);
       }
 
-      .is-open.motion-8 .modal-panel { animation: dovetail-lock-in 620ms var(--ease-weight) both; }
+      .is-open.motion-8 .modal-panel { animation: dovetail-lock-in 300ms var(--ease-weight) both; }
       .is-closing.motion-8 .modal-panel { animation: dovetail-lock-out 300ms cubic-bezier(0.5, 0, 0.82, 0.3) both; }
       .motion-8 .modal-assembly::after {
         right: 24px;
@@ -581,8 +581,8 @@
         background: linear-gradient(90deg, transparent, rgba(92, 153, 187, 0.2), transparent);
       }
 
-      .is-open.motion-9 .modal-panel { animation: bearing-gantry-in 720ms var(--ease-weight) both; }
-      .is-closing.motion-9 .modal-panel { animation: bearing-gantry-out 340ms cubic-bezier(0.48, 0, 0.86, 0.3) both; }
+      .is-open.motion-9 .modal-panel { animation: bearing-gantry-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-9 .modal-panel { animation: bearing-gantry-out 300ms cubic-bezier(0.48, 0, 0.86, 0.3) both; }
       .motion-9 .modal-assembly::before,
       .motion-9 .modal-assembly::after {
         right: 26px;
@@ -593,8 +593,8 @@
       .motion-9 .modal-assembly::before { top: -14px; }
       .motion-9 .modal-assembly::after { bottom: -14px; }
 
-      .is-open.motion-10 .modal-panel { animation: shim-compression-in 700ms var(--ease-weight) both; }
-      .is-closing.motion-10 .modal-panel { animation: shim-compression-out 330ms cubic-bezier(0.52, 0, 0.86, 0.3) both; }
+      .is-open.motion-10 .modal-panel { animation: shim-compression-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-10 .modal-panel { animation: shim-compression-out 300ms cubic-bezier(0.52, 0, 0.86, 0.3) both; }
       .motion-10 .modal-assembly::before,
       .motion-10 .modal-assembly::after {
         inset: 8px;
@@ -623,8 +623,9 @@
       }
 
       @keyframes forged-plate-out {
-        from { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
-        to { opacity: 0; transform: translate3d(0, -34px, 0) scale3d(0.94, 0.82, 1); }
+        0% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(0, -28px, 0) scale3d(0.95, 0.84, 1); }
+        100% { opacity: 0; transform: translate3d(0, -34px, 0) scale3d(0.94, 0.82, 1); }
       }
 
       @keyframes rail-gauge-in {
@@ -636,7 +637,7 @@
 
       @keyframes rail-gauge-out {
         0% { opacity: 1; transform: scale3d(1, 1, 1); }
-        48% { opacity: 1; transform: scale3d(1, 0.1, 1); }
+        88% { opacity: 1; transform: scale3d(1, 0.1, 1); }
         100% { opacity: 0; transform: scale3d(0.28, 0.08, 1); }
       }
 
@@ -648,8 +649,9 @@
       }
 
       @keyframes counterweight-hinge-out {
-        from { opacity: 1; transform: rotateX(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
-        to { opacity: 0; transform: rotateX(-54deg) translate3d(0, -28px, 0) scale3d(0.94, 0.94, 1); }
+        0% { opacity: 1; transform: rotateX(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: rotateX(-44deg) translate3d(0, -22px, 0) scale3d(0.95, 0.95, 1); }
+        100% { opacity: 0; transform: rotateX(-54deg) translate3d(0, -28px, 0) scale3d(0.94, 0.94, 1); }
       }
 
       @keyframes magnetic-seat-in {
@@ -661,8 +663,9 @@
       }
 
       @keyframes magnetic-seat-out {
-        from { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
-        to { opacity: 0; transform: translate3d(0, 42px, 0) scale3d(0.78, 0.78, 1); }
+        0% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(0, 34px, 0) scale3d(0.82, 0.82, 1); }
+        100% { opacity: 0; transform: translate3d(0, 42px, 0) scale3d(0.78, 0.78, 1); }
       }
 
       @keyframes telescoping-drawer-in {
@@ -673,8 +676,9 @@
       }
 
       @keyframes telescoping-drawer-out {
-        from { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
-        to { opacity: 0; transform: translate3d(0, 54px, 0) scale3d(0.72, 0.18, 1); }
+        0% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(0, 44px, 0) scale3d(0.78, 0.22, 1); }
+        100% { opacity: 0; transform: translate3d(0, 54px, 0) scale3d(0.72, 0.18, 1); }
       }
 
       @keyframes drawer-content-in {
@@ -690,8 +694,9 @@
       }
 
       @keyframes vault-door-out {
-        from { opacity: 1; transform: rotateY(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
-        to { opacity: 0; transform: rotateY(-32deg) translate3d(-72px, 0, 0) scale3d(0.92, 0.96, 1); }
+        0% { opacity: 1; transform: rotateY(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: rotateY(-26deg) translate3d(-58px, 0, 0) scale3d(0.93, 0.97, 1); }
+        100% { opacity: 0; transform: rotateY(-32deg) translate3d(-72px, 0, 0) scale3d(0.92, 0.96, 1); }
       }
 
       @keyframes hydraulic-press-in {
@@ -702,8 +707,9 @@
       }
 
       @keyframes hydraulic-press-out {
-        from { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
-        to { opacity: 0; transform: translate3d(0, -48px, 0) scale3d(1.03, 0.12, 1); }
+        0% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(0, -40px, 0) scale3d(1.025, 0.16, 1); }
+        100% { opacity: 0; transform: translate3d(0, -48px, 0) scale3d(1.03, 0.12, 1); }
       }
 
       @keyframes dovetail-lock-in {
@@ -714,8 +720,9 @@
       }
 
       @keyframes dovetail-lock-out {
-        from { opacity: 1; transform: translate3d(0, 0, 0) rotateZ(0deg) scale3d(1, 1, 1); }
-        to { opacity: 0; transform: translate3d(64px, 18px, 0) rotateZ(1.8deg) scale3d(0.91, 0.93, 1); }
+        0% { opacity: 1; transform: translate3d(0, 0, 0) rotateZ(0deg) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(52px, 14px, 0) rotateZ(1.45deg) scale3d(0.92, 0.94, 1); }
+        100% { opacity: 0; transform: translate3d(64px, 18px, 0) rotateZ(1.8deg) scale3d(0.91, 0.93, 1); }
       }
 
       @keyframes bearing-gantry-in {
@@ -727,8 +734,9 @@
       }
 
       @keyframes bearing-gantry-out {
-        from { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
-        to { opacity: 0; transform: translate3d(104px, 30px, 0) scale3d(0.86, 0.86, 1); }
+        0% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(84px, 24px, 0) scale3d(0.88, 0.88, 1); }
+        100% { opacity: 0; transform: translate3d(104px, 30px, 0) scale3d(0.86, 0.86, 1); }
       }
 
       @keyframes shim-compression-in {
@@ -739,8 +747,9 @@
       }
 
       @keyframes shim-compression-out {
-        from { opacity: 1; transform: scale3d(1, 1, 1) translate3d(0, 0, 0); }
-        to { opacity: 0; transform: scale3d(1.14, 0.48, 1) translate3d(0, 28px, 0); }
+        0% { opacity: 1; transform: scale3d(1, 1, 1) translate3d(0, 0, 0); }
+        88% { opacity: 1; transform: scale3d(1.12, 0.54, 1) translate3d(0, 22px, 0); }
+        100% { opacity: 0; transform: scale3d(1.14, 0.48, 1) translate3d(0, 28px, 0); }
       }
 
       @media (max-width: 980px) {
@@ -960,7 +969,7 @@
           modalShell.classList.remove("is-closing", activeMotion);
           modalShell.setAttribute("aria-hidden", "true");
           activeMotion = "";
-        }, 380);
+        }, 360);
       }
 
       document.addEventListener("click", (event) => {
