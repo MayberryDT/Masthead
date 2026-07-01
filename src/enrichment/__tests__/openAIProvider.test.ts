@@ -8,11 +8,24 @@ describe("OpenAI enrichment provider", () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as {
         input: string;
+        max_output_tokens: number;
+        reasoning: { effort: string };
         text: { format: { schema: { required: string[] } } };
       };
       expect(body.input).not.toContain("/home/tyler");
       expect(body.input).not.toContain("OPENAI_API_KEY");
-      expect(body.text.format.schema.required).toEqual(["title", "liveSummary", "searchSummary", "confidence", "missingEvidence"]);
+      expect(body.max_output_tokens).toBe(360);
+      expect(body.reasoning).toEqual({ effort: "minimal" });
+      expect(body.text.format.schema.required).toEqual([
+        "title",
+        "liveSummary",
+        "outcome",
+        "searchSummary",
+        "action",
+        "object",
+        "confidence",
+        "missingEvidence"
+      ]);
       expect(JSON.parse(body.input).facts.coverage).toMatchObject({
         level: "complete",
         messageCount: 2

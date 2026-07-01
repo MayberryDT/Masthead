@@ -5,6 +5,11 @@ import { sessionDemoTelemetry } from "./observabilityDemo";
 import { SessionCard } from "./SessionCard";
 
 type CardLayoutSnapshot = Map<string, DOMRect>;
+type CardLayoutAnimationMode = "density" | "activity";
+
+const SESSION_CARD_LAYOUT_DURATION_MS = 430;
+const SESSION_CARD_LAYOUT_STAGGER_MS = 22;
+const SESSION_CARD_LAYOUT_EASING = "cubic-bezier(0.2, 0.84, 0.16, 1)";
 
 type Props = {
   cards: SessionCardView[];
@@ -168,11 +173,12 @@ function ObservabilityCardGrid({
     previousLayoutRef.current = nextLayout;
     previousOrderSignatureRef.current = orderSignature;
 
-    if (!previousLayout || previousOrderSignature === null || previousOrderSignature === orderSignature || prefersReducedMotion()) {
+    if (!previousLayout || previousOrderSignature === null || prefersReducedMotion()) {
       return;
     }
 
-    animateCardLayoutFrom(grid, previousLayout);
+    const animationMode: CardLayoutAnimationMode = previousOrderSignature === orderSignature ? "density" : "activity";
+    animateCardLayoutFrom(grid, previousLayout, animationMode);
   });
 
   return (
@@ -191,8 +197,8 @@ function captureCardLayout(container: HTMLElement): CardLayoutSnapshot {
   return rects;
 }
 
-function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayoutSnapshot): void {
-  container.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card) => {
+function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayoutSnapshot, mode: CardLayoutAnimationMode): void {
+  container.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card, index) => {
     const sessionId = card.dataset.sessionId;
     const previousRect = sessionId ? previousLayout.get(sessionId) : undefined;
     if (!previousRect) return;
@@ -200,55 +206,102 @@ function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayou
     const nextRect = card.getBoundingClientRect();
     const deltaX = previousRect.left - nextRect.left;
     const deltaY = previousRect.top - nextRect.top;
-    const scaleX = previousRect.width / Math.max(nextRect.width, 1);
-    const scaleY = previousRect.height / Math.max(nextRect.height, 1);
+    const hasMeasurableSize = previousRect.width > 0 && previousRect.height > 0 && nextRect.width > 0 && nextRect.height > 0;
+    const scaleX = hasMeasurableSize ? previousRect.width / nextRect.width : 1;
+    const scaleY = hasMeasurableSize ? previousRect.height / nextRect.height : 1;
     const moved = Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5;
-    const resized = Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01;
+    const resized = hasMeasurableSize && (Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01);
     if (!moved && !resized) return;
 
-    const transform = `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`;
+    const keyframes = gantrySetdownLayoutKeyframes({ deltaX, deltaY, scaleX, scaleY, mode });
     card.classList.add("is-layout-animating");
     if (typeof card.animate !== "function") {
-      animateCardLayoutWithInlineStyle(card, transform);
+      animateCardLayoutWithInlineStyle(card, keyframes[0]);
       return;
     }
 
-    const animation = card.animate(
-      [
-        { transform },
-        { transform: "translate(0, 0) scale(1, 1)" }
-      ],
-      {
-        duration: 300,
-        easing: "cubic-bezier(0.22, 1, 0.36, 1)"
-      }
-    );
+    const animation = card.animate(keyframes, {
+      delay: index * SESSION_CARD_LAYOUT_STAGGER_MS,
+      duration: SESSION_CARD_LAYOUT_DURATION_MS,
+      easing: SESSION_CARD_LAYOUT_EASING,
+      fill: "both"
+    });
     const cleanup = () => card.classList.remove("is-layout-animating");
     animation.addEventListener("finish", cleanup, { once: true });
     animation.addEventListener("cancel", cleanup, { once: true });
   });
 }
 
-function animateCardLayoutWithInlineStyle(card: HTMLElement, transform: string): void {
+function gantrySetdownLayoutKeyframes({
+  deltaX,
+  deltaY,
+  scaleX,
+  scaleY,
+  mode
+}: {
+  deltaX: number;
+  deltaY: number;
+  scaleX: number;
+  scaleY: number;
+  mode: CardLayoutAnimationMode;
+}): Keyframe[] {
+  const yGate = mode === "activity" ? Math.sign(deltaY || 1) * 6 : 6;
+  return [
+    {
+      transform: layoutTransform(deltaX, deltaY + yGate, scaleX * 0.982, scaleY * 0.982),
+      filter: "brightness(0.992)"
+    },
+    {
+      offset: 0.48,
+      transform: layoutTransform(deltaX * 0.24, deltaY * 0.24, 0.996, 0.996)
+    },
+    {
+      offset: 0.76,
+      transform: layoutTransform(0, -1, 1.003, 1.003),
+      filter: "brightness(1.012)"
+    },
+    {
+      transform: layoutTransform(0, 0, 1, 1),
+      filter: "brightness(1)"
+    }
+  ];
+}
+
+function layoutTransform(x: number, y: number, scaleX = 1, scaleY = scaleX): string {
+  return `translate(${roundLayoutNumber(x)}px, ${roundLayoutNumber(y)}px) scale(${roundLayoutNumber(scaleX)}, ${roundLayoutNumber(scaleY)})`;
+}
+
+function roundLayoutNumber(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function animateCardLayoutWithInlineStyle(card: HTMLElement, firstKeyframe: Keyframe): void {
   const previousTransition = card.style.transition;
+  const previousFilter = card.style.filter;
   const previousTransform = card.style.transform;
   const previousTransformOrigin = card.style.transformOrigin;
 
   card.style.transition = "none";
   card.style.transformOrigin = "top left";
-  card.style.transform = transform;
+  card.style.transform = typeof firstKeyframe.transform === "string" ? firstKeyframe.transform : "";
+  card.style.filter = typeof firstKeyframe.filter === "string" ? firstKeyframe.filter : "";
   void card.offsetWidth;
 
   window.requestAnimationFrame(() => {
-    card.style.transition = "transform 300ms cubic-bezier(0.22, 1, 0.36, 1)";
-    card.style.transform = "translate(0, 0) scale(1, 1)";
+    card.style.transition = [
+      `transform ${SESSION_CARD_LAYOUT_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`,
+      `filter ${SESSION_CARD_LAYOUT_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`
+    ].join(", ");
+    card.style.transform = layoutTransform(0, 0, 1, 1);
+    card.style.filter = "brightness(1)";
 
     window.setTimeout(() => {
       card.style.transition = previousTransition;
+      card.style.filter = previousFilter;
       card.style.transform = previousTransform;
       card.style.transformOrigin = previousTransformOrigin;
       card.classList.remove("is-layout-animating");
-    }, 320);
+    }, SESSION_CARD_LAYOUT_DURATION_MS + 20);
   });
 }
 
@@ -257,7 +310,8 @@ function prefersReducedMotion(): boolean {
 }
 
 function headlineUpdateSignature(card: SessionCardView): string {
-  return [card.copy.headline, card.title, card.project].join("\u0000");
+  const successfulRefreshAt = card.copyRefresh?.status === "success" ? card.copyRefresh.requestedAt : "";
+  return [card.copy.headline, card.title, card.project, successfulRefreshAt].join("\u0000");
 }
 
 function laneDescription(laneId: LifecycleLaneView["laneId"]): string {

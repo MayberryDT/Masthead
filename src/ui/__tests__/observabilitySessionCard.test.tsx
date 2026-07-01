@@ -44,6 +44,25 @@ describe("observability session card", () => {
     expect(html).not.toContain("Demo data");
   });
 
+  test("marks changed headlines for the magnetic slug lock refresh", () => {
+    const host = document.createElement("div");
+    host.innerHTML = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          copy: { ...session().copy, headline: "Magnetic slug lock copy" }
+        })}
+        headlineUpdateIndex={2}
+        onToggle={() => undefined}
+      />
+    );
+
+    const card = host.querySelector<HTMLElement>(".session-card");
+    expect(card?.classList.contains("is-headline-refreshing")).toBe(true);
+    expect(card?.style.getPropertyValue("--headline-refresh-index")).toBe("2");
+    expect(card?.querySelector(".headline-text.headline-current")?.textContent).toBe("Magnetic slug lock copy");
+    expect(card?.querySelector(".card-headline-cursor")).toBeNull();
+  });
+
   test("uses a project and work-area label in the header without synthetic id chrome", () => {
     const html = renderToStaticMarkup(
       <SessionCard
@@ -310,11 +329,55 @@ describe("observability session card", () => {
 
       expect(animations.map((animation) => animation.sessionId).sort()).toEqual(["session-1", "session-2"]);
       expect(JSON.stringify(animations.find((animation) => animation.sessionId === "session-2")?.keyframes)).toContain(
-        "translate(0px, 240px)"
+        "translate(0px, 246px)"
       );
       expect(JSON.stringify(animations.find((animation) => animation.sessionId === "session-1")?.keyframes)).toContain(
-        "translate(0px, -240px)"
+        "translate(0px, -246px)"
       );
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.animate = originalAnimate;
+    }
+  });
+
+  test("animates existing cards when card density changes", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const animations: Array<{ sessionId: string; keyframes: Keyframe[] | PropertyIndexedKeyframes | null }> = [];
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const sessionId = this.dataset.sessionId;
+      if (!sessionId) return originalGetBoundingClientRect.call(this);
+      const isCompact = this.parentElement?.classList.contains("compact") === true;
+      return testRect(0, 0, isCompact ? 240 : 320, isCompact ? 178 : 218);
+    };
+    HTMLElement.prototype.animate = vi.fn(function (
+      this: HTMLElement,
+      keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
+      _options?: number | KeyframeAnimationOptions
+    ) {
+      const sessionId = this.dataset.sessionId;
+      if (sessionId) animations.push({ sessionId, keyframes });
+      return { addEventListener: vi.fn() } as unknown as Animation;
+    });
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[session({ sessionId: "session-1" })]} variant="observability" density="comfortable" />);
+      });
+
+      expect(animations).toEqual([]);
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[session({ sessionId: "session-1" })]} variant="observability" density="compact" />);
+      });
+
+      expect(animations.map((animation) => animation.sessionId)).toEqual(["session-1"]);
+      expect(JSON.stringify(animations[0]?.keyframes)).toContain("translate(0px, 6px)");
+      expect(JSON.stringify(animations[0]?.keyframes)).toContain("scale(1.309");
     } finally {
       await act(async () => root.unmount());
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
@@ -352,7 +415,7 @@ describe("observability session card", () => {
 
       const movedCard = container.querySelector<HTMLElement>('[data-session-id="session-2"]');
       expect(movedCard?.className).toContain("is-layout-animating");
-      expect(movedCard?.style.transform).toContain("translate(0px, 240px)");
+      expect(movedCard?.style.transform).toContain("translate(0px, 246px)");
     } finally {
       await act(async () => root.unmount());
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
@@ -479,7 +542,79 @@ describe("observability session card", () => {
       const headlines = Array.from(container.querySelectorAll<HTMLElement>(".headline"));
       expect(headlines[0]?.textContent).toContain("First updated headline");
       expect(headlines[1]?.textContent).toContain("Second updated headline");
+      expect(container.querySelectorAll(".session-card.is-headline-refreshing")).toHaveLength(2);
+      expect(headlines[0]?.querySelector(".headline-text.headline-current")?.textContent).toContain("First updated headline");
       expect(container.querySelector(".card-headline-cursor")).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  test("keeps the outgoing headline layer during a refresh animation", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const original = session({
+      sessionId: "session-1",
+      copy: { ...session().copy, headline: "Outgoing board headline" }
+    });
+    const updated = { ...original, copy: { ...original.copy, headline: "Incoming board headline" } };
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[original]} variant="observability" />);
+      });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[updated]} variant="observability" />);
+      });
+
+      const card = container.querySelector<HTMLElement>(".session-card");
+      const headline = card?.querySelector<HTMLElement>(".headline");
+      expect(card?.classList.contains("is-headline-refreshing")).toBe(true);
+      expect(headline?.querySelector(".headline-previous")?.textContent).toBe("Outgoing board headline");
+      expect(headline?.querySelector(".headline-current")?.textContent).toBe("Incoming board headline");
+      expect(headline?.textContent).toContain("Outgoing board headline");
+      expect(headline?.textContent).toContain("Incoming board headline");
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  test("animates successful same-text headline refreshes", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const original = session({
+      sessionId: "session-1",
+      copy: { ...session().copy, headline: "Stable refreshed headline" },
+      copyRefresh: {
+        provider: "openai",
+        requestedAt: "2026-06-30T23:00:00.000Z",
+        status: "success"
+      }
+    });
+    const refreshed = {
+      ...original,
+      copyRefresh: {
+        provider: "openai" as const,
+        requestedAt: "2026-06-30T23:00:05.000Z",
+        status: "success" as const
+      }
+    };
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[original]} variant="observability" />);
+      });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[refreshed]} variant="observability" />);
+      });
+
+      const card = container.querySelector<HTMLElement>(".session-card");
+      const headline = card?.querySelector<HTMLElement>(".headline");
+      expect(card?.classList.contains("is-headline-refreshing")).toBe(true);
+      expect(headline?.querySelector(".headline-previous")?.textContent).toBe("Stable refreshed headline");
+      expect(headline?.querySelector(".headline-current")?.textContent).toBe("Stable refreshed headline");
     } finally {
       await act(async () => root.unmount());
     }
@@ -504,7 +639,7 @@ describe("observability session card", () => {
       });
 
       const headline = container.querySelector<HTMLElement>(".headline");
-      expect(headline?.textContent).toBe("Updated board headline");
+      expect(headline?.querySelector(".headline-current")?.textContent).toBe("Updated board headline");
       expect(headline?.querySelector(".card-headline-cursor")).toBeNull();
 
       await act(async () => {
@@ -513,6 +648,7 @@ describe("observability session card", () => {
 
       expect(headline?.textContent).toContain("Updated board headline");
       expect(headline?.querySelector(".card-headline-cursor")).toBeNull();
+      expect(container.querySelector(".session-card.is-headline-refreshing")).toBeNull();
     } finally {
       await act(async () => root.unmount());
     }
@@ -737,9 +873,7 @@ function session(overrides: Partial<SessionCardView> = {}): SessionCardView {
   };
 }
 
-function testRect(left: number, top: number): DOMRect {
-  const width = 320;
-  const height = 218;
+function testRect(left: number, top: number, width = 320, height = 218): DOMRect {
   return {
     x: left,
     y: top,

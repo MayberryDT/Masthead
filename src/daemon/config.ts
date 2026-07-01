@@ -35,6 +35,8 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+  const llmCopyEnabled = env.MASTHEAD_LLM_COPY === undefined ? Boolean(env.OPENAI_API_KEY?.trim()) : env.MASTHEAD_LLM_COPY === "1";
+
   return {
     host,
     port: Number.isFinite(configuredPort) ? configuredPort : 17373,
@@ -47,7 +49,7 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     storePath: dataPaths.legacyJournalPath,
     databasePath: dataPaths.databasePath,
     legacyDataDirectory: env.MASTHEAD_LEGACY_DATA_DIR ? resolve(env.MASTHEAD_LEGACY_DATA_DIR) : undefined,
-    llmCopyEnabled: env.MASTHEAD_LLM_COPY === "1",
+    llmCopyEnabled,
     liveCopyCacheMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_CACHE_MS),
     liveCopyTimeoutMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_TIMEOUT_MS),
     liveCopyProjectionBudgetMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_PROJECTION_BUDGET_MS),

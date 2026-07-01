@@ -249,10 +249,10 @@ export function validateSessionCopy(
 ): SessionCopyValidationResult {
   if (!isCopyShape(candidate)) return { ok: false, reason: "invalid_shape" };
   const copy: SessionPlainCopy = {
-    headline: candidate.headline.trim(),
-    status: candidate.status.trim(),
-    reason: candidate.reason.trim(),
-    ...(candidate.nextStep?.trim() ? { nextStep: candidate.nextStep.trim() } : {}),
+    headline: sentenceWithTerminalPunctuation(cleanModelCopyText(candidate.headline)),
+    status: sentenceWithTerminalPunctuation(cleanModelCopyText(candidate.status)),
+    reason: sentenceWithTerminalPunctuation(cleanModelCopyText(candidate.reason)),
+    ...(candidate.nextStep?.trim() ? { nextStep: sentenceWithTerminalPunctuation(cleanModelCopyText(candidate.nextStep)) } : {}),
     source: candidate.source ?? source
   };
 
@@ -265,15 +265,15 @@ export function validateSessionCopy(
     copy.headline.length > 96 ||
     !isSentenceHeadline(copy.headline) ||
     copy.status.length < 2 ||
-    copy.status.length > 64 ||
+    copy.status.length > 80 ||
     copy.reason.length < 2 ||
-    copy.reason.length > 140 ||
+    copy.reason.length > 180 ||
     (copy.nextStep !== undefined && copy.nextStep.length > 100)
   ) {
     return { ok: false, reason: "invalid_shape" };
   }
 
-  if (claimsCompleted(serialized) && !(input.lifecycle === "ended" && input.outcomeLabel === "completed")) {
+  if (claimsCompleted(serialized) && !supportsCompletionClaim(input)) {
     return { ok: false, reason: "unsupported_claim" };
   }
 
@@ -346,8 +346,26 @@ function isCopyShape(value: unknown): value is SessionPlainCopy {
   );
 }
 
+function sentenceWithTerminalPunctuation(value: string): string {
+  const normalized = value.trim();
+  if (!normalized || /[.!?]$/.test(normalized)) return normalized;
+  return `${normalized}.`;
+}
+
+function cleanModelCopyText(value: string): string {
+  return value
+    .replace(/\blatest\s+stop_hook\s+feedback\b/g, "latest feedback")
+    .replace(/\bstop_hook\b/g, "latest feedback")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function claimsCompleted(value: string): boolean {
   return /\b(completed|complete|finished|done)\b/i.test(value);
+}
+
+function supportsCompletionClaim(input: SessionCopyInput): boolean {
+  return input.lifecycle === "ended" && (input.outcomeLabel === "completed" || input.primaryStatus === "completed_reviewed" || input.primaryStatus === "completed_unreviewed");
 }
 
 const unsafeCopyPattern =

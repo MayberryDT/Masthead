@@ -1070,6 +1070,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "GET" && url.pathname === "/projection") {
       const selectedSessionId = url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined;
+      const refreshIntervalMs = optionalPositiveQueryInteger(url.searchParams.get("refreshIntervalMs"));
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
@@ -1080,7 +1081,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       });
       liveEnvelope.events = state.events.length;
       liveEnvelope.gitSnapshots = gitSnapshots.length;
-      liveEnvelope.projection = await sessionCopyEnricher.enrichProjection(liveEnvelope.projection);
+      liveEnvelope.projection = await sessionCopyEnricher.enrichProjection(liveEnvelope.projection, { refreshIntervalMs });
       liveEnvelope.projection = attachCanonicalCardIds(liveEnvelope.projection, {
         hostId: `host:${config.host}`,
         runtimeKind: "codex"
@@ -2413,6 +2414,12 @@ function parseBoundedInteger(
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) return { ok: false };
   return { ok: true, value: parsed };
+}
+
+function optionalPositiveQueryInteger(value: string | null): number | undefined {
+  if (value === null || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function isRuntimeKind(value: unknown): value is RuntimeKind {

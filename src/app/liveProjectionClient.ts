@@ -46,7 +46,11 @@ export function defaultFixtureMode(meta: ImportMeta = import.meta, search = loca
   return params.get("mode") === "fixture" || params.get("mode") === "demo" || params.get("demo") === "1";
 }
 
-export function projectionRequestUrl(baseUrl: string, selectedSessionId?: string | null): string {
+export function projectionRequestUrl(
+  baseUrl: string,
+  selectedSessionId?: string | null,
+  options: { refreshIntervalMs?: number } = {}
+): string {
   const url = new URL(baseUrl);
   url.pathname = "/projection";
   url.searchParams.delete("expandedSessionId");
@@ -54,6 +58,11 @@ export function projectionRequestUrl(baseUrl: string, selectedSessionId?: string
     url.searchParams.set("selectedSessionId", selectedSessionId);
   } else {
     url.searchParams.delete("selectedSessionId");
+  }
+  if (options.refreshIntervalMs !== undefined) {
+    url.searchParams.set("refreshIntervalMs", String(options.refreshIntervalMs));
+  } else {
+    url.searchParams.delete("refreshIntervalMs");
   }
   return url.toString();
 }

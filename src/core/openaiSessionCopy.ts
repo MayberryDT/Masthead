@@ -44,7 +44,7 @@ export type OpenAISessionCopyEnricherConfig = OpenAISessionCopyConfig & {
 };
 
 export type OpenAISessionCopyEnricher = {
-  enrichProjection: (projection: LiveBoardProjection) => Promise<LiveBoardProjection>;
+  enrichProjection: (projection: LiveBoardProjection, options?: { refreshIntervalMs?: number }) => Promise<LiveBoardProjection>;
   status: () => {
     enabled: boolean;
     configured: boolean;
@@ -97,13 +97,18 @@ export async function rewriteSessionCopyWithOpenAI(
           "Never use repeated templates such as ready for review, needs review, work is focused on, or being fixed for a project.",
           "Do not infer lifecycle, outcome, urgency, identity, or completion.",
           "Treat latestFeedback claim flags as agent claims, not deterministic truth.",
-          "Do not mention raw enum names.",
+          "Do not mention raw enum names, snake_case tokens, lifecycle labels, primaryStatus values, or status labels from the input.",
+          "Translate enum-like tokens into plain language, such as review is pending or work is active.",
           "The headline must be a short full sentence that describes the session state, not a category label.",
+          "Headline, status, and reason must be human-readable phrases with ending punctuation.",
+          "Status must not be a single enum-like word such as running, editing, idle, ended, blocked, or failed.",
+          "Use an empty string for nextStep when the input does not directly support a next step.",
           "Never address the user directly. Do not use you, your, Tyler, urgent, critical, dangerous, action required, please, let's, I, or we.",
           "Return only the requested JSON fields."
         ].join(" "),
         input: JSON.stringify(input),
-        max_output_tokens: 240,
+        max_output_tokens: 600,
+        reasoning: { effort: "minimal" },
         store: false,
         text: {
           format: {
@@ -113,7 +118,7 @@ export async function rewriteSessionCopyWithOpenAI(
             schema: {
               type: "object",
               additionalProperties: false,
-              required: ["headline", "status", "reason"],
+              required: ["headline", "status", "reason", "nextStep"],
               properties: {
                 headline: { type: "string" },
                 status: { type: "string" },
@@ -185,8 +190,14 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
   const auditLogger = config.auditLogger ?? createEnrichmentAuditLogger();
   const cache = new Map<string, { copy: SessionPlainCopy; expiresAt: number }>();
   const inFlight = new Map<string, Promise<OpenAISessionCopyResult>>();
+  const lastSuccessfulCopies = new Map<string, SessionPlainCopy>();
 
-  async function cachedRewrite(input: SessionCopyInput, fallback: SessionPlainCopy, remainingMs: number): Promise<OpenAISessionCopyResult> {
+  async function cachedRewrite(
+    input: SessionCopyInput,
+    fallback: SessionPlainCopy,
+    remainingMs: number,
+    refreshIntervalMs: number | undefined
+  ): Promise<OpenAISessionCopyResult> {
     const key = sessionCopyCacheKey({ ...input, refresh: undefined }, model);
     const cached = ttlMs > 0 ? cache.get(key) : undefined;
     if (cached && cached.expiresAt > now()) return { copy: cached.copy, latencyMs: 0, status: "llm" };
@@ -199,7 +210,7 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
       apiKey,
       model,
       fetchImpl: config.fetchImpl,
-      refreshIntervalMs: config.refreshIntervalMs,
+      refreshIntervalMs,
       timeoutMs: Math.max(1, Math.min(config.timeoutMs ?? DEFAULT_TIMEOUT_MS, remainingMs))
     }).then((result) => {
       if (ttlMs > 0 && result.status === "llm" && result.copy) {
@@ -216,12 +227,13 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
   }
 
   return {
-    async enrichProjection(projection) {
+    async enrichProjection(projection, options = {}) {
       if (!enabled) return projection;
+      const refreshIntervalMs = options.refreshIntervalMs ?? config.refreshIntervalMs;
       const deadline = now() + projectionBudgetMs;
       const copiesBySession = new Map<string, SessionPlainCopy>();
       const refreshBySession = new Map<string, NonNullable<LiveBoardProjection["cards"][number]["copyRefresh"]>>();
-      const cards = projection.cards;
+      const cards = prioritizedProjectionCards(projection.cards);
       const refreshId = `refresh:${now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
       const generatedAt = new Date(now()).toISOString();
       const summary = {
@@ -234,16 +246,16 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
       let index = 0;
       const workers = Array.from({ length: Math.min(maxConcurrent, cards.length) }, async () => {
         while (index < cards.length) {
-          const cardIndex = index;
-          const card = cards[index++];
-          if (!card) continue;
+          const workItem = cards[index++];
+          if (!workItem) continue;
+          const { card, cardIndex } = workItem;
           const remainingMs = deadline - now();
           if (remainingMs <= 0) return;
           const refresh = {
             cardIndex,
             generatedAt,
             refreshId,
-            ...(config.refreshIntervalMs ? { refreshIntervalMs: config.refreshIntervalMs } : {})
+            ...(refreshIntervalMs ? { refreshIntervalMs } : {})
           };
           const input = isSessionCopyInput(card.copyInput)
             ? { ...card.copyInput, refresh }
@@ -258,7 +270,7 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
             model,
             provider: "openai",
             refreshId,
-            refreshIntervalMs: config.refreshIntervalMs,
+            refreshIntervalMs,
             sessionId: card.sessionId
           });
           auditLogger.record({
@@ -267,11 +279,11 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
             model,
             provider: "openai",
             refreshId,
-            refreshIntervalMs: config.refreshIntervalMs,
+            refreshIntervalMs,
             sessionId: card.sessionId
           });
           summary.requested += 1;
-          const result = await cachedRewrite(input, card.copy, remainingMs);
+          const result = await cachedRewrite(input, card.copy, remainingMs, refreshIntervalMs);
           auditLogger.record({
             details: {
               failureMessage: result.failureMessage,
@@ -283,12 +295,14 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
             model,
             provider: "openai",
             refreshId,
-            refreshIntervalMs: config.refreshIntervalMs,
+            refreshIntervalMs,
             sessionId: card.sessionId,
             status: result.status
           });
           if (result.status === "llm" && result.copy) {
             copiesBySession.set(card.sessionId, result.copy);
+            lastSuccessfulCopies.set(card.sessionId, result.copy);
+            trimSessionCopyMap(lastSuccessfulCopies, maxEntries);
             refreshBySession.set(card.sessionId, {
               latencyMs: result.latencyMs,
               model,
@@ -304,12 +318,14 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
               model,
               provider: "openai",
               refreshId,
-              refreshIntervalMs: config.refreshIntervalMs,
+              refreshIntervalMs,
               sessionId: card.sessionId,
               status: "success"
             });
           } else {
             const status = result.status === "llm" ? "api_error" : result.status;
+            const previousCopy = lastSuccessfulCopies.get(card.sessionId);
+            if (previousCopy) copiesBySession.set(card.sessionId, previousCopy);
             refreshBySession.set(card.sessionId, {
               failureMessage: result.failureMessage,
               latencyMs: result.latencyMs,
@@ -330,7 +346,7 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
               model,
               provider: "openai",
               refreshId,
-              refreshIntervalMs: config.refreshIntervalMs,
+              refreshIntervalMs,
               sessionId: card.sessionId,
               status
             });
@@ -373,6 +389,18 @@ function extractOutputText(value: unknown): string | undefined {
   return undefined;
 }
 
+function prioritizedProjectionCards(cards: LiveBoardProjection["cards"]): Array<{ card: LiveBoardProjection["cards"][number]; cardIndex: number }> {
+  return cards
+    .map((card, cardIndex) => ({ card, cardIndex }))
+    .toSorted((a, b) => lifecyclePriority(a.card.lifecycle) - lifecyclePriority(b.card.lifecycle) || a.card.priorityRank - b.card.priorityRank || a.cardIndex - b.cardIndex);
+}
+
+function lifecyclePriority(lifecycle: LiveBoardProjection["cards"][number]["lifecycle"]): number {
+  if (lifecycle === "running") return 0;
+  if (lifecycle === "idle") return 1;
+  return 2;
+}
+
 function withOverlayCopy<T extends { sessionId: string; copy: SessionPlainCopy; copyRefresh?: LiveBoardProjection["cards"][number]["copyRefresh"] }>(
   value: T,
   copiesBySession: Map<string, SessionPlainCopy>,
@@ -389,6 +417,14 @@ function withOverlayCopy<T extends { sessionId: string; copy: SessionPlainCopy; 
 }
 
 function trimCache(cache: Map<string, { copy: SessionPlainCopy; expiresAt: number }>, maxEntries: number): void {
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (!oldestKey) return;
+    cache.delete(oldestKey);
+  }
+}
+
+function trimSessionCopyMap(cache: Map<string, SessionPlainCopy>, maxEntries: number): void {
   while (cache.size > maxEntries) {
     const oldestKey = cache.keys().next().value as string | undefined;
     if (!oldestKey) return;

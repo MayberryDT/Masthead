@@ -488,7 +488,7 @@ export function App() {
 
     const mastheadApi = connection.api;
     try {
-      const body = await mastheadApi.getLiveProjection(selectedLiveSessionId);
+      const body = await mastheadApi.getLiveProjection(selectedLiveSessionId, { refreshIntervalMs: refreshRateMs });
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
       if (!isCurrentRequest()) return false;
       setLiveProjection(normalizeLiveBoardProjection(body.projection, selectedSessionId));
@@ -515,7 +515,7 @@ export function App() {
       });
       return false;
     }
-  }, [activeProjectionUrl, selectedSessionId]);
+  }, [activeProjectionUrl, refreshRateMs, selectedSessionId]);
 
   const loadSidebarUsageStats = useCallback(async (options: { signal?: AbortSignal } = {}) => {
     setSidebarUsageLoading(true);

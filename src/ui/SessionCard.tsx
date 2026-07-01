@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import type { SessionCardView } from "../core/types";
 import { isBlockedSessionCard } from "./format";
 import type { DemoSessionTelemetry } from "./observabilityDemo";
@@ -12,21 +12,30 @@ type Props = {
   headlineUpdateIndex?: number;
 };
 
-export function SessionCard({ session, onToggle, demoTelemetry, newCardIndex = 0 }: Props) {
+export function SessionCard({ session, onToggle, demoTelemetry, newCardIndex = 0, headlineUpdateIndex }: Props) {
   const stateClass = sessionStateClassName(session);
   const model = demoTelemetry?.model.value ?? session.model ?? "Not captured";
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Codex";
   const worktree = session.branchOrWorktree ?? "None";
   const headline = sessionHeadline(session);
   const sessionName = sessionHeaderName(session);
+  const isHeadlineRefreshing = headlineUpdateIndex !== undefined;
+  const previousHeadlineRef = useRef(headline);
+  const previousHeadline = previousHeadlineRef.current;
+  const outgoingHeadline = isHeadlineRefreshing ? previousHeadline : undefined;
   const style = {
     viewTransitionName: `session-card-${viewTransitionNamePart(session.sessionId)}`,
-    "--new-card-index": Math.min(newCardIndex, 4)
-  } as CSSProperties & { "--new-card-index": number };
+    "--new-card-index": Math.min(newCardIndex, 4),
+    "--headline-refresh-index": Math.min(headlineUpdateIndex ?? 0, 4)
+  } as CSSProperties & { "--new-card-index": number; "--headline-refresh-index": number };
+
+  useEffect(() => {
+    previousHeadlineRef.current = headline;
+  }, [headline]);
 
   return (
     <article
-      className={`session-card bottom-variant-card dovetail-card ${stateClass}`}
+      className={`session-card bottom-variant-card dovetail-card ${stateClass}${isHeadlineRefreshing ? " is-headline-refreshing" : ""}`}
       data-session-id={session.sessionId}
       style={style}
       role="button"
@@ -49,7 +58,14 @@ export function SessionCard({ session, onToggle, demoTelemetry, newCardIndex = 0
         <span className="state-pill">{sessionStatePillLabel(session)}</span>
       </header>
 
-      <h3 className="headline">{headline}</h3>
+      <h3 className="headline">
+        {outgoingHeadline ? (
+          <span className="headline-text headline-previous" aria-hidden="true">
+            {outgoingHeadline}
+          </span>
+        ) : null}
+        <span className="headline-text headline-current">{headline}</span>
+      </h3>
       <CopyRefreshBadge session={session} />
 
       <div className="fact-grid">

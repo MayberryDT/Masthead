@@ -2015,7 +2015,8 @@ main {
 .settings-section,
 .connected-source-row,
 .adapter-card {
-  animation: usage-card-enter 360ms cubic-bezier(0.2, 0, 0, 1) both;
+  animation: usage-card-enter 400ms cubic-bezier(0.17, 0.78, 0.13, 1) both;
+  transform-origin: 50% 100%;
 }
 
 .usage-summary-strip .usage-metric:nth-child(2) { animation-delay: 35ms; }
@@ -2038,15 +2039,27 @@ main {
 .usage-coverage { animation-delay: 190ms; }
 
 @keyframes usage-card-enter {
-  from {
-    opacity: 0;
-    filter: blur(4px);
-    transform: translateY(10px);
-  }
-  to {
+  0% {
     opacity: 1;
-    filter: blur(0);
-    transform: translateY(0);
+    filter: brightness(0.992);
+    transform: translateY(9px) scale(0.968);
+  }
+
+  66% {
+    opacity: 1;
+    filter: brightness(1.012);
+    transform: translateY(-1px) scale(1.004);
+  }
+
+  84% {
+    opacity: 1;
+    transform: translateY(1px) scale(0.999);
+  }
+
+  100% {
+    opacity: 1;
+    filter: brightness(1);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -3924,6 +3937,8 @@ body {
 }
 
 .observability-card-grid {
+  --layout-dur: 430ms;
+  --layout-ease: cubic-bezier(0.2, 0.84, 0.16, 1);
   view-transition-name: session-card-grid;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4003,29 +4018,41 @@ body {
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .observability-console .session-card,
+  .masthead-shell .session-card,
   .observability-console .session-card.is-new-card,
   .masthead-shell .session-card.is-new-card {
-    animation: session-card-created 460ms var(--layout-ease) both;
-    animation-delay: calc(var(--new-card-index) * 55ms);
+    animation: session-card-created 300ms cubic-bezier(0.17, 0.78, 0.13, 1) both;
+    transform-origin: 50% 100%;
+  }
+
+  .observability-console .session-card.is-new-card,
+  .masthead-shell .session-card.is-new-card {
+    animation-delay: calc(var(--new-card-index) * 44ms);
   }
 }
 
 @keyframes session-card-created {
   0% {
-    opacity: 0;
-    filter: blur(5px);
-    transform: translateY(14px) scale(0.982);
+    opacity: 1;
+    filter: brightness(0.992);
+    transform: translateY(9px) scale(0.968);
   }
 
-  68% {
+  66% {
     opacity: 1;
-    filter: blur(0);
-    transform: translateY(-2px) scale(1);
+    filter: brightness(1.012);
+    transform: translateY(-1px) scale(1.004);
+  }
+
+  84% {
+    opacity: 1;
+    transform: translateY(1px) scale(0.999);
   }
 
   100% {
     opacity: 1;
-    filter: blur(0);
+    filter: brightness(1);
     transform: translateY(0) scale(1);
   }
 }
@@ -5097,9 +5124,11 @@ body {
 
 .observability-console .session-card .headline,
 .masthead-shell .session-card .headline {
+  position: relative;
   display: grid;
   align-content: center;
   min-height: 58px;
+  overflow: hidden;
   border-top: 1px solid rgba(194, 221, 241, 0.1);
   border-bottom: 1px solid rgba(0, 0, 0, 0.32);
   background:
@@ -5115,6 +5144,91 @@ body {
   line-height: 1.32;
   letter-spacing: 0;
   text-wrap: pretty;
+}
+
+.observability-console .session-card .headline::after,
+.masthead-shell .session-card .headline::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(46, 167, 255, 0.3);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.observability-console .session-card .headline-text,
+.masthead-shell .session-card .headline-text {
+  position: relative;
+  z-index: 1;
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.observability-console .session-card.is-headline-refreshing .headline-previous,
+.masthead-shell .session-card.is-headline-refreshing .headline-previous {
+  animation: magnetic-headline-release 680ms cubic-bezier(0.18, 0.9, 0.12, 1) both;
+  animation-delay: calc(var(--headline-refresh-index, 0) * 55ms);
+}
+
+.observability-console .session-card.is-headline-refreshing .headline-current,
+.masthead-shell .session-card.is-headline-refreshing .headline-current {
+  animation: magnetic-headline-lock 680ms cubic-bezier(0.18, 0.9, 0.12, 1) both;
+  animation-delay: calc(var(--headline-refresh-index, 0) * 55ms);
+}
+
+.observability-console .session-card.is-headline-refreshing .headline::after,
+.masthead-shell .session-card.is-headline-refreshing .headline::after {
+  animation: magnetic-headline-field 680ms cubic-bezier(0.18, 0.9, 0.12, 1) both;
+  animation-delay: calc(var(--headline-refresh-index, 0) * 55ms);
+}
+
+@keyframes magnetic-headline-release {
+  0%,
+  38% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+
+  54%,
+  100% {
+    opacity: 0;
+    transform: translateX(-6px) scale(0.992);
+  }
+}
+
+@keyframes magnetic-headline-lock {
+  0%,
+  42% {
+    opacity: 0;
+    transform: translateX(10px) scale(0.992);
+  }
+
+  72% {
+    opacity: 1;
+    transform: translateX(-1px) scale(1.004);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes magnetic-headline-field {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.94);
+  }
+
+  48% {
+    opacity: 1;
+    transform: scaleX(1.01);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
 }
 
 .observability-console .session-card .fact-grid,
@@ -5213,7 +5327,9 @@ body {
 .masthead-shell .session-card .bottom-signal {
   position: absolute;
   z-index: 0;
+  overflow: hidden;
   pointer-events: none;
+  transform-origin: 50% 100%;
   background:
     linear-gradient(180deg, rgba(246, 251, 255, 0.22), transparent 34%),
     linear-gradient(180deg, var(--state), var(--state));
@@ -5221,6 +5337,14 @@ body {
     0 0 0 1px rgba(0, 0, 0, 0.42),
     inset 0 1px 0 rgba(246, 251, 255, 0.24),
     inset 0 -1px 0 rgba(0, 0, 0, 0.52);
+}
+
+.observability-console .session-card .bottom-signal::before,
+.masthead-shell .session-card .bottom-signal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 .observability-console .session-card.dovetail-card .bottom-signal,
@@ -5232,46 +5356,52 @@ body {
   clip-path: polygon(0 0, 28% 0, 33% 60%, 67% 60%, 72% 0, 100% 0, 100% 100%, 0 100%);
 }
 
-.observability-console .session-card.dovetail-card.is-active .bottom-signal {
-  background:
-    linear-gradient(105deg, transparent 0 16%, rgba(246, 251, 255, 0.18) 25%, rgba(246, 251, 255, 0.58) 34%, rgba(246, 251, 255, 0.18) 43%, transparent 54%) 0 0 / 56px 100% repeat-x,
-    linear-gradient(180deg, rgba(246, 251, 255, 0.22), transparent 34%),
-    linear-gradient(180deg, var(--state), var(--state));
-  animation: dovetail-active-run 950ms linear infinite;
+.observability-console .session-card.dovetail-card.is-active .bottom-signal::before,
+.masthead-shell .session-card.dovetail-card.is-active .bottom-signal::before {
+  background: linear-gradient(90deg, transparent 0 28%, rgba(246, 251, 255, 0.42), transparent 52%) 0 0 / 68px 100% repeat-x;
+  animation: calm-lock-active 1300ms linear infinite;
 }
 
-.masthead-shell .session-card.dovetail-card.is-active .bottom-signal {
-  background:
-    linear-gradient(105deg, transparent 0 16%, rgba(246, 251, 255, 0.18) 25%, rgba(246, 251, 255, 0.58) 34%, rgba(246, 251, 255, 0.18) 43%, transparent 54%) 0 0 / 56px 100% repeat-x,
-    linear-gradient(180deg, rgba(246, 251, 255, 0.22), transparent 34%),
-    linear-gradient(180deg, var(--state), var(--state));
-  animation: dovetail-active-run 950ms linear infinite;
+.observability-console .session-card.dovetail-card.is-idle .bottom-signal,
+.masthead-shell .session-card.dovetail-card.is-idle .bottom-signal {
+  animation: calm-lock-idle 6400ms ease-in-out infinite;
 }
 
-.observability-console .session-card.dovetail-card.is-blocked .bottom-signal {
-  animation: dovetail-blocked-pulse 1500ms ease-in-out infinite;
-  filter: drop-shadow(0 0 7px rgba(255, 72, 62, 0.42));
-}
-
+.observability-console .session-card.dovetail-card.is-blocked .bottom-signal,
 .masthead-shell .session-card.dovetail-card.is-blocked .bottom-signal {
-  animation: dovetail-blocked-pulse 1500ms ease-in-out infinite;
-  filter: drop-shadow(0 0 7px rgba(255, 72, 62, 0.42));
+  animation: calm-lock-blocked 1400ms ease-in-out infinite;
+  filter: drop-shadow(0 0 8px rgba(255, 72, 62, 0.52));
 }
 
-@keyframes dovetail-active-run {
+@keyframes calm-lock-active {
   to {
-    background-position: 56px 0, 0 0, 0 0;
+    background-position: 68px 0;
   }
 }
 
-@keyframes dovetail-blocked-pulse {
+@keyframes calm-lock-idle {
   0%,
   100% {
-    filter: drop-shadow(0 0 5px rgba(255, 72, 62, 0.34));
+    opacity: 0.52;
+    filter: brightness(0.92);
   }
 
   50% {
-    filter: drop-shadow(0 0 12px rgba(255, 72, 62, 0.62));
+    opacity: 0.74;
+    filter: brightness(1.04);
+  }
+}
+
+@keyframes calm-lock-blocked {
+  0%,
+  100% {
+    opacity: 0.78;
+    filter: drop-shadow(0 0 5px rgba(255, 72, 62, 0.38));
+  }
+
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 11px rgba(255, 72, 62, 0.58));
   }
 }
 
@@ -5875,10 +6005,16 @@ body {
     transition-duration: 1ms;
   }
 
-  .observability-console .session-card.dovetail-card.is-active .bottom-signal,
-  .observability-console .session-card.dovetail-card.is-blocked .bottom-signal,
-  .masthead-shell .session-card.dovetail-card.is-active .bottom-signal,
-  .masthead-shell .session-card.dovetail-card.is-blocked .bottom-signal {
+  .observability-console .session-card.is-headline-refreshing .headline::after,
+  .observability-console .session-card.is-headline-refreshing .headline-previous,
+  .observability-console .session-card.is-headline-refreshing .headline-current,
+  .masthead-shell .session-card.is-headline-refreshing .headline::after,
+  .masthead-shell .session-card.is-headline-refreshing .headline-previous,
+  .masthead-shell .session-card.is-headline-refreshing .headline-current,
+  .observability-console .session-card.dovetail-card .bottom-signal,
+  .observability-console .session-card.dovetail-card .bottom-signal::before,
+  .masthead-shell .session-card.dovetail-card .bottom-signal,
+  .masthead-shell .session-card.dovetail-card .bottom-signal::before {
     animation: none;
   }
 

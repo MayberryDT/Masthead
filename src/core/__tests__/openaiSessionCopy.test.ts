@@ -95,9 +95,11 @@ describe("OpenAI session copy", () => {
     expect(body).toMatchObject({
       model: "gpt-5-nano-2025-08-07",
       store: false,
-      max_output_tokens: 240,
+      max_output_tokens: 600,
+      reasoning: { effort: "minimal" },
       text: { format: { type: "json_schema", name: "masthead_session_copy", strict: true } }
     });
+    expect(body.text.format.schema.required).toEqual(["headline", "status", "reason", "nextStep"]);
     expect(JSON.parse(body.input)).toEqual(input);
     expect(JSON.parse(body.input).latestFeedback).toEqual({
       present: true,
@@ -114,6 +116,8 @@ describe("OpenAI session copy", () => {
     expect(body.instructions).toContain("system-neutral");
     expect(body.instructions).toContain("claim flags");
     expect(body.instructions).toContain("full sentence");
+    expect(body.instructions).toContain("snake_case tokens");
+    expect(body.instructions).toContain("must not be a single enum-like word");
   });
 
   test("does not send latest feedback snapshot text to OpenAI", async () => {
@@ -349,6 +353,101 @@ describe("OpenAI session copy", () => {
       failed: 1,
       disabled: 0
     });
+  });
+
+  test("keeps the last successful live copy when a later refresh fails", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output: [
+            {
+              type: "message",
+              content: [
+                {
+                  type: "output_text",
+                  text: JSON.stringify({
+                    headline: "This session is active with GPT copy.",
+                    status: "Work is active.",
+                    reason: "This running session has recent activity.",
+                    nextStep: ""
+                  })
+                }
+              ]
+            }
+          ]
+        })
+      })
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) });
+    const enricher = createOpenAISessionCopyEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      now: () => 1_000
+    });
+    const projection = liveProjection([cardView()]);
+
+    const first = await enricher.enrichProjection(projection);
+    const second = await enricher.enrichProjection(projection);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(first.cards[0]?.copy).toMatchObject({
+      headline: "This session is active with GPT copy.",
+      source: "llm"
+    });
+    expect(second.cards[0]?.copy).toMatchObject({
+      headline: "This session is active with GPT copy.",
+      source: "llm"
+    });
+    expect(second.cards[0]?.copyRefresh).toMatchObject({ status: "api_error" });
+    expect(second.copyRefreshSummary).toMatchObject({ requested: 1, succeeded: 0, failed: 1 });
+  });
+
+  test("spends a short projection budget on running cards before ended cards", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  headline: "This session is active now.",
+                  status: "Work is active.",
+                  reason: "This running session has recent activity.",
+                  nextStep: ""
+                })
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const now = vi.fn()
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValue(2);
+    const enricher = createOpenAISessionCopyEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      maxConcurrent: 1,
+      now,
+      projectionBudgetMs: 1
+    });
+    const endedCard = cardView({ sessionId: "ended-session", lifecycle: "ended", primaryStatus: "completed_unreviewed" });
+    const runningCard = cardView({ sessionId: "running-session", lifecycle: "running", primaryStatus: "editing" });
+
+    const enriched = await enricher.enrichProjection(liveProjection([endedCard, runningCard]));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(JSON.parse(fetchImpl.mock.calls[0]![1].body).input).lifecycle).toBe("running");
+    expect(enriched.cards.find((card) => card.sessionId === "running-session")?.copyRefresh).toMatchObject({ status: "success" });
+    expect(enriched.cards.find((card) => card.sessionId === "ended-session")?.copyRefresh).toBeUndefined();
   });
 
   test("writes board audit events for each refresh when enabled", async () => {

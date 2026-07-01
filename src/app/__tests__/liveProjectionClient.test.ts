@@ -36,6 +36,12 @@ describe("live projection client helpers", () => {
     );
   });
 
+  test("passes the board refresh interval to projection requests", () => {
+    expect(projectionRequestUrl("http://127.0.0.1:17374/projection", "s1", { refreshIntervalMs: 5_000 })).toBe(
+      "http://127.0.0.1:17374/projection?selectedSessionId=s1&refreshIntervalMs=5000"
+    );
+  });
+
   test("accepts only live projection envelopes", () => {
     expect(
       isLiveProjectionEnvelope({

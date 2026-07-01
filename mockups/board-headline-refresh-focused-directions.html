@@ -1,0 +1,1065 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Masthead Board Headline Refresh Focused Directions</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --canvas: #031019;
+        --panel: #041522;
+        --card: #071b28;
+        --control: #081d2a;
+        --control-hover: #092231;
+        --ink: #f6fbff;
+        --body: #d6e4ef;
+        --mute: #91a8ba;
+        --line: rgba(194, 221, 241, 0.13);
+        --border: rgba(92, 153, 187, 0.2);
+        --blue: #2ea7ff;
+        --green: #36d869;
+        --red: #ff483e;
+        --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-height: 100%;
+        background: var(--canvas);
+      }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        background:
+          linear-gradient(180deg, rgba(46, 167, 255, 0.052), transparent 420px),
+          linear-gradient(135deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 12px),
+          var(--canvas);
+        color: var(--body);
+        font-family: var(--font-ui);
+        font-size: 13px;
+        line-height: 1.5;
+        letter-spacing: 0;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .page-shell {
+        width: min(1480px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 22px 0 40px;
+      }
+
+      .prototype-head {
+        display: grid;
+        grid-template-columns: minmax(240px, 520px) 1fr;
+        gap: 20px;
+        align-items: end;
+        margin-bottom: 20px;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 18px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        color: var(--ink);
+        font-size: clamp(26px, 4vw, 48px);
+        font-weight: 700;
+        line-height: 0.96;
+        letter-spacing: 0;
+      }
+
+      .prototype-head p {
+        max-width: 64ch;
+        margin-top: 12px;
+        color: var(--mute);
+      }
+
+      .index {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+
+      .index a,
+      .prototype-button,
+      .toolbar-button {
+        min-height: 32px;
+        border: 1px solid rgba(92, 153, 187, 0.24);
+        border-radius: 3px;
+        background: var(--control);
+        color: var(--body);
+        box-shadow:
+          inset 0 1px 0 rgba(246, 251, 255, 0.06),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.38);
+        text-decoration: none;
+        transition:
+          border-color 160ms ease,
+          background-color 160ms ease,
+          color 160ms ease,
+          transform 160ms ease;
+      }
+
+      .index a {
+        display: inline-flex;
+        align-items: center;
+        padding: 0 10px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+
+      .index a:hover,
+      .prototype-button:hover,
+      .toolbar-button:hover {
+        border-color: rgba(112, 173, 205, 0.38);
+        background: var(--control-hover);
+        color: var(--ink);
+      }
+
+      .direction {
+        margin-top: 18px;
+        border: 1px solid rgba(92, 153, 187, 0.22);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 42%),
+          rgba(4, 21, 34, 0.78);
+      }
+
+      .direction-head {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) auto;
+        gap: 14px;
+        align-items: end;
+        padding: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .direction-kicker {
+        margin-bottom: 4px;
+        color: var(--blue);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .direction h2 {
+        color: var(--ink);
+        font-size: 21px;
+        line-height: 1.18;
+      }
+
+      .direction-copy {
+        max-width: 80ch;
+        margin-top: 6px;
+        color: var(--mute);
+      }
+
+      .direction-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .prototype-button,
+      .toolbar-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 12px;
+        cursor: pointer;
+      }
+
+      .prototype-button {
+        color: var(--ink);
+      }
+
+      .board-frame {
+        padding: 14px;
+      }
+
+      .board-surface {
+        border: 1px solid rgba(92, 153, 187, 0.18);
+        background: rgba(3, 16, 25, 0.7);
+        padding: 12px;
+      }
+
+      .board-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .toolbar-left,
+      .toolbar-right {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .toolbar-button {
+        min-height: 34px;
+        color: #c9d8e5;
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+
+      .toolbar-button.active {
+        border-color: rgba(46, 167, 255, 0.42);
+        color: var(--ink);
+      }
+
+      .card-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .session-card {
+        --state: var(--green);
+        position: relative;
+        isolation: isolate;
+        display: grid;
+        grid-template-rows: auto minmax(78px, auto) 1fr auto;
+        gap: 14px;
+        min-height: 246px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background:
+          linear-gradient(180deg, rgba(190, 225, 245, 0.055), transparent 38%),
+          linear-gradient(135deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 12px),
+          var(--card);
+        box-shadow:
+          0 1px 1px rgba(0, 0, 0, 0.32),
+          0 8px 18px rgba(0, 0, 0, 0.16),
+          inset 0 1px 0 rgba(190, 225, 245, 0.065),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.58);
+        padding: 13px 14px 20px;
+        clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), 72% calc(100% - 6px), 67% 100%, 33% 100%, 28% calc(100% - 6px), 0 calc(100% - 6px));
+      }
+
+      .session-card.is-idle {
+        --state: var(--blue);
+      }
+
+      .session-card.is-blocked {
+        --state: var(--red);
+      }
+
+      .card-topline {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .project {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        color: #b8c9d8;
+        font-size: 12.5px;
+        font-weight: 600;
+        line-height: 19px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .runtime-tag,
+      .state-pill {
+        flex: 0 0 auto;
+        height: 22px;
+        border-radius: 3px;
+        padding: 0 8px;
+        font-size: 10.5px;
+        line-height: 22px;
+        white-space: nowrap;
+      }
+
+      .runtime-tag {
+        background: #071724;
+        box-shadow:
+          0 0 0 1px rgba(178, 213, 240, 0.11),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.42);
+        color: #b6c7d5;
+        font-family: var(--font-mono);
+      }
+
+      .state-pill {
+        border: 1px solid rgba(194, 221, 241, 0.12);
+        background: rgba(6, 25, 37, 0.76);
+        color: #d7e5ef;
+        font-weight: 600;
+      }
+
+      .headline {
+        position: relative;
+        display: grid;
+        align-content: center;
+        min-height: 78px;
+        overflow: hidden;
+        border-top: 1px solid rgba(194, 221, 241, 0.1);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.32);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+          rgba(6, 25, 37, 0.42);
+        box-shadow:
+          inset 0 1px 0 rgba(190, 225, 245, 0.04),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.34);
+        color: var(--ink);
+        padding: 9px 10px;
+        font-size: 17px;
+        font-weight: 600;
+        line-height: 1.32;
+      }
+
+      .headline::before,
+      .headline::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+      }
+
+      .headline-text {
+        grid-area: 1 / 1;
+        min-width: 0;
+      }
+
+      .headline-current,
+      .headline-next {
+        position: relative;
+        z-index: 1;
+      }
+
+      .headline-next {
+        opacity: 0;
+      }
+
+      .headline-caret {
+        position: absolute;
+        z-index: 2;
+        top: 10px;
+        bottom: 10px;
+        width: 2px;
+        background: rgba(246, 251, 255, 0.7);
+        opacity: 0;
+      }
+
+      .fact-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        border: 1px solid rgba(194, 221, 241, 0.1);
+        background: rgba(3, 16, 25, 0.24);
+        box-shadow: inset 0 1px 0 rgba(190, 225, 245, 0.035);
+        padding: 8px;
+      }
+
+      .fact {
+        min-width: 0;
+        border-left: 1px solid rgba(194, 221, 241, 0.1);
+        padding-left: 8px;
+      }
+
+      .fact:first-child {
+        border-left: 0;
+        padding-left: 0;
+      }
+
+      .fact-value {
+        overflow: hidden;
+        color: #eef6ff;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        line-height: 18px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .fact-label {
+        overflow: hidden;
+        color: #8fa1b2;
+        font-size: 10.5px;
+        line-height: 16px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .footer-line {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        color: #a4b2bf;
+        font-size: 11.5px;
+      }
+
+      .timestamp {
+        color: var(--body);
+      }
+
+      .bottom-signal {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 0;
+        height: 10px;
+        clip-path: polygon(0 0, 28% 0, 33% 60%, 67% 60%, 72% 0, 100% 0, 100% 100%, 0 100%);
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.22), transparent 34%),
+          linear-gradient(180deg, var(--state), var(--state));
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.42),
+          inset 0 1px 0 rgba(246, 251, 255, 0.24),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.52);
+        pointer-events: none;
+      }
+
+      .option-plate-pass .session-card.is-refreshing .headline-current {
+        animation: plate-pass-current 760ms cubic-bezier(0.2, 0.82, 0.16, 1) both;
+      }
+
+      .option-plate-pass .session-card.is-refreshing .headline-next {
+        animation: plate-pass-next 760ms cubic-bezier(0.2, 0.82, 0.16, 1) both;
+      }
+
+      .option-plate-pass .session-card.is-refreshing .headline::before {
+        background: linear-gradient(100deg, transparent 0 24%, rgba(246, 251, 255, 0.42), transparent 55% 100%);
+        animation: sweep-left-right 760ms cubic-bezier(0.2, 0.82, 0.16, 1) both;
+      }
+
+      .option-slug-lock .session-card.is-refreshing .headline-current {
+        animation: slug-current 680ms cubic-bezier(0.18, 0.9, 0.12, 1) both;
+      }
+
+      .option-slug-lock .session-card.is-refreshing .headline-next {
+        animation: slug-next 680ms cubic-bezier(0.18, 0.9, 0.12, 1) both;
+      }
+
+      .option-slug-lock .session-card.is-refreshing .headline::after {
+        border: 1px solid rgba(46, 167, 255, 0.3);
+        animation: field-lock 680ms cubic-bezier(0.18, 0.9, 0.12, 1) both;
+      }
+
+      .option-burnished-lock .session-card.is-refreshing .headline-current {
+        animation: burnish-current 720ms cubic-bezier(0.18, 0.84, 0.14, 1) both;
+      }
+
+      .option-burnished-lock .session-card.is-refreshing .headline-next {
+        animation: burnish-next 720ms cubic-bezier(0.18, 0.84, 0.14, 1) both;
+      }
+
+      .option-burnished-lock .session-card.is-refreshing .headline::before {
+        background: linear-gradient(90deg, transparent 0 30%, rgba(246, 251, 255, 0.36), transparent 62% 100%);
+        animation: burnish-pass 720ms cubic-bezier(0.18, 0.84, 0.14, 1) both;
+      }
+
+      .option-field-etch .session-card.is-refreshing .headline-current {
+        animation: field-etch-current 700ms cubic-bezier(0.2, 0.86, 0.14, 1) both;
+      }
+
+      .option-field-etch .session-card.is-refreshing .headline-next {
+        animation: field-etch-next 700ms cubic-bezier(0.2, 0.86, 0.14, 1) both;
+      }
+
+      .option-field-etch .session-card.is-refreshing .headline::after {
+        background: radial-gradient(circle at 55% 50%, rgba(46, 167, 255, 0.16), transparent 44%);
+        animation: field-etch-glow 700ms cubic-bezier(0.2, 0.86, 0.14, 1) both;
+      }
+
+      .option-scored-cursor .session-card.is-refreshing .headline-current {
+        animation: scored-current 740ms cubic-bezier(0.19, 0.8, 0.14, 1) both;
+      }
+
+      .option-scored-cursor .session-card.is-refreshing .headline-next {
+        animation: scored-next 740ms cubic-bezier(0.19, 0.8, 0.14, 1) both;
+      }
+
+      .option-scored-cursor .session-card.is-refreshing .headline-caret {
+        animation: scored-caret 740ms cubic-bezier(0.19, 0.8, 0.14, 1) both;
+      }
+
+      .option-machined-slot .session-card.is-refreshing .headline-current {
+        animation: slot-current 700ms cubic-bezier(0.2, 0.82, 0.16, 1) both;
+      }
+
+      .option-machined-slot .session-card.is-refreshing .headline-next {
+        animation: slot-next 700ms cubic-bezier(0.2, 0.82, 0.16, 1) both;
+      }
+
+      .option-machined-slot .session-card.is-refreshing .headline::before {
+        background:
+          linear-gradient(180deg, transparent 0 45%, rgba(246, 251, 255, 0.3) 46% 54%, transparent 55%),
+          linear-gradient(90deg, transparent, rgba(46, 167, 255, 0.18), transparent);
+        animation: slot-line 700ms cubic-bezier(0.2, 0.82, 0.16, 1) both;
+      }
+
+      .option-cold-plate .session-card.is-refreshing .headline-current {
+        animation: cold-current 780ms cubic-bezier(0.2, 0.82, 0.16, 1) both;
+      }
+
+      .option-cold-plate .session-card.is-refreshing .headline-next {
+        animation: cold-next 780ms cubic-bezier(0.2, 0.82, 0.16, 1) both;
+      }
+
+      .option-cold-plate .session-card.is-refreshing .headline::before {
+        background: linear-gradient(105deg, transparent 0 26%, rgba(46, 167, 255, 0.22), rgba(246, 251, 255, 0.34), transparent 62% 100%);
+        animation: cold-pass 780ms cubic-bezier(0.2, 0.82, 0.16, 1) both;
+      }
+
+      .option-pin-register .session-card.is-refreshing .headline-current {
+        animation: pin-current 660ms cubic-bezier(0.2, 0.88, 0.14, 1) both;
+      }
+
+      .option-pin-register .session-card.is-refreshing .headline-next {
+        animation: pin-next 660ms cubic-bezier(0.2, 0.88, 0.14, 1) both;
+      }
+
+      .option-pin-register .session-card.is-refreshing .headline::after {
+        background:
+          radial-gradient(circle at 16px 16px, rgba(246, 251, 255, 0.32) 0 2px, transparent 3px),
+          radial-gradient(circle at calc(100% - 16px) calc(100% - 16px), rgba(246, 251, 255, 0.28) 0 2px, transparent 3px);
+        animation: pin-glint 660ms cubic-bezier(0.2, 0.88, 0.14, 1) both;
+      }
+
+      .option-rail-readhead .session-card.is-refreshing .headline-current {
+        animation: readhead-current 720ms cubic-bezier(0.19, 0.82, 0.14, 1) both;
+      }
+
+      .option-rail-readhead .session-card.is-refreshing .headline-next {
+        animation: readhead-next 720ms cubic-bezier(0.19, 0.82, 0.14, 1) both;
+      }
+
+      .option-rail-readhead .session-card.is-refreshing .headline-caret {
+        animation: readhead-caret 720ms cubic-bezier(0.19, 0.82, 0.14, 1) both;
+      }
+
+      .option-deadbolt-resolve .session-card.is-refreshing .headline-current {
+        animation: deadbolt-current 620ms cubic-bezier(0.22, 0.9, 0.16, 1) both;
+      }
+
+      .option-deadbolt-resolve .session-card.is-refreshing .headline-next {
+        animation: deadbolt-next 620ms cubic-bezier(0.22, 0.9, 0.16, 1) both;
+      }
+
+      .option-deadbolt-resolve .session-card.is-refreshing .headline::after {
+        border: 1px solid rgba(246, 251, 255, 0.2);
+        animation: deadbolt-frame 620ms cubic-bezier(0.22, 0.9, 0.16, 1) both;
+      }
+
+      @keyframes plate-pass-current {
+        0%, 34% { opacity: 1; transform: translateX(0); }
+        58%, 100% { opacity: 0; transform: translateX(-5px); }
+      }
+
+      @keyframes plate-pass-next {
+        0%, 38% { opacity: 0; transform: translateX(5px); }
+        72%, 100% { opacity: 1; transform: translateX(0); }
+      }
+
+      @keyframes sweep-left-right {
+        0% { opacity: 0; transform: translateX(-74%); }
+        32%, 64% { opacity: 1; }
+        100% { opacity: 0; transform: translateX(74%); }
+      }
+
+      @keyframes slug-current {
+        0%, 38% { opacity: 1; transform: translateX(0) scale(1); }
+        54%, 100% { opacity: 0; transform: translateX(-6px) scale(0.992); }
+      }
+
+      @keyframes slug-next {
+        0%, 42% { opacity: 0; transform: translateX(10px) scale(0.992); }
+        72% { opacity: 1; transform: translateX(-1px) scale(1.004); }
+        100% { opacity: 1; transform: translateX(0) scale(1); }
+      }
+
+      @keyframes field-lock {
+        0% { opacity: 0; transform: scaleX(0.94); }
+        48% { opacity: 1; transform: scaleX(1.01); }
+        100% { opacity: 0; transform: scaleX(1); }
+      }
+
+      @keyframes burnish-current {
+        0%, 36% { opacity: 1; filter: brightness(1); transform: translateX(0); }
+        60%, 100% { opacity: 0; filter: brightness(0.8); transform: translateX(-3px); }
+      }
+
+      @keyframes burnish-next {
+        0%, 38% { opacity: 0; filter: brightness(0.82); transform: translateX(6px) scale(0.996); }
+        76% { opacity: 1; filter: brightness(1.06); transform: translateX(-1px) scale(1.002); }
+        100% { opacity: 1; filter: brightness(1); transform: translateX(0) scale(1); }
+      }
+
+      @keyframes burnish-pass {
+        0% { opacity: 0; transform: translateX(-70%) skewX(-7deg); }
+        35%, 66% { opacity: 1; }
+        100% { opacity: 0; transform: translateX(70%) skewX(-7deg); }
+      }
+
+      @keyframes field-etch-current {
+        0%, 34% { opacity: 1; transform: scale(1); filter: blur(0); }
+        56%, 100% { opacity: 0; transform: scale(0.992); filter: blur(0.8px); }
+      }
+
+      @keyframes field-etch-next {
+        0%, 38% { opacity: 0; transform: scale(1.008); filter: blur(0.8px); }
+        72%, 100% { opacity: 1; transform: scale(1); filter: blur(0); }
+      }
+
+      @keyframes field-etch-glow {
+        0% { opacity: 0; transform: scale(0.92); }
+        44%, 62% { opacity: 1; transform: scale(1.03); }
+        100% { opacity: 0; transform: scale(1); }
+      }
+
+      @keyframes scored-current {
+        0%, 35% { opacity: 1; clip-path: inset(0 0 0 0); }
+        60%, 100% { opacity: 0; clip-path: inset(0 0 0 100%); transform: translateX(-2px); }
+      }
+
+      @keyframes scored-next {
+        0%, 38% { opacity: 0; clip-path: inset(0 100% 0 0); }
+        100% { opacity: 1; clip-path: inset(0 0 0 0); }
+      }
+
+      @keyframes scored-caret {
+        0% { left: 10px; opacity: 0; }
+        16%, 86% { opacity: 1; }
+        100% { left: calc(100% - 12px); opacity: 0; }
+      }
+
+      @keyframes slot-current {
+        0%, 36% { opacity: 1; transform: translateY(0); }
+        58%, 100% { opacity: 0; transform: translateY(-6px); }
+      }
+
+      @keyframes slot-next {
+        0%, 42% { opacity: 0; transform: translateY(7px); }
+        74% { opacity: 1; transform: translateY(-1px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
+
+      @keyframes slot-line {
+        0% { opacity: 0; transform: translateY(18px); }
+        40%, 62% { opacity: 1; transform: translateY(0); }
+        100% { opacity: 0; transform: translateY(-18px); }
+      }
+
+      @keyframes cold-current {
+        0%, 34% { opacity: 1; filter: brightness(1) saturate(1); }
+        58%, 100% { opacity: 0; filter: brightness(0.75) saturate(0.8); transform: translateX(-3px); }
+      }
+
+      @keyframes cold-next {
+        0%, 40% { opacity: 0; filter: brightness(0.8) saturate(0.85); transform: translateX(4px); }
+        70% { opacity: 1; filter: brightness(1.08) saturate(1.05); transform: translateX(0); }
+        100% { opacity: 1; filter: brightness(1) saturate(1); }
+      }
+
+      @keyframes cold-pass {
+        0% { opacity: 0; transform: translateX(-78%); }
+        35%, 62% { opacity: 1; }
+        100% { opacity: 0; transform: translateX(78%); }
+      }
+
+      @keyframes pin-current {
+        0%, 38% { opacity: 1; transform: scale(1); }
+        58%, 100% { opacity: 0; transform: scale(0.992); }
+      }
+
+      @keyframes pin-next {
+        0%, 42% { opacity: 0; transform: scale(1.006); }
+        70% { opacity: 1; transform: scale(0.998); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+
+      @keyframes pin-glint {
+        0% { opacity: 0; transform: scale(0.98); }
+        48% { opacity: 1; transform: scale(1.02); }
+        100% { opacity: 0; transform: scale(1); }
+      }
+
+      @keyframes readhead-current {
+        0%, 35% { opacity: 1; transform: translateX(0); }
+        58%, 100% { opacity: 0; transform: translateX(-4px); }
+      }
+
+      @keyframes readhead-next {
+        0%, 38% { opacity: 0; clip-path: inset(0 100% 0 0); }
+        100% { opacity: 1; clip-path: inset(0 0 0 0); }
+      }
+
+      @keyframes readhead-caret {
+        0% { left: 10px; opacity: 0; box-shadow: 0 0 0 rgba(46, 167, 255, 0); }
+        18%, 84% { opacity: 1; box-shadow: 0 0 8px rgba(46, 167, 255, 0.34); }
+        100% { left: calc(100% - 12px); opacity: 0; }
+      }
+
+      @keyframes deadbolt-current {
+        0%, 40% { opacity: 1; transform: translateX(0); }
+        58%, 100% { opacity: 0; transform: translateX(-2px) scale(0.996); }
+      }
+
+      @keyframes deadbolt-next {
+        0%, 42% { opacity: 0; transform: translateX(3px) scale(0.996); }
+        72% { opacity: 1; transform: translateX(0) scale(1.003); }
+        100% { opacity: 1; transform: translateX(0) scale(1); }
+      }
+
+      @keyframes deadbolt-frame {
+        0% { opacity: 0; transform: scaleX(0.98); }
+        48%, 68% { opacity: 1; transform: scaleX(1); }
+        100% { opacity: 0; transform: scaleX(1); }
+      }
+
+      @media (max-width: 1050px) {
+        .prototype-head,
+        .direction-head {
+          grid-template-columns: 1fr;
+        }
+
+        .index,
+        .direction-actions {
+          justify-content: flex-start;
+        }
+
+        .card-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .page-shell {
+          width: min(100% - 20px, 1480px);
+          padding-top: 14px;
+        }
+
+        .direction-head,
+        .board-frame,
+        .board-surface {
+          padding: 10px;
+        }
+
+        .fact-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px 0;
+        }
+
+        .fact:nth-child(3) {
+          border-left: 0;
+          padding-left: 0;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 1ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 1ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="prototype-head">
+        <div>
+          <h1>Board Headline Refresh Focused Directions</h1>
+          <p>Ten focused iterations from the etched plate pass and magnetic slug lock directions. Status rails are static color references in this pass so the headline refresh motion is isolated.</p>
+        </div>
+        <nav class="index" aria-label="Prototype options"></nav>
+      </header>
+
+      <div id="directions"></div>
+    </main>
+
+    <template id="direction-template">
+      <section class="direction" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker"></div>
+            <h2></h2>
+            <p class="direction-copy"></p>
+          </div>
+          <div class="direction-actions">
+            <button class="prototype-button" type="button" data-action="headline">Run headline refresh</button>
+            <button class="prototype-button" type="button" data-action="reset">Reset cards</button>
+          </div>
+        </div>
+        <div class="board-frame">
+          <div class="board-surface">
+            <div class="board-toolbar">
+              <div class="toolbar-left">
+                <button class="toolbar-button active" type="button">Recent Activity</button>
+                <button class="toolbar-button" type="button">All Harnesses</button>
+                <button class="toolbar-button" type="button">Active</button>
+              </div>
+              <div class="toolbar-right">
+                <button class="toolbar-button" type="button">Refresh 10s</button>
+              </div>
+            </div>
+            <div class="card-grid"></div>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <template id="card-template">
+      <article class="session-card">
+        <span class="bottom-signal" aria-hidden="true"></span>
+        <header class="card-topline">
+          <span class="project"></span>
+          <span class="runtime-tag">Codex</span>
+          <span class="state-pill"></span>
+        </header>
+        <h3 class="headline" aria-live="polite">
+          <span class="headline-text headline-current"></span>
+          <span class="headline-text headline-next"></span>
+          <span class="headline-caret" aria-hidden="true"></span>
+        </h3>
+        <div class="fact-grid">
+          <div class="fact"><div class="fact-value">Codex</div><div class="fact-label">Runtime</div></div>
+          <div class="fact"><div class="fact-value fact-tokens"></div><div class="fact-label">Tokens</div></div>
+          <div class="fact"><div class="fact-value">gpt-5.5</div><div class="fact-label">Model</div></div>
+          <div class="fact"><div class="fact-value fact-worktree"></div><div class="fact-label">Worktree</div></div>
+        </div>
+        <footer class="footer-line">
+          <span>Last activity <span class="timestamp last-activity"></span></span>
+          <span>Duration <span class="timestamp duration"></span></span>
+        </footer>
+      </article>
+    </template>
+
+    <script>
+      const optionData = [
+        {
+          key: "plate-pass",
+          label: "01 plate pass",
+          name: "Etched Plate Pass",
+          kicker: "Option 01 / etched plate / grazing light",
+          copy: "A restrained version of the preferred etched pass: the headline is recut by a moving surface highlight with almost no travel.",
+          duration: 760
+        },
+        {
+          key: "slug-lock",
+          label: "02 slug lock",
+          name: "Magnetic Slug Lock",
+          kicker: "Option 02 / magnetic slug / seated lock",
+          copy: "A cleaned-up version of the preferred magnetic lock: the new headline pulls in, over-seats by one pixel, then settles.",
+          duration: 680
+        },
+        {
+          key: "burnished-lock",
+          label: "03 burnish",
+          name: "Burnished Lock Pass",
+          kicker: "Option 03 / burnished plate / magnetic finish",
+          copy: "Etched surface pass plus a restrained magnetic seat. This keeps the light pass from option 7 and the lock-in from option 8.",
+          duration: 720
+        },
+        {
+          key: "field-etch",
+          label: "04 field etch",
+          name: "Field Etch Resolve",
+          kicker: "Option 04 / etched field / resolved focus",
+          copy: "The headline resolves through a soft magnetic field, but the final motion stays firm and mechanical.",
+          duration: 700
+        },
+        {
+          key: "scored-cursor",
+          label: "05 scored",
+          name: "Scored Cursor Trace",
+          kicker: "Option 05 / scoring head / traced reveal",
+          copy: "A narrow read head scores across the headline and reveals the new copy in its path.",
+          duration: 740
+        },
+        {
+          key: "machined-slot",
+          label: "06 slot",
+          name: "Machined Slot Lift",
+          kicker: "Option 06 / machined slot / vertical set",
+          copy: "The copy lifts through a tight machined slot, then seats with a short, heavy downward correction.",
+          duration: 700
+        },
+        {
+          key: "cold-plate",
+          label: "07 cold plate",
+          name: "Cold Plate Sweep",
+          kicker: "Option 07 / cold steel / blue-white pass",
+          copy: "A cooler etched pass with a little less brightness and a more precise surface scan.",
+          duration: 780
+        },
+        {
+          key: "pin-register",
+          label: "08 pin register",
+          name: "Pin Register Snap",
+          kicker: "Option 08 / register pins / exact seating",
+          copy: "The headline stays nearly fixed while the text swaps under two register-pin glints and locks into alignment.",
+          duration: 660
+        },
+        {
+          key: "rail-readhead",
+          label: "09 readhead",
+          name: "Rail Readhead",
+          kicker: "Option 09 / rail reader / guided trace",
+          copy: "A more readable trace animation with a rail-mounted cursor, closer to typing but still metallic.",
+          duration: 720
+        },
+        {
+          key: "deadbolt-resolve",
+          label: "10 deadbolt",
+          name: "Deadbolt Resolve",
+          kicker: "Option 10 / deadbolt frame / hard resolve",
+          copy: "The shortest and heaviest option: minimal movement, brief frame lock, then the new headline appears seated.",
+          duration: 620
+        }
+      ];
+
+      const cards = [
+        {
+          stateClass: "is-active",
+          state: "Active",
+          project: "Masthead · Board animation work",
+          tokens: "1.9M",
+          worktree: "current",
+          last: "0s ago",
+          duration: "2h 44m",
+          headlines: [
+            "Ported gantry setdown motion into Board card layout changes.",
+            "Session is active: verifying refresh copy and Board motion behavior."
+          ]
+        },
+        {
+          stateClass: "is-idle",
+          state: "Idle",
+          project: "Masthead · Logbook polish",
+          tokens: "1.2M",
+          worktree: "branch",
+          last: "7m ago",
+          duration: "2h 8m",
+          headlines: [
+            "Logbook pagination cache is settled and waiting for the next session event.",
+            "Session is quiet: no fresh events landed in the latest refresh window."
+          ]
+        },
+        {
+          stateClass: "is-blocked",
+          state: "Blocked",
+          project: "Masthead · Daemon bridge",
+          tokens: "509K",
+          worktree: "bridge",
+          last: "12m ago",
+          duration: "51m",
+          headlines: [
+            "Bridge handoff is blocked on connector access and needs attention.",
+            "Session needs review: connector route is not accepting the expected read state."
+          ]
+        }
+      ];
+
+      const directions = document.querySelector("#directions");
+      const index = document.querySelector(".index");
+      const directionTemplate = document.querySelector("#direction-template");
+      const cardTemplate = document.querySelector("#card-template");
+      const timers = new WeakMap();
+
+      for (let optionIndex = 0; optionIndex < optionData.length; optionIndex += 1) {
+        const option = optionData[optionIndex];
+        const section = directionTemplate.content.firstElementChild.cloneNode(true);
+        section.id = `option-${optionIndex + 1}`;
+        section.classList.add(`option-${option.key}`);
+        section.dataset.option = option.key;
+        section.dataset.duration = String(option.duration);
+        section.querySelector(".direction-kicker").textContent = option.kicker;
+        section.querySelector("h2").textContent = option.name;
+        section.querySelector(".direction-copy").textContent = option.copy;
+        section.querySelector(".card-grid").append(...cards.map((card) => renderCard(card)));
+        section.querySelector("[data-action='headline']").addEventListener("click", () => runHeadlineRefresh(section, option));
+        section.querySelector("[data-action='reset']").addEventListener("click", () => resetCards(section));
+        directions.append(section);
+
+        const link = document.createElement("a");
+        link.href = `#option-${optionIndex + 1}`;
+        link.textContent = option.label;
+        index.append(link);
+      }
+
+      function renderCard(cardData) {
+        const card = cardTemplate.content.firstElementChild.cloneNode(true);
+        card.classList.add(cardData.stateClass);
+        card.dataset.headlineIndex = "0";
+        card.querySelector(".project").textContent = cardData.project;
+        card.querySelector(".state-pill").textContent = cardData.state;
+        card.querySelector(".headline-current").textContent = cardData.headlines[0];
+        card.querySelector(".headline-next").textContent = cardData.headlines[1];
+        card.querySelector(".fact-tokens").textContent = cardData.tokens;
+        card.querySelector(".fact-worktree").textContent = cardData.worktree;
+        card.querySelector(".last-activity").textContent = cardData.last;
+        card.querySelector(".duration").textContent = cardData.duration;
+        card._headlineOptions = cardData.headlines;
+        return card;
+      }
+
+      function runHeadlineRefresh(section, option) {
+        section.querySelectorAll(".session-card").forEach((card, cardIndex) => {
+          const existingTimers = timers.get(card) ?? [];
+          existingTimers.forEach((timer) => clearTimeout(timer));
+          card.classList.remove("is-refreshing");
+
+          const headlines = card._headlineOptions;
+          const currentIndex = Number(card.dataset.headlineIndex || "0");
+          const nextIndex = currentIndex === 0 ? 1 : 0;
+          card.style.setProperty("--card-index", String(cardIndex));
+          card.querySelector(".headline-current").textContent = headlines[currentIndex];
+          card.querySelector(".headline-next").textContent = headlines[nextIndex];
+          void card.offsetWidth;
+          card.classList.add("is-refreshing");
+
+          const swapTimer = window.setTimeout(() => {
+            card.dataset.headlineIndex = String(nextIndex);
+          }, Math.round(option.duration * 0.54));
+
+          const cleanupTimer = window.setTimeout(() => {
+            card.classList.remove("is-refreshing");
+            card.querySelector(".headline-current").textContent = headlines[nextIndex];
+            card.querySelector(".headline-next").textContent = headlines[currentIndex];
+            timers.delete(card);
+          }, option.duration + 90);
+
+          timers.set(card, [swapTimer, cleanupTimer]);
+        });
+      }
+
+      function resetCards(section) {
+        section.querySelectorAll(".session-card").forEach((card) => {
+          const existingTimers = timers.get(card) ?? [];
+          existingTimers.forEach((timer) => clearTimeout(timer));
+          timers.delete(card);
+          card.classList.remove("is-refreshing");
+          card.dataset.headlineIndex = "0";
+          card.querySelector(".headline-current").textContent = card._headlineOptions[0];
+          card.querySelector(".headline-next").textContent = card._headlineOptions[1];
+        });
+      }
+    </script>
+  </body>
+</html>

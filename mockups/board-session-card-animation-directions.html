@@ -1,0 +1,873 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Masthead Board Session Card Animation Directions</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --page-bg: #031019;
+        --toolbar-bg: #051724;
+        --card-bg: #071b28;
+        --card-bg-hover: #082130;
+        --line: rgba(92, 153, 187, 0.18);
+        --line-strong: rgba(46, 167, 255, 0.34);
+        --ink: #f6fbff;
+        --body: #d6e4ef;
+        --mute: #91a8ba;
+        --ash: #61798e;
+        --blue: #2ea7ff;
+        --green: #36d869;
+        --yellow: #ffcf36;
+        --red: #ff483e;
+        --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        --ease-heavy: cubic-bezier(0.17, 0.78, 0.13, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-height: 100%;
+        background: var(--page-bg);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        font-feature-settings: "calt", "kern", "liga", "ss03";
+        font-variant-numeric: tabular-nums;
+        -webkit-font-smoothing: antialiased;
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at 18% -10%, rgba(46, 167, 255, 0.08), transparent 30%),
+          linear-gradient(180deg, #031019 0%, #020a10 100%);
+        color: var(--body);
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .page-shell {
+        width: min(1480px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 18px 0 52px;
+      }
+
+      .prototype-head {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+        border-bottom: 1px solid rgba(92, 153, 187, 0.16);
+        background: rgba(3, 16, 25, 0.72);
+        padding: 10px 0 12px;
+      }
+
+      .prototype-head h1 {
+        margin: 0;
+        color: var(--ink);
+        font-size: clamp(20px, 2.2vw, 28px);
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .prototype-head p {
+        margin: 6px 0 0;
+        max-width: 118ch;
+        color: var(--mute);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .index {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .index a,
+      .prototype-button,
+      .toolbar-button {
+        min-height: 34px;
+        border: 1px solid rgba(92, 153, 187, 0.2);
+        clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%);
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.036), transparent),
+          #04131f;
+        color: var(--body);
+        cursor: pointer;
+        text-decoration: none;
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+
+      .index a {
+        padding: 8px 9px;
+      }
+
+      .prototype-button,
+      .toolbar-button {
+        padding: 0 11px;
+      }
+
+      .prototype-button:hover,
+      .toolbar-button:hover,
+      .index a:hover {
+        border-color: rgba(46, 167, 255, 0.42);
+        background-color: #082235;
+        color: var(--ink);
+      }
+
+      .prototype-button:active,
+      .toolbar-button:active {
+        transform: scale(0.96);
+      }
+
+      .direction {
+        display: grid;
+        gap: 12px;
+        margin-top: 22px;
+        padding-top: 16px;
+        scroll-margin-top: 18px;
+      }
+
+      .direction-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: end;
+      }
+
+      .direction-kicker {
+        color: var(--blue);
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+
+      .direction h2 {
+        margin: 3px 0 0;
+        color: var(--ink);
+        font-size: 20px;
+        line-height: 1.15;
+      }
+
+      .direction-copy {
+        margin: 5px 0 0;
+        max-width: 98ch;
+        color: var(--mute);
+        font-size: 13px;
+        line-height: 1.42;
+      }
+
+      .direction-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 7px;
+      }
+
+      .board-frame {
+        border: 1px solid rgba(92, 153, 187, 0.18);
+        background:
+          linear-gradient(180deg, rgba(190, 225, 245, 0.022), transparent 42%),
+          #04131f;
+        padding: 12px;
+      }
+
+      .board-surface {
+        display: grid;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .board-toolbar {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .toolbar-left,
+      .toolbar-right {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .toolbar-right {
+        justify-content: flex-end;
+      }
+
+      .toolbar-button.active {
+        border-color: rgba(46, 167, 255, 0.36);
+        background-color: #09263a;
+        color: var(--ink);
+      }
+
+      .board-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        min-width: 0;
+        align-items: start;
+      }
+
+      .board-grid.is-compact {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .session-card {
+        position: relative;
+        isolation: isolate;
+        min-width: 0;
+        height: 206px;
+        overflow: hidden;
+        border: 1px solid rgba(46, 167, 255, 0.24);
+        border-left-color: var(--rail, var(--green));
+        border-radius: 5px;
+        background: var(--card-bg);
+        box-shadow:
+          inset 0 1px 0 rgba(190, 225, 245, 0.06),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.54);
+        padding: 12px;
+        transform-origin: 50% 100%;
+        will-change: transform, filter;
+      }
+
+      .board-grid.is-compact .session-card {
+        height: 162px;
+      }
+
+      .session-card::before {
+        content: "";
+        position: absolute;
+        inset: 8px 0;
+        z-index: 0;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='28' viewBox='0 0 96 28'%3E%3Cpath d='M0 7h96M0 18h96' stroke='%230d2d40' stroke-width='1' stroke-opacity='.5'/%3E%3Cpath d='M0 8h96M0 19h96' stroke='%23030d14' stroke-width='1' stroke-opacity='.32'/%3E%3C/svg%3E");
+        background-repeat: repeat;
+        background-size: 96px 28px;
+        pointer-events: none;
+      }
+
+      .session-card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        border-bottom: 2px solid rgba(46, 167, 255, 0.42);
+        border-radius: inherit;
+        pointer-events: none;
+      }
+
+      .session-card > * {
+        position: relative;
+        z-index: 1;
+      }
+
+      .card-topline {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 0;
+        color: var(--mute);
+        font-family: var(--font-mono);
+        font-size: 10px;
+      }
+
+      .runtime-tag,
+      .state-pill {
+        border: 1px solid rgba(92, 153, 187, 0.18);
+        background: rgba(255, 255, 255, 0.025);
+        padding: 3px 6px;
+        white-space: nowrap;
+      }
+
+      .session-card h3 {
+        margin: 12px 0 0;
+        color: var(--ink);
+        font-size: 15px;
+        line-height: 1.18;
+        text-wrap: balance;
+      }
+
+      .headline {
+        display: -webkit-box;
+        min-height: 36px;
+        overflow: hidden;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+
+      .fact-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 13px;
+      }
+
+      .fact {
+        min-width: 0;
+        border: 1px solid rgba(92, 153, 187, 0.12);
+        background: rgba(255, 255, 255, 0.025);
+        padding: 7px;
+      }
+
+      .fact-value {
+        overflow: hidden;
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .fact-label {
+        margin-top: 2px;
+        color: var(--ash);
+        font-size: 9px;
+        text-transform: uppercase;
+      }
+
+      .footer-line {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 14px;
+        color: var(--mute);
+        font-size: 11px;
+      }
+
+      .board-grid.is-compact .fact-grid {
+        gap: 6px;
+        margin-top: 9px;
+      }
+
+      .board-grid.is-compact .session-card {
+        padding: 10px;
+      }
+
+      .board-grid.is-compact .footer-line {
+        display: none;
+      }
+
+      .session-card.active { --rail: var(--green); }
+      .session-card.waiting { --rail: var(--yellow); }
+      .session-card.blocked { --rail: var(--red); }
+      .session-card.idle { --rail: rgba(174, 191, 205, 0.72); }
+
+      @media (max-width: 1120px) {
+        .board-grid,
+        .board-grid.is-compact {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 720px) {
+        .direction-head,
+        .board-toolbar {
+          grid-template-columns: 1fr;
+        }
+
+        .direction-actions,
+        .toolbar-right {
+          justify-content: flex-start;
+        }
+
+        .board-grid,
+        .board-grid.is-compact {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .session-card {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="prototype-head">
+        <div>
+          <h1>Board Session Card Animation Directions</h1>
+          <p>Ten directions for the Board tab. Each option includes two runnable animations: the far-right card-size toolbar toggle and a most-recent-activity reorder. The cards and toolbar are intentionally reused across options so the motion is what changes.</p>
+        </div>
+        <nav class="index" aria-label="Prototype options"></nav>
+      </header>
+
+      <div id="directions"></div>
+    </main>
+
+    <template id="direction-template">
+      <section class="direction" data-option>
+        <div class="direction-head">
+          <div>
+            <div class="direction-kicker"></div>
+            <h2></h2>
+            <p class="direction-copy"></p>
+          </div>
+          <div class="direction-actions">
+            <button class="prototype-button" type="button" data-action="density">Run size toggle</button>
+            <button class="prototype-button" type="button" data-action="activity">Run activity reorder</button>
+            <button class="prototype-button" type="button" data-action="reset">Reset board</button>
+          </div>
+        </div>
+        <div class="board-frame">
+          <div class="board-surface">
+            <div class="board-toolbar">
+              <div class="toolbar-left">
+                <button class="toolbar-button active" type="button">Recent Activity</button>
+                <button class="toolbar-button" type="button">All Harnesses</button>
+                <button class="toolbar-button" type="button">Active</button>
+                <button class="toolbar-button" type="button">10s</button>
+              </div>
+              <div class="toolbar-right">
+                <button class="toolbar-button density-indicator" type="button">Comfortable</button>
+              </div>
+            </div>
+            <div class="board-grid"></div>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <template id="card-template">
+      <article class="session-card" data-card-id>
+        <div class="card-topline">
+          <span class="project"></span>
+          <span class="runtime-tag"></span>
+          <span class="state-pill"></span>
+        </div>
+        <h3 class="headline"></h3>
+        <div class="fact-grid">
+          <div class="fact"><div class="fact-value fact-runtime"></div><div class="fact-label">Runtime</div></div>
+          <div class="fact"><div class="fact-value fact-tokens"></div><div class="fact-label">Tokens</div></div>
+          <div class="fact"><div class="fact-value fact-model"></div><div class="fact-label">Model</div></div>
+          <div class="fact"><div class="fact-value fact-worktree"></div><div class="fact-label">Worktree</div></div>
+        </div>
+        <footer class="footer-line">
+          <span class="last-activity"></span>
+          <span class="duration"></span>
+        </footer>
+      </article>
+    </template>
+
+    <script>
+      const cards = [
+        {
+          id: "cloudflare",
+          project: "Masthead · Cloudflare API",
+          runtime: "Codex",
+          state: "Active",
+          stateClass: "active",
+          headline: "Created Cloudflare zone usemasthead.com with registrar prep.",
+          tokens: "1.8M",
+          model: "gpt-5.5",
+          worktree: "current",
+          last: "0s ago",
+          duration: "1h 43m"
+        },
+        {
+          id: "usage",
+          project: "Masthead · Usage",
+          runtime: "Codex",
+          state: "Active",
+          stateClass: "active",
+          headline: "Ported option 16 scale-rise motion into production cards.",
+          tokens: "842K",
+          model: "gpt-5.5",
+          worktree: "codex",
+          last: "18s ago",
+          duration: "42m"
+        },
+        {
+          id: "sources",
+          project: "Masthead · Sources",
+          runtime: "Codex",
+          state: "Waiting",
+          stateClass: "waiting",
+          headline: "Centered source toolbar and removed redundant Logbook action.",
+          tokens: "611K",
+          model: "gpt-5.4",
+          worktree: "branch",
+          last: "1m ago",
+          duration: "36m"
+        },
+        {
+          id: "logbook",
+          project: "Masthead · Logbook",
+          runtime: "Codex",
+          state: "Idle",
+          stateClass: "idle",
+          headline: "Restyled bottom pagination toolbar and tuned page caching.",
+          tokens: "1.2M",
+          model: "gpt-5.5",
+          worktree: "branch",
+          last: "4m ago",
+          duration: "2h 8m"
+        },
+        {
+          id: "settings",
+          project: "Masthead · Settings",
+          runtime: "Codex",
+          state: "Idle",
+          stateClass: "idle",
+          headline: "Applied shared section entrance motion to settings panels.",
+          tokens: "377K",
+          model: "gpt-5.4",
+          worktree: "current",
+          last: "7m ago",
+          duration: "28m"
+        },
+        {
+          id: "daemon",
+          project: "Masthead · Daemon",
+          runtime: "Codex",
+          state: "Blocked",
+          stateClass: "blocked",
+          headline: "Verified worktree bridge routes and read-only connector handoff.",
+          tokens: "509K",
+          model: "gpt-5.3",
+          worktree: "bridge",
+          last: "12m ago",
+          duration: "51m"
+        }
+      ];
+
+      const baseOrder = ["cloudflare", "usage", "sources", "logbook", "settings", "daemon"];
+      const activityOrder = ["sources", "cloudflare", "daemon", "usage", "settings", "logbook"];
+
+      const options = [
+        {
+          key: "lift-block-grid",
+          label: "01 lift block",
+          name: "Lift Block Grid",
+          kicker: "Option 01 / lift block / scale-rise reflow",
+          copy: "A Board-specific version of the selected option 16. Cards stay heavy, rise slightly, expand into the new cell, then clamp.",
+          duration: 380,
+          stagger: 22,
+          easing: "cubic-bezier(0.17, 0.78, 0.13, 1)",
+          build: liftBlock
+        },
+        {
+          key: "dovetail-track",
+          label: "02 dovetail track",
+          name: "Dovetail Track Transfer",
+          kicker: "Option 02 / dovetail track / constrained slide",
+          copy: "Cards move like plates constrained in a machined slot. Size changes telescope, activity changes shear along a straight track.",
+          duration: 420,
+          stagger: 24,
+          easing: "cubic-bezier(0.2, 0.82, 0.14, 1)",
+          build: dovetailTrack
+        },
+        {
+          key: "rack-index",
+          label: "03 rack index",
+          name: "Rack Index Shuffle",
+          kicker: "Option 03 / rack teeth / stepped reindex",
+          copy: "A more mechanical stepped motion. Both density and activity updates advance in hard increments, then seat cleanly.",
+          duration: 440,
+          stagger: 18,
+          easing: "steps(4, end)",
+          build: rackIndex
+        },
+        {
+          key: "hydraulic-platen",
+          label: "04 hydraulic",
+          name: "Hydraulic Platen Reflow",
+          kicker: "Option 04 / hydraulic platen / pressure lock",
+          copy: "Cards compress under a plate, slide to the new geometry, then rebound as if hydraulic pressure has released.",
+          duration: 460,
+          stagger: 24,
+          easing: "cubic-bezier(0.16, 0.8, 0.12, 1)",
+          build: hydraulicPlaten
+        },
+        {
+          key: "magnetic-dock",
+          label: "05 magnetic dock",
+          name: "Magnetic Dock Snap",
+          kicker: "Option 05 / magnetic dock / controlled pull",
+          copy: "A short pull and final magnetic snap. The cards do not float; they are dragged into a docking field and lock.",
+          duration: 390,
+          stagger: 20,
+          easing: "cubic-bezier(0.18, 0.86, 0.14, 1)",
+          build: magneticDock
+        },
+        {
+          key: "counterweight",
+          label: "06 counterweight",
+          name: "Counterweight Slide",
+          kicker: "Option 06 / counterweight rail / mass transfer",
+          copy: "The grid behaves like weighted trays on rails. Cards start slightly low, pull across, and settle with a downward catch.",
+          duration: 450,
+          stagger: 26,
+          easing: "cubic-bezier(0.18, 0.78, 0.12, 1)",
+          build: counterweightSlide
+        },
+        {
+          key: "gantry-setdown",
+          label: "07 gantry",
+          name: "Gantry Setdown",
+          kicker: "Option 07 / gantry crane / square setdown",
+          copy: "Cards travel through a squared gantry path. Size updates feel like a lowered platform; activity updates feel like a placed load.",
+          duration: 430,
+          stagger: 22,
+          easing: "cubic-bezier(0.2, 0.84, 0.16, 1)",
+          build: gantrySetdown
+        },
+        {
+          key: "deadbolt-matrix",
+          label: "08 deadbolt",
+          name: "Deadbolt Matrix",
+          kicker: "Option 08 / deadbolt matrix / locked cells",
+          copy: "The restrained option. Movement is minimal, but a strong lock-in pulse makes each new position feel mechanically latched.",
+          duration: 360,
+          stagger: 18,
+          easing: "cubic-bezier(0.22, 0.86, 0.16, 1)",
+          build: deadboltMatrix
+        },
+        {
+          key: "telescoping-cassette",
+          label: "09 cassette",
+          name: "Telescoping Cassette",
+          kicker: "Option 09 / telescoping cassette / nested expansion",
+          copy: "The density toggle gets a nested expansion feel, while activity reordering transfers cards as sliding cassettes.",
+          duration: 430,
+          stagger: 24,
+          easing: "cubic-bezier(0.16, 0.82, 0.13, 1)",
+          build: telescopingCassette
+        },
+        {
+          key: "inertia-brake",
+          label: "10 inertia brake",
+          name: "Inertia Brake Sort",
+          kicker: "Option 10 / inertia brake / fast arrest",
+          copy: "The snappiest option. Cards move with a little momentum, hit a brake, and return to exact final geometry.",
+          duration: 340,
+          stagger: 16,
+          easing: "cubic-bezier(0.2, 0.88, 0.14, 1)",
+          build: inertiaBrake
+        }
+      ];
+
+      const directions = document.querySelector("#directions");
+      const index = document.querySelector(".index");
+      const directionTemplate = document.querySelector("#direction-template");
+      const cardTemplate = document.querySelector("#card-template");
+
+      for (let indexValue = 0; indexValue < options.length; indexValue += 1) {
+        const option = options[indexValue];
+        const section = directionTemplate.content.firstElementChild.cloneNode(true);
+        section.id = `option-${indexValue + 1}`;
+        section.dataset.option = option.key;
+        section.querySelector(".direction-kicker").textContent = option.kicker;
+        section.querySelector("h2").textContent = option.name;
+        section.querySelector(".direction-copy").textContent = option.copy;
+        section.querySelector("[data-action='density']").addEventListener("click", () => runDensity(section, option));
+        section.querySelector("[data-action='activity']").addEventListener("click", () => runActivity(section, option));
+        section.querySelector("[data-action='reset']").addEventListener("click", () => resetBoard(section));
+        renderCards(section.querySelector(".board-grid"), baseOrder);
+        directions.append(section);
+
+        const link = document.createElement("a");
+        link.href = `#option-${indexValue + 1}`;
+        link.textContent = option.label;
+        index.append(link);
+      }
+
+      function renderCards(grid, order) {
+        grid.replaceChildren();
+        for (const id of order) {
+          const cardData = cards.find((card) => card.id === id);
+          const card = cardTemplate.content.firstElementChild.cloneNode(true);
+          card.dataset.cardId = cardData.id;
+          card.classList.add(cardData.stateClass);
+          card.querySelector(".project").textContent = cardData.project;
+          card.querySelector(".runtime-tag").textContent = cardData.runtime;
+          card.querySelector(".state-pill").textContent = cardData.state;
+          card.querySelector(".headline").textContent = cardData.headline;
+          card.querySelector(".fact-runtime").textContent = cardData.runtime;
+          card.querySelector(".fact-tokens").textContent = cardData.tokens;
+          card.querySelector(".fact-model").textContent = cardData.model;
+          card.querySelector(".fact-worktree").textContent = cardData.worktree;
+          card.querySelector(".last-activity").textContent = `Last activity ${cardData.last}`;
+          card.querySelector(".duration").textContent = `Duration ${cardData.duration}`;
+          grid.append(card);
+        }
+      }
+
+      function resetBoard(section) {
+        const grid = section.querySelector(".board-grid");
+        grid.classList.remove("is-compact");
+        section.dataset.activityMode = "base";
+        section.querySelector(".density-indicator").textContent = "Comfortable";
+        renderCards(grid, baseOrder);
+      }
+
+      function runDensity(section, option) {
+        animateBoard(section, option, () => {
+          const grid = section.querySelector(".board-grid");
+          const isCompact = grid.classList.toggle("is-compact");
+          section.querySelector(".density-indicator").textContent = isCompact ? "Compact" : "Comfortable";
+        }, "density");
+      }
+
+      function runActivity(section, option) {
+        animateBoard(section, option, () => {
+          const grid = section.querySelector(".board-grid");
+          const nextMode = section.dataset.activityMode === "recent" ? "base" : "recent";
+          section.dataset.activityMode = nextMode;
+          const order = nextMode === "recent" ? activityOrder : baseOrder;
+          const cardMap = new Map([...grid.children].map((card) => [card.dataset.cardId, card]));
+          grid.replaceChildren(...order.map((id) => cardMap.get(id)).filter(Boolean));
+        }, "activity");
+      }
+
+      function animateBoard(section, option, mutate, mode) {
+        const grid = section.querySelector(".board-grid");
+        const cardsBefore = [...grid.querySelectorAll(".session-card")];
+        const firstRects = new Map(cardsBefore.map((card) => [card.dataset.cardId, card.getBoundingClientRect()]));
+        mutate();
+        const cardsAfter = [...grid.querySelectorAll(".session-card")];
+
+        for (const animation of grid.getAnimations({ subtree: true })) {
+          animation.cancel();
+        }
+
+        cardsAfter.forEach((card, indexValue) => {
+          const first = firstRects.get(card.dataset.cardId);
+          if (!first) return;
+          const last = card.getBoundingClientRect();
+          const dx = first.left - last.left;
+          const dy = first.top - last.top;
+          const sx = first.width / Math.max(last.width, 1);
+          const sy = first.height / Math.max(last.height, 1);
+          const moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
+          const resized = Math.abs(sx - 1) > 0.01 || Math.abs(sy - 1) > 0.01;
+          if (!moved && !resized) return;
+          const keyframes = option.build({ dx, dy, sx, sy, mode, index: indexValue });
+          card.animate(keyframes, {
+            duration: option.duration,
+            delay: indexValue * option.stagger,
+            easing: option.easing,
+            fill: "both"
+          });
+        });
+      }
+
+      function t(x, y, sx = 1, sy = sx) {
+        return `translate(${round(x)}px, ${round(y)}px) scale(${round(sx)}, ${round(sy)})`;
+      }
+
+      function round(value) {
+        return Math.round(value * 1000) / 1000;
+      }
+
+      function liftBlock({ dx, dy, sx, sy, mode }) {
+        const lift = mode === "density" ? 8 : 5;
+        return [
+          { transform: t(dx, dy + lift, sx * 0.968, sy * 0.968), filter: "brightness(0.992)" },
+          { offset: 0.66, transform: t(-1, -1, 1.004, 1.004), filter: "brightness(1.012)" },
+          { offset: 0.84, transform: t(0, 1, 0.999, 0.999) },
+          { transform: t(0, 0, 1, 1), filter: "brightness(1)" }
+        ];
+      }
+
+      function dovetailTrack({ dx, dy, sx, sy, mode }) {
+        const cross = mode === "activity" ? Math.sign(dx || 1) * -3 : 0;
+        return [
+          { transform: t(dx + cross, dy, sx * 0.988, sy), filter: "brightness(0.992)" },
+          { offset: 0.7, transform: t(Math.sign(dx || 1) * 2, 0, 1.002, 0.998), filter: "brightness(1.01)" },
+          { transform: t(0, 0, 1, 1), filter: "brightness(1)" }
+        ];
+      }
+
+      function rackIndex({ dx, dy, sx, sy }) {
+        return [
+          { transform: t(dx, dy, sx, sy), filter: "brightness(0.99)" },
+          { offset: 0.34, transform: t(dx * 0.58, dy * 0.58, sx * 0.99, sy * 0.99) },
+          { offset: 0.68, transform: t(dx * 0.18, dy * 0.18, 1.003, 1.003), filter: "brightness(1.012)" },
+          { transform: t(0, 0, 1, 1), filter: "brightness(1)" }
+        ];
+      }
+
+      function hydraulicPlaten({ dx, dy, sx, sy, mode }) {
+        const press = mode === "density" ? 0.958 : 0.976;
+        return [
+          { transform: t(dx, dy + 4, sx, sy * press), filter: "brightness(0.988)" },
+          { offset: 0.58, transform: t(dx * 0.08, dy * 0.08, 1.006, 0.994), filter: "brightness(1.015)" },
+          { offset: 0.82, transform: t(0, 1, 0.998, 1.002) },
+          { transform: t(0, 0, 1, 1), filter: "brightness(1)" }
+        ];
+      }
+
+      function magneticDock({ dx, dy, sx, sy }) {
+        return [
+          { transform: t(dx * 0.92, dy * 0.92, sx * 0.985, sy * 0.985), filter: "brightness(0.995)" },
+          { offset: 0.72, transform: t(Math.sign(dx || 1) * -2, Math.sign(dy || 1) * -1, 1.004, 1.004), filter: "brightness(1.014)" },
+          { transform: t(0, 0, 1, 1), filter: "brightness(1)" }
+        ];
+      }
+
+      function counterweightSlide({ dx, dy, sx, sy }) {
+        return [
+          { transform: t(dx, dy + 7, sx * 1.004, sy), filter: "brightness(0.99)" },
+          { offset: 0.62, transform: t(-2, 1, 0.997, 1.002), filter: "brightness(1.012)" },
+          { offset: 0.84, transform: t(1, 0, 1.001, 0.999) },
+          { transform: t(0, 0, 1, 1), filter: "brightness(1)" }
+        ];
+      }
+
+      function gantrySetdown({ dx, dy, sx, sy, mode }) {
+        const yGate = mode === "activity" ? Math.sign(dy || 1) * 6 : 6;
+        return [
+          { transform: t(dx, dy + yGate, sx * 0.982, sy * 0.982), filter: "brightness(0.992)" },
+          { offset: 0.48, transform: t(dx * 0.24, dy * 0.24, 0.996, 0.996) },
+          { offset: 0.76, transform: t(0, -1, 1.003, 1.003), filter: "brightness(1.012)" },
+          { transform: t(0, 0, 1, 1), filter: "brightness(1)" }
+        ];
+      }
+
+      function deadboltMatrix({ dx, dy, sx, sy }) {
+        return [
+          { transform: t(dx * 0.82, dy * 0.82, sx * 0.992, sy * 0.992), filter: "brightness(0.996)" },
+          { offset: 0.58, transform: t(0, 0, 0.996, 0.996), filter: "brightness(1.01)" },
+          { offset: 0.72, transform: t(0, 0, 1.002, 1.002) },
+          { transform: t(0, 0, 1, 1), filter: "brightness(1)" }
+        ];
+      }
+
+      function telescopingCassette({ dx, dy, sx, sy, mode }) {
+        const y = mode === "density" ? dy + 5 : dy;
+        return [
+          { transform: t(dx, y, sx * 0.972, sy * 0.955), filter: "brightness(0.99)" },
+          { offset: 0.6, transform: t(dx * 0.06, dy * 0.06, 1.004, 1.008), filter: "brightness(1.012)" },
+          { offset: 0.78, transform: t(0, 0, 0.998, 0.997) },
+          { transform: t(0, 0, 1, 1), filter: "brightness(1)" }
+        ];
+      }
+
+      function inertiaBrake({ dx, dy, sx, sy }) {
+        return [
+          { transform: t(dx, dy, sx, sy), filter: "brightness(0.992)" },
+          { offset: 0.54, transform: t(Math.sign(dx || 1) * -4, Math.sign(dy || 1) * -2, 1.006, 1.006), filter: "brightness(1.016)" },
+          { offset: 0.76, transform: t(Math.sign(dx || 1) * 1, Math.sign(dy || 1) * 1, 0.998, 0.998) },
+          { transform: t(0, 0, 1, 1), filter: "brightness(1)" }
+        ];
+      }
+    </script>
+  </body>
+</html>

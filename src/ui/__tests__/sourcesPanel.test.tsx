@@ -318,7 +318,7 @@ describe("SourcesPanel", () => {
   test("uses shared card entrance motion for source inventory cards", () => {
     const css = readFileSync("src/styles/masthead.css", "utf8");
 
-    expect(css).toMatch(/\.usage-summary-strip \.usage-metric,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: usage-card-enter/);
+    expect(css).toMatch(/\.usage-summary-strip \.usage-metric,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: usage-card-enter 400ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;[\s\S]*transform-origin: 50% 100%;/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: none/);
   });
 });

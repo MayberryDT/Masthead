@@ -157,19 +157,19 @@ describe("dovetail card system", () => {
     const blockedPaletteRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.bottom-variant-card.dovetail-card.is-blocked");
     const headlineRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .headline");
     const signalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .bottom-signal");
+    const signalBeforeRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .bottom-signal::before");
     const bottomSignalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card .bottom-signal");
-    const activeSignalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-active .bottom-signal");
+    const activeSignalBeforeRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-active .bottom-signal::before");
+    const idleSignalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-idle .bottom-signal");
     const blockedSignalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-blocked .bottom-signal");
     const reducedMotionRule = cssRuleBodyContaining(
       mastheadCss,
       "@media (prefers-reduced-motion: reduce)",
-      ".masthead-shell .session-card.dovetail-card.is-active .bottom-signal"
+      ".masthead-shell .session-card.dovetail-card .bottom-signal::before"
     );
     const prototypeDovetailCardRule = cssRuleBody(prototypeHtml, ".dovetail-card");
     const prototypeSignalRule = cssRuleBody(prototypeHtml, ".bottom-signal");
     const prototypeDovetailRule = cssRuleBody(prototypeHtml, ".dovetail-card .bottom-signal");
-    const prototypeActiveSignalRule = cssRuleBody(prototypeHtml, ".dovetail-card.is-active .bottom-signal");
-    const prototypeBlockedSignalRule = cssRuleBody(prototypeHtml, ".dovetail-card.is-blocked .bottom-signal");
 
     expect(mastheadCss).toContain(".bottom-variant-card");
     expect(mastheadCss).toContain(".session-card.dovetail-card .bottom-signal");
@@ -185,25 +185,37 @@ describe("dovetail card system", () => {
     expect(idlePaletteRule).toContain("--state-border: rgba(45, 168, 255, 0.42);");
     expect(blockedPaletteRule).toContain("--state: var(--red);");
     expect(blockedPaletteRule).toContain("--state-border: rgba(255, 72, 62, 0.44);");
-    expect(headlineRule).not.toContain("overflow: hidden;");
+    expect(headlineRule).toContain("overflow: hidden;");
     expect(prototypeDovetailCardRule).toContain("clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), 72% calc(100% - 6px), 67% 100%, 33% 100%, 28% calc(100% - 6px), 0 calc(100% - 6px));");
     expect(prototypeDovetailRule).toContain("height: 10px;");
     expect(prototypeDovetailRule).toContain("clip-path: polygon(0 0, 28% 0, 33% 60%, 67% 60%, 72% 0, 100% 0, 100% 100%, 0 100%);");
     expect(dovetailPaletteRule).toContainDeclarationsFrom(prototypeDovetailCardRule);
-    expect(normalizeCssRule(signalRule)).toBe(normalizeCssRule(prototypeSignalRule));
+    expect(prototypeSignalRule).toContain("linear-gradient(180deg, rgba(246, 251, 255, 0.22), transparent 34%)");
+    expect(signalRule).toContain("linear-gradient(180deg, rgba(246, 251, 255, 0.22), transparent 34%)");
+    expect(signalRule).toContain("linear-gradient(180deg, var(--state), var(--state))");
+    expect(signalRule).toContain("inset 0 -1px 0 rgba(0, 0, 0, 0.52)");
+    expect(signalRule).toContain("overflow: hidden;");
+    expect(signalRule).toContain("transform-origin: 50% 100%;");
+    expect(signalBeforeRule).toContain("content: \"\";");
+    expect(signalBeforeRule).toContain("position: absolute;");
+    expect(signalBeforeRule).toContain("inset: 0;");
     expect(normalizeCssRule(bottomSignalRule)).toBe(normalizeCssRule(prototypeDovetailRule));
     expect(bottomSignalRule).toContain("right: 0;");
     expect(bottomSignalRule).toContain("bottom: 0;");
     expect(bottomSignalRule).toContain("left: 0;");
     expect(bottomSignalRule).toContain("height: 10px;");
     expect(bottomSignalRule).toContain("clip-path: polygon(0 0, 28% 0, 33% 60%, 67% 60%, 72% 0, 100% 0, 100% 100%, 0 100%);");
-    expect(normalizeCssRule(activeSignalRule)).toBe(normalizeCssRule(prototypeActiveSignalRule));
-    expect(activeSignalRule).toContain("animation: dovetail-active-run 950ms linear infinite;");
-    expect(activeSignalRule).toContain("linear-gradient(105deg, transparent 0 16%, rgba(246, 251, 255, 0.18) 25%, rgba(246, 251, 255, 0.58) 34%, rgba(246, 251, 255, 0.18) 43%, transparent 54%)");
-    expect(normalizeCssRule(blockedSignalRule)).toBe(normalizeCssRule(prototypeBlockedSignalRule));
-    expect(blockedSignalRule).toContain("animation: dovetail-blocked-pulse 1500ms ease-in-out infinite;");
-    expect(blockedSignalRule).toContain("filter: drop-shadow(0 0 7px rgba(255, 72, 62, 0.42));");
+    expect(activeSignalBeforeRule).toContain("animation: calm-lock-active 1300ms linear infinite;");
+    expect(activeSignalBeforeRule).toContain("68px 100% repeat-x");
+    expect(idleSignalRule).toContain("animation: calm-lock-idle 6400ms ease-in-out infinite;");
+    expect(blockedSignalRule).toContain("animation: calm-lock-blocked 1400ms ease-in-out infinite;");
+    expect(blockedSignalRule).toContain("filter: drop-shadow(0 0 8px rgba(255, 72, 62, 0.52));");
     expect(reducedMotionRule).toContain("animation: none;");
+    expect(mastheadCss).toContain("@keyframes calm-lock-active");
+    expect(mastheadCss).toContain("@keyframes calm-lock-idle");
+    expect(mastheadCss).toContain("@keyframes calm-lock-blocked");
+    expect(mastheadCss).not.toContain("dovetail-active-run");
+    expect(mastheadCss).not.toContain("dovetail-blocked-pulse");
     expect(mastheadCss).not.toContain("--dovetail-state");
     expect(mastheadCss).not.toContain("dovetail-card-surface");
   });
