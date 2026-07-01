@@ -22,4 +22,14 @@ describe("App component architecture", () => {
     expect(appSource).not.toContain("const handleLogbookQueryChange");
     expect(appSource).not.toContain("const handleLoadMoreLogbookTranscript");
   });
+
+  test("keeps Settings data lifecycle orchestration out of App.tsx", async () => {
+    const appPath = fileURLToPath(new URL("../App.tsx", import.meta.url));
+    const appSource = await readFile(appPath, "utf8");
+
+    expect(appSource).not.toContain("deleteMastheadData as deleteCanonicalMastheadData");
+    expect(appSource).not.toContain("const handleRequestDeleteLocalData");
+    expect(appSource).not.toContain("const handleConfirmScopedDelete");
+    expect(appSource).not.toContain("function downloadTextFile");
+  });
 });

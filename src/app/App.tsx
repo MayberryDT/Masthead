@@ -14,7 +14,7 @@ import { AppShell } from "../ui/AppShell";
 import { HistoryPanel } from "../ui/HistoryPanel";
 import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
-import { OperationsPanel, type DeletionScopeKind } from "../ui/OperationsPanel";
+import { OperationsPanel } from "../ui/OperationsPanel";
 import { SessionBoard } from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
 import { SessionLibraryDetail } from "../ui/SessionLibraryDetail";
@@ -40,24 +40,16 @@ import { startLiveConnector } from "./connectorClient";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
 import { ConnectionRecoveryPanel } from "../ui/ConnectionRecoveryPanel";
 import {
-  applyDefaultRetention as applyDefaultDataRetention,
-  deleteMastheadData as deleteCanonicalMastheadData,
-  exportMastheadData,
-  getDataSummary,
   getSessionDossier,
   getSessionTranscript,
   getUsageStats,
-  listReviewDispositions,
   saveReviewDisposition,
   type SessionTranscriptKindFilter,
   type SessionTranscriptResult,
   type UsageStatsDto,
-  type UsageWindow,
-  type DataSummary,
-  type DeleteMastheadDataScope
+  type UsageWindow
 } from "./daemonClient";
 import type { SessionDossierDto } from "../shared/sessionDossier";
-import { exportedRecordCount, exportLocalData } from "./nativeStoreClient";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
@@ -67,6 +59,7 @@ import { UsagePanel } from "../ui/usage/UsagePanel";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
 import { useLogbookController } from "./logbook/useLogbookController";
+import { useSettingsDataController } from "./settings/useSettingsDataController";
 import { useSourcesController } from "./sources/useSourcesController";
 
 type ConnectorActionState =
@@ -187,24 +180,6 @@ export function App() {
   const [sidebarUsageLoading, setSidebarUsageLoading] = useState(false);
   const [sidebarUsageError, setSidebarUsageError] = useState<string>();
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
-  const [localDataStatus, setLocalDataStatus] = useState<{
-    state:
-      | "idle"
-      | "confirm_delete"
-      | "confirm_prune"
-      | "confirm_scoped_delete"
-      | "busy"
-      | "exported"
-      | "deleted"
-      | "pruned"
-      | "error";
-    message?: string;
-  }>({ state: "idle" });
-  const [dataSummary, setDataSummary] = useState<DataSummary>();
-  const [deletionScopeKind, setDeletionScopeKind] = useState<DeletionScopeKind>("project");
-  const [deletionScopeTarget, setDeletionScopeTarget] = useState("");
-  const [pendingDeletionScope, setPendingDeletionScope] = useState<DeleteMastheadDataScope>();
-  const [pendingDeletionDatabaseId, setPendingDeletionDatabaseId] = useState<string>();
   const searchInputRef = useRef<CollapsibleSearchHandle | null>(null);
   const liveRequestIdRef = useRef(0);
   const fixtureBoard = useMemo(() => buildObservabilityDemoBoard(selectedSessionId), [selectedSessionId]);
@@ -261,10 +236,21 @@ export function App() {
     if (connection.state.state === "probing") return { state: "connecting" };
     return liveConnection;
   }, [connection.state, liveConnection]);
-  const activeDatabaseId =
-    connection.state.state === "ready" || connection.state.state === "read_only" ? connection.state.health.data?.databaseId : undefined;
-  const writeBlockedMessage =
-    "This Masthead connection is read-only. Start the local writable collector before changing settings or deleting data.";
+  const handleReviewDispositionsChanged = useCallback((dispositions: ReviewDisposition[]) => setReviewDispositions(dispositions), []);
+  const handleCanonicalDataDeleted = useCallback(() => {
+    setLiveProjection(emptyLiveBoard);
+    setLiveEvents([]);
+    setLiveGitSnapshots([]);
+    setSessionActionStatus(undefined);
+  }, []);
+  const settingsData = useSettingsDataController({
+    activeProjectionUrl,
+    connectionState: connection.state,
+    isLive: effectiveLiveConnection.state === "live",
+    onCanonicalDataDeleted: handleCanonicalDataDeleted,
+    onReviewDispositionsChanged: handleReviewDispositionsChanged,
+    writable: connection.writable
+  });
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setSelectedBoardTranscriptDebouncedQuery(selectedBoardTranscriptQuery), 200);
@@ -367,31 +353,6 @@ export function App() {
     window.addEventListener("keydown", focusSearch);
     return () => window.removeEventListener("keydown", focusSearch);
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const hydrateLocalData = async () => {
-      try {
-        const dispositions = await listReviewDispositions(activeProjectionUrl).catch(() => []);
-        if (!cancelled) {
-          setReviewDispositions(dispositions);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setLocalDataStatus({
-            state: "error",
-            message: `Local history unavailable: ${error instanceof Error ? error.message : String(error)}`
-          });
-        }
-      }
-    };
-
-    void hydrateLocalData();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeProjectionUrl]);
 
   const loadLiveProjection = useCallback(async () => {
     const requestId = liveRequestIdRef.current + 1;
@@ -528,206 +489,6 @@ export function App() {
       setConnectorAction({
         state: "error",
         message: `Could not start connector: ${error instanceof Error ? error.message : String(error)}`
-      });
-    }
-  };
-
-  const handleExportLocalData = async () => {
-    setLocalDataStatus({ state: "busy", message: "Preparing local export..." });
-    try {
-      const canonicalExport = effectiveLiveConnection.state === "live" ? await exportMastheadData(activeProjectionUrl) : undefined;
-      const exported = canonicalExport ? JSON.stringify(canonicalExport, null, 2) : await exportLocalData();
-      const count = canonicalExport ? exportedSessionCount(canonicalExport) : exportedRecordCount(exported);
-      downloadTextFile(`masthead-export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, exported);
-      setLocalDataStatus({
-        state: "exported",
-        message: count === undefined ? "Local export prepared." : `Exported ${count} Masthead records.`
-      });
-    } catch (error) {
-      setLocalDataStatus({
-        state: "error",
-        message: `Export failed: ${error instanceof Error ? error.message : String(error)}`
-      });
-    }
-  };
-
-  const loadDataDeletionPreview = async (scope?: DeleteMastheadDataScope, databaseId = activeDatabaseId): Promise<DataSummary> => {
-    const summary = await getDataSummary(activeProjectionUrl, scope, { databaseId });
-    setDataSummary(summary);
-    return summary;
-  };
-
-  const handleRequestDeleteLocalData = async () => {
-    if (!connection.writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
-      return;
-    }
-    setLocalDataStatus({ state: "busy", message: "Preparing delete-all preview..." });
-    try {
-      const summary = await loadDataDeletionPreview(undefined, activeDatabaseId);
-      setPendingDeletionDatabaseId(activeDatabaseId);
-      setLocalDataStatus({
-        state: "confirm_delete",
-        message: `Confirm delete all Masthead data: ${formatCount(summary.sessions)} sessions, ${formatCount(
-          summary.rawEvents
-        )} raw source copies, ${formatCount(summary.enrichments)} enrichments, and ${formatCount(
-          summary.auditRows
-        )} MCP audit rows. Original Codex/Hermes/etc. session files remain untouched.`
-      });
-    } catch (error) {
-      setLocalDataStatus({
-        state: "error",
-        message: `Delete preview failed: ${error instanceof Error ? error.message : String(error)}`
-      });
-    }
-  };
-
-  const handleRequestPruneLocalData = async () => {
-    if (!connection.writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
-      return;
-    }
-    setLocalDataStatus({ state: "busy", message: "Preparing raw source copy preview..." });
-    try {
-      const summary = await loadDataDeletionPreview(undefined, activeDatabaseId);
-      setPendingDeletionDatabaseId(activeDatabaseId);
-      setLocalDataStatus({
-        state: "confirm_prune",
-        message: `Confirm deletion of ${formatCount(
-          summary.rawEvents
-        )} raw source copies. Normalized session metadata, summaries, and search records stay available.`
-      });
-    } catch (error) {
-      setLocalDataStatus({
-        state: "error",
-        message: `Raw source copy preview failed: ${error instanceof Error ? error.message : String(error)}`
-      });
-    }
-  };
-
-  const handleConfirmPruneLocalData = async () => {
-    if (!connection.writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
-      return;
-    }
-    setLocalDataStatus({ state: "busy", message: "Deleting raw source copies..." });
-    try {
-      const response = await applyDefaultDataRetention(activeProjectionUrl, { databaseId: pendingDeletionDatabaseId ?? activeDatabaseId });
-      const dispositions = await listReviewDispositions(activeProjectionUrl);
-      setReviewDispositions(dispositions);
-      setDataSummary(response.summary);
-      setPendingDeletionDatabaseId(undefined);
-      setLocalDataStatus({
-        state: "pruned",
-        message: `Deleted ${formatCount(
-          response.result.rawEvents ?? 0
-        )} raw source copies. Normalized sessions, summaries, and search records kept. Original harness files untouched.`
-      });
-    } catch (error) {
-      setLocalDataStatus({
-        state: "error",
-        message: `Retention failed: ${error instanceof Error ? error.message : String(error)}`
-      });
-    }
-  };
-
-  const selectedDeletionScope = (): DeleteMastheadDataScope | undefined => {
-    const target = deletionScopeTarget.trim();
-    if (!target) return undefined;
-    if (deletionScopeKind === "session") return { kind: "session", sessionId: target };
-    if (deletionScopeKind === "runtime") return { kind: "runtime", runtime: target };
-    if (deletionScopeKind === "host") return { kind: "host", host: target };
-    return { kind: "project", project: target };
-  };
-
-  const handleRequestScopedDelete = async () => {
-    if (!connection.writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
-      return;
-    }
-    const scope = selectedDeletionScope();
-    if (!scope) {
-      setLocalDataStatus({ state: "error", message: "Choose a deletion scope and target before deleting records." });
-      return;
-    }
-    setLocalDataStatus({ state: "busy", message: "Preparing scoped deletion preview..." });
-    try {
-      const summary = await loadDataDeletionPreview(scope, activeDatabaseId);
-      setPendingDeletionScope(scope);
-      setPendingDeletionDatabaseId(activeDatabaseId);
-      setLocalDataStatus({
-        state: "confirm_scoped_delete",
-        message: `Confirm scoped deletion for ${scopeLabel(scope)}: ${formatCount(
-          summary.sessions
-        )} sessions, ${formatCount(summary.messages)} searchable messages, and ${formatCount(
-          summary.enrichments
-        )} enrichments. Original harness files are untouched.`
-      });
-    } catch (error) {
-      setLocalDataStatus({
-        state: "error",
-        message: `Scoped delete preview failed: ${error instanceof Error ? error.message : String(error)}`
-      });
-    }
-  };
-
-  const handleConfirmScopedDelete = async () => {
-    if (!connection.writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
-      return;
-    }
-    const scope = pendingDeletionScope ?? selectedDeletionScope();
-    if (!scope) {
-      setLocalDataStatus({ state: "error", message: "Choose a deletion scope and target before deleting records." });
-      return;
-    }
-    setLocalDataStatus({ state: "busy", message: `Deleting Masthead records for ${scopeLabel(scope)}...` });
-    try {
-      const response = await deleteCanonicalMastheadData(scope, activeProjectionUrl, { databaseId: pendingDeletionDatabaseId ?? activeDatabaseId });
-      setDataSummary(response.summary);
-      setPendingDeletionScope(undefined);
-      setPendingDeletionDatabaseId(undefined);
-      setLocalDataStatus({
-        state: "deleted",
-        message: `Deleted ${formatCount(response.result.sessions ?? 0)} sessions for ${scopeLabel(
-          scope
-        )}. Original harness files remain untouched.`
-      });
-    } catch (error) {
-      setLocalDataStatus({
-        state: "error",
-        message: `Scoped delete failed: ${error instanceof Error ? error.message : String(error)}`
-      });
-    }
-  };
-
-  const handleConfirmDeleteLocalData = async () => {
-    if (!connection.writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
-      return;
-    }
-    setLocalDataStatus({ state: "busy", message: "Deleting canonical Masthead data..." });
-    try {
-      const response = await deleteCanonicalMastheadData({ kind: "all" }, activeProjectionUrl, { databaseId: pendingDeletionDatabaseId ?? activeDatabaseId });
-      setReviewDispositions([]);
-      setDataSummary(response.summary);
-      setLiveProjection(emptyLiveBoard);
-      setLiveEvents([]);
-      setLiveGitSnapshots([]);
-      setSessionActionStatus(undefined);
-      setPendingDeletionDatabaseId(undefined);
-      setLocalDataStatus({
-        state: "deleted",
-        message: `Deleted ${formatCount(response.result.sessions ?? 0)} sessions, ${formatCount(
-          response.result.rawEvents ?? 0
-        )} raw source copies, ${formatCount(response.result.enrichments ?? 0)} enrichments, and ${formatCount(
-          response.result.auditRows ?? 0
-        )} MCP audit rows. Original Codex/Hermes/etc. session files remain untouched.`
-      });
-    } catch (error) {
-      setLocalDataStatus({
-        state: "error",
-        message: `Delete failed: ${error instanceof Error ? error.message : String(error)}`
       });
     }
   };
@@ -902,32 +663,20 @@ export function App() {
             connection={connection.state}
             onReconnect={connection.refresh}
             onStartConnector={handleStartConnector}
-            dataSummary={dataSummary}
-            deletionScopeKind={deletionScopeKind}
-            deletionScopeTarget={deletionScopeTarget}
-            localDataStatus={localDataStatus}
-            onCancelLocalDataAction={() => {
-              setLocalDataStatus({ state: "idle" });
-              setPendingDeletionScope(undefined);
-              setPendingDeletionDatabaseId(undefined);
-            }}
-            onDeletionScopeKindChange={(kind) => {
-              setDeletionScopeKind(kind);
-              setPendingDeletionScope(undefined);
-              setPendingDeletionDatabaseId(undefined);
-            }}
-            onDeletionScopeTargetChange={(target) => {
-              setDeletionScopeTarget(target);
-              setPendingDeletionScope(undefined);
-              setPendingDeletionDatabaseId(undefined);
-            }}
-            onExportLocalData={handleExportLocalData}
-            onRequestPruneLocalData={handleRequestPruneLocalData}
-            onConfirmPruneLocalData={handleConfirmPruneLocalData}
-            onRequestScopedDelete={handleRequestScopedDelete}
-            onConfirmScopedDelete={handleConfirmScopedDelete}
-            onRequestDeleteLocalData={handleRequestDeleteLocalData}
-            onConfirmDeleteLocalData={handleConfirmDeleteLocalData}
+            dataSummary={settingsData.dataSummary}
+            deletionScopeKind={settingsData.deletionScopeKind}
+            deletionScopeTarget={settingsData.deletionScopeTarget}
+            localDataStatus={settingsData.localDataStatus}
+            onCancelLocalDataAction={settingsData.cancelLocalDataAction}
+            onDeletionScopeKindChange={settingsData.changeDeletionScopeKind}
+            onDeletionScopeTargetChange={settingsData.changeDeletionScopeTarget}
+            onExportLocalData={settingsData.exportLocalData}
+            onRequestPruneLocalData={settingsData.requestPruneLocalData}
+            onConfirmPruneLocalData={settingsData.confirmPruneLocalData}
+            onRequestScopedDelete={settingsData.requestScopedDelete}
+            onConfirmScopedDelete={settingsData.confirmScopedDelete}
+            onRequestDeleteLocalData={settingsData.requestDeleteLocalData}
+            onConfirmDeleteLocalData={settingsData.confirmDeleteLocalData}
             readOnly={!connection.writable}
           />
         )}
@@ -1103,25 +852,6 @@ function emptyBoardMessage({
   return "Board will switch to live sessions when the local collector responds.";
 }
 
-function exportedSessionCount(value: unknown): number | undefined {
-  if (typeof value !== "object" || value === null || !("sessions" in value)) return undefined;
-  const sessions = value.sessions;
-  return Array.isArray(sessions) ? sessions.length : undefined;
-}
-
-function formatCount(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
-}
-
-function scopeLabel(scope: DeleteMastheadDataScope): string {
-  if (scope.kind === "session") return `session ${scope.sessionId}`;
-  if (scope.kind === "runtime") return `runtime ${scope.runtime}`;
-  if (scope.kind === "host") return `host ${scope.host}`;
-  if (scope.kind === "project") return `project ${scope.project}`;
-  if (scope.kind === "raw_payloads") return "raw source copies";
-  return "all Masthead data";
-}
-
 function reasonForAction(action: Extract<SafeAction, "snooze" | "dismiss" | "mark_reviewed" | "mark_expected">): string {
   const reasons = {
     snooze: "Snoozed from Masthead Board.",
@@ -1145,16 +875,4 @@ function messageForDisposition(disposition: ReviewDisposition): string {
     false_positive: "Marked false positive locally."
   };
   return labels[disposition.status];
-}
-
-function downloadTextFile(filename: string, contents: string): void {
-  if (typeof document === "undefined") return;
-  const url = URL.createObjectURL(new Blob([contents], { type: "application/json" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }
