@@ -45,6 +45,8 @@ export function FilterableSelect({
   const searchRef = useRef<HTMLInputElement | null>(null);
   const closeTimerRef = useRef<number | undefined>(undefined);
   const closeFrameRef = useRef<number | undefined>(undefined);
+  const selectionTimerRef = useRef<number | undefined>(undefined);
+  const [selectingKey, setSelectingKey] = useState<string | undefined>(undefined);
   const selected = options.find((option) => option.value === value);
   const displayValue = selected?.label ?? value ?? placeholder;
   const filteredOptions = useMemo(() => {
@@ -62,6 +64,11 @@ export function FilterableSelect({
     if (closeFrameRef.current !== undefined) {
       window.cancelAnimationFrame(closeFrameRef.current);
       closeFrameRef.current = undefined;
+    }
+
+    if (selectionTimerRef.current !== undefined) {
+      window.clearTimeout(selectionTimerRef.current);
+      selectionTimerRef.current = undefined;
     }
   };
 
@@ -82,6 +89,7 @@ export function FilterableSelect({
 
   const closeMenu = () => {
     clearCloseTimers();
+    setSelectingKey(undefined);
     const closeMs = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur")) || 150;
     setMenuState((current) => (current === "closed" ? current : "closing"));
     closeFrameRef.current = window.requestAnimationFrame(() => {
@@ -98,6 +106,7 @@ export function FilterableSelect({
   const openMenu = () => {
     if (disabled) return;
     clearCloseTimers();
+    setSelectingKey(undefined);
     updateMenuPlacement();
     setMenuState("open");
   };
@@ -135,10 +144,16 @@ export function FilterableSelect({
   useEffect(() => clearCloseTimers, []);
 
   const choose = (nextValue: string | undefined) => {
+    const nextKey = nextValue ?? "__clear__";
+    clearCloseTimers();
+    setSelectingKey(nextKey);
     onChange(nextValue);
     setDraft("");
-    closeMenu();
-    triggerRef.current?.focus();
+    selectionTimerRef.current = window.setTimeout(() => {
+      selectionTimerRef.current = undefined;
+      closeMenu();
+      triggerRef.current?.focus();
+    }, 120);
   };
 
   const commitDraft = () => {
@@ -174,25 +189,40 @@ export function FilterableSelect({
       </label>
       <div className="filterable-select-options" role="listbox" aria-label={`${label} options`}>
         {value ? (
-          <button type="button" role="option" aria-selected="false" className="toolbar-select-option filterable-select-clear" onClick={() => choose(undefined)}>
+          <button
+            type="button"
+            role="option"
+            aria-selected="false"
+            className={`toolbar-select-option filterable-select-clear ${selectingKey === "__clear__" ? "is-selecting" : ""}`.trim()}
+            style={{ "--option-index": "0" } as CSSProperties}
+            onClick={() => choose(undefined)}
+          >
             Any {label.toLowerCase().replace(" filter", "")}
           </button>
         ) : null}
         {filteredOptions.length > 0 ? (
-          filteredOptions.map((option) => (
+          filteredOptions.map((option, index) => (
             <button
               key={option.value}
               type="button"
               role="option"
               aria-selected={option.value === value}
-              className={`toolbar-select-option ${option.value === value ? "selected" : ""}`.trim()}
+              className={`toolbar-select-option ${option.value === value ? "selected" : ""} ${selectingKey === option.value ? "is-selecting" : ""}`.trim()}
+              style={{ "--option-index": String(value ? index + 1 : index) } as CSSProperties}
               onClick={() => choose(option.value)}
             >
               {option.label}
             </button>
           ))
         ) : (
-          <button type="button" role="option" aria-selected="false" className="toolbar-select-option filterable-select-empty" onClick={commitDraft}>
+          <button
+            type="button"
+            role="option"
+            aria-selected="false"
+            className={`toolbar-select-option filterable-select-empty ${selectingKey === (draft.trim() || "__clear__") ? "is-selecting" : ""}`.trim()}
+            style={{ "--option-index": String(value ? 1 : 0) } as CSSProperties}
+            onClick={commitDraft}
+          >
             {draft.trim() ? `Use “${draft.trim()}”` : emptyLabel}
           </button>
         )}

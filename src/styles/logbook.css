@@ -88,6 +88,7 @@
 }
 
 .logbook-date-filter.active .logbook-date-trigger,
+.logbook-date-filter.open .logbook-date-trigger,
 .logbook-file-popover-filter.active .logbook-file-trigger {
   border-color: rgba(46, 167, 255, 0.32);
   background: #0a314b;

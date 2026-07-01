@@ -36,6 +36,8 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const closeTimerRef = useRef<number | undefined>(undefined);
   const closeFrameRef = useRef<number | undefined>(undefined);
+  const selectionTimerRef = useRef<number | undefined>(undefined);
+  const [selectingValue, setSelectingValue] = useState<string | undefined>(undefined);
 
   const clearCloseTimers = () => {
     if (closeTimerRef.current !== undefined) {
@@ -46,6 +48,11 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
     if (closeFrameRef.current !== undefined) {
       window.cancelAnimationFrame(closeFrameRef.current);
       closeFrameRef.current = undefined;
+    }
+
+    if (selectionTimerRef.current !== undefined) {
+      window.clearTimeout(selectionTimerRef.current);
+      selectionTimerRef.current = undefined;
     }
   };
 
@@ -66,12 +73,14 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
 
   const openMenu = () => {
     clearCloseTimers();
+    setSelectingValue(undefined);
     updateMenuPlacement();
     setMenuState("open");
   };
 
   const closeMenu = () => {
     clearCloseTimers();
+    setSelectingValue(undefined);
 
     const closeMs = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur")) || 150;
     setMenuState((current) => (current === "closed" ? current : "closing"));
@@ -119,9 +128,14 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
   useEffect(() => clearCloseTimers, []);
 
   const choose = (nextValue: string) => {
+    clearCloseTimers();
+    setSelectingValue(nextValue);
     onChange(nextValue);
-    closeMenu();
-    triggerRef.current?.focus();
+    selectionTimerRef.current = window.setTimeout(() => {
+      selectionTimerRef.current = undefined;
+      closeMenu();
+      triggerRef.current?.focus();
+    }, 120);
   };
 
   const focusOption = (index: number) => {
@@ -193,7 +207,8 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
           type="button"
           role="option"
           aria-selected={option.value === value}
-          className={`toolbar-select-option ${option.value === value ? "selected" : ""}`.trim()}
+          className={`toolbar-select-option ${option.value === value ? "selected" : ""} ${selectingValue === option.value ? "is-selecting" : ""}`.trim()}
+          style={{ "--option-index": String(index) } as CSSProperties}
           onClick={() => choose(option.value)}
         >
           {option.label}
