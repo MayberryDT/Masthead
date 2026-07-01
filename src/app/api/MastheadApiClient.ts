@@ -30,9 +30,12 @@ export class MastheadApiClient {
     return value as MastheadHealthDto;
   }
 
-  async getLiveProjection(selectedSessionId?: string | null, signal?: AbortSignal): Promise<unknown> {
-    await this.getHealth(signal);
-    return this.getJson(this.projectionUrl(selectedSessionId), signal);
+  async getLiveProjection(
+    selectedSessionId?: string | null,
+    options: { signal?: AbortSignal; refreshIntervalMs?: number } = {}
+  ): Promise<unknown> {
+    await this.getHealth(options.signal);
+    return this.getJson(projectionRequestUrl(this.baseUrl, selectedSessionId, { refreshIntervalMs: options.refreshIntervalMs }), options.signal);
   }
 
   async getLiveEvents(signal?: AbortSignal): Promise<unknown> {

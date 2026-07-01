@@ -34,4 +34,17 @@ describe("daemon config", () => {
 
     expect(config.hookTranscriptCatchupEnabled).toBe(false);
   });
+
+  test("enables GPT-5 Nano live copy by default when an OpenAI key is present", () => {
+    const config = daemonConfigFromEnv({ OPENAI_API_KEY: "sk-test" });
+
+    expect(config.llmCopyEnabled).toBe(true);
+    expect(config.openaiModel).toBeUndefined();
+  });
+
+  test("allows an explicit environment flag to disable live copy even when a key is present", () => {
+    const config = daemonConfigFromEnv({ MASTHEAD_LLM_COPY: "0", OPENAI_API_KEY: "sk-test" });
+
+    expect(config.llmCopyEnabled).toBe(false);
+  });
 });

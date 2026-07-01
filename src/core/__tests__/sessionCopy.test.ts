@@ -374,6 +374,75 @@ describe("session copy", () => {
     ).toEqual({ ok: false, reason: "invalid_shape" });
   });
 
+  test("normalizes missing punctuation on otherwise valid model copy", () => {
+    const input = toSessionCopyInput(cardView({ lifecycle: "running", primaryStatus: "editing" }), [], []);
+
+    expect(
+      validateSessionCopy(
+        {
+          headline: "Masthead session is active with editing in progress",
+          status: "Work is active",
+          reason: "Recent activity includes changed files and test updates",
+          nextStep: "",
+          source: "llm"
+        },
+        input
+      )
+    ).toEqual({
+      ok: true,
+      copy: {
+        headline: "Masthead session is active with editing in progress.",
+        status: "Work is active.",
+        reason: "Recent activity includes changed files and test updates.",
+        source: "llm"
+      }
+    });
+  });
+
+  test("cleans benign internal source tokens from valid model copy", () => {
+    const input = toSessionCopyInput(cardView({ lifecycle: "running", primaryStatus: "editing" }), [], []);
+
+    expect(
+      validateSessionCopy(
+        {
+          headline: "Masthead Codex session is active with editing in the Settings UI work stream.",
+          status: "Session in progress with ongoing editing in the Settings UI work.",
+          reason: "Active session shows ongoing work in Masthead, with recent file changes and no detected secrets as per latest stop_hook feedback.",
+          nextStep: "",
+          source: "llm"
+        },
+        input
+      )
+    ).toMatchObject({
+      ok: true,
+      copy: {
+        reason: "Active session shows ongoing work in Masthead, with recent file changes and no detected secrets as per latest feedback."
+      }
+    });
+  });
+
+  test("allows reported completion wording for ended unreviewed sessions", () => {
+    const input = toSessionCopyInput(cardView({ lifecycle: "ended", primaryStatus: "completed_unreviewed" }), [], []);
+
+    expect(
+      validateSessionCopy(
+        {
+          headline: "Halla session has ended with completion reported.",
+          status: "Review is still pending.",
+          reason: "The session is no longer active, and the completion note has not been reviewed.",
+          nextStep: "Review the evidence before filing it away.",
+          source: "llm"
+        },
+        input
+      )
+    ).toMatchObject({
+      ok: true,
+      copy: {
+        headline: "Halla session has ended with completion reported."
+      }
+    });
+  });
+
   test("rejects direct-address and alarmist main-board copy", () => {
     const input = toSessionCopyInput(cardView({ lifecycle: "running", primaryStatus: "waiting_for_approval" }), [], []);
 

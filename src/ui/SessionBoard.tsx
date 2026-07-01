@@ -310,7 +310,8 @@ function prefersReducedMotion(): boolean {
 }
 
 function headlineUpdateSignature(card: SessionCardView): string {
-  return [card.copy.headline, card.title, card.project].join("\u0000");
+  const successfulRefreshAt = card.copyRefresh?.status === "success" ? card.copyRefresh.requestedAt : "";
+  return [card.copy.headline, card.title, card.project, successfulRefreshAt].join("\u0000");
 }
 
 function laneDescription(laneId: LifecycleLaneView["laneId"]): string {

@@ -48,10 +48,12 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
           "Do not address the user directly and do not use first person.",
           "Title must be a 3 to 8 word noun phrase with a concrete work subject.",
           "Confidence is high when transcript, files, and tools support the claim; medium when partial evidence supports it; low when evidence is hook-only or metadata-only.",
+          "Use empty strings for outcome, action, or object when the input does not directly support those fields.",
           "Return only JSON that matches the schema."
         ].join(" "),
         input: JSON.stringify(providerPayload(input.facts, deterministic)),
         max_output_tokens: 360,
+        reasoning: { effort: "minimal" },
         store: false,
         text: {
           format: {
@@ -61,7 +63,7 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
             schema: {
               type: "object",
               additionalProperties: false,
-              required: ["title", "liveSummary", "searchSummary", "confidence", "missingEvidence"],
+              required: ["title", "liveSummary", "outcome", "searchSummary", "action", "object", "confidence", "missingEvidence"],
               properties: {
                 title: { type: "string" },
                 liveSummary: { type: "string" },

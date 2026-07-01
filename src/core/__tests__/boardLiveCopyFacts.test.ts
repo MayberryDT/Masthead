@@ -56,6 +56,22 @@ describe("board live copy facts", () => {
     expect(facts.recentToolNames).toEqual(["npm run typecheck"]);
   });
 
+  test("sanitizes URL-like project and title facts before live copy", () => {
+    const facts = buildBoardLiveCopyFacts({
+      attentionItems: [],
+      card: card({
+        project: "https-huggingface-co-yuxinlu1-gemma-4",
+        title: "https-huggingface-co-yuxinlu1-gemma-4 Codex session"
+      }),
+      conflicts: [],
+      events: [],
+      gitSnapshots: []
+    });
+
+    expect(facts.project).toBeUndefined();
+    expect(facts.title).toBeUndefined();
+  });
+
   test("drops stale MCP-only canonical enrichment when current activity is unrelated", () => {
     const facts = buildBoardLiveCopyFacts({
       attentionItems: [],
@@ -94,7 +110,7 @@ describe("board live copy facts", () => {
   });
 });
 
-function card(): SessionCardView {
+function card(overrides: Partial<SessionCardView> = {}): SessionCardView {
   return {
     changedFileCount: 2,
     copy: {
@@ -116,7 +132,8 @@ function card(): SessionCardView {
     safeActions: ["open_source_session"],
     sessionId: "session-1",
     stateLabel: "Running",
-    title: "Dossier enrichment"
+    title: "Dossier enrichment",
+    ...overrides
   };
 }
 

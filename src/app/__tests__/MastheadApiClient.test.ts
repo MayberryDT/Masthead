@@ -24,6 +24,22 @@ describe("MastheadApiClient", () => {
     expect(calls).toEqual(["http://127.0.0.1:17374/health", "http://127.0.0.1:17374/projection"]);
   });
 
+  test("loads projection with the active refresh interval", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string | URL) => {
+      calls.push(String(url));
+      if (String(url).endsWith("/health")) return jsonResponse(currentHealth);
+      return jsonResponse({ ok: true, source: "live", projection: { cards: [] } });
+    });
+
+    await new MastheadApiClient("http://127.0.0.1:17374/projection").getLiveProjection("session-1", { refreshIntervalMs: 5_000 });
+
+    expect(calls).toEqual([
+      "http://127.0.0.1:17374/health",
+      "http://127.0.0.1:17374/projection?selectedSessionId=session-1&refreshIntervalMs=5000"
+    ]);
+  });
+
   test("rejects legacy health before loading projection", async () => {
     const calls: string[] = [];
     vi.stubGlobal("fetch", async (url: string | URL) => {

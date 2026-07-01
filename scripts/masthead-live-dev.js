@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { removeDaemonOwnershipMetadata, writeDaemonOwnershipMetadata } from "../dist/daemon/src/core/daemonOwnership.js";
 import { buildLiveDevPlan, startReadOnlyConnectorBridge } from "../dist/daemon/src/core/worktreeConnector.js";
 import { classifyDaemonHealth } from "../dist/daemon/src/shared/protocol.js";
+
+loadLocalEnv();
 
 const children = new Set();
 const bridges = new Set();
@@ -37,7 +40,7 @@ try {
       MASTHEAD_ALLOWED_ORIGINS: plan.allowedOrigins,
       MASTHEAD_GIT_REFRESH_MS: process.env.MASTHEAD_GIT_REFRESH_MS ?? "0",
       MASTHEAD_HOOK_TRANSCRIPT_CATCHUP: process.env.MASTHEAD_HOOK_TRANSCRIPT_CATCHUP ?? "0",
-      MASTHEAD_LLM_COPY: process.env.MASTHEAD_LLM_COPY ?? "0",
+      MASTHEAD_LLM_COPY: process.env.MASTHEAD_LLM_COPY ?? (process.env.OPENAI_API_KEY ? "1" : "0"),
       MASTHEAD_SKIP_MIGRATION_QUICK_CHECK: process.env.MASTHEAD_SKIP_MIGRATION_QUICK_CHECK ?? "1",
       MASTHEAD_SKIP_BACKGROUND_HYDRATION: process.env.MASTHEAD_SKIP_BACKGROUND_HYDRATION ?? "1",
       NODE_OPTIONS: process.env.MASTHEAD_DEV_NODE_OPTIONS ?? ""
@@ -95,6 +98,29 @@ function start(label, command, args, extraEnv = {}) {
   });
 
   return child;
+}
+
+function loadLocalEnv() {
+  for (const file of [".env", ".env.local"]) {
+    if (!existsSync(file)) continue;
+    const lines = readFileSync(file, "utf8").split(/\r?\n/);
+    for (const line of lines) {
+      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+      if (!match || process.env[match[1]] !== undefined) continue;
+      process.env[match[1]] = unquoteEnvValue(match[2]);
+    }
+  }
+}
+
+function unquoteEnvValue(value) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
 }
 
 async function waitForHealth(url, timeoutMs) {

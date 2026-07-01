@@ -66,6 +66,8 @@ export function buildBoardLiveCopyFacts(input: {
   conflicts: ConflictCard[];
   maxEvents?: number;
 }): BoardLiveCopyFacts {
+  const project = safeFactLabel(input.card.project);
+  const title = safeFactLabel(input.card.title);
   const recentEvents = input.events
     .toSorted((left, right) => right.occurredAt.localeCompare(left.occurredAt))
     .map(eventSummary)
@@ -89,8 +91,8 @@ export function buildBoardLiveCopyFacts(input: {
     .filter((summary) => !isLowValueLiveCopyText(summary))
     .slice(0, 6);
   const nonEnrichmentEvidence = [
-    input.card.project,
-    input.card.title,
+    project,
+    title,
     input.card.workContext?.label,
     input.card.workContext?.confidence,
     input.card.latestFeedbackSignal?.summary,
@@ -111,14 +113,14 @@ export function buildBoardLiveCopyFacts(input: {
     lifecycle: input.card.lifecycle,
     model: input.card.model,
     primaryStatus: input.card.primaryStatus,
-    project: input.card.project,
+    project,
     recentCommandFailures,
     recentEvents,
     recentFileBasenames,
     recentToolNames,
     runtime: input.card.runtime,
     sessionId: input.card.sessionId,
-    title: input.card.title,
+    title,
     workContext: input.card.workContext
   };
 }
@@ -164,6 +166,21 @@ function safeShortText(value: string): string | undefined {
   if (!cleaned || isLowValueLiveCopyText(cleaned)) return undefined;
   if (isGenericHarnessToolName(cleaned)) return undefined;
   return cleaned.slice(0, 120);
+}
+
+function safeFactLabel(value: string | undefined): string | undefined {
+  const cleaned = value ? safeShortText(value) : undefined;
+  if (!cleaned) return undefined;
+  if (
+    /^https[-_:]/i.test(cleaned) ||
+    /\bhttps?:\/\//i.test(cleaned) ||
+    /[\\/@]/.test(cleaned) ||
+    /\b[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD)[A-Z0-9_]*\b/i.test(cleaned) ||
+    /\bsk-[A-Za-z0-9_-]+\b/i.test(cleaned)
+  ) {
+    return undefined;
+  }
+  return cleaned.length <= 80 ? cleaned : undefined;
 }
 
 function isGenericHarnessToolName(value: string): boolean {
