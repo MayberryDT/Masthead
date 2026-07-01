@@ -40,10 +40,7 @@ import { startLiveConnector } from "./connectorClient";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
 import { ConnectionRecoveryPanel } from "../ui/ConnectionRecoveryPanel";
 import {
-  addSourceExclusion,
   applyDefaultRetention as applyDefaultDataRetention,
-  approveAdapterTranscripts,
-  cancelImport,
   deleteMastheadData as deleteCanonicalMastheadData,
   exportMastheadData,
   getDataSummary,
@@ -52,30 +49,12 @@ import {
   getLogbookSessionExcerpts,
   getSessionDossier,
   getSessionTranscript,
-  getSourcesSetup,
-  listAdapterSources,
   getUsageStats,
-  importAdapterMetadata,
-  importAdapterTranscripts,
   listProjects,
-  listAdapters,
-  listImports,
   listReviewDispositions,
-  listSources,
-  connectSources,
-  retryImport,
-  repairSources,
-  runSourcesSetup,
   saveReviewDisposition,
-  scanSources,
-  scanSourcesSetup,
   searchLogbook,
-  syncAdapter,
-  syncSources,
   type LogbookExcerpt,
-  type AdapterStatus,
-  type ImportJob,
-  type ImportJobPage,
   type LogbookSearchResult,
   type LogbookSessionDetail,
   type LogbookSort,
@@ -84,9 +63,6 @@ import {
   type SessionTranscriptResult,
   type UsageStatsDto,
   type UsageWindow,
-  type SourceStatus,
-  type SourcesSetupDto,
-  type SourcesSetupRunRequest,
   type DataSummary,
   type DeleteMastheadDataScope
 } from "./daemonClient";
@@ -99,8 +75,8 @@ import { SourcesSurface } from "./surfaces/SourcesSurface";
 import { UsageSurface } from "./surfaces/UsageSurface";
 import { UsagePanel } from "../ui/usage/UsagePanel";
 import { APP_VERSION_LABEL } from "./version";
-import { shouldRefreshSourceInventory } from "./sourceInventoryRefresh";
 import type { ConnectionState } from "../ui/ConnectionStatus";
+import { useSourcesController } from "./sources/useSourcesController";
 import {
   logbookPageSearchFilters,
   readCachedLogbookPage,
@@ -116,7 +92,6 @@ type ConnectorActionState =
   | { state: "error"; message?: string };
 
 type CardLayoutSnapshot = Map<string, DOMRect>;
-type ImportPageState = Pick<ImportJobPage, "limit" | "offset" | "total">;
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
@@ -142,19 +117,6 @@ const emptyLiveBoard: LiveBoardProjection = {
   attentionQueue: [],
   conflicts: []
 };
-
-function isActiveImport(job: ImportJob): boolean {
-  return job.status === "queued" || job.status === "running" || job.status === "cancelling";
-}
-
-function mergeImportRows(activeImports: ImportJob[], historyImports: ImportJob[]): ImportJob[] {
-  const rows = new Map<string, ImportJob>();
-  for (const job of [...activeImports, ...historyImports]) {
-    if (!rows.has(job.importJobId)) rows.set(job.importJobId, job);
-  }
-  return Array.from(rows.values());
-}
-
 
 export function App() {
   const [activeSurface, setActiveSurface] = useState<AppSurface>("now");
@@ -189,18 +151,47 @@ export function App() {
   const activeProjectionUrl = connection.baseUrl;
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
-  const [sources, setSources] = useState<SourceStatus[]>([]);
-  const [adapters, setAdapters] = useState<AdapterStatus[]>([]);
-  const [imports, setImports] = useState<ImportJob[]>([]);
-  const [sourcesSetup, setSourcesSetup] = useState<SourcesSetupDto>();
-  const [importPage, setImportPage] = useState<ImportPageState>({ limit: 50, offset: 0, total: 0 });
-  const [sourcesBusy, setSourcesBusy] = useState(false);
-  const [sourcesStatus, setSourcesStatus] = useState<string>();
   const [logbookResult, setLogbookResult] = useState<LogbookSearchResult>();
   const [logbookSummary, setLogbookSummary] = useState<LogbookSummary>();
   const [logbookLoading, setLogbookLoading] = useState(false);
   const [logbookError, setLogbookError] = useState<string>();
   const [logbookRetryKey, setLogbookRetryKey] = useState(0);
+  const handleSourceLibraryChanged = useCallback(() => setLogbookRetryKey((current) => current + 1), []);
+  const sourcesController = useSourcesController({
+    activeProjectionUrl,
+    activeSurface,
+    isLive:
+      connection.state.state !== "offline" &&
+      connection.state.state !== "incompatible" &&
+      connection.state.state !== "probing" &&
+      liveConnection.state === "live",
+    onLibraryChanged: handleSourceLibraryChanged
+  });
+  const {
+    adapters,
+    busy: sourcesBusy,
+    cancel: handleCancelImport,
+    connectSelected: handleConnectSelectedSources,
+    enableTranscriptImport: handleEnableTranscriptImport,
+    excludePath: handleExcludeSourcePath,
+    importMetadata: handleImportMetadata,
+    importPage,
+    importTranscripts: handleImportTranscripts,
+    imports,
+    loadAdapterSources: handleLoadAdapterSources,
+    pollActiveImports: handlePollActiveImports,
+    refreshSources: handleRefreshSources,
+    repair: handleRepairSources,
+    retry: handleRetryImport,
+    runSetup: handleRunSourcesSetup,
+    scan: handleScanSources,
+    scanSetup: handleScanSourcesSetup,
+    setup: sourcesSetup,
+    sources,
+    status: sourcesStatus,
+    syncAll: handleSyncSources,
+    syncRuntime: handleSyncAdapter
+  } = sourcesController;
   const [logbookSort, setLogbookSort] = useState<LogbookSort>("recent");
   const [logbookPageIndex, setLogbookPageIndex] = useState(0);
   const [usageWindow, setUsageWindow] = useState<UsageWindow>("today");
@@ -210,9 +201,6 @@ export function App() {
   const [sidebarUsageStats, setSidebarUsageStats] = useState<UsageStatsDto>();
   const [sidebarUsageLoading, setSidebarUsageLoading] = useState(false);
   const [sidebarUsageError, setSidebarUsageError] = useState<string>();
-  const sourceInventoryLoadedAtRef = useRef<number | undefined>(undefined);
-  const sourceInventoryLoadedForUrlRef = useRef<string | undefined>(undefined);
-  const sourceInventoryLoadInFlightRef = useRef(false);
   const logbookPageCacheRef = useRef(new Map<string, LogbookSearchResult>());
   const [logbookProjectOptions, setLogbookProjectOptions] = useState<string[]>([]);
   const [logbookFilters, setLogbookFilters] = useState<LogbookFilterState>({});
@@ -619,117 +607,6 @@ export function App() {
     }
   };
 
-  const loadSourceInventory = useCallback(async (options: { showStatus?: boolean } = {}) => {
-    sourceInventoryLoadInFlightRef.current = true;
-    try {
-      const importLimit = importPage.limit;
-      const [setupResult, adapterResult, sourceResult, importResult, activeImportResult] = await Promise.allSettled([
-        getSourcesSetup(activeProjectionUrl),
-        listAdapters(activeProjectionUrl, { includeLocations: false }),
-        listSources(activeProjectionUrl),
-        listImports(activeProjectionUrl, { limit: importLimit, offset: 0 }),
-        listImports(activeProjectionUrl, { limit: 50, offset: 0, status: "active" })
-      ]);
-      if (setupResult.status === "fulfilled") setSourcesSetup(setupResult.value);
-      if (adapterResult.status === "fulfilled") setAdapters(adapterResult.value);
-      if (sourceResult.status === "fulfilled") setSources(sourceResult.value);
-      if (importResult.status === "fulfilled") {
-        const activeImports = activeImportResult.status === "fulfilled" ? activeImportResult.value.imports : [];
-        setImports(mergeImportRows(activeImports, importResult.value.imports));
-        setImportPage({
-          limit: importResult.value.limit,
-          offset: importResult.value.offset,
-          total: Math.max(importResult.value.total, activeImports.length + importResult.value.imports.length)
-        });
-      }
-      if (setupResult.status === "rejected" && sourceResult.status === "rejected" && adapterResult.status === "rejected" && importResult.status === "rejected") {
-        throw sourceResult.reason;
-      }
-      if (setupResult.status === "fulfilled" || adapterResult.status === "fulfilled" || sourceResult.status === "fulfilled" || importResult.status === "fulfilled") {
-        sourceInventoryLoadedAtRef.current = Date.now();
-        sourceInventoryLoadedForUrlRef.current = activeProjectionUrl;
-      }
-      if (options.showStatus && sourceResult.status === "fulfilled") {
-        setSourcesStatus(`${sourceResult.value.length} source${sourceResult.value.length === 1 ? "" : "s"} detected.`);
-      }
-      return {
-        adapters: adapterResult.status === "fulfilled" ? adapterResult.value : undefined,
-        imports:
-          importResult.status === "fulfilled"
-            ? mergeImportRows(activeImportResult.status === "fulfilled" ? activeImportResult.value.imports : [], importResult.value.imports)
-            : undefined,
-        setup: setupResult.status === "fulfilled" ? setupResult.value : undefined,
-        sources: sourceResult.status === "fulfilled" ? sourceResult.value : undefined
-      };
-    } finally {
-      sourceInventoryLoadInFlightRef.current = false;
-    }
-  }, [activeProjectionUrl, importPage.limit]);
-
-  const handleRefreshSources = useCallback(async () => {
-    setSourcesBusy(true);
-    try {
-      await loadSourceInventory({ showStatus: true });
-    } catch (error) {
-      setSourcesStatus(`Source refresh failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  }, [loadSourceInventory]);
-
-  const handleLoadAdapterSources = useCallback(async (runtime: string, page: { limit: number; offset: number }) => {
-    return listAdapterSources(runtime, activeProjectionUrl, page);
-  }, [activeProjectionUrl]);
-
-  const handleScanSources = useCallback(async () => {
-    setSourcesBusy(true);
-    setSourcesStatus("Scanning known local agent history locations...");
-    try {
-      const scan = await scanSources(activeProjectionUrl);
-      const detected = scan.adapters.filter((adapter) => adapter.state === "connected" || adapter.state === "degraded").length;
-      setSourcesStatus(`Scan complete: ${detected} adapter${detected === 1 ? "" : "s"} detected across known locations.`);
-      await loadSourceInventory();
-    } catch (error) {
-      setSourcesStatus(`Source scan failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  }, [activeProjectionUrl, loadSourceInventory]);
-
-  const handleScanSourcesSetup = useCallback(async () => {
-    setSourcesBusy(true);
-    setSourcesStatus("Scanning known local agent history locations...");
-    try {
-      const result = await scanSourcesSetup(activeProjectionUrl);
-      setSourcesSetup(result.setup);
-      const scan = result.scan ?? result.setup.latestScan ?? result.setup.scan;
-      const found = scan?.foundSources.filter((source) => source.importable === true || source.state === "importable").length ?? 0;
-      setSourcesStatus(`Scan complete: ${found} importable source${found === 1 ? "" : "s"} found.`);
-      await loadSourceInventory();
-      return scan;
-    } catch (error) {
-      setSourcesStatus(`Source setup scan failed: ${error instanceof Error ? error.message : String(error)}`);
-      return undefined;
-    } finally {
-      setSourcesBusy(false);
-    }
-  }, [activeProjectionUrl, loadSourceInventory]);
-
-  useEffect(() => {
-    if (effectiveLiveConnection.state !== "live") return;
-    void loadSourceInventory().catch((error: unknown) => {
-      console.error("[masthead] Source inventory refresh failed", error);
-    });
-  }, [effectiveLiveConnection.state, loadSourceInventory]);
-
-  useEffect(() => {
-    if (activeSurface !== "sources") return;
-    if (sourceInventoryLoadInFlightRef.current) return;
-    const lastLoadedAt = sourceInventoryLoadedForUrlRef.current === activeProjectionUrl ? sourceInventoryLoadedAtRef.current : undefined;
-    if (!shouldRefreshSourceInventory({ activeSurface, lastLoadedAt, now: Date.now() })) return;
-    void handleRefreshSources();
-  }, [activeProjectionUrl, activeSurface, handleRefreshSources]);
-
   useEffect(() => {
     if (activeSurface !== "logbook" || effectiveLiveConnection.state !== "live") return;
     const cachedResult = readCachedLogbookPage(logbookPageCacheRef.current, logbookPageRequest);
@@ -879,213 +756,6 @@ export function App() {
     selectedLogbookTranscriptDebouncedQuery,
     selectedLogbookTranscriptFilter
   ]);
-
-  const handlePollActiveImports = useCallback(async () => {
-    const activeImportIds = new Set(
-      imports.filter((job) => job.status === "queued" || job.status === "running").map((job) => job.importJobId)
-    );
-    try {
-      const result = await loadSourceInventory();
-      if (result.imports?.some((job) => activeImportIds.has(job.importJobId) && job.status === "succeeded")) {
-        setLogbookRetryKey((current) => current + 1);
-      }
-    } catch (error) {
-      console.error("[masthead] Active import poll failed", error);
-    }
-  }, [imports, loadSourceInventory]);
-
-  const refreshSourcesAfterImportAction = async () => {
-    await loadSourceInventory();
-    setLogbookRetryKey((current) => current + 1);
-  };
-
-  const importActionStatus = (
-    label: string,
-    result: { imported?: number; importJobId?: string; job?: ImportJob; jobs?: ImportJob[]; queued?: number; sources?: number }
-  ) => {
-    const queued = result.queued ?? result.jobs?.length ?? (result.job || result.importJobId ? 1 : 0);
-    const sourcesCount = result.sources ?? result.jobs?.length ?? (result.job || result.importJobId ? 1 : 0);
-    if (queued > 0) return `${label} queued: ${queued} job${queued === 1 ? "" : "s"} across ${sourcesCount} source${sourcesCount === 1 ? "" : "s"}.`;
-    if (typeof result.imported === "number") return `${label} complete: ${result.imported} records from ${sourcesCount} source${sourcesCount === 1 ? "" : "s"}.`;
-    return `${label} requested.`;
-  };
-
-  const handleImportMetadata = async (runtime: string) => {
-    setSourcesBusy(true);
-    setSourcesStatus(`Importing ${runtime} metadata...`);
-    try {
-      const result = await importAdapterMetadata(runtime, activeProjectionUrl);
-      setSourcesStatus(importActionStatus("Metadata import", result));
-      await refreshSourcesAfterImportAction();
-    } catch (error) {
-      setSourcesStatus(`Metadata import failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
-
-  const handleEnableTranscriptImport = async (runtime: string) => {
-    setSourcesBusy(true);
-    setSourcesStatus(`Enabling ${runtime} transcript import...`);
-    try {
-      await approveAdapterTranscripts(runtime, activeProjectionUrl);
-      setSourcesStatus("Transcript import enabled. Review exclusions before importing raw transcripts.");
-      await refreshSourcesAfterImportAction();
-    } catch (error) {
-      setSourcesStatus(`Transcript import approval failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
-
-  const handleImportTranscripts = async (runtime: string) => {
-    setSourcesBusy(true);
-    setSourcesStatus(`Importing ${runtime} transcripts...`);
-    try {
-      const result = await importAdapterTranscripts(runtime, activeProjectionUrl);
-      setSourcesStatus(importActionStatus("Transcript import", result));
-      await refreshSourcesAfterImportAction();
-    } catch (error) {
-      setSourcesStatus(`Transcript import failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
-
-  const handleSyncAdapter = async (runtime: string) => {
-    setSourcesBusy(true);
-    setSourcesStatus(`Syncing ${runtime} source data...`);
-    try {
-      const result = await syncAdapter(runtime, activeProjectionUrl);
-      setSourcesStatus(importActionStatus("Sync", result));
-      await refreshSourcesAfterImportAction();
-    } catch (error) {
-      setSourcesStatus(`Sync failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
-
-  const handleConnectSelectedSources = async (runtimes: string[]) => {
-    setSourcesBusy(true);
-    setSourcesStatus(`Connecting ${runtimes.length} selected adapter${runtimes.length === 1 ? "" : "s"}...`);
-    try {
-      const result = await connectSources(
-        {
-          importMetadata: true,
-          importTranscripts: false,
-          queueEnrichment: true,
-          runtimes
-        },
-        activeProjectionUrl
-      );
-      const skipped = result.skipped?.length ?? 0;
-      setSourcesStatus(
-        `Connect selected queued ${result.jobs.length} job${result.jobs.length === 1 ? "" : "s"}${skipped ? `; ${skipped} adapter${skipped === 1 ? "" : "s"} skipped.` : "."}`
-      );
-      await refreshSourcesAfterImportAction();
-    } catch (error) {
-      setSourcesStatus(`Connect selected failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
-
-  const handleRunSourcesSetup = async (input: SourcesSetupRunRequest) => {
-    setSourcesBusy(true);
-    setSourcesStatus("Building session library...");
-    try {
-      const result = await runSourcesSetup(input, activeProjectionUrl);
-      setSourcesSetup(result.setup);
-      setSourcesStatus(importActionStatus("Session library build", result));
-      await refreshSourcesAfterImportAction();
-    } catch (error) {
-      setSourcesStatus(`Session library build failed: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
-
-  const handleSyncSources = async () => {
-    setSourcesBusy(true);
-    setSourcesStatus("Syncing connected sources...");
-    try {
-      const result = await syncSources(activeProjectionUrl);
-      setSourcesSetup(result.setup);
-      setSourcesStatus(importActionStatus("Sources sync", result));
-      await refreshSourcesAfterImportAction();
-    } catch (error) {
-      setSourcesStatus(`Sources sync failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
-
-  const handleRepairSources = async () => {
-    setSourcesBusy(true);
-    setSourcesStatus("Repairing missing source data...");
-    try {
-      const result = await repairSources(activeProjectionUrl);
-      setSourcesSetup(result.setup);
-      setSourcesStatus(result.repairs?.length ? `Repair queued: ${result.repairs.length} repair action${result.repairs.length === 1 ? "" : "s"}.` : importActionStatus("Repair", result));
-      await refreshSourcesAfterImportAction();
-    } catch (error) {
-      setSourcesStatus(`Repair failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
-
-  const handleCancelImport = async (importJobId: string) => {
-    setSourcesBusy(true);
-    setSourcesStatus("Cancelling import job...");
-    try {
-      await cancelImport(importJobId, activeProjectionUrl);
-      setSourcesStatus("Import job cancelled.");
-      await refreshSourcesAfterImportAction();
-    } catch (error) {
-      setSourcesStatus(`Import cancel failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
-
-  const handleRetryImport = async (importJobId: string) => {
-    setSourcesBusy(true);
-    setSourcesStatus("Retrying import job...");
-    try {
-      await retryImport(importJobId, activeProjectionUrl);
-      setSourcesStatus("Import job retry queued.");
-      await refreshSourcesAfterImportAction();
-    } catch (error) {
-      setSourcesStatus(`Import retry failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
-
-  const handleExcludeSourcePath = async (path: string) => {
-    setSourcesBusy(true);
-    try {
-      await addSourceExclusion(
-        {
-          exclusionKind: "path",
-          pattern: path,
-          reason: "Excluded from full transcript ingestion."
-        },
-        activeProjectionUrl
-      );
-      setSourcesStatus("Source exclusion saved.");
-      const [nextAdapters, nextSources] = await Promise.all([listAdapters(activeProjectionUrl), listSources(activeProjectionUrl)]);
-      setAdapters(nextAdapters);
-      setSources(nextSources);
-    } catch (error) {
-      setSourcesStatus(`Source exclusion failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setSourcesBusy(false);
-    }
-  };
 
   const handleExportLocalData = async () => {
     setLocalDataStatus({ state: "busy", message: "Preparing local export..." });
