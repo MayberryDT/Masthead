@@ -5,7 +5,13 @@ import { afterEach, describe, expect, test } from "vitest";
 import { getImportJob } from "../../db/importJobRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
-import { markInterruptedImportJobs, queueImportJob, type ImportJobControls, type ImportWorkResult } from "../importCoordinator.ts";
+import {
+  deriveImportVisibilityState,
+  markInterruptedImportJobs,
+  queueImportJob,
+  type ImportJobControls,
+  type ImportWorkResult
+} from "../importCoordinator.ts";
 
 const tempDirs: string[] = [];
 
@@ -121,6 +127,74 @@ describe("import coordinator", () => {
       status: "failed"
     });
     db.close();
+  });
+
+  test("updates heartbeat and stage while a job runs", async () => {
+    const db = await openTestDatabase();
+    seedSource(db);
+    let resolveWorker: (value: ImportWorkResult) => void = () => undefined;
+    const worker = new Promise<ImportWorkResult>((resolve) => {
+      resolveWorker = resolve;
+    });
+
+    const job = queueImportJob(db, { importKind: "metadata", sourceId: "codex-sessions", now: fixedNow }, (controls) => {
+      controls.updateProgress({
+        currentPath: "/tmp/session_index.jsonl",
+        heartbeatAt: "2026-07-01T00:00:05.000Z",
+        importedCount: 1,
+        processedCount: 1,
+        stage: "metadata"
+      });
+      return worker;
+    });
+
+    await flushMicrotasks();
+    expect(getImportJob(db, job.importJobId)).toMatchObject({
+      currentPath: "/tmp/session_index.jsonl",
+      heartbeatAt: "2026-07-01T00:00:05.000Z",
+      importedCount: 1,
+      processedCount: 1,
+      stage: "metadata",
+      status: "running"
+    });
+
+    resolveWorker({ discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 });
+    await waitForJobStatus(db, job.importJobId, "succeeded");
+    expect(getImportJob(db, job.importJobId)).toMatchObject({
+      currentPath: undefined,
+      heartbeatAt: fixedNow(),
+      importedCount: 1,
+      stage: "completion",
+      status: "succeeded"
+    });
+    db.close();
+  });
+
+  test("marks parent job succeeded_with_issues when useful records and failures both occurred", async () => {
+    const db = await openTestDatabase();
+    seedSource(db);
+
+    const job = queueImportJob(db, { importKind: "transcript", sourceId: "codex-sessions", now: fixedNow }, async () => ({
+      discoveredCount: 10,
+      failureCount: 2,
+      importedCount: 8,
+      processedCount: 10,
+      queuedCount: 0
+    }));
+
+    await waitForJobStatus(db, job.importJobId, "succeeded_with_issues");
+    expect(getImportJob(db, job.importJobId)?.status).toBe("succeeded_with_issues");
+    db.close();
+  });
+
+  test("derives stalled state from stale running job heartbeat", () => {
+    expect(
+      deriveImportVisibilityState(
+        { heartbeatAt: "2026-07-01T00:00:00.000Z", status: "running", updatedAt: "2026-07-01T00:00:00.000Z" },
+        new Date("2026-07-01T00:01:00.000Z").getTime(),
+        30_000
+      )
+    ).toBe("stalled");
   });
 });
 

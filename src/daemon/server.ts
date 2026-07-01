@@ -27,7 +27,15 @@ import {
   getDataSummary,
   type DeleteMastheadDataScope
 } from "./db/dataLifecycleRepository.ts";
-import { getImportJob, listImportJobPage, listImportJobs, type ImportJobKind, type ImportJobListStatus } from "./db/importJobRepository.ts";
+import {
+  getImportJob,
+  listImportJobPage,
+  listImportJobs,
+  updateImportJob,
+  type ImportJobKind,
+  type ImportJobListStatus
+} from "./db/importJobRepository.ts";
+import { listImportFailureGroups, listImportWorkUnits } from "./db/importLedgerRepository.ts";
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
@@ -60,13 +68,18 @@ import {
   type ImportJobControls,
   type ImportWorkResult
 } from "./import/importCoordinator.ts";
+import { buildImportCompletionReport } from "./import/importCompletionReport.ts";
+import { buildImportManifestPlan, createManifestForJob } from "./import/importManifestService.ts";
+import { getRuntimePolicy, setRuntimePolicy } from "./import/runtimePolicyRepository.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
+import { runImportWorkUnit } from "./import/importWorkUnitRunner.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { recordRequestDiagnostic, recordRuntimeDiagnostic, runtimeDiagnosticsSnapshot } from "./diagnostics.ts";
 import { discoverSourceSnapshot, type SourceDiscoverySnapshot } from "./sources/sourceDiscoveryService.ts";
 import { scanLocalSources, type SourceScanResult } from "./sources/sourceScanService.ts";
 import { connectSelectedSources, type ConnectSourcesRequest } from "./sources/sourceConnectService.ts";
 import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/sourceSetupService.ts";
+import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { buildMastheadHealth } from "./healthService.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
@@ -606,9 +619,121 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return result;
   }
 
+  async function importTranscriptSourcesWithLedger(
+    sources: DiscoveredSource[],
+    controls: ImportJobControls,
+    scope: ImportScopeDto = defaultTranscriptImportScope()
+  ): Promise<ImportWorkResult> {
+    const result = emptyImportResult();
+    const runtime = sources[0]?.runtime ?? "codex";
+    const transcriptFiles = (
+      await Promise.all(sources.map((source) => transcriptSources(source)))
+    ).flat().filter((source) => !source.path || !sourceIsExcluded(database, source.path));
+    const cursors = readCursorsForSources(transcriptFiles);
+    controls.updateProgress({
+      currentPath: sources[0]?.path ?? sources[0]?.sourceId ?? runtime,
+      heartbeatAt: new Date().toISOString(),
+      stage: "manifest"
+    });
+    const manifest = await createManifestForJob(database, {
+      cursors,
+      generatedAt: new Date().toISOString(),
+      importJobId: controls.importJobId,
+      importKind: "transcript",
+      runtime,
+      scope,
+      sourceId: sources[0]?.sourceId,
+      sources: transcriptFiles
+    });
+    controls.updateProgress({
+      stage: "transcript",
+      totalWorkUnits: manifest.units.length,
+      skippedWorkUnits: manifest.units.filter((unit) => unit.status === "skipped").length
+    });
+
+    for (const unit of manifest.units) {
+      controls.throwIfCancelled();
+      if (unit.status === "skipped") {
+        result.queuedCount += 1;
+        continue;
+      }
+      controls.updateProgress({
+        currentPath: unit.sourcePath ?? unit.sourceSessionId ?? unit.workUnitId,
+        heartbeatAt: new Date().toISOString(),
+        stage: "transcript",
+        totalWorkUnits: manifest.units.length
+      });
+      const adapter = adapterForRuntime(unit.runtime);
+      if (!adapter) throw new Error(`No adapter for runtime ${unit.runtime}`);
+      const unitResult = await runImportWorkUnit({
+        adapterBackfill: (source) => adapter.backfill(source, source.path ? readCursor(database, source.sourceId, source.path) : undefined),
+        db: database,
+        hostId: `host:${config.host}`,
+        hostname: config.host,
+        now: () => new Date().toISOString(),
+        onSessionImported: (sessionId) => queueSessionEnrichment(sessionId),
+        runtimeKind: unit.runtime,
+        workUnitId: unit.workUnitId
+      });
+      result.discoveredCount += unit.estimatedRecords ?? unitResult.processed;
+      result.processedCount += unitResult.processed;
+      result.importedCount += unitResult.imported;
+      result.failureCount += unitResult.failed;
+      if (unit.sourcePath) await updateCursorAfterWorkUnit(unit);
+      controls.updateProgress({
+        completedWorkUnits: listImportWorkUnits(database, { manifestId: unit.manifestId, status: "succeeded", limit: 100_000 }).length,
+        currentPath: unit.sourcePath ?? unit.sourceSessionId ?? unit.workUnitId,
+        failedWorkUnits: listImportWorkUnits(database, { manifestId: unit.manifestId, status: "failed", limit: 100_000 }).length,
+        failureCount: result.failureCount,
+        heartbeatAt: new Date().toISOString(),
+        importedCount: result.importedCount,
+        processedCount: result.processedCount,
+        skippedWorkUnits: listImportWorkUnits(database, { manifestId: unit.manifestId, status: "skipped", limit: 100_000 }).length,
+        stage: "transcript"
+      });
+    }
+
+    const failedUnits = listImportWorkUnits(database, { importJobId: controls.importJobId, status: "failed", limit: 100_000 }).length;
+    const skippedUnits = listImportWorkUnits(database, { importJobId: controls.importJobId, status: "skipped", limit: 100_000 }).length;
+    const report = buildImportCompletionReport(database, {
+      failedUnits,
+      generatedAt: new Date().toISOString(),
+      importJobId: controls.importJobId,
+      recordsFailed: result.failureCount,
+      recordsImported: result.importedCount,
+      recordsSkipped: result.queuedCount,
+      runtime,
+      skippedUnits,
+      status: result.failureCount > 0 && result.importedCount > 0 ? "succeeded_with_issues" : "succeeded",
+      transcriptsImported: result.importedCount
+    });
+    updateImportJob(database, controls.importJobId, {
+      completionReport: report,
+      summary: {
+        failureGroups: listImportFailureGroups(database, controls.importJobId),
+        manifest: manifest.summary
+      },
+      updatedAt: new Date().toISOString()
+    });
+    return result;
+  }
+
   function runImportWorkerForSource(importKind: ImportJobKind, source: DiscoveredSource, controls: ImportJobControls): Promise<ImportWorkResult> {
     if (importKind === "metadata") return importMetadataSources([source], controls);
-    if (importKind === "transcript") return importTranscriptSources([source], controls);
+    if (importKind === "transcript") return importTranscriptSourcesWithLedger([source], controls);
+    return Promise.resolve(emptyImportResult());
+  }
+
+  async function runImportWorkerForRuntime(
+    importKind: ImportJobKind,
+    runtime: RuntimeKind,
+    controls: ImportJobControls,
+    scope: ImportScopeDto = defaultTranscriptImportScope()
+  ): Promise<ImportWorkResult> {
+    const sources = latestScan?.adapters.find((adapter) => adapter.runtime === runtime)?.sources ??
+      (await discoverAllSourcesAndPersist()).filter((source) => source.runtime === runtime);
+    if (importKind === "metadata") return importMetadataSources(sources, controls);
+    if (importKind === "transcript") return importTranscriptSourcesWithLedger(sources, controls, scope);
     return Promise.resolve(emptyImportResult());
   }
 
@@ -621,7 +746,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   async function queueAdapterTranscriptImports(runtime?: string): Promise<{ jobs: ReturnType<typeof queueImportJob>[]; sources: number }> {
-    if (!transcriptImportApproved(database)) {
+    if (runtime && isRuntimeKind(runtime) ? !transcriptImportApprovedForRuntime(runtime) : !transcriptImportApproved(database)) {
       throw clientError("Transcript import requires persisted source review approval.");
     }
     const sources = (await discoverAllSourcesAndPersist()).filter((source) => !runtime || source.runtime === runtime);
@@ -670,10 +795,61 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
   }
 
-  function approveTranscriptImports(): void {
+  function approveTranscriptImports(runtime?: RuntimeKind): void {
     approveTranscriptImport(database, {
       approvedAt: new Date().toISOString(),
       reason: "Source exclusions reviewed before transcript ingestion."
+    });
+    if (runtime) {
+      setRuntimePolicy(database, {
+        decidedAt: new Date().toISOString(),
+        enabled: true,
+        policyKind: "transcript_import",
+        reason: "Coding harness transcript import approved.",
+        runtime
+      });
+    }
+  }
+
+  function transcriptImportApprovedForRuntime(runtime: RuntimeKind): boolean {
+    return getRuntimePolicy(database, runtime, "transcript_import") || transcriptImportApproved(database);
+  }
+
+  function defaultTranscriptImportScope(): ImportScopeDto {
+    return { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 };
+  }
+
+  function importScopeFromBody(body: Record<string, unknown>): ImportScopeDto {
+    const candidate = objectRecord(body.importScope);
+    const mode = typeof candidate.mode === "string" ? candidate.mode : undefined;
+    return {
+      days: typeof candidate.days === "number" && candidate.days > 0 ? candidate.days : 30,
+      includeChangedSinceCursor: candidate.includeChangedSinceCursor !== false,
+      mode: mode === "metadata_all" || mode === "transcript_full" || mode === "enrichment_missing" ? mode : "transcript_recent",
+      unitLimit: typeof candidate.unitLimit === "number" && candidate.unitLimit >= 0 ? candidate.unitLimit : 500
+    };
+  }
+
+  function readCursorsForSources(sources: DiscoveredSource[]): Map<string, NonNullable<ReturnType<typeof readCursor>>> {
+    const cursors = new Map<string, NonNullable<ReturnType<typeof readCursor>>>();
+    for (const source of sources) {
+      const cursor = source.path ? readCursor(database, source.sourceId, source.path) : readCursor(database, source.sourceId);
+      if (!cursor) continue;
+      cursors.set(source.sourceId, cursor);
+      if (source.path) cursors.set(source.path, cursor);
+    }
+    return cursors;
+  }
+
+  async function updateCursorAfterWorkUnit(unit: { sourceId: string; sourcePath?: string }): Promise<void> {
+    if (!unit.sourcePath) return;
+    const info = await stat(unit.sourcePath);
+    upsertCursor(database, {
+      byteOffset: info.size,
+      contentFingerprint: `${info.size}:${Math.trunc(info.mtimeMs)}`,
+      modifiedAt: info.mtime.toISOString(),
+      sourceId: unit.sourceId,
+      sourcePath: unit.sourcePath
     });
   }
 
@@ -984,13 +1160,53 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/sources/import/preview") {
+      try {
+        const scan = latestScan ?? (await scanSourcesAndPersist());
+        const body = objectRecord(await optionalJsonBody(request));
+        const runtimes = setupRuntimesFromBody(body, scan);
+        const scope = importScopeFromBody(body);
+        const generatedAt = new Date().toISOString();
+        const previews = [];
+        for (const runtime of runtimes) {
+          const sources = scan.adapters.find((adapter) => adapter.runtime === runtime)?.sources ?? [];
+          const transcriptFiles = (await Promise.all(sources.map((source) => transcriptSources(source)))).flat();
+          const summary = await buildImportManifestPlan({
+            cursors: readCursorsForSources(transcriptFiles),
+            generatedAt,
+            importJobId: `preview:${runtime}:${generatedAt}`,
+            importKind: "transcript",
+            runtime,
+            scope,
+            sourceId: sources[0]?.sourceId,
+            sources: transcriptFiles
+          });
+          previews.push({ runtime, summary: summary.summary });
+        }
+        sendJson(request, response, config.allowedOrigins, 200, {
+          ok: true,
+          previews
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/sources/setup/run") {
       try {
         const scan = latestScan ?? (await scanSourcesAndPersist());
         const body = objectRecord(await optionalJsonBody(request));
         const runtimes = setupRuntimesFromBody(body, scan);
+        const importScope = importScopeFromBody(body);
         const importTranscripts = body.importTranscripts === true;
-        if (importTranscripts && body.transcriptApproved !== true && !transcriptImportApproved(database)) {
+        if (importTranscripts && body.transcriptApproved === true) {
+          for (const runtime of runtimes) approveTranscriptImports(runtime);
+        }
+        if (importTranscripts && !runtimes.every((runtime) => transcriptImportApprovedForRuntime(runtime))) {
           sendJson(request, response, config.allowedOrigins, 409, {
             ok: false,
             error: "Transcript import requires explicit source review approval."
@@ -1003,14 +1219,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           {
             importMetadata: body.importMetadata !== false,
             importTranscripts,
+            importScope,
             queueEnrichment: body.queueEnrichment === true,
             runtimes,
             transcriptApproved: body.transcriptApproved === true
           },
-          async (kind, sourceId, controls) => {
-            const source = await sourceById(sourceId);
-            if (!source) throw new Error(`Unknown source: ${sourceId}`);
-            return runImportWorkerForSource(kind, source, controls);
+          async (kind, runtime, controls) => {
+            return runImportWorkerForRuntime(kind, runtime, controls, importScope);
           }
         );
         sendJson(request, response, config.allowedOrigins, 202, {
@@ -1369,6 +1584,46 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    const importUnitsMatch = url.pathname.match(/^\/imports\/([^/]+)\/units$/);
+    if (request.method === "GET" && importUnitsMatch?.[1]) {
+      const limit = parseBoundedInteger(url.searchParams.get("limit"), 100, 1, 500);
+      const offset = parseBoundedInteger(url.searchParams.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
+      const status = url.searchParams.get("status");
+      if (!limit.ok || !offset.ok) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: "invalid_pagination"
+        });
+        return;
+      }
+      const units = listImportWorkUnits(database, {
+        importJobId: importUnitsMatch[1],
+        limit: limit.value,
+        offset: offset.value,
+        status: isImportWorkUnitStatus(status) ? status : undefined
+      });
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        limit: limit.value,
+        offset: offset.value,
+        units
+      });
+      return;
+    }
+
+    const importReportMatch = url.pathname.match(/^\/imports\/([^/]+)\/report$/);
+    if (request.method === "GET" && importReportMatch?.[1]) {
+      const job = getImportJob(database, importReportMatch[1]);
+      sendJson(
+        request,
+        response,
+        config.allowedOrigins,
+        job ? 200 : 404,
+        job ? { ok: true, report: job.completionReport } : { ok: false, error: "import not found" }
+      );
+      return;
+    }
+
     const importMatch = url.pathname.match(/^\/imports\/([^/]+)(?:\/(cancel|retry))?$/);
     if (request.method === "GET" && importMatch?.[1] && !importMatch[2]) {
       const job = getImportJob(database, importMatch[1]);
@@ -1382,7 +1637,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         if (!body.sourceId || !isImportJobKind(body.kind)) throw new Error("sourceId and kind are required");
         const source = await sourceById(body.sourceId);
         if (!source) throw new Error(`Unknown source: ${body.sourceId}`);
-        if (body.kind === "transcript" && !transcriptImportApproved(database)) {
+        if (body.kind === "transcript" && !transcriptImportApprovedForRuntime(source.runtime)) {
           sendJson(request, response, config.allowedOrigins, 409, {
             ok: false,
             error: "Transcript import requires persisted source review approval."
@@ -1463,17 +1718,18 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       try {
         const body = JSON.parse(await readBody(request)) as ConnectSourcesRequest;
         const scan = latestScan ?? (await scanSourcesAndPersist());
-        if (body.importTranscripts && !body.transcriptApproved && !transcriptImportApproved(database)) {
+        if (body.importTranscripts && body.transcriptApproved) {
+          for (const runtime of body.runtimes) if (isRuntimeKind(runtime)) approveTranscriptImports(runtime);
+        }
+        if (body.importTranscripts && !body.runtimes.every((runtime) => isRuntimeKind(runtime) && transcriptImportApprovedForRuntime(runtime))) {
           sendJson(request, response, config.allowedOrigins, 409, {
             ok: false,
             error: "Transcript import requires explicit source review approval."
           });
           return;
         }
-        const result = connectSelectedSources(database, scan, body, async (kind, sourceId, controls) => {
-          const source = await sourceById(sourceId);
-          if (!source) throw new Error(`Unknown source: ${sourceId}`);
-          return runImportWorkerForSource(kind, source, controls);
+        const result = connectSelectedSources(database, scan, body, async (kind, runtime, controls) => {
+          return runImportWorkerForRuntime(kind, runtime, controls, body.importScope ?? defaultTranscriptImportScope());
         });
         recordRuntimeDiagnostic({
           details: {
@@ -1684,7 +1940,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
       const action = adapterImportMatch[2];
       if (action === "approve-transcripts") {
-        approveTranscriptImports();
+        approveTranscriptImports(runtime);
         sendJson(request, response, config.allowedOrigins, 202, { ok: true });
         return;
       }
@@ -1700,7 +1956,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         return;
       }
       if (action === "import-transcripts") {
-        if (!transcriptImportApproved(database)) {
+        if (!transcriptImportApprovedForRuntime(runtime)) {
           sendJson(request, response, config.allowedOrigins, 409, {
             ok: false,
             error: "Transcript import requires persisted source review approval."
@@ -1719,7 +1975,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         return;
       }
       const metadata = await queueAdapterMetadataImports(runtime);
-      const transcriptsApproved = transcriptImportApproved(database);
+      const transcriptsApproved = transcriptImportApprovedForRuntime(runtime);
       const transcripts = transcriptsApproved ? await queueAdapterTranscriptImports(runtime) : { jobs: [], sources: 0 };
       const jobs = [...metadata.jobs, ...transcripts.jobs];
       sendJson(request, response, config.allowedOrigins, 202, {
@@ -1772,13 +2028,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "POST" && url.pathname === "/sources/codex/approve-transcripts") {
-      approveTranscriptImports();
+      approveTranscriptImports("codex");
       sendJson(request, response, config.allowedOrigins, 202, { ok: true });
       return;
     }
 
     if (request.method === "POST" && url.pathname === "/sources/codex/import-transcripts") {
-      if (!transcriptImportApproved(database)) {
+      if (!transcriptImportApprovedForRuntime("codex")) {
         sendJson(request, response, config.allowedOrigins, 409, {
           ok: false,
           error: "Transcript import requires persisted source review approval."
@@ -2401,7 +2657,24 @@ function isImportJobKind(value: unknown): value is ImportJobKind {
 }
 
 function isImportJobListStatus(value: unknown): value is ImportJobListStatus {
-  return value === "active" || value === "queued" || value === "running" || value === "succeeded" || value === "failed" || value === "cancelled" || value === "cancelling";
+  return value === "active" ||
+    value === "queued" ||
+    value === "running" ||
+    value === "succeeded" ||
+    value === "succeeded_with_issues" ||
+    value === "failed" ||
+    value === "cancelled" ||
+    value === "cancelling";
+}
+
+function isImportWorkUnitStatus(value: unknown): value is ImportWorkUnitStatus {
+  return value === "queued" ||
+    value === "running" ||
+    value === "succeeded" ||
+    value === "succeeded_with_issues" ||
+    value === "failed" ||
+    value === "skipped" ||
+    value === "cancelled";
 }
 
 function parseBoundedInteger(

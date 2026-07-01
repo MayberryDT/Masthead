@@ -1,0 +1,1290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Masthead Sources Import Grill Session</title>
+  <style>
+    :root {
+      --bg: #031019;
+      --panel: #071b28;
+      --panel-2: #061925;
+      --line: rgba(194, 221, 241, 0.16);
+      --line-strong: rgba(196, 226, 248, 0.28);
+      --ink: #f6fbff;
+      --body: #d6e4ef;
+      --muted: #91a8ba;
+      --ash: #61798e;
+      --blue: #2ea7ff;
+      --blue-soft: rgba(45, 168, 255, 0.16);
+      --green: #36d869;
+      --green-soft: rgba(89, 212, 153, 0.14);
+      --yellow: #ffcf36;
+      --yellow-soft: rgba(247, 201, 72, 0.15);
+      --red: #ff483e;
+      --red-soft: rgba(255, 77, 77, 0.14);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--body);
+      font-family: "IBM Plex Sans", Inter, system-ui, sans-serif;
+      line-height: 1.45;
+    }
+
+    main {
+      max-width: 1420px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: start;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line-strong);
+    }
+
+    h1, h2, h3, p {
+      margin: 0;
+    }
+
+    h1 {
+      color: var(--ink);
+      font-size: 24px;
+      line-height: 1.15;
+      font-weight: 600;
+    }
+
+    h2 {
+      color: var(--ink);
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .mono {
+      color: var(--muted);
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .lead {
+      max-width: 840px;
+      margin-top: 8px;
+      color: var(--body);
+      font-size: 14px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--body);
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .grid.two {
+      grid-template-columns: 1.15fr 0.85fr;
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .panel {
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 16px;
+    }
+
+    .panel.warning {
+      border-color: rgba(255, 207, 54, 0.32);
+      background: linear-gradient(180deg, rgba(255, 207, 54, 0.06), var(--panel));
+    }
+
+    .panel.danger {
+      border-color: rgba(255, 72, 62, 0.34);
+      background: linear-gradient(180deg, rgba(255, 72, 62, 0.07), var(--panel));
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(108px, 1fr));
+      gap: 8px;
+      align-items: stretch;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .stage {
+      position: relative;
+      min-height: 118px;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      padding: 12px;
+    }
+
+    .stage::after {
+      content: "";
+      position: absolute;
+      top: 22px;
+      right: -9px;
+      width: 9px;
+      border-top: 1px solid var(--line-strong);
+    }
+
+    .stage:last-child::after {
+      display: none;
+    }
+
+    .stage strong {
+      display: block;
+      color: var(--ink);
+      font-size: 13px;
+      margin: 6px 0;
+    }
+
+    .stage small {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .stage .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--ash);
+    }
+
+    .stage.done .dot { background: var(--green); }
+    .stage.active .dot { background: var(--blue); }
+    .stage.blocked .dot { background: var(--yellow); }
+    .stage.failed .dot { background: var(--red); }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .table th,
+    .table td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .table th {
+      color: var(--muted);
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 2px 7px;
+      border: 1px solid var(--line);
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .status.good { color: var(--green); background: var(--green-soft); }
+    .status.info { color: var(--blue); background: var(--blue-soft); }
+    .status.warn { color: var(--yellow); background: var(--yellow-soft); }
+    .status.bad { color: var(--red); background: var(--red-soft); }
+
+    .arch {
+      width: 100%;
+      min-height: 360px;
+      display: block;
+      border: 1px solid var(--line);
+      background: #041522;
+    }
+
+    .decision {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      padding: 14px;
+      border: 1px solid rgba(46, 167, 255, 0.34);
+      background: var(--blue-soft);
+    }
+
+    .decision .number {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border: 1px solid rgba(46, 167, 255, 0.6);
+      color: var(--blue);
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+    }
+
+    ul {
+      margin: 8px 0 0 18px;
+      padding: 0;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+
+    @media (max-width: 980px) {
+      main { padding: 18px; }
+      header, .grid.two, .grid.three { grid-template-columns: 1fr; }
+      .pipeline { grid-template-columns: repeat(8, 160px); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="mono">Grill-me session · Turn 13</p>
+        <h1>Sources Import Must Become a Visible Library Build</h1>
+        <p class="lead">Decisions 01 through 12 are locked or revised: setup starts metadata-first, jobs have a visibility contract, transcript import exposes child units, import builds a durable manifest ledger, partial success is first-class, completed imports produce proof reports, canonical session identity merges source evidence, transcript import starts with changed files plus the last 30 days, enrichment is non-blocking, and transcript approval is user-facing by coding harness rather than source folder.</p>
+      </div>
+      <span class="badge">artifact: sources-import-grillme.html</span>
+    </header>
+
+    <section class="grid two">
+      <article class="panel danger">
+        <h2>Failure Pattern to Eliminate</h2>
+        <svg class="arch" viewBox="0 0 800 360" role="img" aria-label="Current import failure pattern">
+          <defs>
+            <marker id="arrow-red" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#ff483e"></path>
+            </marker>
+          </defs>
+          <rect x="34" y="54" width="150" height="64" fill="#071b28" stroke="rgba(255,255,255,.2)"></rect>
+          <text x="109" y="84" text-anchor="middle" fill="#f6fbff" font-size="15">Click import</text>
+          <text x="109" y="103" text-anchor="middle" fill="#91a8ba" font-size="12">one action</text>
+
+          <line x1="184" y1="86" x2="285" y2="86" stroke="#ff483e" stroke-width="2" marker-end="url(#arrow-red)"></line>
+
+          <rect x="285" y="42" width="170" height="88" fill="#071b28" stroke="rgba(255,72,62,.65)"></rect>
+          <text x="370" y="78" text-anchor="middle" fill="#f6fbff" font-size="15">Everything starts</text>
+          <text x="370" y="100" text-anchor="middle" fill="#ffcf36" font-size="12">metadata + transcripts + failures</text>
+
+          <line x1="455" y1="86" x2="552" y2="86" stroke="#ff483e" stroke-width="2" marker-end="url(#arrow-red)"></line>
+
+          <rect x="552" y="42" width="198" height="88" fill="#071b28" stroke="rgba(255,72,62,.65)"></rect>
+          <text x="651" y="75" text-anchor="middle" fill="#f6fbff" font-size="15">Hours pass</text>
+          <text x="651" y="98" text-anchor="middle" fill="#ff483e" font-size="12">no stage, no rate, no confidence</text>
+
+          <rect x="80" y="205" width="640" height="72" fill="rgba(255,72,62,.08)" stroke="rgba(255,72,62,.44)"></rect>
+          <text x="400" y="235" text-anchor="middle" fill="#f6fbff" font-size="18">User cannot answer: Is it working, stuck, done, or damaging?</text>
+          <text x="400" y="260" text-anchor="middle" fill="#91a8ba" font-size="13">This is the core UX bug, independent of parser correctness.</text>
+        </svg>
+      </article>
+
+      <article class="panel">
+        <h2>Turn 01 Framing</h2>
+        <p>The import system needs to behave like a local build pipeline with observable stages.</p>
+        <ul>
+          <li>Each job has a scope: source, kind, path, cursor, and consent boundary.</li>
+          <li>Each job reports discovered, processed, imported, skipped, failed, current path, and rate.</li>
+          <li>Each failure is grouped into a readable cause with sample evidence.</li>
+          <li>Completion means a specific stage finished, not that every future stage is done.</li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <h2>Target Import Ladder</h2>
+        <div class="pipeline">
+          <div class="stage done">
+            <div class="dot"></div>
+            <strong>Discover</strong>
+            <small>Bounded known paths and configured overrides.</small>
+          </div>
+          <div class="stage done">
+            <div class="dot"></div>
+            <strong>Preflight</strong>
+            <small>Path exists, readable, schema recognized, rough counts.</small>
+          </div>
+          <div class="stage done">
+            <div class="dot"></div>
+            <strong>Connect</strong>
+            <small>User selects source locations to track.</small>
+          </div>
+          <div class="stage done">
+            <div class="dot"></div>
+            <strong>Metadata</strong>
+            <small>Create canonical session shells for Logbook.</small>
+          </div>
+          <div class="stage blocked">
+            <div class="dot"></div>
+            <strong>Consent</strong>
+            <small>Per-source transcript approval before private text import.</small>
+          </div>
+          <div class="stage active">
+            <div class="dot"></div>
+            <strong>Transcript</strong>
+            <small>Incremental parse with cursors and redaction.</small>
+          </div>
+          <div class="stage active">
+            <div class="dot"></div>
+            <strong>Normalize</strong>
+            <small>Messages, tools, usage, files, signals, checkpoints.</small>
+          </div>
+          <div class="stage active">
+            <div class="dot"></div>
+            <strong>Enrich</strong>
+            <small>Deterministic capsules, coverage, search projection.</small>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <h2>Visible Job Contract</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Why Tyler Needs It</th>
+              <th>State</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Stage</td>
+              <td>Separates metadata import from transcript import and enrichment.</td>
+              <td><span class="status info">required</span></td>
+            </tr>
+            <tr>
+              <td>Current path</td>
+              <td>Shows the import is moving through real files instead of hanging.</td>
+              <td><span class="status good">exists</span></td>
+            </tr>
+            <tr>
+              <td>Processed / total</td>
+              <td>Gives completion confidence and reveals impossible totals.</td>
+              <td><span class="status warn">needs stronger preflight</span></td>
+            </tr>
+            <tr>
+              <td>Rate and last heartbeat</td>
+              <td>Answers working vs stuck during hours-long imports.</td>
+              <td><span class="status bad">missing</span></td>
+            </tr>
+            <tr>
+              <td>Grouped failures</td>
+              <td>Turns walls of parser errors into actionable repair choices.</td>
+              <td><span class="status bad">weak</span></td>
+            </tr>
+            <tr>
+              <td>Coverage summary</td>
+              <td>Answers whether Logbook, dossiers, and MCP now have useful records.</td>
+              <td><span class="status warn">partial</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+
+      <article class="panel warning">
+        <h2>Decision Under Grill</h2>
+        <div class="decision">
+          <div class="number">01</div>
+          <div>
+            <h3>Should Sources be organized by coding harness, not local source path?</h3>
+            <p>Recommended answer: yes. The primary flow should ask which coding harness to import from, such as Codex, and how much history to include. Source paths remain advanced diagnostics, provenance, and repair details.</p>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <h2>Decision Log</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Decision</th>
+              <th>Answer</th>
+              <th>Effect</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>01</td>
+              <td><span class="status good">Metadata first</span></td>
+              <td>Initial setup produces session shells and Logbook value before transcript consent.</td>
+            </tr>
+            <tr>
+              <td>02</td>
+              <td><span class="status good">Hard visibility contract</span></td>
+              <td>Every job shows stage, current path, counts, rate, heartbeat, grouped failures, cancel, retry, and stalled state.</td>
+            </tr>
+            <tr>
+              <td>03</td>
+              <td><span class="status good">Parent plus child units</span></td>
+              <td>Source-level parent jobs expose file/session child units so failure, retry, and progress are isolated.</td>
+            </tr>
+            <tr>
+              <td>04</td>
+              <td><span class="status good">Manifest before parse</span></td>
+              <td>Transcript import lists child units before parsing so file totals, cursor state, and exclusions are visible immediately.</td>
+            </tr>
+            <tr>
+              <td>05</td>
+              <td><span class="status good">Durable import ledger</span></td>
+              <td>Parent jobs, manifests, child units, heartbeats, failures, and retry state persist in SQLite.</td>
+            </tr>
+            <tr>
+              <td>06</td>
+              <td><span class="status good">Continue with issues</span></td>
+              <td>Bad files fail their child units; useful imports continue; parent jobs can finish as succeeded-with-issues.</td>
+            </tr>
+            <tr>
+              <td>07</td>
+              <td><span class="status good">Completion proof report</span></td>
+              <td>Finished imports show what Masthead gained: sessions, transcripts, skipped records, grouped failures, coverage, and next actions.</td>
+            </tr>
+            <tr>
+              <td>08</td>
+              <td><span class="status good">Canonical merge identity</span></td>
+              <td>Canonical sessions use host + runtime + source session ID; source evidence merges without duplicate Logbook rows.</td>
+            </tr>
+            <tr>
+              <td>09</td>
+              <td><span class="status good">Useful first slice</span></td>
+              <td>Transcript import defaults to new, changed, and recent history; full archive is an explicit long-running job.</td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td><span class="status good">30-day first slice</span></td>
+              <td>The first transcript job includes changed transcripts plus the last 30 days, with previewed counts and an expandable cap.</td>
+            </tr>
+            <tr>
+              <td>11</td>
+              <td><span class="status good">Enrichment non-blocking</span></td>
+              <td>Import completion means canonical records landed; deterministic enrichment runs as a separate visible stage.</td>
+            </tr>
+            <tr>
+              <td>12</td>
+              <td><span class="status good">Coding harness consent</span></td>
+              <td>Transcript approval is user-facing by coding harness/runtime. Source paths remain diagnostics and provenance, not the primary user choice.</td>
+            </tr>
+            <tr>
+              <td>13</td>
+              <td><span class="status info">Under grill</span></td>
+              <td>Confirm the product IA: choose coding harness and import age, with folders hidden unless diagnostics are needed.</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+
+      <article class="panel">
+        <h2>Job Row Mock Shape</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Stage</th>
+              <th>Progress</th>
+              <th>Heartbeat</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="status good">metadata</span></td>
+              <td>842 / 842 records · 100%</td>
+              <td>finished 12:44</td>
+              <td>View summary</td>
+            </tr>
+            <tr>
+              <td><span class="status info">transcript</span></td>
+              <td>18,420 / 92,000 records · 1,240/min</td>
+              <td>4s ago · ~/.codex/sessions/2026/06/thread.jsonl</td>
+              <td>Cancel</td>
+            </tr>
+            <tr>
+              <td><span class="status bad">transcript</span></td>
+              <td>3,112 / unknown · 27 failures</td>
+              <td>stalled 2m 14s · locked sqlite file</td>
+              <td>Retry</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <h2>Consent Scope Revised</h2>
+        <svg class="arch" viewBox="0 0 800 350" role="img" aria-label="Transcript consent scope organized by coding harness">
+          <defs>
+            <marker id="arrow-consent" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#2ea7ff"></path>
+            </marker>
+          </defs>
+          <rect x="42" y="54" width="160" height="70" fill="rgba(54,216,105,.1)" stroke="rgba(54,216,105,.55)"></rect>
+          <text x="122" y="84" text-anchor="middle" fill="#36d869" font-size="14">Codex</text>
+          <text x="122" y="106" text-anchor="middle" fill="#91a8ba" font-size="12">coding harness</text>
+
+          <rect x="42" y="144" width="160" height="70" fill="rgba(46,167,255,.1)" stroke="rgba(46,167,255,.55)"></rect>
+          <text x="122" y="174" text-anchor="middle" fill="#2ea7ff" font-size="14">Claude Code</text>
+          <text x="122" y="196" text-anchor="middle" fill="#91a8ba" font-size="12">future harness</text>
+
+          <rect x="42" y="234" width="160" height="70" fill="rgba(46,167,255,.1)" stroke="rgba(46,167,255,.55)"></rect>
+          <text x="122" y="264" text-anchor="middle" fill="#2ea7ff" font-size="14">OpenCode</text>
+          <text x="122" y="286" text-anchor="middle" fill="#91a8ba" font-size="12">future harness</text>
+
+          <line x1="202" y1="89" x2="318" y2="89" stroke="#2ea7ff" marker-end="url(#arrow-consent)"></line>
+
+          <rect x="318" y="54" width="196" height="70" fill="#071b28" stroke="rgba(54,216,105,.5)"></rect>
+          <text x="416" y="84" text-anchor="middle" fill="#f6fbff" font-size="14">Approve transcripts</text>
+          <text x="416" y="106" text-anchor="middle" fill="#91a8ba" font-size="12">for this coding harness</text>
+
+          <line x1="514" y1="89" x2="614" y2="89" stroke="#2ea7ff" marker-end="url(#arrow-consent)"></line>
+
+          <rect x="614" y="36" width="146" height="106" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="687" y="68" text-anchor="middle" fill="#f6fbff" font-size="14">Diagnostics</text>
+          <text x="687" y="92" text-anchor="middle" fill="#91a8ba" font-size="12">paths</text>
+          <text x="687" y="114" text-anchor="middle" fill="#91a8ba" font-size="12">schemas</text>
+          <text x="687" y="136" text-anchor="middle" fill="#91a8ba" font-size="12">repair evidence</text>
+
+          <rect x="106" y="268" width="588" height="46" fill="rgba(46,167,255,.08)" stroke="rgba(46,167,255,.4)"></rect>
+          <text x="400" y="296" text-anchor="middle" fill="#f6fbff" font-size="14">Users choose coding harness and import age; folders are implementation evidence.</text>
+        </svg>
+      </article>
+
+      <article class="panel">
+        <h2>Harness-First UI Contract</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Surface</th>
+              <th>Shows</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="status good">harness row</span></td>
+              <td>Codex, detected sessions, transcript approval, import age.</td>
+              <td>Import metadata, approve transcripts, import recent or full archive.</td>
+            </tr>
+            <tr>
+              <td><span class="status info">setup modal</span></td>
+              <td>Coding harnesses Masthead can import from.</td>
+              <td>Select harness and age window.</td>
+            </tr>
+            <tr>
+              <td><span class="status warn">source path</span></td>
+              <td>Advanced diagnostic detail only.</td>
+              <td>Inspect, exclude, repair, or report schema issue.</td>
+            </tr>
+            <tr>
+              <td><span class="status bad">revoked harness</span></td>
+              <td>Transcript import blocked for that harness.</td>
+              <td>Do not parse new transcripts from that coding harness.</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <h2>Import vs Enrichment Boundary</h2>
+        <svg class="arch" viewBox="0 0 800 350" role="img" aria-label="Import and enrichment boundary">
+          <defs>
+            <marker id="arrow-enrich" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#2ea7ff"></path>
+            </marker>
+          </defs>
+          <rect x="44" y="48" width="156" height="70" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="122" y="78" text-anchor="middle" fill="#f6fbff" font-size="14">Transcript import</text>
+          <text x="122" y="100" text-anchor="middle" fill="#91a8ba" font-size="12">canonical records</text>
+
+          <line x1="200" y1="83" x2="306" y2="83" stroke="#2ea7ff" marker-end="url(#arrow-enrich)"></line>
+
+          <rect x="306" y="48" width="188" height="70" fill="rgba(54,216,105,.1)" stroke="rgba(54,216,105,.55)"></rect>
+          <text x="400" y="78" text-anchor="middle" fill="#36d869" font-size="14">Import complete</text>
+          <text x="400" y="100" text-anchor="middle" fill="#91a8ba" font-size="12">Logbook can use records</text>
+
+          <line x1="494" y1="83" x2="600" y2="83" stroke="#2ea7ff" marker-end="url(#arrow-enrich)"></line>
+
+          <rect x="600" y="48" width="156" height="70" fill="#061925" stroke="rgba(46,167,255,.55)"></rect>
+          <text x="678" y="78" text-anchor="middle" fill="#f6fbff" font-size="14">Enrichment job</text>
+          <text x="678" y="100" text-anchor="middle" fill="#91a8ba" font-size="12">capsules · search</text>
+
+          <rect x="96" y="178" width="608" height="92" fill="#071b28" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="400" y="208" text-anchor="middle" fill="#f6fbff" font-size="16">Separation prevents a slow summary pass from making import look unfinished.</text>
+          <text x="400" y="232" text-anchor="middle" fill="#91a8ba" font-size="12">The completion report can say: records imported, enrichment queued or running, coverage improving.</text>
+          <text x="400" y="254" text-anchor="middle" fill="#ffcf36" font-size="12">Remote enrichment stays opt-in later; local deterministic enrichment is the default.</text>
+        </svg>
+      </article>
+
+      <article class="panel">
+        <h2>Enrichment Stage Contract</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Choice</th>
+              <th>Default</th>
+              <th>Effect</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="status good">local deterministic</span></td>
+              <td>On</td>
+              <td>Creates titles, summaries, search phrases, and coverage without network dependency.</td>
+            </tr>
+            <tr>
+              <td><span class="status info">remote model</span></td>
+              <td>Off</td>
+              <td>Future optional upgrade with preview, redaction, and audit.</td>
+            </tr>
+            <tr>
+              <td><span class="status warn">blocking import</span></td>
+              <td>No</td>
+              <td>Import success is based on canonical records, not summary generation.</td>
+            </tr>
+            <tr>
+              <td><span class="status info">coverage</span></td>
+              <td>Visible</td>
+              <td>Sources shows imported sessions vs enriched sessions separately.</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <h2>Default Slice Rule</h2>
+        <svg class="arch" viewBox="0 0 800 340" role="img" aria-label="Default transcript slice rule">
+          <defs>
+            <marker id="arrow-slice" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#36d869"></path>
+            </marker>
+          </defs>
+          <rect x="42" y="52" width="176" height="70" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="130" y="82" text-anchor="middle" fill="#f6fbff" font-size="14">Manifest</text>
+          <text x="130" y="104" text-anchor="middle" fill="#91a8ba" font-size="12">all child units</text>
+
+          <line x1="218" y1="87" x2="314" y2="87" stroke="#36d869" marker-end="url(#arrow-slice)"></line>
+
+          <rect x="314" y="24" width="198" height="54" fill="rgba(54,216,105,.1)" stroke="rgba(54,216,105,.55)"></rect>
+          <text x="413" y="56" text-anchor="middle" fill="#36d869" font-size="13">changed since cursor</text>
+
+          <rect x="314" y="92" width="198" height="54" fill="rgba(46,167,255,.1)" stroke="rgba(46,167,255,.55)"></rect>
+          <text x="413" y="124" text-anchor="middle" fill="#2ea7ff" font-size="13">last 30 days</text>
+
+          <rect x="314" y="160" width="198" height="54" fill="rgba(255,207,54,.09)" stroke="rgba(255,207,54,.55)"></rect>
+          <text x="413" y="192" text-anchor="middle" fill="#ffcf36" font-size="13">visible cap</text>
+
+          <line x1="512" y1="52" x2="604" y2="120" stroke="#36d869" marker-end="url(#arrow-slice)"></line>
+          <line x1="512" y1="120" x2="604" y2="120" stroke="#36d869" marker-end="url(#arrow-slice)"></line>
+          <line x1="512" y1="188" x2="604" y2="120" stroke="#36d869" marker-end="url(#arrow-slice)"></line>
+
+          <rect x="604" y="78" width="154" height="84" fill="#071b28" stroke="rgba(54,216,105,.5)"></rect>
+          <text x="681" y="112" text-anchor="middle" fill="#f6fbff" font-size="14">First import</text>
+          <text x="681" y="134" text-anchor="middle" fill="#91a8ba" font-size="12">bounded and useful</text>
+
+          <rect x="94" y="254" width="612" height="50" fill="rgba(46,167,255,.08)" stroke="rgba(46,167,255,.4)"></rect>
+          <text x="400" y="275" text-anchor="middle" fill="#f6fbff" font-size="15">The UI previews exact counts before starting: files, sessions, bytes, and estimated records.</text>
+          <text x="400" y="295" text-anchor="middle" fill="#91a8ba" font-size="12">Tyler can expand to 90 days, all changed, or full archive from the same preview.</text>
+        </svg>
+      </article>
+
+      <article class="panel">
+        <h2>Scope Preview Controls</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Control</th>
+              <th>Default</th>
+              <th>Display</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="status good">changed since cursor</span></td>
+              <td>On</td>
+              <td>Always imported so sync remains current.</td>
+            </tr>
+            <tr>
+              <td><span class="status info">recent window</span></td>
+              <td>30 days</td>
+              <td>Shows matching sessions and files before start.</td>
+            </tr>
+            <tr>
+              <td><span class="status warn">first-run cap</span></td>
+              <td>Visible cap, expandable</td>
+              <td>Prevents accidental massive first import.</td>
+            </tr>
+            <tr>
+              <td><span class="status info">full archive</span></td>
+              <td>Off</td>
+              <td>Separate explicit long-running action.</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel warning">
+        <h2>Scope Choice</h2>
+        <svg class="arch" viewBox="0 0 800 350" role="img" aria-label="Transcript import scope choices">
+          <defs>
+            <marker id="arrow-scope" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#ffcf36"></path>
+            </marker>
+          </defs>
+          <rect x="50" y="52" width="170" height="70" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="135" y="82" text-anchor="middle" fill="#f6fbff" font-size="14">Manifest</text>
+          <text x="135" y="104" text-anchor="middle" fill="#91a8ba" font-size="12">842 transcript files</text>
+
+          <line x1="220" y1="87" x2="314" y2="87" stroke="#ffcf36" marker-end="url(#arrow-scope)"></line>
+
+          <rect x="314" y="30" width="190" height="70" fill="rgba(54,216,105,.1)" stroke="rgba(54,216,105,.55)"></rect>
+          <text x="409" y="60" text-anchor="middle" fill="#36d869" font-size="13">Useful first slice</text>
+          <text x="409" y="82" text-anchor="middle" fill="#91a8ba" font-size="11">new · changed · recent</text>
+
+          <rect x="314" y="126" width="190" height="70" fill="rgba(255,207,54,.09)" stroke="rgba(255,207,54,.55)"></rect>
+          <text x="409" y="156" text-anchor="middle" fill="#ffcf36" font-size="13">Full archive</text>
+          <text x="409" y="178" text-anchor="middle" fill="#91a8ba" font-size="11">explicit long-running job</text>
+
+          <line x1="504" y1="65" x2="604" y2="65" stroke="#ffcf36" marker-end="url(#arrow-scope)"></line>
+          <line x1="504" y1="161" x2="604" y2="161" stroke="#ffcf36" marker-end="url(#arrow-scope)"></line>
+
+          <rect x="604" y="30" width="150" height="70" fill="#061925" stroke="rgba(54,216,105,.55)"></rect>
+          <text x="679" y="60" text-anchor="middle" fill="#36d869" font-size="13">Fast value</text>
+          <text x="679" y="82" text-anchor="middle" fill="#91a8ba" font-size="11">Logbook gets useful now</text>
+
+          <rect x="604" y="126" width="150" height="70" fill="#061925" stroke="rgba(255,207,54,.55)"></rect>
+          <text x="679" y="156" text-anchor="middle" fill="#ffcf36" font-size="13">Complete history</text>
+          <text x="679" y="178" text-anchor="middle" fill="#91a8ba" font-size="11">runs when Tyler chooses</text>
+
+          <rect x="92" y="260" width="616" height="52" fill="rgba(255,207,54,.09)" stroke="rgba(255,207,54,.45)"></rect>
+          <text x="400" y="282" text-anchor="middle" fill="#f6fbff" font-size="15">The full archive should be possible, but it should not be the only path to first value.</text>
+          <text x="400" y="302" text-anchor="middle" fill="#91a8ba" font-size="12">This keeps the first successful transcript job small enough to trust.</text>
+        </svg>
+      </article>
+
+      <article class="panel">
+        <h2>Proposed Scope Defaults</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Scope</th>
+              <th>Default</th>
+              <th>Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="status good">new or changed</span></td>
+              <td>Always included</td>
+              <td>Keeps live and resumed work current.</td>
+            </tr>
+            <tr>
+              <td><span class="status good">recent history</span></td>
+              <td>Recommended first transcript job</td>
+              <td>Gives useful Logbook and dossier content quickly.</td>
+            </tr>
+            <tr>
+              <td><span class="status warn">full archive</span></td>
+              <td>Explicit secondary job</td>
+              <td>Supports complete normalization without hiding a multi-hour operation behind setup.</td>
+            </tr>
+            <tr>
+              <td><span class="status info">metadata archive</span></td>
+              <td>All metadata by default</td>
+              <td>Session shells are cheap and make history visible before transcript import.</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <h2>Identity Merge Model</h2>
+        <svg class="arch" viewBox="0 0 800 350" role="img" aria-label="Canonical session identity merge model">
+          <defs>
+            <marker id="arrow-identity" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#2ea7ff"></path>
+            </marker>
+          </defs>
+          <rect x="42" y="42" width="178" height="58" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="131" y="67" text-anchor="middle" fill="#f6fbff" font-size="13">metadata index</text>
+          <text x="131" y="86" text-anchor="middle" fill="#91a8ba" font-size="11">session shell</text>
+
+          <rect x="42" y="126" width="178" height="58" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="131" y="151" text-anchor="middle" fill="#f6fbff" font-size="13">transcript file</text>
+          <text x="131" y="170" text-anchor="middle" fill="#91a8ba" font-size="11">messages · tools · usage</text>
+
+          <rect x="42" y="210" width="178" height="58" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="131" y="235" text-anchor="middle" fill="#f6fbff" font-size="13">live hook event</text>
+          <text x="131" y="254" text-anchor="middle" fill="#91a8ba" font-size="11">fresh activity</text>
+
+          <line x1="220" y1="71" x2="336" y2="155" stroke="#2ea7ff" marker-end="url(#arrow-identity)"></line>
+          <line x1="220" y1="155" x2="336" y2="155" stroke="#2ea7ff" marker-end="url(#arrow-identity)"></line>
+          <line x1="220" y1="239" x2="336" y2="155" stroke="#2ea7ff" marker-end="url(#arrow-identity)"></line>
+
+          <rect x="336" y="104" width="224" height="102" fill="#071b28" stroke="rgba(46,167,255,.5)"></rect>
+          <text x="448" y="136" text-anchor="middle" fill="#f6fbff" font-size="14">Canonical Session</text>
+          <text x="448" y="160" text-anchor="middle" fill="#91a8ba" font-size="12">host + runtime + source session ID</text>
+          <text x="448" y="183" text-anchor="middle" fill="#36d869" font-size="12">one Logbook row · one dossier · one MCP target</text>
+
+          <line x1="560" y1="155" x2="662" y2="155" stroke="#2ea7ff" marker-end="url(#arrow-identity)"></line>
+
+          <rect x="662" y="104" width="104" height="102" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="714" y="137" text-anchor="middle" fill="#f6fbff" font-size="13">Provenance</text>
+          <text x="714" y="160" text-anchor="middle" fill="#91a8ba" font-size="11">raw records</text>
+          <text x="714" y="180" text-anchor="middle" fill="#91a8ba" font-size="11">source refs</text>
+
+          <rect x="100" y="292" width="600" height="42" fill="rgba(46,167,255,.08)" stroke="rgba(46,167,255,.4)"></rect>
+          <text x="400" y="318" text-anchor="middle" fill="#f6fbff" font-size="14">Deduplication should merge evidence into one canonical session without losing source provenance.</text>
+        </svg>
+      </article>
+
+      <article class="panel">
+        <h2>Deduplication Boundaries</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Layer</th>
+              <th>Dedupe Key</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="status good">session</span></td>
+              <td>host + runtime + source session ID</td>
+              <td>One canonical session row.</td>
+            </tr>
+            <tr>
+              <td><span class="status info">raw record</span></td>
+              <td>source ID + source record key</td>
+              <td>Retries do not duplicate raw evidence.</td>
+            </tr>
+            <tr>
+              <td><span class="status info">message</span></td>
+              <td>session + text hash + observed time + role</td>
+              <td>Repeated imports do not double transcript messages.</td>
+            </tr>
+            <tr>
+              <td><span class="status warn">work unit</span></td>
+              <td>manifest + normalized source path or source session ID</td>
+              <td>Child retries update the same visible row.</td>
+            </tr>
+            <tr>
+              <td><span class="status warn">runtime version</span></td>
+              <td>provenance only</td>
+              <td>Runtime upgrades should not split sessions.</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <h2>Completion Report Shape</h2>
+        <svg class="arch" viewBox="0 0 1180 380" role="img" aria-label="Import completion report">
+          <defs>
+            <marker id="arrow-completion" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#2ea7ff"></path>
+            </marker>
+          </defs>
+          <rect x="38" y="54" width="170" height="72" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="123" y="84" text-anchor="middle" fill="#f6fbff" font-size="14">Import job</text>
+          <text x="123" y="106" text-anchor="middle" fill="#91a8ba" font-size="12">finished with issues</text>
+
+          <line x1="208" y1="90" x2="300" y2="90" stroke="#2ea7ff" marker-end="url(#arrow-completion)"></line>
+
+          <rect x="300" y="34" width="216" height="112" fill="#071b28" stroke="rgba(46,167,255,.46)"></rect>
+          <text x="408" y="66" text-anchor="middle" fill="#f6fbff" font-size="14">Completion Report</text>
+          <text x="408" y="90" text-anchor="middle" fill="#91a8ba" font-size="12">counts · coverage · failures</text>
+          <text x="408" y="112" text-anchor="middle" fill="#91a8ba" font-size="12">what changed in Masthead</text>
+          <text x="408" y="134" text-anchor="middle" fill="#ffcf36" font-size="12">next repair action</text>
+
+          <line x1="516" y1="90" x2="602" y2="90" stroke="#2ea7ff" marker-end="url(#arrow-completion)"></line>
+
+          <g>
+            <rect x="602" y="26" width="168" height="48" fill="rgba(54,216,105,.1)" stroke="rgba(54,216,105,.5)"></rect>
+            <text x="686" y="55" text-anchor="middle" fill="#36d869" font-size="13">Logbook searchable</text>
+
+            <rect x="602" y="86" width="168" height="48" fill="rgba(46,167,255,.1)" stroke="rgba(46,167,255,.5)"></rect>
+            <text x="686" y="115" text-anchor="middle" fill="#2ea7ff" font-size="13">Dossiers richer</text>
+
+            <rect x="602" y="146" width="168" height="48" fill="rgba(255,207,54,.09)" stroke="rgba(255,207,54,.5)"></rect>
+            <text x="686" y="175" text-anchor="middle" fill="#ffcf36" font-size="13">MCP coverage gated</text>
+          </g>
+
+          <line x1="770" y1="50" x2="856" y2="50" stroke="#2ea7ff" marker-end="url(#arrow-completion)"></line>
+          <line x1="770" y1="110" x2="856" y2="110" stroke="#2ea7ff" marker-end="url(#arrow-completion)"></line>
+          <line x1="770" y1="170" x2="856" y2="170" stroke="#2ea7ff" marker-end="url(#arrow-completion)"></line>
+
+          <rect x="856" y="30" width="280" height="160" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="996" y="62" text-anchor="middle" fill="#f6fbff" font-size="14">Proof, not vibes</text>
+          <text x="996" y="88" text-anchor="middle" fill="#91a8ba" font-size="12">842 sessions discovered</text>
+          <text x="996" y="112" text-anchor="middle" fill="#91a8ba" font-size="12">813 transcripts imported</text>
+          <text x="996" y="136" text-anchor="middle" fill="#91a8ba" font-size="12">27 failed · 2 excluded</text>
+          <text x="996" y="160" text-anchor="middle" fill="#91a8ba" font-size="12">790 searchable · 684 enriched</text>
+
+          <rect x="122" y="258" width="936" height="72" fill="rgba(46,167,255,.08)" stroke="rgba(46,167,255,.4)"></rect>
+          <text x="590" y="286" text-anchor="middle" fill="#f6fbff" font-size="17">Completion should answer: what did Masthead gain, what is still missing, and what can I do next?</text>
+          <text x="590" y="310" text-anchor="middle" fill="#91a8ba" font-size="12">A green status without destination coverage does not solve the trust problem.</text>
+        </svg>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel">
+        <h2>Failure Taxonomy</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Group</th>
+              <th>Meaning</th>
+              <th>Default Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="status warn">unreadable</span></td>
+              <td>File missing, permission denied, path changed, symlink blocked.</td>
+              <td>Skip child, keep parent running.</td>
+            </tr>
+            <tr>
+              <td><span class="status warn">locked</span></td>
+              <td>SQLite or transcript file is temporarily unavailable.</td>
+              <td>Retry with backoff, then mark child retryable.</td>
+            </tr>
+            <tr>
+              <td><span class="status bad">malformed</span></td>
+              <td>JSONL line cannot parse or record shape is invalid.</td>
+              <td>Import valid records, count bad records, sample failures.</td>
+            </tr>
+            <tr>
+              <td><span class="status bad">schema drift</span></td>
+              <td>Source exists but parser does not recognize enough structure.</td>
+              <td>Block transcript child, show adapter diagnostic.</td>
+            </tr>
+            <tr>
+              <td><span class="status info">excluded</span></td>
+              <td>User policy excludes source, project, or path.</td>
+              <td>Skip cleanly, do not count as failure.</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+
+      <article class="panel">
+        <h2>Parent Job Outcomes</h2>
+        <svg class="arch" viewBox="0 0 800 330" role="img" aria-label="Parent job outcomes when child units fail">
+          <defs>
+            <marker id="arrow-outcome" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#2ea7ff"></path>
+            </marker>
+          </defs>
+          <rect x="48" y="52" width="160" height="70" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="128" y="82" text-anchor="middle" fill="#f6fbff" font-size="14">Child units</text>
+          <text x="128" y="104" text-anchor="middle" fill="#91a8ba" font-size="12">842 transcript files</text>
+
+          <line x1="208" y1="87" x2="316" y2="87" stroke="#2ea7ff" marker-end="url(#arrow-outcome)"></line>
+
+          <rect x="316" y="30" width="172" height="44" fill="rgba(54,216,105,.1)" stroke="rgba(54,216,105,.55)"></rect>
+          <text x="402" y="57" text-anchor="middle" fill="#36d869" font-size="13">all completed</text>
+
+          <rect x="316" y="84" width="172" height="44" fill="rgba(255,207,54,.09)" stroke="rgba(255,207,54,.55)"></rect>
+          <text x="402" y="111" text-anchor="middle" fill="#ffcf36" font-size="13">some failed</text>
+
+          <rect x="316" y="138" width="172" height="44" fill="rgba(255,72,62,.1)" stroke="rgba(255,72,62,.55)"></rect>
+          <text x="402" y="165" text-anchor="middle" fill="#ff483e" font-size="13">none usable</text>
+
+          <line x1="488" y1="52" x2="604" y2="52" stroke="#2ea7ff" marker-end="url(#arrow-outcome)"></line>
+          <line x1="488" y1="106" x2="604" y2="106" stroke="#2ea7ff" marker-end="url(#arrow-outcome)"></line>
+          <line x1="488" y1="160" x2="604" y2="160" stroke="#2ea7ff" marker-end="url(#arrow-outcome)"></line>
+
+          <rect x="604" y="30" width="150" height="44" fill="#061925" stroke="rgba(54,216,105,.55)"></rect>
+          <text x="679" y="57" text-anchor="middle" fill="#36d869" font-size="13">succeeded</text>
+
+          <rect x="604" y="84" width="150" height="44" fill="#061925" stroke="rgba(255,207,54,.55)"></rect>
+          <text x="679" y="111" text-anchor="middle" fill="#ffcf36" font-size="13">succeeded with issues</text>
+
+          <rect x="604" y="138" width="150" height="44" fill="#061925" stroke="rgba(255,72,62,.55)"></rect>
+          <text x="679" y="165" text-anchor="middle" fill="#ff483e" font-size="13">failed</text>
+
+          <rect x="74" y="232" width="652" height="62" fill="rgba(46,167,255,.08)" stroke="rgba(46,167,255,.4)"></rect>
+          <text x="400" y="258" text-anchor="middle" fill="#f6fbff" font-size="16">Partial success is a first-class outcome, not an ambiguous failure.</text>
+          <text x="400" y="280" text-anchor="middle" fill="#91a8ba" font-size="12">The UI should say what was imported, what failed, and what the next repair action is.</text>
+        </svg>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel warning">
+        <h2>Durability Problem</h2>
+        <svg class="arch" viewBox="0 0 800 330" role="img" aria-label="Import manifest durability problem">
+          <defs>
+            <marker id="arrow-durable-warn" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#ffcf36"></path>
+            </marker>
+          </defs>
+          <rect x="46" y="50" width="170" height="76" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="131" y="82" text-anchor="middle" fill="#f6fbff" font-size="14">Import worker</text>
+          <text x="131" y="104" text-anchor="middle" fill="#91a8ba" font-size="12">manifest in memory</text>
+
+          <line x1="216" y1="88" x2="330" y2="88" stroke="#ffcf36" marker-end="url(#arrow-durable-warn)"></line>
+
+          <rect x="330" y="50" width="150" height="76" fill="rgba(255,72,62,.1)" stroke="rgba(255,72,62,.55)"></rect>
+          <text x="405" y="82" text-anchor="middle" fill="#f6fbff" font-size="14">Daemon restarts</text>
+          <text x="405" y="104" text-anchor="middle" fill="#ff483e" font-size="12">child state disappears</text>
+
+          <line x1="480" y1="88" x2="594" y2="88" stroke="#ffcf36" marker-end="url(#arrow-durable-warn)"></line>
+
+          <rect x="594" y="50" width="160" height="76" fill="#061925" stroke="rgba(255,207,54,.5)"></rect>
+          <text x="674" y="82" text-anchor="middle" fill="#f6fbff" font-size="14">Sources UI</text>
+          <text x="674" y="104" text-anchor="middle" fill="#ffcf36" font-size="12">only sees failed parent</text>
+
+          <rect x="86" y="218" width="628" height="64" fill="rgba(255,207,54,.09)" stroke="rgba(255,207,54,.45)"></rect>
+          <text x="400" y="246" text-anchor="middle" fill="#f6fbff" font-size="16">If child state is not durable, Masthead cannot explain what happened after interruption.</text>
+          <text x="400" y="268" text-anchor="middle" fill="#91a8ba" font-size="12">This recreates the old "I do not know if it worked" failure after crashes, restarts, and app closes.</text>
+        </svg>
+      </article>
+
+      <article class="panel">
+        <h2>Durable Import Ledger</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>SQLite record</th>
+              <th>Stores</th>
+              <th>Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="status info">import_jobs</span></td>
+              <td>Parent operation, stage, aggregate counts, lifecycle.</td>
+              <td>User understands the operation they started.</td>
+            </tr>
+            <tr>
+              <td><span class="status good">import_manifests</span></td>
+              <td>Snapshot of discovered child units for a job.</td>
+              <td>Totals and exclusions are stable for that run.</td>
+            </tr>
+            <tr>
+              <td><span class="status good">import_work_units</span></td>
+              <td>File/session child status, cursor, path, heartbeat, counts, failure group.</td>
+              <td>Cancel, retry, resume, and inspect happen at the right scope.</td>
+            </tr>
+            <tr>
+              <td><span class="status warn">import_failures</span></td>
+              <td>Grouped cause, sample paths, first/last seen, count.</td>
+              <td>Failures become repairable instead of a raw error pile.</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <h2>Manifest Before Parse</h2>
+        <svg class="arch" viewBox="0 0 1180 360" role="img" aria-label="Import manifest architecture">
+          <defs>
+            <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#36d869"></path>
+            </marker>
+          </defs>
+          <rect x="36" y="70" width="156" height="70" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="114" y="100" text-anchor="middle" fill="#f6fbff" font-size="14">Selected Source</text>
+          <text x="114" y="121" text-anchor="middle" fill="#91a8ba" font-size="12">codex sessions dir</text>
+
+          <line x1="192" y1="105" x2="286" y2="105" stroke="#36d869" marker-end="url(#arrow-green)"></line>
+
+          <rect x="286" y="48" width="190" height="114" fill="#071b28" stroke="rgba(54,216,105,.46)"></rect>
+          <text x="381" y="80" text-anchor="middle" fill="#f6fbff" font-size="14">Manifest Builder</text>
+          <text x="381" y="104" text-anchor="middle" fill="#91a8ba" font-size="12">path · size · mtime</text>
+          <text x="381" y="126" text-anchor="middle" fill="#91a8ba" font-size="12">cursor · estimated records</text>
+          <text x="381" y="148" text-anchor="middle" fill="#ffcf36" font-size="12">no full transcript parse yet</text>
+
+          <line x1="476" y1="105" x2="570" y2="105" stroke="#36d869" marker-end="url(#arrow-green)"></line>
+
+          <rect x="570" y="48" width="220" height="114" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="680" y="80" text-anchor="middle" fill="#f6fbff" font-size="14">Visible Child Units</text>
+          <text x="680" y="104" text-anchor="middle" fill="#91a8ba" font-size="12">842 files total</text>
+          <text x="680" y="126" text-anchor="middle" fill="#91a8ba" font-size="12">117 changed since cursor</text>
+          <text x="680" y="148" text-anchor="middle" fill="#91a8ba" font-size="12">9 excluded before parse</text>
+
+          <line x1="790" y1="105" x2="884" y2="105" stroke="#36d869" marker-end="url(#arrow-green)"></line>
+
+          <rect x="884" y="48" width="250" height="114" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="1009" y="80" text-anchor="middle" fill="#f6fbff" font-size="14">Parser Workers</text>
+          <text x="1009" y="104" text-anchor="middle" fill="#91a8ba" font-size="12">process child units</text>
+          <text x="1009" y="126" text-anchor="middle" fill="#91a8ba" font-size="12">heartbeat and progress per file</text>
+          <text x="1009" y="148" text-anchor="middle" fill="#91a8ba" font-size="12">write canonical graph records</text>
+
+          <rect x="106" y="230" width="968" height="72" fill="rgba(54,216,105,.08)" stroke="rgba(54,216,105,.4)"></rect>
+          <text x="590" y="258" text-anchor="middle" fill="#f6fbff" font-size="17">The UI can show true file totals immediately, then switch from manifest progress to parse progress.</text>
+          <text x="590" y="282" text-anchor="middle" fill="#91a8ba" font-size="12">This avoids pretending Masthead knows record totals when it only knows file and byte totals.</text>
+        </svg>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="panel warning">
+        <h2>Current Granularity Risk</h2>
+        <svg class="arch" viewBox="0 0 800 330" role="img" aria-label="Current source-level transcript job risk">
+          <defs>
+            <marker id="arrow-yellow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#ffcf36"></path>
+            </marker>
+          </defs>
+          <rect x="42" y="52" width="150" height="70" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="117" y="82" text-anchor="middle" fill="#f6fbff" font-size="14">codex-sessions</text>
+          <text x="117" y="103" text-anchor="middle" fill="#91a8ba" font-size="12">one visible job</text>
+
+          <line x1="192" y1="87" x2="286" y2="87" stroke="#ffcf36" marker-end="url(#arrow-yellow)"></line>
+
+          <rect x="286" y="34" width="220" height="106" fill="#071b28" stroke="rgba(255,207,54,.5)"></rect>
+          <text x="396" y="72" text-anchor="middle" fill="#f6fbff" font-size="14">Worker expands directory</text>
+          <text x="396" y="94" text-anchor="middle" fill="#91a8ba" font-size="12">many JSONL transcript files</text>
+          <text x="396" y="116" text-anchor="middle" fill="#ffcf36" font-size="12">progress can still feel like one blob</text>
+
+          <line x1="506" y1="87" x2="600" y2="87" stroke="#ffcf36" marker-end="url(#arrow-yellow)"></line>
+
+          <g>
+            <rect x="600" y="30" width="145" height="42" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+            <text x="672" y="56" text-anchor="middle" fill="#d6e4ef" font-size="12">thread-a.jsonl</text>
+            <rect x="600" y="82" width="145" height="42" fill="#061925" stroke="rgba(255,72,62,.5)"></rect>
+            <text x="672" y="108" text-anchor="middle" fill="#ff483e" font-size="12">thread-b fails</text>
+            <rect x="600" y="134" width="145" height="42" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+            <text x="672" y="160" text-anchor="middle" fill="#d6e4ef" font-size="12">thread-c.jsonl</text>
+          </g>
+
+          <rect x="88" y="226" width="624" height="62" fill="rgba(255,207,54,.09)" stroke="rgba(255,207,54,.45)"></rect>
+          <text x="400" y="252" text-anchor="middle" fill="#f6fbff" font-size="16">If the UI only exposes the parent, Tyler still cannot isolate what is slow or broken.</text>
+          <text x="400" y="274" text-anchor="middle" fill="#91a8ba" font-size="12">The source-level job needs visible child units or it repeats the old import ambiguity.</text>
+        </svg>
+      </article>
+
+      <article class="panel">
+        <h2>Recommended Work Unit Model</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Level</th>
+              <th>Purpose</th>
+              <th>Retry Scope</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="status info">parent source job</span></td>
+              <td>User-facing operation: import transcripts for selected Codex sessions directory.</td>
+              <td>Retry all failed or incomplete children.</td>
+            </tr>
+            <tr>
+              <td><span class="status good">child transcript unit</span></td>
+              <td>One transcript file or one source session, with own path, cursor, status, counts, and failure group.</td>
+              <td>Retry this file/session only.</td>
+            </tr>
+            <tr>
+              <td><span class="status warn">record</span></td>
+              <td>Parser-level line/event/message/tool/usage item. Counted and sampled, not shown as a row by default.</td>
+              <td>Skipped, grouped, or repaired by parser rules.</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <h2>Architecture Sketch</h2>
+        <svg class="arch" viewBox="0 0 1180 390" role="img" aria-label="Sources import architecture">
+          <defs>
+            <marker id="arrow-blue" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#2ea7ff"></path>
+            </marker>
+          </defs>
+          <rect x="32" y="42" width="150" height="78" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="107" y="75" text-anchor="middle" fill="#f6fbff" font-size="14">Sources UI</text>
+          <text x="107" y="96" text-anchor="middle" fill="#91a8ba" font-size="12">scan, connect, jobs</text>
+
+          <line x1="182" y1="81" x2="286" y2="81" stroke="#2ea7ff" marker-end="url(#arrow-blue)"></line>
+
+          <rect x="286" y="42" width="168" height="78" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="370" y="75" text-anchor="middle" fill="#f6fbff" font-size="14">Daemon API</text>
+          <text x="370" y="96" text-anchor="middle" fill="#91a8ba" font-size="12">source setup actions</text>
+
+          <line x1="454" y1="81" x2="558" y2="81" stroke="#2ea7ff" marker-end="url(#arrow-blue)"></line>
+
+          <rect x="558" y="42" width="168" height="78" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="642" y="75" text-anchor="middle" fill="#f6fbff" font-size="14">Adapter Registry</text>
+          <text x="642" y="96" text-anchor="middle" fill="#91a8ba" font-size="12">Codex first, neutral core</text>
+
+          <line x1="642" y1="120" x2="642" y2="174" stroke="#2ea7ff" marker-end="url(#arrow-blue)"></line>
+
+          <rect x="506" y="174" width="272" height="78" fill="#071b28" stroke="rgba(46,167,255,.45)"></rect>
+          <text x="642" y="207" text-anchor="middle" fill="#f6fbff" font-size="14">Import Job Coordinator</text>
+          <text x="642" y="228" text-anchor="middle" fill="#91a8ba" font-size="12">queue, heartbeat, cancel, retry, progress</text>
+
+          <line x1="506" y1="213" x2="396" y2="213" stroke="#2ea7ff" marker-end="url(#arrow-blue)"></line>
+          <rect x="218" y="174" width="178" height="78" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="307" y="207" text-anchor="middle" fill="#f6fbff" font-size="14">Preflight Store</text>
+          <text x="307" y="228" text-anchor="middle" fill="#91a8ba" font-size="12">paths, counts, diagnostics</text>
+
+          <line x1="778" y1="213" x2="900" y2="213" stroke="#2ea7ff" marker-end="url(#arrow-blue)"></line>
+          <rect x="900" y="174" width="228" height="78" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="1014" y="207" text-anchor="middle" fill="#f6fbff" font-size="14">Canonical SQLite Graph</text>
+          <text x="1014" y="228" text-anchor="middle" fill="#91a8ba" font-size="12">raw, sessions, messages, tools, usage</text>
+
+          <line x1="1014" y1="252" x2="1014" y2="304" stroke="#2ea7ff" marker-end="url(#arrow-blue)"></line>
+          <rect x="900" y="304" width="228" height="56" fill="#061925" stroke="rgba(194,221,241,.22)"></rect>
+          <text x="1014" y="327" text-anchor="middle" fill="#f6fbff" font-size="14">Logbook · Dossier · MCP</text>
+          <text x="1014" y="347" text-anchor="middle" fill="#91a8ba" font-size="12">read canonical records only</text>
+        </svg>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

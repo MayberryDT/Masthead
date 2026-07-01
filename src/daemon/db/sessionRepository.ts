@@ -26,6 +26,7 @@ export type AdapterIngestionContext = SessionRepositoryContext & {
 
 export type AdapterIngestionResult = {
   sessionId?: string;
+  created?: boolean;
 };
 
 type SessionRepository = {
@@ -543,6 +544,8 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
 export function ingestAdapterRecord(db: MastheadDatabase, record: AdapterRecord, context: AdapterIngestionContext): AdapterIngestionResult {
   const repository = createSessionRepository(db, context);
   let sessionId: string | undefined;
+  const predictedSessionId = predictedCanonicalSessionId(record, context);
+  const sessionExistedBefore = predictedSessionId ? sessionExists(db, predictedSessionId) : undefined;
 
   db.exec("BEGIN IMMEDIATE;");
   try {
@@ -567,7 +570,20 @@ export function ingestAdapterRecord(db: MastheadDatabase, record: AdapterRecord,
     throw error;
   }
 
-  return { sessionId };
+  return { created: sessionId ? !sessionExistedBefore : undefined, sessionId };
+}
+
+function predictedCanonicalSessionId(record: AdapterRecord, context: AdapterIngestionContext): string | undefined {
+  const runtimeId = runtimeIdFor(context.runtimeKind, context.runtimeVersion);
+  const value =
+    record.normalized.kind === "event" || record.normalized.kind === "session"
+      ? metadataValue(record.normalized.value)
+      : transcriptValue(record.normalized.value, record.source.path);
+  return value.sessionId ? canonicalSessionId(context.hostId, runtimeId, value.sessionId) : undefined;
+}
+
+function sessionExists(db: MastheadDatabase, sessionId: string): boolean {
+  return Boolean(db.prepare("SELECT 1 FROM sessions WHERE session_id = ?").get(sessionId));
 }
 
 const terminalEventTypes = new Set<NormalizedEvent["type"]>(["command.finished", "file.changed", "session.completed"]);

@@ -1,3 +1,5 @@
+import type { ImportCompletionReportDto, ImportJobStatus, ImportManifestSummaryDto, ImportScopeDto, ImportStage } from "./sourceImport.ts";
+
 export type SetupStatus = "empty" | "scan_needed" | "scan_available" | "detected" | "connecting" | "importing" | "needs_attention" | "ready";
 
 export type FoundSourceDto = {
@@ -128,7 +130,7 @@ export type SourcesAdvancedImportDto = {
   importJobId: string;
   sourceId: string;
   importKind: "metadata" | "transcript" | "enrichment";
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "cancelling";
+  status: ImportJobStatus;
   discoveredCount: number;
   processedCount?: number;
   importedCount: number;
@@ -137,6 +139,13 @@ export type SourcesAdvancedImportDto = {
   updatedAt: string;
   currentPath?: string;
   failureMessage?: string;
+  stage?: ImportStage;
+  heartbeatAt?: string;
+  totalWorkUnits?: number;
+  completedWorkUnits?: number;
+  failedWorkUnits?: number;
+  skippedWorkUnits?: number;
+  completionReport?: ImportCompletionReportDto;
 };
 
 export type SourcesAdvancedDto = {
@@ -173,6 +182,8 @@ export type SourcesSetupDto = {
     failed: number;
   };
   latestScan?: SourcesOnboardingScanDto;
+  latestManifest?: ImportManifestSummaryDto;
+  latestCompletionReport?: ImportCompletionReportDto;
   nextAction?: "connect_sources" | "approve_transcripts" | "build_library" | "sync" | "repair_missing_data" | "open_logbook" | "none";
   scan?: SourcesOnboardingScanDto;
   advanced: SourcesAdvancedDto;
@@ -187,6 +198,8 @@ export type SourcesSetupRunRequest = {
   transcriptApproved?: boolean;
   enrichmentMode?: "local" | "remote" | "skip";
   transcriptApprovals?: Array<{ sourceId: string; runtime: string; approved: boolean }>;
+  importScope?: ImportScopeDto;
+  runtimeApprovals?: Array<{ runtime: string; approved: boolean }>;
 };
 
 export type SourcesSetupRunInput = SourcesSetupRunRequest;

@@ -423,6 +423,132 @@
   line-height: 1.35;
 }
 
+.sources-import-modal {
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+}
+
+.sources-import-body {
+  display: grid;
+  gap: 14px;
+  overflow: auto;
+}
+
+.sources-import-step,
+.import-progress-panel,
+.import-completion-report {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid rgba(92, 153, 187, 0.16);
+  border-radius: 5px;
+  background: rgba(3, 16, 25, 0.42);
+  padding: 14px;
+}
+
+.harness-import-card {
+  min-height: 156px;
+}
+
+.harness-import-card strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-import-card-description {
+  color: var(--mute);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.sources-import-preview,
+.import-progress-grid,
+.import-report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.sources-import-preview div,
+.import-progress-grid div,
+.import-report-grid div {
+  min-width: 0;
+  border: 1px solid rgba(92, 153, 187, 0.13);
+  border-radius: 4px;
+  background: rgba(6, 25, 37, 0.58);
+  padding: 10px;
+}
+
+.sources-import-preview dt,
+.import-progress-grid dt,
+.import-report-grid dt {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.sources-import-preview dd,
+.import-progress-grid dd,
+.import-report-grid dd {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-family: var(--font-technical);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.sources-import-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid rgba(194, 221, 241, 0.11);
+  padding-top: 12px;
+}
+
+.import-unit-list,
+.import-failure-list,
+.import-report-actions {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.import-unit-list li,
+.import-failure-list li,
+.import-report-actions span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+  border-top: 1px solid rgba(194, 221, 241, 0.1);
+  padding-top: 7px;
+}
+
+.import-unit-list span,
+.import-failure-list span,
+.import-current-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-unit-list strong,
+.import-failure-list strong,
+.import-report-actions span {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 .source-detail-modal {
   width: min(1080px, calc(100vw - 32px));
 }

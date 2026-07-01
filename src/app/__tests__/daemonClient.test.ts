@@ -3,8 +3,11 @@ import {
   getSessionTranscript,
   getSourcesAdvanced,
   getSourcesSetup,
+  getImportReport,
   listImports,
+  listImportWorkUnits,
   listReviewDispositions,
+  previewSourcesImport,
   repairSources,
   runSourcesSetup,
   saveReviewDisposition,
@@ -157,6 +160,79 @@ describe("daemon client review dispositions", () => {
       "http://127.0.0.1:17373/imports?limit=25&offset=50&adapterId=codex&sourceId=codex-sessions&status=active",
       { headers: { accept: "application/json" }, signal: undefined }
     );
+  });
+
+  test("previews a harness-first sources import", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          previews: [
+            {
+              runtime: "codex",
+              summary: {
+                excludedUnits: 1,
+                generatedAt: "2026-07-01T00:00:00.000Z",
+                importJobId: "preview:codex",
+                importKind: "transcript",
+                includedUnits: 2,
+                manifestId: "",
+                runtime: "codex",
+                scope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+                totalBytes: 120,
+                totalUnits: 3
+              }
+            }
+          ]
+        })
+      )
+    );
+
+    await expect(
+      previewSourcesImport("http://127.0.0.1:17373/projection", {
+        importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+        importTranscripts: true,
+        runtimes: ["codex"]
+      })
+    ).resolves.toHaveLength(1);
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/sources/import/preview", {
+      body: JSON.stringify({
+        importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+        importTranscripts: true,
+        runtimes: ["codex"]
+      }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+  });
+
+  test("loads import work units and completion reports", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(response({ ok: true, limit: 50, offset: 0, units: [{ status: "succeeded", workUnitId: "unit-1" }] }))
+        .mockResolvedValueOnce(response({ ok: true, report: { importJobId: "job-1", sessionsCreated: 1 } }))
+    );
+
+    await expect(
+      listImportWorkUnits("http://127.0.0.1:17373/projection", "job-1", { limit: 50, status: "succeeded" })
+    ).resolves.toEqual({
+      limit: 50,
+      offset: 0,
+      units: [{ status: "succeeded", workUnitId: "unit-1" }]
+    });
+    await expect(getImportReport("http://127.0.0.1:17373/projection", "job-1")).resolves.toMatchObject({
+      importJobId: "job-1",
+      sessionsCreated: 1
+    });
+    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:17373/imports/job-1/units?limit=50&status=succeeded", {
+      headers: { accept: "application/json" }
+    });
+    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:17373/imports/job-1/report", {
+      headers: { accept: "application/json" }
+    });
   });
 
   test("loads paginated session transcripts from the daemon", async () => {

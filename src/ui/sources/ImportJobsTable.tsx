@@ -41,7 +41,10 @@ export function ImportJobsTable({
               <th>Started</th>
               <th>Source</th>
               <th>Type</th>
+              <th>Stage</th>
               <th>Progress</th>
+              <th>Units</th>
+              <th>Heartbeat</th>
               <th>Current path</th>
               <th>Status</th>
               <th>Action</th>
@@ -53,7 +56,10 @@ export function ImportJobsTable({
                 <td>{formatTime(job.updatedAt)}</td>
                 <td>{job.sourceId}</td>
                 <td>{job.importKind}</td>
+                <td>{job.stage ?? "—"}</td>
                 <td>{formatProgress(job)}</td>
+                <td>{formatUnits(job)}</td>
+                <td>{job.heartbeatAt ? formatTime(job.heartbeatAt) : "—"}</td>
                 <td>{job.currentPath ?? "—"}</td>
                 <td>
                   <StatusBadge tone={statusTone(job.status)}>{job.status}</StatusBadge>
@@ -87,7 +93,7 @@ function jobAction(
   if (job.status === "cancelling") {
     return <span className="surface-status">Cancelling</span>;
   }
-  if (job.status === "failed" || job.status === "cancelled") {
+  if (job.status === "failed" || job.status === "cancelled" || job.status === "succeeded_with_issues") {
     return (
       <AppButton
         variant="quiet"
@@ -109,11 +115,16 @@ function formatProgress(job: ImportJob): string {
   return percent === undefined ? count : `${count} (${percent}%)`;
 }
 
+function formatUnits(job: ImportJob): string {
+  if (!job.totalWorkUnits) return "—";
+  return `${job.completedWorkUnits ?? 0} / ${job.totalWorkUnits}`;
+}
+
 function statusTone(status: ImportJob["status"]): StatusBadgeTone {
   if (status === "failed") return "danger";
   if (status === "running" || status === "cancelling") return "info";
   if (status === "queued") return "warning";
-  if (status === "succeeded") return "active";
+  if (status === "succeeded" || status === "succeeded_with_issues") return "active";
   return "neutral";
 }
 
