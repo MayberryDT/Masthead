@@ -27,6 +27,7 @@ export type SessionEnrichmentView = {
 
 export type LiveProjectionEnrichment = {
   sourceSessionId: string;
+  generatedAt?: string;
   title?: string;
   liveSummary?: string;
   subject?: string;
@@ -151,6 +152,7 @@ export function liveProjectionEnrichments(db: MastheadDatabase, sourceSessionIds
           action: view.action,
           commandsSummary: view.commandsSummary,
           filesChangedSummary: view.filesChangedSummary,
+          generatedAt: latestGeneratedAt(sessionRows),
           liveSummary: view.liveSummary,
           model: view.model,
           object: view.object,
@@ -167,6 +169,14 @@ export function liveProjectionEnrichments(db: MastheadDatabase, sourceSessionIds
       ];
     })
   );
+}
+
+function latestGeneratedAt(rows: EnrichmentRow[]): string | undefined {
+  return rows
+    .map((row) => row.generatedAt)
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .toSorted()
+    .at(-1);
 }
 
 function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichmentView {

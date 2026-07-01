@@ -35,6 +35,7 @@ export type OpenAISessionCopyResult = {
 };
 
 export type OpenAISessionCopyEnricherConfig = OpenAISessionCopyConfig & {
+  mode?: "blocking" | "background";
   now?: () => number;
   ttlMs?: number;
   failureCooldownMs?: number;
@@ -188,6 +189,7 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
   const model = config.model ?? DEFAULT_MODEL;
   const enabled = config.enabled === true;
   const apiKey = config.apiKey;
+  const mode = config.mode ?? "blocking";
   const now = config.now ?? Date.now;
   const ttlMs = config.ttlMs ?? DEFAULT_TTL_MS;
   const failureCooldownMs = config.failureCooldownMs ?? DEFAULT_FAILURE_COOLDOWN_MS;
@@ -199,6 +201,21 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
   const failedResults = new Map<string, { expiresAt: number; result: OpenAISessionCopyResult }>();
   const inFlight = new Map<string, Promise<OpenAISessionCopyResult>>();
   const lastSuccessfulCopies = new Map<string, SessionPlainCopy>();
+  const completedBackgroundCopies = new Map<
+    string,
+    {
+      copy: SessionPlainCopy;
+      refresh: NonNullable<LiveBoardProjection["cards"][number]["copyRefresh"]>;
+      sessionId: string;
+    }
+  >();
+
+  function activeFailedResult(key: string): OpenAISessionCopyResult | undefined {
+    const failed = failureCooldownMs > 0 ? failedResults.get(key) : undefined;
+    if (failed && failed.expiresAt > now()) return failed.result;
+    if (failed) failedResults.delete(key);
+    return undefined;
+  }
 
   async function cachedRewrite(
     input: SessionCopyInput,
@@ -209,11 +226,10 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
     const key = sessionCopyCacheKey({ ...input, refresh: undefined }, model);
     const cached = ttlMs > 0 ? cache.get(key) : undefined;
     if (cached && cached.expiresAt > now()) return { copy: cached.copy, latencyMs: 0, status: "llm" };
-    const failed = failureCooldownMs > 0 ? failedResults.get(key) : undefined;
-    if (failed && failed.expiresAt > now()) return { ...failed.result, latencyMs: 0 };
-    if (failed) failedResults.delete(key);
+    const failed = activeFailedResult(key);
+    if (failed) return { ...failed, latencyMs: 0 };
 
-    const existing = ttlMs > 0 ? inFlight.get(key) : undefined;
+    const existing = inFlight.get(key);
     if (existing) return existing;
 
     const request = rewriteSessionCopyWithOpenAI(input, fallback, {
@@ -239,13 +255,178 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
       inFlight.delete(key);
     });
 
-    if (ttlMs > 0) inFlight.set(key, request);
+    inFlight.set(key, request);
     return request;
+  }
+
+  function buildRefreshInput(
+    projection: LiveBoardProjection,
+    card: LiveBoardProjection["cards"][number],
+    cardIndex: number,
+    generatedAt: string,
+    refreshId: string,
+    refreshIntervalMs: number | undefined
+  ): SessionCopyInput {
+    const refresh = {
+      cardIndex,
+      generatedAt,
+      refreshId,
+      ...(refreshIntervalMs ? { refreshIntervalMs } : {})
+    };
+    return isSessionCopyInput(card.copyInput)
+      ? { ...card.copyInput, refresh }
+      : toSessionCopyInput(
+          card,
+          projection.attentionQueue.filter((item) => item.sessionId === card.sessionId),
+          projection.conflicts.filter((conflict) => conflict.sessionIds.includes(card.sessionId)),
+          { refresh }
+        );
+  }
+
+  function recordProviderResponse(
+    result: OpenAISessionCopyResult,
+    input: SessionCopyInput,
+    refreshId: string,
+    refreshIntervalMs: number | undefined,
+    sessionId: string
+  ): void {
+    auditLogger.record({
+      details: {
+        failureMessage: result.failureMessage,
+        status: result.status,
+        validationReason: result.validationReason
+      },
+      kind: "board.provider_response",
+      latencyMs: result.latencyMs,
+      model,
+      provider: "openai",
+      refreshId,
+      refreshIntervalMs,
+      sessionId,
+      status: result.status
+    });
+    if (result.status === "llm" && result.copy) {
+      auditLogger.record({
+        details: result.copy,
+        kind: "board.applied",
+        latencyMs: result.latencyMs,
+        model,
+        provider: "openai",
+        refreshId,
+        refreshIntervalMs,
+        sessionId,
+        status: "success"
+      });
+      return;
+    }
+    auditLogger.record({
+      details: {
+        failureMessage: result.failureMessage,
+        input,
+        validationReason: result.validationReason
+      },
+      kind: "board.failed",
+      latencyMs: result.latencyMs,
+      model,
+      provider: "openai",
+      refreshId,
+      refreshIntervalMs,
+      sessionId,
+      status: result.status === "llm" ? "api_error" : result.status
+    });
+  }
+
+  function scheduleBackgroundRewrite(
+    key: string,
+    input: SessionCopyInput,
+    fallback: SessionPlainCopy,
+    generatedAt: string,
+    refreshId: string,
+    refreshIntervalMs: number | undefined,
+    sessionId: string
+  ): void {
+    if (inFlight.has(key) || activeFailedResult(key)) return;
+    auditLogger.record({
+      kind: "board.started",
+      model,
+      provider: "openai",
+      refreshId,
+      refreshIntervalMs,
+      sessionId
+    });
+    auditLogger.record({
+      details: input,
+      kind: "board.input",
+      model,
+      provider: "openai",
+      refreshId,
+      refreshIntervalMs,
+      sessionId
+    });
+    void cachedRewrite(input, fallback, config.timeoutMs ?? DEFAULT_TIMEOUT_MS, refreshIntervalMs).then((result) => {
+      recordProviderResponse(result, input, refreshId, refreshIntervalMs, sessionId);
+      if (result.status !== "llm" || !result.copy) return;
+      completedBackgroundCopies.set(key, {
+        copy: result.copy,
+        refresh: {
+          latencyMs: result.latencyMs,
+          model,
+          provider: "openai",
+          requestedAt: generatedAt,
+          status: "success"
+        },
+        sessionId
+      });
+      lastSuccessfulCopies.set(sessionId, result.copy);
+      trimSessionCopyMap(lastSuccessfulCopies, maxEntries);
+      trimBackgroundCopyMap(completedBackgroundCopies, maxEntries);
+    });
+  }
+
+  function enrichProjectionInBackground(projection: LiveBoardProjection, options: { refreshIntervalMs?: number } = {}): LiveBoardProjection {
+    const refreshIntervalMs = options.refreshIntervalMs ?? config.refreshIntervalMs;
+    const copiesBySession = new Map<string, SessionPlainCopy>();
+    const refreshBySession = new Map<string, NonNullable<LiveBoardProjection["cards"][number]["copyRefresh"]>>();
+    const cards = refreshableProjectionCards(projection.cards);
+    const refreshId = `refresh:${now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
+    const generatedAt = new Date(now()).toISOString();
+    const summary = {
+      disabled: 0,
+      failed: 0,
+      generatedAt,
+      requested: 0,
+      succeeded: 0
+    };
+
+    for (const { card, cardIndex } of cards) {
+      const input = buildRefreshInput(projection, card, cardIndex, generatedAt, refreshId, refreshIntervalMs);
+      const key = sessionCopyCacheKey({ ...input, refresh: undefined }, model);
+      const completed = completedBackgroundCopies.get(key);
+      if (completed) {
+        copiesBySession.set(card.sessionId, completed.copy);
+        refreshBySession.set(card.sessionId, completed.refresh);
+        summary.succeeded += 1;
+        continue;
+      }
+      if (inFlight.has(key) || activeFailedResult(key)) continue;
+      scheduleBackgroundRewrite(key, input, card.copy, generatedAt, refreshId, refreshIntervalMs, card.sessionId);
+      summary.requested += 1;
+    }
+
+    const hasSummary = summary.requested > 0 || summary.succeeded > 0 || summary.failed > 0 || summary.disabled > 0;
+    return {
+      ...projection,
+      cards: projection.cards.map((card) => withOverlayCopy(card, copiesBySession, refreshBySession)),
+      ...(hasSummary ? { copyRefreshSummary: summary } : {}),
+      expandedSession: projection.expandedSession ? withOverlayCopy(projection.expandedSession, copiesBySession, refreshBySession) : undefined,
+      selectedSession: projection.selectedSession ? withOverlayCopy(projection.selectedSession, copiesBySession, refreshBySession) : undefined
+    };
   }
 
   return {
     async enrichProjection(projection, options = {}) {
       if (!enabled) return projection;
+      if (mode === "background") return enrichProjectionInBackground(projection, options);
       const refreshIntervalMs = options.refreshIntervalMs ?? config.refreshIntervalMs;
       const deadline = now() + projectionBudgetMs;
       const copiesBySession = new Map<string, SessionPlainCopy>();
@@ -268,20 +449,7 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
           const { card, cardIndex } = workItem;
           const remainingMs = deadline - now();
           if (remainingMs <= 0) return;
-          const refresh = {
-            cardIndex,
-            generatedAt,
-            refreshId,
-            ...(refreshIntervalMs ? { refreshIntervalMs } : {})
-          };
-          const input = isSessionCopyInput(card.copyInput)
-            ? { ...card.copyInput, refresh }
-            : toSessionCopyInput(
-                card,
-                projection.attentionQueue.filter((item) => item.sessionId === card.sessionId),
-                projection.conflicts.filter((conflict) => conflict.sessionIds.includes(card.sessionId)),
-                { refresh }
-              );
+          const input = buildRefreshInput(projection, card, cardIndex, generatedAt, refreshId, refreshIntervalMs);
           auditLogger.record({
             kind: "board.started",
             model,
@@ -301,21 +469,7 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
           });
           summary.requested += 1;
           const result = await cachedRewrite(input, card.copy, remainingMs, refreshIntervalMs);
-          auditLogger.record({
-            details: {
-              failureMessage: result.failureMessage,
-              status: result.status,
-              validationReason: result.validationReason
-            },
-            kind: "board.provider_response",
-            latencyMs: result.latencyMs,
-            model,
-            provider: "openai",
-            refreshId,
-            refreshIntervalMs,
-            sessionId: card.sessionId,
-            status: result.status
-          });
+          recordProviderResponse(result, input, refreshId, refreshIntervalMs, card.sessionId);
           if (result.status === "llm" && result.copy) {
             copiesBySession.set(card.sessionId, result.copy);
             lastSuccessfulCopies.set(card.sessionId, result.copy);
@@ -328,17 +482,6 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
               status: "success"
             });
             summary.succeeded += 1;
-            auditLogger.record({
-              details: result.copy,
-              kind: "board.applied",
-              latencyMs: result.latencyMs,
-              model,
-              provider: "openai",
-              refreshId,
-              refreshIntervalMs,
-              sessionId: card.sessionId,
-              status: "success"
-            });
           } else {
             const status = result.status === "llm" ? "api_error" : result.status;
             const previousCopy = lastSuccessfulCopies.get(card.sessionId);
@@ -353,20 +496,6 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
             });
             if (status === "disabled") summary.disabled += 1;
             else summary.failed += 1;
-            auditLogger.record({
-              details: {
-                failureMessage: result.failureMessage,
-                validationReason: result.validationReason
-              },
-              kind: "board.failed",
-              latencyMs: result.latencyMs,
-              model,
-              provider: "openai",
-              refreshId,
-              refreshIntervalMs,
-              sessionId: card.sessionId,
-              status
-            });
           }
         }
       });
@@ -453,6 +582,17 @@ function trimCache(cache: Map<string, { copy: SessionPlainCopy; expiresAt: numbe
 }
 
 function trimSessionCopyMap(cache: Map<string, SessionPlainCopy>, maxEntries: number): void {
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (!oldestKey) return;
+    cache.delete(oldestKey);
+  }
+}
+
+function trimBackgroundCopyMap(
+  cache: Map<string, { copy: SessionPlainCopy; refresh: NonNullable<LiveBoardProjection["cards"][number]["copyRefresh"]>; sessionId: string }>,
+  maxEntries: number
+): void {
   while (cache.size > maxEntries) {
     const oldestKey = cache.keys().next().value as string | undefined;
     if (!oldestKey) return;

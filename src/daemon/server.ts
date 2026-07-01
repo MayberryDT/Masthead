@@ -38,6 +38,7 @@ import {
 import { listImportFailureGroups, listImportWorkUnits } from "./db/importLedgerRepository.ts";
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
+import { liveProjectionTranscriptFacts } from "./db/liveTranscriptFactsRepository.ts";
 import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
@@ -180,6 +181,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       enabled: config.liveCopyEnabled ?? config.llmCopyEnabled,
       apiKey: config.openaiApiKey,
       model: config.openaiModel,
+      mode: "background",
       ttlMs: config.liveCopyCacheMs,
       timeoutMs: config.liveCopyTimeoutMs,
       projectionBudgetMs: config.liveCopyProjectionBudgetMs,
@@ -1405,6 +1407,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const liveEnvelope = projectLiveEvents(projectionEvents, projectionGitSnapshots, {
         selectedSessionId,
         sessionEnrichments: liveProjectionEnrichments(database, projectionSessionIds),
+        sessionTranscriptFacts: liveProjectionTranscriptFacts(database, projectionSessionIds),
         diagnostics: state.diagnostics.length
       });
       liveEnvelope.events = state.events.length;

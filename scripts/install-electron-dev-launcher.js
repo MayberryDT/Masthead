@@ -95,6 +95,24 @@ is_masthead_electron_process() {
   return 1
 }
 
+is_masthead_browser_dev_process() {
+  local pid="$1" cwd cmd
+  [[ -n "$pid" && "$pid" != "$$" && "$pid" != "$PPID" ]] || return 1
+  cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  [[ "$cwd" == "$APP_DIR" ]] || return 1
+  cmd="$(read_cmdline "$pid")"
+  case "$cmd" in
+    "npm run dev"|\
+    "sh -c npm run version:sync && npm run build:daemon && node scripts/masthead-live-dev.js"|\
+    "node scripts/masthead-live-dev.js"|\
+    "$NODE_BIN $APP_DIR/scripts/masthead-live-dev.js"|\
+    *"vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort"*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 wait_for_port_to_close() {
   local port="$1"
   for _ in {1..40}; do
@@ -162,6 +180,28 @@ stop_stale_electron_processes() {
     if is_masthead_electron_process "$pid"; then
       cmd="$(read_cmdline "$pid")"
       log "Force stopping stale Masthead Electron process $pid: $cmd"
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
+}
+
+stop_stale_browser_dev_processes() {
+  local pid cmd stale_pids
+  stale_pids="$(pgrep -u "$(id -u)" -f 'npm run dev|masthead-live-dev.js|vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort' 2>/dev/null || true)"
+  for pid in $stale_pids; do
+    if is_masthead_browser_dev_process "$pid"; then
+      cmd="$(read_cmdline "$pid")"
+      log "Stopping stale Masthead browser dev process $pid: $cmd"
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+
+  sleep 1
+
+  for pid in $stale_pids; do
+    if is_masthead_browser_dev_process "$pid"; then
+      cmd="$(read_cmdline "$pid")"
+      log "Force stopping stale Masthead browser dev process $pid: $cmd"
       kill -9 "$pid" 2>/dev/null || true
     fi
   done
@@ -276,6 +316,7 @@ log "App dir: $APP_DIR"
 
 load_local_env
 stop_stale_electron_processes
+stop_stale_browser_dev_processes
 start_dev_daemon
 start_dev_ui
 

@@ -15,6 +15,7 @@ export type BoardLiveCopyFacts = {
     summary: string;
     occurredAt: string;
   }>;
+  recentTranscriptMessages?: string[];
   recentToolNames: string[];
   recentFileBasenames: string[];
   recentCommandFailures: string[];
@@ -26,6 +27,12 @@ export type BoardLiveCopyFacts = {
     messages?: number;
   };
   canonicalEnrichment?: BoardCanonicalEnrichmentFacts;
+};
+
+export type BoardTranscriptMessageFact = {
+  role: "user" | "assistant" | "system" | "tool" | "unknown";
+  text: string;
+  observedAt: string;
 };
 
 export type BoardCanonicalEnrichmentFacts = {
@@ -62,6 +69,7 @@ export function buildBoardLiveCopyFacts(input: {
   canonicalEnrichment?: BoardCanonicalEnrichmentFacts;
   events: NormalizedEvent[];
   gitSnapshots: GitSnapshot[];
+  recentTranscriptMessages?: BoardTranscriptMessageFact[];
   attentionItems: AttentionItem[];
   conflicts: ConflictCard[];
   maxEvents?: number;
@@ -90,12 +98,19 @@ export function buildBoardLiveCopyFacts(input: {
     .map((event) => event.summary)
     .filter((summary) => !isLowValueLiveCopyText(summary))
     .slice(0, 6);
+  const recentTranscriptMessages = unique(
+    (input.recentTranscriptMessages ?? [])
+      .toSorted((left, right) => right.observedAt.localeCompare(left.observedAt))
+      .map(transcriptMessageEvidence)
+      .filter(isString)
+  ).slice(0, 6);
   const nonEnrichmentEvidence = [
     project,
     title,
     input.card.workContext?.label,
     input.card.workContext?.confidence,
     input.card.latestFeedbackSignal?.summary,
+    ...recentTranscriptMessages,
     ...recentEvents.map((event) => event.summary),
     ...recentToolNames,
     ...recentFileBasenames,
@@ -116,6 +131,7 @@ export function buildBoardLiveCopyFacts(input: {
     project,
     recentCommandFailures,
     recentEvents,
+    recentTranscriptMessages,
     recentFileBasenames,
     recentToolNames,
     runtime: input.card.runtime,
@@ -166,6 +182,41 @@ function safeShortText(value: string): string | undefined {
   if (!cleaned || isLowValueLiveCopyText(cleaned)) return undefined;
   if (isGenericHarnessToolName(cleaned)) return undefined;
   return cleaned.slice(0, 120);
+}
+
+function transcriptMessageEvidence(message: BoardTranscriptMessageFact): string | undefined {
+  const neutralized = neutralizeTranscriptText(message.text).replace(/\s+/g, " ").trim();
+  if (message.role === "assistant" && isAssistantProgressMessage(neutralized)) return undefined;
+  if (isUnsafeBoardCopyEvidence(neutralized)) return undefined;
+  const cleaned = safeShortText(neutralized);
+  if (!cleaned) return undefined;
+  if (isUnsafeBoardCopyEvidence(cleaned)) return undefined;
+  return cleaned.length >= 12 ? cleaned : undefined;
+}
+
+function neutralizeTranscriptText(value: string): string {
+  return value
+    .replace(/\bI\s+do\s+not\s+see\s+the\s+headlines\s+changing\b/gi, "Headlines are not visibly changing")
+    .replace(/\bI\s+don't\s+see\s+the\s+headlines\s+changing\b/gi, "Headlines are not visibly changing")
+    .replace(/\bwe\s+need\b/gi, "Need")
+    .replace(/\bI\s+do\s+not\s+see\b/gi, "No visible")
+    .replace(/\bI\s+don't\s+see\b/gi, "No visible")
+    .replace(/\bI\s+saw\b/gi, "Saw")
+    .replace(/\bI\s+even\s+restarted\b/gi, "Restarted")
+    .replace(/\bI\s+think\b/gi, "Likely")
+    .replace(/\bI\s+need\b/gi, "Need");
+}
+
+function isAssistantProgressMessage(value: string): boolean {
+  if (/\bI(?:'|’)m\b/i.test(value)) return true;
+  if (
+    /\bI(?:'|’)m\s+(?:adding|bringing|checking|digging|doing|exposing|looking|patching|putting|reading|rerunning|restarting|running|serving|starting|tracing|wiring)\b/i.test(
+      value
+    )
+  ) {
+    return true;
+  }
+  return /\bI\s+(?:am|can|found|need|think|will)\b/i.test(value);
 }
 
 function safeFactLabel(value: string | undefined): string | undefined {
@@ -229,7 +280,7 @@ function sanitizeCanonicalEnrichment(
 
 function cleanCanonicalEnrichmentText(value: string | undefined): string | undefined {
   const normalized = value?.replace(/\s+/g, " ").trim();
-  if (!normalized || isLowValueLiveCopyText(normalized) || isWeakCanonicalEnrichmentText(normalized)) return undefined;
+  if (!normalized || isLowValueLiveCopyText(normalized) || isWeakCanonicalEnrichmentText(normalized) || isUnsafeBoardCopyEvidence(normalized)) return undefined;
   return normalized;
 }
 
@@ -267,6 +318,16 @@ function isWeakCanonicalEnrichmentText(value: string): boolean {
   if (/\bhas recent (?:[\w .-]+\s+)?activity\b/i.test(normalized)) return true;
   if (/\bbeing (?:fixed|updated|reviewed|validated) for\b/i.test(normalized)) return true;
   return normalized.startsWith("{") || normalized.includes('"event"');
+}
+
+function isUnsafeBoardCopyEvidence(value: string): boolean {
+  return (
+    /::[-\w]+\{[^}]*\}/i.test(value) ||
+    /\[url\]/i.test(value) ||
+    /\b[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD)[A-Z0-9_]*\b/i.test(value) ||
+    /\bsk-[A-Za-z0-9_-]+\b/i.test(value) ||
+    /^https?:\/\//i.test(value)
+  );
 }
 
 function mentionsMcp(value: string): boolean {

@@ -372,7 +372,7 @@ function supportsCompletionClaim(input: SessionCopyInput): boolean {
 }
 
 const unsafeCopyPattern =
-  /\b(you|your|tyler|urgent|critical|dangerous|please|let'?s|i\b|my|i recommend|i finished|we need|waiting for review)\b|completed_unreviewed|waiting_for_user|waiting_for_approval|ended_review|needs_action|primaryStatus|lifecycle|evidence refs|hook event|OPENAI_API_KEY|sk-|https?:\/\/|\/|\bnpm\b|\byarn\b|\bpnpm\b|\bcmd-[a-z0-9-]*/i;
+  /\b(you|your|tyler|urgent|critical|dangerous|please|let'?s|i\b|my|i recommend|i finished|we need|waiting for review)\b|completed_unreviewed|waiting_for_user|waiting_for_approval|ended_review|needs_action|primaryStatus|lifecycle|evidence refs|hook event|OPENAI_API_KEY|sk-|https?:\/\/|\[url\]|::[-\w]+\{[^}]*\}|\/|\bnpm\b|\byarn\b|\bpnpm\b|\bcmd-[a-z0-9-]*/i;
 
 function headlineForInput(input: SessionCopyInput): string {
   const activityHeadline = latestActivityHeadline(input);
@@ -424,10 +424,18 @@ function latestActivityHeadline(input: SessionCopyInput): string | undefined {
     input.recentDelta?.latestEventSummaries.map(latestFeedbackHeadline).find(isString) ??
     latestFeedbackHeadline(input.facts?.recentEvents[0]?.summary) ??
     latestFeedbackHeadline(input.latestFeedback?.summary) ??
+    input.facts?.recentTranscriptMessages?.map(transcriptEvidenceHeadline).find(isString) ??
     latestFeedbackHeadline(input.facts?.canonicalEnrichment?.liveSummary) ??
     latestFeedbackHeadline(input.facts?.canonicalEnrichment?.title) ??
     concreteFactHeadline(input.headlineEvidence)
   );
+}
+
+function transcriptEvidenceHeadline(summary: string | undefined): string | undefined {
+  const cleaned = cleanLatestFeedbackHeadline(summary);
+  if (!cleaned || unsafeCopyPattern.test(cleaned) || isLowQualitySessionHeadline(cleaned)) return undefined;
+  const sentence = /[.!?]$/.test(cleaned) ? cleaned : `${cleaned.replace(/[,:;]+$/g, "").trim()}.`;
+  return isSentenceHeadline(sentence) && !unsafeCopyPattern.test(sentence) && !isLowQualitySessionHeadline(sentence) ? sentence : undefined;
 }
 
 function latestFeedbackHeadline(summary: string | undefined): string | undefined {
@@ -553,6 +561,7 @@ function headlineEvidenceField(
 ): Pick<SessionCopyInput, "headlineEvidence"> {
   const values = [
     facts?.latestFeedback?.summary,
+    ...(facts?.recentTranscriptMessages ?? []),
     facts?.canonicalEnrichment?.liveSummary,
     facts?.canonicalEnrichment?.title,
     facts?.canonicalEnrichment?.subject,

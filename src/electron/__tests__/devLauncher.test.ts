@@ -19,6 +19,16 @@ describe("Masthead Dev launcher template", () => {
     expect(source).toContain("KillMode=control-group");
   });
 
+  test("claims canonical port 5173 by stopping same-repo browser dev launchers", async () => {
+    const source = await readFile("scripts/install-electron-dev-launcher.js", "utf8");
+
+    expect(source).toContain("stop_stale_browser_dev_processes");
+    expect(source).toContain("is_masthead_browser_dev_process");
+    expect(source).toContain("node scripts/masthead-live-dev.js");
+    expect(source).toContain("vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort");
+    expect(source.indexOf("stop_stale_browser_dev_processes")).toBeLessThan(source.indexOf("start_dev_daemon"));
+  });
+
   test("loads ignored local env and pins the UI to the compatible daemon", async () => {
     const source = await readFile("scripts/install-electron-dev-launcher.js", "utf8");
 

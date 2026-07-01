@@ -475,6 +475,55 @@ describe("OpenAI session copy", () => {
     expect(second.copyRefreshSummary).toMatchObject({ requested: 1, succeeded: 0, failed: 1 });
   });
 
+  test("background mode returns projection immediately while live copy is still in flight", async () => {
+    const response = deferredResponse();
+    const fetchImpl = vi.fn(() => response.promise);
+    const enricher = createOpenAISessionCopyEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      mode: "background"
+    });
+    const projection = liveProjection([cardView()]);
+
+    const enrichPromise = enricher.enrichProjection(projection);
+    const race = await Promise.race([enrichPromise.then((value) => ({ kind: "projection" as const, value })), delay(0).then(() => ({ kind: "blocked" as const }))]);
+    response.resolve(validCopyResponse("Background copy has refreshed."));
+
+    expect(race.kind).toBe("projection");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    if (race.kind === "projection") {
+      expect(race.value.cards[0]?.copy.headline).toBe(projection.cards[0]?.copy.headline);
+      expect(race.value.cards[0]?.copyRefresh).toBeUndefined();
+    }
+    await enrichPromise;
+  });
+
+  test("background mode applies a completed live copy on a later projection", async () => {
+    const response = deferredResponse();
+    const fetchImpl = vi.fn(() => response.promise);
+    const enricher = createOpenAISessionCopyEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      mode: "background"
+    });
+    const projection = liveProjection([cardView()]);
+
+    await enricher.enrichProjection(projection);
+    response.resolve(validCopyResponse("This work is in progress."));
+    await flushPromises();
+    await delay(0);
+    const refreshed = await enricher.enrichProjection(projection);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(refreshed.cards[0]?.copy).toMatchObject({
+      headline: "This work is in progress.",
+      source: "llm"
+    });
+    expect(refreshed.cards[0]?.copyRefresh).toMatchObject({ status: "success" });
+  });
+
   test("only refreshes active non-blocked running cards and leaves idle, ended, and blocked cards unmarked", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
@@ -671,4 +720,45 @@ function liveProjection(cards: SessionCardView[]): LiveBoardProjection {
     attentionQueue: [],
     conflicts: []
   };
+}
+
+function validCopyResponse(headline: string): Response {
+  return {
+    ok: true,
+    json: async () => ({
+      output: [
+        {
+          type: "message",
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify({
+                headline,
+                status: "Work is active.",
+                reason: "This running session has recent activity.",
+                nextStep: ""
+              })
+            }
+          ]
+        }
+      ]
+    })
+  } as Response;
+}
+
+function deferredResponse(): { promise: Promise<Response>; resolve: (value: Response) => void } {
+  let resolve!: (value: Response) => void;
+  const promise = new Promise<Response>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function flushPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }

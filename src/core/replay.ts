@@ -1,5 +1,5 @@
 import { attentionPriority, deriveAttentionItems } from "./attention.ts";
-import { buildBoardLiveCopyFacts, isLowValueLiveCopyText } from "./boardLiveCopyFacts.ts";
+import { buildBoardLiveCopyFacts, isLowValueLiveCopyText, type BoardTranscriptMessageFact } from "./boardLiveCopyFacts.ts";
 import { buildBoardBrief } from "./boardBrief.ts";
 import { isFailedCommandEvent } from "./commandStatus.ts";
 import { detectConflicts, detectSharedResourceConflicts } from "./conflicts.ts";
@@ -39,11 +39,13 @@ type ProjectFixtureOptions = {
   selectedSessionId?: string | null;
   includeTerminalSessions?: boolean;
   sessionEnrichments?: Map<string, LiveSessionEnrichment>;
+  sessionTranscriptFacts?: Map<string, LiveSessionTranscriptFacts>;
   now?: Date;
   idleAfterMs?: number;
 };
 
 export type LiveSessionEnrichment = {
+  generatedAt?: string;
   title?: string;
   liveSummary?: string;
   subject?: string;
@@ -58,6 +60,14 @@ export type LiveSessionEnrichment = {
   provider?: string;
   model?: string;
   status?: string;
+};
+
+export type LiveSessionTranscriptFacts = {
+  recentMessages: BoardTranscriptMessageFact[];
+  coverage?: {
+    hasUsableTranscript?: boolean;
+    messages?: number;
+  };
 };
 
 export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOptions = {}): LiveBoardProjection {
@@ -107,7 +117,8 @@ export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOp
         sessionEvents,
         sessionSnapshots,
         expandedSessionId,
-        options.sessionEnrichments?.get(session.sessionId)
+        options.sessionEnrichments?.get(session.sessionId),
+        options.sessionTranscriptFacts?.get(session.sessionId)
       );
     })
     .sort((a, b) => a.priorityRank - b.priorityRank || a.project.localeCompare(b.project));
@@ -173,7 +184,8 @@ function toCard(
   sessionEvents: NormalizedEvent[],
   sessionSnapshots: GitSnapshot[],
   expandedSessionId?: string,
-  enrichment?: LiveSessionEnrichment
+  enrichment?: LiveSessionEnrichment,
+  transcriptFacts?: LiveSessionTranscriptFacts
 ): SessionCardView {
   const indicators: SessionCardView["indicators"] = [];
   if (sessionAttention.length > 0) indicators.push("attention");
@@ -247,7 +259,8 @@ function toCard(
       canonicalEnrichment: cardEnrichment,
       conflicts: sessionConflicts,
       events: sessionEvents,
-      gitSnapshots: sessionSnapshots
+      gitSnapshots: sessionSnapshots,
+      recentTranscriptMessages: transcriptFacts?.recentMessages
     }),
     recentDelta: recentDeltaFromEvents(sessionEvents, sessionSnapshots)
   });
@@ -256,7 +269,7 @@ function toCard(
     copy: buildDeterministicSessionCopy(copyInput),
     copyInput
   };
-  return withEnrichmentCopy(enrichedCard, cardEnrichment);
+  return withEnrichmentCopy(enrichedCard, cardEnrichment, transcriptFacts);
 }
 
 function recentDeltaFromEvents(sessionEvents: NormalizedEvent[], sessionSnapshots: GitSnapshot[]): NonNullable<Parameters<typeof toSessionCopyInput>[3]>["recentDelta"] {
@@ -278,7 +291,12 @@ function toolNameFromLiveEvent(event: NormalizedEvent): string | undefined {
   return cleaned.slice(0, 120);
 }
 
-function withEnrichmentCopy(card: SessionCardView, enrichment: LiveSessionEnrichment | undefined): SessionCardView {
+function withEnrichmentCopy(
+  card: SessionCardView,
+  enrichment: LiveSessionEnrichment | undefined,
+  transcriptFacts: LiveSessionTranscriptFacts | undefined
+): SessionCardView {
+  if (hasNewerTranscriptEvidence(enrichment, transcriptFacts)) return card;
   const headline = cleanLiveSummary(enrichment?.liveSummary) ?? cleanConcreteLiveTitle(enrichment?.title);
   if (!headline) return card;
   return {
@@ -291,6 +309,20 @@ function withEnrichmentCopy(card: SessionCardView, enrichment: LiveSessionEnrich
       status: card.copy.status
     }
   };
+}
+
+function hasNewerTranscriptEvidence(enrichment: LiveSessionEnrichment | undefined, transcriptFacts: LiveSessionTranscriptFacts | undefined): boolean {
+  if (!enrichment?.generatedAt) return false;
+  const latestTranscriptAt = latestTranscriptMessageAt(transcriptFacts);
+  return latestTranscriptAt ? latestTranscriptAt.localeCompare(enrichment.generatedAt) > 0 : false;
+}
+
+function latestTranscriptMessageAt(transcriptFacts: LiveSessionTranscriptFacts | undefined): string | undefined {
+  return transcriptFacts?.recentMessages
+    .map((message) => message.observedAt)
+    .filter(isNonEmptyString)
+    .toSorted()
+    .at(-1);
 }
 
 function cleanLiveSummary(value: string | undefined): string | undefined {

@@ -50,6 +50,13 @@ When browser automation is needed, use the Codex in-app Browser plugin with the 
 
 ## Worktree Startup
 
+Port `5173` is reserved for the installed Masthead Electron Dev app only. Do not start a browser-only
+Vite UI, `npm run dev`, `npm run dev:ui`, or a secondary worktree UI on `5173` when the Electron dev
+app is expected to run. Electron Dev is hardwired to `http://127.0.0.1:5173`; stealing that port can
+prevent the desktop app from opening or make it attach to the wrong renderer. For non-Electron
+browser/worktree testing, explicitly choose another UI port, such as `MASTHEAD_UI_PORT=5180 npm run
+dev`.
+
 Use the harness-neutral live launcher for local Masthead testing:
 
 ```bash
