@@ -5,11 +5,13 @@ import { sessionDemoTelemetry } from "./observabilityDemo";
 import { SessionCard } from "./SessionCard";
 
 type CardLayoutSnapshot = Map<string, DOMRect>;
-type CardLayoutAnimationMode = "density" | "activity";
 
-const SESSION_CARD_LAYOUT_DURATION_MS = 430;
-const SESSION_CARD_LAYOUT_STAGGER_MS = 22;
-const SESSION_CARD_LAYOUT_EASING = "cubic-bezier(0.2, 0.84, 0.16, 1)";
+export const SESSION_CARD_LAYOUT_DURATION_MS = 980;
+export const SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS = 40;
+export const SESSION_CARD_LAYOUT_STAGGER_MS = 32;
+export const SESSION_CARD_LAYOUT_EASING = "cubic-bezier(0.24, 0.08, 0.18, 1)";
+
+const activeLayoutAnimations = new WeakMap<HTMLElement, Animation>();
 
 type Props = {
   cards: SessionCardView[];
@@ -196,8 +198,7 @@ function ObservabilityCardGrid({
       return;
     }
 
-    const animationMode: CardLayoutAnimationMode = previousOrderSignature === orderSignature ? "density" : "activity";
-    animateCardLayoutFrom(grid, previousLayout, animationMode);
+    animateCardLayoutFrom(grid, previousLayout);
   });
 
   return (
@@ -216,7 +217,7 @@ function captureCardLayout(container: HTMLElement): CardLayoutSnapshot {
   return rects;
 }
 
-function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayoutSnapshot, mode: CardLayoutAnimationMode): void {
+function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayoutSnapshot): void {
   container.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card, index) => {
     const sessionId = card.dataset.sessionId;
     const previousRect = sessionId ? previousLayout.get(sessionId) : undefined;
@@ -232,7 +233,11 @@ function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayou
     const resized = hasMeasurableSize && (Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01);
     if (!moved && !resized) return;
 
-    const keyframes = gantrySetdownLayoutKeyframes({ deltaX, deltaY, scaleX, scaleY, mode });
+    const keyframes = steelPlateLayoutKeyframes({ deltaX, deltaY, scaleX, scaleY });
+    const previousAnimation = activeLayoutAnimations.get(card);
+    previousAnimation?.cancel();
+    activeLayoutAnimations.delete(card);
+
     card.classList.add("is-layout-animating");
     if (typeof card.animate !== "function") {
       animateCardLayoutWithInlineStyle(card, keyframes[0]);
@@ -245,45 +250,49 @@ function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayou
       easing: SESSION_CARD_LAYOUT_EASING,
       fill: "both"
     });
-    const cleanup = () => card.classList.remove("is-layout-animating");
+    activeLayoutAnimations.set(card, animation);
+    const cleanup = () => {
+      if (activeLayoutAnimations.get(card) === animation) {
+        activeLayoutAnimations.delete(card);
+        card.classList.remove("is-layout-animating");
+      }
+    };
     animation.addEventListener("finish", cleanup, { once: true });
     animation.addEventListener("cancel", cleanup, { once: true });
   });
 }
 
-function gantrySetdownLayoutKeyframes({
+function steelPlateLayoutKeyframes({
   deltaX,
   deltaY,
   scaleX,
-  scaleY,
-  mode
+  scaleY
 }: {
   deltaX: number;
   deltaY: number;
   scaleX: number;
   scaleY: number;
-  mode: CardLayoutAnimationMode;
 }): Keyframe[] {
-  const yGate = mode === "activity" ? Math.sign(deltaY || 1) * 6 : 6;
   return [
     {
-      transform: layoutTransform(deltaX, deltaY + yGate, scaleX * 0.982, scaleY * 0.982),
-      filter: "brightness(0.992)"
+      transform: layoutTransform(deltaX, deltaY, scaleX, scaleY)
     },
     {
-      offset: 0.48,
-      transform: layoutTransform(deltaX * 0.24, deltaY * 0.24, 0.996, 0.996)
+      offset: 0.62,
+      transform: layoutTransform(deltaX * 0.22, deltaY * 0.22, dampedScale(scaleX, 0.22), dampedScale(scaleY, 0.22))
     },
     {
-      offset: 0.76,
-      transform: layoutTransform(0, -1, 1.003, 1.003),
-      filter: "brightness(1.012)"
+      offset: 0.86,
+      transform: layoutTransform(deltaX * 0.045, deltaY * 0.045, dampedScale(scaleX, 0.045), dampedScale(scaleY, 0.045))
     },
     {
-      transform: layoutTransform(0, 0, 1, 1),
-      filter: "brightness(1)"
+      transform: layoutTransform(0, 0, 1, 1)
     }
   ];
+}
+
+function dampedScale(value: number, remainingRatio: number): number {
+  return 1 + (value - 1) * remainingRatio;
 }
 
 function layoutTransform(x: number, y: number, scaleX = 1, scaleY = scaleX): string {
@@ -296,31 +305,24 @@ function roundLayoutNumber(value: number): number {
 
 function animateCardLayoutWithInlineStyle(card: HTMLElement, firstKeyframe: Keyframe): void {
   const previousTransition = card.style.transition;
-  const previousFilter = card.style.filter;
   const previousTransform = card.style.transform;
   const previousTransformOrigin = card.style.transformOrigin;
 
   card.style.transition = "none";
   card.style.transformOrigin = "top left";
   card.style.transform = typeof firstKeyframe.transform === "string" ? firstKeyframe.transform : "";
-  card.style.filter = typeof firstKeyframe.filter === "string" ? firstKeyframe.filter : "";
   void card.offsetWidth;
 
   window.requestAnimationFrame(() => {
-    card.style.transition = [
-      `transform ${SESSION_CARD_LAYOUT_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`,
-      `filter ${SESSION_CARD_LAYOUT_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`
-    ].join(", ");
+    card.style.transition = `transform ${SESSION_CARD_LAYOUT_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`;
     card.style.transform = layoutTransform(0, 0, 1, 1);
-    card.style.filter = "brightness(1)";
 
     window.setTimeout(() => {
       card.style.transition = previousTransition;
-      card.style.filter = previousFilter;
       card.style.transform = previousTransform;
       card.style.transformOrigin = previousTransformOrigin;
       card.classList.remove("is-layout-animating");
-    }, SESSION_CARD_LAYOUT_DURATION_MS + 20);
+    }, SESSION_CARD_LAYOUT_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS);
   });
 }
 

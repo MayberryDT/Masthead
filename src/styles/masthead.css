@@ -4191,8 +4191,8 @@ body {
 }
 
 .observability-card-grid {
-  --layout-dur: 430ms;
-  --layout-ease: cubic-bezier(0.2, 0.84, 0.16, 1);
+  --layout-dur: 980ms;
+  --layout-ease: cubic-bezier(0.24, 0.08, 0.18, 1);
   view-transition-name: session-card-grid;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4274,33 +4274,25 @@ body {
 @media (prefers-reduced-motion: no-preference) {
   .observability-console .session-card.is-new-card,
   .masthead-shell .session-card.is-new-card {
-    animation: session-card-created 300ms cubic-bezier(0.17, 0.78, 0.13, 1) both;
-    animation-delay: calc(var(--new-card-index) * 44ms);
+    animation: session-card-created 760ms var(--layout-ease) both;
+    animation-delay: calc(var(--new-card-index) * 70ms);
     transform-origin: 50% 100%;
   }
 }
 
 @keyframes session-card-created {
   0% {
-    opacity: 1;
-    filter: brightness(0.992);
-    transform: translateY(9px) scale(0.968);
+    opacity: 0.92;
+    transform: translateY(18px) scale(0.992);
   }
 
-  66% {
+  72% {
     opacity: 1;
-    filter: brightness(1.012);
-    transform: translateY(-1px) scale(1.004);
-  }
-
-  84% {
-    opacity: 1;
-    transform: translateY(1px) scale(0.999);
+    transform: translateY(3px) scale(0.998);
   }
 
   100% {
     opacity: 1;
-    filter: brightness(1);
     transform: translateY(0) scale(1);
   }
 }

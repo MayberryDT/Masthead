@@ -15,7 +15,12 @@ import { HistoryPanel } from "../ui/HistoryPanel";
 import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
 import { OperationsPanel } from "../ui/OperationsPanel";
-import { SessionBoard } from "../ui/SessionBoard";
+import {
+  SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS,
+  SESSION_CARD_LAYOUT_DURATION_MS,
+  SESSION_CARD_LAYOUT_EASING,
+  SessionBoard
+} from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
 import { SessionLibraryDetail } from "../ui/SessionLibraryDetail";
 import { SourcesPanel } from "../ui/SourcesPanel";
@@ -638,7 +643,7 @@ function animateCardLayoutFrom(previousLayout: CardLayoutSnapshot): void {
     void card.offsetWidth;
 
     window.requestAnimationFrame(() => {
-      card.style.transition = "transform 300ms cubic-bezier(0.22, 1, 0.36, 1)";
+      card.style.transition = `transform ${SESSION_CARD_LAYOUT_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`;
       card.style.transform = "translate(0, 0) scale(1, 1)";
 
       window.setTimeout(() => {
@@ -646,7 +651,7 @@ function animateCardLayoutFrom(previousLayout: CardLayoutSnapshot): void {
         card.style.transform = previousTransform;
         card.style.transformOrigin = previousTransformOrigin;
         card.classList.remove("is-layout-animating");
-      }, 320);
+      }, SESSION_CARD_LAYOUT_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS);
     });
   });
 }

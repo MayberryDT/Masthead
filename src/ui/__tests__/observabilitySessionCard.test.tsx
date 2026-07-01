@@ -6,7 +6,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import type { SessionCardView } from "../../core/types";
 import { SessionCard } from "../SessionCard";
-import { SessionBoard } from "../SessionBoard";
+import {
+  SESSION_CARD_LAYOUT_DURATION_MS,
+  SESSION_CARD_LAYOUT_EASING,
+  SESSION_CARD_LAYOUT_STAGGER_MS,
+  SessionBoard
+} from "../SessionBoard";
 import { stateClassName } from "../format";
 import { sessionDemoTelemetry } from "../observabilityDemo";
 
@@ -333,7 +338,11 @@ describe("observability session card", () => {
   test("animates existing cards when their visible order changes", async () => {
     const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
     const originalAnimate = HTMLElement.prototype.animate;
-    const animations: Array<{ sessionId: string; keyframes: Keyframe[] | PropertyIndexedKeyframes | null }> = [];
+    const animations: Array<{
+      sessionId: string;
+      keyframes: Keyframe[] | PropertyIndexedKeyframes | null;
+      options?: number | KeyframeAnimationOptions;
+    }> = [];
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -347,10 +356,10 @@ describe("observability session card", () => {
     HTMLElement.prototype.animate = vi.fn(function (
       this: HTMLElement,
       keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
-      _options?: number | KeyframeAnimationOptions
+      options?: number | KeyframeAnimationOptions
     ) {
       const sessionId = this.dataset.sessionId;
-      if (sessionId) animations.push({ sessionId, keyframes });
+      if (sessionId) animations.push({ sessionId, keyframes, options });
       return { addEventListener: vi.fn() } as unknown as Animation;
     });
 
@@ -370,10 +379,26 @@ describe("observability session card", () => {
 
       expect(animations.map((animation) => animation.sessionId).sort()).toEqual(["session-1", "session-2"]);
       expect(JSON.stringify(animations.find((animation) => animation.sessionId === "session-2")?.keyframes)).toContain(
-        "translate(0px, 246px)"
+        "translate(0px, 240px)"
       );
       expect(JSON.stringify(animations.find((animation) => animation.sessionId === "session-1")?.keyframes)).toContain(
-        "translate(0px, -246px)"
+        "translate(0px, -240px)"
+      );
+      expect(animations.find((animation) => animation.sessionId === "session-2")?.options).toEqual(
+        expect.objectContaining({
+          delay: 0,
+          duration: SESSION_CARD_LAYOUT_DURATION_MS,
+          easing: SESSION_CARD_LAYOUT_EASING,
+          fill: "both"
+        })
+      );
+      expect(animations.find((animation) => animation.sessionId === "session-1")?.options).toEqual(
+        expect.objectContaining({
+          delay: SESSION_CARD_LAYOUT_STAGGER_MS,
+          duration: SESSION_CARD_LAYOUT_DURATION_MS,
+          easing: SESSION_CARD_LAYOUT_EASING,
+          fill: "both"
+        })
       );
     } finally {
       await act(async () => root.unmount());
@@ -385,7 +410,11 @@ describe("observability session card", () => {
   test("animates existing cards when card density changes", async () => {
     const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
     const originalAnimate = HTMLElement.prototype.animate;
-    const animations: Array<{ sessionId: string; keyframes: Keyframe[] | PropertyIndexedKeyframes | null }> = [];
+    const animations: Array<{
+      sessionId: string;
+      keyframes: Keyframe[] | PropertyIndexedKeyframes | null;
+      options?: number | KeyframeAnimationOptions;
+    }> = [];
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -398,10 +427,10 @@ describe("observability session card", () => {
     HTMLElement.prototype.animate = vi.fn(function (
       this: HTMLElement,
       keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
-      _options?: number | KeyframeAnimationOptions
+      options?: number | KeyframeAnimationOptions
     ) {
       const sessionId = this.dataset.sessionId;
-      if (sessionId) animations.push({ sessionId, keyframes });
+      if (sessionId) animations.push({ sessionId, keyframes, options });
       return { addEventListener: vi.fn() } as unknown as Animation;
     });
 
@@ -417,8 +446,16 @@ describe("observability session card", () => {
       });
 
       expect(animations.map((animation) => animation.sessionId)).toEqual(["session-1"]);
-      expect(JSON.stringify(animations[0]?.keyframes)).toContain("translate(0px, 6px)");
-      expect(JSON.stringify(animations[0]?.keyframes)).toContain("scale(1.309");
+      expect(JSON.stringify(animations[0]?.keyframes)).toContain("translate(0px, 0px)");
+      expect(JSON.stringify(animations[0]?.keyframes)).toContain("scale(1.333");
+      expect(animations[0]?.options).toEqual(
+        expect.objectContaining({
+          delay: 0,
+          duration: SESSION_CARD_LAYOUT_DURATION_MS,
+          easing: SESSION_CARD_LAYOUT_EASING,
+          fill: "both"
+        })
+      );
     } finally {
       await act(async () => root.unmount());
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
@@ -456,7 +493,7 @@ describe("observability session card", () => {
 
       const movedCard = container.querySelector<HTMLElement>('[data-session-id="session-2"]');
       expect(movedCard?.className).toContain("is-layout-animating");
-      expect(movedCard?.style.transform).toContain("translate(0px, 246px)");
+      expect(movedCard?.style.transform).toContain("translate(0px, 240px)");
     } finally {
       await act(async () => root.unmount());
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;

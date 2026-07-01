@@ -176,9 +176,13 @@ describe("dovetail card system", () => {
     expect(mastheadCss).toContain(".session-card.dovetail-card .bottom-signal");
     expect(mastheadCss).toContain("view-transition-name: session-card-grid");
     expect(mastheadCss).toContain(".masthead-shell .session-card.is-layout-animating");
+    expect(mastheadCss).toContain("--layout-dur: 980ms;");
+    expect(mastheadCss).toContain("--layout-ease: cubic-bezier(0.24, 0.08, 0.18, 1);");
     expect(mastheadCss).toContain("grid-template-columns var(--layout-dur)");
     expect(mastheadCss).toContain("height var(--layout-dur)");
     expect(mastheadCss).toContain("min-height var(--layout-dur)");
+    expect(mastheadCss).toContain("animation: session-card-created 760ms var(--layout-ease) both;");
+    expect(mastheadCss).toContain("animation-delay: calc(var(--new-card-index) * 70ms);");
     expect(boardVariantRule).toContain("min-height: 238px;");
     expect(boardVariantRule).toContain("overflow: visible;");
     expect(boardVariantRule).toContain("padding-bottom: 18px;");
