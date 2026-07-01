@@ -42,4 +42,13 @@ describe("App component architecture", () => {
     expect(appSource).not.toContain("const handleLoadMoreBoardTranscript");
     expect(appSource).not.toContain("boardDossierRetryKey");
   });
+
+  test("keeps Usage stats loading orchestration out of App.tsx", async () => {
+    const appPath = fileURLToPath(new URL("../App.tsx", import.meta.url));
+    const appSource = await readFile(appPath, "utf8");
+
+    expect(appSource).not.toContain("getUsageStats");
+    expect(appSource).not.toContain("const loadSidebarUsageStats");
+    expect(appSource).not.toContain("const loadUsageStats");
+  });
 });

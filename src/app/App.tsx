@@ -39,12 +39,7 @@ import {
 import { startLiveConnector } from "./connectorClient";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
 import { ConnectionRecoveryPanel } from "../ui/ConnectionRecoveryPanel";
-import {
-  getUsageStats,
-  saveReviewDisposition,
-  type UsageStatsDto,
-  type UsageWindow
-} from "./daemonClient";
+import { saveReviewDisposition } from "./daemonClient";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
@@ -57,6 +52,7 @@ import { useBoardSessionDetailController } from "./board/useBoardSessionDetailCo
 import { useLogbookController } from "./logbook/useLogbookController";
 import { useSettingsDataController } from "./settings/useSettingsDataController";
 import { useSourcesController } from "./sources/useSourcesController";
+import { useUsageStatsController } from "./usage/useUsageStatsController";
 
 type ConnectorActionState =
   | { state: "idle"; message?: string }
@@ -157,13 +153,6 @@ export function App() {
     externalRefreshKey: sourceLibraryRefreshKey,
     isLive: isLiveConnection
   });
-  const [usageWindow, setUsageWindow] = useState<UsageWindow>("today");
-  const [usageStats, setUsageStats] = useState<UsageStatsDto>();
-  const [usageLoading, setUsageLoading] = useState(false);
-  const [usageError, setUsageError] = useState<string>();
-  const [sidebarUsageStats, setSidebarUsageStats] = useState<UsageStatsDto>();
-  const [sidebarUsageLoading, setSidebarUsageLoading] = useState(false);
-  const [sidebarUsageError, setSidebarUsageError] = useState<string>();
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
   const searchInputRef = useRef<CollapsibleSearchHandle | null>(null);
   const liveRequestIdRef = useRef(0);
@@ -227,6 +216,12 @@ export function App() {
     if (connection.state.state === "probing") return { state: "connecting" };
     return liveConnection;
   }, [connection.state, liveConnection]);
+  const usage = useUsageStatsController({
+    active: activeSurface === "usage",
+    activeProjectionUrl,
+    isLive: effectiveLiveConnection.state === "live",
+    refreshKey: sourceLibraryRefreshKey
+  });
   const handleReviewDispositionsChanged = useCallback((dispositions: ReviewDisposition[]) => setReviewDispositions(dispositions), []);
   const handleCanonicalDataDeleted = useCallback(() => {
     setLiveProjection(emptyLiveBoard);
@@ -305,41 +300,6 @@ export function App() {
     }
   }, [activeProjectionUrl, refreshRateMs, selectedSessionId]);
 
-  const loadSidebarUsageStats = useCallback(async (options: { signal?: AbortSignal } = {}) => {
-    setSidebarUsageLoading(true);
-    setSidebarUsageError(undefined);
-    try {
-      const stats = await getUsageStats(activeProjectionUrl, { window: "today", signal: options.signal });
-      setSidebarUsageStats(stats);
-      if (usageWindow === "today") setUsageStats(stats);
-    } catch (error) {
-      if (!options.signal?.aborted) {
-        setSidebarUsageError(error instanceof Error ? error.message : String(error));
-      }
-    } finally {
-      if (!options.signal?.aborted) setSidebarUsageLoading(false);
-    }
-  }, [activeProjectionUrl, usageWindow]);
-
-  const loadUsageStats = useCallback(async (window: UsageWindow = usageWindow, options: { signal?: AbortSignal } = {}) => {
-    setUsageLoading(true);
-    setUsageError(undefined);
-    try {
-      const stats = await getUsageStats(activeProjectionUrl, { window, signal: options.signal });
-      setUsageStats(stats);
-      if (window === "today") {
-        setSidebarUsageStats(stats);
-        setSidebarUsageError(undefined);
-      }
-    } catch (error) {
-      if (!options.signal?.aborted) {
-        setUsageError(error instanceof Error ? error.message : String(error));
-      }
-    } finally {
-      if (!options.signal?.aborted) setUsageLoading(false);
-    }
-  }, [activeProjectionUrl, usageWindow]);
-
   useEffect(() => {
     let cancelled = false;
     let timeoutId: number | undefined;
@@ -356,26 +316,6 @@ export function App() {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [loadLiveProjection, refreshRateMs]);
-
-  useEffect(() => {
-    if (effectiveLiveConnection.state !== "live") return;
-    const controller = new AbortController();
-    void loadSidebarUsageStats({ signal: controller.signal });
-    const interval = window.setInterval(() => {
-      void loadSidebarUsageStats();
-    }, 60_000);
-    return () => {
-      controller.abort();
-      window.clearInterval(interval);
-    };
-  }, [effectiveLiveConnection.state, loadSidebarUsageStats, sourceLibraryRefreshKey]);
-
-  useEffect(() => {
-    if (activeSurface !== "usage" || effectiveLiveConnection.state !== "live") return;
-    const controller = new AbortController();
-    void loadUsageStats(usageWindow, { signal: controller.signal });
-    return () => controller.abort();
-  }, [activeSurface, effectiveLiveConnection.state, loadUsageStats, sourceLibraryRefreshKey, usageWindow]);
 
   const handleOpenSession = (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -535,12 +475,12 @@ export function App() {
           recoveryPanel
         ) : (
           <UsagePanel
-            stats={usageStats}
-            window={usageWindow}
-            loading={usageLoading}
-            error={usageError}
-            onWindowChange={setUsageWindow}
-            onRetry={() => void loadUsageStats(usageWindow)}
+            stats={usage.stats}
+            window={usage.window}
+            loading={usage.loading}
+            error={usage.error}
+            onWindowChange={usage.setWindow}
+            onRetry={usage.retry}
           />
         )}
       </UsageSurface>
@@ -620,9 +560,9 @@ export function App() {
             version={APP_VERSION_LABEL}
             activeCount={observabilitySessionTotal(visibleSummary)}
             activeSurface={activeSurface}
-            usageStats={sidebarUsageStats}
-            usageLoading={sidebarUsageLoading}
-            usageError={sidebarUsageError}
+            usageStats={usage.sidebarStats}
+            usageLoading={usage.sidebarLoading}
+            usageError={usage.sidebarError}
             onSurfaceChange={setActiveSurface}
           />
         }
