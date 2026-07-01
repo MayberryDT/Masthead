@@ -19,8 +19,8 @@
   --red-soft: rgba(255, 97, 97, 0.14);
   --blue: #57c1ff;
   --blue-soft: rgba(87, 193, 255, 0.14);
-  --modal-open-dur: 250ms;
-  --modal-close-dur: 220ms;
+  --modal-open-dur: 300ms;
+  --modal-close-dur: 300ms;
   --modal-scale: 0.96;
   --modal-scale-close: 0.96;
   --modal-ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -1099,6 +1099,7 @@ main {
   background: rgba(0, 0, 0, 0.74);
   padding: 24px;
   opacity: 1;
+  perspective: 1200px;
   transition:
     background-color var(--modal-open-dur) var(--modal-ease),
     opacity var(--modal-open-dur) var(--modal-ease);
@@ -1114,10 +1115,12 @@ main {
 
 .t-modal-backdrop.is-open {
   opacity: 1;
+  animation: modal-backdrop-in var(--modal-open-dur) linear both;
 }
 
 .t-modal-backdrop.is-closing {
   opacity: 0;
+  animation: modal-backdrop-out var(--modal-close-dur) linear both;
   transition:
     background-color var(--modal-close-dur) var(--modal-ease),
     opacity var(--modal-close-dur) var(--modal-ease);
@@ -1186,6 +1189,11 @@ main {
   will-change: transform, opacity;
 }
 
+.session-detail-modal.t-modal {
+  transform-origin: 50% 0%;
+  transform-style: preserve-3d;
+}
+
 .t-modal.is-opening {
   transform: scale(var(--modal-scale));
   opacity: 0;
@@ -1198,6 +1206,10 @@ main {
   pointer-events: auto;
 }
 
+.session-detail-modal.t-modal.is-open {
+  animation: counterweight-hinge-in var(--modal-open-dur) var(--modal-ease) both;
+}
+
 .t-modal.is-closing {
   transform: scale(var(--modal-scale-close));
   opacity: 0;
@@ -1205,6 +1217,33 @@ main {
   transition:
     transform var(--modal-close-dur) var(--modal-ease),
     opacity var(--modal-close-dur) var(--modal-ease);
+}
+
+.session-detail-modal.t-modal.is-closing {
+  animation: counterweight-hinge-out var(--modal-close-dur) cubic-bezier(0.48, 0, 0.82, 0.28) both;
+}
+
+@keyframes modal-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes counterweight-hinge-in {
+  0% { opacity: 0; transform: rotateX(-68deg) translate3d(0, -36px, 0) scale3d(0.92, 0.92, 1); }
+  62% { opacity: 1; transform: rotateX(5deg) translate3d(0, 3px, 0) scale3d(1, 1, 1); }
+  82% { transform: rotateX(-1.6deg) translate3d(0, 0, 0); }
+  100% { opacity: 1; transform: rotateX(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
+}
+
+@keyframes counterweight-hinge-out {
+  0% { opacity: 1; transform: rotateX(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
+  88% { opacity: 1; transform: rotateX(-44deg) translate3d(0, -22px, 0) scale3d(0.95, 0.95, 1); }
+  100% { opacity: 0; transform: rotateX(-54deg) translate3d(0, -28px, 0) scale3d(0.94, 0.94, 1); }
 }
 
 .session-detail-modal::after {
@@ -5969,6 +6008,7 @@ body {
   .t-dropdown,
   .t-modal,
   .t-modal-backdrop {
+    animation: none !important;
     transition: none !important;
   }
 
