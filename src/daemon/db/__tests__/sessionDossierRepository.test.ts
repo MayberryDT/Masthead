@@ -102,6 +102,60 @@ describe("session dossier repository", () => {
     db.close();
   });
 
+  test("labels hook-only tokenless sessions without useful transcript as incomplete capture", async () => {
+    const db = await openTestDatabase();
+    seedSession(db, {
+      lifecycle: "running",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session-hook-only",
+      title: "Codex hook event"
+    });
+    db.prepare("DELETE FROM messages WHERE session_id = ?").run("session-hook-only");
+    db.prepare("DELETE FROM model_usage WHERE session_id = ?").run("session-hook-only");
+    db.prepare("DELETE FROM tool_results WHERE session_id = ?").run("session-hook-only");
+    db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run("session-hook-only");
+    db.prepare("DELETE FROM file_effects WHERE session_id = ?").run("session-hook-only");
+    db.prepare(
+      "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "session-hook-only:hook-message",
+      "session-hook-only",
+      "user",
+      "Codex hook event",
+      "session-hook-only:hook-message:hash",
+      "2026-06-26T12:00:00.000Z",
+      JSON.stringify({ sourceKind: "hook" }),
+      "authoritative"
+    );
+    db.prepare(
+      "INSERT INTO runtime_signals (signal_id, session_id, signal_kind, severity, title, details_json, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "session-hook-only:signal",
+      "session-hook-only",
+      "hook",
+      "info",
+      "Codex hook event",
+      "{}",
+      "2026-06-26T12:01:00.000Z",
+      JSON.stringify({ sourceKind: "hook" })
+    );
+
+    const dossier = getSessionDossier(db, "session-hook-only");
+
+    expect(dossier?.coverage.level).toBe("hook_only");
+    expect(dossier?.coverage.transcript.hasUsableTranscript).toBe(false);
+    expect(dossier?.coverage.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "transcript_missing" }),
+        expect.objectContaining({ code: "tokens_missing" }),
+        expect.objectContaining({ code: "low_value_hook_summaries" })
+      ])
+    );
+    expect(dossier?.narrative.liveSummary).toContain("Only live hook metadata is available for this session.");
+    db.close();
+  });
+
   test("returns undefined for deleted sessions and marks changed sessions without verification", async () => {
     const db = await openTestDatabase();
     seedDossierSession(db, { sessionId: "session-deleted" });

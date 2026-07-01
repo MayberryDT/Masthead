@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { SessionCardView } from "../core/types";
+import { firstUsefulSessionTitle, hasAcceptableDisplayCopy, isWeakLiveSummary } from "../shared/sessionTextQuality.ts";
 import { isBlockedSessionCard } from "./format";
 import type { DemoSessionTelemetry } from "./observabilityDemo";
 
@@ -149,6 +150,7 @@ export function SessionCard({
 function CopyRefreshBadge({ session }: { session: SessionCardView }) {
   const refresh = session.copyRefresh;
   if (!refresh || refresh.status === "success" || refresh.status === "disabled") return null;
+  if (hasAcceptableDisplayCopy({ headline: session.copy.headline, summary: session.copy.reason, title: session.title }, sessionTextContext(session))) return null;
   const label = refresh.status === "not_configured" ? "AI headline not configured" : "AI headline failed";
   const detail = [refresh.status, refresh.failureMessage].filter(Boolean).join(" · ");
   return (
@@ -213,7 +215,9 @@ function sessionHeaderName(session: SessionCardView): string {
 }
 
 function sessionHeadline(session: SessionCardView): string {
-  return cleanHeadline(session.copy.headline) ?? meaningfulSessionTitle(session.title, session.project) ?? `${session.project} session update`;
+  const headline = cleanHeadline(session.copy.headline);
+  if (headline && !isWeakLiveSummary(headline)) return headline;
+  return firstUsefulSessionTitle([session.title, session.workContext?.label], sessionTextContext(session)) ?? `${session.project} session update`;
 }
 
 function cleanSessionName(value: string | undefined): string | undefined {
@@ -225,23 +229,7 @@ function cleanSessionName(value: string | undefined): string | undefined {
 }
 
 function meaningfulSessionTitle(value: string | undefined, project: string): string | undefined {
-  const label = cleanSessionName(value);
-  if (!label) return undefined;
-
-  const normalizedLabel = label.toLowerCase();
-  const normalizedProject = project.trim().toLowerCase();
-  if (
-    normalizedLabel === "codex session" ||
-    normalizedLabel === "codex hook event" ||
-    normalizedLabel === "untitled session" ||
-    normalizedLabel === "session"
-  ) {
-    return undefined;
-  }
-  if (normalizedProject && normalizedLabel === `${normalizedProject} codex session`) return undefined;
-  if (containsSensitiveMarker(label)) return undefined;
-
-  return label;
+  return firstUsefulSessionTitle([cleanSessionName(value)], { project });
 }
 
 function containsSensitiveMarker(label: string): boolean {
@@ -272,6 +260,14 @@ function looksSerialized(label: string): boolean {
 
 function looksLikeRawCommand(label: string): boolean {
   return /^(?:npm|pnpm|yarn|node|python|python3|bash|sh|zsh|git|curl|cat|sed|rg|grep)\s+/.test(label);
+}
+
+function sessionTextContext(session: SessionCardView) {
+  return {
+    project: session.project,
+    sessionId: session.canonicalSessionId ?? session.sessionId,
+    sourceSessionId: session.sourceSessionId ?? session.sessionId
+  };
 }
 
 function prefersReducedMotion(): boolean {

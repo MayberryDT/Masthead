@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { EvidenceRef } from "../core/types";
+import { cleanSessionText, isUsefulSessionTitle } from "../shared/sessionTextQuality.ts";
 import type { SessionCapsule, SessionTitleSource } from "./types";
 import { draftNarrativeFromFacts } from "./sessionNarrativeDraft.ts";
 import type { SessionNarrativeFacts } from "./sessionNarrativeFacts.ts";
@@ -134,25 +135,12 @@ function messageTitleCandidate(value: string, facts: SessionFacts): string | und
 }
 
 function cleanTitle(value: string | undefined): string | undefined {
-  const cleaned = value
-    ?.replace(/\s+/g, " ")
-    .replace(/[.!?]+$/g, "")
-    .trim();
-  if (!cleaned) return undefined;
-  return cleaned.length > 80 ? `${cleaned.slice(0, 77).trim()}...` : cleaned;
+  return cleanSessionText(value, 80)?.replace(/[.!?]+$/g, "").trim();
 }
 
 export function isMeaningfulSessionTitle(value: string | undefined, facts: Pick<SessionFacts, "project" | "sessionId" | "sourceSessionId">): value is string {
   const cleaned = cleanTitle(value);
-  const normalized = cleaned?.toLowerCase();
-  if (!cleaned || !normalized) return false;
-  if (normalized === facts.sessionId.toLowerCase() || normalized === facts.sourceSessionId?.toLowerCase()) return false;
-  if (isInstructionWrapper(cleaned)) return false;
-  if (isGenericSessionTitle(cleaned, facts.project)) return false;
-  if (isWeakGeneratedTitle(cleaned)) return false;
-  if (isOpaqueIdentifier(cleaned)) return false;
-  if (looksLikeSerializedPayload(cleaned)) return false;
-  return true;
+  return isUsefulSessionTitle(cleaned, facts);
 }
 
 function isInstructionWrapper(value: string): boolean {
@@ -162,41 +150,6 @@ function isInstructionWrapper(value: string): boolean {
 function isPromptScaffoldLine(value: string): boolean {
   if (isInstructionWrapper(value)) return true;
   return /^(target|change|acceptance|constraints|contract|goal)$/i.test(value.trim());
-}
-
-function isGenericSessionTitle(value: string, project: string | undefined): boolean {
-  const normalized = value.trim().toLowerCase();
-  const projectPrefix = project?.trim().toLowerCase();
-  const genericTitles = new Set(["codex session", "untitled session", "new session", "session", "chat session"]);
-  if (genericTitles.has(normalized)) return true;
-  if (projectPrefix && (normalized === `${projectPrefix} session` || normalized === `${projectPrefix} codex session`)) return true;
-  return /^(codex|claude|cursor|masthead)?\s*(work\s*)?session\s*\d*$/i.test(value);
-}
-
-function isWeakGeneratedTitle(value: string): boolean {
-  const normalized = value.replace(/[.!?]+$/g, "").trim();
-  return (
-    /^codex hook event\b/i.test(normalized) ||
-    /\b(?:ready for review|needs review|need review|work is focused on)\b/i.test(normalized) ||
-    /\bhas recent (?:[\w .-]+\s+)?activity\b/i.test(normalized) ||
-    /\bbeing (?:fixed|updated|reviewed|validated) for\b/i.test(normalized)
-  );
-}
-
-function isOpaqueIdentifier(value: string): boolean {
-  const normalized = value.trim();
-  if (
-    /^[0-9a-f]{12,}$/i.test(normalized) ||
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)
-  ) {
-    return true;
-  }
-  if (/^session[-_:][a-z0-9][a-z0-9_-]{5,}$/i.test(normalized)) return true;
-  return !/\s/.test(normalized) && /^[a-z0-9_-]{24,}$/i.test(normalized);
-}
-
-function looksLikeSerializedPayload(value: string): boolean {
-  return value.startsWith("{") || value.includes('"event"') || value.includes("\\n") || /^https?:\/\//i.test(value);
 }
 
 function firstWord(value: string): string {

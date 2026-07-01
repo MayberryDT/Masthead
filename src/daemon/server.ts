@@ -38,6 +38,8 @@ import {
 import { listImportFailureGroups, listImportWorkUnits } from "./db/importLedgerRepository.ts";
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
+import { liveProjectionTranscriptFacts } from "./db/liveTranscriptFactsRepository.ts";
+import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsRepository.ts";
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
@@ -82,6 +84,7 @@ import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/so
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { buildMastheadHealth } from "./healthService.ts";
+import { recentHookEventsWithTranscriptPaths } from "./hookTranscriptRecovery.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
 import {
   getCodexHookSettings,
@@ -101,11 +104,21 @@ export type MastheadDaemon = {
 };
 
 export const LIVE_BOARD_RAW_RECORD_LIMIT = 500;
+const HOOK_TRANSCRIPT_RECOVERY_LIMIT = 25;
+const HOOK_TRANSCRIPT_CATCHUP_RECORD_LIMIT = 200;
+const HOOK_TRANSCRIPT_CATCHUP_REQUEUE_MS = 250;
+
+type TranscriptImportOptions = {
+  maxRecordsPerSource?: number;
+  queueEnrichment?: boolean;
+};
 
 export async function createMastheadDaemon(config: DaemonConfig): Promise<MastheadDaemon> {
   await mkdir(dirname(config.storePath), { recursive: true });
   const writerLock = await acquireDatabaseWriterLock(config.dataDirectory ?? dirname(config.databasePath));
+  let hookTranscriptCatchupQueue: Promise<void> = Promise.resolve();
   const hookTranscriptCatchups = new Map<string, Promise<void>>();
+  const disabledHookTranscriptCatchupDiagnostics = new Set<string>();
 
   try {
     // Legacy compatibility store. Do not add new product writes here.
@@ -156,23 +169,30 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       hostname: config.host,
       runtimeKind: "codex"
     });
+    const canonicalRuntimeId = runtimeIdFor("codex", undefined);
+    const canonicalSessionIdForSource = (sourceSessionId: string): string => canonicalSessionId(`host:${config.host}`, canonicalRuntimeId, sourceSessionId);
     const state = createIngestionState(canonicalLiveEvents(database));
     const gitSnapshots = canonicalGitSnapshots(database);
+    for (const gitSnapshot of gitSnapshots) {
+      upsertFileEffectsFromGitSnapshot(database, canonicalSessionIdForSource(gitSnapshot.sessionId), gitSnapshot);
+    }
     const gitSnapshotSignatures = new Map(gitSnapshots.map((snapshot) => [snapshot.sessionId, gitSnapshotSignature(snapshot)]));
     const sessionCopyEnricher = createOpenAISessionCopyEnricher({
-      enabled: config.llmCopyEnabled,
+      enabled: config.liveCopyEnabled ?? config.llmCopyEnabled,
       apiKey: config.openaiApiKey,
       model: config.openaiModel,
+      mode: "background",
       ttlMs: config.liveCopyCacheMs,
       timeoutMs: config.liveCopyTimeoutMs,
       projectionBudgetMs: config.liveCopyProjectionBudgetMs,
       maxConcurrent: config.liveCopyMaxConcurrent && config.liveCopyMaxConcurrent > 0 ? config.liveCopyMaxConcurrent : undefined
     });
-    const enrichmentProvider = config.llmCopyEnabled
+    const enrichmentProvider = config.remoteEnrichmentEnabled
       ? createOpenAIEnrichmentProvider({
           apiKey: config.openaiApiKey,
           enabled: true,
-          model: config.openaiModel
+          model: config.openaiModel,
+          timeoutMs: config.remoteEnrichmentTimeoutMs
         })
       : createDeterministicEnrichmentProvider();
     const enrichment = createEnrichmentCoordinator(database, enrichmentProvider);
@@ -234,20 +254,35 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   async function rebuildEnrichments(input: Record<string, unknown>): Promise<{
+    dryRun?: boolean;
+    mode?: "configured" | "deterministic";
     requested: number;
     succeeded: number;
     failed: number;
-    sessions: Array<{ sessionId: string; status: "succeeded" | "failed"; failureCode?: string; failureMessage?: string }>;
+    sessions: Array<{ sessionId: string; status: "dry_run" | "succeeded" | "failed"; failureCode?: string; failureMessage?: string }>;
   }> {
     const limit = parseBoundedInteger(String(input.limit ?? "100"), 100, 1, 500);
     if (!limit.ok) throw new Error("invalid_limit");
     const sessionIds = selectEnrichmentRebuildSessionIds(database, input, limit.value);
-    const sessions: Array<{ sessionId: string; status: "succeeded" | "failed"; failureCode?: string; failureMessage?: string }> = [];
+    const dryRun = input.dryRun === true;
+    const deterministicOnly = input.deterministicOnly === true;
+    const sessions: Array<{ sessionId: string; status: "dry_run" | "succeeded" | "failed"; failureCode?: string; failureMessage?: string }> = [];
+    if (dryRun) {
+      return {
+        dryRun: true,
+        failed: 0,
+        mode: deterministicOnly ? "deterministic" : "configured",
+        requested: sessionIds.length,
+        sessions: sessionIds.map((sessionId) => ({ sessionId, status: "dry_run" })),
+        succeeded: 0
+      };
+    }
+    const rebuildCoordinator = deterministicOnly ? createEnrichmentCoordinator(database, createDeterministicEnrichmentProvider()) : enrichment;
     let succeeded = 0;
     let failed = 0;
     for (const sessionId of sessionIds) {
       try {
-        await enrichment.enrich(sessionId);
+        await rebuildCoordinator.enrich(sessionId);
         indexCanonicalSessionSearch(database, sessionId);
         succeeded += 1;
         sessions.push({ sessionId, status: "succeeded" });
@@ -287,6 +322,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
     return {
       failed,
+      mode: deterministicOnly ? "deterministic" : "configured",
       requested: sessionIds.length,
       sessions,
       succeeded
@@ -411,6 +447,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       observedAt: gitSnapshot.observedAt,
       value: gitSnapshot
     });
+    upsertFileEffectsFromGitSnapshot(database, canonicalSessionIdForSource(gitSnapshot.sessionId), gitSnapshot);
     return true;
   }
 
@@ -556,7 +593,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return result;
   }
 
-  async function importTranscriptSources(sources: DiscoveredSource[], controls?: ImportJobControls): Promise<ImportWorkResult> {
+  async function importTranscriptSources(
+    sources: DiscoveredSource[],
+    controls?: ImportJobControls,
+    options: TranscriptImportOptions = {}
+  ): Promise<ImportWorkResult> {
+    const maxRecordsPerSource = options.maxRecordsPerSource;
+    const queueEnrichmentForImport = options.queueEnrichment ?? true;
     const result = emptyImportResult();
     for (const source of sources) {
       const adapter = adapterForRuntime(source.runtime);
@@ -577,6 +620,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const info = await stat(transcriptSource.path);
         let latestOffset = cursor && cursor.byteOffset > info.size ? 0 : cursor?.byteOffset ?? 0;
         let cursorContext = cursorContextFromCursor(cursor);
+        const enrichmentSessionIds = new Set<string>();
+        let recordsForSource = 0;
+        let recordsSinceYield = 0;
         for await (const record of adapter.backfill(transcriptSource, cursor)) {
           controls?.throwIfCancelled();
           const nextOffset = offsetFromSourceRecordKey(record.sourceRecordKey) ?? latestOffset;
@@ -590,10 +636,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             hostname: config.host,
             runtimeKind: source.runtime
           });
+          latestOffset = nextOffset;
           if (sessionId) {
             indexCanonicalSessionSearch(database, sessionId);
-            queueSessionEnrichment(sessionId);
-            latestOffset = nextOffset;
+            enrichmentSessionIds.add(sessionId);
           }
           countImportedRecord(result, record, Boolean(sessionId));
           controls?.updateProgress({
@@ -604,6 +650,21 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             processedCount: result.processedCount,
             queuedCount: result.queuedCount
           });
+          recordsForSource += 1;
+          recordsSinceYield += 1;
+          if (maxRecordsPerSource && recordsForSource >= maxRecordsPerSource) {
+            result.limited = true;
+            break;
+          }
+          if (recordsSinceYield >= 25) {
+            recordsSinceYield = 0;
+            await new Promise<void>((resolve) => {
+              setImmediate(resolve);
+            });
+          }
+        }
+        if (queueEnrichmentForImport && !result.limited) {
+          for (const sessionId of enrichmentSessionIds) queueSessionEnrichment(sessionId);
         }
         controls?.throwIfCancelled();
         upsertCursor(database, {
@@ -757,11 +818,29 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   function scheduleHookTranscriptCatchup(event: NormalizedEvent): void {
-    if (!config.hookTranscriptCatchupEnabled) return;
-    const key = stringFromPayload(event.payload, ["transcriptPath", "transcript_path"]) ?? event.eventId;
-    const previous = hookTranscriptCatchups.get(key) ?? Promise.resolve();
-    const next = previous
+    const transcriptPath = stringFromPayload(event.payload, ["transcriptPath", "transcript_path"]);
+    const key = transcriptPath ?? event.eventId;
+    if (!config.hookTranscriptCatchupEnabled) {
+      if (transcriptPath && !disabledHookTranscriptCatchupDiagnostics.has(key)) {
+        disabledHookTranscriptCatchupDiagnostics.add(key);
+        if (disabledHookTranscriptCatchupDiagnostics.size > 100) disabledHookTranscriptCatchupDiagnostics.clear();
+        recordRuntimeDiagnostic({
+          details: {
+            eventId: event.eventId,
+            sourceSessionId: event.sessionId,
+            transcriptPath
+          },
+          kind: "hook_transcript_catchup_disabled",
+          message: "Codex hook included a transcriptPath, but hook transcript catch-up is disabled.",
+          severity: "warning"
+        });
+      }
+      return;
+    }
+    const previousForKey = hookTranscriptCatchups.get(key) ?? Promise.resolve();
+    const next = hookTranscriptCatchupQueue
       .catch(() => undefined)
+      .then(() => previousForKey.catch(() => undefined))
       .then(
         () =>
           new Promise<void>((resolve) => {
@@ -773,6 +852,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         if (hookTranscriptCatchups.get(key) === next) hookTranscriptCatchups.delete(key);
       });
     hookTranscriptCatchups.set(key, next);
+    hookTranscriptCatchupQueue = next.catch(() => undefined);
     next.catch(() => {
       // importHookTranscriptIfApproved records diagnostics; this prevents unhandled rejections.
     });
@@ -784,7 +864,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     try {
       const source = await transcriptSourceFromHookEvent(event, config.codexHomeDir);
       if (!source?.path || sourceIsExcluded(database, source.path)) return;
-      await importTranscriptSources([source]);
+      const result = await importTranscriptSources([source], undefined, {
+        maxRecordsPerSource: HOOK_TRANSCRIPT_CATCHUP_RECORD_LIMIT,
+        queueEnrichment: shouldQueueHookTranscriptEnrichment(event)
+      });
+      if (result.limited) {
+        const timer = setTimeout(() => scheduleHookTranscriptCatchup(event), HOOK_TRANSCRIPT_CATCHUP_REQUEUE_MS);
+        timer.unref?.();
+      }
     } catch (error) {
       state.diagnostics.push({
         code: "invalid_payload",
@@ -793,6 +880,33 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         receivedAt: new Date().toISOString()
       });
     }
+  }
+
+  function shouldDeferLiveEnrichmentToHookTranscript(event: NormalizedEvent): boolean {
+    return config.hookTranscriptCatchupEnabled && transcriptImportApproved(database) && Boolean(hookTranscriptPath(event));
+  }
+
+  function shouldQueueHookTranscriptEnrichment(event: NormalizedEvent): boolean {
+    return event.type === "session.completed";
+  }
+
+  function scheduleRecentHookTranscriptCatchups(reason: "approval" | "startup"): void {
+    if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database)) return;
+    const events = recentHookEventsWithTranscriptPaths(database, codexHookSource.sourceId, HOOK_TRANSCRIPT_RECOVERY_LIMIT);
+    if (events.length === 0) return;
+
+    recordRuntimeDiagnostic({
+      details: {
+        limit: HOOK_TRANSCRIPT_RECOVERY_LIMIT,
+        reason,
+        scheduled: events.length
+      },
+      kind: "hook_transcript_catchup_recovery_scheduled",
+      message: `Scheduled ${events.length} recent Codex hook transcript catch-up${events.length === 1 ? "" : "s"}.`,
+      severity: "info"
+    });
+
+    for (const event of events) scheduleHookTranscriptCatchup(event);
   }
 
   function approveTranscriptImports(runtime?: RuntimeKind): void {
@@ -809,6 +923,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         runtime
       });
     }
+    if (!runtime || runtime === "codex") scheduleRecentHookTranscriptCatchups("approval");
   }
 
   function transcriptImportApprovedForRuntime(runtime: RuntimeKind): boolean {
@@ -1292,6 +1407,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const liveEnvelope = projectLiveEvents(projectionEvents, projectionGitSnapshots, {
         selectedSessionId,
         sessionEnrichments: liveProjectionEnrichments(database, projectionSessionIds),
+        sessionTranscriptFacts: liveProjectionTranscriptFacts(database, projectionSessionIds),
         diagnostics: state.diagnostics.length
       });
       liveEnvelope.events = state.events.length;
@@ -2076,7 +2192,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const sessionId = sessions.upsertLiveEvent(result.event);
         if (sessionId) {
           indexCanonicalSessionSearch(database, sessionId);
-          queueSessionEnrichment(sessionId);
+          if (!shouldDeferLiveEnrichmentToHookTranscript(result.event)) queueSessionEnrichment(sessionId);
           scheduleHookTranscriptCatchup(result.event);
         }
         appendStoreRecordToRawJournal({
@@ -2108,6 +2224,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           void refreshKnownGitSnapshotsSingleFlight();
         }, config.gitRefreshMs).unref()
       : undefined;
+  const startupHookTranscriptCatchupTimer = setTimeout(() => {
+    scheduleRecentHookTranscriptCatchups("startup");
+  }, 1000).unref();
+
   return {
     server,
     database,
@@ -2120,6 +2240,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         await hydrationPromise;
         await new Promise<void>((resolve) => {
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
+        clearTimeout(startupHookTranscriptCatchupTimer);
         server.close(() => {
           try {
             checkpointMastheadDatabase(database);
@@ -2387,7 +2508,7 @@ async function transcriptSources(source: DiscoveredSource): Promise<DiscoveredSo
 }
 
 async function transcriptSourceFromHookEvent(event: NormalizedEvent, homeDir: string): Promise<DiscoveredSource | undefined> {
-  const transcriptPath = stringFromPayload(event.payload, ["transcriptPath", "transcript_path"]);
+  const transcriptPath = hookTranscriptPath(event);
   if (!transcriptPath || !transcriptPath.endsWith(".jsonl") || !isAbsolute(transcriptPath)) return undefined;
 
   const codexRoot = join(homeDir, ".codex");
@@ -2417,12 +2538,20 @@ async function transcriptSourceFromHookEvent(event: NormalizedEvent, homeDir: st
   return undefined;
 }
 
+function hookTranscriptPath(event: NormalizedEvent): string | undefined {
+  return stringFromPayload(event.payload, ["transcriptPath", "transcript_path"]);
+}
+
 function stringFromPayload(payload: Record<string, unknown>, keys: string[]): string | undefined {
   for (const key of keys) {
     const value = payload[key];
     if (typeof value === "string" && value.trim()) return value;
   }
   return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function jsonlFiles(directory: string): Promise<string[]> {

@@ -388,6 +388,71 @@ describe("session copy", () => {
     expect(buildDeterministicSessionCopy(input).headline).toBe("Moved the File button to the far right of the Logbook toolbar.");
   });
 
+  test("ignores unsafe stop-hook feedback before transcript evidence", () => {
+    const input = toSessionCopyInput(
+      cardView({
+        lifecycle: "running",
+        primaryStatus: "editing",
+        latestFeedbackSignal: {
+          present: true,
+          source: "stop_hook",
+          observedAt: "1970-01-01T00:00:00.000Z",
+          claims: ["mentions_files"],
+          summary: "The dev server is still running at [url] ::-stage{cwd=\"\"} ::-commit{cwd=\"\"}."
+        }
+      }),
+      [],
+      [],
+      {
+        facts: {
+          attentionTitles: [],
+          changedFileCount: 1,
+          conflictTitles: [],
+          latestFeedback: {
+            present: true,
+            source: "stop_hook",
+            observedAt: "1970-01-01T00:00:00.000Z",
+            claims: ["mentions_files"],
+            summary: "The dev server is still running at [url] ::-stage{cwd=\"\"} ::-commit{cwd=\"\"}."
+          },
+          lifecycle: "running",
+          primaryStatus: "editing",
+          project: "Masthead",
+          recentCommandFailures: [],
+          recentEvents: [],
+          recentFileBasenames: [],
+          recentToolNames: [],
+          recentTranscriptMessages: ["Board headlines stopped refreshing from transcript updates."],
+          sessionId: "session-1"
+        }
+      }
+    );
+
+    expect(input.headlineEvidence).not.toContain("The dev server is still running at [url] ::-stage{cwd=\"\"} ::-commit{cwd=\"\"}.");
+    expect(buildDeterministicSessionCopy(input).headline).toBe("Board headlines stopped refreshing from transcript updates.");
+  });
+
+  test("uses unpunctuated transcript evidence when it already contains a usable sentence verb", () => {
+    const input = toSessionCopyInput(cardView({ lifecycle: "running", primaryStatus: "editing" }), [], [], {
+      facts: {
+        attentionTitles: [],
+        changedFileCount: 1,
+        conflictTitles: [],
+        lifecycle: "running",
+        primaryStatus: "editing",
+        project: "Masthead",
+        recentCommandFailures: [],
+        recentEvents: [],
+        recentFileBasenames: [],
+        recentToolNames: [],
+        recentTranscriptMessages: ["The final live headline is still too generic because the transcript fact was truncated"],
+        sessionId: "session-1"
+      }
+    });
+
+    expect(buildDeterministicSessionCopy(input).headline).toBe("The final live headline is still too generic because the transcript fact was truncated.");
+  });
+
   test("uses newer concrete event summaries ahead of stale feedback summaries", () => {
     const input = toSessionCopyInput(
       cardView({

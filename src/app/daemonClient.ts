@@ -475,7 +475,11 @@ export type SettingsStateDto = SettingsRuntimeIdentityDto & {
       queued: number;
       failed: number;
       disabled: number;
+      gitSnapshotsWithoutFileEffects?: number;
+      repeatedFailedFingerprints?: number;
+      sessionsWithMessagesButNoEffects?: number;
       status: "complete" | "partial" | "disabled";
+      weakCurrentTitles?: number;
     };
   };
   privacy: {

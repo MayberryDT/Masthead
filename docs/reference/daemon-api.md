@@ -43,7 +43,7 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 
 Write endpoints are local daemon operations. They are not exposed through MCP.
 
-- `POST /ingest` accepts Codex hook payloads.
+- `POST /ingest` accepts Codex hook payloads. When a Codex hook includes `transcriptPath`, transcript import has been approved, and `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP` is not `0`, the daemon schedules a bounded catch-up import for that transcript file so live sessions receive canonical messages and token usage. The daemon also performs a bounded recovery sweep for recent stored hook events with transcript paths after transcript approval and on startup.
 - `POST /sources/discover` refreshes source discovery.
 - `POST /sources/scan` scans known local agent-history locations for all active adapters. It is read-only and allowed through the worktree bridge.
 - `POST /sources/connect` connects selected scan results and queues metadata/enrichment jobs. Transcript import requires explicit approval.
@@ -73,3 +73,5 @@ npm run check:endpoint-matrix
 ```
 
 `npm run doctor:json` includes a `sources-pipeline` check with scan freshness, connected source count, transcript coverage, enrichment coverage, import failures, unrecognized-schema count, and repair recommendations. The check is read-only and reports warnings from observed daemon data only.
+
+`npm run doctor` also checks recent normalized Codex hook events that include transcript paths but still have no useful transcript messages or token rows. That warning usually means transcript import is not approved, the daemon was started with `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP=0`, the recovery sweep has not run yet, or the referenced transcript file cannot be imported.

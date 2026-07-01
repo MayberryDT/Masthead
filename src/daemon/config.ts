@@ -15,6 +15,9 @@ export type DaemonConfig = {
   databasePath: string;
   legacyDataDirectory?: string;
   llmCopyEnabled: boolean;
+  liveCopyEnabled?: boolean;
+  remoteEnrichmentEnabled?: boolean;
+  remoteEnrichmentTimeoutMs?: number;
   liveCopyCacheMs?: number;
   liveCopyTimeoutMs?: number;
   liveCopyProjectionBudgetMs?: number;
@@ -35,7 +38,10 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  const llmCopyEnabled = env.MASTHEAD_LLM_COPY === undefined ? Boolean(env.OPENAI_API_KEY?.trim()) : env.MASTHEAD_LLM_COPY === "1";
+  const legacyLlmCopy = optionalBoolean(env.MASTHEAD_LLM_COPY);
+  const liveCopyEnabled = optionalBoolean(env.MASTHEAD_LIVE_COPY) ?? legacyLlmCopy ?? Boolean(env.OPENAI_API_KEY?.trim());
+  const remoteEnrichmentEnabled = optionalBoolean(env.MASTHEAD_REMOTE_ENRICHMENT) ?? legacyLlmCopy ?? false;
+  const remoteEnrichmentTimeoutMs = optionalPositiveInteger(env.MASTHEAD_REMOTE_ENRICHMENT_TIMEOUT_MS) ?? 12_000;
 
   return {
     host,
@@ -49,7 +55,10 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     storePath: dataPaths.legacyJournalPath,
     databasePath: dataPaths.databasePath,
     legacyDataDirectory: env.MASTHEAD_LEGACY_DATA_DIR ? resolve(env.MASTHEAD_LEGACY_DATA_DIR) : undefined,
-    llmCopyEnabled,
+    llmCopyEnabled: liveCopyEnabled,
+    liveCopyEnabled,
+    remoteEnrichmentEnabled,
+    remoteEnrichmentTimeoutMs,
     liveCopyCacheMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_CACHE_MS),
     liveCopyTimeoutMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_TIMEOUT_MS),
     liveCopyProjectionBudgetMs: optionalPositiveInteger(env.MASTHEAD_LIVE_COPY_PROJECTION_BUDGET_MS),
@@ -59,6 +68,13 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
     openaiModel: env.MASTHEAD_OPENAI_MODEL,
     skipMigrationQuickCheck: env.MASTHEAD_SKIP_MIGRATION_QUICK_CHECK === "1"
   };
+}
+
+function optionalBoolean(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (value === "1") return true;
+  if (value === "0") return false;
+  return undefined;
 }
 
 function optionalPositiveInteger(value: string | undefined): number | undefined {

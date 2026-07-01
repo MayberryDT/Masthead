@@ -66,6 +66,91 @@ describe("live projection", () => {
     });
   });
 
+  test("uses recent canonical transcript messages as live board headline evidence", () => {
+    const started = normalizeCodexHookPayload(
+      {
+        provider_event_id: "transcript-backed-start",
+        event: "session_started",
+        session_id: "transcript-backed-session",
+        timestamp: "2026-06-23T03:00:00.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        title: "Codex session",
+        summary: "Codex hook event"
+      },
+      { receivedAt: "2026-06-23T03:00:00.010Z" }
+    );
+
+    const envelope = projectLiveEvents([started], [], {
+      generatedAt: "2026-06-23T03:01:00.000Z",
+      sessionTranscriptFacts: new Map([
+        [
+          "transcript-backed-session",
+          {
+            recentMessages: [
+              {
+                observedAt: "2026-06-23T03:00:45.000Z",
+                role: "user",
+                text: "Investigate why Board headlines stopped refreshing from transcript updates."
+              }
+            ]
+          }
+        ]
+      ])
+    });
+
+    const card = envelope.projection.cards[0];
+    const copyInput = card?.copyInput as { headlineEvidence?: string[] } | undefined;
+
+    expect(copyInput?.headlineEvidence).toContain("Investigate why Board headlines stopped refreshing from transcript updates.");
+    expect(card?.copy.headline).toContain("Board headlines stopped refreshing");
+  });
+
+  test("prefers newer transcript evidence over stale stored enrichment copy", () => {
+    const started = normalizeCodexHookPayload(
+      {
+        provider_event_id: "stale-enrichment-start",
+        event: "session_started",
+        session_id: "stale-enrichment-session",
+        timestamp: "2026-06-23T03:00:00.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        title: "Codex session"
+      },
+      { receivedAt: "2026-06-23T03:00:00.010Z" }
+    );
+
+    const envelope = projectLiveEvents([started], [], {
+      generatedAt: "2026-06-23T03:02:00.000Z",
+      sessionEnrichments: new Map([
+        [
+          "stale-enrichment-session",
+          {
+            generatedAt: "2026-06-23T03:00:20.000Z",
+            liveSummary: "Old stored enrichment headline is still displayed.",
+            title: "Old stored enrichment"
+          }
+        ]
+      ]),
+      sessionTranscriptFacts: new Map([
+        [
+          "stale-enrichment-session",
+          {
+            recentMessages: [
+              {
+                observedAt: "2026-06-23T03:01:30.000Z",
+                role: "assistant",
+                text: "Board headlines stopped refreshing from transcript updates."
+              }
+            ]
+          }
+        ]
+      ])
+    });
+
+    expect(envelope.projection.cards[0]?.copy.headline).toBe("Board headlines stopped refreshing from transcript updates.");
+  });
+
   test("uses payload project and title when a live session starts with an approval event", () => {
     const approval = normalizeCodexHookPayload(
       {

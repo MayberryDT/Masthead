@@ -4,13 +4,13 @@ Board is Masthead's live view over continuously collected session data. It is no
 
 ## Live Copy
 
-When remote live copy is enabled and configured, each `GET /projection` attempts fresh headline copy for visible running cards on the configured Board refresh interval. The default refresh interval is 10 seconds. Idle and ended cards keep their deterministic or previously persisted copy and do not receive refresh failure badges.
+When remote live copy is enabled and configured, each `GET /projection` schedules fresh headline copy for visible running cards on the configured Board refresh interval. The daemon returns the projection immediately with deterministic copy, then applies completed live-copy results on a later projection. The default refresh interval is 10 seconds. Idle and ended cards keep their deterministic or previously persisted copy and do not receive refresh failure badges.
 
 Live copy cache is disabled by default. If `MASTHEAD_LIVE_COPY_CACHE_MS` is explicitly set through runtime configuration, cached results are an opt-in optimization rather than the default behavior.
 
 ## Failure State
 
-Remote copy failures do not masquerade as successful LLM copy. A card keeps its deterministic or persisted baseline copy and receives `copyRefresh` metadata:
+Remote copy failures do not masquerade as successful LLM copy. A card keeps its deterministic or persisted baseline copy. Provider failures are recorded in the enrichment audit stream rather than blocking the projection response. Blocking test and fixture paths can still report failure metadata:
 
 - `timeout`
 - `api_error`

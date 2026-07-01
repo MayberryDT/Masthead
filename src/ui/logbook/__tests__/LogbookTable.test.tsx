@@ -92,6 +92,37 @@ describe("LogbookTable", () => {
     expect(html).toContain("is-entering");
   });
 
+  test("suppresses weak source ids and lifecycle words in the session subtitle", () => {
+    const html = renderToStaticMarkup(
+      <LogbookTable
+        density="compact"
+        sessions={[
+          {
+            errorCount: 0,
+            fileCount: 0,
+            hostId: "host:test",
+            lastActivityAt: "2026-07-01T10:38:00.000Z",
+            lifecycle: "ended",
+            models: [],
+            outcome: "completed",
+            runtime: "codex",
+            sessionId: "session-weak-source",
+            sourceConfidence: "authoritative",
+            sourceSessionId: "session narrative",
+            title: "Codex session · 2026-07-01 10:38",
+            toolCount: 0,
+            topics: []
+          }
+        ]}
+        onSelect={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Codex session · 2026-07-01 10:38");
+    expect(html).not.toContain("session narrative");
+    expect(html).not.toContain("<span>completed</span>");
+  });
+
   test("starts row entry cascade promptly enough to be visible", () => {
     const css = readFileSync("src/styles/logbook.css", "utf8");
 

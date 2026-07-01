@@ -21,6 +21,7 @@ describe("settings API", () => {
   test("reports effective settings and enumerable deletion targets", async () => {
     const { daemon, databasePath, storePath } = await createTestHarness();
     seedSession(daemon.database, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:settings", title: "Settings API" });
+    seedWeakSessionWithoutEffects(daemon.database);
     const baseUrl = await listen(daemon);
 
     const state = await getJson(baseUrl, "/settings");
@@ -57,6 +58,10 @@ describe("settings API", () => {
     });
     const health = await getJson(baseUrl, "/health");
     expect(settings.data.databaseId).toBe(health.data.databaseId);
+    expect(settings.enrichment.health).toMatchObject({
+      sessionsWithMessagesButNoEffects: 1,
+      weakCurrentTitles: 1
+    });
     expect(state.settings.deletionTargets.projects).toEqual([{ label: "Masthead", value: "Masthead" }]);
     expect(state.settings.deletionTargets.runtimes).toEqual([{ label: "codex", value: "codex" }]);
     expect(state.settings.deletionTargets.hosts).toEqual([{ label: "masthead-test-host", value: "masthead-test-host" }]);
@@ -136,6 +141,52 @@ async function createTestHarness(): Promise<{ daemon: MastheadDaemon; databasePa
   } satisfies DaemonConfig);
   daemons.push(daemon);
   return { daemon, databasePath, storePath, tempDir };
+}
+
+function seedWeakSessionWithoutEffects(db: MastheadDaemon["database"]): void {
+  const now = "2026-06-25T12:05:00.000Z";
+  db.prepare(
+    `INSERT INTO sessions (
+      session_id, host_id, runtime_id, source_session_id, project_label, title, lifecycle,
+      last_activity_at, source_confidence, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("session:weak", "host:test", "runtime:codex", "source-session:weak", "Masthead", "Codex hook event", "ended", now, "authoritative", now, now);
+  db.prepare("INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+    "session:weak:message",
+    "session:weak",
+    "user",
+    "Work on the headline refreshes and data enrichment.",
+    "session:weak:message-hash",
+    now,
+    "{}",
+    "authoritative"
+  );
+  db.prepare(
+    `INSERT INTO session_enrichments (
+      enrichment_id, session_id, enrichment_kind, status, content_fingerprint, prompt_version,
+      provider, model, generated_at, content_json, source_refs_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "enrichment:weak",
+    "session:weak",
+    "session_capsule",
+    "current",
+    "weak:fingerprint",
+    "session-capsule-v1",
+    "deterministic",
+    "local-rules",
+    now,
+    JSON.stringify({
+      candidateDecisions: [],
+      liveSummary: "Recent activity is active.",
+      searchPhrases: [],
+      technologies: [],
+      title: "Codex hook event",
+      topics: [],
+      unresolved: []
+    }),
+    "[]"
+  );
 }
 
 function listen(daemon: MastheadDaemon): Promise<string> {

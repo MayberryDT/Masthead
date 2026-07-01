@@ -56,6 +56,35 @@ describe("board live copy facts", () => {
     expect(facts.recentToolNames).toEqual(["npm run typecheck"]);
   });
 
+  test("keeps useful transcript evidence while dropping directive and progress noise", () => {
+    const facts = buildBoardLiveCopyFacts({
+      attentionItems: [],
+      card: card(),
+      conflicts: [],
+      events: [],
+      gitSnapshots: [],
+      recentTranscriptMessages: [
+        {
+          observedAt: "2026-07-01T21:00:00.000Z",
+          role: "assistant",
+          text: "The dev server is still running at [url] ::-stage{cwd=\"\"} ::-commit{cwd=\"\"}."
+        },
+        {
+          observedAt: "2026-07-01T21:01:00.000Z",
+          role: "assistant",
+          text: "The timestamp was not the whole issue. I’m putting transcript evidence ahead of canonical enrichment."
+        },
+        {
+          observedAt: "2026-07-01T21:02:00.000Z",
+          role: "user",
+          text: "I don't see the headlines changing in the Board tab."
+        }
+      ]
+    });
+
+    expect(facts.recentTranscriptMessages).toEqual(["Headlines are not visibly changing in the Board tab."]);
+  });
+
   test("sanitizes URL-like project and title facts before live copy", () => {
     const facts = buildBoardLiveCopyFacts({
       attentionItems: [],
@@ -107,6 +136,22 @@ describe("board live copy facts", () => {
       liveSummary: "MCP launch config validation has passing tools-list coverage.",
       title: "MCP launch config validation"
     });
+  });
+
+  test("drops canonical enrichment with URL and directive placeholders", () => {
+    const facts = buildBoardLiveCopyFacts({
+      attentionItems: [],
+      canonicalEnrichment: {
+        liveSummary: "The dev server is still running at [url] ::-stage{cwd=\"\"} ::-commit{cwd=\"\"}.",
+        title: "The dev server is still running at [url]."
+      },
+      card: card(),
+      conflicts: [],
+      events: [],
+      gitSnapshots: []
+    });
+
+    expect(facts.canonicalEnrichment).toBeUndefined();
   });
 });
 

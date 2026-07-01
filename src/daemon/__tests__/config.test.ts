@@ -29,6 +29,12 @@ describe("daemon config", () => {
     expect(config.backgroundHydrationEnabled).toBe(false);
   });
 
+  test("enables hook transcript catch-up by default", () => {
+    const config = daemonConfigFromEnv({});
+
+    expect(config.hookTranscriptCatchupEnabled).toBe(true);
+  });
+
   test("can disable hook transcript catch-up for responsive live previews", () => {
     const config = daemonConfigFromEnv({ MASTHEAD_HOOK_TRANSCRIPT_CATCHUP: "0" });
 
@@ -39,6 +45,8 @@ describe("daemon config", () => {
     const config = daemonConfigFromEnv({ OPENAI_API_KEY: "sk-test" });
 
     expect(config.llmCopyEnabled).toBe(true);
+    expect(config.liveCopyEnabled).toBe(true);
+    expect(config.remoteEnrichmentEnabled).toBe(false);
     expect(config.openaiModel).toBeUndefined();
   });
 
@@ -46,5 +54,47 @@ describe("daemon config", () => {
     const config = daemonConfigFromEnv({ MASTHEAD_LLM_COPY: "0", OPENAI_API_KEY: "sk-test" });
 
     expect(config.llmCopyEnabled).toBe(false);
+    expect(config.liveCopyEnabled).toBe(false);
+    expect(config.remoteEnrichmentEnabled).toBe(false);
+  });
+
+  test("splits live copy from durable remote enrichment flags", () => {
+    const keyOnly = daemonConfigFromEnv({ OPENAI_API_KEY: "sk-test" });
+    expect(keyOnly.liveCopyEnabled).toBe(true);
+    expect(keyOnly.remoteEnrichmentEnabled).toBe(false);
+
+    const remoteEnabled = daemonConfigFromEnv({ MASTHEAD_REMOTE_ENRICHMENT: "1", OPENAI_API_KEY: "sk-test" });
+    expect(remoteEnabled.liveCopyEnabled).toBe(true);
+    expect(remoteEnabled.remoteEnrichmentEnabled).toBe(true);
+
+    const liveDisabled = daemonConfigFromEnv({ MASTHEAD_LIVE_COPY: "0", OPENAI_API_KEY: "sk-test" });
+    expect(liveDisabled.liveCopyEnabled).toBe(false);
+    expect(liveDisabled.remoteEnrichmentEnabled).toBe(false);
+  });
+
+  test("lets specific flags override the legacy LLM copy flag", () => {
+    const config = daemonConfigFromEnv({
+      MASTHEAD_LIVE_COPY: "0",
+      MASTHEAD_LLM_COPY: "1",
+      MASTHEAD_REMOTE_ENRICHMENT: "0",
+      OPENAI_API_KEY: "sk-test"
+    });
+
+    expect(config.llmCopyEnabled).toBe(false);
+    expect(config.liveCopyEnabled).toBe(false);
+    expect(config.remoteEnrichmentEnabled).toBe(false);
+  });
+
+  test("keeps legacy LLM copy compatibility when specific flags are absent", () => {
+    const config = daemonConfigFromEnv({ MASTHEAD_LLM_COPY: "1", OPENAI_API_KEY: "sk-test" });
+
+    expect(config.llmCopyEnabled).toBe(true);
+    expect(config.liveCopyEnabled).toBe(true);
+    expect(config.remoteEnrichmentEnabled).toBe(true);
+  });
+
+  test("configures a durable remote enrichment timeout separately from live copy", () => {
+    expect(daemonConfigFromEnv({}).remoteEnrichmentTimeoutMs).toBe(12_000);
+    expect(daemonConfigFromEnv({ MASTHEAD_REMOTE_ENRICHMENT_TIMEOUT_MS: "15000" }).remoteEnrichmentTimeoutMs).toBe(15_000);
   });
 });

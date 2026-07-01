@@ -1,4 +1,4 @@
-import { isMeaningfulSessionTitle } from "../../enrichment/sessionCompiler.ts";
+import { firstUsefulSessionTitle } from "../../shared/sessionTextQuality.ts";
 import { currentSessionEnrichmentViews, type SessionEnrichmentView } from "./enrichmentViewRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
@@ -475,18 +475,28 @@ function bestSessionTitle(row: SessionRow, enrichment?: SessionEnrichmentView): 
     sessionId: row.sessionId,
     sourceSessionId: row.sourceSessionId
   };
-  const candidates = [enrichment?.title, row.objective, row.title, enrichment?.liveSummary];
-  for (const candidate of candidates) {
-    const cleaned = cleanDisplayTitle(candidate);
-    if (isMeaningfulSessionTitle(cleaned, titleFacts)) return cleaned;
-  }
-  return row.project ? `${row.project} session` : row.sourceSessionId;
+  const title = firstUsefulSessionTitle(
+    [enrichment?.title, row.objective, row.title, enrichment?.liveSummary, enrichment?.subject, enrichment?.searchSummary, row.sourceSessionId],
+    titleFacts
+  );
+  if (title) return title;
+  return fallbackSessionTitle(row);
 }
 
-function cleanDisplayTitle(value: string | null | undefined): string | undefined {
-  const cleaned = value?.replace(/\s+/g, " ").trim();
-  if (!cleaned) return undefined;
-  return cleaned.length > 96 ? `${cleaned.slice(0, 93).trim()}...` : cleaned;
+function fallbackSessionTitle(row: SessionRow): string {
+  const observedAt = compactTimestamp(row.lastActivityAt);
+  if (row.project) return `${row.project} · ${observedAt}`;
+  return `${runtimeLabel(row.runtime)} session · ${observedAt}`;
+}
+
+function runtimeLabel(runtime: string): string {
+  return runtime === "codex" ? "Codex" : runtime;
+}
+
+function compactTimestamp(value: string): string {
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return value;
+  return `${match[1]} ${match[2]}:${match[3]}`;
 }
 
 function ftsQuery(query: string): string | undefined {

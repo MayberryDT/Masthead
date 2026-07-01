@@ -5,14 +5,15 @@ Enrichment is derived session data stored in Masthead's canonical SQLite graph. 
 ## Modes
 
 - Deterministic fallback: local derivation from canonical session records. This is the default provider.
-- Optional remote model: enabled only when configured with `MASTHEAD_LLM_COPY=1` and an API key. Remote enrichment must stay scoped, redacted, previewable, strict, and auditable.
+- Optional remote model: enabled only when configured with `MASTHEAD_REMOTE_ENRICHMENT=1` and an API key. Remote enrichment must stay scoped, redacted, previewable, strict, and auditable. `MASTHEAD_REMOTE_ENRICHMENT_TIMEOUT_MS` controls the durable request timeout and defaults to `12000`.
+- Live Now-card AI copy refresh: controlled separately with `MASTHEAD_LIVE_COPY`. The legacy `MASTHEAD_LLM_COPY=1` flag still enables both live copy and durable remote enrichment unless a specific flag overrides it.
 - Disabled or partial: sessions can still be imported and searched when enrichment is queued, failed, disabled, or missing.
 
 When remote enrichment is enabled, provider failures do not silently fall back to deterministic text. A timeout, API error, invalid JSON response, invalid model output, validation failure, or missing key writes/diagnoses a failed enrichment attempt with no current `live_summary` or `search_projection` replacement. Existing successful current rows remain current until a new successful enrichment is written.
 
 ## Coverage
 
-Settings and doctor diagnostics report enrichment coverage using the canonical session count, current session capsules, queued rows, failed rows, and disabled rows.
+Settings and doctor diagnostics report enrichment coverage using the canonical session count, current session capsules, queued rows, failed rows, disabled rows, weak current titles, sessions with messages but no file effects, repeated failed fingerprints, and git snapshot file-effect coverage gaps.
 
 Low enrichment coverage is a repair signal, not a reason to fake imported sessions. Keep the daemon running after imports, inspect Settings enrichment health, or retry failed import/enrichment work after fixing the underlying source issue.
 

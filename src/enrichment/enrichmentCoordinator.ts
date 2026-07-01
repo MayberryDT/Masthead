@@ -1,6 +1,7 @@
 import {
   markStaleCurrentSessionEnrichments,
   readCurrentSessionEnrichment,
+  readLatestFailedSessionEnrichment,
   upsertSessionEnrichment
 } from "../daemon/db/enrichmentRepository.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
@@ -45,11 +46,24 @@ export class EnrichmentFailedError extends Error {
   }
 }
 
+export type EnrichmentCoordinatorOptions = {
+  auditLogger?: EnrichmentAuditLogger;
+  failureBackoffMs?: number;
+  now?: () => number;
+};
+
+const DEFAULT_FAILURE_BACKOFF_MS = 10 * 60_000;
+
 export function createEnrichmentCoordinator(
   db: MastheadDatabase,
   provider: SessionEnrichmentProvider,
-  audit: EnrichmentAuditLogger = createEnrichmentAuditLogger()
+  optionsOrAudit: EnrichmentCoordinatorOptions | EnrichmentAuditLogger = {}
 ): EnrichmentCoordinator {
+  const options = isAuditLogger(optionsOrAudit) ? { auditLogger: optionsOrAudit } : optionsOrAudit;
+  const audit = options.auditLogger ?? createEnrichmentAuditLogger();
+  const failureBackoffMs = options.failureBackoffMs ?? DEFAULT_FAILURE_BACKOFF_MS;
+  const now = options.now ?? Date.now;
+
   return {
     async enrich(sessionId) {
       const facts = buildSessionFacts(db, sessionId);
@@ -74,7 +88,7 @@ export function createEnrichmentCoordinator(
         sourceSessionId: facts.sourceSessionId
       });
       const providerResult = await provider.enrich({ facts });
-      const generatedAt = new Date().toISOString();
+      const generatedAt = new Date(now()).toISOString();
       audit.record({
         details: providerResult,
         inputFingerprint: fingerprint,
@@ -187,6 +201,8 @@ export function createEnrichmentCoordinator(
       const fingerprint = fingerprintSessionFacts(facts);
       const current = readCurrentSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
       if (current?.contentFingerprint === fingerprint) return current;
+      const latestFailed = readLatestFailedSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
+      if (isRecentFailureForFingerprint(latestFailed, fingerprint, now(), failureBackoffMs)) return latestFailed;
       return this.enrich(sessionId);
     }
   };
@@ -202,7 +218,7 @@ function writeFailedEnrichment(
     sessionId: string;
   }
 ): SessionEnrichmentRecord {
-  const failureFingerprint = `${options.fingerprint}:failed:${options.providerResult.status}:${options.generatedAt}`;
+  const failureFingerprint = `${options.fingerprint}:failed:${options.providerResult.status}`;
   const recordWithoutId: Omit<SessionEnrichmentRecord, "enrichmentId"> = {
     contentFingerprint: failureFingerprint,
     enrichmentKind: "session_capsule",
@@ -221,6 +237,22 @@ function writeFailedEnrichment(
     ...recordWithoutId,
     enrichmentId
   };
+}
+
+function isRecentFailureForFingerprint(
+  record: SessionEnrichmentRecord | undefined,
+  fingerprint: string,
+  nowMs: number,
+  failureBackoffMs: number
+): record is SessionEnrichmentRecord {
+  if (!record?.generatedAt || !record.contentFingerprint.startsWith(`${fingerprint}:failed:`)) return false;
+  const generatedAtMs = Date.parse(record.generatedAt);
+  if (!Number.isFinite(generatedAtMs)) return false;
+  return nowMs - generatedAtMs < failureBackoffMs;
+}
+
+function isAuditLogger(value: EnrichmentCoordinatorOptions | EnrichmentAuditLogger): value is EnrichmentAuditLogger {
+  return typeof (value as EnrichmentAuditLogger).record === "function";
 }
 
 function writeEnrichment(

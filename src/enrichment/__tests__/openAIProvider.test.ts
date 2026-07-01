@@ -123,6 +123,37 @@ describe("OpenAI enrichment provider", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  test("uses configured durable timeout for OpenAI requests", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(
+        (_url: string | URL | Request, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              const error = new Error("aborted");
+              error.name = "AbortError";
+              reject(error);
+            });
+          })
+      );
+      const provider = createOpenAIEnrichmentProvider({
+        apiKey: "test-key",
+        enabled: true,
+        fetchImpl,
+        timeoutMs: 25
+      });
+
+      const resultPromise = provider.enrich({ facts: facts() });
+      await vi.advanceTimersByTimeAsync(25);
+      const result = await resultPromise;
+
+      expect(result.status).toBe("timeout");
+      expect(result.failureMessage).toContain("25ms");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("deterministic provider is explicit local enrichment", async () => {
     const result = await createDeterministicEnrichmentProvider().enrich({ facts: facts() });
 

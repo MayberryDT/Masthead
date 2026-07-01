@@ -15,6 +15,7 @@ export type ImportWorkResult = {
   importedCount: number;
   queuedCount: number;
   failureCount: number;
+  limited?: boolean;
 };
 
 export type ImportProgressUpdate = Partial<ImportWorkResult> & {

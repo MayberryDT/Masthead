@@ -16,6 +16,12 @@ The product hierarchy is:
 
 Observability is a view over continuously collected session data.
 
+## Read-Only Run Exceptions
+
+When Tyler asks for a read-only run, do not change product code, data, or runtime state.
+Writing implementation plans and concise GBrain session closeouts is still allowed unless Tyler
+explicitly excludes them.
+
 ## Design Source Of Truth
 
 Read `design.md` before Masthead UI work. It is the single master design source for this repo and follows Google's DESIGN.md structure while preserving this project's lowercase filename.
@@ -43,6 +49,13 @@ affected surfaces at desktop, tablet, and narrow mobile widths.
 When browser automation is needed, use the Codex in-app Browser plugin with the `iab` backend first. Do not fall back to standalone Playwright, external browser-control servers, shell-launched browsers, or Computer Use for browser work unless the user explicitly approves that fallback. References to `tab.playwright` inside the Browser plugin are acceptable only after the in-app Browser runtime is connected, because that still controls the in-app Browser.
 
 ## Worktree Startup
+
+Port `5173` is reserved for the installed Masthead Electron Dev app only. Do not start a browser-only
+Vite UI, `npm run dev`, `npm run dev:ui`, or a secondary worktree UI on `5173` when the Electron dev
+app is expected to run. Electron Dev is hardwired to `http://127.0.0.1:5173`; stealing that port can
+prevent the desktop app from opening or make it attach to the wrong renderer. For non-Electron
+browser/worktree testing, explicitly choose another UI port, such as `MASTHEAD_UI_PORT=5180 npm run
+dev`.
 
 Use the harness-neutral live launcher for local Masthead testing:
 

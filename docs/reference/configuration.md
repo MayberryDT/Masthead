@@ -55,7 +55,10 @@ Masthead is configured with environment variables. Defaults are local and develo
 
 | Variable | Purpose |
 | --- | --- |
-| `MASTHEAD_LLM_COPY` | Set to `1` to enable optional remote copy enrichment |
+| `MASTHEAD_LIVE_COPY` | Set to `0` or `1` to explicitly disable or enable live Now-card AI copy refresh |
+| `MASTHEAD_REMOTE_ENRICHMENT` | Set to `1` to enable durable remote enrichment. Defaults to off |
+| `MASTHEAD_REMOTE_ENRICHMENT_TIMEOUT_MS` | Timeout for durable remote enrichment requests. Defaults to `12000` |
+| `MASTHEAD_LLM_COPY` | Legacy compatibility flag. Enables both live copy and durable remote enrichment unless a specific flag overrides it |
 | `OPENAI_API_KEY` | API key for optional enrichment |
 | `MASTHEAD_OPENAI_MODEL` | Optional model override |
 
