@@ -42,7 +42,7 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
             Delete raw copies
           </AppButton>
         }
-        description="Keeps normalized session metadata, summaries, and search records."
+        description="Keeps normalized session metadata, summaries, and search records. Original source harness files are not modified."
         label="Source copies"
         value={summary ? formatCount(summary.rawEvents) : "Loading"}
       />

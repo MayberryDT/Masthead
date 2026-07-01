@@ -91,7 +91,7 @@ export async function rewriteSessionCopyWithOpenAI(
         instructions: [
           "Rewrite Masthead session metadata into calm, system-neutral plain English for an operations brief.",
           "Only restate the facts in the input.",
-          "For running or idle sessions, summarize the latest concrete activity in one sentence when latestFeedback, facts.recentEvents, or recentDelta.latestEventSummaries are present.",
+          "For running sessions, summarize the latest concrete activity in one sentence when latestFeedback, facts.recentEvents, or recentDelta.latestEventSummaries are present.",
           "Prefer latest activity evidence over lifecycle, status, project, or review-state wording.",
           "Do not mention MCP, Model Context Protocol, or MCP servers unless the input explicitly contains MCP, Model Context Protocol, or an mcp path/topic.",
           "Never use repeated templates such as ready for review, needs review, work is focused on, or being fixed for a project.",
@@ -233,7 +233,7 @@ export function createOpenAISessionCopyEnricher(config: OpenAISessionCopyEnriche
       const deadline = now() + projectionBudgetMs;
       const copiesBySession = new Map<string, SessionPlainCopy>();
       const refreshBySession = new Map<string, NonNullable<LiveBoardProjection["cards"][number]["copyRefresh"]>>();
-      const cards = prioritizedProjectionCards(projection.cards);
+      const cards = refreshableProjectionCards(projection.cards);
       const refreshId = `refresh:${now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
       const generatedAt = new Date(now()).toISOString();
       const summary = {
@@ -389,16 +389,11 @@ function extractOutputText(value: unknown): string | undefined {
   return undefined;
 }
 
-function prioritizedProjectionCards(cards: LiveBoardProjection["cards"]): Array<{ card: LiveBoardProjection["cards"][number]; cardIndex: number }> {
+function refreshableProjectionCards(cards: LiveBoardProjection["cards"]): Array<{ card: LiveBoardProjection["cards"][number]; cardIndex: number }> {
   return cards
     .map((card, cardIndex) => ({ card, cardIndex }))
-    .toSorted((a, b) => lifecyclePriority(a.card.lifecycle) - lifecyclePriority(b.card.lifecycle) || a.card.priorityRank - b.card.priorityRank || a.cardIndex - b.cardIndex);
-}
-
-function lifecyclePriority(lifecycle: LiveBoardProjection["cards"][number]["lifecycle"]): number {
-  if (lifecycle === "running") return 0;
-  if (lifecycle === "idle") return 1;
-  return 2;
+    .filter(({ card }) => card.lifecycle === "running")
+    .toSorted((a, b) => a.card.priorityRank - b.card.priorityRank || a.cardIndex - b.cardIndex);
 }
 
 function withOverlayCopy<T extends { sessionId: string; copy: SessionPlainCopy; copyRefresh?: LiveBoardProjection["cards"][number]["copyRefresh"] }>(

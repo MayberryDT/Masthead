@@ -10,24 +10,38 @@ type Props = {
   isNew?: boolean;
   newCardIndex?: number;
   headlineUpdateIndex?: number;
+  refreshPulseIndex?: number;
 };
 
-export function SessionCard({ session, onToggle, demoTelemetry, newCardIndex = 0, headlineUpdateIndex }: Props) {
+type SessionVisualTier = "quiet" | "live" | "action";
+
+export function SessionCard({
+  session,
+  onToggle,
+  demoTelemetry,
+  isNew = false,
+  newCardIndex = 0,
+  headlineUpdateIndex,
+  refreshPulseIndex
+}: Props) {
   const stateClass = sessionStateClassName(session);
+  const tierClass = `tier-${sessionVisualTier(session)}`;
   const model = demoTelemetry?.model.value ?? session.model ?? "Not captured";
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Codex";
   const worktree = session.branchOrWorktree ?? "None";
   const headline = sessionHeadline(session);
   const sessionName = sessionHeaderName(session);
   const isHeadlineRefreshing = headlineUpdateIndex !== undefined;
+  const isRefreshPulsing = refreshPulseIndex !== undefined && !isHeadlineRefreshing;
   const previousHeadlineRef = useRef(headline);
   const previousHeadline = previousHeadlineRef.current;
   const outgoingHeadline = isHeadlineRefreshing ? previousHeadline : undefined;
   const style = {
     viewTransitionName: `session-card-${viewTransitionNamePart(session.sessionId)}`,
     "--new-card-index": Math.min(newCardIndex, 4),
-    "--headline-refresh-index": Math.min(headlineUpdateIndex ?? 0, 4)
-  } as CSSProperties & { "--new-card-index": number; "--headline-refresh-index": number };
+    "--headline-refresh-index": Math.min(headlineUpdateIndex ?? 0, 4),
+    "--refresh-pulse-index": Math.min(refreshPulseIndex ?? 0, 4)
+  } as CSSProperties & { "--new-card-index": number; "--headline-refresh-index": number; "--refresh-pulse-index": number };
 
   useEffect(() => {
     previousHeadlineRef.current = headline;
@@ -35,7 +49,18 @@ export function SessionCard({ session, onToggle, demoTelemetry, newCardIndex = 0
 
   return (
     <article
-      className={`session-card bottom-variant-card dovetail-card ${stateClass}${isHeadlineRefreshing ? " is-headline-refreshing" : ""}`}
+      className={[
+        "session-card",
+        "bottom-variant-card",
+        "dovetail-card",
+        stateClass,
+        tierClass,
+        isNew ? "is-new-card" : "",
+        isHeadlineRefreshing ? "is-headline-refreshing" : "",
+        isRefreshPulsing ? "is-refresh-pulsing" : ""
+      ]
+        .filter(Boolean)
+        .join(" ")}
       data-session-id={session.sessionId}
       style={style}
       role="button"
@@ -122,6 +147,14 @@ function sessionStateClassName(session: SessionCardView): "is-active" | "is-idle
   if (isBlockedSessionCard(session)) return "is-blocked";
   if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") return "is-idle";
   return "is-active";
+}
+
+function sessionVisualTier(session: SessionCardView): SessionVisualTier {
+  if (isBlockedSessionCard(session)) return "action";
+  if (session.indicators.includes("attention")) return "action";
+  if (session.indicators.includes("conflict")) return "action";
+  if (session.lifecycle === "running") return "live";
+  return "quiet";
 }
 
 function startedLabel(value: string): string {

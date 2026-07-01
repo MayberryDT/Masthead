@@ -43,6 +43,9 @@ CANONICAL_RENDERER_URL="http://127.0.0.1:5173"
 VITE_BIN="$APP_DIR/node_modules/vite/bin/vite.js"
 ELECTRON_BIN="$APP_DIR/node_modules/electron/dist/electron"
 ALLOWED_ORIGINS=${shellQuote(devAllowedOrigins())}
+ACTIVE_DAEMON_PORT="17373"
+ACTIVE_DAEMON_BASE_URL="http://127.0.0.1:17373"
+ACTIVE_PROJECTION_URL="$ACTIVE_DAEMON_BASE_URL/projection"
 
 export PATH="$(dirname "$NODE_BIN"):$HOME/.cargo/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 export npm_config_update_notifier=false
@@ -51,6 +54,18 @@ mkdir -p "$LOG_DIR" "$DATA_DIR/legacy"
 
 log() {
   echo "$(date -Is) $*" >>"$LOG_FILE"
+}
+
+load_local_env() {
+  local file
+  for file in "$APP_DIR/.env" "$APP_DIR/.env.local"; do
+    [[ -f "$file" ]] || continue
+    log "Loading local environment from $file"
+    set -a
+    # shellcheck disable=SC1090
+    source "$file"
+    set +a
+  done
 }
 
 read_cmdline() {
@@ -81,8 +96,9 @@ is_masthead_electron_process() {
 }
 
 wait_for_port_to_close() {
+  local port="$1"
   for _ in {1..40}; do
-    if ! curl -fsS --max-time 1 http://127.0.0.1:17373/health >/dev/null 2>&1; then
+    if ! curl -fsS --max-time 1 "http://127.0.0.1:$port/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.25
@@ -91,7 +107,38 @@ wait_for_port_to_close() {
 }
 
 daemon_is_healthy() {
-  curl -fsS --max-time 1 http://127.0.0.1:17373/health >/dev/null 2>&1
+  local port="$1"
+  curl -fsS --max-time 1 "http://127.0.0.1:$port/health" >/dev/null 2>&1
+}
+
+daemon_is_compatible() {
+  local port="$1" health
+  health="$(curl -fsS --max-time 1 "http://127.0.0.1:$port/health" 2>/dev/null)" || return 1
+  EXPECTED_DATA_DIR="$DATA_DIR" "$NODE_BIN" -e 'let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { try { const j = JSON.parse(input); process.exit(j?.data?.dataDirectory === process.env.EXPECTED_DATA_DIR ? 0 : 1); } catch { process.exit(1); } });' <<<"$health"
+}
+
+set_active_daemon() {
+  local port="$1"
+  ACTIVE_DAEMON_PORT="$port"
+  ACTIVE_DAEMON_BASE_URL="http://127.0.0.1:$port"
+  ACTIVE_PROJECTION_URL="$ACTIVE_DAEMON_BASE_URL/projection"
+}
+
+port_is_listening() {
+  local port="$1"
+  ss -ltn "( sport = :$port )" 2>/dev/null | grep -q LISTEN
+}
+
+find_available_daemon_port() {
+  local port="$1"
+  while (( port <= 17420 )); do
+    if ! port_is_listening "$port"; then
+      echo "$port"
+      return 0
+    fi
+    port=$((port + 1))
+  done
+  return 1
 }
 
 ui_is_masthead_dev() {
@@ -129,7 +176,9 @@ start_dev_ui() {
   log "Starting Masthead Vite dev UI at $CANONICAL_RENDERER_URL"
   (
     cd "$APP_DIR"
-    exec "$NODE_BIN" "$VITE_BIN" --host 127.0.0.1 --port 5173 --strictPort
+    exec env \\
+      VITE_MASTHEAD_PROJECTION_URL="$ACTIVE_PROJECTION_URL" \\
+      "$NODE_BIN" "$VITE_BIN" --host 127.0.0.1 --port 5173 --strictPort
   ) >>"$LOG_FILE" 2>&1 &
 
   echo "$!" >"$LOG_DIR/dev-ui.pid"
@@ -163,12 +212,19 @@ build_electron_dev_bundles() {
 }
 
 start_dev_daemon() {
-  if daemon_is_healthy; then
-    log "Masthead daemon already healthy at http://127.0.0.1:17373"
+  local port="17373"
+  if daemon_is_compatible "$port"; then
+    set_active_daemon "$port"
+    log "Masthead daemon already healthy at $ACTIVE_DAEMON_BASE_URL"
     return 0
   fi
 
-  wait_for_port_to_close || log "Port 17373 stayed occupied by an unhealthy process; daemon start may fail."
+  if daemon_is_healthy "$port"; then
+    log "Port 17373 is occupied by a Masthead daemon with a different data directory; using an isolated dev daemon port."
+    port="$(find_available_daemon_port 17374)"
+  else
+    wait_for_port_to_close "$port" || log "Port 17373 stayed occupied by an unhealthy process; daemon start may fail."
+  fi
 
   log "Building Masthead daemon..."
   if (cd "$APP_DIR" && "$NPM_BIN" run build:daemon) >>"$LOG_FILE" 2>&1; then
@@ -179,7 +235,7 @@ start_dev_daemon() {
     return "$build_status"
   fi
 
-  log "Starting Masthead daemon at http://127.0.0.1:17373"
+  log "Starting Masthead daemon at http://127.0.0.1:$port"
   (
     cd "$APP_DIR"
     exec env \\
@@ -189,7 +245,7 @@ start_dev_daemon() {
       MASTHEAD_HOST="127.0.0.1" \\
       MASTHEAD_MCP_COMMAND="$NODE_BIN" \\
       MASTHEAD_MCP_ENTRY="$MCP_ENTRY" \\
-      MASTHEAD_PORT="17373" \\
+      MASTHEAD_PORT="$port" \\
       MASTHEAD_STORE_PATH="$STORE_PATH" \\
       "$NODE_BIN" "$DAEMON_ENTRY"
   ) >>"$LOG_FILE" 2>&1 &
@@ -197,14 +253,15 @@ start_dev_daemon() {
   echo "$!" >"$LOG_DIR/dev-daemon.pid"
 
   for _ in {1..80}; do
-    if daemon_is_healthy; then
-      log "Masthead daemon is ready."
+    if daemon_is_compatible "$port"; then
+      set_active_daemon "$port"
+      log "Masthead daemon is ready at $ACTIVE_DAEMON_BASE_URL."
       return 0
     fi
     sleep 0.25
   done
 
-  log "Masthead daemon did not become ready at http://127.0.0.1:17373"
+  log "Masthead daemon did not become ready at http://127.0.0.1:$port"
   return 1
 }
 
@@ -217,6 +274,7 @@ fi
 log "=== Masthead dev desktop launch $(date -Is) ==="
 log "App dir: $APP_DIR"
 
+load_local_env
 stop_stale_electron_processes
 start_dev_daemon
 start_dev_ui
@@ -240,6 +298,7 @@ exec env \\
   MASTHEAD_DB_PATH="$DB_PATH" \\
   MASTHEAD_MCP_ENTRY="$MCP_ENTRY" \\
   MASTHEAD_NODE_PATH="$NODE_BIN" \\
+  MASTHEAD_PORT="$ACTIVE_DAEMON_PORT" \\
   MASTHEAD_STORE_PATH="$STORE_PATH" \\
   MASTHEAD_ELECTRON_DEV=1 \\
   MASTHEAD_ELECTRON_RENDERER_URL="$CANONICAL_RENDERER_URL" \\

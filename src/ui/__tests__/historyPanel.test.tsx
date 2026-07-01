@@ -84,6 +84,52 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("Showing 1 of 1");
   });
 
+  test("renders invalid summary date ranges as n/a", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        loadState={{ state: "ready", sessions: [], total: 0 }}
+        loading={false}
+        query=""
+        summary={summary({ earliestActivityAt: "1969-12-31T23:59:59.000Z", latestActivityAt: "2026-06-24T07:00:00.000Z" })}
+        onQueryChange={() => {}}
+      />
+    );
+
+    expect(html).toContain("<dt>Date range</dt>");
+    expect(html).toContain("<dd>n/a</dd>");
+    expect(html).not.toContain("Dec 1969");
+  });
+
+  test("renders far future summary date ranges as n/a", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        loadState={{ state: "ready", sessions: [], total: 0 }}
+        loading={false}
+        query=""
+        summary={summary({ earliestActivityAt: "2026-06-24T07:00:00.000Z", latestActivityAt: "2999-01-01T00:00:00.000Z" })}
+        onQueryChange={() => {}}
+      />
+    );
+
+    expect(html).toContain("<dt>Date range</dt>");
+    expect(html).toContain("<dd>n/a</dd>");
+    expect(html).not.toContain("2999");
+  });
+
+  test("renders valid summary date ranges as month and year", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        loadState={{ state: "ready", sessions: [], total: 0 }}
+        loading={false}
+        query=""
+        summary={summary({ earliestActivityAt: "2026-05-24T07:00:00.000Z", latestActivityAt: "2026-06-24T07:00:00.000Z" })}
+        onQueryChange={() => {}}
+      />
+    );
+
+    expect(html).toContain("<dd>May 2026 - Jun 2026</dd>");
+  });
+
   test("renders more than six database-backed sessions and exposes detail actions", () => {
     const opened: string[] = [];
     const html = renderToStaticMarkup(
@@ -301,4 +347,20 @@ function records(): StoreRecord[] {
       }
     }
   ];
+}
+
+function summary(overrides: Partial<Parameters<typeof HistoryPanel>[0]["summary"]> = {}): NonNullable<Parameters<typeof HistoryPanel>[0]["summary"]> {
+  return {
+    sessions: 1,
+    projects: 1,
+    runtimes: [{ runtime: "codex", count: 1 }],
+    messages: 10,
+    toolCalls: 2,
+    fileEffects: 0,
+    earliestActivityAt: "2026-05-24T07:00:00.000Z",
+    latestActivityAt: "2026-06-24T07:00:00.000Z",
+    models: [],
+    lifecycles: [],
+    ...overrides
+  };
 }

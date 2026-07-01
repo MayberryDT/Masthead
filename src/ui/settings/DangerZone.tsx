@@ -95,7 +95,7 @@ export function DangerZone({
             Delete all Masthead data
           </AppButton>
         }
-        description="Clears canonical sessions, enrichments, source policies, indexes, and MCP audit rows."
+        description="Clears Masthead-owned canonical sessions, enrichments, source policies, indexes, and MCP audit rows. Original source harness files are not modified."
         label="Delete all"
       />
     </SettingsSection>

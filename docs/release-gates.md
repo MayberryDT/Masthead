@@ -29,7 +29,7 @@ Release docs must preserve these launch boundaries:
 - Local SQLite is canonical for Masthead-owned product data.
 - Remote enrichment is optional, scoped, redacted, previewable, and auditable.
 - Remote enrichment is strict when enabled: provider failures are visible in diagnostics/dossier/audit logs and do not silently replace model output with deterministic copy.
-- Board live copy attempts fresh copy on the configured refresh interval and surfaces per-card refresh failures.
+- Board live copy attempts fresh copy for running cards on the configured refresh interval and surfaces per-card refresh failures.
 - Board is a live view over collected session data, not the product category.
 - Source scans check known local agent-history locations only; full transcript import requires explicit approval.
 - Detector-only and cloud-reference harnesses are catalog references, not claims of successful local transcript import.

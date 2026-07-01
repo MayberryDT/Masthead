@@ -120,6 +120,8 @@ export function SessionDossier({
           </header>
 
           <div className="content-grid">
+            <DossierEnrichmentPanel dossier={dossier} error={error} loading={loading} summary={summary} />
+
             <section className="metrics" aria-label="Key stats">
               <Metric className="is-good" label="Source confidence" value={identity?.sourceConfidence ?? live?.identityConfidence ?? "Unknown"} />
               <Metric label="Coverage" value={coverageLabel(dossier?.coverage.level)} />
@@ -132,13 +134,11 @@ export function SessionDossier({
               <Metric className={attentionItems.length > 0 ? "is-warning" : undefined} label="Attention rows" value={formatNumber(attentionItems.length)} />
             </section>
 
-            <DossierEnrichmentPanel dossier={dossier} error={error} loading={loading} summary={summary} />
-
             <section className="panel transcript" aria-label="Transcript excerpt">
               <div className="transcript-toolbar">
                 <div>
                   <h3>Transcript evidence</h3>
-                  <span className="rail-label">filtered to useful card/prototype rows</span>
+                  <span className="rail-label">Relevant transcript evidence</span>
                 </div>
                 <div className="filter-row" aria-label="Transcript filters">
                   {transcriptFilters.map((filter) => (
@@ -349,26 +349,35 @@ function DossierEnrichmentPanel({
         <span className="rail-label">{status}</span>
       </div>
       <div className="summary-scroll">
-        <div className="summary-grid" aria-label="Enrichment stats" data-dossier-section="stats">
-          <SummaryFact label="User messages" value={formatNumber(coverage?.userMessages)} />
-          <SummaryFact label="Assistant messages" value={formatNumber(coverage?.assistantMessages)} />
-          <SummaryFact label="Tool results" value={formatNumber(coverage?.toolResults)} />
-          <SummaryFact label="Checkpoints" value={formatNumber(coverage?.checkpoints)} />
-          <SummaryFact label="Runtime signals" value={formatNumber(coverage?.runtimeSignals)} />
-          <SummaryFact label="Low-value rows" value={formatNumber(coverage?.lowValueItems)} />
-        </div>
-        <DossierEvidenceBlocks dossier={dossier} />
         <SummarySection label="Transcript summary" section="summary" value={summary} extraParagraphs={[dossier?.narrative.outcome].filter((value): value is string => Boolean(value))} />
-        <SummarySection label="First prompt" section="first-prompt" value={dossier?.narrative.firstUserPrompt} />
         <SummarySection label="Latest prompt" section="latest-prompt" value={dossier?.narrative.latestUserPrompt} />
-        <SummarySection label="Technologies" section="technologies" values={dossier?.narrative.technologies} />
+        <SummarySection label="Retrieval notes" section="retrieval" value={dossier?.reuse.copyableContext} />
+        <SummarySection label="Continuation notes" section="continuation" values={dossier?.attention.map((item) => item.title)} />
         <SummarySection label="Unresolved" section="unresolved" values={dossier?.narrative.unresolved} />
         {loading ? <SummarySection label="Loading" section="loading" value="Loading canonical session dossier..." /> : null}
         {error ? <SummarySection label="Dossier error" section="error" value={error} /> : null}
-        <SummarySection label="Retrieval notes" section="retrieval" value={dossier?.reuse.copyableContext} />
-        <SummarySection label="Continuation notes" section="continuation" values={dossier?.attention.map((item) => item.title)} />
+        <DossierEvidenceBlocks dossier={dossier} />
+        <SummarySection label="First prompt" section="first-prompt" value={dossier?.narrative.firstUserPrompt} />
+        <SummarySection label="Technologies" section="technologies" values={dossier?.narrative.technologies} />
+        <DiagnosticCoverage coverage={coverage} />
       </div>
     </section>
+  );
+}
+
+function DiagnosticCoverage({ coverage }: { coverage?: SessionDossierDto["coverage"]["transcript"] }) {
+  return (
+    <div className="summary-section diagnostic-coverage" data-dossier-section="diagnostic-coverage">
+      <h4>Diagnostic coverage</h4>
+      <div className="summary-grid" aria-label="Diagnostic coverage">
+        <SummaryFact label="User messages" value={formatNumber(coverage?.userMessages)} />
+        <SummaryFact label="Assistant messages" value={formatNumber(coverage?.assistantMessages)} />
+        <SummaryFact label="Tool results" value={formatNumber(coverage?.toolResults)} />
+        <SummaryFact label="Checkpoints" value={formatNumber(coverage?.checkpoints)} />
+        <SummaryFact label="System events" value={formatNumber(coverage?.runtimeSignals)} />
+        <SummaryFact label="Filtered rows" value={formatNumber(coverage?.lowValueItems)} />
+      </div>
+    </div>
   );
 }
 
@@ -384,7 +393,7 @@ function SummaryFact({ label, value }: { label: string; value?: string | number 
 function DossierEvidenceBlocks({ dossier }: { dossier?: SessionDossierDto }) {
   const values = [
     ...(dossier?.narrative.topics ?? []).map((value) => ({ className: "is-blue", value })),
-    ...(dossier?.reuse.mcpIncluded ? [{ className: "is-green", value: "MCP included" }] : []),
+    ...(dossier?.reuse.mcpIncluded ? [{ className: "is-green", value: "Agent retrieval ready (MCP included)" }] : []),
     ...(dossier?.narrative.unresolved ?? []).map((value) => ({ className: "is-yellow", value })),
     ...(dossier?.coverage.warnings.slice(0, 3).map((warning) => ({ className: "is-yellow", value: warning.code.replaceAll("_", " ") })) ?? [])
   ];

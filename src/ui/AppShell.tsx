@@ -5,9 +5,10 @@ import { Icon } from "./icons/Icon";
 type Props = {
   sidebar: ReactNode;
   main: ReactNode;
+  motionMode?: "daily" | "presentation";
 };
 
-export function AppShell({ sidebar, main }: Props) {
+export function AppShell({ sidebar, main, motionMode = "daily" }: Props) {
   const [desktopChrome, setDesktopChrome] = useState(false);
 
   useEffect(() => {
@@ -15,7 +16,11 @@ export function AppShell({ sidebar, main }: Props) {
   }, []);
 
   return (
-    <main className={`masthead-shell ${desktopChrome ? "desktop-chrome" : ""}`} aria-label="Masthead session manager">
+    <main
+      className={`masthead-shell ${desktopChrome ? "desktop-chrome" : ""}`}
+      data-motion-mode={motionMode}
+      aria-label="Masthead session manager"
+    >
       <aside className="masthead-sidebar metal-sidebar" aria-label="Primary navigation">
         {sidebar}
       </aside>

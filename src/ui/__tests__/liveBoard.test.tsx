@@ -56,7 +56,7 @@ describe("Live Board UI", () => {
     expect(html).toContain("All Lifecycles");
     expect(html).toContain("Last 24 hours");
     expect(html).toContain("10s");
-    expect(html).toContain("Recent Activity");
+    expect(html).toContain("Priority");
     expect(html).not.toContain("Live ingestion");
     expect(html).not.toContain("Demo");
     expect(html).not.toContain("Offline");

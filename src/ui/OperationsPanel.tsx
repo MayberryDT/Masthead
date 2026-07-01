@@ -119,6 +119,8 @@ export function OperationsPanel({
 
   const writesDisabled = busy || readOnly;
   const showSettingsSections = Boolean(effectiveSettings) || settingsLoadState !== "error";
+  const localOnlyDeletionNote =
+    "Deletes Masthead's local canonical data only. Original source harness files are not modified.";
 
   return (
     <section id="settings" className="settings-panel" aria-label="Settings">
@@ -181,6 +183,7 @@ export function OperationsPanel({
         onCancel={onCancelLocalDataAction}
         onConfirm={onConfirmPruneLocalData}
         open={localDataStatus.state === "confirm_prune"}
+        safetyNote={localOnlyDeletionNote}
         title="Confirm raw source copy deletion"
         tone="danger"
       />
@@ -188,9 +191,11 @@ export function OperationsPanel({
         busy={writesDisabled}
         confirmLabel="Delete selected records"
         description={localDataStatus.message}
+        expectedConfirmation={deletionScopeTarget.trim() || undefined}
         onCancel={onCancelLocalDataAction}
         onConfirm={onConfirmScopedDelete}
         open={localDataStatus.state === "confirm_scoped_delete"}
+        safetyNote={localOnlyDeletionNote}
         title="Confirm scoped deletion"
         tone="danger"
       />
@@ -198,9 +203,11 @@ export function OperationsPanel({
         busy={writesDisabled}
         confirmLabel="Delete all Masthead data"
         description={localDataStatus.message}
+        expectedConfirmation={effectiveSettings?.data.databaseId}
         onCancel={onCancelLocalDataAction}
         onConfirm={onConfirmDeleteLocalData}
         open={localDataStatus.state === "confirm_delete"}
+        safetyNote={localOnlyDeletionNote}
         title="Confirm delete all Masthead data"
         tone="danger"
       />

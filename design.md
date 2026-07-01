@@ -204,7 +204,8 @@ x-motion:
   modal-close-duration: 220ms
   dropdown-open-duration: 250ms
   dropdown-close-duration: 260ms
-  layout-change-duration: 300ms
+  user-layout-duration: 380-430ms
+  system-layout-duration: 180-260ms
   easing: "cubic-bezier(0.22, 1, 0.36, 1)"
 ---
 
@@ -340,6 +341,16 @@ Session cards are the reference pattern for the Now workspace. A card must show 
 
 Clicking a card opens the detail modal. The card itself should not become a miniature dashboard. Keep it focused on the decision a developer can make from the board.
 
+#### Card visual tiers
+
+All tiers use the same metal slab, texture, dovetail shape, typography, and layout system.
+
+- **Tier quiet:** valid background information; no action required.
+- **Tier live:** active or recently changing information; alive but not urgent.
+- **Tier action:** blocked, failed, stale, conflicted, destructive, or user-action-required.
+
+Tier controls visual intensity. Lifecycle controls state meaning. Do not conflate them.
+
 ### Logbook
 
 The Logbook is not an old utility list. It should optimize scanning, filtering, pagination, and opening durable session records while retaining the shared surface language.
@@ -384,13 +395,26 @@ Empty states should be quiet operator states. They should explain the missing da
 
 Motion is part of the design system, not a bonus. It should clarify state changes, preserve spatial continuity, and make interactive controls feel responsive.
 
+### Motion cause model
+
+Masthead motion is cause-based:
+
+1. User-invoked motion may be richer because the user caused the spatial change. Examples: density toggle, explicit sort change, major filter change, modal open/close.
+2. Semantic system motion may be visible because meaning changed. Examples: session becomes blocked, new active session appears, headline meaning changes.
+3. Routine refresh motion must stay quiet. Examples: polling succeeded, same headline was refreshed, counters changed, usage totals updated.
+
+Daily mode is restrained. Presentation mode may use richer timing. Reduced motion removes transform motion while preserving visible state changes.
+
 Use the current motion tokens:
 
 - Modal open: 250ms with `cubic-bezier(0.22, 1, 0.36, 1)`.
 - Modal close: 220ms.
 - Dropdown open: 250ms.
 - Dropdown close: 260ms.
-- Layout change: 300ms.
+- User-invoked layout motion: 380-430ms.
+- System-invoked activity reorder: 180-260ms.
+- Semantic headline replacement: 500-680ms only when headline meaning changes.
+- Routine refresh pulse: 120-180ms, no text replacement animation.
 - Button hover and press: about 160ms.
 
 Animate exact properties only: `transform`, `opacity`, `border-color`, `background-color`, `box-shadow`, and `color`. Do not use `transition: all`.
@@ -398,11 +422,12 @@ Animate exact properties only: `transform`, `opacity`, `border-color`, `backgrou
 Required motion:
 
 - Dropdown menus open and close with transform and opacity.
-- Layout/density changes animate cards moving and resizing.
+- User-invoked layout/density changes animate cards moving and resizing.
+- Live polling reorder may animate, but must use shorter system timing.
 - Modals open and close with panel and backdrop transitions.
 - Buttons, source actions, and card hover/press states have transitions.
 
-Do not animate evidence values just because they changed. Use motion for spatial changes and interaction feedback, not for decorative activity. Respect reduced-motion settings by removing transform motion while keeping state changes visible.
+Do not animate evidence values just because they changed. Do not run full headline replacement motion when only a routine refresh timestamp changed. Use motion for spatial changes, semantic changes, and interaction feedback, not for decorative activity. Respect reduced-motion settings by removing transform motion while keeping state changes visible.
 
 ## Do's and Don'ts
 
@@ -412,6 +437,8 @@ Do:
 - Use shared surface chrome, typography, controls, and evidence patterns across Now, Logbook, Sources, Agent Access, and Settings.
 - Keep Masthead dense, local, evidence-forward, and state-first.
 - Make healthy work quiet and attention states unmistakable.
+- Keep routine refresh motion quiet and reserve richer motion for user-invoked or semantic changes.
+- Use quiet, live, and action visual tiers without changing the Masthead metal card language.
 - Use fixed card dimensions and responsive grid tracks.
 - Keep controls at 40px minimum height unless there is a strong dense-card reason.
 - Verify with the in-app Browser at desktop and mobile widths.
@@ -426,6 +453,8 @@ Don't:
 - Add cards inside cards or floating page-section cards.
 - Add decorative blobs, one-note purple gradients, beige productivity palettes, or bright dashboard themes.
 - Use `transition: all`.
+- Give every panel the same visual urgency.
+- Animate headlines, counters, or usage totals merely because polling refreshed them.
 - Let text overlap, resize the grid, or spill outside buttons and cards.
 - Hide uncertainty. Inferred or weakly attributed states must be labeled.
 

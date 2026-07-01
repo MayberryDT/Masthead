@@ -110,6 +110,9 @@ type LogbookSummaryItem = {
   tone: "sessions" | "projects" | "runtime" | "messages" | "tools" | "range";
 };
 
+const MIN_REASONABLE_SESSION_DATE = Date.UTC(2020, 0, 1);
+const FUTURE_DATE_TOLERANCE_MS = 24 * 60 * 60 * 1000;
+
 export function HistoryPanel({
   adapters = [],
   connectionState = "live",
@@ -689,13 +692,25 @@ function formatCount(value: number): string {
 }
 
 function dateRange(earliest: string | undefined, latest: string | undefined): string {
-  if (!earliest || !latest) return "n/a";
-  return `${formatMonth(earliest)} - ${formatMonth(latest)}`;
+  const start = validActivityDate(earliest);
+  const end = validActivityDate(latest);
+  if (!start || !end) return "n/a";
+  return `${formatMonthDate(start)} - ${formatMonthDate(end)}`;
 }
 
-function formatMonth(value: string): string {
+function validActivityDate(value: string | undefined, now = new Date()): Date | undefined {
+  if (!value) return undefined;
+
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const time = date.getTime();
+  if (!Number.isFinite(time)) return undefined;
+  if (time <= 0) return undefined;
+  if (time < MIN_REASONABLE_SESSION_DATE) return undefined;
+  if (time > now.getTime() + FUTURE_DATE_TOLERANCE_MS) return undefined;
+  return date;
+}
+
+function formatMonthDate(date: Date): string {
   return date.toLocaleDateString([], { month: "short", year: "numeric" });
 }
 

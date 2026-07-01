@@ -27,7 +27,7 @@ describe("SessionDossier", () => {
     expect(dossierRule).toContain("max-height: calc(100vh - 48px);");
     expect(dossierRule).toContain("overflow-y: auto;");
     expect(gridRule).toContain("grid-template-areas:");
-    expect(gridRule).toContain("\"metrics summary\"");
+    expect(gridRule).toContain("\"summary metrics\"");
     expect(summaryRule).toContain("height: 626px;");
     expect(summaryScrollRule).toContain("overflow-y: auto;");
     expect(advancedPanelRule).toContain("grid-template-columns: repeat(4, minmax(0, 1fr));");
@@ -35,7 +35,7 @@ describe("SessionDossier", () => {
     expect(closeRule).toContain("min-height: 30px;");
   });
 
-  test("keeps token and coverage stats in the left metrics rail and omits redundant advanced cards", async () => {
+  test("moves token and coverage stats to a secondary diagnostics rail", async () => {
     const host = document.createElement("div");
     const root = createRoot(host);
 
@@ -75,7 +75,12 @@ describe("SessionDossier", () => {
     const panel = host.querySelector(".panel.summary");
     expect(panel?.querySelector("h3")?.textContent).toBe("Enrichment summary");
     const sections = [...(panel?.querySelectorAll("[data-dossier-section]") ?? [])].map((section) => section.getAttribute("data-dossier-section"));
-    expect(sections.slice(0, 4)).toEqual(["stats", "signals", "summary", "first-prompt"]);
+    expect(sections.slice(0, 6)).toEqual(["summary", "latest-prompt", "retrieval", "continuation", "unresolved", "signals"]);
+    expect(sections).toContain("diagnostic-coverage");
+    expect(panel?.textContent).toContain("Diagnostic coverage");
+    expect(panel?.textContent).toContain("System events");
+    expect(panel?.textContent).not.toContain("Runtime signals");
+    expect(panel?.textContent).not.toContain("Low-value rows");
     expect(panel?.textContent).not.toContain("Topics and signals");
     root.unmount();
   });
@@ -107,7 +112,7 @@ describe("SessionDossier", () => {
 
     expect(html).toContain("local import");
     expect(html).toContain("session capsule");
-    expect(html).toContain("MCP included");
+    expect(html).toContain("Agent retrieval ready");
     expect(html).toContain("verification missing");
     expect(html).toContain("tool details partial");
     expect(html).not.toContain("launcher cleanup path patched");
@@ -274,6 +279,8 @@ describe("SessionDossier", () => {
     expect(html).toContain("Transcript");
     expect(html).toContain("panel transcript");
     expect(html).toContain("Transcript evidence");
+    expect(html).toContain("Relevant transcript evidence");
+    expect(html).not.toContain("filtered to useful card/prototype rows");
     expect(html).toContain("Please repair the OAuth callback.");
     expect(html).toContain("Advanced details");
     expect(html).toContain("meta-rail");

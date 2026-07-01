@@ -58,7 +58,7 @@ if (!app.requestSingleInstanceLock()) {
     mainWindow = await createMainWindow();
     tray = await createMastheadTray(trayIconPath(), {
       onOpenDataDirectory: () => {
-        void openDataDirectory(app.getPath("userData"));
+        void openDataDirectory(electronDataDirectory());
       },
       onQuit: () => app.quit(),
       onShow: showMainWindow
@@ -99,6 +99,7 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
     const connector = await startLiveConnector(
       {
         currentDir: process.cwd(),
+        defaultDataDir: isElectronDevMode() ? electronDevDataDirectory() : undefined,
         env: electronDaemonEnv(),
         resourcesPath: process.resourcesPath,
         userDataDir: app.getPath("userData")
@@ -222,6 +223,7 @@ function registerRendererProtocol(): void {
 function registerDesktopIpc(): void {
   const targetInput = () => ({
     currentDir: process.cwd(),
+    defaultDataDir: isElectronDevMode() ? electronDevDataDirectory() : undefined,
     env: electronDaemonEnv(),
     resourcesPath: process.resourcesPath,
     userDataDir: app.getPath("userData")
@@ -285,6 +287,14 @@ function electronDaemonEnv(): NodeJS.ProcessEnv {
     MASTHEAD_NODE_PATH: process.env.MASTHEAD_NODE_PATH || process.env.npm_node_execpath || process.env.NODE || "node",
     MASTHEAD_PROJECT_DIR: process.env.MASTHEAD_PROJECT_DIR || process.cwd()
   };
+}
+
+function electronDataDirectory(): string {
+  return process.env.MASTHEAD_DATA_DIR || (isElectronDevMode() ? electronDevDataDirectory() : app.getPath("userData"));
+}
+
+function electronDevDataDirectory(): string {
+  return join(process.env.XDG_DATA_HOME || join(app.getPath("home"), ".local", "share"), "masthead-dev");
 }
 
 function isElectronDevMode(): boolean {

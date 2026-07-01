@@ -116,6 +116,7 @@ type ConnectorActionState =
   | { state: "error"; message?: string };
 
 type CardLayoutSnapshot = Map<string, DOMRect>;
+
 type ImportPageState = Pick<ImportJobPage, "limit" | "offset" | "total">;
 
 const replay = fixture as FixtureReplay;
@@ -164,7 +165,7 @@ export function App() {
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [harnessFilter, setHarnessFilter] = useState<HarnessFilter>("all");
   const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("all");
-  const [sortMode, setSortMode] = useState<SortMode>("recent_activity");
+  const [sortMode, setSortMode] = useState<SortMode>("operational_priority");
   const [activityWindow, setActivityWindow] = useState<ActivityWindow>("24h");
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
@@ -1127,7 +1128,7 @@ export function App() {
           summary.rawEvents
         )} raw source copies, ${formatCount(summary.enrichments)} enrichments, and ${formatCount(
           summary.auditRows
-        )} MCP audit rows. Original Codex/Hermes/etc. session files remain untouched.`
+        )} MCP audit rows. Original source harness files remain untouched.`
       });
     } catch (error) {
       setLocalDataStatus({
@@ -1176,7 +1177,7 @@ export function App() {
         state: "pruned",
         message: `Deleted ${formatCount(
           response.result.rawEvents ?? 0
-        )} raw source copies. Normalized sessions, summaries, and search records kept. Original harness files untouched.`
+        )} raw source copies. Normalized sessions, summaries, and search records kept. Original source harness files untouched.`
       });
     } catch (error) {
       setLocalDataStatus({
@@ -1246,7 +1247,7 @@ export function App() {
         state: "deleted",
         message: `Deleted ${formatCount(response.result.sessions ?? 0)} sessions for ${scopeLabel(
           scope
-        )}. Original harness files remain untouched.`
+        )}. Original source harness files remain untouched.`
       });
     } catch (error) {
       setLocalDataStatus({
@@ -1277,7 +1278,7 @@ export function App() {
           response.result.rawEvents ?? 0
         )} raw source copies, ${formatCount(response.result.enrichments ?? 0)} enrichments, and ${formatCount(
           response.result.auditRows ?? 0
-        )} MCP audit rows. Original Codex/Hermes/etc. session files remain untouched.`
+        )} MCP audit rows. Original source harness files remain untouched.`
       });
     } catch (error) {
       setLocalDataStatus({
@@ -1639,6 +1640,22 @@ export function App() {
   );
 }
 
+function emptyBoardTitle({
+  showDemoData,
+  hasActiveToolbarFilters,
+  liveConnection
+}: {
+  showDemoData: boolean;
+  hasActiveToolbarFilters: boolean;
+  liveConnection: ConnectionState;
+}): string {
+  if (hasActiveToolbarFilters) return "No sessions match";
+  if (showDemoData) return "No demo sessions";
+  if (liveConnection.state === "live") return "No active sessions";
+  if (liveConnection.state === "offline") return "No live connection";
+  return "Connecting to Masthead collector";
+}
+
 function captureCardLayout(): CardLayoutSnapshot {
   const rects: CardLayoutSnapshot = new Map();
   document.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card) => {
@@ -1685,23 +1702,6 @@ function animateCardLayoutFrom(previousLayout: CardLayoutSnapshot): void {
       }, 320);
     });
   });
-}
-
-
-function emptyBoardTitle({
-  showDemoData,
-  hasActiveToolbarFilters,
-  liveConnection
-}: {
-  showDemoData: boolean;
-  hasActiveToolbarFilters: boolean;
-  liveConnection: ConnectionState;
-}): string {
-  if (hasActiveToolbarFilters) return "No sessions match";
-  if (showDemoData) return "No demo sessions";
-  if (liveConnection.state === "live") return "No active sessions";
-  if (liveConnection.state === "offline") return "No live connection";
-  return "Connecting to Masthead collector";
 }
 
 function emptyBoardMessage({

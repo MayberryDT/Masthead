@@ -184,6 +184,102 @@ describe("board card filtering", () => {
     ).toEqual(["new-start", "old-start"]);
   });
 
+  test("sorts by operational priority by default", () => {
+    const cards = [
+      {
+        ...baseCard,
+        sessionId: "newer-idle",
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        indicators: [],
+        lastActivity: "2026-06-24T07:59:00.000Z",
+        priorityRank: 50
+      },
+      {
+        ...baseCard,
+        sessionId: "older-blocked",
+        lifecycle: "running",
+        primaryStatus: "blocked",
+        indicators: ["attention"],
+        lastActivity: "2026-06-24T06:00:00.000Z",
+        priorityRank: 5
+      },
+      {
+        ...baseCard,
+        sessionId: "active",
+        lifecycle: "running",
+        primaryStatus: "editing",
+        indicators: [],
+        lastActivity: "2026-06-24T07:30:00.000Z",
+        priorityRank: 10
+      }
+    ] satisfies SessionCardView[];
+
+    expect(filterCards(cards, { query: "", filter: "all", harness: "all", lifecycle: "all" }).map((card) => card.sessionId)).toEqual([
+      "older-blocked",
+      "active",
+      "newer-idle"
+    ]);
+  });
+
+  test("keeps recent activity as a pure recency sort when selected", () => {
+    const cards = [
+      {
+        ...baseCard,
+        sessionId: "older-blocked",
+        lifecycle: "running",
+        primaryStatus: "blocked",
+        indicators: ["attention"],
+        lastActivity: "2026-06-24T06:00:00.000Z",
+        priorityRank: 1
+      },
+      {
+        ...baseCard,
+        sessionId: "newer-idle",
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        indicators: [],
+        lastActivity: "2026-06-24T07:59:00.000Z",
+        priorityRank: 50
+      }
+    ] satisfies SessionCardView[];
+
+    expect(
+      filterCards(cards, { query: "", filter: "all", harness: "all", lifecycle: "all", sort: "recent_activity" }).map(
+        (card) => card.sessionId
+      )
+    ).toEqual(["newer-idle", "older-blocked"]);
+  });
+
+  test("sorts by recency inside operational priority buckets", () => {
+    const cards = [
+      {
+        ...baseCard,
+        sessionId: "older-active",
+        lifecycle: "running",
+        primaryStatus: "editing",
+        indicators: [],
+        lastActivity: "2026-06-24T06:00:00.000Z",
+        priorityRank: 10
+      },
+      {
+        ...baseCard,
+        sessionId: "newer-active",
+        lifecycle: "running",
+        primaryStatus: "editing",
+        indicators: [],
+        lastActivity: "2026-06-24T07:00:00.000Z",
+        priorityRank: 10
+      }
+    ] satisfies SessionCardView[];
+
+    expect(
+      filterCards(cards, { query: "", filter: "all", harness: "all", lifecycle: "all", sort: "operational_priority" }).map(
+        (card) => card.sessionId
+      )
+    ).toEqual(["newer-active", "older-active"]);
+  });
+
   test("main scan window filters by last activity across visible scan cards", () => {
     const cards = [
       { ...baseCard, sessionId: "inside", lastActivity: "2026-06-24T07:30:00.000Z" },

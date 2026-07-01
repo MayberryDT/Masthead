@@ -175,9 +175,9 @@
 
 .session-dossier .content-grid {
   display: grid;
-  grid-template-columns: 265px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 265px;
   grid-template-areas:
-    "metrics summary"
+    "summary metrics"
     "transcript transcript"
     "advanced advanced";
   gap: 14px;
@@ -775,8 +775,8 @@
   .session-dossier .content-grid {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "metrics"
       "summary"
+      "metrics"
       "transcript"
       "advanced";
   }

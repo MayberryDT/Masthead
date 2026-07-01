@@ -606,6 +606,37 @@
   color: var(--body, #d6e4ef);
 }
 
+.confirm-dialog-safety {
+  color: var(--mute, #91a8ba);
+}
+
+.confirm-dialog-typed {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--mute, #91a8ba);
+  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.confirm-dialog-typed input {
+  min-width: min(360px, 100%);
+  min-height: 36px;
+  border: 1px solid rgba(92, 153, 187, 0.22);
+  border-radius: 3px;
+  background: #061925;
+  color: var(--ink, #f6fbff);
+  font: inherit;
+  padding: 8px 10px;
+}
+
+.confirm-dialog-typed input:focus {
+  outline: 0;
+  box-shadow:
+    0 0 0 1px rgba(116, 185, 224, 0.34),
+    0 0 0 3px rgba(46, 167, 255, 0.12);
+}
+
 @media (max-width: 860px) {
   .settings-layout {
     grid-template-columns: 1fr;

@@ -4,7 +4,7 @@ Board is Masthead's live view over continuously collected session data. It is no
 
 ## Live Copy
 
-When remote live copy is enabled and configured, each `GET /projection` attempts fresh headline copy for visible cards on the configured Board refresh interval. The default refresh interval is 10 seconds.
+When remote live copy is enabled and configured, each `GET /projection` attempts fresh headline copy for visible running cards on the configured Board refresh interval. The default refresh interval is 10 seconds. Idle and ended cards keep their deterministic or previously persisted copy and do not receive refresh failure badges.
 
 Live copy cache is disabled by default. If `MASTHEAD_LIVE_COPY_CACHE_MS` is explicitly set through runtime configuration, cached results are an opt-in optimization rather than the default behavior.
 

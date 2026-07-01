@@ -38,9 +38,9 @@ describe("dovetail card system", () => {
     expectSessionMockupStructure(active, "is-active");
     expectSessionMockupStructure(idle, "is-idle");
     expectSessionMockupStructure(blocked, "is-blocked");
-    expect(active.className).toBe("session-card bottom-variant-card dovetail-card is-active");
-    expect(idle.className).toBe("session-card bottom-variant-card dovetail-card is-idle");
-    expect(blocked.className).toBe("session-card bottom-variant-card dovetail-card is-blocked");
+    expect(active.className).toBe("session-card bottom-variant-card dovetail-card is-active tier-live");
+    expect(idle.className).toBe("session-card bottom-variant-card dovetail-card is-idle tier-quiet");
+    expect(blocked.className).toBe("session-card bottom-variant-card dovetail-card is-blocked tier-action");
     expect(active.querySelector(":scope > .bottom-signal")).toBeTruthy();
     expect(active.querySelector(":scope > .card-topline .project")?.textContent).toContain("Masthead");
     expect(active.querySelector(":scope > .card-topline .runtime-tag")?.textContent).toBe("Codex");
@@ -153,8 +153,9 @@ describe("dovetail card system", () => {
       ".masthead-shell .observability-card-grid.compact .session-card.bottom-variant-card"
     );
     const dovetailPaletteRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.bottom-variant-card.dovetail-card");
-    const idlePaletteRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.bottom-variant-card.dovetail-card.is-idle");
-    const blockedPaletteRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.bottom-variant-card.dovetail-card.is-blocked");
+    const quietTierRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.tier-quiet");
+    const liveTierRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.tier-live");
+    const actionTierRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.tier-action");
     const headlineRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .headline");
     const signalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .bottom-signal");
     const signalBeforeRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .bottom-signal::before");
@@ -173,18 +174,23 @@ describe("dovetail card system", () => {
 
     expect(mastheadCss).toContain(".bottom-variant-card");
     expect(mastheadCss).toContain(".session-card.dovetail-card .bottom-signal");
+    expect(mastheadCss).toContain("view-transition-name: session-card-grid");
+    expect(mastheadCss).toContain(".masthead-shell .session-card.is-layout-animating");
+    expect(mastheadCss).toContain("grid-template-columns var(--layout-dur)");
+    expect(mastheadCss).toContain("height var(--layout-dur)");
+    expect(mastheadCss).toContain("min-height var(--layout-dur)");
     expect(boardVariantRule).toContain("min-height: 238px;");
     expect(boardVariantRule).toContain("overflow: visible;");
     expect(boardVariantRule).toContain("padding-bottom: 18px;");
     expect(compactVariantRule).toContain("height: auto;");
     expect(compactVariantRule).toContain("min-height: 238px;");
     expect(compactVariantRule).toContain("overflow: visible;");
-    expect(dovetailPaletteRule).toContain("--state: var(--green);");
-    expect(dovetailPaletteRule).toContain("--state-border: rgba(54, 216, 105, 0.42);");
-    expect(idlePaletteRule).toContain("--state: var(--blue);");
-    expect(idlePaletteRule).toContain("--state-border: rgba(45, 168, 255, 0.42);");
-    expect(blockedPaletteRule).toContain("--state: var(--red);");
-    expect(blockedPaletteRule).toContain("--state-border: rgba(255, 72, 62, 0.44);");
+    expect(quietTierRule).toContain("--state: var(--blue);");
+    expect(quietTierRule).toContain("--state-border: rgba(45, 168, 255, 0.18);");
+    expect(liveTierRule).toContain("--state: var(--green);");
+    expect(liveTierRule).toContain("--state-border: rgba(54, 216, 105, 0.3);");
+    expect(actionTierRule).toContain("--state: var(--red);");
+    expect(actionTierRule).toContain("--state-border: rgba(255, 72, 62, 0.44);");
     expect(headlineRule).toContain("overflow: hidden;");
     expect(prototypeDovetailCardRule).toContain("clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), 72% calc(100% - 6px), 67% 100%, 33% 100%, 28% calc(100% - 6px), 0 calc(100% - 6px));");
     expect(prototypeDovetailRule).toContain("height: 10px;");
@@ -206,14 +212,16 @@ describe("dovetail card system", () => {
     expect(bottomSignalRule).toContain("height: 10px;");
     expect(bottomSignalRule).toContain("clip-path: polygon(0 0, 28% 0, 33% 60%, 67% 60%, 72% 0, 100% 0, 100% 100%, 0 100%);");
     expect(activeSignalBeforeRule).toContain("animation: calm-lock-active 1300ms linear infinite;");
+    expect(activeSignalBeforeRule).toContain("rgba(246, 251, 255, 0.42)");
     expect(activeSignalBeforeRule).toContain("68px 100% repeat-x");
     expect(idleSignalRule).toContain("animation: calm-lock-idle 6400ms ease-in-out infinite;");
     expect(blockedSignalRule).toContain("animation: calm-lock-blocked 1400ms ease-in-out infinite;");
     expect(blockedSignalRule).toContain("filter: drop-shadow(0 0 8px rgba(255, 72, 62, 0.52));");
-    expect(reducedMotionRule).toContain("animation: none;");
+    expect(reducedMotionRule).toContain("animation: none !important;");
     expect(mastheadCss).toContain("@keyframes calm-lock-active");
     expect(mastheadCss).toContain("@keyframes calm-lock-idle");
     expect(mastheadCss).toContain("@keyframes calm-lock-blocked");
+    expect(mastheadCss).not.toContain("@keyframes blocked-enter-pulse");
     expect(mastheadCss).not.toContain("dovetail-active-run");
     expect(mastheadCss).not.toContain("dovetail-blocked-pulse");
     expect(mastheadCss).not.toContain("--dovetail-state");
@@ -225,7 +233,9 @@ describe("dovetail card system", () => {
     const prototypeHtml = readFileSync("mockups/secondary-card-directions.html", "utf8");
     expect(sha256(prototypeHtml)).toBe("cb46462beee01df57da4ebb079fa37d6742901e2b163b761ede36bac674be38e");
 
-    const prototypeCardRule = cssRuleBody(prototypeHtml, ".weld-sheet .metal-card");
+    const prototypeCardRule = withoutCssDeclarations(cssRuleBody(prototypeHtml, ".weld-sheet .metal-card"), [
+      "border-color: rgba(46, 167, 255, 0.24);"
+    ]);
     const prototypeHoverRule = cssRuleBody(prototypeHtml, ".weld-sheet .metal-card:hover");
     const prototypeSignalRule = withoutCssDeclarations(cssRuleBody(prototypeHtml, ".weld-sheet .signal"), [
       "border-top: 2px solid rgba(46, 167, 255, 0.54);"
@@ -244,11 +254,18 @@ describe("dovetail card system", () => {
 
     for (const selector of targetSelectors) {
       expect(cssRuleBody(mastheadCss, selector), selector).toContainDeclarationsFrom(prototypeCardRule);
+      expect(cssRuleBody(mastheadCss, selector), selector).toContain("border-color: rgba(92, 153, 187, 0.14);");
       expect(cssRuleBody(mastheadCss, `${selector}:hover`), `${selector}:hover`).toContainDeclarationsFrom(prototypeHoverRule);
       expect(cssRuleBody(mastheadCss, `${selector}::before`), `${selector}::before`).toContainDeclarationsFrom(prototypeSheetRule);
       expect(cssRuleBody(mastheadCss, `${selector}::after`), `${selector}::after`).toContainDeclarationsFrom(prototypeSignalRule);
       expect(cssRuleBody(mastheadCss, `${selector}::after`), `${selector}::after`).toContain("border-top: 0;");
     }
+
+    expect(cssRuleBody(mastheadCss, ".masthead-shell .adapter-card.is-connected")).toContain("border-color: rgba(46, 167, 255, 0.24);");
+    expect(cssRuleBody(mastheadCss, ".masthead-shell .settings-section-danger")).toContain("border-color: rgba(255, 72, 62, 0.34);");
+    expect(cssRuleBody(mastheadCss, ".masthead-shell .secondary-tier-quiet::after")).toContain("border-bottom-color: rgba(46, 167, 255, 0.18);");
+    expect(cssRuleBody(mastheadCss, ".masthead-shell .secondary-tier-live::after")).toContain("border-bottom-color: rgba(46, 167, 255, 0.42);");
+    expect(cssRuleBody(mastheadCss, ".masthead-shell .secondary-tier-action::after")).toContain("border-bottom-color: rgba(255, 72, 62, 0.48);");
 
     expect(cssRuleBody(mastheadCss, ".masthead-shell .usage-metric-accent")).toContain("display: none;");
     const sidebarPositionRule = cssRuleBodyContaining(mastheadCss, ".masthead-shell .sidebar-usage", "bottom: 16px;");

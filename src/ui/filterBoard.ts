@@ -23,7 +23,7 @@ export function filterCards(cards: SessionCardView[], options: BoardFilterOption
   const query = normalize(options.query);
   const harness = options.harness ?? "all";
   const lifecycle = options.lifecycle ?? "all";
-  const sort = options.sort ?? "recent_activity";
+  const sort = options.sort ?? "operational_priority";
 
   return cards
     .filter((card) => {
@@ -144,7 +144,29 @@ function compareLastActivityDesc(a: SessionCardView, b: SessionCardView): number
   return a.sessionId.localeCompare(b.sessionId);
 }
 
+function operationalBucket(card: SessionCardView): number {
+  if (isBlockedScanCard(card)) return 0;
+  if (card.indicators.includes("attention") || card.indicators.includes("conflict")) return 0;
+  if (card.lifecycle === "running") return 1;
+  if (card.lifecycle === "idle") return 2;
+  return 3;
+}
+
+function compareOperationalPriority(a: SessionCardView, b: SessionCardView): number {
+  const bucketDelta = operationalBucket(a) - operationalBucket(b);
+  if (bucketDelta !== 0) return bucketDelta;
+
+  const priorityDelta = a.priorityRank - b.priorityRank;
+  if (priorityDelta !== 0) return priorityDelta;
+
+  return compareLastActivityDesc(a, b);
+}
+
 function compareCardsForSort(a: SessionCardView, b: SessionCardView, sort: SortMode): number {
+  if (sort === "operational_priority") {
+    return compareOperationalPriority(a, b);
+  }
+
   if (sort === "recently_started") {
     const startedDelta = timestampForSort(b.startedAt ?? b.lastActivity) - timestampForSort(a.startedAt ?? a.lastActivity);
     if (startedDelta !== 0) return startedDelta;

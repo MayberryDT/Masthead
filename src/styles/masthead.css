@@ -75,6 +75,14 @@ body {
   font-family: var(--font-ui);
 }
 
+.masthead-shell[data-motion-mode="daily"] {
+  --headline-semantic-dur: 520ms;
+}
+
+.masthead-shell[data-motion-mode="presentation"] {
+  --headline-semantic-dur: 680ms;
+}
+
 #root {
   height: 100%;
   min-height: 0;
@@ -4057,17 +4065,11 @@ body {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .observability-console .session-card,
-  .masthead-shell .session-card,
   .observability-console .session-card.is-new-card,
   .masthead-shell .session-card.is-new-card {
     animation: session-card-created 300ms cubic-bezier(0.17, 0.78, 0.13, 1) both;
-    transform-origin: 50% 100%;
-  }
-
-  .observability-console .session-card.is-new-card,
-  .masthead-shell .session-card.is-new-card {
     animation-delay: calc(var(--new-card-index) * 44ms);
+    transform-origin: 50% 100%;
   }
 }
 
@@ -4999,6 +5001,7 @@ body {
   --state-border: rgba(54, 216, 105, 0.42);
   --border: var(--surface-border);
   --border-hover: var(--surface-border-hover);
+  --headline-semantic-dur: 520ms;
   --highlight: var(--edge-highlight);
   --radius-card: 5px;
   --radius-control: 3px;
@@ -5087,10 +5090,32 @@ body {
   --state-border: rgba(255, 72, 62, 0.44);
 }
 
+.observability-console .session-card.tier-quiet,
+.masthead-shell .session-card.tier-quiet {
+  --state: var(--blue);
+  --state-border: rgba(45, 168, 255, 0.18);
+  --border: rgba(92, 153, 187, 0.14);
+  --border-hover: rgba(112, 173, 205, 0.2);
+}
+
+.observability-console .session-card.tier-live,
+.masthead-shell .session-card.tier-live {
+  --state: var(--green);
+  --state-border: rgba(54, 216, 105, 0.3);
+  --border: rgba(92, 153, 187, 0.18);
+  --border-hover: rgba(112, 173, 205, 0.25);
+}
+
+.observability-console .session-card.tier-action,
+.masthead-shell .session-card.tier-action {
+  --state: var(--red);
+  --state-border: rgba(255, 72, 62, 0.44);
+  --border: rgba(255, 72, 62, 0.3);
+  --border-hover: rgba(255, 72, 62, 0.46);
+}
+
 .observability-console .session-card.bottom-variant-card.dovetail-card,
 .masthead-shell .session-card.bottom-variant-card.dovetail-card {
-  --state: var(--green);
-  --state-border: rgba(54, 216, 105, 0.42);
   clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), 72% calc(100% - 6px), 67% 100%, 33% 100%, 28% calc(100% - 6px), 0 calc(100% - 6px));
   margin-bottom: 0;
   overflow: hidden;
@@ -5203,22 +5228,30 @@ body {
   min-width: 0;
 }
 
-.observability-console .session-card.is-headline-refreshing .headline-previous,
-.masthead-shell .session-card.is-headline-refreshing .headline-previous {
-  animation: magnetic-headline-release 680ms cubic-bezier(0.18, 0.9, 0.12, 1) both;
-  animation-delay: calc(var(--headline-refresh-index, 0) * 55ms);
-}
+@media (prefers-reduced-motion: no-preference) {
+  .observability-console .session-card.is-headline-refreshing .headline-previous,
+  .masthead-shell .session-card.is-headline-refreshing .headline-previous {
+    animation: magnetic-headline-release var(--headline-semantic-dur, 520ms) cubic-bezier(0.18, 0.9, 0.12, 1) both;
+    animation-delay: calc(var(--headline-refresh-index, 0) * 55ms);
+  }
 
-.observability-console .session-card.is-headline-refreshing .headline-current,
-.masthead-shell .session-card.is-headline-refreshing .headline-current {
-  animation: magnetic-headline-lock 680ms cubic-bezier(0.18, 0.9, 0.12, 1) both;
-  animation-delay: calc(var(--headline-refresh-index, 0) * 55ms);
-}
+  .observability-console .session-card.is-headline-refreshing .headline-current,
+  .masthead-shell .session-card.is-headline-refreshing .headline-current {
+    animation: magnetic-headline-lock var(--headline-semantic-dur, 520ms) cubic-bezier(0.18, 0.9, 0.12, 1) both;
+    animation-delay: calc(var(--headline-refresh-index, 0) * 55ms);
+  }
 
-.observability-console .session-card.is-headline-refreshing .headline::after,
-.masthead-shell .session-card.is-headline-refreshing .headline::after {
-  animation: magnetic-headline-field 680ms cubic-bezier(0.18, 0.9, 0.12, 1) both;
-  animation-delay: calc(var(--headline-refresh-index, 0) * 55ms);
+  .observability-console .session-card.is-headline-refreshing .headline::after,
+  .masthead-shell .session-card.is-headline-refreshing .headline::after {
+    animation: magnetic-headline-field var(--headline-semantic-dur, 520ms) cubic-bezier(0.18, 0.9, 0.12, 1) both;
+    animation-delay: calc(var(--headline-refresh-index, 0) * 55ms);
+  }
+
+  .observability-console .session-card.is-refresh-pulsing .headline::after,
+  .masthead-shell .session-card.is-refresh-pulsing .headline::after {
+    animation: headline-refresh-pulse 160ms ease-out both;
+    animation-delay: calc(var(--refresh-pulse-index, 0) * 24ms);
+  }
 }
 
 @keyframes magnetic-headline-release {
@@ -5267,6 +5300,20 @@ body {
   100% {
     opacity: 0;
     transform: scaleX(1);
+  }
+}
+
+@keyframes headline-refresh-pulse {
+  0% {
+    opacity: 0;
+  }
+
+  35% {
+    opacity: 0.45;
+  }
+
+  100% {
+    opacity: 0;
   }
 }
 
@@ -5469,8 +5516,8 @@ body {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  border: 1px solid rgba(46, 167, 255, 0.24);
-  border-color: rgba(46, 167, 255, 0.24);
+  border: 1px solid rgba(92, 153, 187, 0.14);
+  border-color: rgba(92, 153, 187, 0.14);
   border-radius: 5px;
   background: #071b28;
   box-shadow: none;
@@ -5542,6 +5589,49 @@ body {
   background-size: 96px 28px;
   opacity: 1;
   pointer-events: none;
+}
+
+.observability-console .secondary-tier-live,
+.masthead-shell .secondary-tier-live,
+.observability-console .adapter-card.is-connected,
+.masthead-shell .adapter-card.is-connected,
+.observability-console .connected-source-row.is-active,
+.masthead-shell .connected-source-row.is-active,
+.observability-console .usage-metric.is-selected,
+.masthead-shell .usage-metric.is-selected {
+  border-color: rgba(46, 167, 255, 0.24);
+}
+
+.observability-console .secondary-tier-action,
+.masthead-shell .secondary-tier-action,
+.observability-console .adapter-card.needs-attention,
+.masthead-shell .adapter-card.needs-attention,
+.observability-console .connected-source-row.needs-attention,
+.masthead-shell .connected-source-row.needs-attention,
+.observability-console .import-job-row.failed,
+.masthead-shell .import-job-row.failed,
+.observability-console .settings-section-danger,
+.masthead-shell .settings-section-danger,
+.observability-console .settings-section.danger-zone,
+.masthead-shell .settings-section.danger-zone {
+  border-color: rgba(255, 72, 62, 0.34);
+}
+
+.observability-console .secondary-tier-quiet::after,
+.masthead-shell .secondary-tier-quiet::after {
+  border-bottom-color: rgba(46, 167, 255, 0.18);
+}
+
+.observability-console .secondary-tier-live::after,
+.masthead-shell .secondary-tier-live::after {
+  border-bottom-color: rgba(46, 167, 255, 0.42);
+}
+
+.observability-console .secondary-tier-action::after,
+.masthead-shell .secondary-tier-action::after,
+.observability-console .settings-section-danger::after,
+.masthead-shell .settings-section-danger::after {
+  border-bottom-color: rgba(255, 72, 62, 0.48);
 }
 
 .observability-console .sidebar-usage::after,
@@ -6004,12 +6094,25 @@ body {
   z-index: 1;
 }
 
+@supports (view-transition-name: none) {
+  ::view-transition-group(*) {
+    animation-duration: var(--layout-dur);
+    animation-timing-function: var(--layout-ease);
+  }
+
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: var(--layout-dur);
+    animation-timing-function: var(--layout-ease);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .t-dropdown,
   .t-modal,
   .t-modal-backdrop {
     animation: none !important;
-    transition: none !important;
+    transition-duration: 1ms !important;
   }
 
   .modal-backdrop,
@@ -6020,7 +6123,20 @@ body {
   .observability-console .session-card,
   .masthead-shell .session-card,
   .toolbar-icon-button.layout-toggle {
-    transition: none !important;
+    transition-duration: 1ms !important;
+  }
+
+  .session-card,
+  .session-card::before,
+  .session-card::after,
+  .session-card *,
+  .observability-card-grid,
+  .t-dropdown,
+  .t-modal,
+  .t-modal-backdrop {
+    animation: none !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
   }
 
   .observability-console .metal-surface,
@@ -6051,11 +6167,13 @@ body {
   .masthead-shell .session-card.is-headline-refreshing .headline::after,
   .masthead-shell .session-card.is-headline-refreshing .headline-previous,
   .masthead-shell .session-card.is-headline-refreshing .headline-current,
+  .observability-console .session-card.is-refresh-pulsing .headline::after,
+  .masthead-shell .session-card.is-refresh-pulsing .headline::after,
   .observability-console .session-card.dovetail-card .bottom-signal,
   .observability-console .session-card.dovetail-card .bottom-signal::before,
   .masthead-shell .session-card.dovetail-card .bottom-signal,
   .masthead-shell .session-card.dovetail-card .bottom-signal::before {
-    animation: none;
+    animation: none !important;
   }
 
   .observability-console .metal-surface:hover::before,
@@ -6077,18 +6195,6 @@ body {
   }
 }
 
-@supports (view-transition-name: none) {
-  ::view-transition-group(*) {
-    animation-duration: var(--layout-dur);
-    animation-timing-function: var(--layout-ease);
-  }
-
-  ::view-transition-old(*),
-  ::view-transition-new(*) {
-    animation-duration: var(--layout-dur);
-    animation-timing-function: var(--layout-ease);
-  }
-}
 .dev-cite {
   position: relative;
   outline: 3px solid var(--cite-color, #ffeb3b);

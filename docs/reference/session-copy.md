@@ -36,7 +36,7 @@ A string may mention only facts present in normalized rows, source metadata, fil
 
 ## Board live copy
 
-Board live copy attempts a fresh rewrite on each configured Board refresh when remote live copy is enabled and configured. The default Board cadence is 10 seconds, and the live copy cache is disabled by default. Failures keep the local baseline copy visible but attach refresh metadata such as `timeout`, `api_error`, `invalid_output`, or `validation_failed`; they are not labeled as successful LLM copy.
+Board live copy attempts a fresh rewrite for running cards on each configured Board refresh when remote live copy is enabled and configured. The default Board cadence is 10 seconds, and the live copy cache is disabled by default. Idle and ended cards keep local baseline copy without refresh failure metadata. Failures on running cards keep the local baseline copy visible but attach refresh metadata such as `timeout`, `api_error`, `invalid_output`, or `validation_failed`; they are not labeled as successful LLM copy.
 
 Each projection can include `copyRefreshSummary`, and each card can include `copyRefresh`. Failed refreshes appear on cards as AI headline failure state.
 

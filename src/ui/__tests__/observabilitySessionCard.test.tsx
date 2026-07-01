@@ -27,7 +27,7 @@ describe("observability session card", () => {
     expect(html).toContain("126.7M");
     expect(html).toContain("Duration");
     expect(html).toContain("runtime-tag");
-    expect(html).toContain("bottom-variant-card dovetail-card is-active");
+    expect(html).toContain("bottom-variant-card dovetail-card is-active tier-live");
     expect(html).toContain("bottom-signal");
     expect(html).toContain("Model");
     expect(html).toContain("Worktree");
@@ -61,6 +61,22 @@ describe("observability session card", () => {
     expect(card?.style.getPropertyValue("--headline-refresh-index")).toBe("2");
     expect(card?.querySelector(".headline-text.headline-current")?.textContent).toBe("Magnetic slug lock copy");
     expect(card?.querySelector(".card-headline-cursor")).toBeNull();
+  });
+
+  test("adds visual tier classes by operational state", () => {
+    const active = renderToStaticMarkup(<SessionCard session={session({ lifecycle: "running", primaryStatus: "editing" })} />);
+    const idle = renderToStaticMarkup(<SessionCard session={session({ lifecycle: "idle", primaryStatus: "stalled" })} />);
+    const blocked = renderToStaticMarkup(
+      <SessionCard session={session({ lifecycle: "running", primaryStatus: "waiting_for_approval", indicators: ["attention"] })} />
+    );
+    const conflict = renderToStaticMarkup(
+      <SessionCard session={session({ lifecycle: "running", primaryStatus: "editing", indicators: ["attention", "conflict"] })} />
+    );
+
+    expect(active).toContain("tier-live");
+    expect(idle).toContain("tier-quiet");
+    expect(blocked).toContain("tier-action");
+    expect(conflict).toContain("tier-action");
   });
 
   test("uses a project and work-area label in the header without synthetic id chrome", () => {
@@ -258,12 +274,11 @@ describe("observability session card", () => {
   test("keeps exact mockup class names when a new-card hint is provided", () => {
     const html = renderToStaticMarkup(<SessionCard session={session()} isNew newCardIndex={2} onToggle={() => undefined} />);
 
-    expect(html).toContain("session-card bottom-variant-card dovetail-card is-active");
-    expect(html).not.toContain("is-new-card");
+    expect(html).toContain("session-card bottom-variant-card dovetail-card is-active tier-live is-new-card");
     expect(html).toContain("--new-card-index:2");
   });
 
-  test("does not add legacy new-card classes after the board has mounted", async () => {
+  test("adds a new-card class only for newly appearing cards after the board has mounted", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -283,7 +298,7 @@ describe("observability session card", () => {
     });
 
     expect(container.querySelector('[data-session-id="session-1"]')?.className).not.toContain("is-new-card");
-    expect(container.querySelector('[data-session-id="session-2"]')?.className).not.toContain("is-new-card");
+    expect(container.querySelector('[data-session-id="session-2"]')?.className).toContain("is-new-card");
     expect(container.querySelector('[data-session-id="session-2"]')?.className).toContain("dovetail-card");
 
     await act(async () => root.unmount());
@@ -580,7 +595,7 @@ describe("observability session card", () => {
     }
   });
 
-  test("animates successful same-text headline refreshes", async () => {
+  test("uses a refresh pulse for successful same-text headline refreshes", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
     const original = session({
@@ -612,8 +627,10 @@ describe("observability session card", () => {
 
       const card = container.querySelector<HTMLElement>(".session-card");
       const headline = card?.querySelector<HTMLElement>(".headline");
-      expect(card?.classList.contains("is-headline-refreshing")).toBe(true);
-      expect(headline?.querySelector(".headline-previous")?.textContent).toBe("Stable refreshed headline");
+      expect(card?.classList.contains("is-headline-refreshing")).toBe(false);
+      expect(card?.classList.contains("is-refresh-pulsing")).toBe(true);
+      expect(card?.style.getPropertyValue("--refresh-pulse-index")).toBe("0");
+      expect(headline?.querySelector(".headline-previous")).toBeNull();
       expect(headline?.querySelector(".headline-current")?.textContent).toBe("Stable refreshed headline");
     } finally {
       await act(async () => root.unmount());

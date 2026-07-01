@@ -1,6 +1,6 @@
 export type HarnessFilter = "all" | "codex";
 export type LifecycleFilter = "all" | "running" | "idle" | "blocked";
-export type SortMode = "recent_activity" | "recently_started";
+export type SortMode = "operational_priority" | "recent_activity" | "recently_started";
 export type ActivityWindow = "1h" | "12h" | "24h" | "48h" | "3d" | "7d";
 export type CardDensity = "comfortable" | "compact";
 
@@ -22,6 +22,7 @@ export const LIFECYCLE_OPTIONS = [
 ] satisfies SelectOption<LifecycleFilter>[];
 
 export const SORT_OPTIONS = [
+  { value: "operational_priority", label: "Priority" },
   { value: "recent_activity", label: "Recent Activity" },
   { value: "recently_started", label: "Recently Started" }
 ] satisfies SelectOption<SortMode>[];

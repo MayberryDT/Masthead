@@ -403,6 +403,49 @@ describe("OpenAI session copy", () => {
     expect(second.copyRefreshSummary).toMatchObject({ requested: 1, succeeded: 0, failed: 1 });
   });
 
+  test("only refreshes running cards and leaves idle or ended cards unmarked", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  headline: "This session is active now.",
+                  status: "Work is active.",
+                  reason: "This running session has recent activity.",
+                  nextStep: ""
+                })
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const enricher = createOpenAISessionCopyEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      maxConcurrent: 1,
+      now: () => 1_000
+    });
+    const runningCard = cardView({ sessionId: "running-session", lifecycle: "running", primaryStatus: "editing" });
+    const idleCard = cardView({ sessionId: "idle-session", lifecycle: "idle", primaryStatus: "stalled" });
+    const endedCard = cardView({ sessionId: "ended-session", lifecycle: "ended", primaryStatus: "completed_unreviewed" });
+
+    const enriched = await enricher.enrichProjection(liveProjection([idleCard, endedCard, runningCard]));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(JSON.parse(fetchImpl.mock.calls[0]![1].body).input).lifecycle).toBe("running");
+    expect(enriched.cards.find((card) => card.sessionId === "running-session")?.copyRefresh).toMatchObject({ status: "success" });
+    expect(enriched.cards.find((card) => card.sessionId === "idle-session")?.copyRefresh).toBeUndefined();
+    expect(enriched.cards.find((card) => card.sessionId === "ended-session")?.copyRefresh).toBeUndefined();
+    expect(enriched.copyRefreshSummary).toMatchObject({ requested: 1, succeeded: 1, failed: 0 });
+  });
+
   test("spends a short projection budget on running cards before ended cards", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,

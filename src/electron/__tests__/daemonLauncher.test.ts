@@ -86,4 +86,24 @@ describe("Electron daemon launcher policy", () => {
       port: 17374
     });
   });
+
+  test("uses the Electron dev data directory fallback before userData", () => {
+    expect(
+      resolveDaemonLaunchTarget({
+        currentDir: "/repo",
+        defaultDataDir: "/home/tyler/.local/share/masthead-dev",
+        env: {
+          MASTHEAD_DAEMON_ENTRY: "/repo/dist/daemon/src/daemon/main.js",
+          MASTHEAD_NODE_PATH: "/usr/bin/node",
+          MASTHEAD_PROJECT_DIR: "/repo"
+        },
+        resourcesPath: "/opt/Masthead/resources",
+        userDataDir: "/home/tyler/.config/masthead"
+      })
+    ).toMatchObject({
+      dataDirectory: "/home/tyler/.local/share/masthead-dev",
+      databasePath: "/home/tyler/.local/share/masthead-dev/masthead.sqlite",
+      legacyStorePath: "/home/tyler/.local/share/masthead-dev/legacy/events.ndjson"
+    });
+  });
 });

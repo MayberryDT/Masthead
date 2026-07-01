@@ -73,6 +73,44 @@ describe("Settings surface", () => {
     expect(html).toContain("31 sessions");
     expect(html).toContain("7,657 raw source copies");
     expect(html).toContain("Cancel");
+    expect(html).toContain("Type sqlite:test to confirm");
+    expect(html).toContain("Deletes Masthead");
+  });
+
+  test("delete-all confirmation requires typing the active database id", () => {
+    const html = renderToStaticMarkup(
+      <OperationsPanel
+        dataSummary={settings.storage.dataSummary}
+        localDataStatus={{
+          state: "confirm_delete",
+          message: "Confirm delete all Masthead data: 31 sessions and 7,657 raw source copies."
+        }}
+        settingsState={settings}
+      />
+    );
+
+    expect(html).toContain('placeholder="sqlite:test"');
+    expect(html).toContain("Delete all Masthead data");
+    expect(html).toContain("disabled=\"\"");
+  });
+
+  test("scoped deletion confirmation requires typing the selected target", () => {
+    const html = renderToStaticMarkup(
+      <OperationsPanel
+        dataSummary={settings.storage.dataSummary}
+        deletionScopeKind="project"
+        deletionScopeTarget="Masthead"
+        localDataStatus={{
+          state: "confirm_scoped_delete",
+          message: "Confirm scoped deletion for project Masthead: 31 sessions."
+        }}
+        settingsState={settings}
+      />
+    );
+
+    expect(html).toContain("Type Masthead to confirm");
+    expect(html).toContain("Delete selected records");
+    expect(html).toContain("disabled=\"\"");
   });
 
   test("keeps Priority Bay fluid and gives square toggles breathing room", () => {
@@ -87,7 +125,7 @@ describe("Settings surface", () => {
     const css = readFileSync("src/styles/masthead.css", "utf8");
 
     expect(css).toMatch(/\.usage-summary-strip \.usage-metric,[\s\S]*\.settings-section,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: usage-card-enter 400ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;[\s\S]*transform-origin: 50% 100%;/);
-    expect(css).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{[\s\S]*\.observability-console \.session-card,[\s\S]*\.masthead-shell \.session-card,[\s\S]*animation: session-card-created 300ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;[\s\S]*transform-origin: 50% 100%;/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{[\s\S]*\.observability-console \.session-card\.is-new-card,[\s\S]*\.masthead-shell \.session-card\.is-new-card\s*\{[\s\S]*animation: session-card-created 300ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;[\s\S]*transform-origin: 50% 100%;/);
     expect(css).toMatch(/@keyframes usage-card-enter\s*\{[\s\S]*transform: translateY\(9px\) scale\(0\.968\);[\s\S]*transform: translateY\(-1px\) scale\(1\.004\);[\s\S]*transform: translateY\(1px\) scale\(0\.999\);[\s\S]*transform: translateY\(0\) scale\(1\);/);
     expect(css).toMatch(/@keyframes session-card-created\s*\{[\s\S]*transform: translateY\(9px\) scale\(0\.968\);[\s\S]*transform: translateY\(-1px\) scale\(1\.004\);[\s\S]*transform: translateY\(1px\) scale\(0\.999\);[\s\S]*transform: translateY\(0\) scale\(1\);/);
     expect(css).not.toContain("filter: blur(4px);");

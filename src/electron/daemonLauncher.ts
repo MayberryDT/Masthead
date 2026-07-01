@@ -60,6 +60,7 @@ export type McpLaunchConfigResult = {
 
 export type ResolveDaemonLaunchTargetInput = {
   currentDir: string;
+  defaultDataDir?: string;
   env: NodeJS.ProcessEnv;
   resourcesPath: string;
   userDataDir: string;
@@ -71,7 +72,7 @@ export function connectorBaseUrl(port: number): string {
 
 export function resolveDaemonLaunchTarget(input: ResolveDaemonLaunchTargetInput): DaemonLaunchTarget {
   const port = parsePort(input.env.MASTHEAD_PORT, DEFAULT_CONNECTOR_PORT);
-  const dataDirectory = input.env.MASTHEAD_DATA_DIR || input.userDataDir;
+  const dataDirectory = input.env.MASTHEAD_DATA_DIR || input.defaultDataDir || input.userDataDir;
   const databasePath = input.env.MASTHEAD_DB_PATH || join(dataDirectory, "masthead.sqlite");
   const legacyStorePath = input.env.MASTHEAD_STORE_PATH || join(dataDirectory, "legacy", "events.ndjson");
   const mcpEntryOverride = input.env.MASTHEAD_MCP_ENTRY;
