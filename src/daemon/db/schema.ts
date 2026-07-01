@@ -45,6 +45,11 @@ const migrations = [
     version: 8,
     name: "008_live_projection_usage_indexes",
     path: resolve(currentDir, "migrations/008_live_projection_usage_indexes.sql")
+  },
+  {
+    version: 9,
+    name: "009_import_ledger",
+    path: resolve(currentDir, "migrations/009_import_ledger.sql")
   }
 ];
 
@@ -67,6 +72,11 @@ const criticalTables = [
   "source_policies",
   "source_scan_runs",
   "source_setup_state",
+  "runtime_policies",
+  "import_manifests",
+  "import_work_units",
+  "import_failure_groups",
+  "import_session_impacts",
   "legacy_migrations"
 ];
 

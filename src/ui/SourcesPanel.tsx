@@ -4,7 +4,9 @@ import type { SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunInput } 
 import { ImportJobsTable } from "./sources/ImportJobsTable";
 import { SourcesConnectedDashboard } from "./sources/SourcesConnectedDashboard";
 import { SourcesEmptyState } from "./sources/SourcesEmptyState";
+import { SourcesImportModal } from "./sources/SourcesImportModal";
 import { SourcesOnboardingModal } from "./sources/SourcesOnboardingModal";
+import type { SourcesImportPreview } from "../app/daemonClient";
 
 type Props = {
   adapters?: AdapterStatus[];
@@ -21,6 +23,7 @@ type Props = {
   onImportTranscripts?: (runtime: string) => void;
   onLoadAdapterSources?: (runtime: string, page: { limit: number; offset: number }) => Promise<SourceStatusPage>;
   onPollImports?: () => void;
+  onPreviewImport?: (input: SourcesSetupRunInput) => Promise<SourcesImportPreview[]> | SourcesImportPreview[];
   onConnectSelected?: (runtimes: string[]) => void;
   onRefresh: () => void;
   onRepairSources?: () => void;
@@ -39,6 +42,7 @@ export function SourcesPanel(props: Props) {
   const connectedAdapters = useMemo(() => adapterRows.filter(isConnectedAdapter), [adapterRows]);
   const connectedSources = setup?.connectedSources ?? [];
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const activeImportCount = diagnosticImports.filter((job) => job.status === "queued" || job.status === "running").length;
 
   useEffect(() => {
@@ -64,7 +68,7 @@ export function SourcesPanel(props: Props) {
           busy={busy}
           connectedSources={hasConnectedSetup ? connectedSources : undefined}
           coverage={setup?.coverage}
-          onAddSource={() => setOnboardingOpen(true)}
+          onAddSource={() => setImportOpen(true)}
           onRepairMissingData={props.onRepairSources ?? syncConnected}
           onSyncSources={props.onSyncSources ?? syncConnected}
           status={status}
@@ -91,6 +95,14 @@ export function SourcesPanel(props: Props) {
         onScanSetup={props.onScanSetup}
         open={onboardingOpen}
         scan={setup?.latestScan}
+      />
+      <SourcesImportModal
+        adapters={adapterRows}
+        busy={busy}
+        onClose={() => setImportOpen(false)}
+        onPreviewImport={props.onPreviewImport}
+        onRunSetup={props.onRunSetup}
+        open={importOpen}
       />
     </section>
   );

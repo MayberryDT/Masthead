@@ -12,14 +12,22 @@ import { SourcesPanel } from "../../SourcesPanel";
 const noop = () => undefined;
 
 describe("SourcesPanel import controls", () => {
-  test("opens onboarding from the connected-source dashboard", async () => {
-    const onScan = vi.fn();
+  test("opens import history modal from the connected-source dashboard", async () => {
+    const onPreviewImport = vi.fn(async () => []);
     const container = document.createElement("div");
     const root = createRoot(container);
 
     await act(async () => {
       root.render(
-        <SourcesPanel adapters={[codexAdapter()]} busy={false} imports={[]} onExcludePath={noop} onRefresh={noop} onScan={onScan} sources={[]} />
+        <SourcesPanel
+          adapters={[codexAdapter()]}
+          busy={false}
+          imports={[]}
+          onExcludePath={noop}
+          onPreviewImport={onPreviewImport}
+          onRefresh={noop}
+          sources={[]}
+        />
       );
     });
 
@@ -27,11 +35,14 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Set up more sources").click();
     });
 
+    expect(container.textContent).toContain("Import session history");
+    expect(container.textContent).toContain("Last 30 days");
+
     await act(async () => {
-      buttonByText(container, "Check local sources").click();
+      buttonByText(container, "Preview").click();
     });
 
-    expect(onScan).toHaveBeenCalledTimes(1);
+    expect(onPreviewImport).toHaveBeenCalledTimes(1);
     await act(async () => root.unmount());
   });
 

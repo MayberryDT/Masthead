@@ -63,6 +63,7 @@ import {
   listReviewDispositions,
   listSources,
   connectSources,
+  previewSourcesImport,
   retryImport,
   repairSources,
   runSourcesSetup,
@@ -1008,6 +1009,10 @@ export function App() {
     }
   };
 
+  const handlePreviewSourcesImport = async (input: SourcesSetupRunRequest) => {
+    return previewSourcesImport(activeProjectionUrl, input);
+  };
+
   const handleSyncSources = async () => {
     setSourcesBusy(true);
     setSourcesStatus("Syncing connected sources...");
@@ -1426,6 +1431,7 @@ export function App() {
           onImportTranscripts={handleImportTranscripts}
           onLoadAdapterSources={handleLoadAdapterSources}
           onPollImports={handlePollActiveImports}
+          onPreviewImport={handlePreviewSourcesImport}
           onRepairSources={handleRepairSources}
           onRefresh={handleRefreshSources}
           onRetryImport={handleRetryImport}

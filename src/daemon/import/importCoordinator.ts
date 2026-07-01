@@ -5,6 +5,7 @@ import {
   type ImportJobKind,
   updateImportJob
 } from "../db/importJobRepository.ts";
+import type { ImportStage } from "../../shared/sourceImport.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 import { recordRuntimeDiagnostic } from "../diagnostics.ts";
 
@@ -19,6 +20,12 @@ export type ImportWorkResult = {
 export type ImportProgressUpdate = Partial<ImportWorkResult> & {
   currentPath?: string | null;
   failureMessage?: string | null;
+  heartbeatAt?: string | null;
+  stage?: ImportStage;
+  totalWorkUnits?: number;
+  completedWorkUnits?: number;
+  failedWorkUnits?: number;
+  skippedWorkUnits?: number;
 };
 
 export type ImportCancellationToken = {
@@ -199,6 +206,7 @@ async function runQueuedImportJob(
     throwIfCancelled();
     return updateImportJob(db, importJobId, {
       ...update,
+      heartbeatAt: update.heartbeatAt ?? now(),
       updatedAt: now()
     });
   };
@@ -216,8 +224,10 @@ async function runQueuedImportJob(
       return;
     }
     job = updateImportJob(db, importJobId, {
+      heartbeatAt: now(),
       startedAt: current?.startedAt ?? now(),
       status: "running",
+      stage: "queued",
       updatedAt: now()
     });
   } catch {
@@ -233,7 +243,9 @@ async function runQueuedImportJob(
       ...result,
       currentPath: null,
       finishedAt: now(),
-      status: "succeeded",
+      heartbeatAt: now(),
+      stage: "completion",
+      status: result.failureCount > 0 && result.importedCount > 0 ? "succeeded_with_issues" : "succeeded",
       updatedAt: now()
     });
     recordRuntimeDiagnostic({
@@ -254,6 +266,7 @@ async function runQueuedImportJob(
       updateImportJob(db, importJobId, {
         currentPath: null,
         finishedAt: now(),
+        heartbeatAt: now(),
         status: "cancelled",
         updatedAt: now()
       });
@@ -270,6 +283,7 @@ async function runQueuedImportJob(
         finishedAt: now(),
         failureCount: Math.max(1, latest?.failureCount ?? job.failureCount),
         failureMessage: error instanceof Error ? error.message : String(error),
+        heartbeatAt: now(),
         status: "failed",
         updatedAt: now()
       });
@@ -286,6 +300,17 @@ async function runQueuedImportJob(
   } finally {
     activeImportJobs.delete(importJobId);
   }
+}
+
+export function deriveImportVisibilityState(
+  job: { status: string; heartbeatAt?: string; updatedAt: string },
+  now = Date.now(),
+  stalledAfterMs = 30_000
+): string {
+  if (job.status !== "running") return job.status;
+  const heartbeat = new Date(job.heartbeatAt ?? job.updatedAt).getTime();
+  if (!Number.isFinite(heartbeat)) return job.status;
+  return now - heartbeat > stalledAfterMs ? "stalled" : job.status;
 }
 
 function parseImportConcurrency(value: string | undefined): number {

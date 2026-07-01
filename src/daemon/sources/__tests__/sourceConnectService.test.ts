@@ -17,7 +17,7 @@ afterEach(async () => {
 });
 
 describe("source connect service", () => {
-  test("queues metadata jobs for selected recognized sources and skips selected runtimes without sources", async () => {
+  test("queues one parent metadata job per selected runtime and skips selected runtimes without sources", async () => {
     const { db } = await openSourceConnectTestDatabase("masthead-source-connect-");
     const scan = scanResult([
       adapterResult("codex", [source("codex", "codex-session-index"), source("codex", "codex-history")]),
@@ -25,7 +25,7 @@ describe("source connect service", () => {
       adapterResult("hermes", [])
     ]);
     seedSources(db, scan.adapters.flatMap((adapter) => adapter.sources));
-    const requestedJobs: Array<{ kind: ImportJobKind; sourceId: string }> = [];
+    const requestedJobs: Array<{ kind: ImportJobKind; runtime: string }> = [];
 
     const result = connectSelectedSources(
       db,
@@ -36,29 +36,22 @@ describe("source connect service", () => {
         queueEnrichment: false,
         runtimes: ["codex", "hermes"]
       },
-      async (kind, sourceId) => {
-        requestedJobs.push({ kind, sourceId });
+      async (kind, runtime) => {
+        requestedJobs.push({ kind, runtime });
         return { discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 };
       }
     );
 
     expect(result.jobs.map((job) => [job.importKind, job.sourceId])).toEqual([
-      ["metadata", "codex-session-index"],
-      ["metadata", "codex-history"]
+      ["metadata", "codex-session-index"]
     ]);
-    expect(result.skipped).toEqual([{ runtime: "hermes", reason: "No recognized local source files were detected." }]);
+    expect(result.skipped).toEqual([{ runtime: "hermes", reason: "No recognized local history was detected for this coding harness." }]);
     expect(listImportJobs(db).map((job) => [job.importKind, job.sourceId, job.status])).toEqual(
-      expect.arrayContaining([
-        ["metadata", "codex-session-index", "queued"],
-        ["metadata", "codex-history", "queued"]
-      ])
+      expect.arrayContaining([["metadata", "codex-session-index", "queued"]])
     );
 
     await new Promise((resolve) => setImmediate(resolve));
-    expect(requestedJobs).toEqual([
-      { kind: "metadata", sourceId: "codex-session-index" },
-      { kind: "metadata", sourceId: "codex-history" }
-    ]);
+    expect(requestedJobs).toEqual([{ kind: "metadata", runtime: "codex" }]);
     db.close();
   });
 });

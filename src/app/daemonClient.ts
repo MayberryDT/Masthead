@@ -3,6 +3,7 @@ import type { ReviewDisposition } from "../core/store";
 import type { SessionDossierDto } from "../shared/sessionDossier";
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
 import type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest } from "../shared/sourcesSetup";
+import type { ImportCompletionReportDto, ImportJobStatus, ImportManifestSummaryDto, ImportStage, ImportWorkUnitDto, ImportWorkUnitStatus } from "../shared/sourceImport";
 
 export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
 export type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest };
@@ -74,7 +75,7 @@ export type ImportJob = {
   importJobId: string;
   sourceId: string;
   importKind: "metadata" | "transcript" | "enrichment";
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "cancelling";
+  status: ImportJobStatus;
   discoveredCount: number;
   importedCount: number;
   queuedCount: number;
@@ -86,6 +87,13 @@ export type ImportJob = {
   progressCurrent?: number;
   progressTotal?: number;
   progressPercent?: number;
+  stage?: ImportStage;
+  heartbeatAt?: string;
+  totalWorkUnits?: number;
+  completedWorkUnits?: number;
+  failedWorkUnits?: number;
+  skippedWorkUnits?: number;
+  completionReport?: ImportCompletionReportDto;
 };
 
 export type ImportJobPage = {
@@ -140,6 +148,17 @@ export type ConnectSourcesResult = {
   jobs: ImportJob[];
   queued: number;
   skipped: Array<{ runtime: string; reason: string }>;
+};
+
+export type SourcesImportPreview = {
+  runtime: string;
+  summary: ImportManifestSummaryDto;
+};
+
+export type ImportWorkUnitPage = {
+  units: ImportWorkUnitDto[];
+  limit: number;
+  offset: number;
 };
 
 export type SourceExclusionInput = {
@@ -532,6 +551,23 @@ export async function runSourcesSetup(
   return postSourcesSetupAction(baseUrl, "/sources/setup/run", input);
 }
 
+export async function previewSourcesImport(
+  baseUrl: string,
+  input: SourcesSetupRunRequest
+): Promise<SourcesImportPreview[]> {
+  const url = new URL(baseUrl);
+  url.pathname = "/sources/import/preview";
+  url.search = "";
+  const response = await fetch(url.toString(), {
+    body: JSON.stringify(input),
+    headers: { accept: "application/json", "content-type": "application/json" },
+    method: "POST"
+  });
+  if (!response.ok) throw new Error(`sources import preview request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; previews: SourcesImportPreview[] };
+  return body.previews;
+}
+
 export async function syncSources(
   baseUrl = defaultLiveProjectionUrl(),
   input?: SourcesSetupRunRequest
@@ -722,6 +758,37 @@ export async function listImports(
     offset: body.offset ?? 0,
     total: body.total ?? body.imports.length
   };
+}
+
+export async function listImportWorkUnits(
+  baseUrl: string,
+  importJobId: string,
+  options: { limit?: number; offset?: number; status?: ImportWorkUnitStatus } = {}
+): Promise<ImportWorkUnitPage> {
+  const url = new URL(baseUrl);
+  url.pathname = `/imports/${encodeURIComponent(importJobId)}/units`;
+  url.search = "";
+  if (options.limit !== undefined) url.searchParams.set("limit", String(options.limit));
+  if (options.offset !== undefined) url.searchParams.set("offset", String(options.offset));
+  if (options.status) url.searchParams.set("status", options.status);
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`import work units request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; units: ImportWorkUnitDto[]; limit: number; offset: number };
+  return {
+    limit: body.limit,
+    offset: body.offset,
+    units: body.units
+  };
+}
+
+export async function getImportReport(baseUrl: string, importJobId: string): Promise<ImportCompletionReportDto | undefined> {
+  const url = new URL(baseUrl);
+  url.pathname = `/imports/${encodeURIComponent(importJobId)}/report`;
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`import report request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; report?: ImportCompletionReportDto };
+  return body.report;
 }
 
 export async function cancelImport(importJobId: string, baseUrl = defaultLiveProjectionUrl()): Promise<ImportJob> {

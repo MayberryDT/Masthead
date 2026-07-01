@@ -32,6 +32,18 @@ curl -X POST http://127.0.0.1:17373/sources/codex/import-metadata
 
 Metadata import is the normal first pass. It creates canonical session records without requiring transcript approval.
 
+## Preview Transcript Scope
+
+Before a long-running transcript import, preview the manifest:
+
+```bash
+curl -s -X POST http://127.0.0.1:17373/sources/import/preview \
+  -H 'content-type: application/json' \
+  -d '{"runtimes":["codex"],"importTranscripts":true,"importScope":{"mode":"transcript_recent","days":30,"includeChangedSinceCursor":true,"unitLimit":500}}'
+```
+
+The preview returns included units, skipped units, and byte counts. It does not create import jobs or work-unit rows.
+
 ## Import Transcripts
 
 Transcript import is a separate reviewed step:
@@ -47,6 +59,8 @@ Use source exclusions before transcript import when a source, project, or path s
 
 ```bash
 curl http://127.0.0.1:17373/imports
+curl http://127.0.0.1:17373/imports/<importJobId>/units
+curl http://127.0.0.1:17373/imports/<importJobId>/report
 curl http://127.0.0.1:17373/sessions?q=Logbook
 ```
 

@@ -1,9 +1,9 @@
 import { stableRecordId } from "../identity.ts";
 import type { RuntimeKind } from "../../adapters/types.ts";
+import type { ImportCompletionReportDto, ImportJobKind, ImportJobStatus, ImportScopeDto, ImportStage } from "../../shared/sourceImport.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
-export type ImportJobKind = "metadata" | "transcript" | "enrichment";
-export type ImportJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "cancelling";
+export type { ImportJobKind, ImportJobStatus };
 export type ImportJobListStatus = ImportJobStatus | "active";
 
 export type ImportJobDto = {
@@ -24,6 +24,15 @@ export type ImportJobDto = {
   progressTotal?: number;
   progressPercent?: number;
   startedAt?: string;
+  stage?: ImportStage;
+  heartbeatAt?: string;
+  totalWorkUnits: number;
+  completedWorkUnits: number;
+  failedWorkUnits: number;
+  skippedWorkUnits: number;
+  scope?: ImportScopeDto;
+  summary?: unknown;
+  completionReport?: ImportCompletionReportDto;
 };
 
 type ImportJobRow = {
@@ -41,6 +50,15 @@ type ImportJobRow = {
   failure_message: string | null;
   finished_at: string | null;
   started_at: string | null;
+  stage: ImportStage | null;
+  heartbeat_at: string | null;
+  total_work_units: number;
+  completed_work_units: number;
+  failed_work_units: number;
+  skipped_work_units: number;
+  scope_json: string | null;
+  summary_json: string | null;
+  completion_report_json: string | null;
 };
 
 export type ListImportJobsOptions = {
@@ -93,6 +111,15 @@ export function updateImportJob(
     failureMessage?: string | null;
     finishedAt?: string | null;
     startedAt?: string | null;
+    stage?: ImportStage | null;
+    heartbeatAt?: string | null;
+    totalWorkUnits?: number;
+    completedWorkUnits?: number;
+    failedWorkUnits?: number;
+    skippedWorkUnits?: number;
+    scope?: ImportScopeDto | null;
+    summary?: unknown;
+    completionReport?: ImportCompletionReportDto | null;
     updatedAt: string;
   }
 ): ImportJobDto {
@@ -110,7 +137,16 @@ export function updateImportJob(
       current_path = ?,
       failure_message = ?,
       started_at = ?,
-      finished_at = ?
+      finished_at = ?,
+      stage = ?,
+      heartbeat_at = ?,
+      total_work_units = ?,
+      completed_work_units = ?,
+      failed_work_units = ?,
+      skipped_work_units = ?,
+      scope_json = ?,
+      summary_json = ?,
+      completion_report_json = ?
     WHERE import_job_id = ?`
   ).run(
     updates.status ?? current.status,
@@ -124,6 +160,19 @@ export function updateImportJob(
     updates.failureMessage === undefined ? (current.failureMessage ?? null) : updates.failureMessage,
     updates.startedAt === undefined ? (current.startedAt ?? null) : updates.startedAt,
     updates.finishedAt === undefined ? (current.finishedAt ?? null) : updates.finishedAt,
+    updates.stage === undefined ? (current.stage ?? null) : updates.stage,
+    updates.heartbeatAt === undefined ? (current.heartbeatAt ?? null) : updates.heartbeatAt,
+    updates.totalWorkUnits ?? current.totalWorkUnits,
+    updates.completedWorkUnits ?? current.completedWorkUnits,
+    updates.failedWorkUnits ?? current.failedWorkUnits,
+    updates.skippedWorkUnits ?? current.skippedWorkUnits,
+    updates.scope === undefined ? (current.scope ? JSON.stringify(current.scope) : null) : updates.scope === null ? null : JSON.stringify(updates.scope),
+    updates.summary === undefined ? (current.summary === undefined ? null : JSON.stringify(current.summary)) : JSON.stringify(updates.summary),
+    updates.completionReport === undefined
+      ? (current.completionReport ? JSON.stringify(current.completionReport) : null)
+      : updates.completionReport === null
+        ? null
+        : JSON.stringify(updates.completionReport),
     importJobId
   );
   return getImportJob(db, importJobId) as ImportJobDto;
@@ -192,6 +241,7 @@ function importJobFromRow(row: ImportJobRow): ImportJobDto {
     failureCount: row.failure_count,
     ...(row.failure_message ? { failureMessage: row.failure_message } : {}),
     ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
+    ...(row.heartbeat_at ? { heartbeatAt: row.heartbeat_at } : {}),
     importedCount: row.imported_count,
     importJobId: row.import_job_id,
     importKind: row.import_kind,
@@ -202,7 +252,26 @@ function importJobFromRow(row: ImportJobRow): ImportJobDto {
     queuedCount: row.queued_count,
     sourceId: row.source_id,
     ...(row.started_at ? { startedAt: row.started_at } : {}),
+    ...(row.stage ? { stage: row.stage } : {}),
     status: row.status,
+    totalWorkUnits: row.total_work_units,
+    completedWorkUnits: row.completed_work_units,
+    failedWorkUnits: row.failed_work_units,
+    skippedWorkUnits: row.skipped_work_units,
+    ...(parseOptionalJson<ImportScopeDto>(row.scope_json) ? { scope: parseOptionalJson<ImportScopeDto>(row.scope_json) } : {}),
+    ...(parseOptionalJson<unknown>(row.summary_json) ? { summary: parseOptionalJson<unknown>(row.summary_json) } : {}),
+    ...(parseOptionalJson<ImportCompletionReportDto>(row.completion_report_json)
+      ? { completionReport: parseOptionalJson<ImportCompletionReportDto>(row.completion_report_json) }
+      : {}),
     updatedAt: row.updated_at
   };
+}
+
+function parseOptionalJson<T>(value: string | null): T | undefined {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return undefined;
+  }
 }
