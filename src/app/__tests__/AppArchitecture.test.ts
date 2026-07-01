@@ -32,4 +32,14 @@ describe("App component architecture", () => {
     expect(appSource).not.toContain("const handleConfirmScopedDelete");
     expect(appSource).not.toContain("function downloadTextFile");
   });
+
+  test("keeps Board detail loading orchestration out of App.tsx", async () => {
+    const appPath = fileURLToPath(new URL("../App.tsx", import.meta.url));
+    const appSource = await readFile(appPath, "utf8");
+
+    expect(appSource).not.toContain("getSessionDossier");
+    expect(appSource).not.toContain("getSessionTranscript");
+    expect(appSource).not.toContain("const handleLoadMoreBoardTranscript");
+    expect(appSource).not.toContain("boardDossierRetryKey");
+  });
 });

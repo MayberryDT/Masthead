@@ -40,16 +40,11 @@ import { startLiveConnector } from "./connectorClient";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
 import { ConnectionRecoveryPanel } from "../ui/ConnectionRecoveryPanel";
 import {
-  getSessionDossier,
-  getSessionTranscript,
   getUsageStats,
   saveReviewDisposition,
-  type SessionTranscriptKindFilter,
-  type SessionTranscriptResult,
   type UsageStatsDto,
   type UsageWindow
 } from "./daemonClient";
-import type { SessionDossierDto } from "../shared/sessionDossier";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
@@ -58,6 +53,7 @@ import { UsageSurface } from "./surfaces/UsageSurface";
 import { UsagePanel } from "../ui/usage/UsagePanel";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
+import { useBoardSessionDetailController } from "./board/useBoardSessionDetailController";
 import { useLogbookController } from "./logbook/useLogbookController";
 import { useSettingsDataController } from "./settings/useSettingsDataController";
 import { useSourcesController } from "./sources/useSourcesController";
@@ -107,17 +103,6 @@ export function App() {
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
   const [detailModalOpen, setDetailModalOpen] = useState(false);
-  const [boardDossierRetryKey, setBoardDossierRetryKey] = useState(0);
-  const [selectedBoardDossier, setSelectedBoardDossier] = useState<SessionDossierDto>();
-  const [selectedBoardDossierLoading, setSelectedBoardDossierLoading] = useState(false);
-  const [selectedBoardDossierError, setSelectedBoardDossierError] = useState<string>();
-  const [boardTranscriptRetryKey, setBoardTranscriptRetryKey] = useState(0);
-  const [selectedBoardTranscript, setSelectedBoardTranscript] = useState<SessionTranscriptResult>();
-  const [selectedBoardTranscriptLoading, setSelectedBoardTranscriptLoading] = useState(false);
-  const [selectedBoardTranscriptError, setSelectedBoardTranscriptError] = useState<string>();
-  const [selectedBoardTranscriptFilter, setSelectedBoardTranscriptFilter] = useState<SessionTranscriptKindFilter>("all");
-  const [selectedBoardTranscriptQuery, setSelectedBoardTranscriptQuery] = useState("");
-  const [selectedBoardTranscriptDebouncedQuery, setSelectedBoardTranscriptDebouncedQuery] = useState("");
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
   const [liveConnection, setLiveConnection] = useState<ConnectionState>({ state: "connecting" });
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
@@ -229,6 +214,12 @@ export function App() {
       ? board.selectedSession
       : undefined;
   const selectedBoardCanonicalSessionId = filteredSelectedSession?.canonicalSessionId;
+  const boardDetail = useBoardSessionDetailController({
+    activeProjectionUrl,
+    open: detailModalOpen,
+    sessionId: selectedBoardCanonicalSessionId,
+    showDemoData
+  });
   const effectiveLiveConnection = useMemo<ConnectionState>(() => {
     if (connection.state.state === "offline" || connection.state.state === "incompatible") {
       return { state: "offline", error: "error" in connection.state ? connection.state.error : "Masthead daemon unavailable" };
@@ -251,83 +242,6 @@ export function App() {
     onReviewDispositionsChanged: handleReviewDispositionsChanged,
     writable: connection.writable
   });
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setSelectedBoardTranscriptDebouncedQuery(selectedBoardTranscriptQuery), 200);
-    return () => window.clearTimeout(timeout);
-  }, [selectedBoardTranscriptQuery]);
-
-  useEffect(() => {
-    if (!detailModalOpen || showDemoData || !selectedBoardCanonicalSessionId) {
-      setSelectedBoardDossier(undefined);
-      setSelectedBoardDossierError(undefined);
-      setSelectedBoardDossierLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    setSelectedBoardDossierLoading(true);
-    setSelectedBoardDossierError(undefined);
-    void getSessionDossier(selectedBoardCanonicalSessionId, activeProjectionUrl, { signal: controller.signal })
-      .then((dossier) => {
-        setSelectedBoardDossier(dossier);
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          setSelectedBoardDossier(undefined);
-          setSelectedBoardDossierError(error instanceof Error ? error.message : String(error));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setSelectedBoardDossierLoading(false);
-      });
-    return () => controller.abort();
-  }, [activeProjectionUrl, boardDossierRetryKey, detailModalOpen, selectedBoardCanonicalSessionId, showDemoData]);
-
-  useEffect(() => {
-    if (!detailModalOpen || showDemoData || !selectedBoardCanonicalSessionId) {
-      setSelectedBoardTranscript(undefined);
-      setSelectedBoardTranscriptError(undefined);
-      setSelectedBoardTranscriptLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    setSelectedBoardTranscript(undefined);
-    setSelectedBoardTranscriptLoading(true);
-    setSelectedBoardTranscriptError(undefined);
-    void getSessionTranscript(
-      selectedBoardCanonicalSessionId,
-      {
-        kind: selectedBoardTranscriptFilter,
-        limit: 100,
-        q: selectedBoardTranscriptDebouncedQuery
-      },
-      activeProjectionUrl,
-      { signal: controller.signal }
-    )
-      .then((transcript) => {
-        setSelectedBoardTranscript(transcript);
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          setSelectedBoardTranscript(undefined);
-          setSelectedBoardTranscriptError(error instanceof Error ? error.message : String(error));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setSelectedBoardTranscriptLoading(false);
-      });
-    return () => controller.abort();
-  }, [
-    activeProjectionUrl,
-    boardTranscriptRetryKey,
-    detailModalOpen,
-    selectedBoardCanonicalSessionId,
-    selectedBoardTranscriptDebouncedQuery,
-    selectedBoardTranscriptFilter,
-    showDemoData
-  ]);
 
   const toggleDensity = useCallback(() => {
     const updateDensity = () => setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
@@ -526,29 +440,6 @@ export function App() {
     }
   };
 
-  const handleLoadMoreBoardTranscript = async () => {
-    if (!selectedBoardCanonicalSessionId || !selectedBoardTranscript?.nextCursor || selectedBoardTranscriptLoading) return;
-    setSelectedBoardTranscriptLoading(true);
-    setSelectedBoardTranscriptError(undefined);
-    try {
-      const next = await getSessionTranscript(
-        selectedBoardCanonicalSessionId,
-        {
-          cursor: selectedBoardTranscript.nextCursor,
-          kind: selectedBoardTranscriptFilter,
-          limit: 100,
-          q: selectedBoardTranscriptDebouncedQuery
-        },
-        activeProjectionUrl
-      );
-      setSelectedBoardTranscript((current) => (current ? { ...next, items: [...current.items, ...next.items] } : next));
-    } catch (error) {
-      setSelectedBoardTranscriptError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSelectedBoardTranscriptLoading(false);
-    }
-  };
-
   const needsRecoveryPanel = connection.state.state === "offline" || connection.state.state === "incompatible";
   const recoveryPanel = (
     <ConnectionRecoveryPanel connection={connection.state} onRetry={connection.refresh} onStart={handleStartConnector} />
@@ -743,19 +634,19 @@ export function App() {
           session={filteredSelectedSession}
           onClose={() => setDetailModalOpen(false)}
           onAction={handleSessionAction}
-          dossier={selectedBoardDossier}
-          dossierLoading={selectedBoardDossierLoading}
-          dossierError={selectedBoardDossierError}
-          onRetryDossier={() => setBoardDossierRetryKey((current) => current + 1)}
-          transcript={selectedBoardTranscript}
-          transcriptLoading={selectedBoardTranscriptLoading}
-          transcriptError={selectedBoardTranscriptError}
-          transcriptFilter={selectedBoardTranscriptFilter}
-          transcriptQuery={selectedBoardTranscriptQuery}
-          onTranscriptFilterChange={setSelectedBoardTranscriptFilter}
-          onTranscriptQueryChange={setSelectedBoardTranscriptQuery}
-          onTranscriptLoadMore={() => void handleLoadMoreBoardTranscript()}
-          onRetryTranscript={() => setBoardTranscriptRetryKey((current) => current + 1)}
+          dossier={boardDetail.dossier}
+          dossierLoading={boardDetail.dossierLoading}
+          dossierError={boardDetail.dossierError}
+          onRetryDossier={boardDetail.retryDossier}
+          transcript={boardDetail.transcript}
+          transcriptLoading={boardDetail.transcriptLoading}
+          transcriptError={boardDetail.transcriptError}
+          transcriptFilter={boardDetail.transcriptFilter}
+          transcriptQuery={boardDetail.transcriptQuery}
+          onTranscriptFilterChange={boardDetail.setTranscriptFilter}
+          onTranscriptQueryChange={boardDetail.setTranscriptQuery}
+          onTranscriptLoadMore={() => void boardDetail.loadMoreTranscript()}
+          onRetryTranscript={boardDetail.retryTranscript}
           onOpenSources={() => {
             setDetailModalOpen(false);
             setActiveSurface("sources");
