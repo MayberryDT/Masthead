@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { LogbookSort } from "../../app/daemonClient";
 import type { LogbookFilterOptions, LogbookFilterState } from "../HistoryPanel";
 import { AppButton } from "../primitives/AppButton";
@@ -27,15 +27,57 @@ const sortOptions: Array<{ value: LogbookSort; label: string }> = [
   { value: "project", label: "Project" }
 ];
 
+function cssDurationMs(value: string, fallbackMs: number): number {
+  const trimmed = value.trim();
+  const parsed = Number.parseFloat(trimmed);
+  if (!Number.isFinite(parsed)) return fallbackMs;
+  if (trimmed.endsWith("ms")) return parsed;
+  if (trimmed.endsWith("s")) return parsed * 1000;
+  return parsed;
+}
+
+function dropdownCloseDelayMs(): number {
+  if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return 1;
+  if (typeof window.getComputedStyle !== "function") return 150;
+  return cssDurationMs(window.getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur"), 150);
+}
+
 export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, onQueryChange, onSortChange, query, sort }: Props) {
   const runtimeOptions = [{ value: "", label: "All runtimes" }, ...optionRows(filterOptions?.runtimes)];
   const projectOptions = optionRows(filterOptions?.projects, filters.project);
   const modelOptions = optionRows(filterOptions?.models, filters.model);
   const activeDateFilterCount = [filters.dateFrom, filters.dateTo].filter(Boolean).length;
-  const [dateOpen, setDateOpen] = useState(false);
+  const [dateState, setDateState] = useState<"closed" | "open" | "closing">("closed");
+  const dateCloseTimerRef = useRef<number | undefined>(undefined);
+  const dateOpen = dateState === "open";
   const datePopoverId = useId();
   const updateDateFrom = (value: string) => onFilterChange?.({ ...filters, dateFrom: value || undefined });
   const updateDateTo = (value: string) => onFilterChange?.({ ...filters, dateTo: value || undefined });
+  const dateMounted = dateState !== "closed" || activeDateFilterCount > 0;
+  const clearDateCloseTimer = () => {
+    if (dateCloseTimerRef.current !== undefined) {
+      window.clearTimeout(dateCloseTimerRef.current);
+      dateCloseTimerRef.current = undefined;
+    }
+  };
+  const openDatePopover = () => {
+    clearDateCloseTimer();
+    setDateState("open");
+  };
+  const closeDatePopover = () => {
+    clearDateCloseTimer();
+    setDateState((current) => (current === "closed" ? current : "closing"));
+    dateCloseTimerRef.current = window.setTimeout(() => {
+      setDateState("closed");
+      dateCloseTimerRef.current = undefined;
+    }, dropdownCloseDelayMs());
+  };
+  const toggleDatePopover = () => {
+    if (dateOpen) closeDatePopover();
+    else openDatePopover();
+  };
+
+  useEffect(() => clearDateCloseTimer, []);
 
   return (
     <div className="logbook-toolbar observability-toolbar metal-toolbar" aria-label="Logbook controls">
@@ -48,53 +90,63 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
         onClear={() => onQueryChange("")}
       />
       <div className="toolbar-select-row logbook-toolbar-row" aria-label="Logbook filter controls">
-        <div className={`logbook-date-filter ${activeDateFilterCount > 0 ? "active" : ""}`.trim()}>
+        <div className={`logbook-date-filter ${activeDateFilterCount > 0 ? "active" : ""} ${dateMounted ? "open" : ""}`.trim()}>
           <AppButton
             variant="default"
             className="logbook-date-trigger"
             aria-controls={datePopoverId}
             aria-expanded={dateOpen}
             aria-label="Open date filter"
-            onClick={() => setDateOpen((current) => !current)}
+            onClick={toggleDatePopover}
           >
             <Icon name="timeRange" size="toolbar" weight={iconWeights.toolbar} />
             <span>Date{activeDateFilterCount > 0 ? ` ${activeDateFilterCount}` : ""}</span>
           </AppButton>
-          <div id={datePopoverId} className="logbook-date-popover" aria-hidden={!dateOpen} hidden={!dateOpen}>
-            <label>
-              <span>From</span>
-              <input
-                aria-label="From date"
-                type="date"
-                value={filters.dateFrom ?? ""}
-                onInput={(event) => updateDateFrom(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              <span>To</span>
-              <input
-                aria-label="To date"
-                type="date"
-                value={filters.dateTo ?? ""}
-                onInput={(event) => updateDateTo(event.currentTarget.value)}
-              />
-            </label>
-            <button
-              type="button"
-              className="logbook-date-clear"
-              disabled={activeDateFilterCount === 0}
-              onClick={() => onFilterChange?.({ ...filters, dateFrom: undefined, dateTo: undefined })}
+          {dateMounted ? (
+            <div
+              id={datePopoverId}
+              className={`logbook-date-popover t-dropdown ${dateOpen ? "is-open" : ""} ${dateState === "closing" ? "is-closing" : ""}`.trim()}
+              data-origin="top-left"
+              aria-hidden={!dateOpen}
+              hidden={dateState === "closed"}
             >
-              Clear
-            </button>
-          </div>
+              <label>
+                <span>From</span>
+                <input
+                  aria-label="From date"
+                  type="date"
+                  value={filters.dateFrom ?? ""}
+                  onInput={(event) => updateDateFrom(event.currentTarget.value)}
+                />
+              </label>
+              <label>
+                <span>To</span>
+                <input
+                  aria-label="To date"
+                  type="date"
+                  value={filters.dateTo ?? ""}
+                  onInput={(event) => updateDateTo(event.currentTarget.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="logbook-date-clear"
+                disabled={activeDateFilterCount === 0}
+                onClick={() => onFilterChange?.({ ...filters, dateFrom: undefined, dateTo: undefined })}
+              >
+                Clear
+              </button>
+            </div>
+          ) : null}
         </div>
 
-        <AppSelect
+        <FilterableSelect
           label="Runtime filter"
           icon="runtime"
           value={filters.runtime ?? ""}
           options={runtimeOptions}
+          placeholder="All runtimes"
+          searchPlaceholder="Type or choose runtime"
           className="logbook-filter-select logbook-runtime-filter"
           onChange={(value) => onFilterChange?.({ ...filters, runtime: value || undefined })}
         />

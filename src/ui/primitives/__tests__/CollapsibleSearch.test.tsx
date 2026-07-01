@@ -8,6 +8,8 @@ let container: HTMLDivElement | undefined;
 let root: Root | undefined;
 
 afterEach(() => {
+  vi.useRealTimers();
+  document.documentElement.style.removeProperty("--search-close-dur");
   if (root) {
     act(() => root?.unmount());
     root = undefined;
@@ -59,6 +61,33 @@ describe("CollapsibleSearch", () => {
     expect(searchRoot().className).toContain("expanded");
     expect(searchRoot().className).not.toContain("closing");
     expect(searchInput()).toBe(document.activeElement);
+  });
+
+  test("clears closing state after the configured search close duration", async () => {
+    vi.useFakeTimers();
+    document.documentElement.style.setProperty("--search-close-dur", "230ms");
+    renderSearch({ value: "", onClear: vi.fn() });
+
+    const trigger = buttonByLabel("Search sessions");
+
+    await act(async () => {
+      trigger.click();
+    });
+    await act(async () => {
+      trigger.click();
+    });
+
+    expect(searchRoot().className).toContain("closing");
+
+    await act(async () => {
+      vi.advanceTimersByTime(229);
+    });
+    expect(searchRoot().className).toContain("closing");
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(searchRoot().className).not.toContain("closing");
   });
 
   test("imperative focus expands and focuses the input", async () => {

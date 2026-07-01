@@ -14,6 +14,21 @@ type CollapsibleSearchProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type"
   onClear: () => void;
 };
 
+function cssDurationMs(value: string, fallbackMs: number): number {
+  const trimmed = value.trim();
+  const parsed = Number.parseFloat(trimmed);
+  if (!Number.isFinite(parsed)) return fallbackMs;
+  if (trimmed.endsWith("ms")) return parsed;
+  if (trimmed.endsWith("s")) return parsed * 1000;
+  return parsed;
+}
+
+function searchCloseDelayMs(): number {
+  if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return 1;
+  if (typeof window.getComputedStyle !== "function") return 230;
+  return cssDurationMs(window.getComputedStyle(document.documentElement).getPropertyValue("--search-close-dur"), 230);
+}
+
 export const CollapsibleSearch = forwardRef<CollapsibleSearchHandle, CollapsibleSearchProps>(function CollapsibleSearch(
   { containerClassName = "", label, onClear, placeholder, value, ...props },
   ref
@@ -46,11 +61,10 @@ export const CollapsibleSearch = forwardRef<CollapsibleSearchHandle, Collapsible
     clearCloseTimer();
     setClosing(true);
     setExpanded(false);
-    const closeDelayMs = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 1 : 380;
     closeTimerRef.current = window.setTimeout(() => {
       setClosing(false);
       closeTimerRef.current = null;
-    }, closeDelayMs);
+    }, searchCloseDelayMs());
   };
 
   const clearFromKeyboard = () => {

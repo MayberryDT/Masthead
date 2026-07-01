@@ -12,6 +12,8 @@ let root: Root | undefined;
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => {
+  vi.useRealTimers();
+  document.documentElement.style.removeProperty("--dropdown-close-dur");
   if (root) {
     act(() => root?.unmount());
     root = undefined;
@@ -82,6 +84,23 @@ describe("LogbookToolbar", () => {
     expect(html).not.toContain("File 1");
   });
 
+  test("renders Runtime as a searchable dropdown like Project and Model", async () => {
+    renderToolbar({ onFilterChange: vi.fn() });
+
+    const runtimeTrigger = buttonByLabel("Runtime filter");
+    expect(runtimeTrigger.className).toContain("filterable-select-trigger");
+
+    await act(async () => {
+      runtimeTrigger.click();
+    });
+
+    expect(document.body.querySelector(".filterable-select-menu")).not.toBeNull();
+    expect(inputByPlaceholder("Type or choose runtime")).not.toBeNull();
+    expect(document.body.querySelector(".filterable-select-options")).not.toBeNull();
+    expect(document.body.textContent).toContain("All runtimes");
+    expect(document.body.textContent).toContain("Codex");
+  });
+
   test("opens a compact date popover and updates typed date filters", async () => {
     const onFilterChange = vi.fn();
     renderToolbar({ onFilterChange });
@@ -98,6 +117,36 @@ describe("LogbookToolbar", () => {
 
     expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ dateFrom: "2026-06-10" }));
     expect(container?.querySelector(".logbook-date-popover")).not.toBeNull();
+  });
+
+  test("animates the date popover with the shared toolbar dropdown motion", async () => {
+    vi.useFakeTimers();
+    document.documentElement.style.setProperty("--dropdown-close-dur", "150ms");
+    renderToolbar({ onFilterChange: vi.fn() });
+
+    await act(async () => {
+      buttonByLabel("Open date filter").click();
+    });
+
+    expect(datePopover().className).toContain("t-dropdown");
+    expect(datePopover().className).toContain("is-open");
+
+    await act(async () => {
+      buttonByLabel("Open date filter").click();
+    });
+
+    expect(datePopover().className).toContain("is-closing");
+    expect(datePopover().hidden).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(149);
+    });
+    expect(datePopover().className).toContain("is-closing");
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(container?.querySelector(".logbook-date-popover")).toBeNull();
   });
 });
 
@@ -130,4 +179,16 @@ function inputByLabel(label: string): HTMLInputElement {
   const input = Array.from(container?.querySelectorAll("input") ?? []).find((candidate) => candidate.getAttribute("aria-label") === label);
   expect(input).toBeDefined();
   return input as HTMLInputElement;
+}
+
+function inputByPlaceholder(placeholder: string): HTMLInputElement {
+  const input = Array.from(document.body.querySelectorAll("input") ?? []).find((candidate) => candidate.getAttribute("placeholder") === placeholder);
+  expect(input).toBeDefined();
+  return input as HTMLInputElement;
+}
+
+function datePopover(): HTMLDivElement {
+  const popover = container?.querySelector(".logbook-date-popover");
+  expect(popover).toBeDefined();
+  return popover as HTMLDivElement;
 }
