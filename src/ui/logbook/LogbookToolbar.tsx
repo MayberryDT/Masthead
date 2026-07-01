@@ -49,6 +49,8 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
   const activeDateFilterCount = [filters.dateFrom, filters.dateTo].filter(Boolean).length;
   const [dateState, setDateState] = useState<"closed" | "open" | "closing">("closed");
   const dateCloseTimerRef = useRef<number | undefined>(undefined);
+  const dateRootRef = useRef<HTMLDivElement | null>(null);
+  const dateTriggerRef = useRef<HTMLButtonElement | null>(null);
   const dateOpen = dateState === "open";
   const datePopoverId = useId();
   const updateDateFrom = (value: string) => onFilterChange?.({ ...filters, dateFrom: value || undefined });
@@ -77,6 +79,29 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
     else openDatePopover();
   };
 
+  useEffect(() => {
+    if (!dateOpen) return undefined;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!dateRootRef.current?.contains(target)) closeDatePopover();
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeDatePopover();
+      dateTriggerRef.current?.focus();
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [dateOpen]);
+
   useEffect(() => clearDateCloseTimer, []);
 
   return (
@@ -90,8 +115,9 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
         onClear={() => onQueryChange("")}
       />
       <div className="toolbar-select-row logbook-toolbar-row" aria-label="Logbook filter controls">
-        <div className={`logbook-date-filter ${activeDateFilterCount > 0 ? "active" : ""} ${dateMounted ? "open" : ""}`.trim()}>
+        <div ref={dateRootRef} className={`logbook-date-filter ${activeDateFilterCount > 0 ? "active" : ""} ${dateMounted ? "open" : ""}`.trim()}>
           <AppButton
+            ref={dateTriggerRef}
             variant="default"
             className="logbook-date-trigger"
             aria-controls={datePopoverId}

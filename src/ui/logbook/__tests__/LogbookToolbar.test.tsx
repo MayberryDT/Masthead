@@ -148,6 +148,46 @@ describe("LogbookToolbar", () => {
     });
     expect(container?.querySelector(".logbook-date-popover")).toBeNull();
   });
+
+  test("dismisses the date popover like the shared toolbar dropdowns", async () => {
+    vi.useFakeTimers();
+    document.documentElement.style.setProperty("--dropdown-close-dur", "150ms");
+    renderToolbar({ onFilterChange: vi.fn() });
+
+    await act(async () => {
+      buttonByLabel("Open date filter").click();
+    });
+
+    const outside = document.createElement("button");
+    document.body.append(outside);
+
+    await act(async () => {
+      outside.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+
+    expect(datePopover().className).toContain("is-closing");
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(container?.querySelector(".logbook-date-popover")).toBeNull();
+
+    await act(async () => {
+      buttonByLabel("Open date filter").click();
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+
+    expect(datePopover().className).toContain("is-closing");
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(container?.querySelector(".logbook-date-popover")).toBeNull();
+    outside.remove();
+  });
 });
 
 function renderToolbar({ onFilterChange }: { onFilterChange: (filters: LogbookFilterState) => void }) {
