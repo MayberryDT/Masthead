@@ -513,12 +513,10 @@ export async function getSourcesSetup(
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
 ): Promise<SourcesSetupDto> {
-  const url = new URL(baseUrl);
-  url.pathname = "/sources/setup";
-  url.search = "";
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`sources setup request failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; setup: SourcesSetupDto };
+  const body = await getJson<{ ok: true; setup: SourcesSetupDto }>(baseUrl, "/sources/setup", {
+    label: "sources setup request",
+    signal: options.signal
+  });
   return body.setup;
 }
 
@@ -551,28 +549,15 @@ export async function getSourcesAdvanced(
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
 ): Promise<SourcesAdvancedDto> {
-  const url = new URL(baseUrl);
-  url.pathname = "/sources/advanced";
-  url.search = "";
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`sources advanced request failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; advanced: SourcesAdvancedDto };
+  const body = await getJson<{ ok: true; advanced: SourcesAdvancedDto }>(baseUrl, "/sources/advanced", {
+    label: "sources advanced request",
+    signal: options.signal
+  });
   return body.advanced;
 }
 
 async function postSourcesSetupAction(baseUrl: string, pathname: string, input?: unknown): Promise<SourcesSetupActionResult> {
-  const url = new URL(baseUrl);
-  url.pathname = pathname;
-  url.search = "";
-  const headers: Record<string, string> = { accept: "application/json" };
-  if (input !== undefined) headers["content-type"] = "application/json";
-  const response = await fetch(url.toString(), {
-    body: input === undefined ? undefined : JSON.stringify(input),
-    headers,
-    method: "POST"
-  });
-  if (!response.ok) throw new Error(`sources setup action failed: ${response.status}`);
-  return response.json() as Promise<SourcesSetupActionResult>;
+  return postJson<SourcesSetupActionResult>(baseUrl, pathname, { body: input, label: "sources setup action" });
 }
 
 export async function listSources(baseUrl = defaultLiveProjectionUrl()): Promise<SourceStatus[]> {
@@ -731,25 +716,15 @@ export async function searchLogbook(
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
 ): Promise<LogbookSearchResult> {
-  const url = new URL(baseUrl);
-  url.pathname = "/sessions";
-  url.search = "";
   const filters: LogbookSearchFilters = typeof input === "string" ? { q: input } : input;
-  for (const [key, value] of Object.entries(filters)) {
-    if (value !== undefined && value !== "") url.searchParams.set(key === "q" ? "q" : key, String(value));
-  }
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`logbook search failed: ${response.status}`);
-  return response.json() as Promise<LogbookSearchResult>;
+  return getJson<LogbookSearchResult>(baseUrl, "/sessions", { label: "logbook search", query: filters, signal: options.signal });
 }
 
 export async function getLogbookSummary(baseUrl = defaultLiveProjectionUrl(), options: { signal?: AbortSignal } = {}): Promise<LogbookSummary> {
-  const url = new URL(baseUrl);
-  url.pathname = "/logbook/summary";
-  url.search = "";
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`logbook summary failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; summary: LogbookSummary };
+  const body = await getJson<{ ok: true; summary: LogbookSummary }>(baseUrl, "/logbook/summary", {
+    label: "logbook summary",
+    signal: options.signal
+  });
   return body.summary;
 }
 
@@ -757,13 +732,11 @@ export async function getUsageStats(
   baseUrl = defaultLiveProjectionUrl(),
   options: { window?: UsageWindow; signal?: AbortSignal } = {}
 ): Promise<UsageStatsDto> {
-  const url = new URL(baseUrl);
-  url.pathname = "/usage/summary";
-  url.search = "";
-  url.searchParams.set("window", options.window ?? "today");
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`usage summary failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; usage: UsageStatsDto };
+  const body = await getJson<{ ok: true; usage: UsageStatsDto }>(baseUrl, "/usage/summary", {
+    label: "usage summary",
+    query: { window: options.window ?? "today" },
+    signal: options.signal
+  });
   return body.usage;
 }
 
@@ -772,12 +745,10 @@ export async function getLogbookSession(
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
 ): Promise<LogbookSessionDetail> {
-  const url = new URL(baseUrl);
-  url.pathname = `/sessions/${encodeURIComponent(sessionId)}`;
-  url.search = "";
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`session detail failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; session: LogbookSessionDetail };
+  const body = await getJson<{ ok: true; session: LogbookSessionDetail }>(baseUrl, `/sessions/${encodeURIComponent(sessionId)}`, {
+    label: "session detail",
+    signal: options.signal
+  });
   return body.session;
 }
 
@@ -787,14 +758,11 @@ export async function getLogbookSessionExcerpts(
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
 ): Promise<LogbookExcerpt[]> {
-  const url = new URL(baseUrl);
-  url.pathname = `/sessions/${encodeURIComponent(sessionId)}/excerpts`;
-  url.search = "";
-  if (input.q) url.searchParams.set("q", input.q);
-  if (input.limit) url.searchParams.set("limit", String(input.limit));
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`session excerpts failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; excerpts: LogbookExcerpt[] };
+  const body = await getJson<{ ok: true; excerpts: LogbookExcerpt[] }>(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/excerpts`, {
+    label: "session excerpts",
+    query: input,
+    signal: options.signal
+  });
   return body.excerpts;
 }
 
@@ -803,12 +771,10 @@ export async function getSessionDossier(
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
 ): Promise<SessionDossierDto> {
-  const url = new URL(baseUrl);
-  url.pathname = `/sessions/${encodeURIComponent(sessionId)}/dossier`;
-  url.search = "";
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`session dossier failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true; dossier: SessionDossierDto };
+  const body = await getJson<{ ok: true; dossier: SessionDossierDto }>(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/dossier`, {
+    label: "session dossier",
+    signal: options.signal
+  });
   return body.dossier;
 }
 
@@ -823,16 +789,11 @@ export async function getSessionTranscript(
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
 ): Promise<SessionTranscriptResult> {
-  const url = new URL(baseUrl);
-  url.pathname = `/sessions/${encodeURIComponent(sessionId)}/transcript`;
-  url.search = "";
-  if (input.cursor) url.searchParams.set("cursor", input.cursor);
-  if (input.limit) url.searchParams.set("limit", String(input.limit));
-  if (input.kind) url.searchParams.set("kind", input.kind);
-  if (input.q) url.searchParams.set("q", input.q);
-  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`session transcript failed: ${response.status}`);
-  const body = (await response.json()) as { ok: true } & SessionTranscriptResult;
+  const body = await getJson<{ ok: true } & SessionTranscriptResult>(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript`, {
+    label: "session transcript",
+    query: { cursor: input.cursor, limit: input.limit, kind: input.kind, q: input.q },
+    signal: options.signal
+  });
   return {
     coverage: body.coverage,
     items: body.items,
