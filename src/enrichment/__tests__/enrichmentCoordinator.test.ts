@@ -6,7 +6,7 @@ import { readCurrentSessionEnrichment, readSessionEnrichment } from "../../daemo
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { createDeterministicEnrichmentProvider } from "../deterministicProvider.ts";
-import { createEnrichmentCoordinator, EnrichmentFailedError } from "../enrichmentCoordinator.ts";
+import { createEnrichmentCoordinator, EnrichmentFailedError, shouldReplaceSessionTitle } from "../enrichmentCoordinator.ts";
 import type { SessionEnrichmentProvider } from "../provider.ts";
 
 const tempDirs: string[] = [];
@@ -99,26 +99,42 @@ describe("enrichment coordinator", () => {
     db.close();
   });
 
-  test("ensureCurrent backs off recent failed enrichment for unchanged facts", async () => {
+  test("ensureCurrent backs off recent timeout enrichment for unchanged facts", async () => {
     const db = await openTestDatabase();
     seedSession(db);
-    const provider = countingFailingProvider("validation_failed");
+    const provider = countingFailingProvider("timeout");
     let now = Date.parse("2026-06-25T12:00:00.000Z");
     const coordinator = createEnrichmentCoordinator(db, provider, {
       failureBackoffMs: 10 * 60_000,
       now: () => now
     });
 
-    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "timeout" });
     const backedOff = await coordinator.ensureCurrent("session-1");
 
     now += 10 * 60_000 + 1;
-    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "timeout" });
 
     expect(backedOff).toMatchObject({
-      failureCode: "validation_failed",
+      failureCode: "timeout",
       status: "failed"
     });
+    expect(provider.calls()).toBe(2);
+    db.close();
+  });
+
+  test("ensureCurrent retries validation failures without stale-failure backoff", async () => {
+    const db = await openTestDatabase();
+    seedSession(db);
+    const provider = countingFailingProvider("validation_failed");
+    const coordinator = createEnrichmentCoordinator(db, provider, {
+      failureBackoffMs: 10 * 60_000,
+      now: () => Date.parse("2026-06-25T12:00:00.000Z")
+    });
+
+    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+
     expect(provider.calls()).toBe(2);
     db.close();
   });
@@ -138,6 +154,25 @@ describe("enrichment coordinator", () => {
       provider: "test-provider",
       status: "timeout"
     });
+  });
+
+  test("does not replace a high-confidence ended title with lower-confidence provider output", () => {
+    const current = {
+      basis: "dominant_work" as const,
+      confidence: "high" as const,
+      evidenceRefs: [],
+      text: "Durable ended session title"
+    };
+    const lower = {
+      basis: "fallback" as const,
+      confidence: "low" as const,
+      evidenceRefs: [],
+      text: "Masthead imported evidence"
+    };
+
+    expect(shouldReplaceSessionTitle({ current, incoming: lower, lifecycle: "ended" })).toBe(false);
+    expect(shouldReplaceSessionTitle({ current: lower, incoming: current, lifecycle: "ended" })).toBe(true);
+    expect(shouldReplaceSessionTitle({ current, incoming: lower, lifecycle: "running" })).toBe(true);
   });
 });
 

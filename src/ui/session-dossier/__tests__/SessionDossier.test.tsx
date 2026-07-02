@@ -85,6 +85,170 @@ describe("SessionDossier", () => {
     root.unmount();
   });
 
+  test("renders durable title, summary, purpose, outcome, verification, and continuation before diagnostics", () => {
+    const currentDossier = dossier();
+    currentDossier.durableEnrichment = {
+      sessionDossier: {
+        blockers: [],
+        continuation: {
+          constraints: ["Keep diagnostics below durable memory."],
+          nextStep: "Run the full Dossier verification suite.",
+          openQuestions: []
+        },
+        decisions: ["Use durable memory before live transcript summary."],
+        evidenceRefs: [],
+        keyWork: ["Added durable Dossier work capsule."],
+        outcome: "Dossier durable memory appears before diagnostics.",
+        purpose: "Prioritize durable work memory in the Dossier.",
+        verification: {
+          commands: ["vitest"],
+          evidenceRefs: [],
+          failures: [],
+          status: "passed",
+          summary: "Dossier durable memory tests passed."
+        },
+        warnings: []
+      },
+      sessionSummary: {
+        confidence: "high",
+        evidenceRefs: [],
+        state: "completed",
+        text: "Moved durable Dossier purpose, outcome, verification, and continuation above diagnostics."
+      },
+      sessionTitle: {
+        basis: "dominant_work",
+        confidence: "high",
+        evidenceRefs: [],
+        text: "Durable Dossier memory priority"
+      },
+      version: "session-capsule-v4"
+    };
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
+    const memoryIndex = html.indexOf("data-dossier-section=\"durable-memory\"");
+    const diagnosticIndex = html.indexOf("data-dossier-section=\"diagnostic-coverage\"");
+
+    expect(memoryIndex).toBeGreaterThan(-1);
+    expect(diagnosticIndex).toBeGreaterThan(memoryIndex);
+    expect(html).toContain("Durable Dossier memory priority");
+    expect(html).toContain("Prioritize durable work memory in the Dossier.");
+    expect(html).toContain("Dossier durable memory tests passed.");
+    expect(html).toContain("Run the full Dossier verification suite.");
+  });
+
+  test("renders durable memory as paragraphs instead of summary fact cards", () => {
+    const currentDossier = dossier();
+    currentDossier.durableEnrichment = {
+      sessionDossier: {
+        blockers: ["Missing saved live Google-auth state for PRD flow"],
+        continuation: {
+          constraints: [],
+          nextStep: "Restore corrected launch-polish commit to production.",
+          openQuestions: []
+        },
+        decisions: ["Proceed with restore plan after regression fix."],
+        evidenceRefs: [],
+        keyWork: ["Created launch-polish branches in two repos."],
+        outcome: "Deployment changes implemented; production go/no-go pending live auth state.",
+        purpose: "Document a durable record of the launch polish effort.",
+        verification: {
+          commands: [],
+          evidenceRefs: [],
+          failures: [],
+          status: "mixed",
+          summary: "Local and automated gates passed except paid flow proof."
+        },
+        warnings: []
+      },
+      sessionSummary: {
+        confidence: "high",
+        evidenceRefs: [],
+        state: "completed",
+        text: "Imported historical Pip session evidence with durable enrichment context."
+      },
+      sessionTitle: {
+        basis: "dominant_work",
+        confidence: "high",
+        evidenceRefs: [],
+        text: "Pip launch polish deploy session"
+      },
+      version: "session-capsule-v4"
+    };
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
+    const memoryStart = html.indexOf('data-dossier-section="durable-memory"');
+    const memoryEnd = html.indexOf('data-dossier-section="summary"', memoryStart);
+    const memoryHtml = html.slice(memoryStart, memoryEnd);
+
+    expect(memoryHtml).toContain("durable-paragraph");
+    expect(memoryHtml).toContain("Document a durable record of the launch polish effort.");
+    expect(memoryHtml).toContain("Proceed with restore plan after regression fix.");
+    expect(memoryHtml).not.toContain("summary-grid");
+    expect(memoryHtml).not.toContain("summary-fact");
+  });
+
+  test("uses neutral durable summary and plain-language retrieval notes in default dossier", () => {
+    const currentDossier = dossier();
+    currentDossier.narrative.finalAssistantMessage =
+      "I found a precise root cause and fix: the app does not support hash routes, but it leaves #settings in the address bar.";
+    currentDossier.reuse.copyableContext = [
+      "# Masthead Session Context",
+      "Canonical session: session:06850bab04dbc2101a3a380fd866b66d7",
+      "Files:",
+      "- src/app/App.tsx",
+      "Tools:",
+      "- shell: succeeded"
+    ].join("\n");
+    currentDossier.durableEnrichment = {
+      sessionDossier: {
+        blockers: [],
+        continuation: {
+          constraints: ["Keep the visible Dossier copy in plain language."],
+          nextStep: "Verify the Settings route opens without a lingering hash.",
+          openQuestions: []
+        },
+        decisions: ["Use startup cleanup instead of supporting hash routes."],
+        evidenceRefs: [],
+        keyWork: ["Removed the unsupported Settings hash from the startup path."],
+        outcome: "The Settings route no longer leaves an unsupported hash in the address bar.",
+        purpose: "Clean up unsupported Settings hash routing.",
+        verification: {
+          commands: [],
+          evidenceRefs: [],
+          failures: [],
+          status: "passed",
+          summary: "App route behavior was verified."
+        },
+        warnings: []
+      },
+      sessionSummary: {
+        confidence: "high",
+        evidenceRefs: [],
+        state: "completed",
+        text: "The session cleaned up unsupported Settings hash routing and verified the app no longer leaves the hash behind."
+      },
+      sessionTitle: {
+        basis: "dominant_work",
+        confidence: "high",
+        evidenceRefs: [],
+        text: "Settings hash route cleanup"
+      },
+      version: "session-capsule-v4"
+    };
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
+
+    expect(html).toContain("The session cleaned up unsupported Settings hash routing");
+    expect(html).not.toContain("I found a precise root cause");
+    expect(html).toContain("Clean up unsupported Settings hash routing.");
+    expect(html).toContain("Removed the unsupported Settings hash from the startup path.");
+    expect(html).toContain("Verify the Settings route opens without a lingering hash.");
+    expect(html).not.toContain("# Masthead Session Context");
+    expect(html).not.toContain("session:06850bab04dbc2101a3a380fd866b66d7");
+    expect(html).not.toContain("src/app/App.tsx");
+    expect(html).not.toContain("shell: succeeded");
+  });
+
   test("keeps transcript filter loading state out of the enrichment summary", async () => {
     const host = document.createElement("div");
     const root = createRoot(host);
@@ -99,6 +263,42 @@ describe("SessionDossier", () => {
     expect(summary?.textContent).not.toContain("Loading transcript evidence");
     expect(transcript?.textContent).toContain("Loading transcript");
     root.unmount();
+  });
+
+  test("shows a stable enrichment loading state before dossier data arrives", () => {
+    const html = renderToStaticMarkup(<SessionDossier loading />);
+
+    expect(html).toContain("Enriching data, please stand by");
+    expect(html).toContain("dossier-loading-state");
+    expect(html).toContain("dossier-loading-spinner");
+    expect(html).not.toContain("Loading canonical session dossier");
+  });
+
+  test("does not render legacy capsule copy as current enrichment", () => {
+    const legacy = dossier();
+    legacy.durableEnrichment = undefined;
+    legacy.identity.title = "Codex hook event";
+    legacy.narrative.narrativeDebug = {
+      model: "gpt-5-nano",
+      promptVersion: "session-capsule-v2",
+      provider: "openai",
+      providerStatus: "success",
+      sourceRefs: [],
+      validationWarnings: []
+    };
+    legacy.narrative.liveSummary = "completed";
+    legacy.narrative.outcome = "completed";
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={legacy} />);
+
+    expect(html).toContain("not enriched");
+    expect(html).not.toContain("session-capsule-v2 / current");
+    expect(html).not.toContain("<p>completed.</p>");
+    expect(html).not.toContain("<p>completed</p>");
+    expect(html).not.toContain('data-dossier-section="technologies"');
+    expect(html).not.toContain("<span>auth</span>");
+    expect(html).not.toContain("<strong>success</strong>");
+    expect(html).not.toContain("<strong>Provider</strong><span>openai</span>");
   });
 
   test("uses enriched dossier values for evidence blocks instead of hard-coded topics", () => {
@@ -844,7 +1044,7 @@ function dossier(): SessionDossierDto {
       liveSummary: "Callback repair is being verified.",
       narrativeDebug: {
         model: "gpt-5-nano",
-        promptVersion: "session-capsule-v2",
+        promptVersion: "session-capsule-v4",
         provider: "openai",
         sourceRefs: [{ id: "source-ref-1", kind: "event", observedAt: "2026-06-25T23:00:00.000Z", source: "codex" }],
         subjectConfidence: "high",

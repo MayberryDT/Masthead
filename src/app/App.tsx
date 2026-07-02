@@ -107,6 +107,7 @@ export function App() {
   const [density, setDensity] = useState<CardDensity>("comfortable");
   const [motionDisabled, setMotionDisabled] = useState(() => readStoredMotionDisabled());
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [selectedSessionSnapshot, setSelectedSessionSnapshot] = useState<SessionDetailView>();
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
   const [liveConnection, setLiveConnection] = useState<ConnectionState>({ state: "connecting" });
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
@@ -207,11 +208,12 @@ export function App() {
     () => filterAttentionItemsForCards(board.attentionQueue, filteredCards),
     [board.attentionQueue, filteredCards]
   );
-  const filteredSelectedSession =
-    board.selectedSession && filteredCards.some((card) => card.sessionId === board.selectedSession?.sessionId)
-      ? board.selectedSession
-      : undefined;
-  const selectedBoardCanonicalSessionId = filteredSelectedSession?.canonicalSessionId;
+  const selectedLiveSession =
+    selectedSessionId && board.selectedSession?.sessionId === selectedSessionId ? board.selectedSession : undefined;
+  const modalSelectedSession =
+    selectedLiveSession ??
+    (selectedSessionSnapshot?.sessionId === selectedSessionId ? selectedSessionSnapshot : undefined);
+  const selectedBoardCanonicalSessionId = modalSelectedSession?.canonicalSessionId;
   const boardDetail = useBoardSessionDetailController({
     activeProjectionUrl,
     open: detailModalOpen,
@@ -286,6 +288,14 @@ export function App() {
     return () => window.removeEventListener("keydown", focusSearch);
   }, []);
 
+  useEffect(() => {
+    if (!detailModalOpen) {
+      setSelectedSessionSnapshot(undefined);
+      return;
+    }
+    if (selectedLiveSession) setSelectedSessionSnapshot(selectedLiveSession);
+  }, [detailModalOpen, selectedLiveSession]);
+
   const loadLiveProjection = useCallback(async () => {
     const requestId = liveRequestIdRef.current + 1;
     liveRequestIdRef.current = requestId;
@@ -341,6 +351,7 @@ export function App() {
   }, [loadLiveProjection, refreshRateMs]);
 
   const handleOpenSession = (sessionId: string) => {
+    setSelectedSessionSnapshot(undefined);
     setSelectedSessionId(sessionId);
     setDetailModalOpen(true);
   };
@@ -598,9 +609,9 @@ export function App() {
         motionMode={motionDisabled ? "off" : "daily"}
       />
 
-      {detailModalOpen && filteredSelectedSession ? (
+      {detailModalOpen && modalSelectedSession ? (
         <SessionDetailModal
-          session={filteredSelectedSession}
+          session={modalSelectedSession}
           onClose={() => setDetailModalOpen(false)}
           onAction={handleSessionAction}
           dossier={boardDetail.dossier}
@@ -621,7 +632,7 @@ export function App() {
             setActiveSurface("sources");
           }}
           actionStatus={
-            sessionActionStatus && sessionActionStatus.sessionId === filteredSelectedSession.sessionId
+            sessionActionStatus && sessionActionStatus.sessionId === modalSelectedSession.sessionId
               ? sessionActionStatus.message
               : undefined
           }

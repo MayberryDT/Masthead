@@ -83,7 +83,9 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
           });
         }
         return parseLlmNarrativeResult({
+          evidenceCatalog: narrative.evidenceCatalog,
           fallback: narrative.fallback,
+          facts: narrative.facts,
           latencyMs,
           model,
           outputText,
@@ -122,7 +124,7 @@ function buildRequestPayload(
         { role: "system", content: narrativeInstructions() },
         { role: "user", content: input }
       ],
-      max_tokens: 360,
+      max_tokens: LLM_NARRATIVE_MAX_OUTPUT_TOKENS,
       response_format: { type: "json_object" },
       temperature: 0
     };

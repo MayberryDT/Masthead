@@ -1,7 +1,9 @@
 import { basename, dirname, isAbsolute, sep } from "node:path";
 import { isHighRiskPath } from "../../core/risk.ts";
 import type { EvidenceRef } from "../../core/types.ts";
+import { SESSION_CAPSULE_PROMPT_VERSION } from "../../enrichment/sessionCompiler.ts";
 import type { SessionCapsule } from "../../enrichment/types.ts";
+import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
 import type {
   SessionDossierAttention,
   SessionDossierCoverage,
@@ -108,13 +110,16 @@ export function getSessionDossier(db: MastheadDatabase, sessionId: string): Sess
   const attention = getAttention(tools, runtimeSignals, verification, files);
   const usage = getUsage(db, sessionId);
   const coverage = getDossierCoverage(db, sessionId, files, tools, runtimeSignals, attention, usage, verification);
-  const narrative = withCoverageCaveat(getNarrative(db, sessionId, identity, messages), coverage);
+  const durableEnrichment = getDurableEnrichment(db, sessionId);
+  const dossierIdentity = durableEnrichment ? { ...identity, title: durableEnrichment.sessionTitle.text } : identity;
+  const narrative = withCoverageCaveat(getNarrative(db, sessionId, dossierIdentity, messages), coverage);
   const partial: DossierWithoutReuse = {
     attention,
     coverage,
+    durableEnrichment,
     excerpts: getExcerpts(messages, checkpoints, runtimeSignals),
     files,
-    identity,
+    identity: dossierIdentity,
     narrative,
     timeline: getTimeline(messages, tools, files, checkpoints, runtimeSignals, attention),
     tools,
@@ -122,11 +127,11 @@ export function getSessionDossier(db: MastheadDatabase, sessionId: string): Sess
     verification
   };
   const reuse = {
-    canonicalSessionId: identity.sessionId,
+    canonicalSessionId: dossierIdentity.sessionId,
     mcpIncluded: isMcpIncluded(db, sessionId),
-    sourceConfidence: identity.sourceConfidence,
-    sourceRuntime: identity.runtime,
-    sourceSessionId: identity.sourceSessionId
+    sourceConfidence: dossierIdentity.sourceConfidence,
+    sourceRuntime: dossierIdentity.runtime,
+    sourceSessionId: dossierIdentity.sourceSessionId
   };
   return { ...partial, reuse: { ...reuse, copyableContext: buildCopyableContext(partial, reuse.mcpIncluded) } } as SessionDossierDto;
 }
@@ -435,8 +440,8 @@ function getNarrative(
   identity: SessionDossierIdentity,
   messages: MessageRow[]
 ): SessionDossierNarrative {
-  const enrichment = readCurrentSessionEnrichment(db, sessionId, "session_capsule");
-  const latestFailure = readLatestFailedSessionEnrichment(db, sessionId, "session_capsule");
+  const enrichment = readCurrentSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
+  const latestFailure = readLatestFailedSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
   const capsule = enrichment?.content as SessionCapsule | undefined;
   const userMessages = messages.filter((message) => message.role === "user");
   const assistantMessages = messages.filter((message) => message.role === "assistant");
@@ -480,6 +485,26 @@ function getNarrative(
     topics: capsule?.topics ?? getSessionTopics(db, sessionId),
     unresolved: capsule?.unresolved?.map((claim) => claim.text).filter(Boolean) ?? []
   };
+}
+
+function getDurableEnrichment(db: MastheadDatabase, sessionId: string): DurableSessionEnrichment | undefined {
+  const enrichment = readCurrentSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
+  const capsule = enrichment?.content as SessionCapsule | undefined;
+  if (!enrichment || !capsule) return undefined;
+  if (capsule.durableEnrichment) return capsule.durableEnrichment;
+  if (capsule.sessionTitle && capsule.sessionSummary && capsule.sessionDossier) {
+    return {
+      generatedAt: enrichment.generatedAt,
+      model: enrichment.model,
+      promptVersion: enrichment.promptVersion,
+      sessionDossier: capsule.sessionDossier,
+      sessionSummary: capsule.sessionSummary,
+      sessionTitle: capsule.sessionTitle,
+      source: enrichment.provider === "deterministic" ? "deterministic" : "remote_model",
+      version: "session-capsule-v4"
+    };
+  }
+  return undefined;
 }
 
 function withCoverageCaveat(narrative: SessionDossierNarrative, coverage: SessionDossierCoverage): SessionDossierNarrative {

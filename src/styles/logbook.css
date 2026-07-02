@@ -552,24 +552,44 @@
 }
 
 .logbook-session-button strong {
-  display: block;
+  display: -webkit-box;
   overflow: hidden;
   color: var(--ink);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
 }
 
 .logbook-session-button span,
 .logbook-snippet {
-  display: block;
+  display: -webkit-box;
   overflow: hidden;
   color: var(--mute);
   line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}
+
+.logbook-session-button .logbook-enrichment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.logbook-session-button .logbook-enrichment-chips span {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid rgba(116, 185, 224, 0.2);
+  border-radius: 3px;
+  color: var(--ash);
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  text-transform: none;
 }
 
 .logbook-snippet mark {

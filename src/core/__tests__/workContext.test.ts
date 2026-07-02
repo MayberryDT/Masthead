@@ -30,6 +30,39 @@ describe("work context", () => {
     expect(context.confidence).toBe("path_cluster");
   });
 
+  test("prefers recent event context over stale path clusters", () => {
+    const context = deriveWorkContext({
+      title: "Codex session",
+      branchOrWorktree: "agent/session-123",
+      events: [
+        event("The Board headline validator now compacts subject and disposition slots."),
+        event("Three-line clamp applied to session card headlines.")
+      ],
+      gitSnapshots: [snapshot("src/ui/settings/ProfilePanel.tsx"), snapshot("src/ui/settings/AccountPanel.tsx")]
+    });
+
+    expect(context.label).toBe("Board headline work");
+    expect(context.confidence).toBe("event_summary");
+    expect(context.sourceSignals).toContain("event:headline");
+  });
+
+  test("uses recent transcript context before stale path clusters", () => {
+    const context = deriveWorkContext({
+      title: "Codex session",
+      branchOrWorktree: "agent/session-123",
+      events: [],
+      gitSnapshots: [snapshot("src/ui/settings/ProfilePanel.tsx"), snapshot("src/ui/settings/AccountPanel.tsx")],
+      recentTranscriptMessages: [
+        "The Board headline validator now compacts subject and disposition slots.",
+        "Three-line clamp applied to session card headlines."
+      ]
+    });
+
+    expect(context.label).toBe("Board headline work");
+    expect(context.confidence).toBe("event_summary");
+    expect(context.sourceSignals).toContain("event:headline");
+  });
+
   test("does not leak long paths or secrets into source signals", () => {
     const context = deriveWorkContext({
       title: "Codex session",

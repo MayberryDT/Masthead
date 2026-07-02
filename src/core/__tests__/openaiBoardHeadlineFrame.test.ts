@@ -10,6 +10,13 @@ function facts(overrides: Partial<BoardHeadlineFacts> = {}): BoardHeadlineFacts 
     project: "Masthead",
     lifecycle: "running",
     primaryStatus: "editing",
+    transcriptExcerpt: [
+      {
+        observedAt: "2026-07-01T19:00:00.000Z",
+        role: "user",
+        text: "Use subject and disposition frames for Board headlines."
+      }
+    ],
     recentTranscriptMessages: ["Use subject and disposition frames for Board headlines."],
     recentFileBasenames: ["SessionCard.tsx"],
     changedFileCount: 1,
@@ -89,6 +96,7 @@ describe("OpenAI board headline frame", () => {
     expect(body.text.format.schema.required).toEqual(["subject", "disposition", "state", "subjectKind", "confidence", "evidence"]);
     expect(body.instructions).toContain("Do not summarize the session");
     expect(body.instructions).toContain("smallest concrete work object");
+    expect(body.instructions).toContain("facts.transcriptExcerpt");
     const expectedInput = input();
     expect(JSON.parse(body.input)).toEqual({
       lifecycle: expectedInput.lifecycle,
@@ -102,6 +110,12 @@ describe("OpenAI board headline frame", () => {
         changedFileCount: 1,
         recentFileBasenames: ["SessionCard.tsx"],
         recentToolNames: [],
+        transcriptExcerpt: [
+          {
+            role: "user",
+            text: "Use subject and disposition frames for Board headlines."
+          }
+        ],
         recentTranscriptMessages: ["Use subject and disposition frames for Board headlines."]
       }
     });
@@ -121,6 +135,23 @@ describe("OpenAI board headline frame", () => {
           '::git-stage{cwd="/tmp"}',
           "[url]",
           "sk-proj-secret"
+        ],
+        transcriptExcerpt: [
+          {
+            observedAt: "2026-07-01T19:00:00.000Z",
+            role: "assistant",
+            text: "Board headline frame keeps concrete subject evidence."
+          },
+          {
+            observedAt: "2026-07-01T19:00:01.000Z",
+            role: "user",
+            text: "/home/tyler/secret/path"
+          },
+          {
+            observedAt: "2026-07-01T19:00:02.000Z",
+            role: "assistant",
+            text: "sk-proj-secret"
+          }
         ],
         recentFileBasenames: ["SessionCard.tsx", "/home/tyler/secret/path"],
         recentEvents: [
@@ -158,6 +189,12 @@ describe("OpenAI board headline frame", () => {
       changedFileCount: 1,
       recentFileBasenames: ["SessionCard.tsx"],
       recentToolNames: ["apply_patch"],
+      transcriptExcerpt: [
+        {
+          role: "assistant",
+          text: "Board headline frame keeps concrete subject evidence."
+        }
+      ],
       recentTranscriptMessages: ["Board headline frame keeps concrete subject evidence."]
     });
 

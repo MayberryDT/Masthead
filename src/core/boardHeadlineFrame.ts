@@ -51,6 +51,10 @@ export type BoardHeadlineValidationResult =
       reason: "invalid_shape" | "weak_subject" | "weak_disposition" | "unsafe_text" | "unsupported_state";
     };
 
+const MAX_SUBJECT_LENGTH = 56;
+const MAX_DISPOSITION_LENGTH = 96;
+const MAX_EVIDENCE_LENGTH = 180;
+
 const allowedStates = new Set<BoardHeadlineState>([
   "active",
   "blocked",
@@ -120,12 +124,12 @@ export function validateBoardHeadlineFrame(candidate: unknown): BoardHeadlineVal
   if (!disposition) return { ok: false, reason: "weak_disposition" };
 
   const frame: BoardHeadlineFrame = {
-    subject: subject.slice(0, 96),
-    disposition: disposition.slice(0, 180),
+    subject: compactSlot(subject, MAX_SUBJECT_LENGTH),
+    disposition: compactSlot(disposition, MAX_DISPOSITION_LENGTH),
     state: candidate.state as BoardHeadlineState,
     subjectKind: candidate.subjectKind as BoardHeadlineSubjectKind,
     confidence: candidate.confidence as BoardHeadlineConfidence,
-    evidence: evidence.map((value) => value.slice(0, 180))
+    evidence: evidence.map((value) => compactSlot(value, MAX_EVIDENCE_LENGTH))
   };
 
   return { ok: true, frame };
@@ -134,10 +138,17 @@ export function validateBoardHeadlineFrame(candidate: unknown): BoardHeadlineVal
 export function isUnsafeText(value: string): boolean {
   return (
     hasUnsafeCredentialName(value) ||
+    hasInternalStatusToken(value) ||
     /\bsk-[A-Za-z0-9_-]+\b/i.test(value) ||
     /\bhttps?:\/\//i.test(value) ||
     /::[-\w]+\{[^}]*\}/i.test(value) ||
     /\[url\]/i.test(value)
+  );
+}
+
+function hasInternalStatusToken(value: string): boolean {
+  return /\b(?:api_error|completed_unreviewed|invalid_output|needs_attention|not_configured|validation_failed|waiting_for_approval|waiting_for_user)\b/i.test(
+    value
   );
 }
 
@@ -159,6 +170,15 @@ function hasUnsafeCredentialName(value: string): boolean {
 
 function cleanSlot(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function compactSlot(value: string, maxLength: number): string {
+  const cleaned = cleanSlot(value);
+  if (cleaned.length <= maxLength) return cleaned;
+  const candidate = cleaned.slice(0, maxLength + 1);
+  const wordBoundary = candidate.lastIndexOf(" ");
+  const compacted = wordBoundary >= Math.floor(maxLength * 0.65) ? candidate.slice(0, wordBoundary) : cleaned.slice(0, maxLength);
+  return compacted.replace(/[,:;.!?\s]+$/g, "").trim();
 }
 
 function lowercaseFirst(value: string): string {

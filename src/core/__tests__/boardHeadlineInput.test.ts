@@ -72,6 +72,28 @@ describe("board headline input", () => {
     expect(input.subjectCandidates).not.toContain("Investigate why Board");
   });
 
+  test("does not let settings file evidence override transcript headline work", () => {
+    const input = toBoardHeadlineInput({
+      lifecycle: "running",
+      primaryStatus: "editing",
+      signals: [],
+      facts: facts({
+        workContext: {
+          label: "Settings UI work",
+          confidence: "path_cluster",
+          pathClusters: ["settings"],
+          sourceSignals: ["path:settings"]
+        },
+        recentTranscriptMessages: ["The headlines are still bad because Changed-file review leaks raw completed_unreviewed copy."],
+        recentFileBasenames: ["SettingsPanel.tsx", "SettingsSurface.test.tsx"]
+      })
+    });
+
+    expect(input.subjectCandidates).toContain("Board headlines");
+    expect(input.subjectCandidates).not.toContain("Settings UI");
+    expect(input.subjectCandidates).not.toContain("SettingsPanel.tsx");
+  });
+
   test("maps known UI file basenames to domain subjects", () => {
     const input = toBoardHeadlineInput({
       lifecycle: "running",

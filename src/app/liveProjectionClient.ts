@@ -123,12 +123,16 @@ export function normalizeLiveBoardProjection(
   const expandedSession = projection.expandedSession
     ? normalizeCardHeadline(projection.expandedSession, projection.expandedSession.attentionItems, projection.expandedSession.conflicts)
     : undefined;
+  const projectedSelectedSession = projection.selectedSession
+    ? normalizeCardHeadline(projection.selectedSession, projection.selectedSession.attentionItems, projection.selectedSession.conflicts)
+    : undefined;
   const selectedSession =
     selectedSessionId === null
       ? undefined
-      : (projection.selectedSession
-          ? normalizeCardHeadline(projection.selectedSession, projection.selectedSession.attentionItems, projection.selectedSession.conflicts)
-          : undefined) ?? legacySelectedSession(selectedSessionId, expandedSession, cards, attentionBySession, conflictsBySession);
+      : selectedSessionId
+        ? (projectedSelectedSession?.sessionId === selectedSessionId ? projectedSelectedSession : undefined) ??
+          legacySelectedSession(selectedSessionId, expandedSession, cards, attentionBySession, conflictsBySession)
+        : projectedSelectedSession;
   const laneSessionIds: Record<LifecycleLaneId, string[]> = {
     running: [],
     idle: [],

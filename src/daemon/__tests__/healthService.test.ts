@@ -46,6 +46,7 @@ describe("buildMastheadHealth", () => {
       }
     );
 
+    expect(health.runtime.hookTranscriptCatchupEnabled).toBe(false);
     expect(health.data.sessions).toBe(3);
     expect(health.data.sources).toBe(0);
   });

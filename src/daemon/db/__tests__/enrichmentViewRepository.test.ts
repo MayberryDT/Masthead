@@ -51,7 +51,7 @@ describe("enrichment view repository", () => {
     seedCapsule(db, "session-c", "Reworked the card headline path to summarize the latest assistant output.", {
       generatedAt: "2026-06-24T12:05:00.000Z",
       id: "current-v3",
-      promptVersion: "session-capsule-v3"
+      promptVersion: "session-capsule-v4"
     });
 
     const enrichments = liveProjectionEnrichments(db, new Set(["source-c"]));
@@ -60,6 +60,91 @@ describe("enrichment view repository", () => {
       liveSummary: "Reworked the card headline path to summarize the latest assistant output.",
       title: "Reworked the card headline path to summarize the latest assistant output."
     });
+    db.close();
+  });
+
+  test("does not treat older current prompt versions as usable current enrichment", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-enrichment-view-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedSession(db, "session-old", "source-old");
+    seedCapsule(db, "session-old", "Validated App for Codex hook event.", {
+      generatedAt: "2026-06-24T12:10:00.000Z",
+      id: "old-v3",
+      promptVersion: "session-capsule-v3"
+    });
+
+    const enrichments = liveProjectionEnrichments(db, new Set(["source-old"]));
+
+    expect(enrichments.has("source-old")).toBe(false);
+    db.close();
+  });
+
+  test("persists durable title and summary in the current session capsule", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-enrichment-view-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedSession(db, "session-durable", "source-durable");
+    db.prepare(
+      `INSERT INTO session_enrichments (
+        enrichment_id, session_id, enrichment_kind, status, content_fingerprint, prompt_version,
+        provider, model, generated_at, content_json, source_refs_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "enrichment:durable",
+      "session-durable",
+      "session_capsule",
+      "current",
+      "fingerprint:durable",
+      "session-capsule-v4",
+      "openai",
+      "test-model",
+      "2026-06-24T12:05:00.000Z",
+      JSON.stringify({
+        candidateDecisions: [],
+        liveSummary: "Live summary remains separate from durable title.",
+        searchPhrases: [],
+        sessionDossier: {
+          blockers: [],
+          continuation: { constraints: [], openQuestions: [] },
+          decisions: [],
+          evidenceRefs: [],
+          keyWork: ["Added durable title fields."],
+          verification: {
+            commands: [],
+            evidenceRefs: [],
+            failures: [],
+            status: "unknown",
+            summary: "No verification was captured."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "high",
+          evidenceRefs: [],
+          state: "completed",
+          text: "Added durable title and summary fields to the persisted session capsule."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "high",
+          evidenceRefs: [],
+          text: "Durable capsule field persistence"
+        },
+        technologies: [],
+        title: "Durable capsule field persistence",
+        topics: [],
+        unresolved: []
+      }),
+      "[]"
+    );
+
+    const view = liveProjectionEnrichments(db, new Set(["source-durable"])).get("source-durable");
+
+    expect(view?.sessionTitle?.text).toBe("Durable capsule field persistence");
+    expect(view?.sessionSummary?.text).toContain("persisted session capsule");
     db.close();
   });
 });
@@ -107,7 +192,7 @@ function seedCapsule(
     "session_capsule",
     "current",
     `fingerprint:${options.id ?? sessionId}`,
-    options.promptVersion ?? "session-capsule-v1",
+    options.promptVersion ?? "session-capsule-v4",
     "local",
     "deterministic",
     options.generatedAt ?? "2026-06-24T12:05:00.000Z",

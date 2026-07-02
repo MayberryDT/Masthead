@@ -5475,9 +5475,14 @@ body {
 .observability-console .session-card .headline-text,
 .masthead-shell .session-card .headline-text {
   position: relative;
+  display: -webkit-box;
   z-index: 1;
   grid-area: 1 / 1;
   min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 @media (prefers-reduced-motion: no-preference) {

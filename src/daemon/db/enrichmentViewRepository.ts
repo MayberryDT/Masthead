@@ -1,5 +1,6 @@
 import type { SessionCapsule, SessionEnrichmentStatus } from "../../enrichment/types.ts";
 import { SESSION_CAPSULE_PROMPT_VERSION } from "../../enrichment/sessionCompiler.ts";
+import type { SessionDossierEnrichment, SessionSummaryEnrichment, SessionTitleEnrichment } from "../../shared/sessionEnrichment.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type SessionEnrichmentView = {
@@ -23,6 +24,9 @@ export type SessionEnrichmentView = {
   searchText?: string;
   provider?: string;
   model?: string;
+  sessionTitle?: SessionTitleEnrichment;
+  sessionSummary?: SessionSummaryEnrichment;
+  sessionDossier?: SessionDossierEnrichment;
 };
 
 export type LiveProjectionEnrichment = {
@@ -42,6 +46,9 @@ export type LiveProjectionEnrichment = {
   provider?: string;
   model?: string;
   status?: string;
+  sessionTitle?: SessionTitleEnrichment;
+  sessionSummary?: SessionSummaryEnrichment;
+  sessionDossier?: SessionDossierEnrichment;
 };
 
 type EnrichmentRow = {
@@ -73,10 +80,11 @@ export function currentSessionEnrichmentView(db: MastheadDatabase, sessionId: st
       FROM session_enrichments
       WHERE session_id = ?
         AND status = 'current'
+        AND prompt_version = ?
         AND enrichment_kind IN ('session_capsule', 'live_summary', 'search_projection')
       ORDER BY enrichment_kind ASC, COALESCE(generated_at, '') DESC, enrichment_id DESC`
     )
-    .all(sessionId) as EnrichmentRow[];
+    .all(sessionId, SESSION_CAPSULE_PROMPT_VERSION) as EnrichmentRow[];
   return rows.length > 0 ? rowsToView(sessionId, rows) : undefined;
 }
 
@@ -97,10 +105,11 @@ export function currentSessionEnrichmentViews(db: MastheadDatabase, sessionIds: 
       FROM session_enrichments
       WHERE session_id IN (${sessionIds.map(() => "?").join(", ")})
         AND status = 'current'
+        AND prompt_version = ?
         AND enrichment_kind IN ('session_capsule', 'live_summary', 'search_projection')
       ORDER BY session_id ASC, enrichment_kind ASC, COALESCE(generated_at, '') DESC, enrichment_id DESC`
     )
-    .all(...sessionIds) as EnrichmentRow[];
+    .all(...sessionIds, SESSION_CAPSULE_PROMPT_VERSION) as EnrichmentRow[];
   const bySession = new Map<string, EnrichmentRow[]>();
   for (const row of rows) {
     const current = bySession.get(row.sessionId) ?? [];
@@ -130,11 +139,12 @@ export function liveProjectionEnrichments(db: MastheadDatabase, sourceSessionIds
       FROM session_enrichments
       JOIN sessions ON sessions.session_id = session_enrichments.session_id
       WHERE session_enrichments.status = 'current'
+        AND session_enrichments.prompt_version = ?
         AND session_enrichments.enrichment_kind IN ('session_capsule', 'live_summary')
         ${sourceSessionFilter}
       ORDER BY sessions.source_session_id ASC, session_enrichments.enrichment_kind ASC, COALESCE(session_enrichments.generated_at, '') DESC, session_enrichments.enrichment_id DESC`
     )
-    .all(...(scopedSourceSessionIds ?? [])) as EnrichmentRow[];
+    .all(SESSION_CAPSULE_PROMPT_VERSION, ...(scopedSourceSessionIds ?? [])) as EnrichmentRow[];
 
   const bySession = new Map<string, EnrichmentRow[]>();
   for (const row of rows) {
@@ -160,6 +170,9 @@ export function liveProjectionEnrichments(db: MastheadDatabase, sourceSessionIds
           provider: view.provider,
           sourceSessionId,
           status: view.status,
+          sessionDossier: view.sessionDossier,
+          sessionSummary: view.sessionSummary,
+          sessionTitle: view.sessionTitle,
           subject: view.subject,
           technologies: view.technologies,
           title: view.title,
@@ -186,6 +199,9 @@ function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichment
   const capsule = contentFromRow<SessionCapsule>(capsuleRow);
   const liveSummary = contentFromRow<{ text?: string }>(liveSummaryRow);
   const searchProjection = contentFromRow<{ searchText?: string }>(searchProjectionRow);
+  const sessionTitle = capsule?.sessionTitle ?? capsule?.durableEnrichment?.sessionTitle;
+  const sessionSummary = capsule?.sessionSummary ?? capsule?.durableEnrichment?.sessionSummary;
+  const sessionDossier = capsule?.sessionDossier ?? capsule?.durableEnrichment?.sessionDossier;
   return {
     liveSummary: liveSummary?.text ?? capsule?.liveSummary,
     commandsSummary: capsule?.commandsSummary,
@@ -197,7 +213,10 @@ function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichment
     provider: capsuleRow?.provider ?? undefined,
     searchSummary: capsule?.searchSummary,
     searchText: searchProjection?.searchText,
+    sessionDossier,
     sessionId,
+    sessionSummary,
+    sessionTitle,
     status: "current",
     title: capsule?.title,
     titleSource: capsule?.titleSource,
@@ -211,11 +230,7 @@ function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichment
 
 function rowForKind(rows: EnrichmentRow[], kind: EnrichmentRow["enrichmentKind"]): EnrichmentRow | undefined {
   const candidates = rows.filter((candidate) => candidate.enrichmentKind === kind);
-  return candidates.find((candidate) => candidate.promptVersion === SESSION_CAPSULE_PROMPT_VERSION) ?? candidates.toSorted(compareEnrichmentRows)[0];
-}
-
-function compareEnrichmentRows(left: EnrichmentRow, right: EnrichmentRow): number {
-  return (right.generatedAt ?? "").localeCompare(left.generatedAt ?? "") || right.enrichmentId.localeCompare(left.enrichmentId);
+  return candidates.find((candidate) => candidate.promptVersion === SESSION_CAPSULE_PROMPT_VERSION);
 }
 
 function contentFromRow<T>(row: EnrichmentRow | undefined): T | undefined {

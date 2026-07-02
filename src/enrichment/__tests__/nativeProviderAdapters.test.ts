@@ -50,8 +50,9 @@ describe("native LLM enrichment providers", () => {
       system: string;
     };
     expect(body.model).toBe("claude-sonnet-4-6");
-    expect(body.max_tokens).toBe(360);
-    expect(body.system).toContain("You are writing session metadata for Masthead.");
+    expect(body.max_tokens).toBe(760);
+    expect(body.system).toContain("You are generating durable enrichment for a Masthead session.");
+    expect(body.system).toContain("neutral third-person");
     expect(body.messages[0]?.role).toBe("user");
     expect(body.messages[0]?.content).not.toContain("/home/tyler");
     expect(body.messages[0]?.content).not.toContain("OPENAI_API_KEY");
@@ -64,7 +65,11 @@ describe("native LLM enrichment providers", () => {
       "action",
       "object",
       "confidence",
-      "missingEvidence"
+      "missingEvidence",
+      "version",
+      "sessionTitle",
+      "sessionSummary",
+      "sessionDossier"
     ]);
   });
 
@@ -114,12 +119,13 @@ describe("native LLM enrichment providers", () => {
       };
       systemInstruction: { parts: Array<{ text: string }> };
     };
-    expect(body.systemInstruction.parts[0]?.text).toContain("You are writing session metadata for Masthead.");
+    expect(body.systemInstruction.parts[0]?.text).toContain("You are generating durable enrichment for a Masthead session.");
+    expect(body.systemInstruction.parts[0]?.text).toContain("neutral third-person");
     expect(body.contents[0]?.role).toBe("user");
     expect(body.contents[0]?.parts[0]?.text).not.toContain("/home/tyler");
     expect(body.contents[0]?.parts[0]?.text).not.toContain("OPENAI_API_KEY");
     expect(body.generationConfig).toMatchObject({
-      maxOutputTokens: 360,
+      maxOutputTokens: 760,
       responseMimeType: "application/json",
       temperature: 0
     });
@@ -131,7 +137,11 @@ describe("native LLM enrichment providers", () => {
       "action",
       "object",
       "confidence",
-      "missingEvidence"
+      "missingEvidence",
+      "version",
+      "sessionTitle",
+      "sessionSummary",
+      "sessionDossier"
     ]);
   });
 });

@@ -75,7 +75,7 @@ describe("live transcript facts repository", () => {
     db.close();
   });
 
-  test("drops progress-only assistant messages from live headline facts", async () => {
+  test("keeps substantive assistant progress messages for live headline facts", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-live-transcript-facts-"));
     tempDirs.push(tempDir);
     const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
@@ -87,6 +87,11 @@ describe("live transcript facts repository", () => {
     const facts = liveProjectionTranscriptFacts(db, new Set(["source-a"]));
 
     expect(facts.get("source-a")?.recentMessages).toEqual([
+      {
+        observedAt: "2026-06-24T12:03:00.000Z",
+        role: "assistant",
+        text: "I’m checking the local tests now."
+      },
       {
         observedAt: "2026-06-24T12:02:00.000Z",
         role: "user",

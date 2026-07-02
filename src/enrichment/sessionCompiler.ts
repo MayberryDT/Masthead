@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { EvidenceRef } from "../core/types";
 import { cleanSessionText, isUsefulSessionTitle } from "../shared/sessionTextQuality.ts";
 import type { SessionCapsule, SessionTitleSource } from "./types";
+import { fallbackDurableSessionEnrichment } from "./durableSessionEnrichment.ts";
 import { draftNarrativeFromFacts } from "./sessionNarrativeDraft.ts";
 import type { SessionNarrativeFacts } from "./sessionNarrativeFacts.ts";
 export type { SessionTitleSource } from "./types";
@@ -13,23 +14,23 @@ export type SessionFacts = {
   project: string;
   objective?: string;
   messages: string[];
+  userEvidence?: string[];
+  assistantEvidence?: string[];
   commands: string[];
   files: string[];
   evidence: EvidenceRef[];
   narrative?: SessionNarrativeFacts;
 };
 
-export const SESSION_CAPSULE_PROMPT_VERSION = "session-capsule-v3";
+export const SESSION_CAPSULE_PROMPT_VERSION = "session-capsule-v4";
 
 export function fingerprintSessionFacts(facts: SessionFacts): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
-        commands: facts.commands,
-        files: facts.files,
-        messages: facts.messages,
+        assistantEvidence: facts.assistantEvidence,
+        userEvidence: facts.userEvidence,
         objective: facts.objective,
-        narrative: facts.narrative,
         project: facts.project,
         sessionId: facts.sessionId,
         sourceSessionId: facts.sourceSessionId,
@@ -45,9 +46,11 @@ export function deterministicCapsuleFromFacts(facts: SessionFacts): SessionCapsu
   }
 
   const titleSelection = selectSessionTitle(facts);
+  const durableFields = durableCapsuleFields(facts);
   const capsule = {
     candidateDecisions: [],
     confidence: "medium",
+    ...durableFields,
     liveSummary: `${facts.project}: ${titleSelection.title}`,
     missingEvidence: ["narrative facts"],
     objective: facts.objective,
@@ -64,11 +67,13 @@ export function deterministicCapsuleFromFacts(facts: SessionFacts): SessionCapsu
 
 function capsuleFromNarrativeFacts(facts: SessionFacts): SessionCapsule {
   const draft = draftNarrativeFromFacts(facts.narrative as SessionNarrativeFacts);
+  const durableFields = durableCapsuleFields(facts);
   return {
     action: draft.action,
     candidateDecisions: [],
     commandsSummary: draft.commandsSummary,
     confidence: confidenceFromNarrativeCoverage(facts.narrative),
+    ...durableFields,
     filesChangedSummary: draft.filesChangedSummary,
     liveSummary: draft.liveSummary,
     objective: facts.objective,
@@ -86,6 +91,19 @@ function capsuleFromNarrativeFacts(facts: SessionFacts): SessionCapsule {
     unresolved: [],
     validationWarnings: draft.validationWarnings,
     verificationSummary: draft.verificationSummary
+  };
+}
+
+function durableCapsuleFields(facts: SessionFacts): Pick<SessionCapsule, "durableEnrichment" | "sessionDossier" | "sessionSummary" | "sessionTitle"> {
+  const durableEnrichment = {
+    ...fallbackDurableSessionEnrichment(facts),
+    promptVersion: SESSION_CAPSULE_PROMPT_VERSION
+  };
+  return {
+    durableEnrichment,
+    sessionDossier: durableEnrichment.sessionDossier,
+    sessionSummary: durableEnrichment.sessionSummary,
+    sessionTitle: durableEnrichment.sessionTitle
   };
 }
 

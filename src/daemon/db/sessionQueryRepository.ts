@@ -1,4 +1,5 @@
 import { firstUsefulSessionTitle } from "../../shared/sessionTextQuality.ts";
+import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../../shared/sessionEnrichment.ts";
 import { currentSessionEnrichmentViews, type SessionEnrichmentView } from "./enrichmentViewRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
@@ -22,6 +23,8 @@ export type SessionListItemDto = {
   toolCount: number;
   errorCount: number;
   enrichmentStatus?: "current" | "stale" | "failed" | "disabled" | "missing";
+  sessionTitle?: SessionTitleEnrichment;
+  sessionSummary?: SessionSummaryEnrichment;
   unresolved: string[];
   snippet?: string;
   sourceConfidence: "authoritative" | "inferred" | "heuristic";
@@ -458,6 +461,8 @@ function rowToListItem(row: SessionRow, snippet?: string, enrichment?: SessionEn
     project: row.project ?? undefined,
     runtime: row.runtime,
     sessionId: row.sessionId,
+    sessionSummary: enrichment?.sessionSummary,
+    sessionTitle: enrichment?.sessionTitle,
     snippet,
     sourceConfidence: row.sourceConfidence,
     sourceSessionId: row.sourceSessionId,
@@ -476,7 +481,7 @@ function bestSessionTitle(row: SessionRow, enrichment?: SessionEnrichmentView): 
     sourceSessionId: row.sourceSessionId
   };
   const title = firstUsefulSessionTitle(
-    [enrichment?.title, row.objective, row.title, enrichment?.liveSummary, enrichment?.subject, enrichment?.searchSummary, row.sourceSessionId],
+    [enrichment?.sessionTitle?.text, enrichment?.title, row.objective, row.title, enrichment?.subject, row.sourceSessionId],
     titleFacts
   );
   if (title) return title;

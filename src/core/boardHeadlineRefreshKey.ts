@@ -22,6 +22,18 @@ export function boardHeadlineRefreshKey(model: string, input: BoardHeadlineInput
 }
 
 function meaningfulTranscriptMessages(input: BoardHeadlineInput): string[] {
+  const excerptMessages = cleanList(
+    (input.facts.transcriptExcerpt ?? [])
+      .map((message) => {
+        const text = clean(message.text);
+        if (!text || isLowValueHeadlineEvidence(text)) return undefined;
+        return `${message.role}: ${text}`;
+      })
+      .filter((message): message is string => Boolean(message)),
+    20
+  );
+  if (excerptMessages.length > 0) return excerptMessages;
+
   return cleanList(input.facts.recentTranscriptMessages ?? [], 8).filter((message) => !isLowValueHeadlineEvidence(message));
 }
 

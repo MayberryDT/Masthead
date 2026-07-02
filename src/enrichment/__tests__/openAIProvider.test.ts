@@ -9,13 +9,17 @@ describe("OpenAI enrichment provider", () => {
       expect(String(url)).toBe("https://api.openai.com/v1/responses");
       const body = JSON.parse(String(init?.body)) as {
         input: string;
+        instructions: string;
         max_output_tokens: number;
         reasoning: { effort: string };
         text: { format: { schema: { required: string[] } } };
       };
+      const input = JSON.parse(body.input);
       expect(body.input).not.toContain("/home/tyler");
       expect(body.input).not.toContain("OPENAI_API_KEY");
-      expect(body.max_output_tokens).toBe(360);
+      expect(body.instructions).toContain("neutral third-person");
+      expect(body.instructions).toContain("Do not write from the assistant's perspective");
+      expect(body.max_output_tokens).toBe(760);
       expect(body.reasoning).toEqual({ effort: "minimal" });
       expect(body.text.format.schema.required).toEqual([
         "title",
@@ -25,24 +29,66 @@ describe("OpenAI enrichment provider", () => {
         "action",
         "object",
         "confidence",
-        "missingEvidence"
+        "missingEvidence",
+        "version",
+        "sessionTitle",
+        "sessionSummary",
+        "sessionDossier"
       ]);
-      expect(JSON.parse(body.input).facts.coverage).toMatchObject({
-        level: "complete",
-        messageCount: 2
-      });
-      expect(JSON.parse(body.input).facts.commands[0]).toMatchObject({
-        exitCode: 0,
-        name: "npm test -- --run src/mcp/__tests__/toolsList.test.ts",
-        status: "succeeded"
-      });
+      expect(input.evidenceCatalog).toEqual([]);
+      expect(Object.keys(input)).toEqual(["evidenceCatalog", "facts"]);
+      expect(Object.keys(input.facts).sort()).toEqual(["assistantEvidence", "userEvidence"]);
+      expect(input.facts.userEvidence).toEqual([
+        "Fix MCP launch config validation before review.",
+        "Make sure the Dossier copy stays neutral."
+      ]);
+      expect(input.facts.assistantEvidence).toEqual([
+        "Added validation and tools-list coverage for MCP launch config.",
+        "The Dossier summary now describes the session in neutral language."
+      ]);
       return responseWithOutput({
         confidence: "high",
-        liveSummary: "MCP launch config validation has tools-list coverage.",
+        liveSummary: "Durable enrichment provider returned structured session copy.",
+        action: "generate",
+        object: "structured session copy",
         missingEvidence: [],
-        outcome: "Added validation and tools-list coverage for MCP launch config.",
-        searchSummary: "Masthead session for MCP launch config validation with tools-list coverage.",
-        title: "MCP launch config validation"
+        outcome: "Structured session copy was generated.",
+        searchSummary: "Durable title, summary, and dossier enrichment were generated.",
+        sessionDossier: {
+          blockers: [],
+          continuation: {
+            constraints: [],
+            nextStep: "Persist the durable fields.",
+            openQuestions: []
+          },
+          decisions: [],
+          evidenceRefIds: [],
+          keyWork: ["Generated durable title and archival summary."],
+          outcome: "Durable title, summary, and Dossier sections were generated.",
+          purpose: "Generate structured session copy.",
+          verification: {
+            commands: ["vitest"],
+            evidenceRefIds: [],
+            failures: [],
+            status: "passed",
+            summary: "Provider parsing test passed."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "high",
+          evidenceRefIds: [],
+          state: "completed",
+          text: "Generated structured session copy with durable title, archival summary, and Dossier sections."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "high",
+          evidenceRefIds: [],
+          text: "Structured session copy generation"
+        },
+        title: "Legacy compatible title",
+        version: "session-capsule-v4"
       });
     });
     const provider = createOpenAIEnrichmentProvider({
@@ -60,12 +106,15 @@ describe("OpenAI enrichment provider", () => {
     expect(result.source).toBe("llm");
     expect(result.provider).toBe("openai");
     expect(result.model).toBe("test-model");
-    expect(result.capsule?.title).toBe("MCP launch config validation");
+    expect(result.capsule?.title).toBe("Structured session copy generation");
     expect(result.capsule?.titleSource).toBe("llm");
     expect(result.capsule?.confidence).toBe("high");
     expect(result.capsule?.missingEvidence).toEqual([]);
-    expect(result.capsule?.liveSummary).toBe("MCP launch config validation has tools-list coverage.");
-    expect(result.capsule?.searchSummary).toContain("tools-list coverage");
+    expect(result.capsule?.liveSummary).toBe("Durable enrichment provider returned structured session copy.");
+    expect(result.capsule?.searchSummary).toContain("dossier enrichment");
+    expect(result.capsule?.sessionTitle?.text).toBe("Structured session copy generation");
+    expect(result.capsule?.sessionSummary?.text).toContain("Generated structured session copy");
+    expect(result.capsule?.sessionDossier?.verification.status).toBe("passed");
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
@@ -164,6 +213,71 @@ describe("OpenAI enrichment provider", () => {
     expect(result.validationFailures).toContain("title");
   });
 
+  test("keeps structured LLM enrichment when soft narrative copy rules fail", async () => {
+    const provider = createOpenAIEnrichmentProvider({
+      apiKey: "test-key",
+      enabled: true,
+      fetchImpl: vi.fn(async () =>
+        responseWithOutput({
+          confidence: "high",
+          liveSummary:
+            "This archived session captured Dossier enrichment work with robust transcript evidence, enough detail for Logbook reuse, and follow-up notes for future agents.",
+          action: "generate",
+          object: "durable Dossier enrichment",
+          missingEvidence: [],
+          outcome: "Durable Dossier enrichment was generated for reuse.",
+          searchSummary:
+            "Durable Dossier enrichment, transcript evidence, Logbook reuse, structured session summary, and future-agent continuation notes.",
+          sessionDossier: {
+            blockers: [],
+            continuation: {
+              constraints: [],
+              nextStep: "Use the durable Dossier summary in the modal.",
+              openQuestions: []
+            },
+            decisions: ["Keep the Dossier summary neutral."],
+            evidenceRefIds: [],
+            keyWork: ["Generated structured Dossier enrichment from transcript evidence."],
+            outcome: "Structured durable Dossier enrichment was generated.",
+            purpose: "Summarize the session for later retrieval.",
+            verification: {
+              commands: [],
+              evidenceRefIds: [],
+              failures: [],
+              status: "unknown",
+              summary: "No verification command evidence was provided."
+            },
+            warnings: []
+          },
+          sessionSummary: {
+            confidence: "high",
+            evidenceRefIds: [],
+            state: "completed",
+            text: "Generated neutral Dossier enrichment from transcript evidence for later retrieval."
+          },
+          sessionTitle: {
+            basis: "dominant_work",
+            confidence: "high",
+            evidenceRefIds: [],
+            text: "Dossier enrichment generation"
+          },
+          title: "Codex session",
+          version: "session-capsule-v4"
+        })
+      )
+    });
+
+    const result = await provider.enrich({ facts: facts() });
+
+    expect(result.status).toBe("success");
+    expect(result.source).toBe("llm");
+    expect(result.capsule?.title).toBe("Dossier enrichment generation");
+    expect(result.capsule?.sessionDossier?.purpose).toBe("Summarize the session for later retrieval.");
+    expect(result.capsule?.validationWarnings).toEqual(
+      expect.arrayContaining(["title:generic", "liveSummary:too_long"])
+    );
+  });
+
   test("returns disabled without deterministic fallback when OpenAI enrichment is disabled", async () => {
     const fetchImpl = vi.fn();
     const provider = createOpenAIEnrichmentProvider({
@@ -248,6 +362,11 @@ function facts(): SessionFacts {
     evidence: [],
     files: ["/home/tyler/.codex/worktrees/7c35/Masthead/src/ui/AgentAccessPanel.tsx"],
     messages: ["Fix MCP launch config validation before review."],
+    userEvidence: ["Fix MCP launch config validation before review.", "Make sure the Dossier copy stays neutral."],
+    assistantEvidence: [
+      "Added validation and tools-list coverage for MCP launch config.",
+      "The Dossier summary now describes the session in neutral language."
+    ],
     narrative: {
       buildFailed: false,
       buildPassed: false,

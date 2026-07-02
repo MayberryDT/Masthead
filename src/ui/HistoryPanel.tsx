@@ -9,6 +9,7 @@ import type {
   LogbookSummary,
   SourceStatus
 } from "../app/daemonClient";
+import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
 import { LogbookFacets } from "./logbook/LogbookFacets";
 import { LogbookTable } from "./logbook/LogbookTable";
 import { LogbookToolbar } from "./logbook/LogbookToolbar";
@@ -77,6 +78,9 @@ export type LogbookSession = {
   fileCount?: number;
   toolCount?: number;
   errorCount?: number;
+  enrichmentStatus?: "current" | "stale" | "failed" | "disabled" | "missing";
+  sessionTitle?: SessionTitleEnrichment;
+  sessionSummary?: SessionSummaryEnrichment;
   sourceConfidence?: "authoritative" | "inferred" | "heuristic";
 };
 

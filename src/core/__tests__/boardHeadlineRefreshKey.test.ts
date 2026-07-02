@@ -16,6 +16,13 @@ function input(overrides: Partial<BoardHeadlineInput> = {}): BoardHeadlineInput 
       project: "Masthead",
       lifecycle: "running",
       primaryStatus: "editing",
+      transcriptExcerpt: [
+        {
+          observedAt: "2026-07-01T12:00:00.000Z",
+          role: "user",
+          text: "Board headlines should refresh from transcript messages."
+        }
+      ],
       recentTranscriptMessages: ["Board headlines should refresh from transcript messages."],
       recentFileBasenames: ["SessionCard.tsx"],
       changedFileCount: 1,
@@ -37,6 +44,7 @@ describe("board headline refresh key", () => {
         input({
           facts: {
             ...input().facts,
+            transcriptExcerpt: [],
             recentTranscriptMessages: []
           }
         })
@@ -45,7 +53,7 @@ describe("board headline refresh key", () => {
   });
 
   test("returns undefined without transcript evidence", () => {
-    const key = boardHeadlineRefreshKey("gpt-test", input({ facts: { ...input().facts, recentTranscriptMessages: [] } }));
+    const key = boardHeadlineRefreshKey("gpt-test", input({ facts: { ...input().facts, transcriptExcerpt: [], recentTranscriptMessages: [] } }));
 
     expect(key).toBeUndefined();
   });
@@ -74,7 +82,35 @@ describe("board headline refresh key", () => {
       input({
         facts: {
           ...input().facts,
+          transcriptExcerpt: [
+            {
+              observedAt: "2026-07-01T12:01:00.000Z",
+              role: "assistant",
+              text: "Use the last assistant answer as headline evidence."
+            }
+          ],
           recentTranscriptMessages: ["Use the last assistant answer as headline evidence."]
+        }
+      })
+    );
+
+    expect(second).not.toBe(first);
+  });
+
+  test("changes when the transcript role changes even if the text is the same", () => {
+    const first = boardHeadlineRefreshKey("gpt-test", input());
+    const second = boardHeadlineRefreshKey(
+      "gpt-test",
+      input({
+        facts: {
+          ...input().facts,
+          transcriptExcerpt: [
+            {
+              observedAt: "2026-07-01T12:00:00.000Z",
+              role: "assistant",
+              text: "Board headlines should refresh from transcript messages."
+            }
+          ]
         }
       })
     );

@@ -87,7 +87,9 @@ export function createGeminiEnrichmentProvider(config: GeminiEnrichmentConfig = 
           });
         }
         return parseLlmNarrativeResult({
+          evidenceCatalog: narrative.evidenceCatalog,
           fallback: narrative.fallback,
+          facts: narrative.facts,
           latencyMs,
           model,
           outputText,

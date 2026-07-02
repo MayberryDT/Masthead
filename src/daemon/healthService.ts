@@ -52,6 +52,7 @@ export function buildMastheadHealth(
       startedAt: runtime.startedAt,
       mode: "primary",
       writable: true,
+      hookTranscriptCatchupEnabled: config.hookTranscriptCatchupEnabled,
       host: config.host,
       port: runtime.port()
     },

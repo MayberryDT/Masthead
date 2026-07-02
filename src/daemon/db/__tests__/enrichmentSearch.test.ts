@@ -42,6 +42,39 @@ describe("enrichment search", () => {
         objective: "Fix OAuth callback handling",
         searchSummary: "Masthead session for MCP launch config validation. Verification: tools-list test passed.",
         searchPhrases: ["OAuth callback", "authentication return path"],
+        sessionDossier: {
+          blockers: [],
+          continuation: {
+            constraints: [],
+            nextStep: "Keep durable title search indexed.",
+            openQuestions: []
+          },
+          decisions: [],
+          evidenceRefs: [],
+          keyWork: ["Indexed durable title fields."],
+          outcome: "Durable title and summary are searchable.",
+          purpose: "Refresh durable search projection.",
+          verification: {
+            commands: [],
+            evidenceRefs: [],
+            failures: [],
+            status: "unknown",
+            summary: "Search indexing was exercised."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "high",
+          evidenceRefs: [],
+          state: "completed",
+          text: "Added durable title and summary fields to Logbook search indexing."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "high",
+          evidenceRefs: [],
+          text: "Durable search projection"
+        },
         technologies: ["TypeScript"],
         title: "OAuth callback repair",
         topics: ["authentication"],
@@ -63,6 +96,9 @@ describe("enrichment search", () => {
       expect.objectContaining({ sessionId: "session-1" })
     ]);
     expect(searchSessions(db, { query: "tools-list", limit: 10 }).sessions).toEqual([
+      expect.objectContaining({ sessionId: "session-1" })
+    ]);
+    expect(searchSessions(db, { query: "durable", limit: 10 }).sessions).toEqual([
       expect.objectContaining({ sessionId: "session-1" })
     ]);
     db.close();

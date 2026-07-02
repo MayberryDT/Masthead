@@ -37,7 +37,6 @@ export function SessionBoard({
 }: Props) {
   const seenSessionIdsRef = useRef<Set<string> | null>(null);
   const semanticHeadlineSignaturesRef = useRef<Map<string, string> | null>(null);
-  const refreshPulseSignaturesRef = useRef<Map<string, string> | null>(null);
   const newSessionOrder = useMemo(() => {
     const seenSessionIds = seenSessionIdsRef.current;
     if (!seenSessionIds) return new Map<string, number>();
@@ -50,26 +49,15 @@ export function SessionBoard({
     if (!previousSignatures) return new Map<string, number>();
 
     const updatedSessionIds = cards
-      .filter((card) => previousSignatures.has(card.sessionId) && previousSignatures.get(card.sessionId) !== semanticHeadlineSignature(card))
+      .filter(
+        (card) =>
+          shouldAnimateHeadlineChange(card) &&
+          previousSignatures.has(card.sessionId) &&
+          previousSignatures.get(card.sessionId) !== semanticHeadlineSignature(card)
+      )
       .map((card) => card.sessionId);
     return new Map(updatedSessionIds.map((sessionId, index) => [sessionId, index]));
   }, [cards]);
-  const refreshPulseOrder = useMemo(() => {
-    const previousSemanticSignatures = semanticHeadlineSignaturesRef.current;
-    const previousRefreshSignatures = refreshPulseSignaturesRef.current;
-    if (!previousSemanticSignatures || !previousRefreshSignatures) return new Map<string, number>();
-
-    const pulsedSessionIds = cards
-      .filter((card) => {
-        if (!previousSemanticSignatures.has(card.sessionId)) return false;
-        if (previousSemanticSignatures.get(card.sessionId) !== semanticHeadlineSignature(card)) return false;
-        const nextRefreshSignature = refreshPulseSignature(card);
-        return nextRefreshSignature !== "" && previousRefreshSignatures.get(card.sessionId) !== nextRefreshSignature;
-      })
-      .map((card) => card.sessionId);
-    return new Map(pulsedSessionIds.map((sessionId, index) => [sessionId, index]));
-  }, [cards]);
-
   useEffect(() => {
     if (!seenSessionIdsRef.current) {
       seenSessionIdsRef.current = new Set(cards.map((card) => card.sessionId));
@@ -80,7 +68,6 @@ export function SessionBoard({
     }
 
     semanticHeadlineSignaturesRef.current = new Map(cards.map((card) => [card.sessionId, semanticHeadlineSignature(card)]));
-    refreshPulseSignaturesRef.current = new Map(cards.map((card) => [card.sessionId, refreshPulseSignature(card)]));
   }, [cards]);
 
   if (variant === "observability") {
@@ -103,7 +90,6 @@ export function SessionBoard({
                 isNew={newSessionOrder.has(card.sessionId)}
                 newCardIndex={newSessionOrder.get(card.sessionId)}
                 headlineUpdateIndex={headlineUpdateOrder.get(card.sessionId)}
-                refreshPulseIndex={refreshPulseOrder.get(card.sessionId)}
               />
             ))}
           </ObservabilityCardGrid>
@@ -157,7 +143,6 @@ export function SessionBoard({
                       isNew={newSessionOrder.has(sessionId)}
                       newCardIndex={newSessionOrder.get(sessionId)}
                       headlineUpdateIndex={headlineUpdateOrder.get(sessionId)}
-                      refreshPulseIndex={refreshPulseOrder.get(sessionId)}
                     />
                   ) : null;
                 })
@@ -181,21 +166,22 @@ function ObservabilityCardGrid({
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const previousLayoutRef = useRef<CardLayoutSnapshot | null>(null);
-  const previousOrderSignatureRef = useRef<string | null>(null);
+  const previousLayoutSignatureRef = useRef<string | null>(null);
   const orderSignature = cards.map((card) => card.sessionId).join("\u0000");
+  const layoutSignature = `${density}\u0000${orderSignature}`;
 
   useLayoutEffect(() => {
     const grid = gridRef.current;
     if (!grid) return;
 
     const previousLayout = previousLayoutRef.current;
-    const previousOrderSignature = previousOrderSignatureRef.current;
+    const previousLayoutSignature = previousLayoutSignatureRef.current;
     const nextLayout = captureCardLayout(grid);
 
     previousLayoutRef.current = nextLayout;
-    previousOrderSignatureRef.current = orderSignature;
+    previousLayoutSignatureRef.current = layoutSignature;
 
-    if (!previousLayout || previousOrderSignature === null || prefersReducedMotion()) {
+    if (!previousLayout || previousLayoutSignature === null || previousLayoutSignature === layoutSignature || prefersReducedMotion()) {
       return;
     }
 
@@ -331,8 +317,8 @@ function semanticHeadlineSignature(card: SessionCardView): string {
   return [card.headline.headline, card.title, card.project].join("\u0000");
 }
 
-function refreshPulseSignature(card: SessionCardView): string {
-  return card.headlineRefresh?.status === "success" ? card.headlineRefresh.requestedAt : "";
+function shouldAnimateHeadlineChange(card: SessionCardView): boolean {
+  return card.lifecycle === "running";
 }
 
 function laneDescription(laneId: LifecycleLaneView["laneId"]): string {

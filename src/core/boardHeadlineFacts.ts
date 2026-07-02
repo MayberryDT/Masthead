@@ -15,6 +15,7 @@ export type BoardHeadlineFacts = {
     summary: string;
     occurredAt: string;
   }>;
+  transcriptExcerpt?: BoardHeadlineTranscriptExcerpt[];
   recentTranscriptMessages?: string[];
   recentToolNames: string[];
   recentFileBasenames: string[];
@@ -27,6 +28,12 @@ export type BoardHeadlineFacts = {
     messages?: number;
   };
   canonicalEnrichment?: BoardCanonicalEnrichmentFacts;
+};
+
+export type BoardHeadlineTranscriptExcerpt = {
+  role: "user" | "assistant";
+  text: string;
+  observedAt: string;
 };
 
 export type BoardTranscriptMessageFact = {
@@ -51,6 +58,10 @@ export type BoardCanonicalEnrichmentFacts = {
   model?: string;
   status?: string;
 };
+
+const MAX_TRANSCRIPT_EXCERPT_MESSAGES = 20;
+const MAX_TRANSCRIPT_EXCERPT_TOTAL_CHARS = 10_000;
+const MAX_TRANSCRIPT_EXCERPT_MESSAGE_CHARS = 900;
 
 export function buildBoardHeadlineFacts(input: {
   card: Pick<
@@ -98,12 +109,8 @@ export function buildBoardHeadlineFacts(input: {
     .map((event) => event.summary)
     .filter((summary) => !isLowValueBoardHeadlineText(summary))
     .slice(0, 6);
-  const recentTranscriptMessages = unique(
-    (input.recentTranscriptMessages ?? [])
-      .toSorted((left, right) => right.observedAt.localeCompare(left.observedAt))
-      .map(transcriptMessageEvidence)
-      .filter(isString)
-  ).slice(0, 6);
+  const transcriptExcerpt = buildTranscriptExcerpt(input.recentTranscriptMessages ?? []);
+  const recentTranscriptMessages = transcriptExcerpt.map((message) => message.text);
   const nonEnrichmentEvidence = [
     project,
     title,
@@ -131,6 +138,7 @@ export function buildBoardHeadlineFacts(input: {
     project,
     recentCommandFailures,
     recentEvents,
+    transcriptExcerpt,
     recentTranscriptMessages,
     recentFileBasenames,
     recentToolNames,
@@ -184,16 +192,6 @@ function safeShortText(value: string): string | undefined {
   return cleaned.slice(0, 120);
 }
 
-function transcriptMessageEvidence(message: BoardTranscriptMessageFact): string | undefined {
-  const neutralized = neutralizeTranscriptText(message.text).replace(/\s+/g, " ").trim();
-  if (message.role === "assistant" && isAssistantProgressMessage(neutralized)) return undefined;
-  if (isUnsafeBoardHeadlineEvidence(neutralized)) return undefined;
-  const cleaned = safeShortText(neutralized);
-  if (!cleaned) return undefined;
-  if (isUnsafeBoardHeadlineEvidence(cleaned)) return undefined;
-  return cleaned.length >= 12 ? cleaned : undefined;
-}
-
 function neutralizeTranscriptText(value: string): string {
   return value
     .replace(/\bI\s+do\s+not\s+see\s+the\s+headlines\s+changing\b/gi, "Headlines are not visibly changing")
@@ -207,16 +205,49 @@ function neutralizeTranscriptText(value: string): string {
     .replace(/\bI\s+need\b/gi, "Need");
 }
 
-function isAssistantProgressMessage(value: string): boolean {
-  if (/\bI(?:'|’)m\b/i.test(value)) return true;
-  if (
-    /\bI(?:'|’)m\s+(?:adding|bringing|checking|digging|doing|exposing|looking|patching|putting|reading|rerunning|restarting|running|serving|starting|tracing|wiring)\b/i.test(
-      value
-    )
-  ) {
-    return true;
+function buildTranscriptExcerpt(messages: BoardTranscriptMessageFact[]): BoardHeadlineTranscriptExcerpt[] {
+  const selected: BoardHeadlineTranscriptExcerpt[] = [];
+  const seen = new Set<string>();
+  let totalChars = 0;
+
+  for (const message of messages.toSorted((left, right) => right.observedAt.localeCompare(left.observedAt))) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    const remaining = MAX_TRANSCRIPT_EXCERPT_TOTAL_CHARS - totalChars;
+    if (remaining <= 0) break;
+
+    const cleaned = transcriptExcerptText(message.text, Math.min(MAX_TRANSCRIPT_EXCERPT_MESSAGE_CHARS, remaining));
+    if (!cleaned) continue;
+
+    const key = `${message.role}:${cleaned.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    selected.push({
+      observedAt: message.observedAt,
+      role: message.role,
+      text: cleaned
+    });
+    totalChars += cleaned.length;
+
+    if (selected.length >= MAX_TRANSCRIPT_EXCERPT_MESSAGES) break;
   }
-  return /\bI\s+(?:am|can|found|need|think|will)\b/i.test(value);
+
+  return selected.toSorted((left, right) => left.observedAt.localeCompare(right.observedAt));
+}
+
+function transcriptExcerptText(value: string, maxChars: number): string | undefined {
+  const cleaned = neutralizeTranscriptText(value)
+    .replace(/\/home\/[^/\s"'`]+(?:\/[^\s"'`]*)?/g, "[redacted-path]")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned || cleaned.length < 12) return undefined;
+  if (isLowValueBoardHeadlineText(cleaned)) return undefined;
+  if (isGenericHarnessToolName(cleaned)) return undefined;
+  if (isUnsafeBoardHeadlineEvidence(cleaned)) return undefined;
+
+  const clipped = cleaned.slice(0, maxChars).trim();
+  if (!clipped || clipped.length < 12 || isUnsafeBoardHeadlineEvidence(clipped)) return undefined;
+  return clipped;
 }
 
 function safeFactLabel(value: string | undefined): string | undefined {

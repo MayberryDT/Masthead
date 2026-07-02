@@ -42,6 +42,7 @@ export type MastheadHealthDto = {
     startedAt: string;
     mode: MastheadRuntimeMode;
     writable: boolean;
+    hookTranscriptCatchupEnabled?: boolean;
     host: string;
     port: number;
     upstream?: {

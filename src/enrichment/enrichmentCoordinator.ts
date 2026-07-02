@@ -6,6 +6,7 @@ import {
 } from "../daemon/db/enrichmentRepository.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 import { createEnrichmentAuditLogger, type EnrichmentAuditLogger } from "./enrichmentAudit.ts";
+import { fallbackDurableSessionEnrichment } from "./durableSessionEnrichment.ts";
 import { buildSessionFacts } from "./sessionFacts.ts";
 import {
   fingerprintSessionFacts,
@@ -15,6 +16,7 @@ import {
   type SessionFacts
 } from "./sessionCompiler.ts";
 import type { EnrichmentProviderResult, EnrichmentProviderStatus, SessionEnrichmentProvider } from "./provider.ts";
+import type { SessionTitleEnrichment } from "../shared/sessionEnrichment.ts";
 import type { SessionCapsule, SessionEnrichmentKind, SessionEnrichmentRecord } from "./types.ts";
 
 export type EnrichmentCoordinator = {
@@ -44,6 +46,22 @@ export class EnrichmentFailedError extends Error {
     this.failureMessage = input.failureMessage;
     this.record = input.record;
   }
+}
+
+export function shouldReplaceSessionTitle(input: {
+  current?: SessionTitleEnrichment;
+  incoming: SessionTitleEnrichment;
+  lifecycle?: string;
+}): boolean {
+  if (!input.current) return true;
+  if (input.lifecycle !== "ended") return true;
+  return confidenceRank(input.incoming.confidence) > confidenceRank(input.current.confidence);
+}
+
+function confidenceRank(value: "high" | "medium" | "low"): number {
+  if (value === "high") return 3;
+  if (value === "medium") return 2;
+  return 1;
 }
 
 export type EnrichmentCoordinatorOptions = {
@@ -246,6 +264,7 @@ function isRecentFailureForFingerprint(
   failureBackoffMs: number
 ): record is SessionEnrichmentRecord {
   if (!record?.generatedAt || !record.contentFingerprint.startsWith(`${fingerprint}:failed:`)) return false;
+  if (record.failureCode === "validation_failed") return false;
   const generatedAtMs = Date.parse(record.generatedAt);
   if (!Number.isFinite(generatedAtMs)) return false;
   return nowMs - generatedAtMs < failureBackoffMs;
@@ -288,18 +307,34 @@ function writeEnrichment(
 }
 
 function applyTitleQuality(capsule: SessionCapsule, facts: SessionFacts): SessionCapsule {
-  const title = capsule.title?.trim();
-  if (isMeaningfulSessionTitle(title, facts)) {
-    return {
-      ...capsule,
-      title,
-      titleSource: capsule.titleSource ?? selectSessionTitle(facts).source
-    };
-  }
-
-  const selected = selectSessionTitle(facts);
+  const fallbackDurable = fallbackDurableSessionEnrichment(facts);
+  const durableBase = capsule.durableEnrichment ?? fallbackDurable;
+  const durableTitle = capsule.sessionTitle ?? durableBase.sessionTitle;
+  const durableSummary = capsule.sessionSummary ?? durableBase.sessionSummary;
+  const durableDossier = capsule.sessionDossier ?? durableBase.sessionDossier;
+  const durableTitleCandidate = durableTitle.confidence === "low" && durableTitle.basis === "fallback" ? undefined : durableTitle.text?.trim();
+  const title = durableTitleCandidate || capsule.title?.trim();
+  const selected = isMeaningfulSessionTitle(title, facts)
+    ? { source: capsule.titleSource ?? selectSessionTitle(facts).source, title }
+    : selectSessionTitle(facts);
+  const sessionTitle = isMeaningfulSessionTitle(durableTitleCandidate, facts)
+    ? durableTitle
+    : {
+        ...durableTitle,
+        confidence: "low" as const,
+        text: selected.title
+      };
   return {
     ...capsule,
+    durableEnrichment: {
+      ...durableBase,
+      sessionDossier: durableDossier,
+      sessionSummary: durableSummary,
+      sessionTitle
+    },
+    sessionDossier: durableDossier,
+    sessionSummary: durableSummary,
+    sessionTitle,
     title: selected.title,
     titleSource: selected.source
   };
@@ -307,6 +342,15 @@ function applyTitleQuality(capsule: SessionCapsule, facts: SessionFacts): Sessio
 
 function searchProjectionText(capsule: SessionCapsule): string {
   return [
+    capsule.sessionTitle?.text,
+    capsule.sessionSummary?.text,
+    capsule.sessionDossier?.purpose,
+    capsule.sessionDossier?.outcome,
+    ...(capsule.sessionDossier?.keyWork ?? []),
+    ...(capsule.sessionDossier?.decisions ?? []),
+    ...(capsule.sessionDossier?.blockers ?? []),
+    capsule.sessionDossier?.verification.summary,
+    capsule.sessionDossier?.continuation.nextStep,
     capsule.title,
     capsule.objective,
     capsule.liveSummary,

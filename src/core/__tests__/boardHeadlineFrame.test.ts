@@ -137,6 +137,23 @@ describe("board headline frame contract", () => {
     }
   });
 
+  test("caps accepted display slots so rendered headlines stay compact", () => {
+    const result = validateBoardHeadlineFrame(
+      frame({
+        subject: "boardHeadlineFrame.ts state updates and Sources UI toolbar layout changes",
+        disposition:
+          "updated to reflect CSS toolbar and Sources UI changes; evidence indicates toolbar layout updates with right-aligned facts and removal of left accent"
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.frame.subject.length).toBeLessThanOrEqual(56);
+      expect(result.frame.disposition.length).toBeLessThanOrEqual(96);
+      expect(renderBoardHeadlineFrame(result.frame).length).toBeLessThanOrEqual(155);
+    }
+  });
+
   test("rejects unsafe secrets, API keys, Codex directives, and URL placeholders", () => {
     expect(validateBoardHeadlineFrame(frame({ disposition: "uses OPENAI_API_KEY during testing" }))).toEqual({
       ok: false,
@@ -151,6 +168,17 @@ describe("board headline frame contract", () => {
       reason: "unsafe_text"
     });
     expect(validateBoardHeadlineFrame(frame({ disposition: "links to [url] during summary" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+  });
+
+  test("rejects raw internal status tokens in display copy", () => {
+    expect(validateBoardHeadlineFrame(frame({ disposition: "completed_unreviewed" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ subject: "Changed-file review", disposition: "completed_unreviewed." }))).toEqual({
       ok: false,
       reason: "unsafe_text"
     });

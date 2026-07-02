@@ -32,6 +32,7 @@ type Props = {
 };
 
 const formatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const CURRENT_SESSION_CAPSULE_VERSION = "session-capsule-v4";
 const transcriptFilters: Array<{ label: string; value: SessionTranscriptKindFilter }> = [
   { label: "Evidence", value: "all" },
   { label: "User", value: "user" },
@@ -63,12 +64,10 @@ export function SessionDossier({
   const attentionItems = dossier?.attention ?? liveAttention(live);
   const timelineEvents = useMemo(() => (dossier?.timeline ?? liveTimeline(live)).filter((event) => event.kind !== "file"), [dossier?.timeline, live]);
   const transcriptRows = useMemo(() => compactTranscriptRows(transcript?.items), [transcript?.items]);
-  const title = identity?.title ?? live?.headline.headline ?? live?.title ?? "Session dossier";
-  const description =
-    summary ??
-    readableTranscriptText(live?.headline.frame?.disposition) ??
-    readableTranscriptText(live?.currentActivity) ??
-    "Canonical identifiers and reusable session context.";
+  const title = dossierTitle(dossier, live);
+  const description = dossierDescription(summary, live);
+  const enrichmentStatus = dossierEnrichmentStatus(dossier, loading);
+  const narrativeDebug = currentNarrativeDebug(dossier);
   const endedAt = identity?.endedAt ?? identity?.lastActivityAt ?? live?.lastActivity;
   const advancedPanelId = `${identity?.sessionId ?? live?.canonicalSessionId ?? live?.sessionId ?? "session"}-advanced-details-panel`;
   const sourceId = identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId ?? "-";
@@ -200,7 +199,7 @@ export function SessionDossier({
               </div>
               <div className="advanced-cell">
                 <span>Enrichment</span>
-                <strong>{dossier?.narrative.narrativeDebug?.providerStatus ?? (dossier ? "deterministic / current" : "-")}</strong>
+                <strong>{dossier || loading ? enrichmentStatus : "-"}</strong>
               </div>
               <div className="advanced-cell is-wide">
                 <span>Worktree</span>
@@ -258,12 +257,12 @@ export function SessionDossier({
 
                 <section className="advanced-detail-card is-wide">
                   <h4>Narrative evidence</h4>
-                  {dossier?.narrative.narrativeDebug ? (
+                  {narrativeDebug ? (
                     <ul className="advanced-list">
-                      <li><strong>Title source</strong><span>{dossier.narrative.narrativeDebug.titleSource ?? "-"}</span></li>
-                      <li><strong>Subject source</strong><span>{dossier.narrative.narrativeDebug.subjectSource ?? "-"}</span></li>
-                      <li><strong>Provider</strong><span>{dossier.narrative.narrativeDebug.provider ?? "local rules"}</span></li>
-                      <li><strong>Evidence refs</strong><span>{formatNumber(dossier.narrative.narrativeDebug.sourceRefs.length)}</span></li>
+                      <li><strong>Title source</strong><span>{narrativeDebug.titleSource ?? "-"}</span></li>
+                      <li><strong>Subject source</strong><span>{narrativeDebug.subjectSource ?? "-"}</span></li>
+                      <li><strong>Provider</strong><span>{narrativeDebug.provider ?? "local rules"}</span></li>
+                      <li><strong>Evidence refs</strong><span>{formatNumber(narrativeDebug.sourceRefs.length)}</span></li>
                     </ul>
                   ) : (
                     <p className="advanced-detail-muted">Narrative not generated yet.</p>
@@ -339,9 +338,8 @@ function DossierEnrichmentPanel({
   summary?: string;
 }) {
   const coverage = dossier?.coverage.transcript;
-  const status = dossier
-    ? [dossier.narrative.narrativeDebug?.promptVersion ?? "session-capsule-v2", dossier.reuse.mcpIncluded ? "current" : "not indexed"].join(" / ")
-    : "live projection";
+  const status = dossierEnrichmentStatus(dossier, loading);
+  const hasCurrentEnrichment = hasCurrentDossierEnrichment(dossier);
   return (
     <section className="panel summary" aria-label="Enrichment summary">
       <div className="panel-head">
@@ -349,19 +347,78 @@ function DossierEnrichmentPanel({
         <span className="rail-label">{status}</span>
       </div>
       <div className="summary-scroll">
-        <SummarySection label="Transcript summary" section="summary" value={summary} extraParagraphs={[dossier?.narrative.outcome].filter((value): value is string => Boolean(value))} />
+        {loading && !dossier ? <DossierLoadingState /> : null}
+        <DossierDurableMemory dossier={dossier} />
+        <SummarySection label="Transcript summary" section="summary" value={summary} extraParagraphs={dossierSummaryExtras(dossier)} />
         <SummarySection label="Latest prompt" section="latest-prompt" value={dossier?.narrative.latestUserPrompt} />
-        <SummarySection label="Retrieval notes" section="retrieval" value={dossier?.reuse.copyableContext} />
+        <SummarySection label="Retrieval notes" section="retrieval" values={dossierRetrievalNotes(dossier)} />
         <SummarySection label="Continuation notes" section="continuation" values={dossier?.attention.map((item) => item.title)} />
-        <SummarySection label="Unresolved" section="unresolved" values={dossier?.narrative.unresolved} />
-        {loading ? <SummarySection label="Loading" section="loading" value="Loading canonical session dossier..." /> : null}
+        <SummarySection label="Unresolved" section="unresolved" values={hasCurrentEnrichment ? dossier?.narrative.unresolved : undefined} />
         {error ? <SummarySection label="Dossier error" section="error" value={error} /> : null}
-        <DossierEvidenceBlocks dossier={dossier} />
+        <DossierEvidenceBlocks dossier={dossier} hasCurrentEnrichment={hasCurrentEnrichment} />
         <SummarySection label="First prompt" section="first-prompt" value={dossier?.narrative.firstUserPrompt} />
-        <SummarySection label="Technologies" section="technologies" values={dossier?.narrative.technologies} />
+        <SummarySection label="Technologies" section="technologies" values={hasCurrentEnrichment ? dossier?.narrative.technologies : undefined} />
         <DiagnosticCoverage coverage={coverage} />
       </div>
     </section>
+  );
+}
+
+function DossierLoadingState() {
+  return (
+    <div className="dossier-loading-state" data-dossier-section="loading" aria-live="polite">
+      <span className="dossier-loading-spinner" aria-hidden="true" />
+      <strong>Enriching data, please stand by</strong>
+    </div>
+  );
+}
+
+function DossierDurableMemory({ dossier }: { dossier?: SessionDossierDto }) {
+  const durable = currentDurableEnrichment(dossier);
+  if (!durable) return null;
+  const memory = durable.sessionDossier;
+  const verification = memory.verification;
+  return (
+    <div className="dossier-durable-memory" data-dossier-section="durable-memory">
+      <header>
+        <div>
+          <h4>{durable.sessionTitle.text}</h4>
+          <p>{durable.sessionSummary.text}</p>
+        </div>
+      </header>
+      <DurableParagraph label="Purpose" value={memory.purpose} />
+      <DurableParagraph label="Outcome" value={memory.outcome} />
+      <DurableParagraph label="Verification" value={`${statusLabel(verification.status)} - ${verification.summary}`} />
+      <DurableParagraph label="Next step" value={memory.continuation.nextStep} />
+      <DurableList label="Key work" values={memory.keyWork} />
+      <DurableList label="Decisions" values={memory.decisions} />
+      <DurableList label="Blockers" values={memory.blockers} />
+      <DurableList label="Constraints" values={memory.continuation.constraints} />
+    </div>
+  );
+}
+
+function DurableParagraph({ label, value }: { label: string; value?: string }) {
+  if (!value) return null;
+  return (
+    <div className="durable-paragraph">
+      <span>{label}</span>
+      <p>{value}</p>
+    </div>
+  );
+}
+
+function DurableList({ label, values }: { label: string; values: string[] }) {
+  if (values.length === 0) return null;
+  return (
+    <div className="durable-list">
+      <span>{label}</span>
+      <ul>
+        {values.slice(0, 5).map((value) => (
+          <li key={value}>{value}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -390,11 +447,11 @@ function SummaryFact({ label, value }: { label: string; value?: string | number 
   );
 }
 
-function DossierEvidenceBlocks({ dossier }: { dossier?: SessionDossierDto }) {
+function DossierEvidenceBlocks({ dossier, hasCurrentEnrichment }: { dossier?: SessionDossierDto; hasCurrentEnrichment: boolean }) {
   const values = [
-    ...(dossier?.narrative.topics ?? []).map((value) => ({ className: "is-blue", value })),
+    ...(hasCurrentEnrichment ? (dossier?.narrative.topics ?? []).map((value) => ({ className: "is-blue", value })) : []),
     ...(dossier?.reuse.mcpIncluded ? [{ className: "is-green", value: "Agent retrieval ready (MCP included)" }] : []),
-    ...(dossier?.narrative.unresolved ?? []).map((value) => ({ className: "is-yellow", value })),
+    ...(hasCurrentEnrichment ? (dossier?.narrative.unresolved ?? []).map((value) => ({ className: "is-yellow", value })) : []),
     ...(dossier?.coverage.warnings.slice(0, 3).map((warning) => ({ className: "is-yellow", value: warning.code.replaceAll("_", " ") })) ?? [])
   ];
   const uniqueValues = values.filter((item, index) => {
@@ -480,23 +537,138 @@ function compactTranscriptRows(items?: SessionTranscriptItem[]): CompactTranscri
     .filter((item) => item.displayText.length > 0);
 }
 
+function dossierTitle(dossier?: SessionDossierDto, live?: SessionDetailView): string {
+  const candidates = [
+    currentDurableEnrichment(dossier)?.sessionTitle.text,
+    dossier?.identity.title,
+    live?.headline.headline,
+    live?.title
+  ];
+  return candidates.map(readableTranscriptText).find(isUsefulDossierLabel) ?? "Session dossier";
+}
+
+function dossierDescription(summary: string | undefined, live?: SessionDetailView): string {
+  const candidates = [summary, live?.headline.frame?.disposition, live?.currentActivity];
+  return candidates.map(readableTranscriptText).find(isPlainDossierCopy) ?? "Canonical identifiers and reusable session context.";
+}
+
+function dossierEnrichmentStatus(dossier: SessionDossierDto | undefined, loading?: boolean): string {
+  if (!dossier) return loading ? `${CURRENT_SESSION_CAPSULE_VERSION} / loading` : "live projection";
+  if (hasCurrentDossierEnrichment(dossier)) return `${CURRENT_SESSION_CAPSULE_VERSION} / current`;
+  if (loading) return `${CURRENT_SESSION_CAPSULE_VERSION} / loading`;
+  const debug = dossier.narrative.narrativeDebug;
+  if (debug?.promptVersion === CURRENT_SESSION_CAPSULE_VERSION && (debug.failureCode || debug.providerStatus)) return `${CURRENT_SESSION_CAPSULE_VERSION} / failed`;
+  return "not enriched";
+}
+
+function hasCurrentDossierEnrichment(dossier?: SessionDossierDto): boolean {
+  return Boolean(currentDurableEnrichment(dossier) || currentNarrativeDebug(dossier));
+}
+
+function currentDurableEnrichment(dossier?: SessionDossierDto) {
+  const durable = dossier?.durableEnrichment;
+  return durable?.promptVersion === CURRENT_SESSION_CAPSULE_VERSION || durable?.version === CURRENT_SESSION_CAPSULE_VERSION ? durable : undefined;
+}
+
+function currentNarrativeDebug(dossier?: SessionDossierDto): SessionDossierDto["narrative"]["narrativeDebug"] | undefined {
+  const debug = dossier?.narrative.narrativeDebug;
+  if (debug?.promptVersion !== CURRENT_SESSION_CAPSULE_VERSION) return undefined;
+  if (debug.failureCode) return undefined;
+  if (debug.providerStatus && !["current", "success"].includes(debug.providerStatus)) return undefined;
+  return debug;
+}
+
 function dossierSummary(dossier?: SessionDossierDto, live?: SessionDetailView): string | undefined {
   const narrative = dossier?.narrative;
+  const hasCurrentEnrichment = hasCurrentDossierEnrichment(dossier);
   const candidates = [
-    narrative?.finalAssistantMessage,
-    narrative?.liveSummary,
-    narrative?.outcome,
+    currentDurableEnrichment(dossier)?.sessionSummary.text,
+    hasCurrentEnrichment ? narrative?.liveSummary : undefined,
+    hasCurrentEnrichment ? narrative?.outcome : undefined,
     live?.headline.headline,
     live?.currentActivity,
-    narrative?.objective,
+    hasCurrentEnrichment ? narrative?.objective : undefined,
     live?.headline.frame?.disposition,
     ...(live?.headline.frame?.evidence ?? []),
     live?.headline.status
   ]
     .map(readableTranscriptText)
+    .filter(isPlainDossierCopy)
     .filter((value): value is string => Boolean(value));
   const summary = candidates.find((candidate, index) => !candidates.slice(0, index).some((earlier) => sameReadableText(candidate, earlier)));
   return summary ? sentence(summary) : undefined;
+}
+
+function dossierSummaryExtras(dossier?: SessionDossierDto): string[] {
+  if (!hasCurrentDossierEnrichment(dossier)) return [];
+  return [dossier?.narrative.outcome].map(readableTranscriptText).filter(isPlainDossierCopy);
+}
+
+function dossierRetrievalNotes(dossier?: SessionDossierDto): string[] | undefined {
+  const memory = currentDurableEnrichment(dossier)?.sessionDossier;
+  const hasCurrentEnrichment = Boolean(memory || hasCurrentDossierEnrichment(dossier));
+  const durableValues = [
+    memory?.purpose,
+    memory?.outcome,
+    ...(memory?.keyWork ?? []),
+    ...(memory?.decisions ?? []),
+    ...(memory?.blockers ?? []),
+    memory?.verification.summary,
+    memory?.continuation.nextStep,
+    ...(memory?.continuation.openQuestions ?? []),
+    ...(memory?.continuation.constraints ?? [])
+  ];
+  const fallbackValues = [
+    hasCurrentEnrichment ? dossier?.narrative.objective : undefined,
+    hasCurrentEnrichment ? dossier?.narrative.liveSummary : undefined,
+    hasCurrentEnrichment ? dossier?.narrative.outcome : undefined,
+    dossier?.verification.summary,
+    ...(dossier?.attention.map((item) => item.title) ?? []),
+    ...(dossier?.coverage.warnings.map((warning) => warning.message) ?? [])
+  ];
+  const values = (memory ? durableValues : fallbackValues)
+    .map(readableTranscriptText)
+    .filter(isPlainDossierCopy)
+    .filter((value, index, items) => items.findIndex((candidate) => sameReadableText(candidate, value)) === index)
+    .slice(0, 8);
+  return values.length > 0 ? values : undefined;
+}
+
+function isUsefulDossierLabel(value: string | undefined): value is string {
+  if (!value) return false;
+  const text = value.trim();
+  return Boolean(text) && !isWeakDossierCopy(text);
+}
+
+function isPlainDossierCopy(value: string | undefined): value is string {
+  if (!value) return false;
+  const text = value.trim();
+  if (!text) return false;
+  if (isWeakDossierCopy(text)) return false;
+  if (/\b(?:i|me|my|mine|we|us|our|ours|you|your|yours)\b/i.test(text)) return false;
+  if (/#\s*Masthead Session Context/i.test(text)) return false;
+  if (/\bsession:[0-9a-f-]{12,}\b/i.test(text)) return false;
+  if (/(?:^|\s)(?:src|dist|node_modules|\.codex|\/home)\/[^\s]+/i.test(text)) return false;
+  if (/\bshell:\s*(?:succeeded|failed|unknown)\b/i.test(text)) return false;
+  return true;
+}
+
+function isWeakDossierCopy(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replace(/[.!?]+$/g, "");
+  return (
+    normalized === "codex hook event" ||
+    normalized === "runtime signal" ||
+    normalized === "completed" ||
+    normalized === "complete" ||
+    normalized === "done" ||
+    normalized === "running" ||
+    normalized === "active" ||
+    normalized === "idle" ||
+    normalized === "ended" ||
+    normalized === "blocked" ||
+    normalized === "failed" ||
+    normalized === "unknown"
+  );
 }
 
 function sentence(value: string): string {
@@ -568,6 +740,14 @@ function rowTone(kind?: string): string {
 function coverageLabel(value?: SessionDossierDto["coverage"]["level"]): string {
   if (!value) return "Live";
   return value.replaceAll("_", " ");
+}
+
+function statusLabel(value: string): string {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function formatCompactNumber(value?: number): string {

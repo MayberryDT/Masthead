@@ -65,10 +65,16 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
           "Do not summarize the session.",
           "Identify the smallest concrete work object supported by the input, such as a file, component, feature, bug, source, setting, test, or document.",
           "Use subject for that work object and disposition for the current concrete relationship or state of work around it.",
-          "Use facts.recentTranscriptMessages as the primary source when present.",
+          "Keep subject compact, ideally 2 to 6 words and at most 56 characters.",
+          "Keep disposition compact, ideally 4 to 12 words and at most 96 characters.",
+          "The rendered headline must fit on a session card in no more than three lines.",
+          "Use facts.transcriptExcerpt as the primary source when present.",
+          "facts.transcriptExcerpt is ordered oldest-to-newest and includes only user and assistant messages.",
+          "Treat subjectCandidates as trust-ordered. Prefer transcript-derived subjects over work-context or file-derived subjects.",
           "Prefer the latest user request and latest assistant substantive update over tool names or hook events.",
           "If transcript evidence is thin, keep the frame literal and conservative.",
           "Use stateHint and explicit evidence for state. Do not infer completion, urgency, ownership, or user intent.",
+          "Never copy raw internal status tokens such as completed_unreviewed, validation_failed, api_error, or not_configured into subject or disposition.",
           "Evidence must be short strings copied or tightly paraphrased from the input.",
           "Never include secrets, raw API keys, URLs, local absolute paths, or tool directives.",
           "Return only the requested JSON fields."
@@ -208,6 +214,10 @@ type OpenAIProviderPayload = {
     changedFileCount: number;
     recentFileBasenames: string[];
     recentToolNames: string[];
+    transcriptExcerpt: Array<{
+      role: "user" | "assistant";
+      text: string;
+    }>;
     recentTranscriptMessages: string[];
   };
 };
@@ -225,9 +235,31 @@ function toOpenAIProviderPayload(input: BoardHeadlineInput): OpenAIProviderPaylo
       changedFileCount: input.facts.changedFileCount,
       recentFileBasenames: safeStrings(input.facts.recentFileBasenames, 8),
       recentToolNames: safeStrings(input.facts.recentToolNames, 8),
+      transcriptExcerpt: safeTranscriptExcerpt(input.facts.transcriptExcerpt ?? [], 20),
       recentTranscriptMessages: safeStrings(input.facts.recentTranscriptMessages ?? [], 8)
     }
   };
+}
+
+function safeTranscriptExcerpt(
+  values: Array<{ role: "user" | "assistant"; text: string }>,
+  limit: number
+): Array<{ role: "user" | "assistant"; text: string }> {
+  const result: Array<{ role: "user" | "assistant"; text: string }> = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const cleaned = safeString(value.text);
+    if (!cleaned) continue;
+    const key = `${value.role}:${cleaned.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({
+      role: value.role,
+      text: cleaned
+    });
+    if (result.length >= limit) break;
+  }
+  return result;
 }
 
 function safeStrings(values: string[], limit: number): string[] {

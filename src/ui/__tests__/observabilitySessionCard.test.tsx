@@ -82,7 +82,8 @@ describe("observability session card", () => {
     expect(active).toContain("tier-live");
     expect(idle).toContain("tier-quiet");
     expect(blocked).toContain("tier-action");
-    expect(conflict).toContain("tier-action");
+    expect(conflict).toContain("is-active tier-live");
+    expect(conflict).not.toContain("tier-action");
   });
 
   test("uses a project and work-area label in the header without synthetic id chrome", () => {
@@ -527,6 +528,46 @@ describe("observability session card", () => {
     }
   });
 
+  test("does not animate same-order live content refreshes as card moves", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const animations: string[] = [];
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    let measuredHeight = 220;
+
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const sessionId = this.dataset.sessionId;
+      if (!sessionId) return originalGetBoundingClientRect.call(this);
+      return testRect(0, 0, 320, measuredHeight);
+    };
+    HTMLElement.prototype.animate = vi.fn(function (this: HTMLElement) {
+      const sessionId = this.dataset.sessionId;
+      if (sessionId) animations.push(sessionId);
+      return { addEventListener: vi.fn() } as unknown as Animation;
+    });
+
+    try {
+      const original = boardSession({ sessionId: "session-1", title: "Short session title" });
+      const updated = boardSession({ sessionId: "session-1", title: "Longer updated session title" });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[original]} variant="observability" density="comfortable" />);
+      });
+
+      measuredHeight = 280;
+      await act(async () => {
+        root.render(<SessionBoard cards={[updated]} variant="observability" density="comfortable" />);
+      });
+
+      expect(animations).toEqual([]);
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.animate = originalAnimate;
+    }
+  });
+
   test("skips reorder animation when reduced motion is requested", async () => {
     const originalAnimate = HTMLElement.prototype.animate;
     const originalMatchMedia = window.matchMedia;
@@ -652,6 +693,36 @@ describe("observability session card", () => {
     }
   });
 
+  test("does not run headline swap animation for idle cards", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const original = boardSession({
+      sessionId: "session-idle",
+      lifecycle: "ended",
+      primaryStatus: "completed_unreviewed",
+      headline: headlineView("Idle old headline")
+    });
+    const updated = boardHeadline(original, "Idle updated headline");
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[original]} variant="observability" />);
+      });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[updated]} variant="observability" />);
+      });
+
+      const card = container.querySelector<HTMLElement>(".session-card");
+      const headline = card?.querySelector<HTMLElement>(".headline");
+      expect(card?.classList.contains("is-headline-refreshing")).toBe(false);
+      expect(headline?.querySelector(".headline-previous")).toBeNull();
+      expect(headline?.querySelector(".headline-current")?.textContent).toBe("Idle updated headline");
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
   test("uses a refresh pulse for same-text headline refreshes", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -713,6 +784,36 @@ describe("observability session card", () => {
     } finally {
       await act(async () => root.unmount());
       vi.useRealTimers();
+    }
+  });
+
+  test("does not pulse observability cards for same-text board refreshes", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const original = boardSession({
+      sessionId: "session-1",
+      headline: headlineView("Stable board headline")
+    });
+    const refreshed = {
+      ...original,
+      headlineRefresh: {
+        provider: "openai",
+        requestedAt: "2026-06-23T02:04:00.000Z",
+        status: "success" as const
+      }
+    };
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[original]} variant="observability" />);
+      });
+      await act(async () => {
+        root.render(<SessionBoard cards={[refreshed]} variant="observability" />);
+      });
+
+      expect(container.querySelector(".session-card.is-refresh-pulsing")).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
     }
   });
 

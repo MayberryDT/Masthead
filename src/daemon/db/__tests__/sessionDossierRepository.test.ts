@@ -93,12 +93,116 @@ describe("session dossier repository", () => {
       latestFailedAttemptAt: "2026-06-26T12:12:00.000Z",
       missingEvidence: ["verification"],
       model: "gpt-5-nano",
-      promptVersion: "session-capsule-v3",
+      promptVersion: "session-capsule-v4",
       providerStatus: "success",
       provider: "openai",
       subjectConfidence: "high",
       titleSource: "llm"
     });
+    db.close();
+  });
+
+  test("includes durable enrichment in the session dossier", async () => {
+    const db = await openTestDatabase();
+    seedDossierSession(db, { sessionId: "session-durable-dossier" });
+    upsertSessionEnrichment(db, {
+      content: {
+        candidateDecisions: [],
+        liveSummary: "Live Dossier summary remains separate.",
+        searchPhrases: [],
+        sessionDossier: {
+          blockers: [],
+          continuation: {
+            constraints: ["Keep Board headlines separate from durable titles."],
+            nextStep: "Render durable Dossier sections first.",
+            openQuestions: []
+          },
+          decisions: ["Do not reuse Board live headlines as Logbook titles."],
+          evidenceRefs: [],
+          keyWork: ["Added durable Dossier enrichment."],
+          outcome: "Dossier durable enrichment is available to the UI.",
+          purpose: "Expose durable enrichment through the Dossier endpoint.",
+          verification: {
+            commands: ["vitest"],
+            evidenceRefs: [],
+            failures: [],
+            status: "passed",
+            summary: "Dossier repository tests passed."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "high",
+          evidenceRefs: [],
+          state: "completed",
+          text: "Exposed durable enrichment through the Session Dossier endpoint."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "high",
+          evidenceRefs: [],
+          text: "Session Dossier enrichment exposure"
+        },
+        technologies: [],
+        title: "Session Dossier enrichment exposure",
+        topics: [],
+        unresolved: []
+      },
+      contentFingerprint: "session-durable-dossier:fingerprint:v4",
+      enrichmentKind: "session_capsule",
+      generatedAt: "2026-06-26T12:13:00.000Z",
+      model: "gpt-5-nano",
+      promptVersion: "session-capsule-v4",
+      provider: "openai",
+      sessionId: "session-durable-dossier",
+      sourceRefs: [],
+      status: "current"
+    });
+
+    const dossier = getSessionDossier(db, "session-durable-dossier");
+
+    expect(dossier?.identity.title).toBe("Session Dossier enrichment exposure");
+    expect(dossier?.durableEnrichment?.sessionTitle.text).toBe("Session Dossier enrichment exposure");
+    expect(dossier?.durableEnrichment?.sessionDossier.decisions).toContain("Do not reuse Board live headlines as Logbook titles.");
+    db.close();
+  });
+
+  test("ignores older current enrichment prompt versions in the session dossier", async () => {
+    const db = await openTestDatabase();
+    seedDossierSession(db, { sessionId: "session-old-enrichment" });
+    db.prepare("DELETE FROM session_enrichments WHERE session_id = ?").run("session-old-enrichment");
+    upsertSessionEnrichment(db, {
+      content: {
+        candidateDecisions: [],
+        confidence: "high",
+        liveSummary: "Validated App for Codex hook event.",
+        missingEvidence: [],
+        outcome: "Validated App for Codex hook event.",
+        providerStatus: "success",
+        searchPhrases: ["Codex hook event"],
+        technologies: [],
+        title: "Project App",
+        titleSource: "llm",
+        topics: ["codex-hook-event"],
+        unresolved: []
+      },
+      contentFingerprint: "old-v3-fingerprint",
+      enrichmentKind: "session_capsule",
+      generatedAt: "2026-06-26T12:11:00.000Z",
+      model: "gpt-5-nano",
+      promptVersion: "session-capsule-v3",
+      provider: "openai",
+      sessionId: "session-old-enrichment",
+      sourceRefs: [],
+      status: "current"
+    });
+
+    const dossier = getSessionDossier(db, "session-old-enrichment");
+
+    expect(dossier?.durableEnrichment).toBeUndefined();
+    expect(dossier?.narrative.liveSummary).toBeUndefined();
+    expect(dossier?.narrative.outcome).toBe("completed");
+    expect(dossier?.narrative.narrativeDebug).toBeUndefined();
     db.close();
   });
 
@@ -292,7 +396,7 @@ function seedDossierSession(db: MastheadDatabase, options: { sessionId?: string 
     enrichmentKind: "session_capsule",
     generatedAt: "2026-06-26T12:11:00.000Z",
     model: "gpt-5-nano",
-    promptVersion: "session-capsule-v3",
+    promptVersion: "session-capsule-v4",
     provider: "openai",
     sessionId,
     sourceRefs: [{ id: "m1", kind: "event", observedAt: "2026-06-26T12:00:00.000Z", source: "fixture" }],
@@ -305,7 +409,7 @@ function seedDossierSession(db: MastheadDatabase, options: { sessionId?: string 
     failureMessage: "OpenAI enrichment timed out. No fallback was persisted.",
     generatedAt: "2026-06-26T12:12:00.000Z",
     model: "gpt-5-nano",
-    promptVersion: "session-capsule-v3",
+    promptVersion: "session-capsule-v4",
     provider: "openai",
     sessionId,
     sourceRefs: [{ id: "m1", kind: "event", observedAt: "2026-06-26T12:00:00.000Z", source: "fixture" }],

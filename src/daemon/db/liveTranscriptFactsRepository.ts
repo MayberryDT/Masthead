@@ -71,9 +71,5 @@ function isLowValueLiveTranscriptText(value: string, role: "user" | "assistant")
   if (!normalized) return true;
   if (/^(codex hook event|runtime signal|unknown|shell)$/i.test(normalized)) return true;
   if (role !== "assistant") return false;
-  if (/\bI(?:'|’)m\s+(?:checking|running|reading|looking|starting|rerunning|applying|writing|opening|waiting)\b/i.test(normalized)) {
-    return true;
-  }
-  if (/^I\s+(?:am|will|can)\s+/i.test(normalized)) return true;
   return false;
 }
