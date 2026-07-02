@@ -1,6 +1,7 @@
 import { attentionPriority, deriveAttentionItems } from "./attention.ts";
 import { buildBoardLiveCopyFacts, type BoardTranscriptMessageFact } from "./boardLiveCopyFacts.ts";
 import { buildBoardBrief } from "./boardBrief.ts";
+import type { BoardHeadlineView } from "./boardHeadlineFrame.ts";
 import { toBoardHeadlineInput, type BoardHeadlineSignal } from "./boardHeadlineInput.ts";
 import { isFailedCommandEvent } from "./commandStatus.ts";
 import { detectConflicts, detectSharedResourceConflicts } from "./conflicts.ts";
@@ -40,6 +41,7 @@ type ProjectFixtureOptions = {
   selectedSessionId?: string | null;
   includeTerminalSessions?: boolean;
   sessionEnrichments?: Map<string, LiveSessionEnrichment>;
+  sessionHeadlineViews?: Map<string, BoardHeadlineView>;
   sessionTranscriptFacts?: Map<string, LiveSessionTranscriptFacts>;
   headlineMode?: "llm" | "offline";
   now?: Date;
@@ -121,7 +123,8 @@ export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOp
         expandedSessionId,
         options.sessionEnrichments?.get(session.sessionId),
         options.sessionTranscriptFacts?.get(session.sessionId),
-        options.headlineMode ?? "llm"
+        options.headlineMode ?? "llm",
+        options.sessionHeadlineViews?.get(session.sessionId)
       );
     })
     .sort((a, b) => a.priorityRank - b.priorityRank || a.project.localeCompare(b.project));
@@ -189,7 +192,8 @@ function toCard(
   expandedSessionId?: string,
   enrichment?: LiveSessionEnrichment,
   transcriptFacts?: LiveSessionTranscriptFacts,
-  headlineMode: "llm" | "offline" = "llm"
+  headlineMode: "llm" | "offline" = "llm",
+  storedHeadline?: BoardHeadlineView
 ): SessionCardView {
   const indicators: SessionCardView["indicators"] = [];
   if (sessionAttention.length > 0) indicators.push("attention");
@@ -271,7 +275,7 @@ function toCard(
     signals: signalsFromCard(card, sessionAttention, sessionConflicts),
     facts
   });
-  const headline = headlineMode === "llm" ? buildPendingBoardHeadlineView(headlineInput) : buildOfflineBoardHeadlineView(headlineInput);
+  const headline = storedHeadline ?? (headlineMode === "llm" ? buildPendingBoardHeadlineView(headlineInput) : buildOfflineBoardHeadlineView(headlineInput));
   const enrichedCard = {
     ...card,
     headline,

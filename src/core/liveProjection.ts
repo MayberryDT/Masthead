@@ -1,4 +1,5 @@
 import { projectFixture, type LiveSessionEnrichment, type LiveSessionTranscriptFacts } from "./replay.ts";
+import type { BoardHeadlineView } from "./boardHeadlineFrame.ts";
 import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent } from "./types";
 
 export type LiveProjectionEnvelope = {
@@ -15,6 +16,7 @@ type LiveProjectionOptions = {
   expandedSessionId?: string;
   selectedSessionId?: string | null;
   sessionEnrichments?: Map<string, LiveSessionEnrichment>;
+  sessionHeadlineViews?: Map<string, BoardHeadlineView>;
   sessionTranscriptFacts?: Map<string, LiveSessionTranscriptFacts>;
   headlineMode?: "llm" | "offline";
   generatedAt?: string;
@@ -44,6 +46,7 @@ export function projectLiveEvents(
     projection: projectFixture(replay, {
       expandedSessionId: options.expandedSessionId,
       sessionEnrichments: normalizeLiveSessionEnrichments(options.sessionEnrichments),
+      sessionHeadlineViews: options.sessionHeadlineViews,
       sessionTranscriptFacts: options.sessionTranscriptFacts,
       headlineMode: options.headlineMode ?? "llm",
       selectedSessionId,

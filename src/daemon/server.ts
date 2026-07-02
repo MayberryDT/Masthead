@@ -43,6 +43,7 @@ import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsReposit
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
+import { currentBoardHeadlineFrames } from "./db/boardHeadlineFrameRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
@@ -1400,9 +1401,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
+      const sessionHeadlineViews = currentBoardHeadlineFrames(database, projectionSessionIds);
       const liveEnvelope = projectLiveEvents(projectionEvents, projectionGitSnapshots, {
         selectedSessionId,
         sessionEnrichments: liveProjectionEnrichments(database, projectionSessionIds),
+        sessionHeadlineViews,
         sessionTranscriptFacts: liveProjectionTranscriptFacts(database, projectionSessionIds),
         headlineMode,
         diagnostics: state.diagnostics.length

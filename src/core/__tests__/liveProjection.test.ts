@@ -65,6 +65,64 @@ describe("live projection", () => {
     expect(card?.headline.headline).toContain(":");
   });
 
+  test("applies supplied last successful LLM headline frames while keeping current headline input", () => {
+    const started = normalizeCodexHookPayload(
+      {
+        provider_event_id: "stored-headline-start",
+        event: "session_started",
+        session_id: "stored-headline-session",
+        timestamp: "2026-06-23T03:00:00.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        title: "Codex session"
+      },
+      { receivedAt: "2026-06-23T03:00:00.010Z" }
+    );
+    const storedHeadline = {
+      headline: "Board headlines: persisted frame is ready.",
+      frame: {
+        subject: "Board headlines",
+        disposition: "persisted frame is ready",
+        state: "active" as const,
+        subjectKind: "feature" as const,
+        confidence: "high" as const,
+        evidence: ["Stored successful frame"]
+      },
+      source: "llm" as const,
+      status: "ready" as const,
+      generatedAt: "2026-06-23T03:00:30.000Z",
+      provider: "openai",
+      model: "gpt-5"
+    };
+
+    const envelope = projectLiveEvents([started], [], {
+      generatedAt: "2026-06-23T03:02:00.000Z",
+      headlineMode: "llm",
+      sessionHeadlineViews: new Map([["stored-headline-session", storedHeadline]]),
+      sessionTranscriptFacts: new Map([
+        [
+          "stored-headline-session",
+          {
+            recentMessages: [
+              {
+                observedAt: "2026-06-23T03:01:30.000Z",
+                role: "user",
+                text: "Refresh the Board headline input from current transcript evidence."
+              }
+            ]
+          }
+        ]
+      ])
+    });
+
+    const card = envelope.projection.cards[0];
+    const headlineInput = card?.headlineInput as { evidence?: string[]; subjectCandidates?: string[] } | undefined;
+
+    expect(card?.headline).toEqual(storedHeadline);
+    expect(headlineInput?.evidence).toContain("Refresh the Board headline input from current transcript evidence.");
+    expect(headlineInput?.evidence).not.toContain("Stored successful frame");
+  });
+
   test("projects normalized hook events into a live board envelope", () => {
     const started = normalizeCodexHookPayload(
       {
