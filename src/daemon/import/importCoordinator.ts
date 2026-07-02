@@ -101,8 +101,10 @@ export function cancelImportJob(db: MastheadDatabase, importJobId: string, now =
   if (!job) throw new Error(`Import job not found: ${importJobId}`);
   const active = activeImportJobs.get(importJobId);
   if (active) active.token.cancelled = true;
-  if (job.status !== "queued" && job.status !== "running") return job;
+  if (job.status === "queued") return cancelQueuedImportJob(db, importJobId, now);
+  if (job.status !== "running") return job;
   return updateImportJob(db, importJobId, {
+    heartbeatAt: now(),
     status: "cancelling",
     updatedAt: now()
   });
@@ -220,7 +222,8 @@ async function runQueuedImportJob(
 
   try {
     const current = getImportJob(db, importJobId);
-    if (current?.status === "cancelled") {
+    if (token.cancelled || current?.status === "cancelled" || current?.status === "cancelling") {
+      if (current?.status !== "cancelled") cancelQueuedImportJob(db, importJobId, now);
       activeImportJobs.delete(importJobId);
       return;
     }
@@ -301,6 +304,27 @@ async function runQueuedImportJob(
   } finally {
     activeImportJobs.delete(importJobId);
   }
+}
+
+function cancelQueuedImportJob(db: MastheadDatabase, importJobId: string, now: () => string): ImportJobDto {
+  const pendingIndex = pendingImportJobs.findIndex((queued) => queued.importJobId === importJobId);
+  if (pendingIndex >= 0) pendingImportJobs.splice(pendingIndex, 1);
+  activeImportJobs.delete(importJobId);
+  const cancelledAt = now();
+  const cancelled = updateImportJob(db, importJobId, {
+    currentPath: null,
+    finishedAt: cancelledAt,
+    heartbeatAt: cancelledAt,
+    status: "cancelled",
+    updatedAt: cancelledAt
+  });
+  recordRuntimeDiagnostic({
+    details: { importJobId },
+    kind: "import_job_cancelled",
+    message: `Import job ${importJobId} cancelled`,
+    severity: "info"
+  });
+  return cancelled;
 }
 
 export function deriveImportVisibilityState(

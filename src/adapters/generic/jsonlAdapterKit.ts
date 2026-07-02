@@ -4,6 +4,8 @@ import type { AdapterRecord, DiscoveredSource, NormalizedAdapterPayload, SourceC
 
 export type JsonlShapeProfile = {
   runtime: string;
+  fallbackSessionId?: (source: DiscoveredSource) => string | undefined;
+  ignoreUnrecognizedRecords?: boolean;
   sessionIdKeys: string[];
   observedAtKeys: string[];
   roleKeys: string[];
@@ -41,6 +43,7 @@ export async function* backfillJsonlSource(
     }
     const normalized = normalizeJsonlPayload(payload, profile, source, confidence);
     if (!normalized) {
+      if (profile.ignoreUnrecognizedRecords) continue;
       yield diagnosticRecord(source, lineNumber, trimmed, `${source.runtime}_schema_not_recognized`);
       continue;
     }
@@ -63,11 +66,11 @@ export function normalizeJsonlPayload(
   confidence: SourceConfidence
 ): NormalizedAdapterPayload | undefined {
   if (!isRecord(payload)) return undefined;
-  const sessionId = readString(payload, profile.sessionIdKeys);
+  const sessionId = readString(payload, profile.sessionIdKeys) ?? profile.fallbackSessionId?.(source);
   if (!sessionId) return undefined;
   const observedAt = readString(payload, profile.observedAtKeys) ?? new Date(0).toISOString();
   const role = readString(payload, profile.roleKeys);
-  const text = readString(payload, profile.textKeys);
+  const text = readText(payload, profile.textKeys);
   const toolName = readString(payload, profile.toolNameKeys);
   const toolOutput = readString(payload, profile.toolOutputKeys);
 
@@ -114,6 +117,37 @@ export function readString(payload: unknown, keys: string[]): string | undefined
   return undefined;
 }
 
+function readText(payload: unknown, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = readPath(payload, key);
+    const text = textFromValue(value);
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function textFromValue(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (Array.isArray(value)) {
+    const parts = value.map((item) => textFromContentPart(item)).filter((item): item is string => Boolean(item));
+    const text = parts.join("\n\n").trim();
+    return text || undefined;
+  }
+  if (!isRecord(value)) return undefined;
+  const direct = readString(value, ["text", "content"]);
+  if (direct) return direct;
+  const nested = textFromValue(value.parts) ?? textFromValue(value.content);
+  return nested;
+}
+
+function textFromContentPart(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (!isRecord(value)) return undefined;
+  const type = typeof value.type === "string" ? value.type.toLowerCase() : "";
+  if (type === "thinking" || type === "toolcall" || type === "tool_call") return undefined;
+  return readString(value, ["text", "content"]);
+}
+
 export function readNumber(payload: unknown, keys: string[]): number | undefined {
   for (const key of keys) {
     const value = readPath(payload, key);
@@ -137,6 +171,7 @@ export function normalizeRole(role: string): string {
   if (lower.includes("user") || lower.includes("human")) return "user";
   if (lower.includes("assistant") || lower.includes("agent")) return "assistant";
   if (lower.includes("system")) return "system";
+  if (lower.includes("tool")) return "tool";
   return lower;
 }
 

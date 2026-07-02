@@ -1,5 +1,5 @@
 import { readdir, stat, readFile } from "node:fs/promises";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { AdapterRecord, DiscoveredSource, DiscoveryContext, IngestCursor, RuntimeKind, SessionAdapter, SourceInventory } from "../types.ts";
 import type { AdapterPathCandidate } from "../pathTypes.ts";
 import {
@@ -10,6 +10,7 @@ import {
   hash,
   isRecord,
   normalizeRole,
+  readString,
   readPath
 } from "./jsonlAdapterKit.ts";
 import { quoteIdentifier, sqliteTables, tableColumns, withReadonlySqliteCopy } from "./sqliteAdapterKit.ts";
@@ -64,6 +65,10 @@ async function inspectLocalSource(source: DiscoveredSource): Promise<SourceInven
 async function* backfillLocalSource(source: DiscoveredSource, _cursor: IngestCursor | undefined, options: LocalAdapterOptions): AsyncIterable<AdapterRecord> {
   if (!source.path) return;
   if (source.sourceKind === "jsonl" && options.jsonlProfile) {
+    if (source.path.endsWith(".json") && !source.path.endsWith(".jsonl")) {
+      yield* backfillJsonDocumentSource(source, options.jsonlProfile);
+      return;
+    }
     yield* backfillJsonlSource(source, options.jsonlProfile, { confidence: source.confidence });
     return;
   }
@@ -76,6 +81,31 @@ async function* backfillLocalSource(source: DiscoveredSource, _cursor: IngestCur
     return;
   }
   yield diagnosticRecord(source, `${source.runtime}_schema_not_recognized`);
+}
+
+async function* backfillJsonDocumentSource(source: DiscoveredSource, profile: JsonlShapeProfile): AsyncIterable<AdapterRecord> {
+  if (!source.path) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(source.path, "utf8"));
+  } catch {
+    yield diagnosticRecord(source, "json_invalid_document");
+    return;
+  }
+
+  const records = recordsFromJsonDocument(source, profile, parsed);
+  if (records.length === 0) {
+    const normalized = normalizeJsonlPayload(parsed, profile, source, source.confidence);
+    if (normalized) {
+      const observedAt = readString(parsed, profile.observedAtKeys) ?? new Date(0).toISOString();
+      yield adapterRecord(source, `${source.path}:document`, observedAt, parsed, normalized);
+      return;
+    }
+    yield diagnosticRecord(source, `${source.runtime}_schema_not_recognized`);
+    return;
+  }
+
+  for (const record of records) yield record;
 }
 
 async function* backfillSqliteSource(source: DiscoveredSource, profile: JsonlShapeProfile): AsyncIterable<AdapterRecord> {
@@ -130,6 +160,28 @@ async function* backfillSqliteSource(source: DiscoveredSource, profile: JsonlSha
   for (const record of records) yield record;
 }
 
+function recordsFromJsonDocument(source: DiscoveredSource, profile: JsonlShapeProfile, value: unknown): AdapterRecord[] {
+  if (!isRecord(value)) return [];
+  const sessionId = readString(value, profile.sessionIdKeys) ?? profile.fallbackSessionId?.(source);
+  if (!sessionId) return [];
+  const documentObservedAt = readString(value, profile.observedAtKeys) ?? new Date(0).toISOString();
+  const messages = jsonValueMessagesWithTimestamps(value, profile, documentObservedAt);
+  return messages.map((message, index) =>
+    adapterRecord(
+      source,
+      `${source.path}:message:${index + 1}`,
+      message.observedAt,
+      message.payload,
+      adapterPayload("message", source.confidence, source, {
+        observedAt: message.observedAt,
+        role: normalizeRole(message.role),
+        sessionId,
+        text: message.text
+      })
+    )
+  );
+}
+
 function recordsFromSqliteJsonValue(source: DiscoveredSource, profile: JsonlShapeProfile, table: string, index: number, value: unknown): AdapterRecord[] {
   const text = sqliteValueText(value);
   if (!text) return [];
@@ -163,6 +215,24 @@ function recordsFromSqliteJsonValue(source: DiscoveredSource, profile: JsonlShap
       })
     )
   );
+}
+
+function jsonValueMessagesWithTimestamps(value: unknown, profile: JsonlShapeProfile, fallbackObservedAt: string): Array<{ observedAt: string; payload: unknown; role: string; text: string }> {
+  const candidates = [readPath(value, "messages"), readPath(value, "conversation"), readPath(value, "tabs.0.bubbles")];
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue;
+    const messages = candidate
+      .filter(isRecord)
+      .map((item) => ({
+        observedAt: readString(item, profile.observedAtKeys) ?? fallbackObservedAt,
+        payload: item,
+        role: stringValue(item.role) ?? stringValue(item.speaker) ?? stringValue(item.type) ?? "",
+        text: messageText(item)
+      }))
+      .filter((item) => item.role && item.text);
+    if (messages.length > 0) return messages;
+  }
+  return [];
 }
 
 async function* backfillMarkdownSource(source: DiscoveredSource): AsyncIterable<AdapterRecord> {
@@ -216,11 +286,19 @@ function markdownRoleBlocks(text: string): Array<{ role: string; text: string }>
 }
 
 export function genericCodingProfile(runtime: string): JsonlShapeProfile {
+  const isHermes = runtime === "hermes";
+  const isOmp = runtime === "omp";
   return {
+    fallbackSessionId: isHermes || isOmp ? sessionIdFromSourcePath : undefined,
+    ignoreUnrecognizedRecords: isHermes || isOmp,
     runtime,
-    observedAtKeys: ["timestamp", "createdAt", "created_at", "updatedAt", "observedAt", "time"],
-    roleKeys: ["role", "type", "message.role", "speaker"],
-    sessionIdKeys: ["sessionId", "session_id", "conversationId", "conversation_id", "uuid", "id", "parentSessionId", "parent_session_id"],
+    observedAtKeys: isOmp
+      ? ["message.timestamp", "timestamp", "createdAt", "created_at", "updatedAt", "observedAt", "time", "session_start", "started_at", "last_updated"]
+      : ["timestamp", "createdAt", "created_at", "updatedAt", "observedAt", "time", "session_start", "started_at", "last_updated"],
+    roleKeys: isOmp ? ["message.role", "role", "speaker"] : ["role", "type", "message.role", "speaker"],
+    sessionIdKeys: isOmp
+      ? ["sessionId", "session_id", "conversationId", "conversation_id", "uuid", "parentSessionId", "parent_session_id"]
+      : ["sessionId", "session_id", "conversationId", "conversation_id", "uuid", "id", "parentSessionId", "parent_session_id"],
     textKeys: ["message.content", "content", "text", "message.text", "summary", "output"],
     toolNameKeys: ["toolName", "tool_name", "name", "tool"],
     toolOutputKeys: ["toolOutput", "tool_output", "result", "output"],
@@ -231,6 +309,17 @@ export function genericCodingProfile(runtime: string): JsonlShapeProfile {
       totalTokens: ["usage.total_tokens", "usage.totalTokens", "totalTokens", "total_tokens"]
     }
   };
+}
+
+function sessionIdFromSourcePath(source: DiscoveredSource): string | undefined {
+  if (!source.path) return undefined;
+  const base = basename(source.path).replace(/\.(jsonl|json)$/i, "");
+  if (source.runtime === "omp") {
+    if (/^\d{4}-\d{2}-\d{2}T/.test(base)) return base;
+    const parent = basename(dirname(source.path));
+    if (/^\d{4}-\d{2}-\d{2}T/.test(parent)) return `${parent}:${base.replace(/^__/, "")}`;
+  }
+  return base;
 }
 
 export function jsonValueMessages(value: unknown): Array<{ role: string; text: string }> {
@@ -292,6 +381,7 @@ function matchesKind(path: string, contentKind: AdapterPathCandidate["contentKin
     if (lowerName.endsWith(".jsonl")) return true;
     if (!lowerName.endsWith(".json")) return false;
     if (lowerName === "package.json" || lowerName === "tsconfig.json" || lowerName === "workspace.json") return false;
+    if (lowerName.startsWith("request_dump")) return false;
     return /session|conversation|chat|history|transcript|message|run|event|diff|composer/.test(lowerPath);
   }
   if (contentKind === "markdown-files") return lowerName.endsWith(".md") || lowerName.endsWith(".markdown");
@@ -329,6 +419,23 @@ function sqliteValueText(value: unknown): string | undefined {
   if (typeof value === "string" && value.trim()) return value;
   if (value instanceof Uint8Array) return new TextDecoder().decode(value);
   return undefined;
+}
+
+function messageText(value: Record<string, unknown>): string {
+  const content = value.content ?? value.text ?? value.message;
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (isRecord(part)) return stringValue(part.text) ?? stringValue(part.content) ?? "";
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+  return "";
 }
 
 function stringValue(value: unknown): string | undefined {

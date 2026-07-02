@@ -14,7 +14,7 @@
 - [x] Transcript import populates messages/tools. Evidence: `npm run verify` import and MCP smokes passed on 2026-06-26.
 
 ## Multi-adapter Sources
-- [x] Sources shows Codex, Cursor, Claude Code, Antigravity, OpenCode, Aider, OpenClaw, Hermes, and Pi. Evidence: `supportedAdapters`, registry, scan-service, and Sources UI tests added on 2026-06-27.
+- [x] Sources shows Codex, Cursor, Claude Code, OpenCode, Aider, OpenClaw, Hermes, Pi, and OMP. Evidence: `supportedAdapters`, registry, scan-service, and Sources UI tests added on 2026-06-27, with OMP promoted and Antigravity pruned on 2026-07-02.
 - [x] Scan this computer checks known local locations only. Evidence: `sourceScanService.test.ts` verifies arbitrary home files are ignored on 2026-06-27.
 - [x] Connect selected queues metadata import jobs. Evidence: `sourceConnectService.test.ts` verifies per-source metadata jobs on 2026-06-27.
 - [x] Transcript import requires explicit approval. Evidence: `/sources/connect` rejects transcript import without approval and adapter transcript routes use existing policy checks.

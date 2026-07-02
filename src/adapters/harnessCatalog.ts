@@ -52,11 +52,6 @@ export const HARNESS_CATALOG: HarnessCatalogEntry[] = [
     "~/.claude/conversations",
     "~/.claude/history"
   ], ["MASTHEAD_CLAUDE_CODE_HOME", "CLAUDE_HOME"], { tokens: true, files: true }),
-  active("antigravity", "Antigravity", ["Google Antigravity"], "Google Antigravity local agent history and artifacts when schema is recognized.", "active_metadata", ["sqlite", "jsonl"], [
-    "~/Library/Application Support/Antigravity",
-    "~/.config/Antigravity",
-    "%APPDATA%/Antigravity"
-  ], ["MASTHEAD_ANTIGRAVITY_HOME", "ANTIGRAVITY_HOME"], { files: true }),
   active("opencode", "OpenCode", ["OpenCode AI"], "OpenCode local session history.", "active_transcript", ["jsonl", "sqlite"], [
     "~/.opencode",
     "~/.local/share/opencode",
@@ -88,13 +83,13 @@ export const HARNESS_CATALOG: HarnessCatalogEntry[] = [
     "~/.local/share/pi",
     "~/.config/pi"
   ], ["MASTHEAD_PI_HOME", "PI_HOME"]),
-  active("omp", "Oh My Pi", ["OMP", "oh-my-pi", "pi-coding-agent"], "Oh My Pi / OMP coding agent local state. OMP advertises on-disk sessions for --resume, so Masthead scans conservative OMP homes until the exact schema is verified.", "detector_only", ["sqlite", "jsonl"], [
-    "~/.omp",
-    "~/.oh-my-pi",
-    "~/.local/share/omp",
-    "~/.config/omp",
-    "~/.local/share/oh-my-pi",
-    "~/.config/oh-my-pi"
+  active("omp", "Oh My Pi", ["OMP", "oh-my-pi", "pi-coding-agent"], "Oh My Pi / OMP local session history.", "active_transcript", ["jsonl"], [
+    "~/.omp/agent/sessions",
+    "~/.oh-my-pi/agent/sessions",
+    "~/.local/share/omp/agent/sessions",
+    "~/.config/omp/agent/sessions",
+    "~/.local/share/oh-my-pi/agent/sessions",
+    "~/.config/oh-my-pi/agent/sessions"
   ], ["MASTHEAD_OMP_HOME", "OMP_HOME", "OH_MY_PI_HOME"]),
   active("cline", "Cline", ["Claude Dev", "saoudrizwan.claude-dev"], "Cline VS Code extension task and chat history.", "detector_only", ["sqlite", "jsonl"], vscodeExtensionPaths(["cline", "saoudrizwan.claude-dev"]), ["MASTHEAD_CLINE_HOME", "CLINE_HOME"]),
   active("roo_code", "Roo Code", ["Roo", "Roo Cline"], "Roo Code VS Code extension task and chat history.", "detector_only", ["sqlite", "jsonl"], vscodeExtensionPaths(["roo", "roo-code", "rooveterinaryinc"]), ["MASTHEAD_ROO_CODE_HOME", "ROO_CODE_HOME"]),
@@ -166,7 +161,7 @@ export const HARNESS_CATALOG: HarnessCatalogEntry[] = [
   {
     aliases: ["Gemini CLI"],
     cloudOnly: false,
-    description: "Legacy Gemini CLI compatibility for existing imported records. Antigravity is the forward-looking Google local agent path.",
+    description: "Legacy Gemini CLI compatibility for existing imported records.",
     envOverrides: [],
     knownCandidatePaths: [],
     label: "Gemini CLI",
@@ -248,7 +243,7 @@ function active(
 ): HarnessCatalogEntry {
   const runtimeStatus: HarnessRuntimeStatus = supportLevel === "detector_only" ? "scan_target" : "import_adapter";
   const supportsImport = runtimeStatus === "import_adapter";
-  const supportsTranscriptImport = supportsImport && (supportLevel === "active_full" || supportLevel === "active_transcript" || supportLevel === "active_metadata");
+  const supportsTranscriptImport = supportsImport && (supportLevel === "active_full" || supportLevel === "active_transcript");
   return {
     aliases,
     cloudOnly: false,

@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { toBoardHeadlineInput, type BoardHeadlineInput, type BoardHeadlineSignal } from "../boardHeadlineInput";
 import { validateBoardHeadlineFrame } from "../boardHeadlineFrame";
 import type { BoardHeadlineFacts } from "../boardHeadlineFacts";
-import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView } from "../offlineBoardHeadline";
+import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView, buildWaitingForTranscriptBoardHeadlineView } from "../offlineBoardHeadline";
 
 function facts(overrides: Partial<BoardHeadlineFacts> = {}): BoardHeadlineFacts {
   return {
@@ -43,6 +43,14 @@ describe("offline board headline views", () => {
   test("returns a pending placeholder without a deterministic frame", () => {
     expect(buildPendingBoardHeadlineView(input())).toEqual({
       headline: "Generating headline...",
+      source: "pending",
+      status: "pending"
+    });
+  });
+
+  test("builds a waiting-for-transcript pending headline", () => {
+    expect(buildWaitingForTranscriptBoardHeadlineView(input())).toEqual({
+      headline: "Waiting for transcript...",
       source: "pending",
       status: "pending"
     });

@@ -51,38 +51,6 @@ export type BoardHeadlineValidationResult =
       reason: "invalid_shape" | "weak_subject" | "weak_disposition" | "unsafe_text" | "unsupported_state";
     };
 
-const bannedHeadlinePhrases = [
-  "recent activity",
-  "recent completion note",
-  "is focused on",
-  "work is focused on",
-  "being updated around",
-  "being fixed around",
-  "session update",
-  "session activity",
-  "work is in progress",
-  "changes have",
-  "updates have",
-  "had recent",
-  "has recent",
-  "quiet but open",
-  "needs attention",
-  "follow-up had",
-  "follow-up has"
-];
-
-const bannedSubjects = [
-  "session",
-  "work",
-  "changes",
-  "updates",
-  "recent activity",
-  "verification follow-up",
-  "codex hook event",
-  "session narrative",
-  "ui changes"
-];
-
 const allowedStates = new Set<BoardHeadlineState>([
   "active",
   "blocked",
@@ -141,36 +109,26 @@ export function validateBoardHeadlineFrame(candidate: unknown): BoardHeadlineVal
     return { ok: false, reason: "invalid_shape" };
   }
 
+  const subject = cleanSlot(candidate.subject);
+  const disposition = cleanSlot(candidate.disposition);
+  const evidence = candidate.evidence.map(cleanSlot).filter(Boolean).slice(0, 6);
+
+  if (isUnsafeText(subject) || isUnsafeText(disposition) || evidence.some(isUnsafeText)) {
+    return { ok: false, reason: "unsafe_text" };
+  }
+  if (!subject) return { ok: false, reason: "weak_subject" };
+  if (!disposition) return { ok: false, reason: "weak_disposition" };
+
   const frame: BoardHeadlineFrame = {
-    subject: cleanSlot(candidate.subject),
-    disposition: cleanSlot(candidate.disposition),
+    subject: subject.slice(0, 96),
+    disposition: disposition.slice(0, 180),
     state: candidate.state as BoardHeadlineState,
     subjectKind: candidate.subjectKind as BoardHeadlineSubjectKind,
     confidence: candidate.confidence as BoardHeadlineConfidence,
-    evidence: candidate.evidence.map(cleanSlot).filter(Boolean).slice(0, 6)
+    evidence: evidence.map((value) => value.slice(0, 180))
   };
 
-  if (isUnsafeText(frame.subject) || isUnsafeText(frame.disposition) || frame.evidence.some(isUnsafeText)) {
-    return { ok: false, reason: "unsafe_text" };
-  }
-  if (!isUsefulSubject(frame.subject)) return { ok: false, reason: "weak_subject" };
-  if (!isUsefulDisposition(frame.disposition)) return { ok: false, reason: "weak_disposition" };
-
   return { ok: true, frame };
-}
-
-export function isUsefulSubject(value: string): boolean {
-  const normalized = cleanSlot(value).toLowerCase();
-  if (normalized.length < 4 || normalized.length > 72) return false;
-
-  return !bannedSubjects.some((subject) => normalized === subject);
-}
-
-export function isUsefulDisposition(value: string): boolean {
-  const normalized = cleanSlot(value).toLowerCase();
-  if (normalized.length < 12 || normalized.length > 140) return false;
-
-  return !bannedHeadlinePhrases.some((phrase) => normalized.includes(phrase));
 }
 
 export function isUnsafeText(value: string): boolean {

@@ -101,7 +101,8 @@ describe("OpenAI board headline frame", () => {
       facts: {
         changedFileCount: 1,
         recentFileBasenames: ["SessionCard.tsx"],
-        recentToolNames: []
+        recentToolNames: [],
+        recentTranscriptMessages: ["Use subject and disposition frames for Board headlines."]
       }
     });
     expect(body.input).not.toContain("OPENAI_API_KEY");
@@ -152,12 +153,12 @@ describe("OpenAI board headline frame", () => {
     });
     expect(providerInput).not.toHaveProperty("facts.sessionId");
     expect(providerInput).not.toHaveProperty("facts.project");
-    expect(providerInput).not.toHaveProperty("facts.recentTranscriptMessages");
     expect(providerInput).not.toHaveProperty("facts.recentEvents");
     expect(providerInput.facts).toEqual({
       changedFileCount: 1,
       recentFileBasenames: ["SessionCard.tsx"],
-      recentToolNames: ["apply_patch"]
+      recentToolNames: ["apply_patch"],
+      recentTranscriptMessages: ["Board headline frame keeps concrete subject evidence."]
     });
 
     expect(body.input).toContain("Headline work started");
@@ -191,15 +192,15 @@ describe("OpenAI board headline frame", () => {
     });
   });
 
-  test("returns validation_failed for weak model frames", async () => {
+  test("accepts structurally valid frames without semantic support matching", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       responseWithFrame({
         subject: "UI changes",
         disposition: "has recent activity",
-        state: "active",
+        state: "completed",
         subjectKind: "component",
         confidence: "low",
-        evidence: ["Use subject and disposition frames for Board headlines."]
+        evidence: []
       })
     );
 
@@ -211,79 +212,12 @@ describe("OpenAI board headline frame", () => {
         model: "gpt-5-nano-2025-08-07"
       })
     ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "weak_subject"
-    });
-  });
-
-  test("rejects structurally valid frames that do not match the input state", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame({ state: "completed" })));
-
-    await expect(
-      rewriteBoardHeadlineFrameWithOpenAI(input(), {
-        enabled: true,
-        apiKey: "key",
-        fetchImpl,
-        model: "gpt-5-nano-2025-08-07"
-      })
-    ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "state_mismatch"
-    });
-  });
-
-  test("rejects frames without supported evidence", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame({ evidence: [] })));
-
-    await expect(
-      rewriteBoardHeadlineFrameWithOpenAI(input(), {
-        enabled: true,
-        apiKey: "key",
-        fetchImpl,
-        model: "gpt-5-nano-2025-08-07"
-      })
-    ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "empty_evidence"
-    });
-  });
-
-  test("rejects evidence not supported by the compact input", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame({ evidence: ["Unrelated payment workflow redesign."] })));
-
-    await expect(
-      rewriteBoardHeadlineFrameWithOpenAI(input(), {
-        enabled: true,
-        apiKey: "key",
-        fetchImpl,
-        model: "gpt-5-nano-2025-08-07"
-      })
-    ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "unsupported_evidence"
-    });
-  });
-
-  test("rejects approval claims without approval evidence", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      responseWithFrame(
-        validFrame({
-          disposition: "needs your approval before continuing",
-          evidence: ["Use subject and disposition frames for Board headlines."]
-        })
-      )
-    );
-
-    await expect(
-      rewriteBoardHeadlineFrameWithOpenAI(input(), {
-        enabled: true,
-        apiKey: "key",
-        fetchImpl,
-        model: "gpt-5-nano-2025-08-07"
-      })
-    ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "unsupported_claim"
+      status: "llm",
+      frame: {
+        subject: "UI changes",
+        disposition: "has recent activity",
+        state: "completed"
+      }
     });
   });
 

@@ -32,7 +32,7 @@ describe("catalog path candidates", () => {
 
   test("uses bounded depth for directory candidates", () => {
     const ompCandidates = catalogPathCandidatesForRuntime("omp", context);
-    expect(ompCandidates.map((candidate) => candidate.relativePath)).toContain("/home/tester/.omp");
+    expect(ompCandidates.map((candidate) => candidate.relativePath)).toContain("/home/tester/.omp/agent/sessions");
     expect(ompCandidates.every((candidate) => candidate.maxDepth !== undefined && candidate.maxDepth <= 4)).toBe(true);
   });
 

@@ -21,9 +21,9 @@ Local dev server was restarted from this branch and is serving `http://127.0.0.1
 | Codex | Yes | Local-dependent | Tested | Approval-gated | Tested | Full adapter |
 | Cursor | Yes | Local-dependent | Tested | Approval-gated | Tested | SQLite schema-recognition only |
 | Claude Code | Yes | Local-dependent | Tested | Approval-gated | Tested | JSONL/JSON schema-recognition only |
-| Antigravity | Yes | Local-dependent | Tested | Approval-gated | Tested | Metadata/transcript when schema recognized |
 | OpenCode | Yes | Local-dependent | Tested | Approval-gated | Tested | JSONL/JSON schema-recognition only |
 | Aider | Yes | Local-dependent | Tested | Approval-gated | Tested | Markdown role-block import |
 | OpenClaw | Yes | Local-dependent | Tested | Approval-gated | Tested | JSONL/JSON schema-recognition only |
 | Hermes | Yes | Local-dependent | Tested | Approval-gated | Tested | SQLite/JSONL schema-recognition only |
 | Pi | Yes | Local-dependent | Tested | Approval-gated | Tested | Metadata/transcript when schema recognized |
+| OMP | Yes | Local-dependent | Tested | Approval-gated | Tested | JSONL session import |

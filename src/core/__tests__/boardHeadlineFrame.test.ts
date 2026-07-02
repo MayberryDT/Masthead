@@ -48,18 +48,9 @@ describe("board headline frame contract", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("rejects weak generic subjects", () => {
-    expect(validateBoardHeadlineFrame(frame({ subject: "UI changes" }))).toEqual({
-      ok: false,
-      reason: "weak_subject"
-    });
-  });
-
-  test("rejects weak generic dispositions", () => {
-    expect(validateBoardHeadlineFrame(frame({ disposition: "has recent activity" }))).toEqual({
-      ok: false,
-      reason: "weak_disposition"
-    });
+  test("allows generic but structurally valid model text", () => {
+    expect(validateBoardHeadlineFrame(frame({ subject: "UI changes" })).ok).toBe(true);
+    expect(validateBoardHeadlineFrame(frame({ disposition: "has recent activity" })).ok).toBe(true);
   });
 
   test("rejects unsafe text in subject and disposition", () => {

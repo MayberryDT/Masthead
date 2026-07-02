@@ -58,6 +58,66 @@ export function recentHookEventsWithTranscriptPaths(db: MastheadDatabase, source
     .filter((event): event is NormalizedEvent => Boolean(event));
 }
 
+export function recentHookEventsWithTranscriptPathsForSessions(
+  db: MastheadDatabase,
+  sourceId: string,
+  sourceSessionIds: Set<string>,
+  limit: number
+): NormalizedEvent[] {
+  const sessionIds = [...sourceSessionIds].filter(Boolean);
+  if (sessionIds.length === 0) return [];
+  const placeholders = sessionIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `WITH candidates AS (
+        SELECT
+          raw_event_id AS rawEventId,
+          observed_at AS observedAt,
+          payload_json AS payloadJson,
+          COALESCE(
+            json_extract(payload_json, '$.value.sessionId'),
+            json_extract(payload_json, '$.value.sourceSessionId'),
+            json_extract(payload_json, '$.sessionId'),
+            json_extract(payload_json, '$.sourceSessionId')
+          ) AS sourceSessionId,
+          COALESCE(
+            json_extract(payload_json, '$.value.payload.transcriptPath'),
+            json_extract(payload_json, '$.value.payload.transcript_path'),
+            json_extract(payload_json, '$.payload.transcriptPath'),
+            json_extract(payload_json, '$.payload.transcript_path')
+          ) AS transcriptPath
+        FROM raw_events
+        WHERE source_id = ?
+          AND source_kind = 'hook'
+          AND json_valid(payload_json)
+          AND (payload_json LIKE '%"transcriptPath"%' OR payload_json LIKE '%"transcript_path"%')
+      ),
+      ranked AS (
+        SELECT
+          rawEventId,
+          observedAt,
+          payloadJson,
+          ROW_NUMBER() OVER (
+            PARTITION BY sourceSessionId, transcriptPath
+            ORDER BY observedAt DESC, rawEventId DESC
+          ) AS rowRank
+        FROM candidates
+        WHERE sourceSessionId IN (${placeholders})
+          AND transcriptPath IS NOT NULL
+      )
+      SELECT payloadJson
+      FROM ranked
+      WHERE rowRank = 1
+      ORDER BY observedAt DESC, rawEventId DESC
+      LIMIT ?`
+    )
+    .all(sourceId, ...sessionIds, Math.max(1, limit)) as HookTranscriptRow[];
+
+  return rows
+    .map((row) => parseNormalizedHookEvent(row.payloadJson))
+    .filter((event): event is NormalizedEvent => Boolean(event));
+}
+
 function parseNormalizedHookEvent(payloadJson: string): NormalizedEvent | undefined {
   const record = parseStoreRecord(payloadJson);
   if (!record || record.recordType !== "event") return undefined;

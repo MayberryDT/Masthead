@@ -48,7 +48,7 @@ describe("multi-adapter import", () => {
 
     expect(rows).toEqual(
       expect.arrayContaining(
-        ["codex", "cursor", "claude_code", "antigravity", "opencode", "aider", "openclaw", "hermes", "pi"].map((runtime) =>
+        ["codex", "cursor", "claude_code", "opencode", "aider", "openclaw", "hermes", "pi", "omp"].map((runtime) =>
           expect.objectContaining({ messages: 2, runtime, sessions: 1 })
         )
       )
@@ -97,12 +97,12 @@ async function fixtureSources(tempDir: string): Promise<DiscoveredSource[]> {
   sources.push(await jsonlSource(tempDir, "codex", "codex-transcript-jsonl"));
   sources.push(await sqliteJsonSource(tempDir, "cursor", "cursor.vscdb"));
   sources.push(await jsonlSource(tempDir, "claude_code"));
-  sources.push(await sqliteJsonSource(tempDir, "antigravity", "antigravity.vscdb"));
   sources.push(await jsonlSource(tempDir, "opencode"));
   sources.push(await markdownSource(tempDir));
   sources.push(await jsonlSource(tempDir, "openclaw"));
   sources.push(await sqliteRowsSource(tempDir, "hermes", "hermes.db"));
   sources.push(await jsonlSource(tempDir, "pi"));
+  sources.push(await ompJsonlSource(tempDir));
   return sources;
 }
 
@@ -124,6 +124,20 @@ async function markdownSource(tempDir: string): Promise<DiscoveredSource> {
   const path = join(tempDir, "aider.chat.history.md");
   await writeFile(path, "# User\n\naider user prompt\n\n# Assistant\n\naider assistant reply\n", "utf8");
   return makeSource("aider", path, "ui_signal", "aider-markdown");
+}
+
+async function ompJsonlSource(tempDir: string): Promise<DiscoveredSource> {
+  const path = join(tempDir, "2026-06-27T10-00-00-000Z_omp-session.jsonl");
+  await writeFile(
+    path,
+    [
+      JSON.stringify({ cwd: tempDir, timestamp: "2026-06-27T10:00:00.000Z", title: "OMP fixture", type: "session" }),
+      JSON.stringify({ message: { content: [{ text: "omp user prompt", type: "text" }], role: "user", timestamp: "2026-06-27T10:00:00.000Z" }, timestamp: "2026-06-27T10:00:00.000Z", type: "message" }),
+      JSON.stringify({ message: { content: [{ text: "omp assistant reply", type: "text" }], role: "assistant", timestamp: "2026-06-27T10:01:00.000Z" }, timestamp: "2026-06-27T10:01:00.000Z", type: "message" })
+    ].join("\n") + "\n",
+    "utf8"
+  );
+  return makeSource("omp", path, "jsonl", "omp-jsonl-tree");
 }
 
 async function sqliteJsonSource(tempDir: string, runtime: RuntimeKind, name: string): Promise<DiscoveredSource> {

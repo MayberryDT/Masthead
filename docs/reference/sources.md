@@ -4,7 +4,7 @@ Sources is Masthead's local connector surface. It discovers local coding-harness
 
 ## Setup Flow
 
-1. Choose the coding harnesses to import from, for example Codex, Hermes, Cursor, or Antigravity.
+1. Choose the coding harnesses to import from, for example Codex, Hermes, Cursor, or OMP.
 2. Choose an import age. The default is changed transcripts plus the last 30 days. Full archive import is explicit.
 3. Preview the manifest before starting. The preview reports included files, skipped files, and total bytes without parsing transcripts.
 4. Start import. Masthead queues one parent job per selected coding harness/runtime.
@@ -16,8 +16,8 @@ Local paths remain advanced diagnostics and provenance. The user-facing approval
 
 The onboarding catalog separates import support from awareness:
 
-- Active import adapters: Codex, Cursor, Claude Code, Antigravity, OpenCode, Aider, OpenClaw, Hermes, and Pi.
-- Detector-only local harnesses: OMP, Crush, Cline, Roo Code, Kilo Code, Continue.dev, OpenHands, GitHub Copilot, Windsurf, Zed AI, Amazon Q Developer, Sourcegraph Amp, JetBrains AI, Qodo, Tabnine, and IBM Bob.
+- Active import adapters: Codex, Cursor, Claude Code, OpenCode, Aider, OpenClaw, Hermes, Pi, and OMP.
+- Detector-only local harnesses: Crush, Cline, Roo Code, Kilo Code, Continue.dev, OpenHands, GitHub Copilot, Windsurf, Zed AI, Amazon Q Developer, Sourcegraph Amp, JetBrains AI, Qodo, Tabnine, and IBM Bob.
 - Cloud-reference harnesses: Devin and Jules.
 - Legacy hidden compatibility: Gemini CLI for existing imported records only.
 

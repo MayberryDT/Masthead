@@ -157,7 +157,7 @@ describe("board headline frame repository", () => {
       upsertBoardHeadlineFrame(db, {
         frame: frame({
           disposition: "Uses a subject that validation rejects",
-          subject: "work"
+          subject: " "
         }),
         generatedAt: "2026-07-01T12:00:00.000Z",
         model: "gpt-5",

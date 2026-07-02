@@ -2,6 +2,7 @@ import type { ImportJobDto, ImportJobKind } from "../db/importJobRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 import { queueImportJob, type ImportJobControls, type ImportWorkResult } from "../import/importCoordinator.ts";
 import { setSourcePolicy } from "../db/sourcePolicyRepository.ts";
+import { adapterForRuntime } from "../../adapters/registry.ts";
 import type { RuntimeKind } from "../../adapters/types.ts";
 import type { ImportScopeDto } from "../../shared/sourceImport.ts";
 import type { SourceScanResult } from "./sourceScanService.ts";
@@ -40,6 +41,10 @@ export function connectSelectedSources(
   }
 
   for (const adapter of scan.adapters.filter((adapter) => selected.has(adapter.runtime))) {
+    if (!adapterForRuntime(adapter.runtime)) {
+      skipped.push({ runtime: adapter.runtime, reason: "Masthead can detect this harness, but import is not supported yet." });
+      continue;
+    }
     const parentSource = adapter.sources[0];
     if (!parentSource) {
       skipped.push({ runtime: adapter.runtime, reason: "No recognized local history was detected for this coding harness." });

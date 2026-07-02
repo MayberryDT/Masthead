@@ -262,8 +262,7 @@ export type BoardHeadlineRefreshStatus =
   | "not_configured"
   | "timeout"
   | "api_error"
-  | "invalid_output"
-  | "validation_failed";
+  | "invalid_output";
 
 export type BoardHeadlineRefreshState = {
   requestedAt: string;

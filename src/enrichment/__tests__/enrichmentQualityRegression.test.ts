@@ -90,7 +90,7 @@ describe("enrichment quality regressions", () => {
   test("board headline frame API validates provider output and renders accepted frames", async () => {
     const invalidFetch = vi.fn<typeof fetch>().mockResolvedValue(
       responseWithFrame({
-        subject: "recent activity",
+        subject: "https://example.com/task",
         disposition: "recent activity",
         state: "active",
         subjectKind: "unknown",
@@ -102,8 +102,8 @@ describe("enrichment quality regressions", () => {
     await expect(
       rewriteBoardHeadlineFrameWithOpenAI(headlineInput(), { apiKey: "key", enabled: true, fetchImpl: invalidFetch })
     ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "weak_subject"
+      status: "invalid_output",
+      validationReason: "unsafe_text"
     });
 
     const frame: BoardHeadlineFrame = {

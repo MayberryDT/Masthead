@@ -6,6 +6,7 @@ import { getImportJob } from "../../db/importJobRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
 import {
+  cancelImportJob,
   deriveImportVisibilityState,
   markInterruptedImportJobs,
   queueImportJob,
@@ -96,6 +97,42 @@ describe("import coordinator", () => {
     await waitForJobStatus(db, first.importJobId, "succeeded");
     await waitForJobStatus(db, second.importJobId, "succeeded");
     expect(secondStarted).toBe(true);
+    db.close();
+  });
+
+  test("cancels queued imports immediately without waiting for the active job", async () => {
+    const db = await openTestDatabase();
+    seedSource(db);
+    seedSource(db, "codex-archive");
+    let resolveFirst: (value: ImportWorkResult) => void = () => undefined;
+    const firstWorker = new Promise<ImportWorkResult>((resolve) => {
+      resolveFirst = resolve;
+    });
+    let secondStarted = false;
+
+    const first = queueImportJob(db, { importKind: "metadata", sourceId: "codex-sessions", now: fixedNow }, () => firstWorker);
+    const second = queueImportJob(db, { importKind: "metadata", sourceId: "codex-archive", now: fixedNow }, () => {
+      secondStarted = true;
+      return Promise.resolve({ discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 });
+    });
+
+    await flushMicrotasks();
+    expect(getImportJob(db, first.importJobId)?.status).toBe("running");
+    expect(getImportJob(db, second.importJobId)?.status).toBe("queued");
+
+    const cancelled = cancelImportJob(db, second.importJobId, fixedNow);
+
+    expect(cancelled.status).toBe("cancelled");
+    expect(getImportJob(db, second.importJobId)).toMatchObject({
+      finishedAt: fixedNow(),
+      status: "cancelled"
+    });
+
+    resolveFirst({ discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 });
+    await waitForJobStatus(db, first.importJobId, "succeeded");
+    await flushMicrotasks();
+    expect(secondStarted).toBe(false);
+    expect(getImportJob(db, second.importJobId)?.status).toBe("cancelled");
     db.close();
   });
 

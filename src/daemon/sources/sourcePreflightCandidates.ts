@@ -5,13 +5,13 @@ import type { SourcePreflightDto } from "./sourcePreflight.ts";
 import { codexCandidatePaths } from "../../adapters/codex/discovery.ts";
 import { cursorCandidatePaths } from "../../adapters/cursor/discovery.ts";
 import { claudeCodeCandidatePaths } from "../../adapters/claudeCode/discovery.ts";
-import { antigravityCandidatePaths } from "../../adapters/antigravity/discovery.ts";
 import { opencodeCandidatePaths } from "../../adapters/opencode/discovery.ts";
 import { aiderCandidatePaths } from "../../adapters/aider/discovery.ts";
 import { openclawCandidatePaths } from "../../adapters/openclaw/discovery.ts";
 import { hermesCandidatePaths } from "../../adapters/hermes/discovery.ts";
 import { piCandidatePaths } from "../../adapters/pi/discovery.ts";
 import { catalogPathCandidatesForRuntime } from "../../adapters/catalogPathCandidates.ts";
+import { canImportHarness, harnessForRuntime } from "../../adapters/harnessCatalog.ts";
 
 export async function preflightAdapterCandidates(runtime: RuntimeKind, context: DiscoveryContext): Promise<SourcePreflightDto[]> {
   const candidates = candidatePathsForRuntime(runtime, context);
@@ -30,10 +30,11 @@ export async function preflightAdapterCandidates(runtime: RuntimeKind, context: 
 }
 
 export function candidatePathsForRuntime(runtime: RuntimeKind, context: DiscoveryContext): AdapterPathCandidate[] {
+  const harness = harnessForRuntime(runtime);
+  if (harness && !canImportHarness(harness)) return catalogPathCandidatesForRuntime(runtime, context);
   if (runtime === "codex") return codexCandidatePaths(context);
   if (runtime === "cursor") return cursorCandidatePaths(context);
   if (runtime === "claude_code") return claudeCodeCandidatePaths(context);
-  if (runtime === "antigravity") return antigravityCandidatePaths(context);
   if (runtime === "opencode") return opencodeCandidatePaths(context);
   if (runtime === "aider") return aiderCandidatePaths(context);
   if (runtime === "openclaw") return openclawCandidatePaths(context);

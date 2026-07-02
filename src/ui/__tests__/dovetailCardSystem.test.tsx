@@ -128,7 +128,7 @@ describe("dovetail card system", () => {
     );
 
     expectNoDovetailTreatment(importJobsHtml);
-    expect(importJobsHtml).toContain("Import Queue");
+    expect(importJobsHtml).toContain("Import activity");
     expect(importJobsHtml).not.toContain("dovetail-info-card");
     expect(readFileSync("src/styles/primitives.css", "utf8")).not.toContain(".code-block.dovetail");
   });

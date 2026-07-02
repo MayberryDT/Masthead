@@ -20,7 +20,6 @@ describe("harness catalog", () => {
         "codex",
         "cursor",
         "claude_code",
-        "antigravity",
         "opencode",
         "aider",
         "openclaw",
@@ -45,23 +44,24 @@ describe("harness catalog", () => {
     );
   });
 
-  test("represents OMP as detector-only until local storage schema is verified", () => {
+  test("represents OMP as an importable local session source", () => {
     const omp = harnessForRuntime("omp");
     expect(omp?.label).toBe("Oh My Pi");
-    expect(omp?.supportLevel).toBe("detector_only");
-    expect(omp?.runtimeStatus).toBe("scan_target");
+    expect(omp?.supportLevel).toBe("active_transcript");
+    expect(omp?.runtimeStatus).toBe("import_adapter");
     expect(canScanHarness(omp!)).toBe(true);
-    expect(canImportHarness(omp!)).toBe(false);
+    expect(canImportHarness(omp!)).toBe(true);
     expect(omp?.aliases).toEqual(expect.arrayContaining(["OMP", "oh-my-pi", "pi-coding-agent"]));
-    expect(omp?.knownCandidatePaths).toEqual(expect.arrayContaining(["~/.omp", "~/.oh-my-pi"]));
+    expect(omp?.knownCandidatePaths).toEqual(expect.arrayContaining(["~/.omp/agent/sessions", "~/.oh-my-pi/agent/sessions"]));
   });
 
   test("separates import adapters from detector scan targets", () => {
-    expect(activeImportRuntimes()).toEqual(["codex", "cursor", "claude_code", "antigravity", "opencode", "aider", "openclaw", "hermes", "pi"]);
+    expect(activeImportRuntimes()).toEqual(["codex", "cursor", "claude_code", "opencode", "aider", "openclaw", "hermes", "pi", "omp"]);
     expect(importAdapterHarnesses().map((entry) => entry.runtime)).toEqual(activeImportRuntimes());
     expect(scanTargetHarnesses().map((entry) => entry.runtime)).toEqual(
       expect.arrayContaining(["codex", "cursor", "omp", "cline", "roo_code", "continue_dev", "crush"])
     );
+    expect(scanTargetHarnesses().map((entry) => entry.runtime)).not.toContain("antigravity");
     expect(scanTargetHarnesses().map((entry) => entry.runtime)).not.toEqual(activeImportRuntimes());
     expect(catalogOnlyHarnesses()).toEqual([]);
   });

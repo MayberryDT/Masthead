@@ -85,7 +85,7 @@ import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/so
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { buildMastheadHealth } from "./healthService.ts";
-import { recentHookEventsWithTranscriptPaths } from "./hookTranscriptRecovery.ts";
+import { recentHookEventsWithTranscriptPaths, recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
 import {
   getCodexHookSettings,
@@ -599,6 +599,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       if (!adapter) continue;
       controls?.throwIfCancelled();
       controls?.updateProgress({ currentPath: source.path ?? source.sourceId });
+      let recordsSinceYield = 0;
       for await (const record of adapter.backfill(source)) {
         controls?.throwIfCancelled();
         const { sessionId } = ingestAdapterRecord(database, record, {
@@ -617,6 +618,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           processedCount: result.processedCount,
           queuedCount: result.queuedCount
         });
+        recordsSinceYield += 1;
+        if (recordsSinceYield >= 25) {
+          recordsSinceYield = 0;
+          await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+          });
+          controls?.throwIfCancelled();
+        }
       }
     }
     return result;
@@ -935,6 +944,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       severity: "info"
     });
 
+    for (const event of events) scheduleHookTranscriptCatchup(event);
+  }
+
+  function scheduleRecentHookTranscriptCatchupsForSessions(sourceSessionIds: Set<string>): void {
+    if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database) || sourceSessionIds.size === 0) return;
+    const events = recentHookEventsWithTranscriptPathsForSessions(database, codexHookSource.sourceId, sourceSessionIds, HOOK_TRANSCRIPT_RECOVERY_LIMIT);
     for (const event of events) scheduleHookTranscriptCatchup(event);
   }
 
@@ -1313,7 +1328,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const generatedAt = new Date().toISOString();
         const previews = [];
         for (const runtime of runtimes) {
-          const sources = scan.adapters.find((adapter) => adapter.runtime === runtime)?.sources ?? [];
+          const adapterScan = scan.adapters.find((adapter) => adapter.runtime === runtime);
+          const sources = adapterScan?.sources ?? [];
           const transcriptFiles = (await Promise.all(sources.map((source) => transcriptSources(source)))).flat();
           const summary = await buildImportManifestPlan({
             cursors: readCursorsForSources(transcriptFiles),
@@ -1325,6 +1341,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             sourceId: sources[0]?.sourceId,
             sources: transcriptFiles
           });
+          summary.summary.estimatedRecords = adapterScan && adapterScan.discoveredSessions > 0 ? adapterScan.discoveredSessions : undefined;
           previews.push({ runtime, summary: summary.summary });
         }
         sendJson(request, response, config.allowedOrigins, 200, {
@@ -1431,6 +1448,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const selectedSessionId = url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined;
       const headlineMode = (config.liveCopyEnabled ?? config.llmCopyEnabled) && config.openaiApiKey?.trim() ? "llm" : "offline";
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
+      scheduleRecentHookTranscriptCatchupsForSessions(projectionSessionIds);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
       const sessionHeadlineViews = currentBoardHeadlineFrames(
@@ -2862,8 +2880,8 @@ function isRuntimeKind(value: unknown): value is RuntimeKind {
 
 function setupRuntimesFromBody(body: Record<string, unknown>, scan: SourceScanResult): RuntimeKind[] {
   const requested = Array.isArray(body.runtimes) ? body.runtimes.filter((runtime): runtime is RuntimeKind => isRuntimeKind(runtime)) : [];
-  if (requested.length > 0) return requested;
-  return scan.adapters.filter((adapter) => adapter.sources.length > 0).map((adapter) => adapter.runtime);
+  if (requested.length > 0) return requested.filter((runtime) => Boolean(adapterForRuntime(runtime)));
+  return scan.adapters.filter((adapter) => adapter.sources.length > 0 && adapterForRuntime(adapter.runtime)).map((adapter) => adapter.runtime);
 }
 
 function isSourcePolicyKind(value: unknown): value is SourcePolicyKind {
