@@ -1,6 +1,7 @@
 import type { BoardHeadlineInput } from "./boardHeadlineInput";
 import {
   renderBoardHeadlineFrame,
+  validateBoardHeadlineFrame,
   type BoardHeadlineFrame,
   type BoardHeadlineSubjectKind,
   type BoardHeadlineView
@@ -15,20 +16,53 @@ export function buildPendingBoardHeadlineView(_input: BoardHeadlineInput): Board
 }
 
 export function buildOfflineBoardHeadlineView(input: BoardHeadlineInput): BoardHeadlineView {
-  const frame: BoardHeadlineFrame = {
-    subject: offlineSubject(input),
-    disposition: offlineDisposition(input),
-    state: input.stateHint,
-    subjectKind: inferSubjectKind(offlineSubject(input)),
-    confidence: "low",
-    evidence: input.evidence.slice(0, 4)
-  };
+  const candidate = offlineFrame(input);
+  const validated = validateBoardHeadlineFrame(candidate);
+  const frame = validated.ok ? validated.frame : validatedFallbackFrame(input);
 
   return {
     headline: renderBoardHeadlineFrame(frame),
     frame,
     source: "offline",
     status: "ready"
+  };
+}
+
+function offlineFrame(input: BoardHeadlineInput): BoardHeadlineFrame {
+  const subject = offlineSubject(input);
+
+  return {
+    subject,
+    disposition: offlineDisposition(input),
+    state: input.stateHint,
+    subjectKind: inferSubjectKind(subject),
+    confidence: "low",
+    evidence: input.evidence.slice(0, 4)
+  };
+}
+
+function validatedFallbackFrame(input: BoardHeadlineInput): BoardHeadlineFrame {
+  const frame: BoardHeadlineFrame = {
+    subject: "Board headlines",
+    disposition: fallbackDisposition(input),
+    state: input.stateHint,
+    subjectKind: "feature",
+    confidence: "low",
+    evidence: []
+  };
+  const validated = validateBoardHeadlineFrame(frame);
+
+  return validated.ok ? validated.frame : fallbackBoardHeadlineFrame();
+}
+
+function fallbackBoardHeadlineFrame(): BoardHeadlineFrame {
+  return {
+    subject: "Board headlines",
+    disposition: "waiting for LLM headline access",
+    state: "unknown",
+    subjectKind: "feature",
+    confidence: "low",
+    evidence: []
   };
 }
 
@@ -51,7 +85,8 @@ function normalizeSubject(value: string): string | undefined {
 }
 
 function isGenericSubject(value: string): boolean {
-  return /^(masthead|session|work|ui changes)$/i.test(value);
+  const normalized = value.toLowerCase();
+  return /^(masthead|ui|changes?|updates?|sessions?|work|recent activity|ui changes?)$/.test(normalized);
 }
 
 function offlineDisposition(input: BoardHeadlineInput): string {
@@ -76,9 +111,40 @@ function offlineDisposition(input: BoardHeadlineInput): string {
 
 function blockedFailure(input: BoardHeadlineInput): string {
   return (
-    input.dispositionHints.find((hint) => /\b(?:failed|blocked|missing)\b/i.test(hint)) ??
+    input.dispositionHints.find(isSafeBlockedFailure) ??
     "recorded session evidence"
   );
+}
+
+function isSafeBlockedFailure(hint: string): boolean {
+  if (!/\b(?:failed|blocked|missing)\b/i.test(hint)) return false;
+  if (/\bhttps?:\/\//i.test(hint)) return false;
+  if (/::[-\w]+\{[^}]*\}/i.test(hint)) return false;
+  if (/\[url\]/i.test(hint)) return false;
+  if (/\bsk-[A-Za-z0-9_-]+\b/i.test(hint)) return false;
+  if (hasUnsafeCredentialName(hint)) return false;
+  return true;
+}
+
+function hasUnsafeCredentialName(value: string): boolean {
+  return value
+    .split(/[^A-Za-z0-9_]+/)
+    .filter(Boolean)
+    .some((token) => {
+      if (token !== token.toUpperCase()) return false;
+
+      const parts = token.split("_").filter(Boolean);
+      if (parts.some((part) => part === "SECRET" || part === "TOKEN" || part === "PASSWORD")) {
+        return true;
+      }
+
+      return parts.includes("KEY") && parts.some((part) => part === "API" || part === "AUTH" || part === "ACCESS");
+    });
+}
+
+function fallbackDisposition(input: BoardHeadlineInput): string {
+  if (input.stateHint === "blocked") return "blocked by recorded session evidence";
+  return "waiting for LLM headline access";
 }
 
 function inferSubjectKind(subject: string): BoardHeadlineSubjectKind {
