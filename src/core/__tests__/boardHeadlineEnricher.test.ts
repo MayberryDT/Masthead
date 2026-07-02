@@ -71,7 +71,7 @@ function card(overrides: Partial<SessionCardView> = {}): SessionCardView {
     lastActivityLabel: "now",
     changedFileCount: 1,
     indicators: [],
-    identityConfidence: "exact",
+    identityConfidence: "direct",
     safeActions: [],
     isExpanded: false,
     headlineInput: input(),
