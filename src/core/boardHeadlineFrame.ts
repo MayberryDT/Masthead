@@ -137,6 +137,9 @@ export function validateBoardHeadlineFrame(candidate: unknown): BoardHeadlineVal
   if (!allowedConfidence.has(candidate.confidence as BoardHeadlineConfidence)) {
     return { ok: false, reason: "invalid_shape" };
   }
+  if (candidate.evidence.some((value) => typeof value !== "string")) {
+    return { ok: false, reason: "invalid_shape" };
+  }
 
   const frame: BoardHeadlineFrame = {
     subject: cleanSlot(candidate.subject),
@@ -144,10 +147,7 @@ export function validateBoardHeadlineFrame(candidate: unknown): BoardHeadlineVal
     state: candidate.state as BoardHeadlineState,
     subjectKind: candidate.subjectKind as BoardHeadlineSubjectKind,
     confidence: candidate.confidence as BoardHeadlineConfidence,
-    evidence: candidate.evidence
-      .map((value) => (typeof value === "string" ? cleanSlot(value) : ""))
-      .filter(Boolean)
-      .slice(0, 6)
+    evidence: candidate.evidence.map(cleanSlot).filter(Boolean).slice(0, 6)
   };
 
   if (isUnsafeText(frame.subject) || isUnsafeText(frame.disposition) || frame.evidence.some(isUnsafeText)) {

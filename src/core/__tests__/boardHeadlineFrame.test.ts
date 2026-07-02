@@ -17,6 +17,13 @@ function frame(overrides: Partial<BoardHeadlineFrame> = {}): BoardHeadlineFrame 
   };
 }
 
+function candidate(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    ...frame(),
+    ...overrides
+  };
+}
+
 describe("board headline frame contract", () => {
   test("renders subject and disposition as a Board headline", () => {
     expect(renderBoardHeadlineFrame(frame())).toBe(
@@ -75,5 +82,81 @@ describe("board headline frame contract", () => {
     );
 
     expect(result.ok).toBe(true);
+  });
+
+  test("rejects unsupported state values", () => {
+    expect(validateBoardHeadlineFrame(candidate({ state: "reviewing" }))).toEqual({
+      ok: false,
+      reason: "unsupported_state"
+    });
+  });
+
+  test("rejects unsupported subject kind values", () => {
+    expect(validateBoardHeadlineFrame(candidate({ subjectKind: "workflow" }))).toEqual({
+      ok: false,
+      reason: "unsupported_state"
+    });
+  });
+
+  test("rejects unsupported confidence values as invalid shape", () => {
+    expect(validateBoardHeadlineFrame(candidate({ confidence: "certain" }))).toEqual({
+      ok: false,
+      reason: "invalid_shape"
+    });
+  });
+
+  test("cleans valid string evidence and caps it at six entries", () => {
+    const result = validateBoardHeadlineFrame(
+      frame({
+        evidence: [
+          " first evidence item ",
+          "",
+          "second  evidence item",
+          " third evidence item ",
+          "fourth evidence item",
+          "fifth evidence item",
+          "sixth evidence item",
+          "seventh evidence item"
+        ]
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.frame.evidence).toEqual([
+        "first evidence item",
+        "second evidence item",
+        "third evidence item",
+        "fourth evidence item",
+        "fifth evidence item",
+        "sixth evidence item"
+      ]);
+    }
+  });
+
+  test("rejects unsafe secrets, API keys, Codex directives, and URL placeholders", () => {
+    expect(validateBoardHeadlineFrame(frame({ disposition: "uses OPENAI_API_KEY during testing" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ disposition: "stores sk-proj-example123" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ disposition: "emits ::git-stage{cwd=\"/tmp\"} after staging" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ disposition: "links to [url] during summary" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+  });
+
+  test("rejects non-string evidence entries as invalid shape", () => {
+    expect(validateBoardHeadlineFrame(candidate({ evidence: [123] }))).toEqual({
+      ok: false,
+      reason: "invalid_shape"
+    });
   });
 });
