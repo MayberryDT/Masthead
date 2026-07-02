@@ -6,13 +6,32 @@ import { SessionCard } from "./SessionCard";
 import { prefersReducedMotion } from "./motionPreference";
 
 type CardLayoutSnapshot = Map<string, DOMRect>;
+type CardLayoutChangeKind = "reorder" | "shrinking" | "growing";
+type InlineLayoutStyleSnapshot = {
+  alignSelf: string;
+  height: string;
+  justifySelf: string;
+  minHeight: string;
+  transform: string;
+  transformOrigin: string;
+  transition: string;
+  width: string;
+};
+type ActiveLayoutAnimation = {
+  animation?: Animation;
+  inlineStyle?: InlineLayoutStyleSnapshot;
+  timers: number[];
+};
 
-export const SESSION_CARD_LAYOUT_DURATION_MS = 980;
+export const SESSION_CARD_LAYOUT_DURATION_MS = 760;
+export const SESSION_CARD_LAYOUT_COMPACT_PHASE_MS = 420;
+export const SESSION_CARD_LAYOUT_EXPAND_DURATION_MS = 260;
+export const SESSION_CARD_LAYOUT_LOCK_MS = 120;
 export const SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS = 40;
 export const SESSION_CARD_LAYOUT_STAGGER_MS = 32;
 export const SESSION_CARD_LAYOUT_EASING = "cubic-bezier(0.24, 0.08, 0.18, 1)";
 
-const activeLayoutAnimations = new WeakMap<HTMLElement, Animation>();
+const activeLayoutAnimations = new WeakMap<HTMLElement, ActiveLayoutAnimation>();
 
 type Props = {
   cards: SessionCardView[];
@@ -167,6 +186,7 @@ function ObservabilityCardGrid({
   const gridRef = useRef<HTMLDivElement | null>(null);
   const previousLayoutRef = useRef<CardLayoutSnapshot | null>(null);
   const previousLayoutSignatureRef = useRef<string | null>(null);
+  const previousDensityRef = useRef<CardDensity | null>(null);
   const orderSignature = cards.map((card) => card.sessionId).join("\u0000");
   const layoutSignature = `${density}\u0000${orderSignature}`;
 
@@ -176,16 +196,20 @@ function ObservabilityCardGrid({
 
     const previousLayout = previousLayoutRef.current;
     const previousLayoutSignature = previousLayoutSignatureRef.current;
+    const previousDensity = previousDensityRef.current;
     const nextLayout = captureCardLayout(grid);
+    const layoutChangeKind = previousDensity && previousDensity !== density ? (density === "compact" ? "shrinking" : "growing") : "reorder";
 
     previousLayoutRef.current = nextLayout;
     previousLayoutSignatureRef.current = layoutSignature;
+    previousDensityRef.current = density;
 
     if (!previousLayout || previousLayoutSignature === null || previousLayoutSignature === layoutSignature || prefersReducedMotion()) {
+      if (prefersReducedMotion()) cancelActiveCardLayoutAnimations(grid);
       return;
     }
 
-    animateCardLayoutFrom(grid, previousLayout);
+    animateCardLayoutFrom(grid, previousLayout, layoutChangeKind);
   });
 
   return (
@@ -204,7 +228,7 @@ function captureCardLayout(container: HTMLElement): CardLayoutSnapshot {
   return rects;
 }
 
-function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayoutSnapshot): void {
+function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayoutSnapshot, changeKind: CardLayoutChangeKind): void {
   container.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card, index) => {
     const sessionId = card.dataset.sessionId;
     const previousRect = sessionId ? previousLayout.get(sessionId) : undefined;
@@ -220,97 +244,321 @@ function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayou
     const resized = hasMeasurableSize && (Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01);
     if (!moved && !resized) return;
 
-    const keyframes = steelPlateLayoutKeyframes({ deltaX, deltaY, scaleX, scaleY });
-    const previousAnimation = activeLayoutAnimations.get(card);
-    previousAnimation?.cancel();
-    activeLayoutAnimations.delete(card);
+    const delay = layoutPhaseDelay(changeKind, index);
+    const keyframes = steelPlateLayoutKeyframes({ deltaX, deltaY });
+    cancelCardLayoutAnimation(card);
 
-    card.classList.add("is-layout-animating");
-    if (typeof card.animate !== "function") {
-      animateCardLayoutWithInlineStyle(card, keyframes[0]);
+    const activeAnimation: ActiveLayoutAnimation = { timers: [] };
+    activeLayoutAnimations.set(card, activeAnimation);
+    card.classList.add("is-layout-animating", `is-layout-${changeKind}`);
+    const hasCardAnimationApi = typeof card.animate === "function";
+    if (changeKind === "shrinking") {
+      activeAnimation.inlineStyle = lockCardToLayoutSize(card, previousRect);
+      card.classList.add("is-layout-compacting");
+      if (!hasCardAnimationApi) {
+        animateShrinkingCardLayoutWithInlineStyle(card, keyframes[0], {
+          activeAnimation,
+          delay,
+          nextRect
+        });
+        return;
+      }
+      startCardLayoutCompaction(card, activeAnimation, nextRect);
+      activeAnimation.timers.push(
+        window.setTimeout(() => {
+          if (activeLayoutAnimations.get(card) !== activeAnimation) return;
+          card.classList.remove("is-layout-compacting");
+          card.classList.add("is-layout-moving");
+        }, delay)
+      );
+    } else {
+      card.classList.add("is-layout-moving");
+    }
+    if (changeKind === "growing") {
+      activeAnimation.inlineStyle = lockCardToLayoutSize(card, previousRect);
+    }
+    if (!hasCardAnimationApi) {
+      animateCardLayoutWithInlineStyle(card, keyframes[0], {
+        activeAnimation,
+        changeKind,
+        delay,
+        nextRect
+      });
       return;
     }
 
     const animation = card.animate(keyframes, {
-      delay: index * SESSION_CARD_LAYOUT_STAGGER_MS,
+      delay,
       duration: SESSION_CARD_LAYOUT_DURATION_MS,
       easing: SESSION_CARD_LAYOUT_EASING,
       fill: "both"
     });
-    activeLayoutAnimations.set(card, animation);
-    const cleanup = () => {
-      if (activeLayoutAnimations.get(card) === animation) {
-        activeLayoutAnimations.delete(card);
-        card.classList.remove("is-layout-animating");
+    activeAnimation.animation = animation;
+    const finish = () => {
+      if (activeLayoutAnimations.get(card) !== activeAnimation) return;
+      if (changeKind === "growing") {
+        startCardLayoutExpansion(card, activeAnimation, nextRect);
+      } else {
+        settleCardLayoutAnimation(card, activeAnimation);
       }
     };
-    animation.addEventListener("finish", cleanup, { once: true });
-    animation.addEventListener("cancel", cleanup, { once: true });
+    const cancel = () => {
+      if (activeLayoutAnimations.get(card) === activeAnimation) {
+        completeCardLayoutAnimation(card, activeAnimation);
+      }
+    };
+    animation.addEventListener("finish", finish, { once: true });
+    animation.addEventListener("cancel", cancel, { once: true });
   });
 }
 
 function steelPlateLayoutKeyframes({
   deltaX,
-  deltaY,
-  scaleX,
-  scaleY
+  deltaY
 }: {
   deltaX: number;
   deltaY: number;
-  scaleX: number;
-  scaleY: number;
 }): Keyframe[] {
   return [
     {
-      transform: layoutTransform(deltaX, deltaY, scaleX, scaleY)
+      transform: layoutTransform(deltaX, deltaY)
     },
     {
-      offset: 0.62,
-      transform: layoutTransform(deltaX * 0.22, deltaY * 0.22, dampedScale(scaleX, 0.22), dampedScale(scaleY, 0.22))
+      offset: 0.82,
+      transform: layoutTransform(deltaX * 0.04, deltaY * 0.04)
     },
     {
-      offset: 0.86,
-      transform: layoutTransform(deltaX * 0.045, deltaY * 0.045, dampedScale(scaleX, 0.045), dampedScale(scaleY, 0.045))
-    },
-    {
-      transform: layoutTransform(0, 0, 1, 1)
+      transform: layoutTransform(0, 0)
     }
   ];
 }
 
-function dampedScale(value: number, remainingRatio: number): number {
-  return 1 + (value - 1) * remainingRatio;
-}
-
-function layoutTransform(x: number, y: number, scaleX = 1, scaleY = scaleX): string {
-  return `translate(${roundLayoutNumber(x)}px, ${roundLayoutNumber(y)}px) scale(${roundLayoutNumber(scaleX)}, ${roundLayoutNumber(scaleY)})`;
+function layoutTransform(x: number, y: number): string {
+  return `translate(${roundLayoutNumber(x)}px, ${roundLayoutNumber(y)}px)`;
 }
 
 function roundLayoutNumber(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
-function animateCardLayoutWithInlineStyle(card: HTMLElement, firstKeyframe: Keyframe): void {
-  const previousTransition = card.style.transition;
-  const previousTransform = card.style.transform;
-  const previousTransformOrigin = card.style.transformOrigin;
+function layoutPhaseDelay(changeKind: CardLayoutChangeKind, index: number): number {
+  const stagger = index * SESSION_CARD_LAYOUT_STAGGER_MS;
+  return changeKind === "shrinking" ? SESSION_CARD_LAYOUT_COMPACT_PHASE_MS + stagger : stagger;
+}
 
+function animateCardLayoutWithInlineStyle(
+  card: HTMLElement,
+  firstKeyframe: Keyframe,
+  options: {
+    activeAnimation: ActiveLayoutAnimation;
+    changeKind: CardLayoutChangeKind;
+    delay: number;
+    nextRect: DOMRect;
+  }
+): void {
+  const { activeAnimation, changeKind, delay, nextRect } = options;
+  activeAnimation.inlineStyle ??= snapshotCardLayoutStyles(card);
   card.style.transition = "none";
   card.style.transformOrigin = "top left";
   card.style.transform = typeof firstKeyframe.transform === "string" ? firstKeyframe.transform : "";
   void card.offsetWidth;
 
   window.requestAnimationFrame(() => {
-    card.style.transition = `transform ${SESSION_CARD_LAYOUT_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`;
-    card.style.transform = layoutTransform(0, 0, 1, 1);
-
-    window.setTimeout(() => {
-      card.style.transition = previousTransition;
-      card.style.transform = previousTransform;
-      card.style.transformOrigin = previousTransformOrigin;
-      card.classList.remove("is-layout-animating");
-    }, SESSION_CARD_LAYOUT_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS);
+    if (activeLayoutAnimations.get(card) !== activeAnimation) return;
+    const moveTimer = window.setTimeout(() => {
+      startInlineCardLayoutMove(card, activeAnimation, changeKind, nextRect);
+    }, delay);
+    activeAnimation.timers.push(moveTimer);
   });
+}
+
+function animateShrinkingCardLayoutWithInlineStyle(
+  card: HTMLElement,
+  firstKeyframe: Keyframe,
+  options: {
+    activeAnimation: ActiveLayoutAnimation;
+    delay: number;
+    nextRect: DOMRect;
+  }
+): void {
+  const { activeAnimation, delay, nextRect } = options;
+  activeAnimation.inlineStyle ??= snapshotCardLayoutStyles(card);
+  card.style.transition = "none";
+  card.style.transformOrigin = "top left";
+  card.style.transform = typeof firstKeyframe.transform === "string" ? firstKeyframe.transform : "";
+  const fromWidth = readInlineLayoutNumber(card.style.width, nextRect.width);
+  const fromHeight = readInlineLayoutNumber(card.style.height, nextRect.height);
+  const targetWidth = roundLayoutNumber(nextRect.width);
+  const targetHeight = roundLayoutNumber(nextRect.height);
+  let compactStartedAt: number | null = null;
+
+  const compactFrame = (timestamp: number) => {
+    if (activeLayoutAnimations.get(card) !== activeAnimation) return;
+    compactStartedAt ??= timestamp;
+    const progress = Math.min(1, Math.max(0, (timestamp - compactStartedAt) / SESSION_CARD_LAYOUT_COMPACT_PHASE_MS));
+    const width = fromWidth + (targetWidth - fromWidth) * progress;
+    const height = fromHeight + (targetHeight - fromHeight) * progress;
+    card.style.width = `${roundLayoutNumber(width)}px`;
+    card.style.minHeight = `${roundLayoutNumber(height)}px`;
+    card.style.height = `${roundLayoutNumber(height)}px`;
+
+    if (progress < 1) {
+      window.requestAnimationFrame(compactFrame);
+      return;
+    }
+
+    const moveDelay = Math.max(0, delay - SESSION_CARD_LAYOUT_COMPACT_PHASE_MS);
+    const moveTimer = window.setTimeout(
+      () => startInlineCardLayoutMove(card, activeAnimation, "shrinking", nextRect),
+      moveDelay
+    );
+    activeAnimation.timers.push(moveTimer);
+  };
+
+  void card.offsetWidth;
+  window.requestAnimationFrame(compactFrame);
+}
+
+function readInlineLayoutNumber(value: string, fallback: number): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : roundLayoutNumber(fallback);
+}
+
+function startInlineCardLayoutMove(
+  card: HTMLElement,
+  activeAnimation: ActiveLayoutAnimation,
+  changeKind: CardLayoutChangeKind,
+  nextRect: DOMRect
+): void {
+  if (activeLayoutAnimations.get(card) !== activeAnimation) return;
+  card.classList.remove("is-layout-compacting");
+  card.classList.add("is-layout-moving");
+  card.style.transition = `transform ${SESSION_CARD_LAYOUT_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`;
+  card.style.transform = layoutTransform(0, 0);
+
+  const finishTimer = window.setTimeout(() => {
+    if (activeLayoutAnimations.get(card) !== activeAnimation) return;
+    if (changeKind === "growing") {
+      startCardLayoutExpansion(card, activeAnimation, nextRect);
+    } else {
+      settleCardLayoutAnimation(card, activeAnimation);
+    }
+  }, SESSION_CARD_LAYOUT_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS);
+  activeAnimation.timers.push(finishTimer);
+}
+
+function snapshotCardLayoutStyles(card: HTMLElement): InlineLayoutStyleSnapshot {
+  return {
+    alignSelf: card.style.alignSelf,
+    height: card.style.height,
+    justifySelf: card.style.justifySelf,
+    minHeight: card.style.minHeight,
+    transform: card.style.transform,
+    transformOrigin: card.style.transformOrigin,
+    transition: card.style.transition,
+    width: card.style.width
+  };
+}
+
+function lockCardToLayoutSize(card: HTMLElement, rect: DOMRect): InlineLayoutStyleSnapshot {
+  const snapshot = snapshotCardLayoutStyles(card);
+  card.style.width = `${roundLayoutNumber(rect.width)}px`;
+  card.style.minHeight = `${roundLayoutNumber(rect.height)}px`;
+  card.style.height = `${roundLayoutNumber(rect.height)}px`;
+  card.style.justifySelf = "start";
+  card.style.alignSelf = "start";
+  return snapshot;
+}
+
+function startCardLayoutCompaction(card: HTMLElement, activeAnimation: ActiveLayoutAnimation, nextRect: DOMRect): void {
+  card.style.transition = "none";
+  void card.offsetWidth;
+
+  window.requestAnimationFrame(() => {
+    if (activeLayoutAnimations.get(card) !== activeAnimation) return;
+    card.style.transition = [
+      `width ${SESSION_CARD_LAYOUT_COMPACT_PHASE_MS}ms ${SESSION_CARD_LAYOUT_EASING}`,
+      `min-height ${SESSION_CARD_LAYOUT_COMPACT_PHASE_MS}ms ${SESSION_CARD_LAYOUT_EASING}`,
+      `height ${SESSION_CARD_LAYOUT_COMPACT_PHASE_MS}ms ${SESSION_CARD_LAYOUT_EASING}`
+    ].join(", ");
+    card.style.width = `${roundLayoutNumber(nextRect.width)}px`;
+    card.style.minHeight = `${roundLayoutNumber(nextRect.height)}px`;
+    card.style.height = `${roundLayoutNumber(nextRect.height)}px`;
+  });
+}
+
+function startCardLayoutExpansion(card: HTMLElement, activeAnimation: ActiveLayoutAnimation, nextRect: DOMRect): void {
+  card.classList.remove("is-layout-moving");
+  card.classList.add("is-layout-expanding");
+  card.style.transition = [
+    `width ${SESSION_CARD_LAYOUT_EXPAND_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`,
+    `min-height ${SESSION_CARD_LAYOUT_EXPAND_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`,
+    `height ${SESSION_CARD_LAYOUT_EXPAND_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`
+  ].join(", ");
+  card.style.width = `${roundLayoutNumber(nextRect.width)}px`;
+  card.style.minHeight = `${roundLayoutNumber(nextRect.height)}px`;
+  card.style.height = `${roundLayoutNumber(nextRect.height)}px`;
+
+  const cleanupTimer = window.setTimeout(
+    () => completeCardLayoutAnimation(card, activeAnimation),
+    SESSION_CARD_LAYOUT_EXPAND_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS
+  );
+  activeAnimation.timers.push(cleanupTimer);
+}
+
+function settleCardLayoutAnimation(card: HTMLElement, activeAnimation: ActiveLayoutAnimation): void {
+  card.classList.remove("is-layout-moving", "is-layout-compacting");
+  card.classList.add("is-layout-locking");
+  const cleanupTimer = window.setTimeout(() => completeCardLayoutAnimation(card, activeAnimation), SESSION_CARD_LAYOUT_LOCK_MS);
+  activeAnimation.timers.push(cleanupTimer);
+}
+
+function completeCardLayoutAnimation(card: HTMLElement, activeAnimation: ActiveLayoutAnimation): void {
+  if (activeLayoutAnimations.get(card) !== activeAnimation) return;
+  activeLayoutAnimations.delete(card);
+  for (const timer of activeAnimation.timers) window.clearTimeout(timer);
+  activeAnimation.animation?.cancel?.();
+  restoreCardLayoutStyles(card, activeAnimation.inlineStyle);
+  removeLayoutPhaseClasses(card);
+}
+
+function cancelCardLayoutAnimation(card: HTMLElement): void {
+  const activeAnimation = activeLayoutAnimations.get(card);
+  if (!activeAnimation) return;
+  activeLayoutAnimations.delete(card);
+  for (const timer of activeAnimation.timers) window.clearTimeout(timer);
+  activeAnimation.animation?.cancel?.();
+  restoreCardLayoutStyles(card, activeAnimation.inlineStyle);
+  removeLayoutPhaseClasses(card);
+}
+
+function cancelActiveCardLayoutAnimations(container: HTMLElement): void {
+  container.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card) => cancelCardLayoutAnimation(card));
+}
+
+function restoreCardLayoutStyles(card: HTMLElement, snapshot: InlineLayoutStyleSnapshot | undefined): void {
+  if (!snapshot) return;
+  card.style.alignSelf = snapshot.alignSelf;
+  card.style.height = snapshot.height;
+  card.style.justifySelf = snapshot.justifySelf;
+  card.style.minHeight = snapshot.minHeight;
+  card.style.transform = snapshot.transform;
+  card.style.transformOrigin = snapshot.transformOrigin;
+  card.style.transition = snapshot.transition;
+  card.style.width = snapshot.width;
+}
+
+function removeLayoutPhaseClasses(card: HTMLElement): void {
+  card.classList.remove(
+    "is-layout-animating",
+    "is-layout-reorder",
+    "is-layout-shrinking",
+    "is-layout-growing",
+    "is-layout-compacting",
+    "is-layout-moving",
+    "is-layout-expanding",
+    "is-layout-locking"
+  );
 }
 
 function semanticHeadlineSignature(card: SessionCardView): string {

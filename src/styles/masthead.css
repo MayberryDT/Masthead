@@ -4232,16 +4232,17 @@ body {
 }
 
 .observability-card-grid {
-  --layout-dur: 980ms;
+  --layout-dur: 1300ms;
+  --layout-move-dur: 760ms;
+  --layout-compact-phase-dur: 420ms;
+  --layout-expand-dur: 260ms;
   --layout-ease: cubic-bezier(0.24, 0.08, 0.18, 1);
   view-transition-name: session-card-grid;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-sm);
   width: 100%;
-  transition:
-    gap var(--layout-dur) var(--layout-ease),
-    grid-template-columns var(--layout-dur) var(--layout-ease);
+  transition-property: none;
 }
 
 .observability-card-grid.compact {
@@ -4258,13 +4259,9 @@ body {
   --status-rail: var(--green);
   border-left: 1px solid var(--surface-metal-border);
   padding: 0;
-  transition:
-    height var(--layout-dur) var(--layout-ease),
-    min-height var(--layout-dur) var(--layout-ease),
-    border-color 180ms var(--layout-ease),
-    background-color 180ms var(--layout-ease),
-    box-shadow 180ms var(--layout-ease),
-    transform 180ms var(--layout-ease);
+  transition-property: border-color, background-color, box-shadow, transform;
+  transition-duration: 180ms;
+  transition-timing-function: var(--layout-ease);
 }
 
 .observability-card-grid.compact .session-card {
@@ -4309,6 +4306,7 @@ body {
 
 .observability-console .session-card.is-layout-animating,
 .masthead-shell .session-card.is-layout-animating {
+  transform-origin: top left;
   will-change: transform;
 }
 

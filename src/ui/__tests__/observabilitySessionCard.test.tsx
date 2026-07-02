@@ -8,8 +8,11 @@ import type { BoardHeadlineView } from "../../core/boardHeadlineFrame";
 import type { SessionCardView } from "../../core/types";
 import { SessionCard } from "../SessionCard";
 import {
+  SESSION_CARD_LAYOUT_COMPACT_PHASE_MS,
+  SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS,
   SESSION_CARD_LAYOUT_DURATION_MS,
   SESSION_CARD_LAYOUT_EASING,
+  SESSION_CARD_LAYOUT_EXPAND_DURATION_MS,
   SESSION_CARD_LAYOUT_STAGGER_MS,
   SessionBoard
 } from "../SessionBoard";
@@ -394,7 +397,84 @@ describe("observability session card", () => {
     }
   });
 
-  test("animates existing cards when card density changes", async () => {
+  test("stages density shrink without scaling cards", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const animations: Array<{
+      sessionId: string;
+      keyframes: Keyframe[] | PropertyIndexedKeyframes | null;
+      options?: number | KeyframeAnimationOptions;
+    }> = [];
+    const animationFrames: FrameRequestCallback[] = [];
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const sessionId = this.dataset.sessionId;
+      if (!sessionId) return originalGetBoundingClientRect.call(this);
+      const isCompact = this.parentElement?.classList.contains("compact") === true;
+      return testRect(0, 0, isCompact ? 240 : 320, isCompact ? 178 : 218);
+    };
+    HTMLElement.prototype.animate = vi.fn(function (
+      this: HTMLElement,
+      keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
+      options?: number | KeyframeAnimationOptions
+    ) {
+      const sessionId = this.dataset.sessionId;
+      if (sessionId) animations.push({ sessionId, keyframes, options });
+      return { addEventListener: vi.fn() } as unknown as Animation;
+    });
+    window.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="comfortable" />);
+      });
+
+      expect(animations).toEqual([]);
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="compact" />);
+      });
+
+      const card = container.querySelector<HTMLElement>(".session-card");
+      const keyframes = JSON.stringify(animations[0]?.keyframes);
+      expect(animations.map((animation) => animation.sessionId)).toEqual(["session-1"]);
+      expect(keyframes).toContain("translate(0px, 0px)");
+      expect(keyframes).not.toContain("scale(");
+      expect(card?.className).toContain("is-layout-compacting");
+      expect(card?.style.width).toBe("320px");
+      expect(card?.style.height).toBe("218px");
+      expect(animations[0]?.options).toEqual(
+        expect.objectContaining({
+          delay: SESSION_CARD_LAYOUT_COMPACT_PHASE_MS,
+          duration: SESSION_CARD_LAYOUT_DURATION_MS,
+          easing: SESSION_CARD_LAYOUT_EASING,
+          fill: "both"
+        })
+      );
+
+      await act(async () => {
+        for (const frame of animationFrames.splice(0)) frame(0);
+      });
+
+      expect(card?.style.transition).toContain(`width ${SESSION_CARD_LAYOUT_COMPACT_PHASE_MS}ms`);
+      expect(card?.style.transition).toContain(`height ${SESSION_CARD_LAYOUT_COMPACT_PHASE_MS}ms`);
+      expect(card?.style.width).toBe("240px");
+      expect(card?.style.height).toBe("178px");
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.animate = originalAnimate;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+    }
+  });
+
+  test("moves compact cards before expanding when card density grows", async () => {
     const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
     const originalAnimate = HTMLElement.prototype.animate;
     const animations: Array<{
@@ -423,18 +503,24 @@ describe("observability session card", () => {
 
     try {
       await act(async () => {
-        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="comfortable" />);
+        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="compact" />);
       });
 
       expect(animations).toEqual([]);
 
       await act(async () => {
-        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="compact" />);
+        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="comfortable" />);
       });
 
+      const card = container.querySelector<HTMLElement>(".session-card");
+      const keyframes = JSON.stringify(animations[0]?.keyframes);
       expect(animations.map((animation) => animation.sessionId)).toEqual(["session-1"]);
-      expect(JSON.stringify(animations[0]?.keyframes)).toContain("translate(0px, 0px)");
-      expect(JSON.stringify(animations[0]?.keyframes)).toContain("scale(1.333");
+      expect(keyframes).toContain("translate(0px, 0px)");
+      expect(keyframes).not.toContain("scale(");
+      expect(card?.className).toContain("is-layout-growing");
+      expect(card?.className).toContain("is-layout-moving");
+      expect(card?.style.width).toBe("240px");
+      expect(card?.style.height).toBe("178px");
       expect(animations[0]?.options).toEqual(
         expect.objectContaining({
           delay: 0,
@@ -447,6 +533,58 @@ describe("observability session card", () => {
       await act(async () => root.unmount());
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
       HTMLElement.prototype.animate = originalAnimate;
+    }
+  });
+
+  test("cleans layout phase classes after card growth expands", async () => {
+    vi.useFakeTimers();
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const animationListeners: Record<string, EventListenerOrEventListenerObject> = {};
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const sessionId = this.dataset.sessionId;
+      if (!sessionId) return originalGetBoundingClientRect.call(this);
+      const isCompact = this.parentElement?.classList.contains("compact") === true;
+      return testRect(0, 0, isCompact ? 240 : 320, isCompact ? 178 : 218);
+    };
+    HTMLElement.prototype.animate = vi.fn(function () {
+      return {
+        addEventListener: vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+          animationListeners[type] = listener;
+        })
+      } as unknown as Animation;
+    });
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="compact" />);
+      });
+      await act(async () => {
+        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="comfortable" />);
+      });
+
+      const card = container.querySelector<HTMLElement>(".session-card");
+      expect(card?.className).toContain("is-layout-growing");
+      expect(card?.className).toContain("is-layout-moving");
+
+      await act(async () => {
+        const listener = animationListeners.finish;
+        if (typeof listener === "function") listener(new Event("finish"));
+        await vi.advanceTimersByTimeAsync(SESSION_CARD_LAYOUT_EXPAND_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS);
+      });
+
+      expect(card?.className).not.toContain("is-layout-animating");
+      expect(card?.className).not.toContain("is-layout-growing");
+      expect(card?.className).not.toContain("is-layout-expanding");
+      expect(card?.style.width).toBe("");
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.animate = originalAnimate;
+      vi.useRealTimers();
     }
   });
 
@@ -481,6 +619,68 @@ describe("observability session card", () => {
       const movedCard = container.querySelector<HTMLElement>('[data-session-id="session-2"]');
       expect(movedCard?.className).toContain("is-layout-animating");
       expect(movedCard?.style.transform).toContain("translate(0px, 240px)");
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.animate = originalAnimate;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+    }
+  });
+
+  test("keeps fallback density shrink in a readable compact phase before moving", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const animationFrames: FrameRequestCallback[] = [];
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const sessionId = this.dataset.sessionId;
+      if (!sessionId) return originalGetBoundingClientRect.call(this);
+      const isCompact = this.parentElement?.classList.contains("compact") === true;
+      return testRect(0, 0, isCompact ? 240 : 320, isCompact ? 178 : 218);
+    };
+    (HTMLElement.prototype as { animate?: HTMLElement["animate"] }).animate = undefined;
+    window.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="comfortable" />);
+      });
+      await act(async () => {
+        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="compact" />);
+      });
+
+      const card = container.querySelector<HTMLElement>(".session-card");
+      expect(card?.className).toContain("is-layout-compacting");
+      expect(card?.style.width).toBe("320px");
+      expect(card?.style.height).toBe("218px");
+
+      await act(async () => {
+        animationFrames.shift()?.(0);
+      });
+
+      expect(card?.style.width).toBe("320px");
+      expect(card?.style.height).toBe("218px");
+      expect(card?.style.transition).not.toContain("transform");
+
+      await act(async () => {
+        animationFrames.shift()?.(SESSION_CARD_LAYOUT_COMPACT_PHASE_MS / 2);
+      });
+
+      const halfwayWidth = Number.parseFloat(card?.style.width ?? "");
+      const halfwayHeight = Number.parseFloat(card?.style.height ?? "");
+      expect(halfwayWidth).toBeGreaterThan(240);
+      expect(halfwayWidth).toBeLessThan(320);
+      expect(halfwayHeight).toBeGreaterThan(178);
+      expect(halfwayHeight).toBeLessThan(218);
+      expect(card?.className).toContain("is-layout-compacting");
+      expect(card?.className).not.toContain("is-layout-moving");
+      expect(card?.style.transition).not.toContain("transform");
     } finally {
       await act(async () => root.unmount());
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
