@@ -233,7 +233,11 @@ describe("board headline input", () => {
           "work on data enrichment"
         ],
         recentFileBasenames: ["SessionCard.tsx", "SessionCard.tsx", "DangerZone.tsx"],
-        recentEvents: Array.from({ length: 25 }, (_, index) => ({ summary: `event ${index + 1}` })),
+        recentEvents: Array.from({ length: 25 }, (_, index) => ({
+          type: "event",
+          summary: `event ${index + 1}`,
+          occurredAt: `2026-07-01T12:${index.toString().padStart(2, "0")}:00.000Z`
+        })),
         recentToolNames: ["shell"],
         attentionTitles: ["attention"]
       })
