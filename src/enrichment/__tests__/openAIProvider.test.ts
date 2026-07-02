@@ -5,7 +5,8 @@ import type { SessionFacts } from "../sessionCompiler.ts";
 
 describe("OpenAI enrichment provider", () => {
   test("uses validated Responses output when enabled and configured", async () => {
-    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe("https://api.openai.com/v1/responses");
       const body = JSON.parse(String(init?.body)) as {
         input: string;
         max_output_tokens: number;
@@ -65,6 +66,80 @@ describe("OpenAI enrichment provider", () => {
     expect(result.capsule?.missingEvidence).toEqual([]);
     expect(result.capsule?.liveSummary).toBe("MCP launch config validation has tools-list coverage.");
     expect(result.capsule?.searchSummary).toContain("tools-list coverage");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  test("uses chat completions for OpenAI-compatible endpoints", async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe("http://127.0.0.1:11434/v1/chat/completions");
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        model: string;
+        response_format?: { type: string };
+      };
+      expect(body.model).toBe("llama-3.1");
+      expect(body.messages[0]?.role).toBe("system");
+      expect(body.messages[1]?.role).toBe("user");
+      expect(body.messages[1]?.content).not.toContain("/home/tyler");
+      expect(body.response_format).toEqual({ type: "json_object" });
+      return responseWithChatOutput({
+        confidence: "medium",
+        liveSummary: "MCP launch config validation has compatible endpoint coverage.",
+        missingEvidence: [],
+        outcome: "Validated compatible provider request wiring.",
+        searchSummary: "Masthead session for compatible provider request wiring.",
+        title: "Compatible provider request wiring"
+      });
+    });
+    const provider = createOpenAIEnrichmentProvider({
+      apiKey: "test-key",
+      apiStyle: "chat_completions",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      enabled: true,
+      fetchImpl,
+      model: "llama-3.1",
+      providerId: "openai_compatible"
+    });
+
+    const result = await provider.enrich({ facts: facts() });
+
+    expect(provider.id).toBe("openai_compatible");
+    expect(result.status).toBe("success");
+    expect(result.provider).toBe("openai_compatible");
+    expect(result.capsule?.title).toBe("Compatible provider request wiring");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  test("omits authorization for local OpenAI-compatible providers without API keys", async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe("http://127.0.0.1:11434/v1/chat/completions");
+      const headers = init?.headers as Record<string, string>;
+      expect(headers.authorization).toBeUndefined();
+      expect(headers["content-type"]).toBe("application/json");
+      return responseWithChatOutput({
+        confidence: "medium",
+        liveSummary: "Local enrichment completed through Ollama.",
+        missingEvidence: [],
+        outcome: "Validated optional-key local model request wiring.",
+        searchSummary: "Masthead session for local Ollama enrichment.",
+        title: "Local Ollama enrichment"
+      });
+    });
+    const provider = createOpenAIEnrichmentProvider({
+      apiKeyRequired: false,
+      apiStyle: "chat_completions",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      enabled: true,
+      fetchImpl,
+      model: "llama3.1",
+      providerId: "ollama"
+    });
+
+    const result = await provider.enrich({ facts: facts() });
+
+    expect(result.status).toBe("success");
+    expect(result.provider).toBe("ollama");
+    expect(result.capsule?.title).toBe("Local Ollama enrichment");
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
@@ -235,6 +310,21 @@ function responseWithOutput(output: Record<string, unknown>): Response {
               type: "output_text"
             }
           ]
+        }
+      ]
+    })
+  } as Response;
+}
+
+function responseWithChatOutput(output: Record<string, unknown>): Response {
+  return {
+    ok: true,
+    json: async () => ({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify(output)
+          }
         }
       ]
     })

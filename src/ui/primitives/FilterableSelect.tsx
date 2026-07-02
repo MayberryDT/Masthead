@@ -14,6 +14,9 @@ type FilterableSelectProps = {
   value?: string;
   options: FilterableSelectOption[];
   placeholder: string;
+  allowCustomValue?: boolean;
+  clearable?: boolean;
+  clearLabel?: string;
   searchPlaceholder?: string;
   emptyLabel?: string;
   className?: string;
@@ -21,8 +24,15 @@ type FilterableSelectProps = {
   onChange: (value: string | undefined) => void;
 };
 
+type FilterableSelectMenuStyle = CSSProperties & {
+  "--filterable-select-options-max-height"?: string;
+};
+
 export function FilterableSelect({
+  allowCustomValue = true,
   className = "",
+  clearable = true,
+  clearLabel,
   disabled = false,
   emptyLabel = "No matches",
   icon,
@@ -77,14 +87,32 @@ export function FilterableSelect({
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
     const viewportPadding = 12;
+    const menuGap = 6;
+    const preferredMenuHeight = 320;
+    const minimumMenuHeight = 128;
+    const viewportHeight = Math.max(1, window.innerHeight - viewportPadding * 2);
     const menuWidth = Math.min(Math.max(rect.width, 260), window.innerWidth - viewportPadding * 2);
     const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - viewportPadding - menuWidth);
+    const availableBelow = window.innerHeight - rect.bottom - viewportPadding - menuGap;
+    const availableAbove = rect.top - viewportPadding - menuGap;
+    const placeAbove = availableBelow < 220 && availableAbove > availableBelow;
+    const sideHeight = Math.max(0, placeAbove ? availableAbove : availableBelow);
+    const availableHeight = Math.max(
+      Math.min(minimumMenuHeight, viewportHeight),
+      Math.min(preferredMenuHeight, viewportHeight, sideHeight)
+    );
+    const preferredTop = placeAbove ? rect.top - menuGap - availableHeight : rect.bottom + menuGap;
+    const maxTop = Math.max(viewportPadding, window.innerHeight - viewportPadding - availableHeight);
+    const top = Math.min(Math.max(viewportPadding, preferredTop), maxTop);
+
     setMenuStyle({
+      "--filterable-select-options-max-height": `${Math.max(24, availableHeight - 50)}px`,
       left,
+      maxHeight: availableHeight,
       minWidth: menuWidth,
       position: "fixed",
-      top: rect.bottom + 6
-    });
+      top
+    } as FilterableSelectMenuStyle);
   };
 
   const closeMenu = () => {
@@ -158,7 +186,11 @@ export function FilterableSelect({
 
   const commitDraft = () => {
     const nextValue = draft.trim();
-    choose(nextValue || undefined);
+    if (allowCustomValue) {
+      choose(nextValue || undefined);
+      return;
+    }
+    if (filteredOptions.length > 0) choose(filteredOptions[0].value);
   };
 
   const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -188,7 +220,7 @@ export function FilterableSelect({
         <input ref={searchRef} value={draft} placeholder={searchPlaceholder} onChange={(event) => setDraft(event.currentTarget.value)} onKeyDown={onSearchKeyDown} />
       </label>
       <div className="filterable-select-options" role="listbox" aria-label={`${label} options`}>
-        {value ? (
+        {value && clearable ? (
           <button
             type="button"
             role="option"
@@ -197,7 +229,7 @@ export function FilterableSelect({
             style={{ "--option-index": "0" } as CSSProperties}
             onClick={() => choose(undefined)}
           >
-            Any {label.toLowerCase().replace(" filter", "")}
+            {clearLabel ?? `Any ${label.toLowerCase().replace(" filter", "")}`}
           </button>
         ) : null}
         {filteredOptions.length > 0 ? (
@@ -218,12 +250,13 @@ export function FilterableSelect({
           <button
             type="button"
             role="option"
+            disabled={!allowCustomValue}
             aria-selected="false"
             className={`toolbar-select-option filterable-select-empty ${selectingKey === (draft.trim() || "__clear__") ? "is-selecting" : ""}`.trim()}
             style={{ "--option-index": String(value ? 1 : 0) } as CSSProperties}
-            onClick={commitDraft}
+            onClick={allowCustomValue ? commitDraft : undefined}
           >
-            {draft.trim() ? `Use “${draft.trim()}”` : emptyLabel}
+            {allowCustomValue && draft.trim() ? `Use “${draft.trim()}”` : emptyLabel}
           </button>
         )}
       </div>

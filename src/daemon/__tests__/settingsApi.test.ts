@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -9,10 +10,13 @@ import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
 
 const tempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
+const servers: Server[] = [];
 
 afterEach(async () => {
   await Promise.all(daemons.map((daemon) => daemon.close()));
   daemons.length = 0;
+  await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
+  servers.length = 0;
   await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
   tempDirs.length = 0;
 });
@@ -33,6 +37,42 @@ describe("settings API", () => {
         enrichment: {
           provider: "Deterministic fallback",
           remoteModelEnabled: false
+        },
+        llm: {
+          activeProvider: "openai",
+          providers: expect.arrayContaining([
+            expect.objectContaining({
+              configured: false,
+              id: "openai",
+              model: "gpt-5-nano-2025-08-07"
+            }),
+            expect.objectContaining({
+              configured: false,
+              id: "anthropic",
+              model: "claude-sonnet-4-6"
+            }),
+            expect.objectContaining({
+              configured: false,
+              id: "gemini",
+              model: "gemini-3.5-flash"
+            }),
+            expect.objectContaining({
+              apiKeyRequired: false,
+              baseUrl: "http://127.0.0.1:11434/v1",
+              id: "ollama",
+              label: "Ollama",
+              local: true,
+              model: "llama3.1"
+            }),
+            expect.objectContaining({
+              apiKeyRequired: false,
+              baseUrl: "http://127.0.0.1:8000/v1",
+              id: "vllm",
+              label: "vLLM",
+              local: true
+            })
+          ]),
+          remoteEnrichmentEnabled: false
         },
         privacy: {
           mcpAccessEnabled: true,
@@ -62,9 +102,237 @@ describe("settings API", () => {
       sessionsWithMessagesButNoEffects: 1,
       weakCurrentTitles: 1
     });
+    expect(settings.hooks.integrations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionSurface: "settings",
+          captureMode: "live_hook",
+          label: "Codex",
+          runtime: "codex",
+          supportsActions: true
+        }),
+        expect.objectContaining({
+          actionSurface: "sources",
+          captureMode: "transcript_import",
+          label: "Claude Code",
+          runtime: "claude_code",
+          supportsActions: false
+        }),
+        expect.objectContaining({
+          actionSurface: "sources",
+          captureMode: "transcript_import",
+          label: "OpenCode",
+          runtime: "opencode",
+          supportsActions: false
+        })
+      ])
+    );
     expect(state.settings.deletionTargets.projects).toEqual([{ label: "Masthead", value: "Masthead" }]);
     expect(state.settings.deletionTargets.runtimes).toEqual([{ label: "codex", value: "codex" }]);
     expect(state.settings.deletionTargets.hosts).toEqual([{ label: "masthead-test-host", value: "masthead-test-host" }]);
+  });
+
+  test("saves LLM provider settings without exposing API keys", async () => {
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    const saved = await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "openai_compatible",
+      apiKey: "sk-test-settings-secret-3456",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      model: "llama-3.1",
+      remoteEnrichmentEnabled: true
+    });
+
+    expect(JSON.stringify(saved)).not.toContain("sk-test-settings-secret-3456");
+    expect(saved.settings.llm).toMatchObject({
+      activeProvider: "openai_compatible",
+      remoteEnrichmentEnabled: true,
+      providers: expect.arrayContaining([
+        expect.objectContaining({
+          baseUrl: "http://127.0.0.1:11434/v1",
+          configured: true,
+          id: "openai_compatible",
+          keyPreview: "••••3456",
+          model: "llama-3.1"
+        })
+      ])
+    });
+    expect(saved.settings.enrichment).toMatchObject({
+      model: "llama-3.1",
+      provider: "OpenAI-compatible",
+      remoteModelEnabled: true
+    });
+
+    const reloaded = await getJson(baseUrl, "/settings");
+    expect(JSON.stringify(reloaded)).not.toContain("sk-test-settings-secret-3456");
+    expect(reloaded.settings.llm.providers).toEqual(saved.settings.llm.providers);
+
+    const stored = daemon.database.prepare("SELECT setting_json AS settingJson FROM app_settings WHERE setting_key = ?").get("llm_provider") as
+      | { settingJson: string }
+      | undefined;
+    expect(stored?.settingJson).toContain("sk-test-settings-secret-3456");
+
+    const cleared = await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "openai_compatible",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      clearApiKey: true,
+      model: "llama-3.1",
+      remoteEnrichmentEnabled: false
+    });
+    expect(cleared.settings.llm.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          configured: false,
+          id: "openai_compatible"
+        })
+      ])
+    );
+    expect(JSON.stringify(cleared)).not.toContain("sk-test-settings-secret-3456");
+    expect(cleared.settings.enrichment).toMatchObject({
+      provider: "Deterministic fallback",
+      remoteModelEnabled: false
+    });
+  });
+
+  test("rejects incomplete OpenAI-compatible provider settings", async () => {
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    const response = await fetch(`${baseUrl}/settings/llm-provider`, {
+      body: JSON.stringify({
+        activeProvider: "openai_compatible",
+        apiKey: "sk-test",
+        model: "llama-3.1",
+        remoteEnrichmentEnabled: true
+      }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("OpenAI-compatible providers require an HTTP base URL");
+  });
+
+  test("enables local Ollama enrichment without an API key", async () => {
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    const saved = await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "ollama",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      model: "llama3.1",
+      remoteEnrichmentEnabled: true
+    });
+
+    expect(JSON.stringify(saved)).not.toContain("sk-");
+    expect(JSON.stringify(saved)).not.toContain('"apiKey":');
+    expect(saved.settings.llm).toMatchObject({
+      activeProvider: "ollama",
+      providers: expect.arrayContaining([
+        expect.objectContaining({
+          apiKeyRequired: false,
+          baseUrl: "http://127.0.0.1:11434/v1",
+          configured: true,
+          id: "ollama",
+          label: "Ollama",
+          local: true,
+          model: "llama3.1"
+        })
+      ]),
+      remoteEnrichmentEnabled: true
+    });
+    expect(saved.settings.enrichment).toMatchObject({
+      model: "llama3.1",
+      provider: "Ollama",
+      remoteModelEnabled: true
+    });
+  });
+
+  test("lists models from a local OpenAI-compatible provider", async () => {
+    const modelServer = createServer((request, response) => {
+      expect(request.url).toBe("/v1/models");
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "llama3.1" }, { id: "qwen2.5-coder" }] }));
+    });
+    servers.push(modelServer);
+    const modelBaseUrl = await listenHttp(modelServer);
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    const discovered = await postJson(
+      baseUrl,
+      "/settings/llm-provider/models",
+      {
+        activeProvider: "ollama",
+        baseUrl: `${modelBaseUrl}/v1`
+      },
+      200
+    );
+
+    expect(discovered).toEqual({
+      ok: true,
+      models: [
+        { id: "llama3.1", label: "llama3.1" },
+        { id: "qwen2.5-coder", label: "qwen2.5-coder" }
+      ]
+    });
+  });
+
+  test("saves native Anthropic and Gemini provider settings without exposing API keys", async () => {
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    const anthropic = await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "anthropic",
+      apiKey: "anthropic-settings-secret-7890",
+      model: "claude-sonnet-4-6",
+      remoteEnrichmentEnabled: true
+    });
+    expect(JSON.stringify(anthropic)).not.toContain("anthropic-settings-secret-7890");
+    expect(anthropic.settings.llm).toMatchObject({
+      activeProvider: "anthropic",
+      providers: expect.arrayContaining([
+        expect.objectContaining({
+          configured: true,
+          id: "anthropic",
+          keyPreview: "••••7890",
+          model: "claude-sonnet-4-6"
+        })
+      ]),
+      remoteEnrichmentEnabled: true
+    });
+    expect(anthropic.settings.enrichment).toMatchObject({
+      model: "claude-sonnet-4-6",
+      provider: "Anthropic",
+      remoteModelEnabled: true
+    });
+
+    const gemini = await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "gemini",
+      apiKey: "gemini-settings-secret-2468",
+      model: "gemini-3.5-flash",
+      remoteEnrichmentEnabled: true
+    });
+    expect(JSON.stringify(gemini)).not.toContain("anthropic-settings-secret-7890");
+    expect(JSON.stringify(gemini)).not.toContain("gemini-settings-secret-2468");
+    expect(gemini.settings.llm).toMatchObject({
+      activeProvider: "gemini",
+      providers: expect.arrayContaining([
+        expect.objectContaining({
+          configured: true,
+          id: "gemini",
+          keyPreview: "••••2468",
+          model: "gemini-3.5-flash"
+        })
+      ]),
+      remoteEnrichmentEnabled: true
+    });
+    expect(gemini.settings.enrichment).toMatchObject({
+      model: "gemini-3.5-flash",
+      provider: "Gemini",
+      remoteModelEnabled: true
+    });
   });
 
   test("rejects stale database identity on destructive previews and confirms", async () => {
@@ -198,14 +466,27 @@ function listen(daemon: MastheadDaemon): Promise<string> {
   });
 }
 
+function listenHttp(server: Server): Promise<string> {
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address() as AddressInfo;
+      resolve(`http://127.0.0.1:${address.port}`);
+    });
+  });
+}
+
 async function getJson(baseUrl: string, path: string): Promise<Record<string, any>> {
   const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" } });
   expect(response.status).toBe(200);
   return response.json() as Promise<Record<string, any>>;
 }
 
-async function postJson(baseUrl: string, path: string): Promise<Record<string, any>> {
-  const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" }, method: "POST" });
-  expect(response.status).toBe(202);
+async function postJson(baseUrl: string, path: string, body?: unknown, expectedStatus = 202): Promise<Record<string, any>> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: body === undefined ? { accept: "application/json" } : { accept: "application/json", "content-type": "application/json" },
+    method: "POST"
+  });
+  expect(response.status).toBe(expectedStatus);
   return response.json() as Promise<Record<string, any>>;
 }

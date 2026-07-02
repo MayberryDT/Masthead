@@ -28,18 +28,17 @@ export function ObservabilitySidebar({
 }: Props) {
   return (
     <div className="sidebar-shell">
-      <a className="sidebar-brand" href="#overview" aria-label="Masthead overview">
+      <div className="sidebar-brand" aria-label="Masthead">
         <img className="brand-sail" src={sailLogoUrl} alt="" aria-hidden="true" />
         <span>
           <strong>Masthead</strong>
           <small className="version-number">{version}</small>
         </span>
-      </a>
+      </div>
 
       <nav className="sidebar-nav" aria-label="Masthead sections">
         <SidebarGroup>
           <SidebarLink
-            href="#board"
             icon="sessions"
             label="Board"
             count={activeCount}
@@ -47,28 +46,24 @@ export function ObservabilitySidebar({
             onClick={() => onSurfaceChange?.("now")}
           />
           <SidebarLink
-            href="#logbook"
             icon="logbook"
             label="Logbook"
             active={activeSurface === "logbook"}
             onClick={() => onSurfaceChange?.("logbook")}
           />
           <SidebarLink
-            href="#sources"
             icon="sources"
             label="Sources"
             active={activeSurface === "sources"}
             onClick={() => onSurfaceChange?.("sources")}
           />
           <SidebarLink
-            href="#usage"
             icon="usage"
             label="Usage"
             active={activeSurface === "usage"}
             onClick={() => onSurfaceChange?.("usage")}
           />
           <SidebarLink
-            href="#settings"
             icon="settings"
             label="Settings"
             active={activeSurface === "settings"}
@@ -90,14 +85,12 @@ function SidebarGroup({ children }: { children: ReactNode }) {
 }
 
 function SidebarLink({
-  href,
   icon,
   label,
   count,
   active = false,
   onClick
 }: {
-  href: string;
   icon: IconName;
   label: string;
   count?: number;
@@ -105,24 +98,17 @@ function SidebarLink({
   onClick?: () => void;
 }) {
   return (
-    <a
+    <button
+      type="button"
       className={`sidebar-link ${active ? "active" : ""}`}
-      href={href}
       aria-current={active ? "page" : undefined}
-      onClick={
-        onClick
-          ? (event) => {
-              event.preventDefault();
-              onClick();
-            }
-          : undefined
-      }
+      onClick={onClick}
     >
       <span className="sidebar-icon" aria-hidden="true">
         <Icon name={icon} size="sidebar" weight={active ? iconWeights.sidebarSelected : iconWeights.sidebarInactive} />
       </span>
       <span>{label}</span>
       {count !== undefined ? <strong>{count}</strong> : null}
-    </a>
+    </button>
   );
 }

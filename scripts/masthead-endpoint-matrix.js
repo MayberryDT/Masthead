@@ -46,7 +46,8 @@ export const READ_ONLY_ENDPOINTS = [
 
 export const READ_ONLY_POST_ENDPOINTS = [
   { method: "POST", path: "/mcp/launch-config/validate", label: "mcp launch validation", body: { launchConfig: { command: process.execPath, args: ["server.js"], env: {} } } },
-  { method: "POST", path: "/mcp/test-connection", label: "mcp connection test", body: { launchConfig: { command: process.execPath, args: ["server.js"], env: {} } } }
+  { method: "POST", path: "/mcp/test-connection", label: "mcp connection test", body: { launchConfig: { command: process.execPath, args: ["server.js"], env: {} } } },
+  { method: "POST", path: "/settings/llm-provider/models", label: "llm provider model discovery", body: { activeProvider: "ollama", baseUrl: "http://127.0.0.1:11434/v1" } }
 ];
 
 export const BLOCKED_MUTATION_ENDPOINTS = [

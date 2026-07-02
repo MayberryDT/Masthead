@@ -7,6 +7,8 @@ import {
   type CodexHookConfig,
   type HookEventName
 } from "../core/hookAdmin.ts";
+import { scanTargetHarnesses, type HarnessCatalogEntry } from "../adapters/harnessCatalog.ts";
+import type { RuntimeKind } from "../adapters/types.ts";
 import { getDataSummary, type DataSummary } from "./db/dataLifecycleRepository.ts";
 import { globalMcpAccessEnabled } from "./db/mcpQueryRepository.ts";
 import { CURRENT_SCHEMA_VERSION, getOrCreateDatabaseIdentity } from "./db/schema.ts";
@@ -15,6 +17,7 @@ import { sourcePolicyEnabled } from "./db/sourcePolicyRepository.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
 import type { DaemonConfig } from "./config.ts";
 import { isWeakSessionTitle } from "../shared/sessionTextQuality.ts";
+import { effectiveLlmProvider, getLlmProviderSettings, type LlmProviderSettingsDto } from "./llmSettings.ts";
 
 export type SettingsOptionDto = {
   value: string;
@@ -27,12 +30,28 @@ export type HookLastTestDto = {
   message: string;
 };
 
+export type HarnessCaptureMode = "live_hook" | "transcript_import" | "metadata_import" | "source_discovery";
+export type HarnessCaptureStatus = "installed" | "needs_repair" | "not_installed" | "managed_in_sources" | "discovery_only";
+export type HarnessCaptureActionSurface = "settings" | "sources";
+
+export type HarnessCaptureIntegrationDto = {
+  runtime: RuntimeKind;
+  label: string;
+  captureMode: HarnessCaptureMode;
+  status: HarnessCaptureStatus;
+  actionSurface: HarnessCaptureActionSurface;
+  supportsActions: boolean;
+  description: string;
+  configPath?: string;
+};
+
 export type CodexHookSettingsDto = {
   configPath: string;
   configExists: boolean;
   installed: boolean;
   missingEvents: HookEventName[];
   mismatchedEvents: HookEventName[];
+  integrations: HarnessCaptureIntegrationDto[];
   command: string;
   endpoint: string;
   latestBackupPath?: string;
@@ -81,6 +100,7 @@ export type SettingsStateDto = SettingsRuntimeIdentityDto & {
       weakCurrentTitles?: number;
     };
   };
+  llm: LlmProviderSettingsDto;
   privacy: {
     transcriptImportEnabled: boolean;
     mcpAccessEnabled: boolean;
@@ -103,6 +123,8 @@ type HooksConfigRead = {
   config: CodexHookConfig;
   existed: boolean;
 };
+
+type CodexHookSettingsBaseDto = Omit<CodexHookSettingsDto, "integrations">;
 
 const hookLastTestKey = "codex_hook_last_test";
 
@@ -144,18 +166,22 @@ export function settingsRuntimeIdentity(config: DaemonConfig, db: MastheadDataba
 export async function getSettingsState(db: MastheadDatabase, config: DaemonConfig): Promise<SettingsStateDto> {
   const dataSummary = getDataSummary(db);
   const identity = settingsRuntimeIdentity(config, db);
+  const llm = getLlmProviderSettings(db, config);
+  const effectiveProvider = effectiveLlmProvider(db, config);
+  const remoteModelEnabled = effectiveProvider.remoteEnrichmentEnabled && effectiveProvider.configured;
   return {
     ...identity,
     deletionTargets: deletionTargets(db),
     enrichment: {
       currentEnrichments: dataSummary.enrichments,
       health: enrichmentHealth(db, dataSummary.sessions),
-      model: config.openaiModel ?? "deterministic",
-      provider: config.remoteEnrichmentEnabled && config.openaiApiKey ? "OpenAI" : "Deterministic fallback",
-      remoteModelEnabled: Boolean(config.remoteEnrichmentEnabled && config.openaiApiKey),
+      model: remoteModelEnabled ? effectiveProvider.model : effectiveProvider.remoteEnrichmentEnabled ? effectiveProvider.model || "Not configured" : "deterministic",
+      provider: effectiveProvider.remoteEnrichmentEnabled ? effectiveProvider.label : "Deterministic fallback",
+      remoteModelEnabled,
       sessionCount: dataSummary.sessions
     },
     hooks: await getCodexHookSettings(db, config),
+    llm,
     privacy: {
       mcpAccessEnabled: globalMcpAccessEnabled(db),
       redactionEnabled: true,
@@ -291,7 +317,7 @@ export async function getCodexHookSettings(db: MastheadDatabase, config: DaemonC
   try {
     const { config: hookConfig, existed } = await readHooksConfig(configPath, { allowMissing: true });
     const verification = verifyMastheadHookConfig(hookConfig, { command });
-    return {
+    return withHarnessCaptureIntegrations({
       command,
       configExists: existed,
       configPath,
@@ -302,9 +328,9 @@ export async function getCodexHookSettings(db: MastheadDatabase, config: DaemonC
       latestBackupPath,
       mismatchedEvents: verification.mismatchedEvents,
       missingEvents: verification.missingEvents
-    };
+    });
   } catch (error) {
-    return {
+    return withHarnessCaptureIntegrations({
       command,
       configExists: false,
       configPath,
@@ -316,8 +342,66 @@ export async function getCodexHookSettings(db: MastheadDatabase, config: DaemonC
       latestBackupPath,
       mismatchedEvents: [],
       missingEvents: []
+    });
+  }
+}
+
+function withHarnessCaptureIntegrations(settings: CodexHookSettingsBaseDto): CodexHookSettingsDto {
+  return {
+    ...settings,
+    integrations: scanTargetHarnesses().map((entry) => harnessCaptureIntegration(entry, settings))
+  };
+}
+
+function harnessCaptureIntegration(entry: HarnessCatalogEntry, codexSettings: CodexHookSettingsBaseDto): HarnessCaptureIntegrationDto {
+  if (entry.runtime === "codex") {
+    return {
+      actionSurface: "settings",
+      captureMode: "live_hook",
+      configPath: codexSettings.configPath,
+      description: "Live local hook events are installed, tested, and removed from this Settings card.",
+      label: entry.label,
+      runtime: entry.runtime,
+      status: codexCaptureStatus(codexSettings),
+      supportsActions: true
     };
   }
+
+  const captureMode = harnessCaptureMode(entry);
+  const status: HarnessCaptureStatus = captureMode === "source_discovery" ? "discovery_only" : "managed_in_sources";
+  return {
+    actionSurface: "sources",
+    captureMode,
+    description: harnessCaptureDescription(entry, captureMode),
+    label: entry.label,
+    runtime: entry.runtime,
+    status,
+    supportsActions: false
+  };
+}
+
+function harnessCaptureMode(entry: HarnessCatalogEntry): HarnessCaptureMode {
+  if (entry.runtimeStatus === "scan_target") return "source_discovery";
+  if (entry.supportLevel === "active_metadata") return "metadata_import";
+  if (entry.supportLevel === "active_full" || entry.supportLevel === "active_transcript") return "transcript_import";
+  return "metadata_import";
+}
+
+function harnessCaptureDescription(entry: HarnessCatalogEntry, captureMode: HarnessCaptureMode): string {
+  if (captureMode === "source_discovery") {
+    return `Masthead can discover likely ${entry.label} local state in Sources. A full import or live hook adapter is not wired yet.`;
+  }
+  if (captureMode === "metadata_import") {
+    return `Imported from local ${entry.label} session metadata through Sources.`;
+  }
+  return `Imported from local ${entry.label} transcript history through Sources.`;
+}
+
+function codexCaptureStatus(settings: CodexHookSettingsBaseDto): HarnessCaptureStatus {
+  if (settings.error) return "needs_repair";
+  if (settings.installed && settings.missingEvents.length === 0 && settings.mismatchedEvents.length === 0) return "installed";
+  if (settings.configExists) return "needs_repair";
+  return "not_installed";
 }
 
 export async function installCodexHooks(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {

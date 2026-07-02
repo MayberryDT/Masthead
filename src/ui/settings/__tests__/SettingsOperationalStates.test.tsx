@@ -111,8 +111,70 @@ const settings: SettingsStateDto = {
     configPath: "/tmp/.codex/hooks.json",
     endpoint: "http://127.0.0.1:17373/ingest",
     installed: false,
+    integrations: [
+      {
+        actionSurface: "settings",
+        captureMode: "live_hook",
+        description: "Live local hook events are managed from this Settings card.",
+        label: "Codex",
+        runtime: "codex",
+        status: "needs_repair",
+        supportsActions: true
+      }
+    ],
     missingEvents: ["SessionStart"],
     mismatchedEvents: []
+  },
+  llm: {
+    activeProvider: "openai",
+    providers: [
+      {
+        apiKeyRequired: true,
+        apiStyle: "responses",
+        baseUrl: "https://api.openai.com/v1",
+        configured: false,
+        customBaseUrl: false,
+        id: "openai",
+        label: "OpenAI",
+        local: false,
+        model: "gpt-5-nano-2025-08-07"
+      },
+      {
+        apiKeyRequired: true,
+        apiStyle: "chat_completions",
+        configured: false,
+        customBaseUrl: true,
+        id: "openai_compatible",
+        label: "OpenAI-compatible",
+        local: false,
+        model: ""
+      },
+      {
+        apiKeyRequired: true,
+        apiStyle: "anthropic_messages",
+        configured: false,
+        customBaseUrl: false,
+        id: "anthropic",
+        label: "Anthropic",
+        local: false,
+        model: "claude-sonnet-4-6"
+      },
+      {
+        apiKeyRequired: true,
+        apiStyle: "gemini_generate_content",
+        configured: false,
+        customBaseUrl: false,
+        id: "gemini",
+        label: "Gemini",
+        local: false,
+        model: "gemini-3.5-flash"
+      }
+    ],
+    remoteEnrichmentEnabled: false,
+    secretStorage: {
+      description: "API keys are stored only in the local Masthead settings database and are never returned by the settings API.",
+      kind: "local_database"
+    }
   },
   privacy: {
     mcpAccessEnabled: true,

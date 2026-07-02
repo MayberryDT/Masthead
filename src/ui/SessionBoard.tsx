@@ -3,6 +3,7 @@ import type { LifecycleLaneView, SessionCardView } from "../core/types";
 import type { CardDensity } from "./toolbarOptions";
 import { sessionDemoTelemetry } from "./observabilityDemo";
 import { SessionCard } from "./SessionCard";
+import { prefersReducedMotion } from "./motionPreference";
 
 type CardLayoutSnapshot = Map<string, DOMRect>;
 
@@ -324,10 +325,6 @@ function animateCardLayoutWithInlineStyle(card: HTMLElement, firstKeyframe: Keyf
       card.classList.remove("is-layout-animating");
     }, SESSION_CARD_LAYOUT_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS);
   });
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
 function semanticHeadlineSignature(card: SessionCardView): string {

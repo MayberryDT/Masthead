@@ -7,7 +7,6 @@ import { adapterRecordFromCodexHook, codexHookSource } from "../adapters/codex/h
 import { adapterForRuntime } from "../adapters/registry.ts";
 import { createDeterministicEnrichmentProvider } from "../enrichment/deterministicProvider.ts";
 import { createEnrichmentCoordinator, EnrichmentFailedError } from "../enrichment/enrichmentCoordinator.ts";
-import { createOpenAIEnrichmentProvider } from "../enrichment/openAIProvider.ts";
 import { RUNTIME_KINDS, type AdapterDiagnostic, type RuntimeKind } from "../adapters/types.ts";
 import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent } from "../core/ingestion.ts";
@@ -86,6 +85,7 @@ import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { buildMastheadHealth } from "./healthService.ts";
 import { recentHookEventsWithTranscriptPaths } from "./hookTranscriptRecovery.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
+import { createSettingsBackedEnrichmentProvider, listLlmProviderModels, updateLlmProviderSettings } from "./llmSettings.ts";
 import {
   getCodexHookSettings,
   getSettingsState,
@@ -187,14 +187,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       projectionBudgetMs: config.liveCopyProjectionBudgetMs,
       maxConcurrent: config.liveCopyMaxConcurrent && config.liveCopyMaxConcurrent > 0 ? config.liveCopyMaxConcurrent : undefined
     });
-    const enrichmentProvider = config.remoteEnrichmentEnabled
-      ? createOpenAIEnrichmentProvider({
-          apiKey: config.openaiApiKey,
-          enabled: true,
-          model: config.openaiModel,
-          timeoutMs: config.remoteEnrichmentTimeoutMs
-        })
-      : createDeterministicEnrichmentProvider();
+    const enrichmentProvider = createSettingsBackedEnrichmentProvider(database, config);
     const enrichment = createEnrichmentCoordinator(database, enrichmentProvider);
     const queuedEnrichmentSessionIds = new Set<string>();
     let enrichmentQueueScheduled = false;
@@ -1535,6 +1528,39 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         ok: true,
         settings: await getSettingsState(database, config)
       });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/settings/llm-provider") {
+      try {
+        const body = objectRecord(await optionalJsonBody(request));
+        updateLlmProviderSettings(database, config, body);
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          settings: await getSettingsState(database, config)
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/settings/llm-provider/models") {
+      try {
+        const body = objectRecord(await optionalJsonBody(request));
+        sendJson(request, response, config.allowedOrigins, 200, {
+          models: await listLlmProviderModels(database, config, body),
+          ok: true
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
       return;
     }
 

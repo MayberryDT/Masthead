@@ -1,34 +1,33 @@
-import { useEffect, useState } from "react";
-
 type SettingsToggleProps = {
   checked?: boolean;
   disabled?: boolean;
   label: string;
+  offLabel?: string;
   onChange?: (checked: boolean) => void;
+  onLabel?: string;
 };
 
-export function SettingsToggle({ checked = false, disabled = false, label, onChange }: SettingsToggleProps) {
-  const [localChecked, setLocalChecked] = useState(checked);
-
-  useEffect(() => {
-    setLocalChecked(checked);
-  }, [checked]);
+export function SettingsToggle({
+  checked = false,
+  disabled = false,
+  label,
+  offLabel = "Disabled",
+  onChange,
+  onLabel = "Enabled"
+}: SettingsToggleProps) {
+  const controlDisabled = disabled || !onChange;
 
   return (
-    <label className={`settings-toggle ${localChecked ? "checked" : ""} ${disabled ? "disabled" : ""}`.trim()}>
+    <label className={`settings-toggle ${checked ? "checked" : ""} ${controlDisabled ? "disabled" : ""}`.trim()}>
       <input
         type="checkbox"
-        checked={localChecked}
-        disabled={disabled}
+        checked={checked}
+        disabled={controlDisabled}
         aria-label={label}
-        onChange={(event) => {
-          const nextChecked = event.currentTarget.checked;
-          setLocalChecked(nextChecked);
-          onChange?.(nextChecked);
-        }}
+        onChange={(event) => onChange?.(event.currentTarget.checked)}
       />
       <span aria-hidden="true" />
-      <strong>{localChecked ? "Enabled" : "Disabled"}</strong>
+      <strong>{checked ? onLabel : offLabel}</strong>
     </label>
   );
 }

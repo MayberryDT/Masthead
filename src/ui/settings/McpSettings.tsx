@@ -13,7 +13,6 @@ import { AppButton } from "../primitives/AppButton";
 import { CodeBlock } from "../primitives/CodeBlock";
 import { StatusBadge } from "../primitives/StatusBadge";
 import { SettingsSection } from "./SettingsSection";
-import { SettingsToggle } from "./SettingsToggle";
 
 type McpSettingsProps = {
   baseUrl?: string;
@@ -37,6 +36,7 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
   const [loadError, setLoadError] = useState<string>();
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [status, setStatus] = useState<McpStatusDto>();
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [testResult, setTestResult] = useState<McpTestConnectionDto>();
   const [testState, setTestState] = useState<TestState>("idle");
 
@@ -76,7 +76,12 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
 
   async function copyConfig(): Promise<void> {
     if (!canCopy || !globalThis.navigator?.clipboard) return;
-    await globalThis.navigator.clipboard.writeText(activeCode);
+    try {
+      await globalThis.navigator.clipboard.writeText(activeCode);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
   }
 
   async function runLaunchTest(): Promise<void> {
@@ -131,7 +136,9 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
           <span className="settings-mcp-label">MCP access</span>
           <p>Allow read-only MCP clients to query sessions that are not excluded by source or session policy.</p>
         </div>
-        <SettingsToggle label="MCP access" checked={privacy?.mcpAccessEnabled ?? status?.globalAccessEnabled} />
+        <StatusBadge tone={privacy?.mcpAccessEnabled ?? status?.globalAccessEnabled ? "active" : "neutral"}>
+          {privacy?.mcpAccessEnabled ?? status?.globalAccessEnabled ? "Enabled" : "Disabled"}
+        </StatusBadge>
       </div>
 
       <div className="settings-mcp-config" aria-label="MCP config formats">
@@ -153,7 +160,7 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
           <div className="settings-mcp-tab-meta">
             <p>{activeTab.description}</p>
             <AppButton disabled={!canCopy} onClick={() => void copyConfig()} variant="quiet">
-              Copy config
+              {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy config"}
             </AppButton>
           </div>
           <CodeBlock code={activeCode} label={activeTab.label} />

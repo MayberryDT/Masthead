@@ -5,7 +5,7 @@ import { Icon } from "./icons/Icon";
 type Props = {
   sidebar: ReactNode;
   main: ReactNode;
-  motionMode?: "daily" | "presentation";
+  motionMode?: "daily" | "presentation" | "off";
 };
 
 export function AppShell({ sidebar, main, motionMode = "daily" }: Props) {

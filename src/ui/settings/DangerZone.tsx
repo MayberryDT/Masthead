@@ -1,6 +1,6 @@
 import type { SettingsOptionDto } from "../../app/daemonClient";
 import { AppButton } from "../primitives/AppButton";
-import { AppSelect } from "../primitives/AppSelect";
+import { FilterableSelect } from "../primitives/FilterableSelect";
 import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 import type { DeletionScopeKind } from "../OperationsPanel";
@@ -57,14 +57,20 @@ export function DangerZone({
       <SettingsRow
         control={
           <div className="settings-delete-controls">
-            <AppSelect
+            <FilterableSelect
+              allowCustomValue={false}
+              clearable={false}
               icon="source"
               label="Delete scope"
-              onChange={(value) => onDeletionScopeKindChange?.(value as DeletionScopeKind)}
+              onChange={(value) => {
+                if (isDeletionScopeKind(value)) onDeletionScopeKindChange?.(value);
+              }}
               options={scopeOptions}
+              placeholder="Delete scope"
+              searchPlaceholder="Search delete scopes"
               value={deletionScopeKind}
             />
-            {deletionScopeKind === "session" || targetOptions.length === 0 ? (
+            {deletionScopeKind === "session" ? (
               <input
                 aria-label="Delete target"
                 disabled={busy}
@@ -73,12 +79,17 @@ export function DangerZone({
                 value={deletionScopeTarget}
               />
             ) : (
-              <AppSelect
+              <FilterableSelect
+                allowCustomValue={false}
+                clearLabel={`Choose ${deletionScopeKind}`}
                 icon="source"
                 label="Delete target"
-                onChange={(value) => onDeletionScopeTargetChange?.(value)}
-                options={[{ label: `Choose ${deletionScopeKind}`, value: "" }, ...targetOptions]}
-                value={deletionScopeTarget}
+                onChange={(value) => onDeletionScopeTargetChange?.(value ?? "")}
+                options={targetOptions}
+                placeholder={`Choose ${deletionScopeKind}`}
+                searchPlaceholder="Search delete targets"
+                emptyLabel="No matching delete targets"
+                value={deletionScopeTarget || undefined}
               />
             )}
             <AppButton disabled={busy || deletionScopeTarget.trim().length === 0} onClick={onRequestScopedDelete} variant="danger">
@@ -100,6 +111,10 @@ export function DangerZone({
       />
     </SettingsSection>
   );
+}
+
+function isDeletionScopeKind(value: string | undefined): value is DeletionScopeKind {
+  return value === "project" || value === "session" || value === "runtime" || value === "host";
 }
 
 function optionsForScope(kind: DeletionScopeKind, targets: DangerZoneProps["targets"]): SettingsOptionDto[] {

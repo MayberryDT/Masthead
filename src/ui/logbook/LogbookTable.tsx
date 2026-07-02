@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LogbookSession } from "../HistoryPanel";
+import { prefersReducedMotion } from "../motionPreference";
 import { logbookColumns } from "./logbookColumns";
 import { LogbookRow } from "./LogbookRow";
 
@@ -121,8 +122,4 @@ function LogbookTableLayer({
       </tbody>
     </table>
   );
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }

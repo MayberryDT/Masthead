@@ -87,6 +87,40 @@ body {
   --headline-semantic-dur: 2800ms;
 }
 
+html[data-masthead-motion="off"],
+.masthead-shell[data-motion-mode="off"] {
+  --dropdown-close-dur: 1ms;
+  --headline-semantic-dur: 1ms;
+  --layout-dur: 1ms;
+  --modal-close-dur: 1ms;
+  --modal-open-dur: 1ms;
+  --search-close-dur: 1ms;
+  scroll-behavior: auto !important;
+}
+
+.masthead-shell[data-motion-mode="off"],
+.masthead-shell[data-motion-mode="off"] *,
+.masthead-shell[data-motion-mode="off"] *::before,
+.masthead-shell[data-motion-mode="off"] *::after {
+  animation: none !important;
+  transition-duration: 1ms !important;
+  scroll-behavior: auto !important;
+}
+
+html[data-masthead-motion="off"] *,
+html[data-masthead-motion="off"] *::before,
+html[data-masthead-motion="off"] *::after {
+  animation: none !important;
+  transition-duration: 1ms !important;
+  scroll-behavior: auto !important;
+}
+
+html[data-masthead-motion="off"] ::view-transition-group(*),
+html[data-masthead-motion="off"] ::view-transition-old(*),
+html[data-masthead-motion="off"] ::view-transition-new(*) {
+  animation-duration: 1ms !important;
+}
+
 #root {
   height: 100%;
   min-height: 0;
@@ -3176,16 +3210,22 @@ body {
 .sidebar-link {
   position: relative;
   display: flex;
+  width: 100%;
   min-height: 40px;
   align-items: center;
   gap: 10px;
   overflow: hidden;
+  border: 0;
   border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
   padding: 0 8px;
   color: #d5e4f0;
+  font: inherit;
   font-size: 15px;
   font-weight: 500;
   line-height: 40px;
+  text-align: left;
   transition-property: background-color, box-shadow, color, transform;
   transition-duration: 160ms;
   transition-timing-function: ease;
@@ -3794,6 +3834,7 @@ body {
 
 .filterable-select-menu {
   max-width: 320px;
+  overflow: hidden;
   padding: 6px;
 }
 
@@ -3822,7 +3863,7 @@ body {
 
 .filterable-select-options {
   display: grid;
-  max-height: 260px;
+  max-height: var(--filterable-select-options-max-height, 260px);
   overflow-y: auto;
   gap: 2px;
 }
@@ -6106,8 +6147,6 @@ body {
 .masthead-shell .observability-toolbar .search-field,
 .observability-console .filterable-select-search,
 .masthead-shell .filterable-select-search,
-.observability-console .settings-text-input,
-.masthead-shell .settings-text-input,
 .observability-console .settings-delete-controls input,
 .masthead-shell .settings-delete-controls input,
 .observability-console .logbook-date-popover input,
@@ -6139,8 +6178,6 @@ body {
 .masthead-shell .observability-toolbar .search-field,
 .observability-console .filterable-select-search,
 .masthead-shell .filterable-select-search,
-.observability-console .settings-text-input,
-.masthead-shell .settings-text-input,
 .observability-console .settings-delete-controls input,
 .masthead-shell .settings-delete-controls input,
 .observability-console .logbook-date-popover input,
@@ -6170,8 +6207,6 @@ body {
 .masthead-shell .observability-toolbar .search-field,
 .observability-console .filterable-select-search,
 .masthead-shell .filterable-select-search,
-.observability-console .settings-text-input,
-.masthead-shell .settings-text-input,
 .observability-console .settings-delete-controls input,
 .masthead-shell .settings-delete-controls input,
 .observability-console .logbook-date-popover input,
@@ -6242,16 +6277,6 @@ body {
 .masthead-shell .toolbar-select-menu::after {
   background-image: none;
   opacity: 0;
-}
-
-.observability-console .settings-toggle > span,
-.masthead-shell .settings-toggle > span {
-  clip-path: var(--folded-control-clip);
-  border-radius: 1px;
-  background-color: var(--folded-control-fill);
-  box-shadow:
-    inset 0 1px 0 var(--folded-control-top),
-    inset 0 -1px 0 var(--folded-control-bottom);
 }
 
 .observability-console input[type="checkbox"],

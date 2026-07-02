@@ -2,17 +2,18 @@ import { useCallback, useEffect, useState } from "react";
 import { invokeDesktopCommand, isDesktopBridgeAvailable } from "../app/desktopBridge";
 import {
   getSettingsState,
+  updateLlmProviderSettings,
   type DataSummary,
-  type SettingsStateDto
+  type SettingsStateDto,
+  type UpdateLlmProviderSettingsInput
 } from "../app/daemonClient";
 import type { MastheadConnectionState } from "../app/connection/MastheadConnectionProvider";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { AdvancedRuntimeSettings } from "./settings/AdvancedRuntimeSettings";
 import { EnrichmentSettings } from "./settings/EnrichmentSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { HooksSettings } from "./settings/HooksSettings";
 import { McpSettings } from "./settings/McpSettings";
-import { PrivacySettings } from "./settings/PrivacySettings";
+import { PreferencesSettings } from "./settings/PreferencesSettings";
 import { StorageSettings } from "./settings/StorageSettings";
 import { AppButton } from "./primitives/AppButton";
 
@@ -38,6 +39,7 @@ type Props = {
   deletionScopeKind?: DeletionScopeKind;
   deletionScopeTarget?: string;
   localDataStatus?: LocalDataStatus;
+  motionDisabled?: boolean;
   settingsState?: SettingsStateDto;
   readOnly?: boolean;
   connection?: MastheadConnectionState;
@@ -47,6 +49,7 @@ type Props = {
   onDeletionScopeKindChange?: (kind: DeletionScopeKind) => void;
   onDeletionScopeTargetChange?: (target: string) => void;
   onExportLocalData?: () => void;
+  onMotionDisabledChange?: (disabled: boolean) => void;
   onRequestPruneLocalData?: () => void;
   onConfirmPruneLocalData?: () => void;
   onRequestScopedDelete?: () => void;
@@ -61,6 +64,7 @@ export function OperationsPanel({
   deletionScopeKind = "project",
   deletionScopeTarget = "",
   localDataStatus = { state: "idle" },
+  motionDisabled,
   onCancelLocalDataAction,
   onConfirmDeleteLocalData,
   onConfirmPruneLocalData,
@@ -68,6 +72,7 @@ export function OperationsPanel({
   onDeletionScopeKindChange,
   onDeletionScopeTargetChange,
   onExportLocalData,
+  onMotionDisabledChange,
   onRequestDeleteLocalData,
   onRequestPruneLocalData,
   onRequestScopedDelete,
@@ -77,7 +82,7 @@ export function OperationsPanel({
   const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
   const [settingsError, setSettingsError] = useState<string>();
   const [settingsLoadState, setSettingsLoadState] = useState<"loading" | "ready" | "error">(settingsState ? "ready" : "loading");
-  const effectiveSettings = settingsState ?? loadedSettings;
+  const effectiveSettings = loadedSettings ?? settingsState;
   const effectiveSummary = dataSummary ?? effectiveSettings?.storage.dataSummary;
   const busy = localDataStatus.state === "busy";
 
@@ -117,6 +122,14 @@ export function OperationsPanel({
     }
   };
 
+  const saveLlmProviderSettings = useCallback(async (input: UpdateLlmProviderSettingsInput) => {
+    if (readOnly) throw new Error("Settings are read-only in this connection.");
+    const nextSettings = await updateLlmProviderSettings(input, baseUrl);
+    setLoadedSettings(nextSettings);
+    setSettingsError(undefined);
+    setSettingsLoadState("ready");
+  }, [baseUrl, readOnly]);
+
   const writesDisabled = busy || readOnly;
   const showSettingsSections = Boolean(effectiveSettings) || settingsLoadState !== "error";
   const localOnlyDeletionNote =
@@ -149,12 +162,17 @@ export function OperationsPanel({
             />
           </div>
           <div className="settings-priority-column settings-priority-column-policy">
-            <PrivacySettings privacy={effectiveSettings?.privacy} />
-            <EnrichmentSettings enrichment={effectiveSettings?.enrichment} />
+            <EnrichmentSettings
+              enrichment={effectiveSettings?.enrichment}
+              llm={effectiveSettings?.llm}
+              onSaveProvider={saveLlmProviderSettings}
+              readOnly={readOnly}
+              settingsBaseUrl={baseUrl}
+            />
           </div>
           <div className="settings-priority-column settings-priority-column-session">
             <HooksSettings baseUrl={baseUrl} hooks={effectiveSettings?.hooks} readOnly={readOnly} />
-            <AdvancedRuntimeSettings dataSummary={effectiveSummary} settings={effectiveSettings} />
+            <PreferencesSettings motionDisabled={motionDisabled} onMotionDisabledChange={onMotionDisabledChange} />
           </div>
           <div className="settings-priority-column settings-priority-column-mcp">
             <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />

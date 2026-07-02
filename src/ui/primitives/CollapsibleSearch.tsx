@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState, type InputHTMLAttributes } from "react";
 import { Icon } from "../icons/Icon";
 import { iconWeights } from "../icons/icon-tokens";
+import { prefersReducedMotion } from "../motionPreference";
 import { SearchInput } from "./SearchInput";
 
 export type CollapsibleSearchHandle = {
@@ -24,7 +25,7 @@ function cssDurationMs(value: string, fallbackMs: number): number {
 }
 
 function searchCloseDelayMs(): number {
-  if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return 1;
+  if (prefersReducedMotion()) return 1;
   if (typeof window.getComputedStyle !== "function") return 230;
   return cssDurationMs(window.getComputedStyle(document.documentElement).getPropertyValue("--search-close-dur"), 230);
 }

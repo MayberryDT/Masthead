@@ -35,5 +35,7 @@ describe("ObservabilitySidebar", () => {
     expect(html).not.toContain("Demo");
     expect(html).toContain("<img");
     expect(html).toContain("brand-sail");
+    expect(html).toContain("<button");
+    expect(html).not.toContain("href=\"#");
   });
 });

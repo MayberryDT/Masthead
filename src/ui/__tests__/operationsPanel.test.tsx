@@ -7,6 +7,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { SettingsStateDto } from "../../app/daemonClient";
 import { OperationsPanel } from "../OperationsPanel";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 describe("OperationsPanel", () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
@@ -18,7 +20,9 @@ describe("OperationsPanel", () => {
     }
     container?.remove();
     container = undefined;
+    document.querySelectorAll(".toolbar-select-menu-portal").forEach((node) => node.remove());
     delete window.mastheadDesktop;
+    vi.unstubAllGlobals();
   });
 
   test("renders local export and delete controls", () => {
@@ -120,7 +124,7 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Source copies");
     expect(html).toContain("4");
     expect(html).not.toContain("Sessions");
-    expect(html).toContain("Retention classes");
+    expect(html).not.toContain("Retention classes");
   });
 
   test("renders local action errors without changing action labels", () => {
@@ -131,6 +135,378 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Export failed: unavailable");
     expect(html).toContain("Export data");
     expect(html).toContain("Delete all Masthead data");
+  });
+
+  test("uses searchable scrolling dropdowns for populated danger-zone delete targets", async () => {
+    const onTargetChange = vi.fn();
+    const settingsWithTargets: SettingsStateDto = {
+      ...settings,
+      deletionTargets: {
+        ...settings.deletionTargets,
+        projects: Array.from({ length: 18 }, (_, index) => ({
+          label: `Project ${String(index + 1).padStart(2, "0")}`,
+          value: `project-${index + 1}`
+        }))
+      }
+    };
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        <OperationsPanel
+          deletionScopeKind="project"
+          deletionScopeTarget=""
+          onDeletionScopeTargetChange={onTargetChange}
+          settingsState={settingsWithTargets}
+        />
+      );
+    });
+
+    const triggers = Array.from(container.querySelectorAll<HTMLButtonElement>(".settings-delete-controls .filterable-select-trigger"));
+    expect(triggers).toHaveLength(2);
+
+    await act(async () => {
+      triggers[1].click();
+    });
+
+    const menu = document.body.querySelector<HTMLElement>(".filterable-select-menu");
+    const options = document.body.querySelector<HTMLElement>(".filterable-select-options");
+    const search = document.body.querySelector<HTMLInputElement>(".filterable-select-search input");
+    expect(menu).not.toBeNull();
+    expect(menu?.style.maxHeight).not.toBe("");
+    expect(Number.parseFloat(menu?.style.maxHeight ?? "0")).toBeLessThanOrEqual(window.innerHeight - 24);
+    expect(options).not.toBeNull();
+    expect(options?.parentElement?.style.getPropertyValue("--filterable-select-options-max-height")).not.toBe("");
+    expect(search?.placeholder).toBe("Search delete targets");
+    expect(document.body.textContent).toContain("Project 18");
+
+    await act(async () => {
+      if (!search) throw new Error("missing delete target search input");
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      valueSetter?.call(search, "not-a-project");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(document.body.textContent).toContain("No matching delete targets");
+    expect(document.body.textContent).not.toContain("Use “not-a-project”");
+  });
+
+  test("keeps empty project delete targets as a searchable dropdown", async () => {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<OperationsPanel deletionScopeKind="project" deletionScopeTarget="" settingsState={settings} />);
+    });
+
+    const triggers = Array.from(container.querySelectorAll<HTMLButtonElement>(".settings-delete-controls .filterable-select-trigger"));
+    expect(triggers).toHaveLength(2);
+    expect(container.querySelector('input[placeholder="project label"]')).toBeNull();
+
+    await act(async () => {
+      triggers[1].click();
+    });
+
+    expect(document.body.querySelector<HTMLInputElement>(".filterable-select-search input")?.placeholder).toBe("Search delete targets");
+    expect(document.body.textContent).toContain("No matching delete targets");
+  });
+
+  test("saves LLM provider settings without keeping the raw key visible", async () => {
+    const requests: Array<{ body: Record<string, unknown>; url: string }> = [];
+    const nextSettings: SettingsStateDto = {
+      ...settings,
+      llm: {
+        ...settings.llm,
+        providers: settings.llm.providers.map((provider) =>
+          provider.id === "openai"
+            ? { ...provider, configured: true, keyPreview: "••••3456", keySource: "settings" }
+            : provider
+        )
+      }
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        requests.push({ body: JSON.parse(String(init?.body)), url: String(url) });
+        return {
+          ok: true,
+          json: async () => ({ ok: true, settings: nextSettings })
+        } as Response;
+      })
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<OperationsPanel baseUrl="http://127.0.0.1:17373" settingsState={settings} />);
+    });
+
+    const keyInput = container.querySelector<HTMLInputElement>('input[type="password"]');
+    const saveButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Save provider");
+    await act(async () => {
+      if (!keyInput || !saveButton) throw new Error("missing provider settings controls");
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      valueSetter?.call(keyInput, "test-settings-secret-3456");
+      keyInput.dispatchEvent(new Event("input", { bubbles: true }));
+      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(requests).toEqual([
+      {
+        body: {
+          activeProvider: "openai",
+          apiKey: "test-settings-secret-3456",
+          clearApiKey: false,
+          model: "gpt-5-nano-2025-08-07",
+          remoteEnrichmentEnabled: false
+        },
+        url: "http://127.0.0.1:17373/settings/llm-provider"
+      }
+    ]);
+    expect(container.textContent).toContain("••••3456 from settings");
+    expect(container.textContent).not.toContain("test-settings-secret-3456");
+  });
+
+  test("saves a selected native Gemini provider instead of falling back to OpenAI", async () => {
+    const requests: Array<{ body: Record<string, unknown>; url: string }> = [];
+    const nextSettings: SettingsStateDto = {
+      ...settings,
+      llm: {
+        ...settings.llm,
+        activeProvider: "gemini",
+        providers: settings.llm.providers.map((provider) =>
+          provider.id === "gemini"
+            ? { ...provider, configured: true, keyPreview: "••••2468", keySource: "settings" }
+            : provider
+        ),
+        remoteEnrichmentEnabled: true
+      }
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        requests.push({ body: JSON.parse(String(init?.body)), url: String(url) });
+        return {
+          ok: true,
+          json: async () => ({ ok: true, settings: nextSettings })
+        } as Response;
+      })
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<OperationsPanel baseUrl="http://127.0.0.1:17373" settingsState={settings} />);
+    });
+
+    const providerTrigger = [...container.querySelectorAll<HTMLButtonElement>(".filterable-select-trigger")]
+      .find((button) => button.textContent?.includes("OpenAI"));
+    await act(async () => {
+      if (!providerTrigger) throw new Error("missing provider dropdown trigger");
+      providerTrigger.click();
+    });
+
+    const geminiOption = [...document.body.querySelectorAll<HTMLButtonElement>(".toolbar-select-option")]
+      .find((button) => button.textContent === "Gemini");
+    await act(async () => {
+      if (!geminiOption) throw new Error("missing Gemini provider option");
+      geminiOption.click();
+    });
+
+    const keyInput = container.querySelector<HTMLInputElement>('input[type="password"]');
+    const saveButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Save provider");
+    await act(async () => {
+      if (!keyInput || !saveButton) throw new Error("missing provider settings controls");
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      valueSetter?.call(keyInput, "gemini-settings-secret-2468");
+      keyInput.dispatchEvent(new Event("input", { bubbles: true }));
+      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(requests).toEqual([
+      {
+        body: {
+          activeProvider: "gemini",
+          apiKey: "gemini-settings-secret-2468",
+          clearApiKey: false,
+          model: "gemini-3.5-flash",
+          remoteEnrichmentEnabled: false
+        },
+        url: "http://127.0.0.1:17373/settings/llm-provider"
+      }
+    ]);
+  });
+
+  test("saves a local Ollama provider without requiring an API key", async () => {
+    const requests: Array<{ body: Record<string, unknown>; url: string }> = [];
+    const localSettings: SettingsStateDto = {
+      ...settings,
+      llm: {
+        ...settings.llm,
+        providers: [
+          ...settings.llm.providers,
+          {
+            apiKeyRequired: false,
+            apiStyle: "chat_completions",
+            baseUrl: "http://127.0.0.1:11434/v1",
+            configured: false,
+            customBaseUrl: true,
+            id: "ollama",
+            label: "Ollama",
+            local: true,
+            model: "llama3.1"
+          } as SettingsStateDto["llm"]["providers"][number]
+        ]
+      }
+    };
+    const nextSettings: SettingsStateDto = {
+      ...localSettings,
+      llm: {
+        ...localSettings.llm,
+        activeProvider: "ollama",
+        providers: localSettings.llm.providers.map((provider) =>
+          provider.id === "ollama" ? { ...provider, configured: true } : provider
+        ),
+        remoteEnrichmentEnabled: true
+      }
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        requests.push({ body: JSON.parse(String(init?.body)), url: String(url) });
+        return {
+          ok: true,
+          json: async () => ({ ok: true, settings: nextSettings })
+        } as Response;
+      })
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<OperationsPanel baseUrl="http://127.0.0.1:17373" settingsState={localSettings} />);
+    });
+
+    const providerTrigger = [...container.querySelectorAll<HTMLButtonElement>(".filterable-select-trigger")]
+      .find((button) => button.textContent?.includes("OpenAI"));
+    await act(async () => {
+      if (!providerTrigger) throw new Error("missing provider dropdown trigger");
+      providerTrigger.click();
+    });
+
+    const ollamaOption = [...document.body.querySelectorAll<HTMLButtonElement>(".toolbar-select-option")]
+      .find((button) => button.textContent === "Ollama");
+    await act(async () => {
+      if (!ollamaOption) throw new Error("missing Ollama provider option");
+      ollamaOption.click();
+    });
+
+    const remoteToggle = container.querySelector<HTMLInputElement>('input[aria-label="Use remote LLM enrichment"]');
+    const saveButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Save provider");
+    await act(async () => {
+      if (!remoteToggle || !saveButton) throw new Error("missing local provider controls");
+      remoteToggle.click();
+      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(requests).toEqual([
+      {
+        body: {
+          activeProvider: "ollama",
+          baseUrl: "http://127.0.0.1:11434/v1",
+          clearApiKey: false,
+          model: "llama3.1",
+          remoteEnrichmentEnabled: true
+        },
+        url: "http://127.0.0.1:17373/settings/llm-provider"
+      }
+    ]);
+    expect(container.textContent).toContain("No key required");
+    expect(container.textContent).not.toContain("Add an API key");
+  });
+
+  test("refreshes local provider models from the Settings API", async () => {
+    const requests: Array<{ body: Record<string, unknown>; url: string }> = [];
+    const localSettings: SettingsStateDto = {
+      ...settings,
+      llm: {
+        ...settings.llm,
+        activeProvider: "ollama",
+        providers: [
+          ...settings.llm.providers,
+          {
+            apiKeyRequired: false,
+            apiStyle: "chat_completions",
+            baseUrl: "http://127.0.0.1:11434/v1",
+            configured: true,
+            customBaseUrl: true,
+            id: "ollama",
+            label: "Ollama",
+            local: true,
+            model: "llama3.1"
+          } as SettingsStateDto["llm"]["providers"][number]
+        ]
+      }
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        requests.push({ body: JSON.parse(String(init?.body)), url: String(url) });
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            models: [
+              { id: "llama3.1", label: "llama3.1" },
+              { id: "qwen2.5-coder", label: "qwen2.5-coder" }
+            ]
+          })
+        } as Response;
+      })
+    );
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<OperationsPanel baseUrl="http://127.0.0.1:17373" settingsState={localSettings} />);
+    });
+
+    const refreshButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Refresh models");
+    await act(async () => {
+      if (!refreshButton) throw new Error("missing Refresh models button");
+      refreshButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(requests).toEqual([
+      {
+        body: {
+          activeProvider: "ollama",
+          baseUrl: "http://127.0.0.1:11434/v1"
+        },
+        url: "http://127.0.0.1:17373/settings/llm-provider/models"
+      }
+    ]);
+    expect(container.textContent).toContain("2 models found.");
+    expect(container.textContent).toContain("qwen2.5-coder");
   });
 
   test("opens the data directory through the desktop bridge", async () => {
@@ -210,8 +586,70 @@ const settings: SettingsStateDto = {
     configPath: "/tmp/.codex/hooks.json",
     endpoint: "http://127.0.0.1:17373/ingest",
     installed: false,
+    integrations: [
+      {
+        actionSurface: "settings",
+        captureMode: "live_hook",
+        description: "Live local hook events are managed from this Settings card.",
+        label: "Codex",
+        runtime: "codex",
+        status: "not_installed",
+        supportsActions: true
+      }
+    ],
     missingEvents: [],
     mismatchedEvents: []
+  },
+  llm: {
+    activeProvider: "openai",
+    providers: [
+      {
+        apiKeyRequired: true,
+        apiStyle: "responses",
+        baseUrl: "https://api.openai.com/v1",
+        configured: false,
+        customBaseUrl: false,
+        id: "openai",
+        label: "OpenAI",
+        local: false,
+        model: "gpt-5-nano-2025-08-07"
+      },
+      {
+        apiKeyRequired: true,
+        apiStyle: "chat_completions",
+        configured: false,
+        customBaseUrl: true,
+        id: "openai_compatible",
+        label: "OpenAI-compatible",
+        local: false,
+        model: ""
+      },
+      {
+        apiKeyRequired: true,
+        apiStyle: "anthropic_messages",
+        configured: false,
+        customBaseUrl: false,
+        id: "anthropic",
+        label: "Anthropic",
+        local: false,
+        model: "claude-sonnet-4-6"
+      },
+      {
+        apiKeyRequired: true,
+        apiStyle: "gemini_generate_content",
+        configured: false,
+        customBaseUrl: false,
+        id: "gemini",
+        label: "Gemini",
+        local: false,
+        model: "gemini-3.5-flash"
+      }
+    ],
+    remoteEnrichmentEnabled: false,
+    secretStorage: {
+      description: "API keys are stored only in the local Masthead settings database and are never returned by the settings API.",
+      kind: "local_database"
+    }
   },
   privacy: {
     mcpAccessEnabled: true,

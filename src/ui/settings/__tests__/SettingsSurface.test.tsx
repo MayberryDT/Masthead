@@ -13,6 +13,8 @@ describe("Settings surface", () => {
           dataSummary={settings.storage.dataSummary}
           deletionScopeKind="project"
           deletionScopeTarget="Masthead"
+          motionDisabled={false}
+          onMotionDisabledChange={() => undefined}
           settingsState={settings}
         />
       </SettingsSurface>
@@ -21,14 +23,27 @@ describe("Settings surface", () => {
     expect(html).toContain("settings-layout");
     expect(html).toContain("settings-section-wide");
     expect(html).toContain("settings-section-danger");
-    expect(html).toContain("Enrichment model");
+    expect(html).toContain("LLM provider");
+    expect(html).toContain("Use remote LLM enrichment");
+    expect(html).toContain("OpenAI");
     expect(html).toContain("API key");
-    expect(html).toContain("fast, lightweight model");
-    expect(html).toContain("Transcript import");
-    expect(html).toContain("Redaction");
-    expect(html).toContain("Codex hooks");
-    expect(html).toContain("Repair hooks");
-    expect(html).toContain("Capture mode");
+    expect(html).toContain("Paste API key");
+    expect(html).not.toContain("Fast model name");
+    expect(html).toContain("type=\"password\"");
+    expect(html).toContain("Save provider");
+    expect(html).not.toContain("sk-test-settings-secret");
+    expect(html).not.toContain("Data boundaries");
+    expect(html).not.toContain("Transcript import");
+    expect(html).not.toContain("Redaction");
+    expect(html).toContain("Session capture");
+    expect(html).not.toContain("Codex hooks");
+    expect(html).toContain("Install/repair hooks");
+    expect(html).toContain("Test hooks");
+    expect(html).toContain("Uninstall hooks");
+    expect(html).toContain("Supported harnesses");
+    expect(html).toContain("Claude Code");
+    expect(html).toContain("OpenCode");
+    expect(html).toContain("Managed in Sources");
     expect(html).toContain("MCP access");
     expect(html).toContain("MCP server");
     expect(html).toContain("Refresh MCP");
@@ -38,8 +53,16 @@ describe("Settings surface", () => {
     expect(html).toContain("Test MCP launch");
     expect(html).toContain("/home/tyler/.local/share/masthead/masthead.sqlite");
     expect(html).toContain("Export data");
-    expect(html).toContain("Advanced runtime");
-    expect(html).toContain("Retention classes");
+    expect(html).toContain("Preferences");
+    expect(html).toContain("Motion");
+    expect(html).toContain("Enable motion");
+    expect(html).toContain("settings-toggle checked");
+    expect(html).toContain("Motion on");
+    expect(html).toContain("checked=\"\"");
+    expect(html).not.toContain("Advanced runtime");
+    expect(html).not.toContain("Retention classes");
+    expect(html).not.toContain("Raw event rows");
+    expect(html).not.toContain("<span>MCP audit rows</span>");
     expect(html).not.toContain("Codex integration");
     expect(html).not.toContain("Lifecycle hooks");
     expect(html).not.toContain("Current enrichments");
@@ -49,9 +72,22 @@ describe("Settings surface", () => {
     expect(html).not.toContain("Sessions");
     expect(html).not.toContain("Can agents read Masthead?");
     expect(html).not.toContain("Agent Access");
+    expect(html).toContain("settings-toggle");
     expect(html).not.toContain("ops-card");
     expect(html).not.toContain("ghost-pill");
     expect(html).not.toContain("<select");
+  });
+
+  test("renders disabled motion as the off state", () => {
+    const html = renderToStaticMarkup(
+      <OperationsPanel motionDisabled onMotionDisabledChange={() => undefined} settingsState={settings} />
+    );
+
+    expect(html).toContain("Enable motion");
+    expect(html).toContain("settings-toggle");
+    expect(html).not.toContain("settings-toggle checked");
+    expect(html).not.toContain("checked=\"\"");
+    expect(html).toContain("Motion off");
   });
 
   test("renders a separate confirmation dialog for destructive actions", () => {
@@ -113,7 +149,7 @@ describe("Settings surface", () => {
     expect(html).toContain("disabled=\"\"");
   });
 
-  test("keeps Priority Bay fluid and gives square toggles breathing room", () => {
+  test("keeps Priority Bay fluid with real toggle styling", () => {
     const css = readFileSync("src/styles/settings.css", "utf8");
 
     expect(css).toMatch(/\.settings-layout-priority-bay\s*\{[\s\S]*max-width: none;/);
@@ -131,6 +167,7 @@ describe("Settings surface", () => {
     expect(css).not.toContain("filter: blur(4px);");
     expect(css).not.toContain("filter: blur(5px);");
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.settings-section,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: none/);
+    expect(css).toMatch(/\.masthead-shell\[data-motion-mode="off"\],[\s\S]*\.masthead-shell\[data-motion-mode="off"\] \*::after\s*\{[\s\S]*animation: none !important;[\s\S]*transition-duration: 1ms !important;/);
   });
 });
 
@@ -170,10 +207,90 @@ const settings: SettingsStateDto = {
     configPath: "/home/tyler/.codex/hooks.json",
     endpoint: "http://127.0.0.1:17373/ingest",
     installed: true,
+    integrations: [
+      {
+        actionSurface: "settings",
+        captureMode: "live_hook",
+        description: "Live local hook events are managed from this Settings card.",
+        label: "Codex",
+        runtime: "codex",
+        status: "installed",
+        supportsActions: true
+      },
+      {
+        actionSurface: "sources",
+        captureMode: "transcript_import",
+        description: "Imported from local Claude Code transcript history through Sources.",
+        label: "Claude Code",
+        runtime: "claude_code",
+        status: "managed_in_sources",
+        supportsActions: false
+      },
+      {
+        actionSurface: "sources",
+        captureMode: "transcript_import",
+        description: "Imported from local OpenCode transcript history through Sources.",
+        label: "OpenCode",
+        runtime: "opencode",
+        status: "managed_in_sources",
+        supportsActions: false
+      }
+    ],
     latestBackupPath: "/home/tyler/.codex/hooks.json.masthead-backup.json",
     lastEventAt: "2026-06-25T12:00:00.000Z",
     missingEvents: [],
     mismatchedEvents: []
+  },
+  llm: {
+    activeProvider: "openai",
+    providers: [
+      {
+        apiKeyRequired: true,
+        apiStyle: "responses",
+        baseUrl: "https://api.openai.com/v1",
+        configured: false,
+        customBaseUrl: false,
+        id: "openai",
+        label: "OpenAI",
+        local: false,
+        model: "gpt-5-nano-2025-08-07"
+      },
+      {
+        apiKeyRequired: true,
+        apiStyle: "chat_completions",
+        configured: false,
+        customBaseUrl: true,
+        id: "openai_compatible",
+        label: "OpenAI-compatible",
+        local: false,
+        model: ""
+      },
+      {
+        apiKeyRequired: true,
+        apiStyle: "anthropic_messages",
+        configured: false,
+        customBaseUrl: false,
+        id: "anthropic",
+        label: "Anthropic",
+        local: false,
+        model: "claude-sonnet-4-6"
+      },
+      {
+        apiKeyRequired: true,
+        apiStyle: "gemini_generate_content",
+        configured: false,
+        customBaseUrl: false,
+        id: "gemini",
+        label: "Gemini",
+        local: false,
+        model: "gemini-3.5-flash"
+      }
+    ],
+    remoteEnrichmentEnabled: false,
+    secretStorage: {
+      description: "API keys are stored only in the local Masthead settings database and are never returned by the settings API.",
+      kind: "local_database"
+    }
   },
   product: "masthead",
   runtime: {

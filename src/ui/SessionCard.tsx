@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { SessionCardView } from "../core/types";
 import { firstUsefulSessionTitle, hasAcceptableDisplayCopy, isWeakLiveSummary } from "../shared/sessionTextQuality.ts";
 import { isBlockedSessionCard } from "./format";
+import { prefersReducedMotion } from "./motionPreference";
 import type { DemoSessionTelemetry } from "./observabilityDemo";
 
 type Props = {
@@ -268,10 +269,6 @@ function sessionTextContext(session: SessionCardView) {
     sessionId: session.canonicalSessionId ?? session.sessionId,
     sourceSessionId: session.sourceSessionId ?? session.sessionId
   };
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
 function cleanProjectName(value: string): string {

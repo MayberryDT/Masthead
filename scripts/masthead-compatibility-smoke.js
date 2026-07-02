@@ -102,7 +102,10 @@ async function handleUpstream(request, response, requests) {
     return;
   }
 
-  if (request.method === "POST" && (url.pathname === "/mcp/launch-config/validate" || url.pathname === "/mcp/test-connection")) {
+  if (
+    request.method === "POST" &&
+    (url.pathname === "/mcp/launch-config/validate" || url.pathname === "/mcp/test-connection" || url.pathname === "/settings/llm-provider/models")
+  ) {
     sendJson(response, 200, { ok: true, endpoint: url.pathname, forwardedBody: body });
     return;
   }

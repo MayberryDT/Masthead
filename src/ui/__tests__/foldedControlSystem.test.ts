@@ -30,7 +30,6 @@ describe("folded sheet-metal control system", () => {
       ".masthead-shell .toolbar-select",
       ".masthead-shell .observability-toolbar .search-field",
       ".masthead-shell .filterable-select-search",
-      ".masthead-shell .settings-text-input",
       ".masthead-shell .settings-delete-controls input",
       ".masthead-shell .dossier-transcript-toolbar input",
       ".masthead-shell .usage-toolbar button"

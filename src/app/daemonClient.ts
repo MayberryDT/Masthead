@@ -424,12 +424,28 @@ export type SettingsOptionDto = {
   label: string;
 };
 
+export type HarnessCaptureMode = "live_hook" | "transcript_import" | "metadata_import" | "source_discovery";
+export type HarnessCaptureStatus = "installed" | "needs_repair" | "not_installed" | "managed_in_sources" | "discovery_only";
+export type HarnessCaptureActionSurface = "settings" | "sources";
+
+export type HarnessCaptureIntegrationDto = {
+  runtime: string;
+  label: string;
+  captureMode: HarnessCaptureMode;
+  status: HarnessCaptureStatus;
+  actionSurface: HarnessCaptureActionSurface;
+  supportsActions: boolean;
+  description: string;
+  configPath?: string;
+};
+
 export type CodexHookSettingsDto = {
   configPath: string;
   configExists: boolean;
   installed: boolean;
   missingEvents: string[];
   mismatchedEvents: string[];
+  integrations: HarnessCaptureIntegrationDto[];
   command: string;
   endpoint: string;
   latestBackupPath?: string;
@@ -440,6 +456,63 @@ export type CodexHookSettingsDto = {
     message: string;
   };
   error?: string;
+};
+
+export type LlmProviderId =
+  | "openai"
+  | "openai_compatible"
+  | "anthropic"
+  | "gemini"
+  | "ollama"
+  | "lm_studio"
+  | "vllm"
+  | "llama_cpp"
+  | "localai";
+
+export type LlmApiStyle = "responses" | "chat_completions" | "anthropic_messages" | "gemini_generate_content";
+
+export type LlmProviderDto = {
+  id: LlmProviderId;
+  label: string;
+  apiStyle: LlmApiStyle;
+  apiKeyRequired: boolean;
+  configured: boolean;
+  model: string;
+  baseUrl?: string;
+  keyPreview?: string;
+  keySource?: "environment" | "settings";
+  customBaseUrl: boolean;
+  local: boolean;
+};
+
+export type LlmProviderSettingsDto = {
+  activeProvider: LlmProviderId;
+  remoteEnrichmentEnabled: boolean;
+  providers: LlmProviderDto[];
+  secretStorage: {
+    kind: "local_database";
+    description: string;
+  };
+};
+
+export type UpdateLlmProviderSettingsInput = {
+  activeProvider?: LlmProviderId;
+  apiKey?: string;
+  baseUrl?: string;
+  clearApiKey?: boolean;
+  model?: string;
+  remoteEnrichmentEnabled?: boolean;
+};
+
+export type LlmProviderModelOptionDto = {
+  id: string;
+  label: string;
+};
+
+export type ListLlmProviderModelsInput = {
+  activeProvider: LlmProviderId;
+  apiKey?: string;
+  baseUrl?: string;
 };
 
 export type SettingsRuntimeIdentityDto = {
@@ -464,6 +537,7 @@ export type SettingsRuntimeIdentityDto = {
 
 export type SettingsStateDto = SettingsRuntimeIdentityDto & {
   hooks: CodexHookSettingsDto;
+  llm: LlmProviderSettingsDto;
   enrichment: {
     provider: string;
     remoteModelEnabled: boolean;
@@ -925,6 +999,28 @@ export async function getSettingsState(baseUrl = defaultLiveProjectionUrl(), opt
   if (!response.ok) throw new Error(`settings request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; settings: SettingsStateDto };
   return body.settings;
+}
+
+export async function updateLlmProviderSettings(
+  input: UpdateLlmProviderSettingsInput,
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<SettingsStateDto> {
+  const body = await postJson<{ ok: true; settings: SettingsStateDto }>(baseUrl, "/settings/llm-provider", {
+    body: input,
+    label: "LLM provider settings"
+  });
+  return body.settings;
+}
+
+export async function listLlmProviderModels(
+  input: ListLlmProviderModelsInput,
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<LlmProviderModelOptionDto[]> {
+  const body = await postJson<{ ok: true; models: LlmProviderModelOptionDto[] }>(baseUrl, "/settings/llm-provider/models", {
+    body: input,
+    label: "LLM provider models"
+  });
+  return body.models;
 }
 
 export async function getCodexHookSettings(

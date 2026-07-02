@@ -15,6 +15,7 @@ import { HistoryPanel } from "../ui/HistoryPanel";
 import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
 import { OperationsPanel } from "../ui/OperationsPanel";
+import { prefersReducedMotion, readStoredMotionDisabled, writeStoredMotionDisabled } from "../ui/motionPreference";
 import {
   SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS,
   SESSION_CARD_LAYOUT_DURATION_MS,
@@ -58,6 +59,7 @@ import { useLogbookController } from "./logbook/useLogbookController";
 import { useSettingsDataController } from "./settings/useSettingsDataController";
 import { useSourcesController } from "./sources/useSourcesController";
 import { useUsageStatsController } from "./usage/useUsageStatsController";
+import { clearUnsupportedLocationHash } from "./locationHash";
 
 type ConnectorActionState =
   | { state: "idle"; message?: string }
@@ -103,6 +105,7 @@ export function App() {
   const [activityWindow, setActivityWindow] = useState<ActivityWindow>("24h");
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
+  const [motionDisabled, setMotionDisabled] = useState(() => readStoredMotionDisabled());
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
   const [liveConnection, setLiveConnection] = useState<ConnectionState>({ state: "connecting" });
@@ -228,6 +231,20 @@ export function App() {
     refreshKey: sourceLibraryRefreshKey
   });
   const handleReviewDispositionsChanged = useCallback((dispositions: ReviewDisposition[]) => setReviewDispositions(dispositions), []);
+  const handleMotionDisabledChange = useCallback((disabled: boolean) => setMotionDisabled(disabled), []);
+
+  useEffect(() => {
+    clearUnsupportedLocationHash();
+  }, []);
+
+  useEffect(() => {
+    writeStoredMotionDisabled(motionDisabled);
+  }, [motionDisabled]);
+
+  useEffect(() => {
+    document.documentElement.dataset.mastheadMotion = motionDisabled ? "off" : "daily";
+  }, [motionDisabled]);
+
   const handleCanonicalDataDeleted = useCallback(() => {
     setLiveProjection(emptyLiveBoard);
     setLiveEvents([]);
@@ -246,7 +263,7 @@ export function App() {
   const toggleDensity = useCallback(() => {
     const updateDensity = () => setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
 
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (motionDisabled || prefersReducedMotion()) {
       updateDensity();
       return;
     }
@@ -254,7 +271,7 @@ export function App() {
     const previousLayout = captureCardLayout();
     flushSync(updateDensity);
     animateCardLayoutFrom(previousLayout);
-  }, []);
+  }, [motionDisabled]);
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -504,10 +521,12 @@ export function App() {
             deletionScopeKind={settingsData.deletionScopeKind}
             deletionScopeTarget={settingsData.deletionScopeTarget}
             localDataStatus={settingsData.localDataStatus}
+            motionDisabled={motionDisabled}
             onCancelLocalDataAction={settingsData.cancelLocalDataAction}
             onDeletionScopeKindChange={settingsData.changeDeletionScopeKind}
             onDeletionScopeTargetChange={settingsData.changeDeletionScopeTarget}
             onExportLocalData={settingsData.exportLocalData}
+            onMotionDisabledChange={handleMotionDisabledChange}
             onRequestPruneLocalData={settingsData.requestPruneLocalData}
             onConfirmPruneLocalData={settingsData.confirmPruneLocalData}
             onRequestScopedDelete={settingsData.requestScopedDelete}
@@ -573,6 +592,7 @@ export function App() {
           />
         }
         main={mainSurface}
+        motionMode={motionDisabled ? "off" : "daily"}
       />
 
       {detailModalOpen && filteredSelectedSession ? (
@@ -618,6 +638,8 @@ function captureCardLayout(): CardLayoutSnapshot {
 }
 
 function animateCardLayoutFrom(previousLayout: CardLayoutSnapshot): void {
+  if (prefersReducedMotion()) return;
+
   document.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card) => {
     const sessionId = card.dataset.sessionId;
     const previousRect = sessionId ? previousLayout.get(sessionId) : undefined;

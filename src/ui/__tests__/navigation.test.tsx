@@ -12,6 +12,7 @@ describe("product navigation", () => {
     expect(html).toContain("Sources");
     expect(html).toContain("Usage");
     expect(html).toContain("Settings");
+    expect(html).not.toContain("href=\"#");
     expect(html).not.toContain("Agent Access");
     expect(html).not.toContain("#agent-access");
     expect(html).not.toContain("Performance");

@@ -7,6 +7,7 @@ import { CollapsibleSearch } from "../primitives/CollapsibleSearch";
 import { FilterableSelect } from "../primitives/FilterableSelect";
 import { Icon } from "../icons/Icon";
 import { iconWeights } from "../icons/icon-tokens";
+import { prefersReducedMotion } from "../motionPreference";
 
 type Props = {
   query: string;
@@ -37,7 +38,7 @@ function cssDurationMs(value: string, fallbackMs: number): number {
 }
 
 function dropdownCloseDelayMs(): number {
-  if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return 1;
+  if (prefersReducedMotion()) return 1;
   if (typeof window.getComputedStyle !== "function") return 150;
   return cssDurationMs(window.getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur"), 150);
 }
