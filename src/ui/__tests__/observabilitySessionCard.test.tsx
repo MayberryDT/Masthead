@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
+import type { BoardHeadlineView } from "../../core/boardHeadlineFrame";
 import type { SessionCardView } from "../../core/types";
 import { SessionCard } from "../SessionCard";
 import {
@@ -15,6 +16,15 @@ import {
 import { stateClassName } from "../format";
 import { sessionDemoTelemetry } from "../observabilityDemo";
 
+type LegacyBoardSession = SessionCardView & {
+  copy: {
+    headline: string;
+    status: string;
+    reason: string;
+    source: string;
+  };
+};
+
 describe("observability session card", () => {
   test("renders compact reference facts without prototype telemetry rows", () => {
     const referenceSession = session();
@@ -24,7 +34,7 @@ describe("observability session card", () => {
     );
 
     expect(html).toContain(`Masthead · ${expectedHeaderTime}`);
-    expect(html).toContain("Refactor auth flow");
+    expect(html).toContain("Board headlines: structured around subject and disposition.");
     expect(html).toContain("Active");
     expect(html).toContain("8m 42s");
     expect(html).toContain("Runtime");
@@ -54,7 +64,7 @@ describe("observability session card", () => {
     host.innerHTML = renderToStaticMarkup(
       <SessionCard
         session={session({
-          copy: { ...session().copy, headline: "Magnetic slug lock copy" }
+          headline: headlineView("Magnetic slug lock copy")
         })}
         headlineUpdateIndex={2}
         onToggle={() => undefined}
@@ -125,7 +135,7 @@ describe("observability session card", () => {
     );
 
     expect(html).toContain("Halla · SEO system work");
-    expect(html).toContain("Refactor auth flow");
+    expect(html).toContain("Board headlines: structured around subject and disposition.");
     expect(html).not.toContain("Halla Codex session");
   });
 
@@ -133,12 +143,7 @@ describe("observability session card", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
-          copy: {
-            headline: "Updated section auto-rotation stops.",
-            reason: "This summary is persisted with the canonical Masthead session record.",
-            source: "enrichment",
-            status: "Review is pending."
-          },
+          headline: headlineView("Updated section auto-rotation stops.", { source: "enrichment" }),
           title: "Codex hook event",
           workContext: {
             label: "UI polish",
@@ -160,12 +165,7 @@ describe("observability session card", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
-          copy: {
-            headline: "Recent activity.",
-            reason: "Recent activity.",
-            source: "deterministic",
-            status: "Work is active."
-          },
+          headline: headlineView("Recent activity.", { source: "offline" }),
           title: "Codex hook event",
           workContext: {
             label: "Headline enrichment reliability",
@@ -186,12 +186,7 @@ describe("observability session card", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
-          copy: {
-            headline: "Added v2 session narrative facts, validator, deterministic draft.",
-            reason: "This summary is persisted with the canonical Masthead session record.",
-            source: "enrichment",
-            status: "Work is active."
-          },
+          headline: headlineView("Added v2 session narrative facts, validator, deterministic draft.", { source: "enrichment" }),
           title: "019f0626-012e-7251-aaa6-e5aedba59bf3 session",
           workContext: {
             label: "Narrative quality",
@@ -314,7 +309,7 @@ describe("observability session card", () => {
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<SessionBoard cards={[session({ sessionId: "session-1" })]} variant="observability" />);
+      root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" />);
     });
 
     expect(container.querySelector('[data-session-id="session-1"]')?.className).not.toContain("is-new-card");
@@ -322,7 +317,7 @@ describe("observability session card", () => {
     await act(async () => {
       root.render(
         <SessionBoard
-          cards={[session({ sessionId: "session-1" }), session({ sessionId: "session-2", title: "Second session" })]}
+          cards={[boardSession({ sessionId: "session-1" }), boardSession({ sessionId: "session-2", title: "Second session" })]}
           variant="observability"
         />
       );
@@ -364,8 +359,8 @@ describe("observability session card", () => {
     });
 
     try {
-      const first = session({ sessionId: "session-1", title: "First session" });
-      const second = session({ sessionId: "session-2", title: "Second session" });
+      const first = boardSession({ sessionId: "session-1", title: "First session" });
+      const second = boardSession({ sessionId: "session-2", title: "Second session" });
 
       await act(async () => {
         root.render(<SessionBoard cards={[first, second]} variant="observability" />);
@@ -436,13 +431,13 @@ describe("observability session card", () => {
 
     try {
       await act(async () => {
-        root.render(<SessionBoard cards={[session({ sessionId: "session-1" })]} variant="observability" density="comfortable" />);
+        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="comfortable" />);
       });
 
       expect(animations).toEqual([]);
 
       await act(async () => {
-        root.render(<SessionBoard cards={[session({ sessionId: "session-1" })]} variant="observability" density="compact" />);
+        root.render(<SessionBoard cards={[boardSession({ sessionId: "session-1" })]} variant="observability" density="compact" />);
       });
 
       expect(animations.map((animation) => animation.sessionId)).toEqual(["session-1"]);
@@ -481,8 +476,8 @@ describe("observability session card", () => {
     window.requestAnimationFrame = vi.fn(() => 1);
 
     try {
-      const first = session({ sessionId: "session-1", title: "First session" });
-      const second = session({ sessionId: "session-2", title: "Second session" });
+      const first = boardSession({ sessionId: "session-1", title: "First session" });
+      const second = boardSession({ sessionId: "session-2", title: "Second session" });
 
       await act(async () => {
         root.render(<SessionBoard cards={[first, second]} variant="observability" />);
@@ -515,8 +510,8 @@ describe("observability session card", () => {
     });
 
     try {
-      const first = session({ sessionId: "session-1", copy: { ...session().copy, headline: "First headline" } });
-      const second = session({ sessionId: "session-2", copy: { ...session().copy, headline: "Second headline" } });
+      const first = boardSession({ sessionId: "session-1", headline: headlineView("First headline") });
+      const second = boardSession({ sessionId: "session-2", headline: headlineView("Second headline") });
 
       await act(async () => {
         root.render(<SessionBoard cards={[first, second]} variant="observability" />);
@@ -526,8 +521,8 @@ describe("observability session card", () => {
         root.render(
           <SessionBoard
             cards={[
-              { ...first, copy: { ...first.copy, headline: "First headline refreshed" } },
-              { ...second, copy: { ...second.copy, headline: "Second headline refreshed" } }
+              boardHeadline(first, "First headline refreshed"),
+              boardHeadline(second, "Second headline refreshed")
             ]}
             variant="observability"
           />
@@ -566,8 +561,8 @@ describe("observability session card", () => {
     });
 
     try {
-      const first = session({ sessionId: "session-1", title: "First session" });
-      const second = session({ sessionId: "session-2", title: "Second session" });
+      const first = boardSession({ sessionId: "session-1", title: "First session" });
+      const second = boardSession({ sessionId: "session-2", title: "Second session" });
 
       await act(async () => {
         root.render(<SessionBoard cards={[first, second]} variant="observability" />);
@@ -592,13 +587,13 @@ describe("observability session card", () => {
     vi.useFakeTimers();
     const container = document.createElement("div");
     const root = createRoot(container);
-    const first = session({
+    const first = boardSession({
       sessionId: "session-1",
-      copy: { ...session().copy, headline: "First old headline" }
+      headline: headlineView("First old headline")
     });
-    const second = session({
+    const second = boardSession({
       sessionId: "session-2",
-      copy: { ...session().copy, headline: "Second old headline" }
+      headline: headlineView("Second old headline")
     });
 
     try {
@@ -610,8 +605,8 @@ describe("observability session card", () => {
         root.render(
           <SessionBoard
             cards={[
-              { ...first, copy: { ...first.copy, headline: "First updated headline" } },
-              { ...second, copy: { ...second.copy, headline: "Second updated headline" } }
+              boardHeadline(first, "First updated headline"),
+              boardHeadline(second, "Second updated headline")
             ]}
             variant="observability"
           />
@@ -640,11 +635,11 @@ describe("observability session card", () => {
   test("keeps the outgoing headline layer during a refresh animation", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
-    const original = session({
+    const original = boardSession({
       sessionId: "session-1",
-      copy: { ...session().copy, headline: "Outgoing board headline" }
+      headline: headlineView("Outgoing board headline")
     });
-    const updated = { ...original, copy: { ...original.copy, headline: "Incoming board headline" } };
+    const updated = boardHeadline(original, "Incoming board headline");
 
     try {
       await act(async () => {
@@ -666,34 +661,14 @@ describe("observability session card", () => {
     }
   });
 
-  test("uses a refresh pulse for successful same-text headline refreshes", async () => {
+  test("uses a refresh pulse for same-text headline refreshes", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
-    const original = session({
-      sessionId: "session-1",
-      copy: { ...session().copy, headline: "Stable refreshed headline" },
-      copyRefresh: {
-        provider: "openai",
-        requestedAt: "2026-06-30T23:00:00.000Z",
-        status: "success"
-      }
-    });
-    const refreshed = {
-      ...original,
-      copyRefresh: {
-        provider: "openai" as const,
-        requestedAt: "2026-06-30T23:00:05.000Z",
-        status: "success" as const
-      }
-    };
+    const refreshed = session({ sessionId: "session-1", headline: headlineView("Stable refreshed headline") });
 
     try {
       await act(async () => {
-        root.render(<SessionBoard cards={[original]} variant="observability" />);
-      });
-
-      await act(async () => {
-        root.render(<SessionBoard cards={[refreshed]} variant="observability" />);
+        root.render(<SessionCard session={refreshed} refreshPulseIndex={0} />);
       });
 
       const card = container.querySelector<HTMLElement>(".session-card");
@@ -712,11 +687,11 @@ describe("observability session card", () => {
     vi.useFakeTimers();
     const container = document.createElement("div");
     const root = createRoot(container);
-    const original = session({
+    const original = boardSession({
       sessionId: "session-1",
-      copy: { ...session().copy, headline: "Old board headline" }
+      headline: headlineView("Old board headline")
     });
-    const updated = { ...original, copy: { ...original.copy, headline: "Updated board headline" } };
+    const updated = boardHeadline(original, "Updated board headline");
 
     try {
       await act(async () => {
@@ -764,11 +739,11 @@ describe("observability session card", () => {
     }));
     const container = document.createElement("div");
     const root = createRoot(container);
-    const original = session({
+    const original = boardSession({
       sessionId: "session-1",
-      copy: { ...session().copy, headline: "Old reduced headline" }
+      headline: headlineView("Old reduced headline")
     });
-    const updated = { ...original, copy: { ...original.copy, headline: "Updated reduced headline" } };
+    const updated = boardHeadline(original, "Updated reduced headline");
 
     try {
       await act(async () => {
@@ -794,12 +769,7 @@ describe("observability session card", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
-          copy: {
-            headline: "{\"type\":\"response_item\",\"payload\":{\"command\":\"npm test\"}}",
-            reason: "Raw event text should not be used as card copy.",
-            source: "deterministic",
-            status: "Captured"
-          },
+          headline: headlineView("{\"type\":\"response_item\",\"payload\":{\"command\":\"npm test\"}}", { source: "offline" }),
           project: "Masthead",
           title: "Import correctness"
         })}
@@ -832,7 +802,7 @@ describe("observability session card", () => {
 
   test("does not apply demo harness or model values to live observability cards", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[session({ thinkingLevel: undefined })]} variant="observability" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession({ thinkingLevel: undefined })]} variant="observability" onOpenSession={() => undefined} />
     );
 
     expect(html).toContain("Codex");
@@ -847,7 +817,7 @@ describe("observability session card", () => {
 
   test("applies compact density to the observability card grid", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[session()]} variant="observability" density="compact" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession()]} variant="observability" density="compact" onOpenSession={() => undefined} />
     );
 
     expect(html).toContain("observability-card-grid compact");
@@ -855,7 +825,7 @@ describe("observability session card", () => {
 
   test("renders captured live model values without demo telemetry", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[session({ model: "gpt-5.5" })]} variant="observability" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession({ model: "gpt-5.5" })]} variant="observability" onOpenSession={() => undefined} />
     );
 
     expect(html).toContain("gpt-5.5");
@@ -863,54 +833,53 @@ describe("observability session card", () => {
     expect(html).not.toContain("Hermes");
   });
 
-  test("renders live copy refresh failures without labeling local copy as LLM output", () => {
+  test("renders pending headline state without an AI failure badge", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
-          copy: {
-            headline: "Refactor auth flow",
-            reason: "Work is moving through implementation.",
-            source: "deterministic",
-            status: "Added token refresh logic"
-          },
-          copyRefresh: {
-            failureMessage: "OpenAI live copy request failed with HTTP 500.",
+          headline: headlineView("Generating headline...", { source: "pending", status: "pending" }),
+          headlineRefresh: {
             provider: "openai",
             requestedAt: "2026-06-23T02:04:00.000Z",
-            status: "api_error"
+            status: "pending"
           }
         })}
         onToggle={() => undefined}
       />
     );
 
-    expect(html).toContain("Refactor auth flow");
+    expect(html).toContain("Generating headline...");
+    expect(html).toContain("Pending");
     expect(html).not.toContain("AI headline failed");
+    expect(html).not.toContain("AI headline not configured");
     expect(html).not.toContain("api_error");
     expect(html).not.toContain("source: llm");
   });
 
-  test("does not render a live copy badge for successful refreshes", () => {
+  test("renders offline headline source calmly without an AI failure badge", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
-          copyRefresh: {
+          headline: headlineView("Board headlines: structured around subject and disposition.", { source: "offline" }),
+          headlineRefresh: {
             provider: "openai",
             requestedAt: "2026-06-23T02:04:00.000Z",
-            status: "success"
+            status: "not_configured"
           }
         })}
         onToggle={() => undefined}
       />
     );
 
+    expect(html).toContain("Board headlines: structured around subject and disposition.");
+    expect(html).toContain("Offline");
     expect(html).not.toContain("AI headline failed");
     expect(html).not.toContain("AI headline not configured");
   });
 
   test("does not render captured thinking values as a primary card fact", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[session({ thinkingLevel: "Extra High" })]} variant="observability" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession({ thinkingLevel: "Extra High" })]} variant="observability" onOpenSession={() => undefined} />
     );
 
     expect(html).not.toContain("Extra High");
@@ -944,12 +913,7 @@ function session(overrides: Partial<SessionCardView> = {}): SessionCardView {
     sessionId: "session-1",
     project: "Masthead",
     title: "Raw title",
-    copy: {
-      headline: "Refactor auth flow",
-      status: "Added token refresh logic",
-      reason: "Work is moving through implementation.",
-      source: "deterministic"
-    },
+    headline: headlineView("Board headlines: structured around subject and disposition."),
     stateLabel: "Running",
     primaryStatus: "editing",
     lifecycle: "running",
@@ -966,6 +930,35 @@ function session(overrides: Partial<SessionCardView> = {}): SessionCardView {
     safeActions: ["open_source_session"],
     isExpanded: false,
     ...overrides
+  };
+}
+
+function headlineView(headline: string, overrides: Partial<BoardHeadlineView> = {}): BoardHeadlineView {
+  return {
+    headline,
+    source: "llm",
+    status: "ready",
+    ...overrides
+  };
+}
+
+function boardSession(overrides: Partial<SessionCardView> = {}): LegacyBoardSession {
+  return withLegacyBoardCopy(session(overrides));
+}
+
+function boardHeadline(session: LegacyBoardSession, headline: string): LegacyBoardSession {
+  return withLegacyBoardCopy({ ...session, headline: { ...session.headline, headline } });
+}
+
+function withLegacyBoardCopy(session: SessionCardView): LegacyBoardSession {
+  return {
+    ...session,
+    copy: {
+      headline: session.headline.headline,
+      status: "",
+      reason: "",
+      source: "deterministic"
+    }
   };
 }
 
