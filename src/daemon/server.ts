@@ -13,7 +13,7 @@ import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent } from "../core/ingestion.ts";
 import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
 import { projectLiveEvents } from "../core/liveProjection.ts";
-import { createOpenAISessionCopyEnricher } from "../core/openaiSessionCopy.ts";
+import { createBoardHeadlineEnricher } from "../core/boardHeadlineEnricher.ts";
 import { createFileBackedStore, type StoreRecord } from "../core/store.ts";
 import type { ReviewDisposition } from "../core/store.ts";
 import type { CodexHookDiagnostic } from "../core/codexAdapter.ts";
@@ -177,15 +177,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       upsertFileEffectsFromGitSnapshot(database, canonicalSessionIdForSource(gitSnapshot.sessionId), gitSnapshot);
     }
     const gitSnapshotSignatures = new Map(gitSnapshots.map((snapshot) => [snapshot.sessionId, gitSnapshotSignature(snapshot)]));
-    const sessionCopyEnricher = createOpenAISessionCopyEnricher({
+    const boardHeadlineEnricher = createBoardHeadlineEnricher({
       enabled: config.liveCopyEnabled ?? config.llmCopyEnabled,
       apiKey: config.openaiApiKey,
       model: config.openaiModel,
-      mode: "background",
-      ttlMs: config.liveCopyCacheMs,
-      timeoutMs: config.liveCopyTimeoutMs,
-      projectionBudgetMs: config.liveCopyProjectionBudgetMs,
-      maxConcurrent: config.liveCopyMaxConcurrent && config.liveCopyMaxConcurrent > 0 ? config.liveCopyMaxConcurrent : undefined
+      timeoutMs: config.liveCopyTimeoutMs
     });
     const enrichmentProvider = config.remoteEnrichmentEnabled
       ? createOpenAIEnrichmentProvider({
@@ -1127,7 +1123,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             reason: legacySqliteMigration.reason
           }
         },
-        llmCopy: sessionCopyEnricher.status()
+        boardHeadlines: boardHeadlineEnricher.status()
       });
       return;
     }
@@ -1400,7 +1396,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "GET" && url.pathname === "/projection") {
       const selectedSessionId = url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined;
-      const refreshIntervalMs = optionalPositiveQueryInteger(url.searchParams.get("refreshIntervalMs"));
+      const headlineMode = (config.liveCopyEnabled ?? config.llmCopyEnabled) && config.openaiApiKey?.trim() ? "llm" : "offline";
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
@@ -1408,11 +1404,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         selectedSessionId,
         sessionEnrichments: liveProjectionEnrichments(database, projectionSessionIds),
         sessionTranscriptFacts: liveProjectionTranscriptFacts(database, projectionSessionIds),
+        headlineMode,
         diagnostics: state.diagnostics.length
       });
       liveEnvelope.events = state.events.length;
       liveEnvelope.gitSnapshots = gitSnapshots.length;
-      liveEnvelope.projection = await sessionCopyEnricher.enrichProjection(liveEnvelope.projection, { refreshIntervalMs });
+      liveEnvelope.projection = await boardHeadlineEnricher.enrichProjection(liveEnvelope.projection);
       liveEnvelope.projection = attachCanonicalCardIds(liveEnvelope.projection, {
         hostId: `host:${config.host}`,
         runtimeKind: "codex"
@@ -2816,12 +2813,6 @@ function parseBoundedInteger(
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) return { ok: false };
   return { ok: true, value: parsed };
-}
-
-function optionalPositiveQueryInteger(value: string | null): number | undefined {
-  if (value === null || value === "") return undefined;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function isRuntimeKind(value: unknown): value is RuntimeKind {
