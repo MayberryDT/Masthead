@@ -136,6 +136,57 @@ describe("SessionDossier", () => {
     expect(html).toContain("Run the full Dossier verification suite.");
   });
 
+  test("renders durable memory as paragraphs instead of summary fact cards", () => {
+    const currentDossier = dossier();
+    currentDossier.durableEnrichment = {
+      sessionDossier: {
+        blockers: ["Missing saved live Google-auth state for PRD flow"],
+        continuation: {
+          constraints: [],
+          nextStep: "Restore corrected launch-polish commit to production.",
+          openQuestions: []
+        },
+        decisions: ["Proceed with restore plan after regression fix."],
+        evidenceRefs: [],
+        keyWork: ["Created launch-polish branches in two repos."],
+        outcome: "Deployment changes implemented; production go/no-go pending live auth state.",
+        purpose: "Document a durable record of the launch polish effort.",
+        verification: {
+          commands: [],
+          evidenceRefs: [],
+          failures: [],
+          status: "mixed",
+          summary: "Local and automated gates passed except paid flow proof."
+        },
+        warnings: []
+      },
+      sessionSummary: {
+        confidence: "high",
+        evidenceRefs: [],
+        state: "completed",
+        text: "Imported historical Pip session evidence with durable enrichment context."
+      },
+      sessionTitle: {
+        basis: "dominant_work",
+        confidence: "high",
+        evidenceRefs: [],
+        text: "Pip launch polish deploy session"
+      },
+      version: "session-capsule-v4"
+    };
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
+    const memoryStart = html.indexOf('data-dossier-section="durable-memory"');
+    const memoryEnd = html.indexOf('data-dossier-section="summary"', memoryStart);
+    const memoryHtml = html.slice(memoryStart, memoryEnd);
+
+    expect(memoryHtml).toContain("durable-paragraph");
+    expect(memoryHtml).toContain("Document a durable record of the launch polish effort.");
+    expect(memoryHtml).toContain("Proceed with restore plan after regression fix.");
+    expect(memoryHtml).not.toContain("summary-grid");
+    expect(memoryHtml).not.toContain("summary-fact");
+  });
+
   test("uses neutral durable summary and plain-language retrieval notes in default dossier", () => {
     const currentDossier = dossier();
     currentDossier.narrative.finalAssistantMessage =

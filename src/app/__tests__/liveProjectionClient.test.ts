@@ -253,6 +253,38 @@ describe("live projection client helpers", () => {
     expect(normalizeLiveBoardProjection(projection, null).selectedSession).toBeUndefined();
     expect(normalizeLiveBoardProjection(projection, "running-session").selectedSession?.sessionId).toBe("running-session");
   });
+
+  test("ignores stale selected session details that do not match the requested session", () => {
+    const projection = {
+      summary: { active: 2, needsAttention: 0, conflicts: 0, completed: 0 },
+      cards: [
+        legacyCard({
+          sessionId: "pip-session",
+          lifecycle: "running",
+          primaryStatus: "editing",
+          indicators: []
+        }),
+        legacyCard({
+          sessionId: "university-dates",
+          lifecycle: "ended",
+          primaryStatus: "completed_unreviewed",
+          indicators: []
+        })
+      ],
+      selectedSession: legacySessionDetail({
+        sessionId: "university-dates",
+        lifecycle: "ended",
+        primaryStatus: "completed_unreviewed",
+        indicators: []
+      }),
+      attentionQueue: [],
+      conflicts: []
+    } as unknown as LiveBoardProjection;
+
+    const normalized = normalizeLiveBoardProjection(projection, "pip-session");
+
+    expect(normalized.selectedSession?.sessionId).toBe("pip-session");
+  });
 });
 
 function metaWithMode(mode: string): ImportMeta {

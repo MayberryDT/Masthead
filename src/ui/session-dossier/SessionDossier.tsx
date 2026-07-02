@@ -385,18 +385,25 @@ function DossierDurableMemory({ dossier }: { dossier?: SessionDossierDto }) {
           <h4>{durable.sessionTitle.text}</h4>
           <p>{durable.sessionSummary.text}</p>
         </div>
-        <span>{statusLabel(durable.sessionSummary.state)}</span>
       </header>
-      <div className="summary-grid" aria-label="Durable session memory">
-        <SummaryFact label="Purpose" value={memory.purpose} />
-        <SummaryFact label="Outcome" value={memory.outcome} />
-        <SummaryFact label="Verification" value={`${statusLabel(verification.status)} - ${verification.summary}`} />
-        <SummaryFact label="Next step" value={memory.continuation.nextStep} />
-      </div>
+      <DurableParagraph label="Purpose" value={memory.purpose} />
+      <DurableParagraph label="Outcome" value={memory.outcome} />
+      <DurableParagraph label="Verification" value={`${statusLabel(verification.status)} - ${verification.summary}`} />
+      <DurableParagraph label="Next step" value={memory.continuation.nextStep} />
       <DurableList label="Key work" values={memory.keyWork} />
       <DurableList label="Decisions" values={memory.decisions} />
       <DurableList label="Blockers" values={memory.blockers} />
       <DurableList label="Constraints" values={memory.continuation.constraints} />
+    </div>
+  );
+}
+
+function DurableParagraph({ label, value }: { label: string; value?: string }) {
+  if (!value) return null;
+  return (
+    <div className="durable-paragraph">
+      <span>{label}</span>
+      <p>{value}</p>
     </div>
   );
 }
