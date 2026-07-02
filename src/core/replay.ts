@@ -1,11 +1,12 @@
 import { attentionPriority, deriveAttentionItems } from "./attention.ts";
-import { buildBoardLiveCopyFacts, isLowValueLiveCopyText, type BoardTranscriptMessageFact } from "./boardLiveCopyFacts.ts";
+import { buildBoardLiveCopyFacts, type BoardTranscriptMessageFact } from "./boardLiveCopyFacts.ts";
 import { buildBoardBrief } from "./boardBrief.ts";
+import { toBoardHeadlineInput, type BoardHeadlineSignal } from "./boardHeadlineInput.ts";
 import { isFailedCommandEvent } from "./commandStatus.ts";
 import { detectConflicts, detectSharedResourceConflicts } from "./conflicts.ts";
+import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView } from "./offlineBoardHeadline.ts";
 import { deriveOutcome } from "./outcomes.ts";
 import { deriveSessions } from "./sessionReducer.ts";
-import { buildDeterministicSessionCopy, toSessionCopyInput } from "./sessionCopy.ts";
 import { deriveWorkContext } from "./workContext.ts";
 import type {
   AttentionItem,
@@ -40,6 +41,7 @@ type ProjectFixtureOptions = {
   includeTerminalSessions?: boolean;
   sessionEnrichments?: Map<string, LiveSessionEnrichment>;
   sessionTranscriptFacts?: Map<string, LiveSessionTranscriptFacts>;
+  headlineMode?: "llm" | "offline";
   now?: Date;
   idleAfterMs?: number;
 };
@@ -118,7 +120,8 @@ export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOp
         sessionSnapshots,
         expandedSessionId,
         options.sessionEnrichments?.get(session.sessionId),
-        options.sessionTranscriptFacts?.get(session.sessionId)
+        options.sessionTranscriptFacts?.get(session.sessionId),
+        options.headlineMode ?? "offline"
       );
     })
     .sort((a, b) => a.priorityRank - b.priorityRank || a.project.localeCompare(b.project));
@@ -185,7 +188,8 @@ function toCard(
   sessionSnapshots: GitSnapshot[],
   expandedSessionId?: string,
   enrichment?: LiveSessionEnrichment,
-  transcriptFacts?: LiveSessionTranscriptFacts
+  transcriptFacts?: LiveSessionTranscriptFacts,
+  headlineMode: "llm" | "offline" = "offline"
 ): SessionCardView {
   const indicators: SessionCardView["indicators"] = [];
   if (sessionAttention.length > 0) indicators.push("attention");
@@ -252,113 +256,60 @@ function toCard(
     latestFeedbackSignal: feedbackSignal
   };
 
-  const copyInput = toSessionCopyInput(card, sessionAttention, sessionConflicts, {
-    facts: buildBoardLiveCopyFacts({
-      attentionItems: sessionAttention,
-      card,
-      canonicalEnrichment: cardEnrichment,
-      conflicts: sessionConflicts,
-      events: sessionEvents,
-      gitSnapshots: sessionSnapshots,
-      recentTranscriptMessages: transcriptFacts?.recentMessages
-    }),
-    recentDelta: recentDeltaFromEvents(sessionEvents, sessionSnapshots)
+  const facts = buildBoardLiveCopyFacts({
+    attentionItems: sessionAttention,
+    card,
+    canonicalEnrichment: cardEnrichment,
+    conflicts: sessionConflicts,
+    events: sessionEvents,
+    gitSnapshots: sessionSnapshots,
+    recentTranscriptMessages: transcriptFacts?.recentMessages
   });
+  const headlineInput = toBoardHeadlineInput({
+    lifecycle: card.lifecycle,
+    primaryStatus: card.primaryStatus,
+    signals: signalsFromCard(card, sessionAttention, sessionConflicts),
+    facts
+  });
+  const headline = headlineMode === "llm" ? buildPendingBoardHeadlineView(headlineInput) : buildOfflineBoardHeadlineView(headlineInput);
   const enrichedCard = {
     ...card,
-    copy: buildDeterministicSessionCopy(copyInput),
-    copyInput
+    headline,
+    headlineInput
   };
-  return withEnrichmentCopy(enrichedCard, cardEnrichment, transcriptFacts);
+  return withEnrichmentHeadline(enrichedCard, cardEnrichment, transcriptFacts, headlineMode);
 }
 
-function recentDeltaFromEvents(sessionEvents: NormalizedEvent[], sessionSnapshots: GitSnapshot[]): NonNullable<Parameters<typeof toSessionCopyInput>[3]>["recentDelta"] {
-  const recent = sessionEvents.toSorted((left, right) => right.occurredAt.localeCompare(left.occurredAt)).slice(0, 8);
-  return {
-    eventsSinceLastRefresh: sessionEvents.length,
-    latestEventSummaries: recent.map((event) => event.summary).filter((summary) => !isLowValueLiveCopyText(summary)).slice(0, 8),
-    latestFileBasenames: sessionSnapshots.flatMap((snapshot) => snapshot.changedPaths.map((path) => path.path.split("/").at(-1) ?? "")).filter(Boolean).slice(0, 8),
-    latestToolNames: recent.map(toolNameFromLiveEvent).filter((value): value is string => Boolean(value)).slice(0, 8)
-  };
+function signalsFromCard(
+  card: Pick<SessionCardView, "indicators" | "primaryStatus">,
+  attentionItems: AttentionItem[],
+  conflicts: ConflictCard[]
+): BoardHeadlineSignal[] {
+  const signals = new Set<BoardHeadlineSignal>();
+  for (const item of attentionItems) {
+    if (item.type === "approval_requested") signals.add("approval_waiting");
+    if (item.type === "user_question") signals.add("user_reply_waiting");
+    if (item.type === "command_failed") signals.add("command_failed");
+    if (item.type === "repeated_failure") signals.add("repeated_failure");
+    if (item.type === "stalled") signals.add("stalled");
+    if (item.type === "completed_without_verification") signals.add("verification_missing");
+    if (item.type === "stale_verification") signals.add("verification_stale");
+    if (item.type === "high_risk_change") signals.add("high_risk_change");
+    if (item.type === "conflict") signals.add("conflict_detected");
+  }
+  if (card.indicators.includes("risk")) signals.add("high_risk_change");
+  if (card.indicators.includes("verification")) signals.add("verification_missing");
+  if (card.indicators.includes("conflict") || conflicts.length > 0) signals.add("conflict_detected");
+  return [...signals].toSorted();
 }
 
-function toolNameFromLiveEvent(event: NormalizedEvent): string | undefined {
-  if (event.type !== "command.started" && event.type !== "command.finished") return undefined;
-  const value = event.payload.normalizedCommand ?? event.payload.command ?? event.payload.toolName ?? event.payload.commandId;
-  if (typeof value !== "string") return undefined;
-  const cleaned = value.replace(/\s+/g, " ").trim();
-  if (/^(bash|edit|glob|grep|ls|read|shell|write|apply_patch|multi_tool_use\.parallel)$/i.test(cleaned)) return undefined;
-  return cleaned.slice(0, 120);
-}
-
-function withEnrichmentCopy(
+function withEnrichmentHeadline(
   card: SessionCardView,
-  enrichment: LiveSessionEnrichment | undefined,
-  transcriptFacts: LiveSessionTranscriptFacts | undefined
+  _enrichment: LiveSessionEnrichment | undefined,
+  _transcriptFacts: LiveSessionTranscriptFacts | undefined,
+  _headlineMode: "llm" | "offline"
 ): SessionCardView {
-  if (hasNewerTranscriptEvidence(enrichment, transcriptFacts)) return card;
-  const headline = cleanLiveSummary(enrichment?.liveSummary) ?? cleanConcreteLiveTitle(enrichment?.title);
-  if (!headline) return card;
-  return {
-    ...card,
-    copy: {
-      ...card.copy,
-      headline,
-      reason: "This summary is persisted with the canonical Masthead session record.",
-      source: "enrichment",
-      status: card.copy.status
-    }
-  };
-}
-
-function hasNewerTranscriptEvidence(enrichment: LiveSessionEnrichment | undefined, transcriptFacts: LiveSessionTranscriptFacts | undefined): boolean {
-  if (!enrichment?.generatedAt) return false;
-  const latestTranscriptAt = latestTranscriptMessageAt(transcriptFacts);
-  return latestTranscriptAt ? latestTranscriptAt.localeCompare(enrichment.generatedAt) > 0 : false;
-}
-
-function latestTranscriptMessageAt(transcriptFacts: LiveSessionTranscriptFacts | undefined): string | undefined {
-  return transcriptFacts?.recentMessages
-    .map((message) => message.observedAt)
-    .filter(isNonEmptyString)
-    .toSorted()
-    .at(-1);
-}
-
-function cleanLiveSummary(value: string | undefined): string | undefined {
-  const normalized = value?.replace(/\s+/g, " ").trim();
-  if (!normalized || normalized.startsWith("{") || normalized.includes('"event"')) return undefined;
-  if (isWeakEnrichmentHeadline(normalized)) return undefined;
-  return normalized;
-}
-
-function cleanLiveTitle(value: string | undefined): string | undefined {
-  const normalized = cleanLiveSummary(value);
-  if (!normalized || !/[.!?]$/.test(normalized)) return undefined;
-  return normalized;
-}
-
-function cleanConcreteLiveTitle(value: string | undefined): string | undefined {
-  const normalized = value?.replace(/\s+/g, " ").trim();
-  if (!normalized || /[.!?]$/.test(normalized)) return cleanLiveTitle(normalized);
-  if (!isConcreteEnrichmentTitle(normalized)) return undefined;
-  if (looksLikeCompleteSentenceFragment(normalized)) return `${normalized}.`;
-  return undefined;
-}
-
-function isConcreteEnrichmentTitle(value: string): boolean {
-  const normalized = value.toLowerCase();
-  if (["codex hook event", "codex session", "untitled session", "new session", "session narrative", "session"].includes(normalized)) return false;
-  if (/^(?:browser is (?:connected|reconnected)|there is\b|updated\b)/i.test(value)) return false;
-  if (/^[\w .-]+\s+mcp$/i.test(value)) return false;
-  if (/^[0-9a-f]{12,}$/i.test(value) || /^session[-_:][a-z0-9][a-z0-9_-]{5,}$/i.test(value)) return false;
-  return value.length >= 10 && /[a-z]/i.test(value);
-}
-
-function looksLikeCompleteSentenceFragment(value: string): boolean {
-  return /\b(?:added|blocked|checked|configured|corrected|created|deployed|documented|ended|filed|fixed|has|have|implemented|installed|is|logged|moved|patched|published|recorded|removed|rendered|report|reports|reworked|rewrote|showing|shows|started|stopped|updated|uses|verified|was|were)\b/i.test(
-    value
-  );
+  return card;
 }
 
 function sanitizeLiveCardEnrichment(
@@ -447,21 +398,6 @@ function isNonEmptyString(value: unknown): value is string {
 
 function mentionsMcp(value: string): boolean {
   return /\bmodel context protocol\b|(?:^|[\s/_.-])mcp(?:$|[\s/_.-])|mcp[A-Z_-]/i.test(value);
-}
-
-function isWeakEnrichmentHeadline(value: string): boolean {
-  const normalized = value.replace(/[.!?]+$/g, "").trim();
-  if (/^codex hook event\b/i.test(normalized)) return true;
-  if (/^updated\b/i.test(normalized)) return true;
-  if (/\b(?:ready for review|needs review|need review|work is focused on)\b/i.test(normalized)) return true;
-  if (/\bhas recent (?:[\w .-]+\s+)?activity\b/i.test(normalized)) return true;
-  if (/\bbeing (?:fixed|updated|reviewed|validated) for\b/i.test(normalized)) return true;
-  if (/^(?:[\w .-]+\s+)?work is being (?:updated|fixed|changed) around [\w .-]+$/i.test(normalized)) return true;
-  if (/^(?:codex hook event|session narrative|[\w .-]+ session) is being (?:fixed|updated|reviewed|validated) for [\w .-]+$/i.test(normalized)) return true;
-  if (/^(?:browser is (?:connected|reconnected)|there is [\w .-]+|[\w .-]+) is being (?:fixed|updated|reviewed|validated) for [A-Z][\w .-]+$/i.test(normalized)) {
-    return true;
-  }
-  return false;
 }
 
 function toDetail(

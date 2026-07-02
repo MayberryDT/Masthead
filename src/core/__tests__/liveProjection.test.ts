@@ -3,6 +3,60 @@ import { normalizeCodexHookPayload } from "../codexAdapter";
 import { projectLiveEvents } from "../liveProjection";
 
 describe("live projection", () => {
+  test("projects pending Board headlines in LLM mode", () => {
+    const started = normalizeCodexHookPayload(
+      {
+        provider_event_id: "llm-headline-start",
+        event: "session_started",
+        session_id: "llm-headline-session",
+        timestamp: "2026-06-23T03:00:00.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        title: "Wire Board headline frames"
+      },
+      { receivedAt: "2026-06-23T03:00:00.010Z" }
+    );
+
+    const envelope = projectLiveEvents([started], [], {
+      generatedAt: "2026-06-23T03:01:00.000Z",
+      headlineMode: "llm"
+    });
+
+    const card = envelope.projection.cards[0];
+
+    expect(card?.headline).toEqual({
+      headline: "Generating headline...",
+      source: "pending",
+      status: "pending"
+    });
+    expect(card?.headlineInput).toBeDefined();
+  });
+
+  test("projects explicit offline Board headlines in offline mode", () => {
+    const started = normalizeCodexHookPayload(
+      {
+        provider_event_id: "offline-headline-start",
+        event: "session_started",
+        session_id: "offline-headline-session",
+        timestamp: "2026-06-23T03:00:00.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        title: "Wire Board headline frames"
+      },
+      { receivedAt: "2026-06-23T03:00:00.010Z" }
+    );
+
+    const envelope = projectLiveEvents([started], [], {
+      generatedAt: "2026-06-23T03:01:00.000Z",
+      headlineMode: "offline"
+    });
+
+    const card = envelope.projection.cards[0];
+
+    expect(card?.headline.source).toBe("offline");
+    expect(card?.headline.headline).toContain(":");
+  });
+
   test("projects normalized hook events into a live board envelope", () => {
     const started = normalizeCodexHookPayload(
       {
@@ -100,13 +154,13 @@ describe("live projection", () => {
     });
 
     const card = envelope.projection.cards[0];
-    const copyInput = card?.copyInput as { headlineEvidence?: string[] } | undefined;
+    const headlineInput = card?.headlineInput as { evidence?: string[]; subjectCandidates?: string[] } | undefined;
 
-    expect(copyInput?.headlineEvidence).toContain("Investigate why Board headlines stopped refreshing from transcript updates.");
-    expect(card?.copy.headline).toContain("Board headlines stopped refreshing");
+    expect(headlineInput?.evidence).toContain("Investigate why Board headlines stopped refreshing from transcript updates.");
+    expect(headlineInput?.subjectCandidates).toContain("Board headlines");
   });
 
-  test("prefers newer transcript evidence over stale stored enrichment copy", () => {
+  test("does not replace pending Board headlines with stale stored enrichment in LLM mode", () => {
     const started = normalizeCodexHookPayload(
       {
         provider_event_id: "stale-enrichment-start",
@@ -122,6 +176,7 @@ describe("live projection", () => {
 
     const envelope = projectLiveEvents([started], [], {
       generatedAt: "2026-06-23T03:02:00.000Z",
+      headlineMode: "llm",
       sessionEnrichments: new Map([
         [
           "stale-enrichment-session",
@@ -148,7 +203,11 @@ describe("live projection", () => {
       ])
     });
 
-    expect(envelope.projection.cards[0]?.copy.headline).toBe("Board headlines stopped refreshing from transcript updates.");
+    expect(envelope.projection.cards[0]?.headline).toEqual({
+      headline: "Generating headline...",
+      source: "pending",
+      status: "pending"
+    });
   });
 
   test("uses payload project and title when a live session starts with an approval event", () => {

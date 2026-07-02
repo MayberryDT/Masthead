@@ -16,6 +16,7 @@ type LiveProjectionOptions = {
   selectedSessionId?: string | null;
   sessionEnrichments?: Map<string, LiveSessionEnrichment>;
   sessionTranscriptFacts?: Map<string, LiveSessionTranscriptFacts>;
+  headlineMode?: "llm" | "offline";
   generatedAt?: string;
   diagnostics?: number;
 };
@@ -44,6 +45,7 @@ export function projectLiveEvents(
       expandedSessionId: options.expandedSessionId,
       sessionEnrichments: normalizeLiveSessionEnrichments(options.sessionEnrichments),
       sessionTranscriptFacts: options.sessionTranscriptFacts,
+      headlineMode: options.headlineMode ?? "offline",
       selectedSessionId,
       now: new Date(generatedAt)
     })

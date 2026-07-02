@@ -124,7 +124,7 @@ describe("Live Board projection", () => {
       ["history", ["history-session"]]
     ]);
     expect(board.lanes!.map((lane) => lane.laneId)).not.toContain("ended_review");
-    expect(board.cards.every((card) => card.copy.headline.length > 0 && card.copy.reason.length > 0)).toBe(true);
+    expect(board.cards.every((card) => card.headline.headline.length > 0 && card.headline.source === "offline" && card.headline.status === "ready")).toBe(true);
   });
 
   test("keeps running sessions in Running even when they need attention", () => {
@@ -240,9 +240,9 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]).toMatchObject({
       title: "Masthead UI work",
-      copy: {
-        headline: "UI changes are in progress.",
-        source: "deterministic"
+      headline: {
+        source: "offline",
+        status: "ready"
       },
       workContext: {
         label: "UI work"
@@ -277,9 +277,9 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]).toMatchObject({
       title: "Masthead UI work",
-      copy: {
-        headline: "UI changes are in progress.",
-        source: "deterministic"
+      headline: {
+        source: "offline",
+        status: "ready"
       }
     });
   });
@@ -311,12 +311,12 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]).toMatchObject({
       title: "Masthead UI work",
-      copy: {
-        headline: "UI changes are in progress.",
-        source: "deterministic"
+      headline: {
+        source: "offline",
+        status: "ready"
       }
     });
-    expect(JSON.stringify(board.cards[0])).not.toMatch(/codex hook event/i);
+    expect(board.cards[0]?.headline.headline).not.toMatch(/codex hook event/i);
   });
 
   test("ignores generic is-being-fixed enrichment for card headlines", () => {
@@ -345,9 +345,9 @@ describe("Live Board projection", () => {
     );
 
     expect(board.cards[0]).toMatchObject({
-      copy: {
-        headline: "UI changes are in progress.",
-        source: "deterministic"
+      headline: {
+        source: "offline",
+        status: "ready"
       }
     });
   });
@@ -382,11 +382,14 @@ describe("Live Board projection", () => {
     );
 
     expect(board.cards[0]).toMatchObject({
-      copy: {
-        headline: "Reworked the card copy path to summarize the latest assistant output.",
-        source: "deterministic"
+      headline: {
+        source: "offline",
+        status: "ready"
       }
     });
+    expect((board.cards[0]?.headlineInput as { evidence?: string[] } | undefined)?.evidence).toContain(
+      "Reworked the card copy path to summarize the latest assistant output."
+    );
   });
 
   test("does not append recent activity copy to sentence-like enrichment titles", () => {
@@ -414,8 +417,8 @@ describe("Live Board projection", () => {
       }
     );
 
-    expect(board.cards[0]?.copy.headline).toBe("Launcher cleanup path is patched.");
-    expect(board.cards[0]?.copy.headline).not.toContain("patched has recent");
+    expect(board.cards[0]?.headline.source).toBe("offline");
+    expect(board.cards[0]?.headline.headline).not.toContain("patched has recent");
   });
 
   test("ignores stale MCP enrichment when current activity is unrelated", () => {
@@ -449,9 +452,9 @@ describe("Live Board projection", () => {
     );
 
     expect(board.cards[0]?.title).toBe("Live card copy work");
-    expect(board.cards[0]?.copy).toMatchObject({
-      headline: "Reworked the card copy path to summarize the latest assistant output.",
-      source: "deterministic"
+    expect(board.cards[0]?.headline).toMatchObject({
+      source: "offline",
+      status: "ready"
     });
     expect(JSON.stringify(board.cards[0])).not.toMatch(/\bmcp\b/i);
   });
@@ -487,14 +490,14 @@ describe("Live Board projection", () => {
     );
 
     expect(board.cards[0]?.title).toBe("Masthead");
-    expect(board.cards[0]?.copy).toMatchObject({
-      headline: "Reworked the card copy path to summarize the latest assistant output.",
-      source: "deterministic"
+    expect(board.cards[0]?.headline).toMatchObject({
+      source: "offline",
+      status: "ready"
     });
     expect(JSON.stringify(board.cards[0])).not.toMatch(/\bmcp\b/i);
   });
 
-  test("uses high-quality enrichment for running session headlines", () => {
+  test("keeps high-quality enrichment from replacing pending LLM headlines", () => {
     const board = projectFixture(
       {
         events: [
@@ -511,6 +514,7 @@ describe("Live Board projection", () => {
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
+        headlineMode: "llm",
         sessionEnrichments: new Map([
           [
             "running-enriched-session",
@@ -524,9 +528,10 @@ describe("Live Board projection", () => {
     );
 
     expect(board.cards[0]).toMatchObject({
-      copy: {
-        headline: "MCP launch config validation has passing tools-list coverage.",
-        source: "enrichment"
+      headline: {
+        headline: "Generating headline...",
+        source: "pending",
+        status: "pending"
       },
       lifecycle: "running",
       workContext: {
@@ -919,8 +924,10 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]?.workContext?.label).toBe("OAuth callback work");
     expect(board.cards[0]?.latestFeedbackSignal?.claims).toContain("claims_complete");
-    expect(board.cards[0]?.copy.headline).toBe("Implementation is complete, but auth tests are still failing.");
-    expect(board.cards[0]?.copy.status).toBe("Session reports completion.");
+    expect(board.cards[0]?.headline).toMatchObject({ source: "offline", status: "ready" });
+    expect((board.cards[0]?.headlineInput as { dispositionHints?: string[] } | undefined)?.dispositionHints).toContain(
+      "Implementation is complete, but auth tests are still failing."
+    );
     expect(board.selectedSession?.latestFeedback?.text).toContain("auth tests are still failing");
     expect(board.selectedSession?.inspectorSections).toEqual([
       "state",
@@ -960,9 +967,10 @@ describe("Live Board projection", () => {
     expect(board.cards[0]?.latestFeedbackSignal?.summary).toBe(
       "Live session cards no longer receive demo harness or model telemetry."
     );
-    expect(board.cards[0]?.copy.headline).toBe(
+    expect((board.cards[0]?.headlineInput as { dispositionHints?: string[] } | undefined)?.dispositionHints).toContain(
       "Live session cards no longer receive demo harness or model telemetry."
     );
+    expect(board.cards[0]?.headline.source).toBe("offline");
   });
 
   test("skips dangling transition bullets when summarizing latest feedback", () => {
@@ -990,9 +998,10 @@ describe("Live Board projection", () => {
     expect(board.cards[0]?.latestFeedbackSignal?.summary).toBe(
       "The main grid now shows active sessions and recent idle sessions."
     );
-    expect(board.cards[0]?.copy.headline).toBe(
+    expect((board.cards[0]?.headlineInput as { dispositionHints?: string[] } | undefined)?.dispositionHints).toContain(
       "The main grid now shows active sessions and recent idle sessions."
     );
+    expect(board.cards[0]?.headline.source).toBe("offline");
   });
 
   test("turns redacted slash markers into natural language in latest feedback summaries", () => {
