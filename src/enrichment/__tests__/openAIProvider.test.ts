@@ -138,6 +138,71 @@ describe("OpenAI enrichment provider", () => {
     expect(result.validationFailures).toContain("title");
   });
 
+  test("keeps structured LLM enrichment when soft narrative copy rules fail", async () => {
+    const provider = createOpenAIEnrichmentProvider({
+      apiKey: "test-key",
+      enabled: true,
+      fetchImpl: vi.fn(async () =>
+        responseWithOutput({
+          confidence: "high",
+          liveSummary:
+            "This archived session captured Dossier enrichment work with robust transcript evidence, enough detail for Logbook reuse, and follow-up notes for future agents.",
+          action: "generate",
+          object: "durable Dossier enrichment",
+          missingEvidence: [],
+          outcome: "Durable Dossier enrichment was generated for reuse.",
+          searchSummary:
+            "Durable Dossier enrichment, transcript evidence, Logbook reuse, structured session summary, and future-agent continuation notes.",
+          sessionDossier: {
+            blockers: [],
+            continuation: {
+              constraints: [],
+              nextStep: "Use the durable Dossier summary in the modal.",
+              openQuestions: []
+            },
+            decisions: ["Keep the Dossier summary neutral."],
+            evidenceRefIds: [],
+            keyWork: ["Generated structured Dossier enrichment from transcript evidence."],
+            outcome: "Structured durable Dossier enrichment was generated.",
+            purpose: "Summarize the session for later retrieval.",
+            verification: {
+              commands: [],
+              evidenceRefIds: [],
+              failures: [],
+              status: "unknown",
+              summary: "No verification command evidence was provided."
+            },
+            warnings: []
+          },
+          sessionSummary: {
+            confidence: "high",
+            evidenceRefIds: [],
+            state: "completed",
+            text: "Generated neutral Dossier enrichment from transcript evidence for later retrieval."
+          },
+          sessionTitle: {
+            basis: "dominant_work",
+            confidence: "high",
+            evidenceRefIds: [],
+            text: "Dossier enrichment generation"
+          },
+          title: "Codex session",
+          version: "session-capsule-v4"
+        })
+      )
+    });
+
+    const result = await provider.enrich({ facts: facts() });
+
+    expect(result.status).toBe("success");
+    expect(result.source).toBe("llm");
+    expect(result.capsule?.title).toBe("Dossier enrichment generation");
+    expect(result.capsule?.sessionDossier?.purpose).toBe("Summarize the session for later retrieval.");
+    expect(result.capsule?.validationWarnings).toEqual(
+      expect.arrayContaining(["title:generic", "liveSummary:too_long"])
+    );
+  });
+
   test("returns disabled without deterministic fallback when OpenAI enrichment is disabled", async () => {
     const fetchImpl = vi.fn();
     const provider = createOpenAIEnrichmentProvider({

@@ -264,6 +264,7 @@ function isRecentFailureForFingerprint(
   failureBackoffMs: number
 ): record is SessionEnrichmentRecord {
   if (!record?.generatedAt || !record.contentFingerprint.startsWith(`${fingerprint}:failed:`)) return false;
+  if (record.failureCode === "validation_failed") return false;
   const generatedAtMs = Date.parse(record.generatedAt);
   if (!Number.isFinite(generatedAtMs)) return false;
   return nowMs - generatedAtMs < failureBackoffMs;

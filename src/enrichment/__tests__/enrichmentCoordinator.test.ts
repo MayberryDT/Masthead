@@ -99,26 +99,42 @@ describe("enrichment coordinator", () => {
     db.close();
   });
 
-  test("ensureCurrent backs off recent failed enrichment for unchanged facts", async () => {
+  test("ensureCurrent backs off recent timeout enrichment for unchanged facts", async () => {
     const db = await openTestDatabase();
     seedSession(db);
-    const provider = countingFailingProvider("validation_failed");
+    const provider = countingFailingProvider("timeout");
     let now = Date.parse("2026-06-25T12:00:00.000Z");
     const coordinator = createEnrichmentCoordinator(db, provider, {
       failureBackoffMs: 10 * 60_000,
       now: () => now
     });
 
-    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "timeout" });
     const backedOff = await coordinator.ensureCurrent("session-1");
 
     now += 10 * 60_000 + 1;
-    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "timeout" });
 
     expect(backedOff).toMatchObject({
-      failureCode: "validation_failed",
+      failureCode: "timeout",
       status: "failed"
     });
+    expect(provider.calls()).toBe(2);
+    db.close();
+  });
+
+  test("ensureCurrent retries validation failures without stale-failure backoff", async () => {
+    const db = await openTestDatabase();
+    seedSession(db);
+    const provider = countingFailingProvider("validation_failed");
+    const coordinator = createEnrichmentCoordinator(db, provider, {
+      failureBackoffMs: 10 * 60_000,
+      now: () => Date.parse("2026-06-25T12:00:00.000Z")
+    });
+
+    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+    await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+
     expect(provider.calls()).toBe(2);
     db.close();
   });

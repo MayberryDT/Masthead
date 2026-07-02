@@ -285,15 +285,22 @@ function mergeValidatedNarrative(
   const searchSummary = validatedField("searchSummary", value.searchSummary);
   const confidence = confidenceField(value.confidence);
   const missingEvidence = missingEvidenceField(value.missingEvidence);
-  const failures = [
-    ...(!title.ok ? ["title", ...title.failures.map((failure) => `title:${failure}`)] : []),
-    ...(!liveSummary.ok ? ["liveSummary", ...liveSummary.failures.map((failure) => `liveSummary:${failure}`)] : []),
-    ...(!searchSummary.ok ? ["searchSummary", ...searchSummary.failures.map((failure) => `searchSummary:${failure}`)] : []),
+  const softFailures = [
+    ...fieldValidationWarnings("title", title),
+    ...fieldValidationWarnings("liveSummary", liveSummary),
+    ...fieldValidationWarnings("searchSummary", searchSummary)
+  ];
+  const softFailureSummary = [
+    ...fieldValidationFailureSummary("title", title),
+    ...fieldValidationFailureSummary("liveSummary", liveSummary),
+    ...fieldValidationFailureSummary("searchSummary", searchSummary)
+  ];
+  const hardFailures = [
     ...(confidence ? [] : ["confidence"]),
     ...(missingEvidence ? [] : ["missingEvidence"])
   ];
-  if (!title.ok || !liveSummary.ok || !searchSummary.ok || !confidence || !missingEvidence) {
-    return { ok: false, validationFailures: failures };
+  if (!confidence || !missingEvidence) {
+    return { ok: false, validationFailures: [...softFailureSummary, ...hardFailures] };
   }
   const outcome = validatedOptionalField("outcome", value.outcome);
   const durableEnrichment = {
@@ -309,24 +316,33 @@ function mergeValidatedNarrative(
     model,
     promptVersion: SESSION_CAPSULE_PROMPT_VERSION
   };
+  const liveSummaryValue =
+    (liveSummary.ok ? liveSummary.value : undefined) || durableEnrichment.sessionSummary.text || fallback.liveSummary || fallback.title;
+  const searchSummaryValue =
+    (searchSummary.ok ? searchSummary.value : undefined) ||
+    [durableEnrichment.sessionTitle.text, durableEnrichment.sessionSummary.text, durableEnrichment.sessionDossier.purpose]
+      .filter(Boolean)
+      .join(" ");
+  const validationWarnings = unique([...softFailures, ...(outcome.failures.map((failure) => `outcome:${failure}`))]);
   return {
     capsule: {
       ...fallback,
       action: stringField(value.action) ?? fallback.action,
       confidence,
       durableEnrichment,
-      liveSummary: liveSummary.value,
+      liveSummary: liveSummaryValue,
       missingEvidence,
       object: stringField(value.object) ?? fallback.object,
-      outcome: outcome ?? fallback.outcome,
+      outcome: (outcome.ok ? outcome.value : undefined) ?? fallback.outcome,
       providerStatus: "success",
-      searchPhrases: unique([...(fallback.searchPhrases ?? []), durableEnrichment.sessionTitle.text, durableEnrichment.sessionSummary.text, searchSummary.value]),
-      searchSummary: searchSummary.value,
+      searchPhrases: unique([...(fallback.searchPhrases ?? []), durableEnrichment.sessionTitle.text, durableEnrichment.sessionSummary.text, searchSummaryValue]),
+      searchSummary: searchSummaryValue,
       sessionDossier: durableEnrichment.sessionDossier,
       sessionSummary: durableEnrichment.sessionSummary,
       sessionTitle: durableEnrichment.sessionTitle,
       title: durableEnrichment.sessionTitle.text,
-      titleSource: "llm"
+      titleSource: "llm",
+      validationWarnings: validationWarnings.length > 0 ? validationWarnings : fallback.validationWarnings
     },
     ok: true
   };
@@ -335,16 +351,30 @@ function mergeValidatedNarrative(
 function validatedField(
   field: "title" | "liveSummary" | "searchSummary",
   value: unknown
-): { ok: true; value: string } | { ok: false; failures: string[] } {
-  if (typeof value !== "string") return { ok: false, failures: ["missing"] };
+): { ok: true; value: string; failures: [] } | { ok: false; value: string; failures: string[] } {
+  if (typeof value !== "string") return { ok: false, failures: ["missing"], value: "" };
   const result = validateNarrativeField(field, value);
-  return result.ok ? { ok: true, value: result.value } : { ok: false, failures: result.failures };
+  return result.ok ? { ok: true, failures: [], value: result.value } : { ok: false, failures: result.failures, value: result.value };
 }
 
-function validatedOptionalField(field: "outcome", value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
+function validatedOptionalField(field: "outcome", value: unknown): { ok: true; value: string; failures: [] } | { ok: false; value?: string; failures: string[] } {
+  if (typeof value !== "string") return { failures: [], ok: false };
   const result = validateNarrativeField(field, value);
-  return result.ok ? result.value : undefined;
+  return result.ok ? { failures: [], ok: true, value: result.value } : { failures: result.failures, ok: false, value: result.value };
+}
+
+function fieldValidationWarnings(
+  field: "title" | "liveSummary" | "searchSummary",
+  result: { ok: true; value: string; failures: [] } | { ok: false; value: string; failures: string[] }
+): string[] {
+  return result.failures.map((failure) => `${field}:${failure}`);
+}
+
+function fieldValidationFailureSummary(
+  field: "title" | "liveSummary" | "searchSummary",
+  result: { ok: true; value: string; failures: [] } | { ok: false; value: string; failures: string[] }
+): string[] {
+  return result.failures.length > 0 ? [field, ...fieldValidationWarnings(field, result)] : [];
 }
 
 function failureResult(
