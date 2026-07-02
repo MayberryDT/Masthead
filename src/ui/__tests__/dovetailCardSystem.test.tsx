@@ -430,11 +430,18 @@ function expectNoDovetailTreatment(html: string): void {
 function sessionFixture(overrides: Partial<SessionCardView> = {}): SessionCardView {
   return {
     changedFileCount: 1,
-    copy: {
+    headline: {
       headline: "Refining the live card hierarchy.",
-      reason: "The card uses canonical session evidence.",
-      source: "deterministic",
-      status: "Work is active."
+      frame: {
+        subject: "Live card hierarchy",
+        disposition: "uses canonical session evidence",
+        state: "active",
+        subjectKind: "component",
+        confidence: "high",
+        evidence: []
+      },
+      source: "llm",
+      status: "ready"
     },
     durationLabel: "24m",
     identityConfidence: "direct",

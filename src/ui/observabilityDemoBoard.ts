@@ -202,11 +202,18 @@ function toCard(input: DemoCardInput): SessionCardView {
     sessionId: input.sessionId,
     project: "Masthead",
     title: input.headline,
-    copy: {
+    headline: {
       headline: input.headline,
-      status: "",
-      reason: input.copyReason ?? "Demo session data is shown to exercise the observability layout.",
-      source: "fallback"
+      frame: {
+        subject: input.headline,
+        disposition: input.copyReason ?? "demo session data exercises the observability layout",
+        state: input.primaryStatus === "blocked" ? "blocked" : input.lifecycle === "idle" ? "paused" : "active",
+        subjectKind: "feature",
+        confidence: "low",
+        evidence: []
+      },
+      source: "offline",
+      status: "ready"
     },
     stateLabel: input.stateLabel,
     primaryStatus: input.primaryStatus,

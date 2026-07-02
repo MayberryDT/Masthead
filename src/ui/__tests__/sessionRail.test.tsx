@@ -15,11 +15,18 @@ describe("SessionRail", () => {
             project: "Masthead",
             title: "Fix private branch src/auth/token.ts",
             branchOrWorktree: "agent/private-branch",
-            copy: {
+            headline: {
               headline: "Auth work",
-              status: "Tests need another look.",
-              reason: "A failed test signal is visible.",
-              source: "deterministic"
+              frame: {
+                subject: "Auth work",
+                disposition: "tests need another look",
+                state: "needs_verification",
+                subjectKind: "test",
+                confidence: "high",
+                evidence: ["A failed test signal is visible."]
+              },
+              source: "llm",
+              status: "ready"
             }
           })
         ]}
@@ -45,11 +52,18 @@ function session(overrides: Partial<SessionCardView> = {}): SessionCardView {
     sessionId: "session-1",
     project: "Masthead",
     title: "Raw title",
-    copy: {
+    headline: {
       headline: "Session activity",
-      status: "Work is active.",
-      reason: "No blocker is visible.",
-      source: "deterministic"
+      frame: {
+        subject: "Session activity",
+        disposition: "work is active",
+        state: "active",
+        subjectKind: "unknown",
+        confidence: "low",
+        evidence: ["No blocker is visible."]
+      },
+      source: "llm",
+      status: "ready"
     },
     stateLabel: "Running",
     primaryStatus: "editing",

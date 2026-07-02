@@ -16,15 +16,6 @@ import {
 import { stateClassName } from "../format";
 import { sessionDemoTelemetry } from "../observabilityDemo";
 
-type LegacyBoardSession = SessionCardView & {
-  copy: {
-    headline: string;
-    status: string;
-    reason: string;
-    source: string;
-  };
-};
-
 describe("observability session card", () => {
   test("renders compact reference facts without prototype telemetry rows", () => {
     const referenceSession = session();
@@ -942,24 +933,12 @@ function headlineView(headline: string, overrides: Partial<BoardHeadlineView> = 
   };
 }
 
-function boardSession(overrides: Partial<SessionCardView> = {}): LegacyBoardSession {
-  return withLegacyBoardCopy(session(overrides));
+function boardSession(overrides: Partial<SessionCardView> = {}): SessionCardView {
+  return session(overrides);
 }
 
-function boardHeadline(session: LegacyBoardSession, headline: string): LegacyBoardSession {
-  return withLegacyBoardCopy({ ...session, headline: { ...session.headline, headline } });
-}
-
-function withLegacyBoardCopy(session: SessionCardView): LegacyBoardSession {
-  return {
-    ...session,
-    copy: {
-      headline: session.headline.headline,
-      status: "",
-      reason: "",
-      source: "deterministic"
-    }
-  };
+function boardHeadline(session: SessionCardView, headline: string): SessionCardView {
+  return { ...session, headline: { ...session.headline, headline } };
 }
 
 function testRect(left: number, top: number, width = 320, height = 218): DOMRect {

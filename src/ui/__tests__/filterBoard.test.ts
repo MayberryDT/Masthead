@@ -6,12 +6,18 @@ const baseCard: SessionCardView = {
   sessionId: "s1",
   project: "Auth",
   title: "Fix callback",
-  copy: {
+  headline: {
     headline: "Still running",
-    status: "Waiting on approval",
-    reason: "This session is active and paused for a decision.",
-    nextStep: "Open the session when you want to review it.",
-    source: "deterministic"
+    frame: {
+      subject: "Auth callback",
+      disposition: "paused for a decision on approval",
+      state: "waiting",
+      subjectKind: "feature",
+      confidence: "high",
+      evidence: ["Open the session when you want to review it."]
+    },
+    source: "llm",
+    status: "ready"
   },
   stateLabel: "Waiting For Approval",
   primaryStatus: "waiting_for_approval",
@@ -38,11 +44,18 @@ describe("board card filtering", () => {
         sessionId: "s2",
         project: "Imports",
         title: "Rebuild importer",
-        copy: {
+        headline: {
           headline: "Still running",
-          status: "Testing changes",
-          reason: "This session is active and checking the work.",
-          source: "deterministic"
+          frame: {
+            subject: "Importer",
+            disposition: "checking the work in tests",
+            state: "active",
+            subjectKind: "import",
+            confidence: "high",
+            evidence: []
+          },
+          source: "llm",
+          status: "ready"
         },
         stateLabel: "Testing",
         primaryStatus: "testing",
@@ -77,11 +90,18 @@ describe("board card filtering", () => {
       project: "Billing",
       title: "Session work",
       branchOrWorktree: "main",
-      copy: {
+      headline: {
         headline: "Work is active",
-        status: "Session is active.",
-        reason: "No blocker is visible.",
-        source: "deterministic"
+        frame: {
+          subject: "OAuth callback",
+          disposition: "active with no visible blocker",
+          state: "active",
+          subjectKind: "feature",
+          confidence: "high",
+          evidence: []
+        },
+        source: "llm",
+        status: "ready"
       },
       workContext: {
         label: "OAuth callback work",

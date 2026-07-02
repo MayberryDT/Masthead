@@ -12,7 +12,7 @@ describe("observability demo board", () => {
     });
     expect(observabilitySessionTotal(board.summary)).toBe(24);
     expect(board.cards).toHaveLength(9);
-    expect(board.cards.map((card) => card.copy.headline)).toEqual([
+    expect(board.cards.map((card) => card.headline.headline)).toEqual([
       "Refactored auth flow and added token refresh logic",
       "Implemented payment service and webhook handler",
       "Fixed session timeout edge case in middleware",

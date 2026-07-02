@@ -214,12 +214,18 @@ describe("Live Board UI", () => {
       sessionId: "session-1",
       project: "App",
       title: "Shared workspace edit",
-      copy: {
+      headline: {
         headline: "Still running",
-        status: "Review shared edits",
-        reason: "This session is active with overlapping work to inspect.",
-        nextStep: "Open details before continuing.",
-        source: "deterministic"
+        frame: {
+          subject: "Shared workspace edit",
+          disposition: "review shared edits with overlapping work to inspect",
+          state: "active",
+          subjectKind: "feature",
+          confidence: "high",
+          evidence: ["Open details before continuing."]
+        },
+        source: "llm",
+        status: "ready"
       },
       stateLabel: "Editing",
       primaryStatus: "editing",
@@ -325,11 +331,18 @@ describe("Live Board UI", () => {
           sessionId: "session-private",
           project: "Payroll",
           title: "Fix Acme payroll callback with private customer detail",
-          copy: {
+          headline: {
             headline: "Auth work",
-            status: "Work is active.",
-            reason: "No blocker is visible.",
-            source: "deterministic"
+            frame: {
+              subject: "Auth work",
+              disposition: "active with no visible blocker",
+              state: "active",
+              subjectKind: "feature",
+              confidence: "high",
+              evidence: []
+            },
+            source: "llm",
+            status: "ready"
           },
           stateLabel: "Editing",
           primaryStatus: "editing",

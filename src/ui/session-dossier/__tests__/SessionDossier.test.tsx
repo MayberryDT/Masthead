@@ -954,11 +954,18 @@ function liveSession(): SessionDetailView {
     attentionItems: [],
     changedFileCount: 1,
     conflicts: [],
-    copy: {
+    headline: {
       headline: "Live session title",
-      reason: "Work is active.",
-      source: "deterministic",
-      status: "Review shared edits"
+      frame: {
+        subject: "Live session title",
+        disposition: "review shared edits",
+        state: "active",
+        subjectKind: "feature",
+        confidence: "high",
+        evidence: ["Work is active."]
+      },
+      source: "llm",
+      status: "ready"
     },
     currentActivity: "Editing files",
     durationLabel: "4m",

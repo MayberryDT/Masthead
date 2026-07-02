@@ -331,11 +331,11 @@ function prefersReducedMotion(): boolean {
 }
 
 function semanticHeadlineSignature(card: SessionCardView): string {
-  return [card.copy.headline, card.title, card.project].join("\u0000");
+  return [card.headline.headline, card.title, card.project].join("\u0000");
 }
 
 function refreshPulseSignature(card: SessionCardView): string {
-  return card.copyRefresh?.status === "success" ? card.copyRefresh.requestedAt : "";
+  return card.headlineRefresh?.status === "success" ? card.headlineRefresh.requestedAt : "";
 }
 
 function laneDescription(laneId: LifecycleLaneView["laneId"]): string {
