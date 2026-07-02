@@ -123,13 +123,13 @@ describe("OpenAI board headline frame", () => {
         ],
         recentFileBasenames: ["SessionCard.tsx", "/home/tyler/secret/path"],
         recentEvents: [
-          { kind: "session.started", summary: "Headline work started" },
-          { kind: "tool.call", summary: "OPENAI_API_KEY" },
-          { kind: "tool.call", summary: "https://example.com" },
-          { kind: "tool.call", summary: '::git-stage{cwd="/tmp"}' },
-          { kind: "tool.call", summary: "[url]" },
-          { kind: "tool.call", summary: "sk-proj-secret" },
-          { kind: "tool.call", summary: "/home/tyler/secret/path" }
+          { type: "session.started", summary: "Headline work started", occurredAt: "2026-07-01T19:00:00.000Z" },
+          { type: "tool.call", summary: "OPENAI_API_KEY", occurredAt: "2026-07-01T19:00:01.000Z" },
+          { type: "tool.call", summary: "https://example.com", occurredAt: "2026-07-01T19:00:02.000Z" },
+          { type: "tool.call", summary: '::git-stage{cwd="/tmp"}', occurredAt: "2026-07-01T19:00:03.000Z" },
+          { type: "tool.call", summary: "[url]", occurredAt: "2026-07-01T19:00:04.000Z" },
+          { type: "tool.call", summary: "sk-proj-secret", occurredAt: "2026-07-01T19:00:05.000Z" },
+          { type: "tool.call", summary: "/home/tyler/secret/path", occurredAt: "2026-07-01T19:00:06.000Z" }
         ],
         recentCommandFailures: ["OPENAI_API_KEY"],
         attentionTitles: ["https://example.com"],
@@ -244,8 +244,8 @@ describe("OpenAI board headline frame", () => {
   test("returns timeout when the OpenAI request is aborted", async () => {
     vi.useFakeTimers();
     let capturedSignal: AbortSignal | undefined;
-    const fetchImpl = vi.fn((_url, request) => {
-      capturedSignal = request?.signal;
+    const fetchImpl = vi.fn((_url: Parameters<typeof fetch>[0], request?: RequestInit): Promise<Response> => {
+      capturedSignal = request?.signal ?? undefined;
       return new Promise((_resolve, reject) => {
         capturedSignal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
       });
