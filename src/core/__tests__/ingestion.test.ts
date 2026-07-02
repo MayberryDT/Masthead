@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { afterEach, describe, expect, test } from "vitest";
-import { createIngestionState, ingestCodexHookPayload } from "../ingestion";
+import { createIngestionState, ingestCodexHookPayload, removeEventFromLiveProjectionState } from "../ingestion";
 
 const hookScript = new URL("../../../scripts/masthead-hook.js", import.meta.url);
 
@@ -44,6 +44,41 @@ describe("hook ingestion", () => {
     expect(second.status).toBe("duplicate");
     expect(state.events).toHaveLength(1);
     expect(state.diagnostics).toHaveLength(0);
+  });
+
+  test("can remove an accepted event from live projection state while preserving dedupe memory", () => {
+    const state = createIngestionState();
+    const first = ingestCodexHookPayload(JSON.stringify(hookPayload), state, {
+      receivedAt: "2026-06-23T02:12:00.100Z"
+    });
+    expect(first.status).toBe("accepted");
+    if (first.status !== "accepted") throw new Error("expected accepted event");
+
+    removeEventFromLiveProjectionState(state, first.event);
+    const duplicate = ingestCodexHookPayload(JSON.stringify(hookPayload), state, {
+      receivedAt: "2026-06-23T02:12:00.200Z"
+    });
+
+    expect(state.events).toHaveLength(0);
+    expect(duplicate.status).toBe("duplicate");
+  });
+
+  test("hydrates dedupe memory without hydrating deferred events into live projection state", () => {
+    const accepted = ingestCodexHookPayload(JSON.stringify(hookPayload), createIngestionState(), {
+      receivedAt: "2026-06-23T02:12:00.100Z"
+    });
+    expect(accepted.status).toBe("accepted");
+    if (accepted.status !== "accepted") throw new Error("expected accepted event");
+
+    const state = createIngestionState([accepted.event], {
+      includeInLiveProjection: () => false
+    });
+    const duplicate = ingestCodexHookPayload(JSON.stringify(hookPayload), state, {
+      receivedAt: "2026-06-23T02:12:00.200Z"
+    });
+
+    expect(state.events).toHaveLength(0);
+    expect(duplicate.status).toBe("duplicate");
   });
 
   test("records malformed JSON diagnostics instead of accepting an event", () => {

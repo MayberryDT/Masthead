@@ -366,10 +366,20 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
         branch = COALESCE(excluded.branch, sessions.branch),
         title = COALESCE(sessions.title, excluded.title),
         objective = COALESCE(sessions.objective, excluded.objective),
-        lifecycle = excluded.lifecycle,
-        outcome_label = COALESCE(excluded.outcome_label, sessions.outcome_label),
+        lifecycle = CASE
+          WHEN excluded.lifecycle = 'ended' THEN excluded.lifecycle
+          WHEN sessions.lifecycle = 'ended' THEN sessions.lifecycle
+          ELSE excluded.lifecycle
+        END,
+        outcome_label = CASE
+          WHEN sessions.lifecycle = 'ended' AND excluded.lifecycle != 'ended' THEN sessions.outcome_label
+          ELSE COALESCE(excluded.outcome_label, sessions.outcome_label)
+        END,
         last_activity_at = MAX(sessions.last_activity_at, excluded.last_activity_at),
-        ended_at = COALESCE(excluded.ended_at, sessions.ended_at),
+        ended_at = CASE
+          WHEN sessions.lifecycle = 'ended' AND excluded.lifecycle != 'ended' THEN sessions.ended_at
+          ELSE COALESCE(excluded.ended_at, sessions.ended_at)
+        END,
         updated_at = excluded.updated_at`
     ).run(
       sessionId,
@@ -426,7 +436,25 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
     db.prepare(
       `INSERT INTO tool_calls (tool_call_id, session_id, turn_id, tool_name, arguments_redacted_json, started_at, source_ref_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(tool_call_id) DO NOTHING`
+      ON CONFLICT(tool_call_id) DO UPDATE SET
+        turn_id = COALESCE(tool_calls.turn_id, excluded.turn_id),
+        tool_name = CASE
+          WHEN tool_calls.started_at IS NULL OR excluded.started_at < tool_calls.started_at THEN excluded.tool_name
+          ELSE tool_calls.tool_name
+        END,
+        arguments_redacted_json = CASE
+          WHEN tool_calls.arguments_redacted_json IS NULL OR tool_calls.started_at IS NULL OR excluded.started_at < tool_calls.started_at
+            THEN excluded.arguments_redacted_json
+          ELSE tool_calls.arguments_redacted_json
+        END,
+        started_at = CASE
+          WHEN tool_calls.started_at IS NULL OR excluded.started_at < tool_calls.started_at THEN excluded.started_at
+          ELSE tool_calls.started_at
+        END,
+        source_ref_json = CASE
+          WHEN tool_calls.started_at IS NULL OR excluded.started_at < tool_calls.started_at THEN excluded.source_ref_json
+          ELSE tool_calls.source_ref_json
+        END`
     ).run(
       toolCallId(sessionId, event),
       sessionId,

@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -289,6 +290,182 @@ describe("ingest server live projection", () => {
     }
   });
 
+  test("defers successful PostToolUse events out of immediate projection while preserving high-value turns", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveQuestionPayload("server-live-question"));
+    await postJson(server.baseUrl, "/ingest", liveSuccessfulToolPayload("server-live-tool"));
+
+    const projection = await getJson(server.baseUrl, "/projection?expandedSessionId=server-live");
+    const card = projection.projection.cards[0];
+
+    expect(card.sessionId).toBe("server-live");
+    expect(card.headlineInput.facts.recentTranscriptMessages).toEqual(
+      expect.arrayContaining(["Make Masthead live facts lightweight."])
+    );
+    expect(card.headlineInput.facts.recentToolNames).not.toContain("npm run noisy-tool-stat");
+
+    await waitForToolResultRowCount(databasePath, 1);
+    expect(rawJournalRows(databasePath).map((row) => row.source_record_key)).toEqual([
+      "event:codex:server-live-question",
+      "event:codex:server-live-tool"
+    ]);
+    expect(toolResultRows(databasePath)).toEqual([expect.objectContaining({ exit_code: 0, status: "succeeded" })]);
+  });
+
+  test("deferred PostToolUse flushing after Stop does not reopen an ended canonical session", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveSuccessfulToolPayload("server-live-tool-after-stop"));
+    await postJson(
+      server.baseUrl,
+      "/ingest",
+      liveSessionCompletedPayload("server-live-stop-after-tool", "server-live", "/workspace/masthead", "2026-06-24T12:03:00.000Z")
+    );
+    await waitForToolResultRowCount(databasePath, 1);
+
+    expect(sessionLifecycleRows(databasePath)).toEqual([
+      {
+        ended_at: "2026-06-24T12:03:00.000Z",
+        lifecycle: "ended",
+        outcome_label: "completed",
+        source_session_id: "server-live"
+      }
+    ]);
+  });
+
+  test("deferred command start enriches an immediate failed command finish", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveFailedToolPayload("server-live-failed-finish"));
+    await postJson(server.baseUrl, "/ingest", liveToolStartPayload("server-live-start-after-failed-finish"));
+    await waitForToolCallStartedAt(databasePath, "2026-06-24T12:01:30.000Z");
+
+    expect(toolCallRows(databasePath)).toEqual([
+      expect.objectContaining({
+        arguments_redacted_json: JSON.stringify({ command: "npm run failing-tool", commandId: "call-failing-tool" }),
+        started_at: "2026-06-24T12:01:30.000Z",
+        tool_name: "shell"
+      })
+    ]);
+    expect(toolResultRows(databasePath)).toEqual([expect.objectContaining({ exit_code: 1, status: "failed" })]);
+  });
+
+  test("clear discards pending deferred events so deleted state is not repopulated", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveSuccessfulToolPayload("server-live-clear-pending"));
+    await postJson(server.baseUrl, "/clear", {});
+    await delay(900);
+
+    expect(rawJournalRows(databasePath)).toEqual([]);
+    expect(toolResultRows(databasePath)).toEqual([]);
+    expect((await getJson(server.baseUrl, "/events")).events).toEqual([]);
+  });
+
+  test("clear discards a stalled pre-barrier ingest so deleted state is not repopulated", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveQuestionPayload("server-before-stalled-clear"));
+    const stalled = await startStalledJsonPost(server.baseUrl, "/ingest", liveApprovalPayload("server-stalled-clear"));
+
+    await postJson(server.baseUrl, "/clear", {});
+    stalled.finish();
+    const stale = await stalled.response;
+
+    expect(stale.status).toBe(202);
+    expect(stale.body).toMatchObject({
+      ok: true,
+      status: "stale",
+      events: 0,
+      gitSnapshots: 0
+    });
+    expect(rawJournalRows(databasePath)).toEqual([]);
+    expect((await getJson(server.baseUrl, "/events")).events).toEqual([]);
+  });
+
+  test("project-scoped data delete accounts for pending deferred events before deleting", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveSuccessfulToolPayload("server-live-delete-pending"));
+    const deleted = await postJson(server.baseUrl, "/data/delete", {
+      scope: {
+        kind: "project",
+        project: "Masthead"
+      }
+    });
+    await delay(900);
+
+    expect(deleted).toMatchObject({
+      ok: true,
+      preview: {
+        rawEvents: 1,
+        sessions: 1
+      },
+      result: {
+        rawEvents: 1,
+        sessions: 1
+      }
+    });
+    expect(rawJournalRows(databasePath)).toEqual([]);
+    expect(toolResultRows(databasePath)).toEqual([]);
+  });
+
+  test("retention prunes pending deferred raw events instead of letting them reappear", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveSuccessfulToolPayload("server-live-retention-pending"));
+    const retained = await postJson(server.baseUrl, "/retention", {
+      policy: {
+        cutoffAt: "2026-06-25T00:00:00.000Z",
+        recordTypes: ["event"],
+        keepUnresolvedAttention: false
+      }
+    });
+    await delay(900);
+
+    expect(retained.result).toMatchObject({
+      removedRecords: 1,
+      removedRecordIds: ["event:codex:server-live-retention-pending"]
+    });
+    expect(rawJournalRows(databasePath)).toEqual([]);
+  });
+
   test("data lifecycle endpoints summarize, export, and delete canonical session data", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
@@ -558,7 +735,9 @@ describe("ingest server live projection", () => {
       "/ingest",
       liveSessionPayload("server-git-b", "session-git-b", secondWorktreePath, "session-git-b")
     );
-    expect(accepted.gitSnapshots).toBe(2);
+    expect(accepted.gitSnapshots).toBe(0);
+    const refreshed = await postJson(server.baseUrl, "/refresh", {});
+    expect(refreshed.gitSnapshots).toBe(2);
 
     const projection = await getJson(server.baseUrl, "/projection?expandedSessionId=session-git-a");
 
@@ -569,8 +748,9 @@ describe("ingest server live projection", () => {
       severity: "high",
       attribution: "direct",
       sharedPaths: ["src/shared.ts"],
-      sessionIds: ["session-git-a", "session-git-b"]
+      sessionIds: expect.arrayContaining(["session-git-a", "session-git-b"])
     });
+    expect(projection.projection.conflicts[0].sessionIds).toHaveLength(2);
     expect(projection.projection.cards).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ sessionId: "session-git-a", changedFileCount: 1, indicators: expect.arrayContaining(["conflict"]) }),
@@ -588,7 +768,8 @@ describe("ingest server live projection", () => {
     servers.push(server.child);
 
     const accepted = await postJson(server.baseUrl, "/ingest", liveSessionPayload("server-refresh", "session-refresh", repoPath));
-    expect(accepted.gitSnapshots).toBe(1);
+    expect(accepted.gitSnapshots).toBe(0);
+    expect((await postJson(server.baseUrl, "/refresh", {})).gitSnapshots).toBe(1);
     let projection = await getJson(server.baseUrl, "/projection?expandedSessionId=session-refresh");
     expect(projection.projection.cards[0]).toMatchObject({ sessionId: "session-refresh", changedFileCount: 0 });
 
@@ -604,6 +785,93 @@ describe("ingest server live projection", () => {
       sessionId: "session-refresh",
       changedFileCount: 1
     });
+  });
+
+  test("deferred workspace events after Stop do not append non-terminal Git snapshots before terminal refresh", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const repoPath = join(tempDir, "repo");
+    await createCleanRepo(repoPath);
+    const server = await startServer(join(tempDir, "events.ndjson"), { MASTHEAD_DB_PATH: databasePath, MASTHEAD_GIT_REFRESH_MS: "0" });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveSessionPayload("server-completed-unrefreshed-start", "session-completed-unrefreshed", repoPath));
+    const completedPayload = liveSessionCompletedPayload("server-completed-unrefreshed-stop", "session-completed-unrefreshed", repoPath);
+    delete completedPayload["cwd"];
+    delete completedPayload["repo_root"];
+    await postJson(server.baseUrl, "/ingest", completedPayload);
+
+    await writeFile(join(repoPath, "src/shared.ts"), "export const value = 4;\n", "utf8");
+    await postJson(
+      server.baseUrl,
+      "/ingest",
+      liveSuccessfulToolPayload(
+        "server-completed-unrefreshed-late-tool",
+        "session-completed-unrefreshed",
+        repoPath,
+        "2026-06-23T03:37:00.000Z"
+      )
+    );
+    await waitForToolResultRowCount(databasePath, 1);
+    await delay(300);
+
+    expect(gitSnapshotRawRows(databasePath)).toHaveLength(0);
+    expect((await getJson(server.baseUrl, "/events")).gitSnapshots).toHaveLength(0);
+
+    const refresh = await postJson(server.baseUrl, "/refresh", {});
+    expect(refresh.refreshed).toBe(1);
+    expect(refresh.gitSnapshots).toBe(1);
+    expect(gitSnapshotRawRows(databasePath).map(gitSnapshotIdFromRawRow)).toEqual([
+      expect.stringContaining(":terminal:codex:server-completed-unrefreshed-stop")
+    ]);
+  });
+
+  test("refresh captures one terminal Git snapshot after a session starts and completes before refresh", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const repoPath = join(tempDir, "repo");
+    await createCleanRepo(repoPath);
+    const server = await startServer(join(tempDir, "events.ndjson"), { MASTHEAD_GIT_REFRESH_MS: "0" });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveSessionPayload("server-completed-refresh-start", "session-completed-refresh", repoPath));
+    expect((await postJson(server.baseUrl, "/refresh", {})).gitSnapshots).toBe(1);
+
+    const completedPayload = liveSessionCompletedPayload("server-completed-refresh-stop", "session-completed-refresh", repoPath);
+    delete completedPayload["cwd"];
+    delete completedPayload["repo_root"];
+    await postJson(server.baseUrl, "/ingest", completedPayload);
+
+    const refresh = await postJson(server.baseUrl, "/refresh", {});
+
+    expect(refresh.refreshed).toBe(1);
+    expect(refresh.gitSnapshots).toBe(2);
+    expect(gitSnapshotRawRows(join(tempDir, "masthead.sqlite"))).toHaveLength(2);
+    expect(gitSnapshotRawRows(join(tempDir, "masthead.sqlite")).map(gitSnapshotIdFromRawRow)).toEqual(
+      expect.arrayContaining([expect.stringContaining(":terminal:codex:server-completed-refresh-stop")])
+    );
+
+    await writeFile(join(repoPath, "src/shared.ts"), "export const value = 4;\n", "utf8");
+    await postJson(
+      server.baseUrl,
+      "/ingest",
+      liveSuccessfulToolPayload(
+        "server-completed-refresh-late-tool",
+        "session-completed-refresh",
+        repoPath,
+        "2026-06-23T03:37:00.000Z"
+      )
+    );
+    await waitForToolResultRowCount(join(tempDir, "masthead.sqlite"), 1);
+    expect((await getJson(server.baseUrl, "/events")).gitSnapshots).toHaveLength(2);
+    expect(gitSnapshotRawRows(join(tempDir, "masthead.sqlite"))).toHaveLength(2);
+
+    const secondRefresh = await postJson(server.baseUrl, "/refresh", {});
+    expect(secondRefresh.refreshed).toBe(0);
+    expect(secondRefresh.gitSnapshots).toBe(2);
+    expect((await getJson(server.baseUrl, "/events")).gitSnapshots).toHaveLength(2);
+    expect(gitSnapshotRawRows(join(tempDir, "masthead.sqlite"))).toHaveLength(2);
   });
 });
 
@@ -671,6 +939,67 @@ async function postJson(baseUrl: string, path: string, body: unknown): Promise<R
   return response.json() as Promise<Record<string, unknown>>;
 }
 
+async function startStalledJsonPost(
+  baseUrl: string,
+  path: string,
+  body: unknown
+): Promise<{ finish: () => void; response: Promise<{ body: Record<string, unknown>; status: number }> }> {
+  const target = new URL(`${baseUrl}${path}`);
+  const payload = JSON.stringify(body);
+  const splitAt = Math.max(1, Math.floor(payload.length / 2));
+  let finish: (() => void) | undefined;
+
+  let requestStarted: () => void = () => undefined;
+  let requestFailed: (error: Error) => void = () => undefined;
+  const started = new Promise<void>((resolve, reject) => {
+    requestStarted = resolve;
+    requestFailed = reject;
+  });
+
+  const response = new Promise<{ body: Record<string, unknown>; status: number }>((resolve, reject) => {
+    const request = httpRequest(
+      {
+        headers: {
+          connection: "close",
+          "content-length": Buffer.byteLength(payload),
+          "content-type": "application/json",
+          expect: "100-continue"
+        },
+        hostname: target.hostname,
+        method: "POST",
+        path: `${target.pathname}${target.search}`,
+        port: Number(target.port)
+      },
+      (incoming) => {
+        let raw = "";
+        incoming.setEncoding("utf8");
+        incoming.on("data", (chunk) => {
+          raw += chunk;
+        });
+        incoming.on("end", () => {
+          resolve({ body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {}, status: incoming.statusCode ?? 0 });
+        });
+      }
+    );
+    request.on("continue", () => {
+      request.write(payload.slice(0, splitAt));
+      finish = () => request.end(payload.slice(splitAt));
+      requestStarted();
+    });
+    request.on("error", (error) => {
+      requestFailed(error);
+      reject(error);
+    });
+    request.flushHeaders();
+  });
+
+  await started;
+  return {
+    finish: () => finish?.(),
+    response
+  };
+}
+
 async function getJson(baseUrl: string, path: string): Promise<Record<string, any>> {
   const response = await fetch(`${baseUrl}${path}`);
   expect(response.status).toBe(200);
@@ -713,6 +1042,26 @@ async function waitForImportJobs(baseUrl: string, importJobIds: string[]): Promi
   return imports;
 }
 
+async function waitForToolResultRowCount(databasePath: string, count: number): Promise<void> {
+  const deadline = Date.now() + 1500;
+  while (Date.now() < deadline) {
+    if (toolResultRows(databasePath).length === count) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+async function waitForToolCallStartedAt(databasePath: string, startedAt: string): Promise<void> {
+  const deadline = Date.now() + 1500;
+  while (Date.now() < deadline) {
+    if (toolCallRows(databasePath).some((row) => row.started_at === startedAt)) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function jobIds(response: Record<string, any>): string[] {
   return (response.jobs ?? []).map((job: { importJobId: string }) => job.importJobId);
 }
@@ -735,6 +1084,80 @@ function liveApprovalPayload(providerEventId: string): Record<string, unknown> {
   };
 }
 
+function liveQuestionPayload(providerEventId: string): Record<string, unknown> {
+  return {
+    provider_event_id: providerEventId,
+    event: "user_question",
+    session_id: "server-live",
+    timestamp: "2026-06-24T12:01:00.000Z",
+    cwd: "/workspace/masthead",
+    repo_root: "/workspace/masthead",
+    project: "Masthead",
+    title: "Lightweight live facts",
+    message: "Make Masthead live facts lightweight."
+  };
+}
+
+function liveSuccessfulToolPayload(
+  providerEventId: string,
+  sessionId = "server-live",
+  repoPath = "/workspace/masthead",
+  timestamp = "2026-06-24T12:02:00.000Z"
+): Record<string, unknown> {
+  return {
+    provider_event_id: providerEventId,
+    hookEventName: "PostToolUse",
+    sessionId,
+    timestamp,
+    cwd: repoPath,
+    repo_root: repoPath,
+    project: "Masthead",
+    exit_code: 0,
+    toolName: "Bash",
+    toolUseId: "call-noisy-tool-stat",
+    toolInput: {
+      command: "npm run noisy-tool-stat"
+    },
+    toolResponse: "exit code 0"
+  };
+}
+
+function liveFailedToolPayload(providerEventId: string): Record<string, unknown> {
+  return {
+    provider_event_id: providerEventId,
+    hookEventName: "PostToolUse",
+    sessionId: "server-live",
+    timestamp: "2026-06-24T12:02:00.000Z",
+    cwd: "/workspace/masthead",
+    repo_root: "/workspace/masthead",
+    project: "Masthead",
+    exit_code: 1,
+    toolName: "Bash",
+    toolUseId: "call-failing-tool",
+    toolInput: {
+      command: "npm run failing-tool"
+    },
+    toolResponse: "exit code 1"
+  };
+}
+
+function liveToolStartPayload(providerEventId: string): Record<string, unknown> {
+  return {
+    provider_event_id: providerEventId,
+    hookEventName: "PreToolUse",
+    sessionId: "server-live",
+    timestamp: "2026-06-24T12:01:30.000Z",
+    cwd: "/workspace/masthead",
+    repo_root: "/workspace/masthead",
+    project: "Masthead",
+    toolName: "Bash",
+    toolUseId: "call-failing-tool",
+    toolInput: {
+      command: "npm run failing-tool"
+    }
+  };
+}
+
 function liveSessionPayload(providerEventId: string, sessionId: string, repoPath: string, branch = "master"): Record<string, unknown> {
   return {
     provider_event_id: providerEventId,
@@ -746,6 +1169,24 @@ function liveSessionPayload(providerEventId: string, sessionId: string, repoPath
     branch,
     project: "Masthead",
     title: `Live Git ${sessionId}`
+  };
+}
+
+function liveSessionCompletedPayload(
+  providerEventId: string,
+  sessionId: string,
+  repoPath: string,
+  timestamp = "2026-06-23T03:36:00.000Z"
+): Record<string, unknown> {
+  return {
+    provider_event_id: providerEventId,
+    hookEventName: "Stop",
+    sessionId,
+    timestamp,
+    cwd: repoPath,
+    repo_root: repoPath,
+    project: "Masthead",
+    lastAssistantMessage: "Completed the live Git refresh session."
   };
 }
 
@@ -779,12 +1220,60 @@ function rawJournalRows(databasePath: string): Array<{ source_kind: string; sour
   }
 }
 
+function gitSnapshotRawRows(databasePath: string): Array<{ source_kind: string; source_record_key: string; payload_json: string }> {
+  return rawJournalRows(databasePath).filter((row) => {
+    const record = JSON.parse(row.payload_json) as { recordType?: string };
+    return record.recordType === "git_snapshot";
+  });
+}
+
+function gitSnapshotIdFromRawRow(row: { payload_json: string }): string {
+  const record = JSON.parse(row.payload_json) as { value?: { snapshotId?: string } };
+  return record.value?.snapshotId ?? "";
+}
+
 function ingestSourceRows(databasePath: string): Array<{ adapter: string; endpoint: string | null; source_id: string; source_kind: string }> {
   const db = new DatabaseSync(databasePath);
   try {
     return db
       .prepare("SELECT adapter, endpoint, source_id, source_kind FROM ingest_sources ORDER BY source_id")
       .all() as Array<{ adapter: string; endpoint: string | null; source_id: string; source_kind: string }>;
+  } finally {
+    db.close();
+  }
+}
+
+function toolResultRows(databasePath: string): Array<{ exit_code: number | null; status: string }> {
+  const db = new DatabaseSync(databasePath);
+  try {
+    return db.prepare("SELECT exit_code, status FROM tool_results ORDER BY completed_at").all() as Array<{ exit_code: number | null; status: string }>;
+  } finally {
+    db.close();
+  }
+}
+
+function toolCallRows(databasePath: string): Array<{ arguments_redacted_json: string | null; started_at: string | null; tool_name: string }> {
+  const db = new DatabaseSync(databasePath);
+  try {
+    return db
+      .prepare("SELECT tool_name, arguments_redacted_json, started_at FROM tool_calls ORDER BY started_at")
+      .all() as Array<{ arguments_redacted_json: string | null; started_at: string | null; tool_name: string }>;
+  } finally {
+    db.close();
+  }
+}
+
+function sessionLifecycleRows(databasePath: string): Array<{
+  ended_at: string | null;
+  lifecycle: string;
+  outcome_label: string | null;
+  source_session_id: string;
+}> {
+  const db = new DatabaseSync(databasePath);
+  try {
+    return db
+      .prepare("SELECT source_session_id, lifecycle, outcome_label, ended_at FROM sessions ORDER BY source_session_id")
+      .all() as Array<{ ended_at: string | null; lifecycle: string; outcome_label: string | null; source_session_id: string }>;
   } finally {
     db.close();
   }
