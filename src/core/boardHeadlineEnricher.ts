@@ -32,6 +32,7 @@ type CacheKey = string;
 export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig = {}): BoardHeadlineEnricher {
   const model = config.model ?? DEFAULT_MODEL;
   const completed = new Map<CacheKey, BoardHeadlineView>();
+  const failures = new Map<CacheKey, OpenAIBoardHeadlineFrameResult>();
   const inFlight = new Map<CacheKey, Promise<void>>();
 
   function status() {
@@ -46,6 +47,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
     const currentStatus = status();
     const generatedAt = nowIso(config.now);
     const overlays = new Map<string, BoardHeadlineView>();
+    const countedFailedKeys = new Set<CacheKey>();
     const summary = {
       requested: 0,
       succeeded: 0,
@@ -63,9 +65,6 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
         continue;
       }
 
-      if (!isRefreshableCard(card, input)) continue;
-
-      summary.requested += 1;
       const key = cacheKey(model, input);
       const cached = completed.get(key);
 
@@ -75,17 +74,22 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
         continue;
       }
 
+      if (failures.has(key) && !countedFailedKeys.has(key)) {
+        summary.failed += 1;
+        countedFailedKeys.add(key);
+      }
+
       const retained = retainedReadyHeadline(card.headline);
       if (retained) {
         overlays.set(card.sessionId, retained);
-        summary.succeeded += 1;
-        continue;
+      } else {
+        overlays.set(card.sessionId, buildPendingBoardHeadlineView(input));
       }
 
-      overlays.set(card.sessionId, buildPendingBoardHeadlineView(input));
       summary.pending += 1;
       if (!inFlight.has(key)) {
         inFlight.set(key, requestHeadline(input, key));
+        summary.requested += 1;
       }
     }
 
@@ -115,8 +119,15 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       const view = viewFromOpenAIResult(result, model, nowIso(config.now));
       if (view) {
         completed.set(key, view);
+        failures.delete(key);
+      } else {
+        failures.set(key, result);
       }
-    } catch {
+    } catch (error) {
+      failures.set(key, {
+        failureMessage: error instanceof Error ? error.message : "OpenAI board headline frame request failed.",
+        status: "api_error"
+      });
       // Keep configured LLM mode pending on failures; do not synthesize offline copy here.
     } finally {
       inFlight.delete(key);
@@ -151,10 +162,6 @@ function viewFromOpenAIResult(
 function headlineInput(card: SessionCardView): BoardHeadlineInput | undefined {
   if (!isBoardHeadlineInput(card.headlineInput)) return undefined;
   return card.headlineInput;
-}
-
-function isRefreshableCard(card: SessionCardView, input: BoardHeadlineInput): boolean {
-  return card.lifecycle === "running" && input.stateHint === "active";
 }
 
 function retainedReadyHeadline(headline: BoardHeadlineView): BoardHeadlineView | undefined {

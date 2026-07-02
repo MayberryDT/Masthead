@@ -171,8 +171,112 @@ describe("board headline enricher", () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(result.headlineRefreshSummary).toMatchObject({
-      requested: 1,
+      requested: 0,
       succeeded: 1,
+      failed: 0,
+      pending: 0
+    });
+  });
+
+  test("refreshes changed headline input even when the card has a ready LLM headline", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+    const readyHeadline: BoardHeadlineView = {
+      headline: "Old subject: old disposition.",
+      frame: validFrame({ subject: "Old subject", disposition: "old disposition" }),
+      source: "llm",
+      status: "ready",
+      generatedAt: "2026-07-01T12:00:00.000Z",
+      model: "gpt-5-nano-2025-08-07",
+      provider: "openai"
+    };
+
+    const result = await enricher.enrichProjection(
+      projection([
+        card({
+          headline: readyHeadline,
+          headlineInput: input({
+            subjectCandidates: ["Changed board headline input"],
+            evidence: ["Changed evidence should refresh the LLM headline."]
+          })
+        })
+      ])
+    );
+
+    expect(result.cards[0]?.headline).toBe(readyHeadline);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.headlineRefreshSummary).toMatchObject({
+      requested: 1,
+      succeeded: 0,
+      failed: 0,
+      pending: 1
+    });
+
+    response.resolve(responseWithFrame(validFrame({ subject: "Changed board headline input" })));
+    await flushMicrotasks();
+  });
+
+  test("surfaces provider failures on later projections without offline fallback", async () => {
+    const retryResponse = deferred<Response>();
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("{}", { status: 500 }))
+      .mockImplementationOnce(() => retryResponse.promise);
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+
+    const first = await enricher.enrichProjection(projection([card()]));
+    await flushMicrotasks();
+    const second = await enricher.enrichProjection(projection([card()]));
+
+    expect(first.cards[0]?.headline.source).toBe("pending");
+    expect(second.cards[0]?.headline.source).toBe("pending");
+    expect(second.cards[0]?.headline.headline).not.toBe("Board headlines: waiting for LLM headline access.");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(second.headlineRefreshSummary).toMatchObject({
+      requested: 1,
+      succeeded: 0,
+      failed: 1,
+      pending: 1
+    });
+
+    retryResponse.resolve(responseWithFrame(validFrame()));
+    await flushMicrotasks();
+  });
+
+  test("counts requested only for newly scheduled provider requests", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+    const firstCard = card();
+    const duplicateCard = card({ sessionId: "session-2" });
+
+    const inFlightResult = await enricher.enrichProjection(projection([firstCard, duplicateCard]));
+    const duplicateInFlightResult = await enricher.enrichProjection(projection([firstCard, duplicateCard]));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(inFlightResult.headlineRefreshSummary).toMatchObject({
+      requested: 1,
+      succeeded: 0,
+      failed: 0,
+      pending: 2
+    });
+    expect(duplicateInFlightResult.headlineRefreshSummary).toMatchObject({
+      requested: 0,
+      succeeded: 0,
+      failed: 0,
+      pending: 2
+    });
+
+    response.resolve(responseWithFrame(validFrame()));
+    await flushMicrotasks();
+
+    const cachedResult = await enricher.enrichProjection(projection([firstCard, duplicateCard]));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(cachedResult.headlineRefreshSummary).toMatchObject({
+      requested: 0,
+      succeeded: 2,
       failed: 0,
       pending: 0
     });
@@ -202,8 +306,9 @@ describe("board headline enricher", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  test("does not schedule non-active running cards in LLM mode", async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
+  test("schedules non-active running cards in LLM mode", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
     const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
     const waitingInput = input({
       primaryStatus: "waiting_for_user",
@@ -221,12 +326,15 @@ describe("board headline enricher", () => {
     );
 
     expect(result.cards[0]?.headline).toEqual(pendingHeadline());
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(result.headlineRefreshSummary).toMatchObject({
-      requested: 0,
+      requested: 1,
       succeeded: 0,
       failed: 0,
-      pending: 0
+      pending: 1
     });
+
+    response.resolve(responseWithFrame(validFrame({ state: "waiting" })));
+    await flushMicrotasks();
   });
 });
