@@ -453,11 +453,11 @@
 .session-dossier .dossier-loading-state {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  border: 1px solid rgba(46, 167, 255, 0.18);
+  gap: 10px;
+  min-height: 38px;
+  border: 1px solid rgba(46, 167, 255, 0.24);
   border-radius: 6px;
-  padding: 7px 10px;
+  padding: 8px 11px;
   color: var(--ink);
   background: rgba(6, 25, 37, 0.72);
 }
@@ -467,30 +467,24 @@
   line-height: 1.2;
 }
 
-.session-dossier .dossier-loading-dot {
-  width: 8px;
-  height: 8px;
+.session-dossier .dossier-loading-spinner {
+  width: 15px;
+  height: 15px;
   border-radius: 999px;
-  background: var(--blue);
-  box-shadow: 0 0 0 0 rgba(46, 167, 255, 0.34);
-  animation: dossier-loading-pulse 1.4s ease-in-out infinite;
+  border: 2px solid rgba(46, 167, 255, 0.18);
+  border-top-color: var(--blue);
+  box-shadow: 0 0 12px rgba(46, 167, 255, 0.18);
+  animation: dossier-loading-spin 860ms linear infinite;
 }
 
-@keyframes dossier-loading-pulse {
-  0%,
-  100% {
-    opacity: 0.55;
-    box-shadow: 0 0 0 0 rgba(46, 167, 255, 0.3);
-  }
-
-  50% {
-    opacity: 1;
-    box-shadow: 0 0 0 5px rgba(46, 167, 255, 0);
+@keyframes dossier-loading-spin {
+  to {
+    transform: rotate(1turn);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .session-dossier .dossier-loading-dot {
+  .session-dossier .dossier-loading-spinner {
     animation: none;
   }
 }

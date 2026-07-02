@@ -217,9 +217,37 @@ describe("SessionDossier", () => {
   test("shows a stable enrichment loading state before dossier data arrives", () => {
     const html = renderToStaticMarkup(<SessionDossier loading />);
 
-    expect(html).toContain("Enriching data");
+    expect(html).toContain("Enriching data, please stand by");
     expect(html).toContain("dossier-loading-state");
+    expect(html).toContain("dossier-loading-spinner");
     expect(html).not.toContain("Loading canonical session dossier");
+  });
+
+  test("does not render legacy capsule copy as current enrichment", () => {
+    const legacy = dossier();
+    legacy.durableEnrichment = undefined;
+    legacy.identity.title = "Codex hook event";
+    legacy.narrative.narrativeDebug = {
+      model: "gpt-5-nano",
+      promptVersion: "session-capsule-v2",
+      provider: "openai",
+      providerStatus: "success",
+      sourceRefs: [],
+      validationWarnings: []
+    };
+    legacy.narrative.liveSummary = "completed";
+    legacy.narrative.outcome = "completed";
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={legacy} />);
+
+    expect(html).toContain("not enriched");
+    expect(html).not.toContain("session-capsule-v2 / current");
+    expect(html).not.toContain("<p>completed.</p>");
+    expect(html).not.toContain("<p>completed</p>");
+    expect(html).not.toContain('data-dossier-section="technologies"');
+    expect(html).not.toContain("<span>auth</span>");
+    expect(html).not.toContain("<strong>success</strong>");
+    expect(html).not.toContain("<strong>Provider</strong><span>openai</span>");
   });
 
   test("uses enriched dossier values for evidence blocks instead of hard-coded topics", () => {
@@ -965,7 +993,7 @@ function dossier(): SessionDossierDto {
       liveSummary: "Callback repair is being verified.",
       narrativeDebug: {
         model: "gpt-5-nano",
-        promptVersion: "session-capsule-v2",
+        promptVersion: "session-capsule-v4",
         provider: "openai",
         sourceRefs: [{ id: "source-ref-1", kind: "event", observedAt: "2026-06-25T23:00:00.000Z", source: "codex" }],
         subjectConfidence: "high",

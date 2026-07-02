@@ -191,9 +191,9 @@ function sessionStateClassName(session: SessionCardView): "is-active" | "is-idle
 
 function sessionVisualTier(session: SessionCardView): SessionVisualTier {
   if (isBlockedSessionCard(session)) return "action";
+  if (session.lifecycle === "running") return "live";
   if (session.indicators.includes("attention")) return "action";
   if (session.indicators.includes("conflict")) return "action";
-  if (session.lifecycle === "running") return "live";
   return "quiet";
 }
 

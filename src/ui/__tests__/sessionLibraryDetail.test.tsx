@@ -188,6 +188,11 @@ function dossier(): SessionDossierDto {
       title: "Repair OAuth callback"
     },
     narrative: {
+      narrativeDebug: {
+        promptVersion: "session-capsule-v4",
+        provider: "openai",
+        sourceRefs: []
+      },
       objective: "Fix the OAuth return path.",
       outcome: "OAuth route still fails in one edge case.",
       technologies: ["vite"],

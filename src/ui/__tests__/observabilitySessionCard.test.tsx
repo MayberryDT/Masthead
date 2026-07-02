@@ -82,7 +82,8 @@ describe("observability session card", () => {
     expect(active).toContain("tier-live");
     expect(idle).toContain("tier-quiet");
     expect(blocked).toContain("tier-action");
-    expect(conflict).toContain("tier-action");
+    expect(conflict).toContain("is-active tier-live");
+    expect(conflict).not.toContain("tier-action");
   });
 
   test("uses a project and work-area label in the header without synthetic id chrome", () => {
