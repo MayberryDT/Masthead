@@ -15,6 +15,14 @@ export function buildPendingBoardHeadlineView(_input: BoardHeadlineInput): Board
   };
 }
 
+export function buildWaitingForTranscriptBoardHeadlineView(_input: BoardHeadlineInput): BoardHeadlineView {
+  return {
+    headline: "Waiting for transcript...",
+    source: "pending",
+    status: "pending"
+  };
+}
+
 export function buildOfflineBoardHeadlineView(input: BoardHeadlineInput): BoardHeadlineView {
   const candidate = offlineFrame(input);
   const validated = validateBoardHeadlineFrame(candidate);

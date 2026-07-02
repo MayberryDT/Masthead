@@ -13,7 +13,7 @@ import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent } from "../core/ingestion.ts";
 import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
 import { projectLiveEvents } from "../core/liveProjection.ts";
-import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent } from "../core/boardHeadlineEnricher.ts";
+import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent, type BoardHeadlineGenerationFinishedEvent } from "../core/boardHeadlineEnricher.ts";
 import { createFileBackedStore, type StoreRecord } from "../core/store.ts";
 import type { ReviewDisposition } from "../core/store.ts";
 import type { CodexHookDiagnostic } from "../core/codexAdapter.ts";
@@ -43,7 +43,7 @@ import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsReposit
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
-import { currentBoardHeadlineFrames, upsertBoardHeadlineFrame } from "./db/boardHeadlineFrameRepository.ts";
+import { currentBoardHeadlineFrames, insertBoardHeadlineGeneration, upsertBoardHeadlineFrame } from "./db/boardHeadlineFrameRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
@@ -85,7 +85,7 @@ import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/so
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { buildMastheadHealth } from "./healthService.ts";
-import { recentHookEventsWithTranscriptPaths } from "./hookTranscriptRecovery.ts";
+import { recentHookEventsWithTranscriptPaths, recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
 import {
   getCodexHookSettings,
@@ -108,6 +108,7 @@ export const LIVE_BOARD_RAW_RECORD_LIMIT = 500;
 const HOOK_TRANSCRIPT_RECOVERY_LIMIT = 25;
 const HOOK_TRANSCRIPT_CATCHUP_RECORD_LIMIT = 200;
 const HOOK_TRANSCRIPT_CATCHUP_REQUEUE_MS = 250;
+const VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS = 750;
 
 type TranscriptImportOptions = {
   maxRecordsPerSource?: number;
@@ -120,6 +121,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   let hookTranscriptCatchupQueue: Promise<void> = Promise.resolve();
   const hookTranscriptCatchups = new Map<string, Promise<void>>();
   const disabledHookTranscriptCatchupDiagnostics = new Set<string>();
+  const visibleTranscriptCatchupLastRunBySession = new Map<string, number>();
 
   try {
     // Legacy compatibility store. Do not add new product writes here.
@@ -209,10 +211,49 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         });
       }
     };
+    const persistBoardHeadlineGeneration = (event: BoardHeadlineGenerationFinishedEvent): void => {
+      try {
+        const sessionId = canonicalSessionIdForSource(event.sessionId);
+        const row = database
+          .prepare("SELECT session_id AS sessionId, source_session_id AS sourceSessionId FROM sessions WHERE source_session_id = ? AND session_id = ?")
+          .get(event.sessionId, sessionId) as { sessionId: string; sourceSessionId: string } | undefined;
+        if (!row) return;
+
+        insertBoardHeadlineGeneration(database, {
+          completedAt: event.completedAt,
+          failureMessage: event.failureMessage,
+          frame: event.frame,
+          latencyMs: event.latencyMs,
+          model: event.model,
+          provider: event.provider,
+          refreshKey: event.refreshKey,
+          requestedAt: event.requestedAt,
+          sessionId: row.sessionId,
+          sourceSessionId: row.sourceSessionId,
+          status: event.status,
+          transcriptExcerpt: event.input.facts.transcriptExcerpt ?? []
+        });
+      } catch (error) {
+        recordRuntimeDiagnostic({
+          details: {
+            error,
+            completedAt: event.completedAt,
+            model: event.model,
+            provider: event.provider,
+            sourceSessionId: event.sessionId,
+            status: event.status
+          },
+          kind: "board_headline_generation_persist_failed",
+          message: `Board headline generation persistence failed for ${event.sessionId}`,
+          severity: "warning"
+        });
+      }
+    };
     const boardHeadlineEnricher = createBoardHeadlineEnricher({
       enabled: config.liveCopyEnabled ?? config.llmCopyEnabled,
       apiKey: config.openaiApiKey,
       model: config.openaiModel,
+      onGenerationFinished: persistBoardHeadlineGeneration,
       onFrameApplied: persistBoardHeadlineFrame,
       timeoutMs: config.liveCopyTimeoutMs
     });
@@ -846,7 +887,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return { jobs, sources: sources.length };
   }
 
-  function scheduleHookTranscriptCatchup(event: NormalizedEvent): void {
+  function scheduleHookTranscriptCatchup(event: NormalizedEvent): Promise<void> | undefined {
     const transcriptPath = stringFromPayload(event.payload, ["transcriptPath", "transcript_path"]);
     const key = transcriptPath ?? event.eventId;
     if (!config.hookTranscriptCatchupEnabled) {
@@ -885,6 +926,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     next.catch(() => {
       // importHookTranscriptIfApproved records diagnostics; this prevents unhandled rejections.
     });
+    return next;
   }
 
   async function importHookTranscriptIfApproved(event: NormalizedEvent): Promise<void> {
@@ -936,6 +978,34 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     });
 
     for (const event of events) scheduleHookTranscriptCatchup(event);
+  }
+
+  async function catchUpVisibleHookTranscripts(sourceSessionIds: Set<string>, refreshIntervalMs: number): Promise<void> {
+    if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database) || sourceSessionIds.size === 0) return;
+    const nowMs = Date.now();
+    const catchupIntervalMs = effectiveVisibleTranscriptCatchupIntervalMs(refreshIntervalMs);
+    const dueSessionIds = new Set<string>();
+    for (const sourceSessionId of sourceSessionIds) {
+      const lastRunAt = visibleTranscriptCatchupLastRunBySession.get(sourceSessionId);
+      if (lastRunAt === undefined || nowMs - lastRunAt >= catchupIntervalMs) {
+        dueSessionIds.add(sourceSessionId);
+        visibleTranscriptCatchupLastRunBySession.set(sourceSessionId, nowMs);
+      }
+    }
+    if (dueSessionIds.size === 0) return;
+
+    const events = recentHookEventsWithTranscriptPathsForSessions(
+      database,
+      codexHookSource.sourceId,
+      dueSessionIds,
+      Math.min(HOOK_TRANSCRIPT_RECOVERY_LIMIT, dueSessionIds.size)
+    );
+    const scheduled = events
+      .map((event) => scheduleHookTranscriptCatchup(event))
+      .filter((promise): promise is Promise<void> => Boolean(promise));
+    if (scheduled.length === 0) return;
+
+    await Promise.race([Promise.allSettled(scheduled).then(() => undefined), unrefDelay(VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS)]);
   }
 
   function approveTranscriptImports(runtime?: RuntimeKind): void {
@@ -1429,8 +1499,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "GET" && url.pathname === "/projection") {
       const selectedSessionId = url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined;
+      const refreshIntervalMs = parseBoardRefreshIntervalMs(url.searchParams.get("refreshIntervalMs"));
       const headlineMode = (config.liveCopyEnabled ?? config.llmCopyEnabled) && config.openaiApiKey?.trim() ? "llm" : "offline";
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
+      await catchUpVisibleHookTranscripts(projectionSessionIds, refreshIntervalMs);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
       const sessionHeadlineViews = currentBoardHeadlineFrames(
@@ -1450,7 +1522,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       });
       liveEnvelope.events = state.events.length;
       liveEnvelope.gitSnapshots = gitSnapshots.length;
-      liveEnvelope.projection = await boardHeadlineEnricher.enrichProjection(liveEnvelope.projection);
+      liveEnvelope.projection = await boardHeadlineEnricher.enrichProjection(liveEnvelope.projection, { refreshIntervalMs });
       liveEnvelope.projection = attachCanonicalCardIds(liveEnvelope.projection, {
         hostId: `host:${config.host}`,
         runtimeKind: "codex"
@@ -2483,6 +2555,23 @@ function latestProjectionSessionIds(events: NormalizedEvent[], selectedSessionId
     if (sessionId) sessionIds.add(sessionId);
   }
   return sessionIds;
+}
+
+function parseBoardRefreshIntervalMs(value: string | null): number {
+  const intervalMs = Number(value);
+  if (!Number.isFinite(intervalMs)) return 10_000;
+  return Math.max(5_000, Math.min(60_000, intervalMs));
+}
+
+function effectiveVisibleTranscriptCatchupIntervalMs(refreshIntervalMs: number): number {
+  return Math.max(5_000, Math.min(60_000, refreshIntervalMs));
+}
+
+function unrefDelay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
 }
 
 function liveSessionCount(events: NormalizedEvent[]): number {

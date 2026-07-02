@@ -10,6 +10,13 @@ function facts(overrides: Partial<BoardHeadlineFacts> = {}): BoardHeadlineFacts 
     project: "Masthead",
     lifecycle: "running",
     primaryStatus: "editing",
+    transcriptExcerpt: [
+      {
+        observedAt: "2026-07-01T19:00:00.000Z",
+        role: "user",
+        text: "Use subject and disposition frames for Board headlines."
+      }
+    ],
     recentTranscriptMessages: ["Use subject and disposition frames for Board headlines."],
     recentFileBasenames: ["SessionCard.tsx"],
     changedFileCount: 1,
@@ -89,6 +96,7 @@ describe("OpenAI board headline frame", () => {
     expect(body.text.format.schema.required).toEqual(["subject", "disposition", "state", "subjectKind", "confidence", "evidence"]);
     expect(body.instructions).toContain("Do not summarize the session");
     expect(body.instructions).toContain("smallest concrete work object");
+    expect(body.instructions).toContain("facts.transcriptExcerpt");
     const expectedInput = input();
     expect(JSON.parse(body.input)).toEqual({
       lifecycle: expectedInput.lifecycle,
@@ -101,7 +109,14 @@ describe("OpenAI board headline frame", () => {
       facts: {
         changedFileCount: 1,
         recentFileBasenames: ["SessionCard.tsx"],
-        recentToolNames: []
+        recentToolNames: [],
+        transcriptExcerpt: [
+          {
+            role: "user",
+            text: "Use subject and disposition frames for Board headlines."
+          }
+        ],
+        recentTranscriptMessages: ["Use subject and disposition frames for Board headlines."]
       }
     });
     expect(body.input).not.toContain("OPENAI_API_KEY");
@@ -120,6 +135,23 @@ describe("OpenAI board headline frame", () => {
           '::git-stage{cwd="/tmp"}',
           "[url]",
           "sk-proj-secret"
+        ],
+        transcriptExcerpt: [
+          {
+            observedAt: "2026-07-01T19:00:00.000Z",
+            role: "assistant",
+            text: "Board headline frame keeps concrete subject evidence."
+          },
+          {
+            observedAt: "2026-07-01T19:00:01.000Z",
+            role: "user",
+            text: "/home/tyler/secret/path"
+          },
+          {
+            observedAt: "2026-07-01T19:00:02.000Z",
+            role: "assistant",
+            text: "sk-proj-secret"
+          }
         ],
         recentFileBasenames: ["SessionCard.tsx", "/home/tyler/secret/path"],
         recentEvents: [
@@ -152,12 +184,18 @@ describe("OpenAI board headline frame", () => {
     });
     expect(providerInput).not.toHaveProperty("facts.sessionId");
     expect(providerInput).not.toHaveProperty("facts.project");
-    expect(providerInput).not.toHaveProperty("facts.recentTranscriptMessages");
     expect(providerInput).not.toHaveProperty("facts.recentEvents");
     expect(providerInput.facts).toEqual({
       changedFileCount: 1,
       recentFileBasenames: ["SessionCard.tsx"],
-      recentToolNames: ["apply_patch"]
+      recentToolNames: ["apply_patch"],
+      transcriptExcerpt: [
+        {
+          role: "assistant",
+          text: "Board headline frame keeps concrete subject evidence."
+        }
+      ],
+      recentTranscriptMessages: ["Board headline frame keeps concrete subject evidence."]
     });
 
     expect(body.input).toContain("Headline work started");
@@ -191,15 +229,15 @@ describe("OpenAI board headline frame", () => {
     });
   });
 
-  test("returns validation_failed for weak model frames", async () => {
+  test("accepts structurally valid frames without semantic support matching", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       responseWithFrame({
         subject: "UI changes",
         disposition: "has recent activity",
-        state: "active",
+        state: "completed",
         subjectKind: "component",
         confidence: "low",
-        evidence: ["Use subject and disposition frames for Board headlines."]
+        evidence: []
       })
     );
 
@@ -211,79 +249,12 @@ describe("OpenAI board headline frame", () => {
         model: "gpt-5-nano-2025-08-07"
       })
     ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "weak_subject"
-    });
-  });
-
-  test("rejects structurally valid frames that do not match the input state", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame({ state: "completed" })));
-
-    await expect(
-      rewriteBoardHeadlineFrameWithOpenAI(input(), {
-        enabled: true,
-        apiKey: "key",
-        fetchImpl,
-        model: "gpt-5-nano-2025-08-07"
-      })
-    ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "state_mismatch"
-    });
-  });
-
-  test("rejects frames without supported evidence", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame({ evidence: [] })));
-
-    await expect(
-      rewriteBoardHeadlineFrameWithOpenAI(input(), {
-        enabled: true,
-        apiKey: "key",
-        fetchImpl,
-        model: "gpt-5-nano-2025-08-07"
-      })
-    ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "empty_evidence"
-    });
-  });
-
-  test("rejects evidence not supported by the compact input", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame({ evidence: ["Unrelated payment workflow redesign."] })));
-
-    await expect(
-      rewriteBoardHeadlineFrameWithOpenAI(input(), {
-        enabled: true,
-        apiKey: "key",
-        fetchImpl,
-        model: "gpt-5-nano-2025-08-07"
-      })
-    ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "unsupported_evidence"
-    });
-  });
-
-  test("rejects approval claims without approval evidence", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      responseWithFrame(
-        validFrame({
-          disposition: "needs your approval before continuing",
-          evidence: ["Use subject and disposition frames for Board headlines."]
-        })
-      )
-    );
-
-    await expect(
-      rewriteBoardHeadlineFrameWithOpenAI(input(), {
-        enabled: true,
-        apiKey: "key",
-        fetchImpl,
-        model: "gpt-5-nano-2025-08-07"
-      })
-    ).resolves.toMatchObject({
-      status: "validation_failed",
-      validationReason: "unsupported_claim"
+      status: "llm",
+      frame: {
+        subject: "UI changes",
+        disposition: "has recent activity",
+        state: "completed"
+      }
     });
   });
 

@@ -48,18 +48,9 @@ describe("board headline frame contract", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("rejects weak generic subjects", () => {
-    expect(validateBoardHeadlineFrame(frame({ subject: "UI changes" }))).toEqual({
-      ok: false,
-      reason: "weak_subject"
-    });
-  });
-
-  test("rejects weak generic dispositions", () => {
-    expect(validateBoardHeadlineFrame(frame({ disposition: "has recent activity" }))).toEqual({
-      ok: false,
-      reason: "weak_disposition"
-    });
+  test("allows generic but structurally valid model text", () => {
+    expect(validateBoardHeadlineFrame(frame({ subject: "UI changes" })).ok).toBe(true);
+    expect(validateBoardHeadlineFrame(frame({ disposition: "has recent activity" })).ok).toBe(true);
   });
 
   test("rejects unsafe text in subject and disposition", () => {
@@ -160,6 +151,17 @@ describe("board headline frame contract", () => {
       reason: "unsafe_text"
     });
     expect(validateBoardHeadlineFrame(frame({ disposition: "links to [url] during summary" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+  });
+
+  test("rejects raw internal status tokens in display copy", () => {
+    expect(validateBoardHeadlineFrame(frame({ disposition: "completed_unreviewed" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ subject: "Changed-file review", disposition: "completed_unreviewed." }))).toEqual({
       ok: false,
       reason: "unsafe_text"
     });

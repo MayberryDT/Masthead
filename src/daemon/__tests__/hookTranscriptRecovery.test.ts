@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
-import { recentHookEventsWithTranscriptPaths } from "../hookTranscriptRecovery.ts";
+import { recentHookEventsWithTranscriptPaths, recentHookEventsWithTranscriptPathsForSessions } from "../hookTranscriptRecovery.ts";
 
 const tempDirs: string[] = [];
 
@@ -33,6 +33,27 @@ describe("hook transcript recovery", () => {
 
     expect(events.map((event) => event.sessionId)).toEqual(["noisy-source", "quiet-source"]);
     expect(events).toHaveLength(2);
+    db.close();
+  });
+
+  test("selects transcript paths for requested source sessions only", async () => {
+    const db = await openTestDatabase();
+    seedHookRecord(db, {
+      eventId: "visible",
+      observedAt: "2026-06-25T12:00:00.000Z",
+      sourceSessionId: "visible-source",
+      transcriptPath: "/home/tyler/.codex/sessions/visible.jsonl"
+    });
+    seedHookRecord(db, {
+      eventId: "hidden",
+      observedAt: "2026-06-25T12:01:00.000Z",
+      sourceSessionId: "hidden-source",
+      transcriptPath: "/home/tyler/.codex/sessions/hidden.jsonl"
+    });
+
+    const events = recentHookEventsWithTranscriptPathsForSessions(db, "codex-hook-local", new Set(["visible-source"]), 10);
+
+    expect(events.map((event) => event.sessionId)).toEqual(["visible-source"]);
     db.close();
   });
 });

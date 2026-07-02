@@ -34,6 +34,9 @@ export function toBoardHeadlineInput(input: {
   const { facts, lifecycle, primaryStatus, signals } = input;
   const canonical = facts.canonicalEnrichment;
   const transcriptMessages = facts.recentTranscriptMessages ?? [];
+  const transcriptSubjects = uniqueBounded(transcriptMessages.flatMap(transcriptSubjectCandidates), 8);
+  const transcriptSupport = transcriptSubjectSupport(transcriptMessages);
+  const hasTranscriptSubjects = transcriptSubjects.length > 0;
 
   return {
     lifecycle,
@@ -42,11 +45,19 @@ export function toBoardHeadlineInput(input: {
     signals,
     subjectCandidates: uniqueBounded(
       [
-        ...transcriptMessages.flatMap(transcriptSubjectCandidates),
+        ...transcriptSubjects,
         canonical?.subject,
         canonical?.object,
-        cleanWorkContextLabel(facts.workContext?.label),
-        ...facts.recentFileBasenames.flatMap(fileSubjectCandidates),
+        supportedWorkContextLabel(facts.workContext?.label, {
+          hasTranscriptSubjects,
+          transcriptMentionsSettings: transcriptSupport.settings
+        }),
+        ...facts.recentFileBasenames.flatMap((basename) =>
+          fileSubjectCandidates(basename, {
+            allowSettingsSubjects: transcriptSupport.settings || !hasTranscriptSubjects,
+            hasTranscriptSubjects
+          })
+        ),
         facts.title,
         facts.project
       ],
@@ -147,11 +158,29 @@ function cleanWorkContextLabel(value: string | undefined): string | undefined {
   return cleaned?.replace(/\s+(?:changes|work)$/i, "");
 }
 
-function fileSubjectCandidates(value: string): string[] {
+function supportedWorkContextLabel(
+  value: string | undefined,
+  context: { hasTranscriptSubjects: boolean; transcriptMentionsSettings: boolean }
+): string | undefined {
+  const label = cleanWorkContextLabel(value);
+  if (!label) return undefined;
+  if (context.hasTranscriptSubjects && isSettingsSubject(label) && !context.transcriptMentionsSettings) return undefined;
+  return label;
+}
+
+function fileSubjectCandidates(
+  value: string,
+  options: { allowSettingsSubjects: boolean; hasTranscriptSubjects: boolean } = {
+    allowSettingsSubjects: true,
+    hasTranscriptSubjects: false
+  }
+): string[] {
   const basename = cleanText(value);
   if (!basename) return [];
 
-  return uniqueBounded([...knownFileSubjects(basename), basename], 4);
+  const knownSubjects = knownFileSubjects(basename).filter((subject) => options.allowSettingsSubjects || !isSettingsSubject(subject));
+  const includeBasename = !options.hasTranscriptSubjects || options.allowSettingsSubjects || !isSettingsFileBasename(basename);
+  return uniqueBounded([...knownSubjects, includeBasename ? basename : undefined], 4);
 }
 
 function uniqueBounded(values: Array<string | undefined>, limit: number): string[] {
@@ -188,6 +217,7 @@ function domainSubjectCandidates(value: string): string[] {
 
   const patterns: Array<[RegExp, string]> = [
     [/\bboard headlines?\b/i, "Board headlines"],
+    [/\bheadlines?\b/i, "Board headlines"],
     [/\bheadline refresh(?:es)?\b/i, "headline refreshes"],
     [/\bdata enrichment\b/i, "data enrichment"],
     [/\bsettings danger zone\b/i, "Settings danger zone"],
@@ -249,4 +279,20 @@ function knownFileSubjects(value: string): string[] {
   }
 
   return subjects;
+}
+
+function transcriptSubjectSupport(messages: string[]): { settings: boolean } {
+  const text = messages.join(" ");
+  return {
+    settings: /\bsettings?\b/i.test(text)
+  };
+}
+
+function isSettingsSubject(value: string): boolean {
+  return /\bsettings?\b/i.test(value);
+}
+
+function isSettingsFileBasename(value: string): boolean {
+  const normalized = value.replace(/[-_\s.]+/g, "").toLowerCase();
+  return normalized.includes("settings") || normalized.includes("dangerzone");
 }

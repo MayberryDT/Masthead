@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { BoardHeadlineFrame } from "../../../core/boardHeadlineFrame.ts";
-import { currentBoardHeadlineFrames, upsertBoardHeadlineFrame } from "../boardHeadlineFrameRepository.ts";
+import { currentBoardHeadlineFrames, insertBoardHeadlineGeneration, recentBoardHeadlineGenerations, upsertBoardHeadlineFrame } from "../boardHeadlineFrameRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 import { seedSession } from "./sessionTestHelpers.ts";
@@ -156,8 +156,8 @@ describe("board headline frame repository", () => {
     expect(() =>
       upsertBoardHeadlineFrame(db, {
         frame: frame({
-          disposition: "Uses a subject that validation rejects",
-          subject: "work"
+          disposition: "Uses unsafe model text that validation rejects",
+          subject: "https://example.com/headline"
         }),
         generatedAt: "2026-07-01T12:00:00.000Z",
         model: "gpt-5",
@@ -165,7 +165,7 @@ describe("board headline frame repository", () => {
         sessionId: "session-1",
         sourceSessionId: "source-session-1"
       })
-    ).toThrow("Invalid Board headline frame: weak_subject");
+    ).toThrow("Invalid Board headline frame: unsafe_text");
     db.close();
   });
 
@@ -195,6 +195,76 @@ describe("board headline frame repository", () => {
     );
 
     expect(currentBoardHeadlineFrames(db, [{ sessionId: "session-1", sourceSessionId: "source-session-1" }])).toEqual(new Map());
+    db.close();
+  });
+
+  test("records append-only generation attempts with transcript samples", async () => {
+    const db = await openTestDatabase();
+    seedSession(db, {
+      lifecycle: "running",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session-1",
+      title: "Board headline generation log"
+    });
+
+    insertBoardHeadlineGeneration(db, {
+      completedAt: "2026-07-01T12:00:01.000Z",
+      frame: frame({
+        disposition: "Stores every generated headline attempt",
+        subject: "Board headline generation log"
+      }),
+      latencyMs: 300,
+      model: "gpt-5",
+      provider: "openai",
+      refreshKey: "refresh-key-one",
+      requestedAt: "2026-07-01T12:00:00.700Z",
+      sessionId: "session-1",
+      sourceSessionId: "source-session-1",
+      status: "success",
+      transcriptExcerpt: [
+        {
+          observedAt: "2026-07-01T12:00:00.000Z",
+          role: "user",
+          text: "Keep a durable log of generated Board headlines."
+        }
+      ]
+    });
+    insertBoardHeadlineGeneration(db, {
+      completedAt: "2026-07-01T12:00:02.000Z",
+      failureMessage: "OpenAI board headline frame response was not valid JSON.",
+      latencyMs: 250,
+      model: "gpt-5",
+      provider: "openai",
+      refreshKey: "refresh-key-two",
+      requestedAt: "2026-07-01T12:00:01.750Z",
+      sessionId: "session-1",
+      sourceSessionId: "source-session-1",
+      status: "invalid_output",
+      transcriptExcerpt: []
+    });
+
+    const rows = recentBoardHeadlineGenerations(db, { limit: 10, sourceSessionId: "source-session-1" });
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      failureMessage: "OpenAI board headline frame response was not valid JSON.",
+      headline: undefined,
+      status: "invalid_output",
+      transcriptExcerptCount: 0
+    });
+    expect(rows[1]).toMatchObject({
+      headline: "Board headline generation log: stores every generated headline attempt.",
+      status: "success",
+      transcriptExcerptCount: 1,
+      transcriptExcerptSample: [
+        {
+          role: "user",
+          text: "Keep a durable log of generated Board headlines."
+        }
+      ]
+    });
+    expect(rows[0]?.generationId).not.toBe(rows[1]?.generationId);
     db.close();
   });
 });

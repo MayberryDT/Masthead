@@ -56,7 +56,7 @@ describe("board headline facts", () => {
     expect(facts.recentToolNames).toEqual(["npm run typecheck"]);
   });
 
-  test("keeps useful transcript evidence while dropping directive and progress noise", () => {
+  test("keeps useful role-labeled transcript evidence while dropping directive noise", () => {
     const facts = buildBoardHeadlineFacts({
       attentionItems: [],
       card: card(),
@@ -82,7 +82,44 @@ describe("board headline facts", () => {
       ]
     });
 
-    expect(facts.recentTranscriptMessages).toEqual(["Headlines are not visibly changing in the Board tab."]);
+    expect(facts.transcriptExcerpt).toEqual([
+      {
+        observedAt: "2026-07-01T21:01:00.000Z",
+        role: "assistant",
+        text: "The timestamp was not the whole issue. I’m putting transcript evidence ahead of canonical enrichment."
+      },
+      {
+        observedAt: "2026-07-01T21:02:00.000Z",
+        role: "user",
+        text: "Headlines are not visibly changing in the Board tab."
+      }
+    ]);
+    expect(facts.recentTranscriptMessages).toEqual([
+      "The timestamp was not the whole issue. I’m putting transcript evidence ahead of canonical enrichment.",
+      "Headlines are not visibly changing in the Board tab."
+    ]);
+  });
+
+  test("keeps a substantial recent transcript excerpt instead of only six short snippets", () => {
+    const facts = buildBoardHeadlineFacts({
+      attentionItems: [],
+      card: card(),
+      conflicts: [],
+      events: [],
+      gitSnapshots: [],
+      recentTranscriptMessages: Array.from({ length: 10 }, (_, index) => ({
+        observedAt: `2026-07-01T21:${String(index).padStart(2, "0")}:00.000Z`,
+        role: index % 2 === 0 ? "user" : "assistant",
+        text: `Transcript message ${index} includes concrete headline work context for the model.`
+      }))
+    });
+
+    expect(facts.transcriptExcerpt).toHaveLength(10);
+    expect(facts.recentTranscriptMessages).toHaveLength(10);
+    expect(facts.transcriptExcerpt?.at(0)).toMatchObject({
+      role: "user",
+      text: "Transcript message 0 includes concrete headline work context for the model."
+    });
   });
 
   test("sanitizes URL-like project and title facts before headline enrichment", () => {

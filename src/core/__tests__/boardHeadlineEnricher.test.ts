@@ -243,6 +243,39 @@ describe("board headline enricher", () => {
     expect(onFrameApplied).not.toHaveBeenCalled();
   });
 
+  test("reports failed provider attempts for durable generation logging", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 500 }));
+    const onGenerationFinished = vi.fn();
+    const now = vi.fn(() => new Date("2026-07-01T12:34:56.000Z"));
+    const headlineInput = input();
+    const enricher = createBoardHeadlineEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      model: "gpt-test",
+      now,
+      onGenerationFinished
+    });
+
+    await enricher.enrichProjection(projection([card({ headlineInput })]));
+    await flushMicrotasks();
+
+    expect(onGenerationFinished).toHaveBeenCalledTimes(1);
+    expect(onGenerationFinished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        completedAt: "2026-07-01T12:34:56.000Z",
+        failureMessage: "OpenAI board headline frame request failed with HTTP 500.",
+        input: headlineInput,
+        model: "gpt-test",
+        provider: "openai",
+        requestedAt: "2026-07-01T12:34:56.000Z",
+        sessionId: "session-1",
+        status: "api_error"
+      })
+    );
+    expect(onGenerationFinished.mock.calls[0]?.[0].refreshKey).toEqual(expect.any(String));
+  });
+
   test("calls onFrameApplied for each card sharing an in-flight frame request", async () => {
     const response = deferred<Response>();
     const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
@@ -264,68 +297,205 @@ describe("board headline enricher", () => {
     expect(onFrameApplied).toHaveBeenNthCalledWith(2, expect.objectContaining({ sessionId: "session-2", frame }));
   });
 
-  test("refreshes changed headline input even when the card has a ready LLM headline", async () => {
-    const response = deferred<Response>();
-    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+  test("does not call OpenAI when configured LLM mode has no transcript evidence", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
     const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
-    const readyHeadline: BoardHeadlineView = {
-      headline: "Old subject: old disposition.",
-      frame: validFrame({ subject: "Old subject", disposition: "old disposition" }),
-      source: "llm",
-      status: "ready",
-      generatedAt: "2026-07-01T12:00:00.000Z",
-      model: "gpt-5-nano-2025-08-07",
-      provider: "openai"
-    };
 
     const result = await enricher.enrichProjection(
       projection([
         card({
-          headline: readyHeadline,
           headlineInput: input({
-            subjectCandidates: ["Changed board headline input"],
-            evidence: ["Changed evidence should refresh the LLM headline."]
+            facts: {
+              ...input().facts,
+              recentTranscriptMessages: []
+            }
           })
         })
       ])
     );
 
-    expect(result.cards[0]?.headline).toBe(readyHeadline);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.cards[0]?.headline).toMatchObject({
+      headline: "Waiting for transcript...",
+      source: "pending",
+      status: "pending"
+    });
+  });
+
+  test("does not call OpenAI when transcript excerpt contains only hook placeholders", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+
+    const result = await enricher.enrichProjection(
+      projection([
+        card({
+          headlineInput: input({
+            subjectCandidates: ["Settings UI", "SettingsPanel.tsx"],
+            evidence: ["SettingsPanel.tsx", "Codex hook event"],
+            facts: {
+              ...input().facts,
+              transcriptExcerpt: [
+                {
+                  observedAt: "2026-07-01T12:00:00.000Z",
+                  role: "assistant",
+                  text: "Codex hook event"
+                }
+              ],
+              recentTranscriptMessages: ["Codex hook event"],
+              recentFileBasenames: ["SettingsPanel.tsx"]
+            }
+          })
+        })
+      ])
+    );
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.cards[0]?.headline).toMatchObject({
+      headline: "Waiting for transcript...",
+      source: "pending",
+      status: "pending"
+    });
+  });
+
+  test("does not request a new headline when the transcript refresh key is unchanged", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+
+    await enricher.enrichProjection(projection([card()]));
+    response.resolve(responseWithFrame(validFrame()));
+    await flushMicrotasks();
+    await enricher.enrichProjection(projection([card()]));
+    await enricher.enrichProjection(
+      projection([
+        card({
+          headlineInput: input({
+            facts: {
+              ...input().facts,
+              changedFileCount: 3,
+              recentToolNames: ["shell", "Read"]
+            }
+          })
+        })
+      ])
+    );
+
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test("requests a new headline when transcript evidence changes", async () => {
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+    let nowMs = Date.parse("2026-07-01T12:00:00.000Z");
+    const now = vi.fn<() => Date>(() => new Date(nowMs));
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl, now });
+
+    await enricher.enrichProjection(projection([card()]));
+    first.resolve(responseWithFrame(validFrame()));
+    await flushMicrotasks();
+    nowMs = Date.parse("2026-07-01T12:00:05.000Z");
+    await enricher.enrichProjection(projection([card()]));
+
+    const result = await enricher.enrichProjection(
+      projection([
+        card({
+          headlineInput: input({
+            facts: {
+              ...input().facts,
+              recentTranscriptMessages: ["Use new transcript evidence for the next headline."]
+            }
+          })
+        })
+      ]),
+      { refreshIntervalMs: 5_000 }
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(result.headlineRefreshSummary).toMatchObject({
       requested: 1,
-      succeeded: 0,
-      failed: 0,
       pending: 1
     });
 
-    response.resolve(responseWithFrame(validFrame({ subject: "Changed board headline input" })));
+    second.resolve(responseWithFrame(validFrame({ subject: "New transcript evidence" })));
     await flushMicrotasks();
   });
 
-  test("surfaces provider failures on later projections without offline fallback", async () => {
+  test("uses the Board refresh interval as the active-session request cooldown", async () => {
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+    let nowMs = Date.parse("2026-07-01T12:00:00.000Z");
+    const now = vi.fn<() => Date>(() => new Date(nowMs));
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl, now });
+
+    await enricher.enrichProjection(projection([card()]), { refreshIntervalMs: 10_000 });
+    first.resolve(responseWithFrame(validFrame()));
+    await flushMicrotasks();
+
+    nowMs = Date.parse("2026-07-01T12:00:01.000Z");
+    await enricher.enrichProjection(projection([card()]), { refreshIntervalMs: 10_000 });
+
+    nowMs = Date.parse("2026-07-01T12:00:05.000Z");
+    await enricher.enrichProjection(
+      projection([
+        card({
+          headlineInput: input({
+            facts: {
+              ...input().facts,
+              recentTranscriptMessages: ["Changed too soon for another active request."]
+            }
+          })
+        })
+      ]),
+      { refreshIntervalMs: 10_000 }
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    nowMs = Date.parse("2026-07-01T12:00:11.000Z");
+    await enricher.enrichProjection(
+      projection([
+        card({
+          headlineInput: input({
+            facts: {
+              ...input().facts,
+              recentTranscriptMessages: ["Changed after the Board refresh interval."]
+            }
+          })
+        })
+      ]),
+      { refreshIntervalMs: 10_000 }
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    second.resolve(responseWithFrame(validFrame({ subject: "Board refresh interval" })));
+    await flushMicrotasks();
+  });
+
+  test("retries a failed headline request after the refresh cooldown", async () => {
     const retryResponse = deferred<Response>();
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response("{}", { status: 500 }))
       .mockImplementationOnce(() => retryResponse.promise);
-    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+    let nowMs = Date.parse("2026-07-01T12:00:00.000Z");
+    const now = vi.fn<() => Date>(() => new Date(nowMs));
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl, now });
 
-    const first = await enricher.enrichProjection(projection([card()]));
+    await enricher.enrichProjection(projection([card()]), { refreshIntervalMs: 10_000 });
     await flushMicrotasks();
-    const second = await enricher.enrichProjection(projection([card()]));
 
-    expect(first.cards[0]?.headline.source).toBe("pending");
-    expect(second.cards[0]?.headline.source).toBe("pending");
-    expect(second.cards[0]?.headlineRefresh).toMatchObject({
-      provider: "openai",
-      status: "api_error"
-    });
-    expect(second.cards[0]?.headline.headline).not.toBe("Board headlines: waiting for LLM headline access.");
+    nowMs = Date.parse("2026-07-01T12:00:05.000Z");
+    await enricher.enrichProjection(projection([card()]), { refreshIntervalMs: 10_000 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    nowMs = Date.parse("2026-07-01T12:00:11.000Z");
+    const result = await enricher.enrichProjection(projection([card()]), { refreshIntervalMs: 10_000 });
+
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(second.headlineRefreshSummary).toMatchObject({
+    expect(result.headlineRefreshSummary).toMatchObject({
       requested: 1,
-      succeeded: 0,
       failed: 1,
       pending: 1
     });

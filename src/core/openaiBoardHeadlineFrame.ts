@@ -7,8 +7,7 @@ export type OpenAIBoardHeadlineFrameStatus =
   | "not_configured"
   | "timeout"
   | "api_error"
-  | "invalid_output"
-  | "validation_failed";
+  | "invalid_output";
 
 export type OpenAIBoardHeadlineFrameConfig = {
   enabled?: boolean;
@@ -66,7 +65,13 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
           "Do not summarize the session.",
           "Identify the smallest concrete work object supported by the input, such as a file, component, feature, bug, source, setting, test, or document.",
           "Use subject for that work object and disposition for the current concrete relationship or state of work around it.",
+          "Use facts.transcriptExcerpt as the primary source when present.",
+          "facts.transcriptExcerpt is ordered oldest-to-newest and includes only user and assistant messages.",
+          "Treat subjectCandidates as trust-ordered. Prefer transcript-derived subjects over work-context or file-derived subjects.",
+          "Prefer the latest user request and latest assistant substantive update over tool names or hook events.",
+          "If transcript evidence is thin, keep the frame literal and conservative.",
           "Use stateHint and explicit evidence for state. Do not infer completion, urgency, ownership, or user intent.",
+          "Never copy raw internal status tokens such as completed_unreviewed, validation_failed, api_error, or not_configured into subject or disposition.",
           "Evidence must be short strings copied or tightly paraphrased from the input.",
           "Never include secrets, raw API keys, URLs, local absolute paths, or tool directives.",
           "Return only the requested JSON fields."
@@ -141,19 +146,10 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
     const validation = validateBoardHeadlineFrame(parsed);
     if (!validation.ok) {
       return {
-        failureMessage: "OpenAI board headline frame response failed validation.",
+        failureMessage: "OpenAI board headline frame response was structurally invalid.",
         latencyMs,
-        status: "validation_failed",
+        status: "invalid_output",
         validationReason: validation.reason
-      };
-    }
-    const inputValidationReason = validateFrameAgainstInput(validation.frame, input);
-    if (inputValidationReason) {
-      return {
-        failureMessage: "OpenAI board headline frame response was not supported by the input.",
-        latencyMs,
-        status: "validation_failed",
-        validationReason: inputValidationReason
       };
     }
 
@@ -215,6 +211,11 @@ type OpenAIProviderPayload = {
     changedFileCount: number;
     recentFileBasenames: string[];
     recentToolNames: string[];
+    transcriptExcerpt: Array<{
+      role: "user" | "assistant";
+      text: string;
+    }>;
+    recentTranscriptMessages: string[];
   };
 };
 
@@ -230,89 +231,33 @@ function toOpenAIProviderPayload(input: BoardHeadlineInput): OpenAIProviderPaylo
     facts: {
       changedFileCount: input.facts.changedFileCount,
       recentFileBasenames: safeStrings(input.facts.recentFileBasenames, 8),
-      recentToolNames: safeStrings(input.facts.recentToolNames, 8)
+      recentToolNames: safeStrings(input.facts.recentToolNames, 8),
+      transcriptExcerpt: safeTranscriptExcerpt(input.facts.transcriptExcerpt ?? [], 20),
+      recentTranscriptMessages: safeStrings(input.facts.recentTranscriptMessages ?? [], 8)
     }
   };
 }
 
-function validateFrameAgainstInput(frame: BoardHeadlineFrame, input: BoardHeadlineInput): string | undefined {
-  if (frame.evidence.length === 0) return "empty_evidence";
-  if (input.stateHint !== "unknown" && frame.state !== input.stateHint) return "state_mismatch";
-  if (frame.evidence.some((evidence) => !isSupportedEvidence(evidence, input))) return "unsupported_evidence";
-  if (hasUnsupportedClaim(frame, input)) return "unsupported_claim";
-  return undefined;
-}
-
-function isSupportedEvidence(evidence: string, input: BoardHeadlineInput): boolean {
-  const normalizedEvidence = normalizeForSupport(evidence);
-  if (!normalizedEvidence) return false;
-
-  const supportTexts = [
-    ...input.evidence,
-    ...input.subjectCandidates,
-    ...input.dispositionHints,
-    ...input.facts.recentFileBasenames,
-    ...input.facts.recentToolNames,
-    ...input.facts.recentCommandFailures,
-    ...input.facts.attentionTitles,
-    ...input.facts.conflictTitles,
-    ...(input.facts.recentTranscriptMessages ?? []),
-    ...input.facts.recentEvents.map((event) => event.summary)
-  ]
-    .map(normalizeForSupport)
-    .filter((value): value is string => Boolean(value));
-
-  if (supportTexts.some((support) => support.includes(normalizedEvidence) || normalizedEvidence.includes(support))) return true;
-
-  const evidenceTokens = supportTokens(normalizedEvidence);
-  if (evidenceTokens.length === 0) return false;
-  const supportTokenSet = new Set(supportTexts.flatMap(supportTokens));
-  const matchingTokens = evidenceTokens.filter((token) => supportTokenSet.has(token)).length;
-  return matchingTokens >= Math.max(2, Math.ceil(evidenceTokens.length * 0.6));
-}
-
-function hasUnsupportedClaim(frame: BoardHeadlineFrame, input: BoardHeadlineInput): boolean {
-  const text = `${frame.subject} ${frame.disposition}`.toLowerCase();
-  if (/\b(?:you|your)\b/.test(text)) return true;
-  if (/\bapproval|approve|approved\b/.test(text) && !input.signals.includes("approval_waiting") && input.primaryStatus !== "waiting_for_approval") {
-    return true;
+function safeTranscriptExcerpt(
+  values: Array<{ role: "user" | "assistant"; text: string }>,
+  limit: number
+): Array<{ role: "user" | "assistant"; text: string }> {
+  const result: Array<{ role: "user" | "assistant"; text: string }> = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const cleaned = safeString(value.text);
+    if (!cleaned) continue;
+    const key = `${value.role}:${cleaned.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({
+      role: value.role,
+      text: cleaned
+    });
+    if (result.length >= limit) break;
   }
-  if (/\b(?:completed|complete|finished|done|ready for review)\b/.test(text) && input.stateHint !== "completed") {
-    return true;
-  }
-  return false;
+  return result;
 }
-
-function normalizeForSupport(value: string): string | undefined {
-  const normalized = value
-    .toLowerCase()
-    .replace(/[^a-z0-9._ -]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return normalized || undefined;
-}
-
-function supportTokens(value: string): string[] {
-  return value
-    .split(/[^a-z0-9]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 3 && !supportStopWords.has(token));
-}
-
-const supportStopWords = new Set([
-  "and",
-  "are",
-  "around",
-  "before",
-  "for",
-  "from",
-  "into",
-  "now",
-  "the",
-  "this",
-  "that",
-  "with"
-]);
 
 function safeStrings(values: string[], limit: number): string[] {
   const result: string[] = [];

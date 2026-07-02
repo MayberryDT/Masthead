@@ -4,7 +4,8 @@ import {
   type BoardHeadlineView
 } from "./boardHeadlineFrame.ts";
 import type { BoardHeadlineInput } from "./boardHeadlineInput.ts";
-import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView } from "./offlineBoardHeadline.ts";
+import { boardHeadlineRefreshKey } from "./boardHeadlineRefreshKey.ts";
+import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView, buildWaitingForTranscriptBoardHeadlineView } from "./offlineBoardHeadline.ts";
 import {
   rewriteBoardHeadlineFrameWithOpenAI,
   type OpenAIBoardHeadlineFrameResult
@@ -21,6 +22,7 @@ export type BoardHeadlineEnricherConfig = {
   timeoutMs?: number;
   now?: () => Date;
   onFrameApplied?: (event: BoardHeadlineAppliedEvent) => void;
+  onGenerationFinished?: (event: BoardHeadlineGenerationFinishedEvent) => void;
 };
 
 export type BoardHeadlineAppliedEvent = {
@@ -32,8 +34,27 @@ export type BoardHeadlineAppliedEvent = {
   generatedAt: string;
 };
 
+export type BoardHeadlineGenerationFinishedEvent = {
+  sessionId: string;
+  input: BoardHeadlineInput;
+  provider: string;
+  model: string;
+  refreshKey: string;
+  requestedAt: string;
+  completedAt: string;
+  status: "success" | OpenAIBoardHeadlineFrameResult["status"];
+  frame?: BoardHeadlineFrame;
+  headline?: BoardHeadlineView;
+  failureMessage?: string;
+  latencyMs?: number;
+};
+
+export type BoardHeadlineEnrichProjectionOptions = {
+  refreshIntervalMs?: number;
+};
+
 export type BoardHeadlineEnricher = {
-  enrichProjection(projection: LiveBoardProjection): Promise<LiveBoardProjection>;
+  enrichProjection(projection: LiveBoardProjection, options?: BoardHeadlineEnrichProjectionOptions): Promise<LiveBoardProjection>;
   status(): { enabled: boolean; configured: boolean; model: string };
 };
 
@@ -52,6 +73,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
   const inFlight = new Map<CacheKey, Promise<void>>();
   const pendingSessionIds = new Map<CacheKey, Set<string>>();
   const appliedSessionIds = new Map<CacheKey, Set<string>>();
+  const lastRequestedAtBySession = new Map<string, number>();
 
   function status() {
     return {
@@ -61,9 +83,15 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
     };
   }
 
-  async function enrichProjection(projection: LiveBoardProjection): Promise<LiveBoardProjection> {
+  async function enrichProjection(
+    projection: LiveBoardProjection,
+    options: BoardHeadlineEnrichProjectionOptions = {}
+  ): Promise<LiveBoardProjection> {
     const currentStatus = status();
-    const generatedAt = nowIso(config.now);
+    const projectionNow = config.now?.() ?? new Date();
+    const generatedAt = projectionNow.toISOString();
+    const nowMs = projectionNow.getTime();
+    const requestCooldownMs = effectiveHeadlineRequestCooldownMs(options.refreshIntervalMs);
     const overlays = new Map<string, BoardHeadlineView>();
     const refreshOverlays = new Map<string, BoardHeadlineRefreshState>();
     const countedFailedKeys = new Set<CacheKey>();
@@ -92,7 +120,19 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
         continue;
       }
 
-      const key = cacheKey(model, input);
+      const key = boardHeadlineRefreshKey(model, input);
+      if (!key) {
+        overlays.set(card.sessionId, retained ?? buildWaitingForTranscriptBoardHeadlineView(input));
+        refreshOverlays.set(card.sessionId, {
+          provider: "openai",
+          model,
+          requestedAt: generatedAt,
+          status: "pending"
+        });
+        summary.pending += 1;
+        continue;
+      }
+
       const cached = completed.get(key);
 
       if (cached) {
@@ -134,7 +174,12 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
           status: "pending"
         });
       }
+      const canRequestNow = requestAllowedForSession(lastRequestedAtBySession, card.sessionId, nowMs, requestCooldownMs);
+      if (!canRequestNow && !isFinalRefreshCard(card)) {
+        continue;
+      }
       if (!inFlight.has(key)) {
+        lastRequestedAtBySession.set(card.sessionId, nowMs);
         inFlight.set(key, requestHeadline(input, key, card.sessionId));
         summary.requested += 1;
       }
@@ -154,6 +199,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
   }
 
   async function requestHeadline(input: BoardHeadlineInput, key: CacheKey, sessionId: string): Promise<void> {
+    const requestedAt = nowIso(config.now);
     try {
       const result = await rewriteBoardHeadlineFrameWithOpenAI(input, {
         enabled: true,
@@ -163,7 +209,9 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
         timeoutMs: config.timeoutMs
       });
 
-      const view = viewFromOpenAIResult(result, model, nowIso(config.now));
+      const completedAt = nowIso(config.now);
+      const view = viewFromOpenAIResult(result, model, completedAt);
+      emitGenerationFinished(key, sessionId, input, result, view, requestedAt, completedAt);
       if (view) {
         completed.set(key, view);
         failures.delete(key);
@@ -178,6 +226,18 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
         failureMessage: error instanceof Error ? error.message : "OpenAI board headline frame request failed.",
         status: "api_error"
       });
+      emitGenerationFinished(
+        key,
+        sessionId,
+        input,
+        {
+          failureMessage: error instanceof Error ? error.message : "OpenAI board headline frame request failed.",
+          status: "api_error"
+        },
+        undefined,
+        requestedAt,
+        nowIso(config.now)
+      );
       // Keep configured LLM mode pending on failures; do not synthesize offline copy here.
     } finally {
       pendingSessionIds.delete(key);
@@ -211,6 +271,34 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       generatedAt: view.generatedAt
     });
     sessionIds.add(sessionId);
+  }
+
+  function emitGenerationFinished(
+    key: CacheKey,
+    sessionId: string,
+    input: BoardHeadlineInput,
+    result: OpenAIBoardHeadlineFrameResult,
+    view: ReadyLLMBoardHeadlineView | undefined,
+    requestedAt: string,
+    completedAt: string
+  ): void {
+    const sessionIds = pendingSessionIds.get(key) ?? new Set([sessionId]);
+    for (const pendingSessionId of sessionIds) {
+      config.onGenerationFinished?.({
+        completedAt,
+        failureMessage: result.failureMessage,
+        frame: result.frame,
+        headline: view,
+        input,
+        latencyMs: result.latencyMs,
+        model,
+        provider: "openai",
+        refreshKey: key,
+        requestedAt,
+        sessionId: pendingSessionId,
+        status: result.status === "llm" ? "success" : result.status
+      });
+    }
   }
 
   return {
@@ -314,8 +402,6 @@ function refreshStatusFromOpenAI(status: OpenAIBoardHeadlineFrameResult["status"
       return "timeout";
     case "invalid_output":
       return "invalid_output";
-    case "validation_failed":
-      return "validation_failed";
     case "not_configured":
       return "not_configured";
     case "api_error":
@@ -325,12 +411,22 @@ function refreshStatusFromOpenAI(status: OpenAIBoardHeadlineFrameResult["status"
   }
 }
 
-function cacheKey(model: string, input: BoardHeadlineInput): CacheKey {
-  return JSON.stringify({ model, input });
+function effectiveHeadlineRequestCooldownMs(refreshIntervalMs: number | undefined): number {
+  if (!Number.isFinite(refreshIntervalMs)) return 10_000;
+  return Math.max(5_000, Math.min(60_000, Number(refreshIntervalMs)));
 }
 
 function nowIso(now: BoardHeadlineEnricherConfig["now"]): string {
   return (now?.() ?? new Date()).toISOString();
+}
+
+function requestAllowedForSession(lastRequestedAtBySession: Map<string, number>, sessionId: string, nowMs: number, cooldownMs: number): boolean {
+  const lastRequestedAt = lastRequestedAtBySession.get(sessionId);
+  return lastRequestedAt === undefined || nowMs - lastRequestedAt >= cooldownMs;
+}
+
+function isFinalRefreshCard(card: SessionCardView): boolean {
+  return card.lifecycle === "ended";
 }
 
 function isBoardHeadlineInput(value: unknown): value is BoardHeadlineInput {

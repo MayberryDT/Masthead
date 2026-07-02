@@ -545,6 +545,65 @@ describe("progressive Codex imports", () => {
     expect(countWhere(daemon.database, "model_usage", "total_tokens IS NOT NULL")).toBe(2);
   });
 
+  test("tails visible hook transcriptPath rows during projection refresh", async () => {
+    const { daemon, codexRoot } = await createTestHarness();
+    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "projection-tail-session.jsonl");
+    await writeJsonl(transcriptPath, [
+      {
+        type: "session_meta",
+        timestamp: "2026-06-25T12:00:00.000Z",
+        payload: {
+          session_id: "projection-tail-session",
+          cwd: "/home/tyler/Documents/Masthead",
+          model: "gpt-5"
+        }
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-06-25T12:00:30.000Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Refresh the board headline from transcript text." }]
+        }
+      }
+    ]);
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    await ingestHook(baseUrl, {
+      event: "session_started",
+      model: "gpt-5",
+      provider_event_id: "projection-tail-session-start-1",
+      session_id: "projection-tail-session",
+      timestamp: "2026-06-25T12:00:00.000Z",
+      title: "Projection tail session",
+      transcriptPath
+    });
+    const sessionId = sessionIdFor(daemon.database, "projection-tail-session");
+    await waitFor(() => countWhere(daemon.database, "messages", "session_id = ? AND role = 'user'", sessionId) === 1);
+
+    await delay(1100);
+    const original = await readFile(transcriptPath, "utf8");
+    await writeFile(
+      transcriptPath,
+      `${original}${JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-06-25T12:01:00.000Z",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "I updated the board headline using the newest transcript rows." }]
+        }
+      })}\n`,
+      "utf8"
+    );
+
+    const response = await fetch(`${baseUrl}/projection?refreshIntervalMs=5000`, { headers: { accept: "application/json" } });
+    expect(response.status).toBe(200);
+    await waitFor(() => countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId) === 1);
+  });
+
   test("does not import hook transcriptPath before transcript import approval", async () => {
     const { daemon, codexRoot } = await createTestHarness();
     const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "unapproved-token-session.jsonl");
@@ -887,6 +946,10 @@ function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => {
     setImmediate(() => resolve());
   });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function countRows(database: MastheadDaemon["database"], table: string): number {
