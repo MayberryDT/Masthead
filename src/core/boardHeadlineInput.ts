@@ -1,5 +1,5 @@
-import type { BoardLiveCopyFacts } from "./boardLiveCopyFacts";
-import type { BoardHeadlineState } from "./boardHeadlineFrame";
+import type { BoardLiveCopyFacts } from "./boardLiveCopyFacts.ts";
+import type { BoardHeadlineState } from "./boardHeadlineFrame.ts";
 
 export type BoardHeadlineSignal =
   | "approval_waiting"

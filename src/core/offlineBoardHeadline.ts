@@ -1,11 +1,11 @@
-import type { BoardHeadlineInput } from "./boardHeadlineInput";
+import type { BoardHeadlineInput } from "./boardHeadlineInput.ts";
 import {
   renderBoardHeadlineFrame,
   validateBoardHeadlineFrame,
   type BoardHeadlineFrame,
   type BoardHeadlineSubjectKind,
   type BoardHeadlineView
-} from "./boardHeadlineFrame";
+} from "./boardHeadlineFrame.ts";
 
 export function buildPendingBoardHeadlineView(_input: BoardHeadlineInput): BoardHeadlineView {
   return {

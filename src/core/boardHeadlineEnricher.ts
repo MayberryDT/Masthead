@@ -2,14 +2,14 @@ import {
   renderBoardHeadlineFrame,
   type BoardHeadlineFrame,
   type BoardHeadlineView
-} from "./boardHeadlineFrame";
-import type { BoardHeadlineInput } from "./boardHeadlineInput";
-import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView } from "./offlineBoardHeadline";
+} from "./boardHeadlineFrame.ts";
+import type { BoardHeadlineInput } from "./boardHeadlineInput.ts";
+import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView } from "./offlineBoardHeadline.ts";
 import {
   rewriteBoardHeadlineFrameWithOpenAI,
   type OpenAIBoardHeadlineFrameResult
-} from "./openaiBoardHeadlineFrame";
-import type { LiveBoardProjection, SessionCardView, SessionDetailView, ExpandedSessionView } from "./types";
+} from "./openaiBoardHeadlineFrame.ts";
+import type { LiveBoardProjection, SessionCardView, SessionDetailView, ExpandedSessionView } from "./types.ts";
 
 export const DEFAULT_MODEL = "gpt-5-nano-2025-08-07";
 

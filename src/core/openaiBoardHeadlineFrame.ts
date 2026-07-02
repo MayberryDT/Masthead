@@ -1,5 +1,5 @@
-import { isUnsafeText, validateBoardHeadlineFrame, type BoardHeadlineFrame } from "./boardHeadlineFrame";
-import type { BoardHeadlineInput, BoardHeadlineSignal } from "./boardHeadlineInput";
+import { isUnsafeText, validateBoardHeadlineFrame, type BoardHeadlineFrame } from "./boardHeadlineFrame.ts";
+import type { BoardHeadlineInput, BoardHeadlineSignal } from "./boardHeadlineInput.ts";
 
 export type OpenAIBoardHeadlineFrameStatus =
   | "llm"
