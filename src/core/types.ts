@@ -32,7 +32,7 @@ export type NormalizedEvent = {
   eventId: string;
   sessionId?: string;
   source: {
-    adapter: "codex" | "git" | "masthead";
+    adapter: string;
     surface: "hook" | "fixture" | "observer" | "user";
     sourceEventId?: string;
   };

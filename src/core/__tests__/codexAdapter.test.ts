@@ -165,6 +165,42 @@ describe("codex hook adapter", () => {
     expect(JSON.stringify(event)).not.toContain("Success. Updated");
   });
 
+  test("keeps Codex transcript pointers and compact summaries available for live facts", () => {
+    const rawAssistantMessage =
+      "Implemented /workspace/masthead/src/private.ts and ran npm test -- --run src/private.test.ts. Tests are still failing in /workspace/masthead/src/private.ts.";
+    const event = normalizeCodexHookPayload(
+      {
+        hookEventName: "Stop",
+        sessionId: "codex-session-live-facts",
+        timestamp: "2026-07-02T12:01:00.000Z",
+        cwd: "/workspace/masthead",
+        lastAssistantMessage: rawAssistantMessage,
+        transcriptPath: "/home/tyler/.codex/sessions/2026/07/02/live-facts.jsonl"
+      },
+      { receivedAt: "2026-07-02T12:01:00.100Z" }
+    );
+    const latestFeedbackSnapshot = event.payload.latestFeedbackSnapshot as { text?: unknown } | undefined;
+
+    expect(event.type).toBe("session.completed");
+    expect(event.payload).toMatchObject({
+      latestFeedbackSnapshot: {
+        claims: expect.arrayContaining(["claims_complete", "mentions_tests", "mentions_error"])
+      },
+      lastAssistantMessageSummary: {
+        redacted: true,
+        stored: false
+      },
+      transcriptPath: "/home/tyler/.codex/sessions/2026/07/02/live-facts.jsonl"
+    });
+    expect(event.payload.lastAssistantMessage).toBeUndefined();
+    expect(latestFeedbackSnapshot?.text).toEqual(expect.any(String));
+    expect(latestFeedbackSnapshot?.text).not.toBe("");
+    expect(JSON.stringify(event)).not.toContain(rawAssistantMessage);
+    expect(latestFeedbackSnapshot?.text).not.toContain(rawAssistantMessage);
+    expect(latestFeedbackSnapshot?.text).not.toContain("/workspace/masthead/src/private.ts");
+    expect(latestFeedbackSnapshot?.text).not.toContain("src/private.test.ts");
+  });
+
   test("normalizes real Stop hooks without storing the last assistant message", () => {
     const event = normalizeCodexHookPayload(
       {
