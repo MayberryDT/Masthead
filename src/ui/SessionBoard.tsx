@@ -49,7 +49,12 @@ export function SessionBoard({
     if (!previousSignatures) return new Map<string, number>();
 
     const updatedSessionIds = cards
-      .filter((card) => previousSignatures.has(card.sessionId) && previousSignatures.get(card.sessionId) !== semanticHeadlineSignature(card))
+      .filter(
+        (card) =>
+          shouldAnimateHeadlineChange(card) &&
+          previousSignatures.has(card.sessionId) &&
+          previousSignatures.get(card.sessionId) !== semanticHeadlineSignature(card)
+      )
       .map((card) => card.sessionId);
     return new Map(updatedSessionIds.map((sessionId, index) => [sessionId, index]));
   }, [cards]);
@@ -60,6 +65,7 @@ export function SessionBoard({
 
     const pulsedSessionIds = cards
       .filter((card) => {
+        if (!shouldAnimateHeadlineChange(card)) return false;
         if (!previousSemanticSignatures.has(card.sessionId)) return false;
         if (previousSemanticSignatures.get(card.sessionId) !== semanticHeadlineSignature(card)) return false;
         const nextRefreshSignature = refreshPulseSignature(card);
@@ -336,6 +342,10 @@ function semanticHeadlineSignature(card: SessionCardView): string {
 
 function refreshPulseSignature(card: SessionCardView): string {
   return card.headlineRefresh?.status === "success" ? card.headlineRefresh.requestedAt : "";
+}
+
+function shouldAnimateHeadlineChange(card: SessionCardView): boolean {
+  return card.lifecycle === "running";
 }
 
 function laneDescription(laneId: LifecycleLaneView["laneId"]): string {

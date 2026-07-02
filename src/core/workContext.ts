@@ -6,6 +6,7 @@ type DeriveWorkContextInput = {
   events: NormalizedEvent[];
   gitSnapshots: GitSnapshot[];
   latestFeedbackSignal?: LatestFeedbackSignal;
+  recentTranscriptMessages?: string[];
 };
 
 const GENERIC_TITLES = new Set(["codex session", "untitled session", "session"]);
@@ -15,6 +16,16 @@ export function deriveWorkContext(input: DeriveWorkContextInput): WorkAreaContex
   const titleMatch = labelFromTitle(input.title);
   if (titleMatch) {
     return context(titleMatch.label, "title", clusters, [`title:${titleMatch.signal}`]);
+  }
+
+  const specificTranscriptMatch = labelFromSpecificText(input.recentTranscriptMessages ?? []);
+  if (specificTranscriptMatch) {
+    return context(specificTranscriptMatch.label, "event_summary", clusters, [`event:${specificTranscriptMatch.signal}`]);
+  }
+
+  const specificEventMatch = labelFromSpecificEvents(input.events);
+  if (specificEventMatch) {
+    return context(specificEventMatch.label, "event_summary", clusters, [`event:${specificEventMatch.signal}`]);
   }
 
   const clusterLabel = labelFromClusters(clusters);
@@ -75,12 +86,29 @@ function labelFromClusters(clusters: string[]): string | undefined {
 }
 
 function labelFromEvents(events: NormalizedEvent[]): { label: string; signal: string } | undefined {
-  const summaries = events.slice(-3).map((event) => event.summary).join(" ");
+  const summaries = recentEventSummaries(events);
   if (!summaries || !isSafeCategorizationSource(summaries)) return undefined;
   if (/test|verification/i.test(summaries)) return { label: "Test work", signal: "tests" };
   if (/auth|oauth/i.test(summaries)) return { label: "Auth work", signal: "auth" };
   if (/ui|component|screen/i.test(summaries)) return { label: "UI work", signal: "ui" };
   return undefined;
+}
+
+function labelFromSpecificEvents(events: NormalizedEvent[]): { label: string; signal: string } | undefined {
+  return labelFromSpecificText([recentEventSummaries(events)]);
+}
+
+function labelFromSpecificText(values: string[]): { label: string; signal: string } | undefined {
+  const summaries = values.map((value) => value.trim()).filter(Boolean).slice(-3).join(" ");
+  if (!summaries || !isSafeCategorizationSource(summaries)) return undefined;
+  if (/\bheadline/i.test(summaries) && /\b(board|session card|card)\b/i.test(summaries)) {
+    return { label: "Board headline work", signal: "headline" };
+  }
+  return undefined;
+}
+
+function recentEventSummaries(events: NormalizedEvent[]): string {
+  return events.slice(-3).map((event) => event.summary).join(" ");
 }
 
 function labelFromFeedback(signal: LatestFeedbackSignal | undefined): { label: string; signal: string } | undefined {

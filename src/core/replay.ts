@@ -229,7 +229,8 @@ function toCard(
     branchOrWorktree,
     events: sessionEvents,
     gitSnapshots: sessionSnapshots,
-    latestFeedbackSignal: feedbackSignal
+    latestFeedbackSignal: feedbackSignal,
+    recentTranscriptMessages: transcriptFacts?.recentMessages.map((message) => message.text)
   });
 
   const card = {

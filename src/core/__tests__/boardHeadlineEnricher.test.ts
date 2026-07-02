@@ -383,6 +383,49 @@ describe("board headline enricher", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  test("does not request a replacement headline for ended cards that already have LLM copy", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const readyHeadline: BoardHeadlineView = {
+      headline: "Board headlines: structured around subject and disposition.",
+      frame: validFrame(),
+      source: "llm",
+      status: "ready",
+      generatedAt: "2026-07-01T12:00:00.000Z",
+      model: "gpt-5-nano-2025-08-07",
+      provider: "openai"
+    };
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+
+    const result = await enricher.enrichProjection(
+      projection([
+        card({
+          lifecycle: "ended",
+          primaryStatus: "completed_unreviewed",
+          headline: readyHeadline,
+          headlineInput: input({
+            lifecycle: "ended",
+            primaryStatus: "completed_unreviewed",
+            stateHint: "completed",
+            facts: {
+              ...input().facts,
+              lifecycle: "ended",
+              primaryStatus: "completed_unreviewed",
+              recentTranscriptMessages: ["A later projection has terminal session details."]
+            }
+          })
+        })
+      ])
+    );
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.cards[0]?.headline).toBe(readyHeadline);
+    expect(result.cards[0]?.headlineRefresh).toBeUndefined();
+    expect(result.headlineRefreshSummary).toMatchObject({
+      requested: 0,
+      pending: 0
+    });
+  });
+
   test("requests a new headline when transcript evidence changes", async () => {
     const first = deferred<Response>();
     const second = deferred<Response>();

@@ -652,6 +652,36 @@ describe("observability session card", () => {
     }
   });
 
+  test("does not run headline swap animation for idle cards", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const original = boardSession({
+      sessionId: "session-idle",
+      lifecycle: "ended",
+      primaryStatus: "completed_unreviewed",
+      headline: headlineView("Idle old headline")
+    });
+    const updated = boardHeadline(original, "Idle updated headline");
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={[original]} variant="observability" />);
+      });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[updated]} variant="observability" />);
+      });
+
+      const card = container.querySelector<HTMLElement>(".session-card");
+      const headline = card?.querySelector<HTMLElement>(".headline");
+      expect(card?.classList.contains("is-headline-refreshing")).toBe(false);
+      expect(headline?.querySelector(".headline-previous")).toBeNull();
+      expect(headline?.querySelector(".headline-current")?.textContent).toBe("Idle updated headline");
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
   test("uses a refresh pulse for same-text headline refreshes", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);

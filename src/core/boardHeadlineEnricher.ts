@@ -148,6 +148,11 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
         continue;
       }
 
+      if (!shouldRequestHeadlineForCard(card)) {
+        if (retained) overlays.set(card.sessionId, retained);
+        continue;
+      }
+
       trackPendingSession(key, card.sessionId);
 
       const failure = failures.get(key);
@@ -175,7 +180,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
         });
       }
       const canRequestNow = requestAllowedForSession(lastRequestedAtBySession, card.sessionId, nowMs, requestCooldownMs);
-      if (!canRequestNow && !isFinalRefreshCard(card)) {
+      if (!canRequestNow) {
         continue;
       }
       if (!inFlight.has(key)) {
@@ -425,8 +430,8 @@ function requestAllowedForSession(lastRequestedAtBySession: Map<string, number>,
   return lastRequestedAt === undefined || nowMs - lastRequestedAt >= cooldownMs;
 }
 
-function isFinalRefreshCard(card: SessionCardView): boolean {
-  return card.lifecycle === "ended";
+function shouldRequestHeadlineForCard(card: SessionCardView): boolean {
+  return card.lifecycle === "running";
 }
 
 function isBoardHeadlineInput(value: unknown): value is BoardHeadlineInput {

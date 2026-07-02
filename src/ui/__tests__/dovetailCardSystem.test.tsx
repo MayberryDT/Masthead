@@ -157,6 +157,7 @@ describe("dovetail card system", () => {
     const liveTierRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.tier-live");
     const actionTierRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.tier-action");
     const headlineRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .headline");
+    const headlineTextRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .headline-text");
     const signalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .bottom-signal");
     const signalBeforeRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .bottom-signal::before");
     const bottomSignalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card .bottom-signal");
@@ -196,6 +197,8 @@ describe("dovetail card system", () => {
     expect(actionTierRule).toContain("--state: var(--red);");
     expect(actionTierRule).toContain("--state-border: rgba(255, 72, 62, 0.44);");
     expect(headlineRule).toContain("overflow: hidden;");
+    expect(headlineTextRule).toContain("-webkit-line-clamp: 3;");
+    expect(headlineTextRule).toContain("overflow: hidden;");
     expect(prototypeDovetailCardRule).toContain("clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), 72% calc(100% - 6px), 67% 100%, 33% 100%, 28% calc(100% - 6px), 0 calc(100% - 6px));");
     expect(prototypeDovetailRule).toContain("height: 10px;");
     expect(prototypeDovetailRule).toContain("clip-path: polygon(0 0, 28% 0, 33% 60%, 67% 60%, 72% 0, 100% 0, 100% 100%, 0 100%);");
