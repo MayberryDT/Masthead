@@ -124,7 +124,11 @@ describe("Live Board projection", () => {
       ["history", ["history-session"]]
     ]);
     expect(board.lanes!.map((lane) => lane.laneId)).not.toContain("ended_review");
-    expect(board.cards.every((card) => card.headline.headline.length > 0 && card.headline.source === "offline" && card.headline.status === "ready")).toBe(true);
+    expect(
+      board.cards.every(
+        (card) => card.headline.headline.length > 0 && card.headline.source === "pending" && card.headlineInput !== undefined
+      )
+    ).toBe(true);
   });
 
   test("keeps running sessions in Running even when they need attention", () => {
@@ -241,8 +245,8 @@ describe("Live Board projection", () => {
     expect(board.cards[0]).toMatchObject({
       title: "Masthead UI work",
       headline: {
-        source: "offline",
-        status: "ready"
+        source: "pending",
+        status: "pending"
       },
       workContext: {
         label: "UI work"
@@ -278,8 +282,8 @@ describe("Live Board projection", () => {
     expect(board.cards[0]).toMatchObject({
       title: "Masthead UI work",
       headline: {
-        source: "offline",
-        status: "ready"
+        source: "pending",
+        status: "pending"
       }
     });
   });
@@ -312,8 +316,8 @@ describe("Live Board projection", () => {
     expect(board.cards[0]).toMatchObject({
       title: "Masthead UI work",
       headline: {
-        source: "offline",
-        status: "ready"
+        source: "pending",
+        status: "pending"
       }
     });
     expect(board.cards[0]?.headline.headline).not.toMatch(/codex hook event/i);
@@ -346,8 +350,8 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]).toMatchObject({
       headline: {
-        source: "offline",
-        status: "ready"
+        source: "pending",
+        status: "pending"
       }
     });
   });
@@ -383,8 +387,8 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]).toMatchObject({
       headline: {
-        source: "offline",
-        status: "ready"
+        source: "pending",
+        status: "pending"
       }
     });
     expect((board.cards[0]?.headlineInput as { evidence?: string[] } | undefined)?.evidence).toContain(
@@ -417,7 +421,7 @@ describe("Live Board projection", () => {
       }
     );
 
-    expect(board.cards[0]?.headline.source).toBe("offline");
+    expect(board.cards[0]?.headline.source).toBe("pending");
     expect(board.cards[0]?.headline.headline).not.toContain("patched has recent");
   });
 
@@ -453,8 +457,8 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]?.title).toBe("Live card copy work");
     expect(board.cards[0]?.headline).toMatchObject({
-      source: "offline",
-      status: "ready"
+      source: "pending",
+      status: "pending"
     });
     expect(JSON.stringify(board.cards[0])).not.toMatch(/\bmcp\b/i);
   });
@@ -491,8 +495,8 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]?.title).toBe("Masthead");
     expect(board.cards[0]?.headline).toMatchObject({
-      source: "offline",
-      status: "ready"
+      source: "pending",
+      status: "pending"
     });
     expect(JSON.stringify(board.cards[0])).not.toMatch(/\bmcp\b/i);
   });
@@ -924,7 +928,7 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]?.workContext?.label).toBe("OAuth callback work");
     expect(board.cards[0]?.latestFeedbackSignal?.claims).toContain("claims_complete");
-    expect(board.cards[0]?.headline).toMatchObject({ source: "offline", status: "ready" });
+    expect(board.cards[0]?.headline).toMatchObject({ source: "pending", status: "pending" });
     expect((board.cards[0]?.headlineInput as { dispositionHints?: string[] } | undefined)?.dispositionHints).toContain(
       "Implementation is complete, but auth tests are still failing."
     );
@@ -970,7 +974,7 @@ describe("Live Board projection", () => {
     expect((board.cards[0]?.headlineInput as { dispositionHints?: string[] } | undefined)?.dispositionHints).toContain(
       "Live session cards no longer receive demo harness or model telemetry."
     );
-    expect(board.cards[0]?.headline.source).toBe("offline");
+    expect(board.cards[0]?.headline.source).toBe("pending");
   });
 
   test("skips dangling transition bullets when summarizing latest feedback", () => {
@@ -1001,7 +1005,7 @@ describe("Live Board projection", () => {
     expect((board.cards[0]?.headlineInput as { dispositionHints?: string[] } | undefined)?.dispositionHints).toContain(
       "The main grid now shows active sessions and recent idle sessions."
     );
-    expect(board.cards[0]?.headline.source).toBe("offline");
+    expect(board.cards[0]?.headline.source).toBe("pending");
   });
 
   test("turns redacted slash markers into natural language in latest feedback summaries", () => {

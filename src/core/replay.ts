@@ -121,7 +121,7 @@ export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOp
         expandedSessionId,
         options.sessionEnrichments?.get(session.sessionId),
         options.sessionTranscriptFacts?.get(session.sessionId),
-        options.headlineMode ?? "offline"
+        options.headlineMode ?? "llm"
       );
     })
     .sort((a, b) => a.priorityRank - b.priorityRank || a.project.localeCompare(b.project));
@@ -189,7 +189,7 @@ function toCard(
   expandedSessionId?: string,
   enrichment?: LiveSessionEnrichment,
   transcriptFacts?: LiveSessionTranscriptFacts,
-  headlineMode: "llm" | "offline" = "offline"
+  headlineMode: "llm" | "offline" = "llm"
 ): SessionCardView {
   const indicators: SessionCardView["indicators"] = [];
   if (sessionAttention.length > 0) indicators.push("attention");

@@ -94,11 +94,10 @@ function card(overrides: Partial<SessionCardView> = {}): SessionCardView {
     sessionId: "session-1",
     project: "App",
     title: "Session title",
-    copy: {
-      headline: "Session activity",
-      status: "Work is active.",
-      reason: "This session is active.",
-      source: "deterministic"
+    headline: {
+      headline: "Generating headline...",
+      source: "pending",
+      status: "pending"
     },
     stateLabel: "Running",
     primaryStatus: "editing",

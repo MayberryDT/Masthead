@@ -3,7 +3,7 @@ import { normalizeCodexHookPayload } from "../codexAdapter";
 import { projectLiveEvents } from "../liveProjection";
 
 describe("live projection", () => {
-  test("projects pending Board headlines in LLM mode", () => {
+  test("projects pending Board headlines by default and in LLM mode", () => {
     const started = normalizeCodexHookPayload(
       {
         provider_event_id: "llm-headline-start",
@@ -17,6 +17,9 @@ describe("live projection", () => {
       { receivedAt: "2026-06-23T03:00:00.010Z" }
     );
 
+    const defaultEnvelope = projectLiveEvents([started], [], {
+      generatedAt: "2026-06-23T03:01:00.000Z"
+    });
     const envelope = projectLiveEvents([started], [], {
       generatedAt: "2026-06-23T03:01:00.000Z",
       headlineMode: "llm"
@@ -24,6 +27,11 @@ describe("live projection", () => {
 
     const card = envelope.projection.cards[0];
 
+    expect(defaultEnvelope.projection.cards[0]?.headline).toEqual({
+      headline: "Generating headline...",
+      source: "pending",
+      status: "pending"
+    });
     expect(card?.headline).toEqual({
       headline: "Generating headline...",
       source: "pending",

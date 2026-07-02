@@ -45,7 +45,7 @@ export function projectLiveEvents(
       expandedSessionId: options.expandedSessionId,
       sessionEnrichments: normalizeLiveSessionEnrichments(options.sessionEnrichments),
       sessionTranscriptFacts: options.sessionTranscriptFacts,
-      headlineMode: options.headlineMode ?? "offline",
+      headlineMode: options.headlineMode ?? "llm",
       selectedSessionId,
       now: new Date(generatedAt)
     })
