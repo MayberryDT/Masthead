@@ -1,10 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 import { toBoardHeadlineInput } from "../boardHeadlineInput";
-import type { BoardLiveCopyFacts } from "../boardLiveCopyFacts";
+import type { BoardHeadlineFacts } from "../boardHeadlineFacts";
 import { rewriteBoardHeadlineFrameWithOpenAI } from "../openaiBoardHeadlineFrame";
 import type { BoardHeadlineFrame } from "../boardHeadlineFrame";
 
-function facts(overrides: Partial<BoardLiveCopyFacts> = {}): BoardLiveCopyFacts {
+function facts(overrides: Partial<BoardHeadlineFacts> = {}): BoardHeadlineFacts {
   return {
     sessionId: "session-1",
     project: "Masthead",

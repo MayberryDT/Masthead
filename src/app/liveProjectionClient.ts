@@ -2,7 +2,7 @@ import type { LiveProjectionEnvelope } from "../core/liveProjection";
 import { buildBoardBrief } from "../core/boardBrief";
 import { toBoardHeadlineInput, type BoardHeadlineSignal } from "../core/boardHeadlineInput";
 import { validateBoardHeadlineFrame, renderBoardHeadlineFrame, type BoardHeadlineView } from "../core/boardHeadlineFrame";
-import { buildBoardLiveCopyFacts } from "../core/boardLiveCopyFacts";
+import { buildBoardHeadlineFacts } from "../core/boardHeadlineFacts";
 import { buildOfflineBoardHeadlineView } from "../core/offlineBoardHeadline";
 import type {
   AttentionItem,
@@ -224,7 +224,7 @@ function normalizeCardHeadline<T extends SessionCardView | SessionDetailView>(
     lifecycle: baseCard.lifecycle,
     primaryStatus: baseCard.primaryStatus,
     signals: headlineSignals(baseCard, attentionItems, conflicts),
-    facts: buildBoardLiveCopyFacts({
+    facts: buildBoardHeadlineFacts({
       card: baseCard,
       events: [],
       gitSnapshots: [],

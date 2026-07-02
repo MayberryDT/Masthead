@@ -73,10 +73,10 @@ describe("board headline frame contract", () => {
     });
   });
 
-  test("allows concrete OpenAI live copy refresh frame", () => {
+  test("allows concrete OpenAI board headline refresh frame", () => {
     const result = validateBoardHeadlineFrame(
       frame({
-        subject: "OpenAI live copy refresh",
+        subject: "OpenAI board headline refresh",
         disposition: "scheduled in the background without blocking Board projection"
       })
     );

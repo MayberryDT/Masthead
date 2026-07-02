@@ -41,7 +41,7 @@ describe("daemon config", () => {
     expect(config.hookTranscriptCatchupEnabled).toBe(false);
   });
 
-  test("enables GPT-5 Nano live copy by default when an OpenAI key is present", () => {
+  test("enables GPT-5 Nano live headline by default when an OpenAI key is present", () => {
     const config = daemonConfigFromEnv({ OPENAI_API_KEY: "sk-test" });
 
     expect(config.llmCopyEnabled).toBe(true);
@@ -50,7 +50,7 @@ describe("daemon config", () => {
     expect(config.openaiModel).toBeUndefined();
   });
 
-  test("allows an explicit environment flag to disable live copy even when a key is present", () => {
+  test("allows an explicit environment flag to disable live headline even when a key is present", () => {
     const config = daemonConfigFromEnv({ MASTHEAD_LLM_COPY: "0", OPENAI_API_KEY: "sk-test" });
 
     expect(config.llmCopyEnabled).toBe(false);
@@ -58,7 +58,7 @@ describe("daemon config", () => {
     expect(config.remoteEnrichmentEnabled).toBe(false);
   });
 
-  test("splits live copy from durable remote enrichment flags", () => {
+  test("splits live headline from durable remote enrichment flags", () => {
     const keyOnly = daemonConfigFromEnv({ OPENAI_API_KEY: "sk-test" });
     expect(keyOnly.liveCopyEnabled).toBe(true);
     expect(keyOnly.remoteEnrichmentEnabled).toBe(false);
@@ -93,7 +93,7 @@ describe("daemon config", () => {
     expect(config.remoteEnrichmentEnabled).toBe(true);
   });
 
-  test("configures a durable remote enrichment timeout separately from live copy", () => {
+  test("configures a durable remote enrichment timeout separately from live headline", () => {
     expect(daemonConfigFromEnv({}).remoteEnrichmentTimeoutMs).toBe(12_000);
     expect(daemonConfigFromEnv({ MASTHEAD_REMOTE_ENRICHMENT_TIMEOUT_MS: "15000" }).remoteEnrichmentTimeoutMs).toBe(15_000);
   });

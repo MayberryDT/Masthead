@@ -21,7 +21,7 @@ $ git log --oneline --decorate --graph -20
 * 261c20f docs: add Masthead release gate
 * bcc2728 test: prove Masthead's operational product loop
 * bced718 refactor: make SQLite the only normal Masthead product store
-* 87da47c fix: prevent noisy session copy from becoming product text
+* 87da47c fix: prevent noisy Board text from becoming product text
 * 4b51976 feat: make Settings operate on verified runtime state
 * e0a75f9 feat: verify MCP launch against the active session database
 * 1cd773c feat: make Logbook operational on canonical sessions

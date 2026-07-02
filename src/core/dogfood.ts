@@ -205,7 +205,7 @@ export function evaluateDogfoodAcceptance(fixture: FixtureReplay, options: Dogfo
       "cards stay compact while selected-session detail exposes evidence",
       modalEvidence.details
     ),
-    gate("calm_ops_copy", calmOpsCopy.ok, "main-board copy follows calm ops voice rules", calmOpsCopy.details),
+    gate("calm_ops_copy", calmOpsCopy.ok, "main-board headline text follows calm ops voice rules", calmOpsCopy.details),
     gate(
       "feedback_snapshot_privacy",
       feedbackPrivacy.ok,
@@ -300,7 +300,7 @@ export function evaluateLiveDogfoodAcceptance(envelope: LiveProjectionLike, opti
       degradedConflicts: conflicts.filter((conflict) => conflict.attribution === "degraded").length
     }),
     gate("lifecycle_lanes", lifecycleLanes.ok, "live projection exposes ordered lifecycle lanes", lifecycleLanes.details),
-    gate("calm_ops_copy", calmOpsCopy.ok, "live main-board copy follows calm ops voice rules", calmOpsCopy.details),
+    gate("calm_ops_copy", calmOpsCopy.ok, "live main-board headline text follows calm ops voice rules", calmOpsCopy.details),
     gate(
       "feedback_snapshot_privacy",
       feedbackPrivacy.ok,

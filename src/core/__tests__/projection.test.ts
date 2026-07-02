@@ -366,10 +366,10 @@ describe("Live Board projection", () => {
           }),
           {
             ...event("latest", "review-template-session", "file.changed", "2026-06-23T02:03:00.000Z"),
-            summary: "Reworked the card copy path to summarize the latest assistant output."
+            summary: "Reworked the Board headline path to summarize the latest assistant output."
           }
         ],
-        gitSnapshots: [snapshot("snapshot-review-template", "review-template-session", "src/core/sessionCopy.ts")]
+        gitSnapshots: [snapshot("snapshot-review-template", "review-template-session", "src/core/boardHeadlineFrame.ts")]
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
@@ -392,11 +392,11 @@ describe("Live Board projection", () => {
       }
     });
     expect((board.cards[0]?.headlineInput as { evidence?: string[] } | undefined)?.evidence).toContain(
-      "Reworked the card copy path to summarize the latest assistant output."
+      "Reworked the Board headline path to summarize the latest assistant output."
     );
   });
 
-  test("does not append recent activity copy to sentence-like enrichment titles", () => {
+  test("does not append recent activity text to sentence-like enrichment titles", () => {
     const board = projectFixture(
       {
         events: [
@@ -431,14 +431,14 @@ describe("Live Board projection", () => {
         events: [
           event("start", "stale-topic-session", "session.started", "2026-06-23T02:00:00.000Z", {
             project: "Masthead",
-            title: "Live card copy work"
+            title: "Live Board headline work"
           }),
           {
             ...event("latest", "stale-topic-session", "file.changed", "2026-06-23T02:03:00.000Z"),
-            summary: "Reworked the card copy path to summarize the latest assistant output."
+            summary: "Reworked the Board headline path to summarize the latest assistant output."
           }
         ],
-        gitSnapshots: [snapshot("snapshot-stale-topic", "stale-topic-session", "src/core/sessionCopy.ts")]
+        gitSnapshots: [snapshot("snapshot-stale-topic", "stale-topic-session", "src/core/boardHeadlineFrame.ts")]
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
@@ -455,7 +455,7 @@ describe("Live Board projection", () => {
       }
     );
 
-    expect(board.cards[0]?.title).toBe("Live card copy work");
+    expect(board.cards[0]?.title).toBe("Live Board headline work");
     expect(board.cards[0]?.headline).toMatchObject({
       source: "pending",
       status: "pending"
@@ -473,10 +473,10 @@ describe("Live Board projection", () => {
           }),
           {
             ...event("latest", "title-only-topic-session", "file.changed", "2026-06-23T02:03:00.000Z"),
-            summary: "Reworked the card copy path to summarize the latest assistant output."
+            summary: "Reworked the Board headline path to summarize the latest assistant output."
           }
         ],
-        gitSnapshots: [snapshot("snapshot-title-only-topic", "title-only-topic-session", "src/core/sessionCopy.ts")]
+        gitSnapshots: [snapshot("snapshot-title-only-topic", "title-only-topic-session", "src/core/boardHeadlineFrame.ts")]
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
@@ -947,10 +947,10 @@ describe("Live Board projection", () => {
     const board = projectFixture(
       {
         events: [
-          event("start", "session-copy", "session.started", "2026-06-24T06:00:00.000Z", {
+          event("start", "headline-session", "session.started", "2026-06-24T06:00:00.000Z", {
             title: "Masthead UI work"
           }),
-          event("stop", "session-copy", "session.completed", "2026-06-24T06:05:00.000Z", {
+          event("stop", "headline-session", "session.completed", "2026-06-24T06:05:00.000Z", {
             latestFeedbackSnapshot: {
               text:
                 "The root cause was not GPT-5 nano. What changed: - Live session cards no longer receive demo harness/model telemetry. - Card headlines are now sentence-shaped.",
@@ -965,7 +965,7 @@ describe("Live Board projection", () => {
         ],
         gitSnapshots: []
       },
-      { selectedSessionId: "session-copy" }
+      { selectedSessionId: "headline-session" }
     );
 
     expect(board.cards[0]?.latestFeedbackSignal?.summary).toBe(

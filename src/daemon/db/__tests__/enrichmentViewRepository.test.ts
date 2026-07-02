@@ -48,7 +48,7 @@ describe("enrichment view repository", () => {
       id: "stale-v2",
       promptVersion: "session-capsule-v2"
     });
-    seedCapsule(db, "session-c", "Reworked the card copy path to summarize the latest assistant output.", {
+    seedCapsule(db, "session-c", "Reworked the card headline path to summarize the latest assistant output.", {
       generatedAt: "2026-06-24T12:05:00.000Z",
       id: "current-v3",
       promptVersion: "session-capsule-v3"
@@ -57,8 +57,8 @@ describe("enrichment view repository", () => {
     const enrichments = liveProjectionEnrichments(db, new Set(["source-c"]));
 
     expect(enrichments.get("source-c")).toMatchObject({
-      liveSummary: "Reworked the card copy path to summarize the latest assistant output.",
-      title: "Reworked the card copy path to summarize the latest assistant output."
+      liveSummary: "Reworked the card headline path to summarize the latest assistant output.",
+      title: "Reworked the card headline path to summarize the latest assistant output."
     });
     db.close();
   });

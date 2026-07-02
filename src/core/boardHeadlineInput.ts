@@ -1,4 +1,4 @@
-import type { BoardLiveCopyFacts } from "./boardLiveCopyFacts.ts";
+import type { BoardHeadlineFacts } from "./boardHeadlineFacts.ts";
 import type { BoardHeadlineState } from "./boardHeadlineFrame.ts";
 
 export type BoardHeadlineSignal =
@@ -22,14 +22,14 @@ export type BoardHeadlineInput = {
   subjectCandidates: string[];
   dispositionHints: string[];
   evidence: string[];
-  facts: BoardLiveCopyFacts;
+  facts: BoardHeadlineFacts;
 };
 
 export function toBoardHeadlineInput(input: {
   lifecycle: string;
   primaryStatus: string;
   signals: BoardHeadlineSignal[];
-  facts: BoardLiveCopyFacts;
+  facts: BoardHeadlineFacts;
 }): BoardHeadlineInput {
   const { facts, lifecycle, primaryStatus, signals } = input;
   const canonical = facts.canonicalEnrichment;

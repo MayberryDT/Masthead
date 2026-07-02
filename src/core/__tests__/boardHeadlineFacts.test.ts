@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { buildBoardLiveCopyFacts } from "../boardLiveCopyFacts";
+import { buildBoardHeadlineFacts } from "../boardHeadlineFacts";
 import type { GitSnapshot, NormalizedEvent, SessionCardView } from "../types";
 
-describe("board live copy facts", () => {
+describe("board headline facts", () => {
   test("collects recent events while filtering low-value hook noise", () => {
-    const facts = buildBoardLiveCopyFacts({
+    const facts = buildBoardHeadlineFacts({
       attentionItems: [
         {
           affectedCommandIds: ["cmd-test"],
@@ -40,8 +40,8 @@ describe("board live copy facts", () => {
     expect(facts.attentionTitles).toEqual(["Test command failed"]);
   });
 
-  test("filters generic harness tool names out of copy facts", () => {
-    const facts = buildBoardLiveCopyFacts({
+  test("filters generic harness tool names out of headline facts", () => {
+    const facts = buildBoardHeadlineFacts({
       attentionItems: [],
       card: card(),
       conflicts: [],
@@ -57,7 +57,7 @@ describe("board live copy facts", () => {
   });
 
   test("keeps useful transcript evidence while dropping directive and progress noise", () => {
-    const facts = buildBoardLiveCopyFacts({
+    const facts = buildBoardHeadlineFacts({
       attentionItems: [],
       card: card(),
       conflicts: [],
@@ -85,8 +85,8 @@ describe("board live copy facts", () => {
     expect(facts.recentTranscriptMessages).toEqual(["Headlines are not visibly changing in the Board tab."]);
   });
 
-  test("sanitizes URL-like project and title facts before live copy", () => {
-    const facts = buildBoardLiveCopyFacts({
+  test("sanitizes URL-like project and title facts before headline enrichment", () => {
+    const facts = buildBoardHeadlineFacts({
       attentionItems: [],
       card: card({
         project: "https-huggingface-co-yuxinlu1-gemma-4",
@@ -102,7 +102,7 @@ describe("board live copy facts", () => {
   });
 
   test("drops stale MCP-only canonical enrichment when current activity is unrelated", () => {
-    const facts = buildBoardLiveCopyFacts({
+    const facts = buildBoardHeadlineFacts({
       attentionItems: [],
       canonicalEnrichment: {
         liveSummary: "MCP launch config validation is being reviewed for Masthead.",
@@ -111,7 +111,7 @@ describe("board live copy facts", () => {
       },
       card: card(),
       conflicts: [],
-      events: [event("event-copy", "file.changed", "Reworked live card copy for the Now surface.")],
+      events: [event("event-copy", "file.changed", "Reworked board headline for the Now surface.")],
       gitSnapshots: [snapshot()]
     });
 
@@ -119,7 +119,7 @@ describe("board live copy facts", () => {
   });
 
   test("keeps MCP canonical enrichment when current activity explicitly mentions MCP", () => {
-    const facts = buildBoardLiveCopyFacts({
+    const facts = buildBoardHeadlineFacts({
       attentionItems: [],
       canonicalEnrichment: {
         liveSummary: "MCP launch config validation has passing tools-list coverage.",
@@ -139,7 +139,7 @@ describe("board live copy facts", () => {
   });
 
   test("drops canonical enrichment with URL and directive placeholders", () => {
-    const facts = buildBoardLiveCopyFacts({
+    const facts = buildBoardHeadlineFacts({
       attentionItems: [],
       canonicalEnrichment: {
         liveSummary: "The dev server is still running at [url] ::-stage{cwd=\"\"} ::-commit{cwd=\"\"}.",

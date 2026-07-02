@@ -131,7 +131,7 @@ describe("dogfood acceptance harness", () => {
     );
   });
 
-  test("live dogfood rejects unsafe main-board copy and raw feedback markers", () => {
+  test("live dogfood rejects unsafe main-board headline text and raw feedback markers", () => {
     const projection = completeLiveProjection();
     projection.cards[0] = {
       ...projection.cards[0]!,

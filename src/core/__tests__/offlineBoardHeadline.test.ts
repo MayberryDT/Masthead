@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { toBoardHeadlineInput, type BoardHeadlineInput, type BoardHeadlineSignal } from "../boardHeadlineInput";
 import { validateBoardHeadlineFrame } from "../boardHeadlineFrame";
-import type { BoardLiveCopyFacts } from "../boardLiveCopyFacts";
+import type { BoardHeadlineFacts } from "../boardHeadlineFacts";
 import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView } from "../offlineBoardHeadline";
 
-function facts(overrides: Partial<BoardLiveCopyFacts> = {}): BoardLiveCopyFacts {
+function facts(overrides: Partial<BoardHeadlineFacts> = {}): BoardHeadlineFacts {
   return {
     sessionId: "session-1",
     project: "Masthead",
@@ -28,7 +28,7 @@ function facts(overrides: Partial<BoardLiveCopyFacts> = {}): BoardLiveCopyFacts 
   };
 }
 
-function input(overrides: Partial<BoardLiveCopyFacts> = {}, signals: BoardHeadlineSignal[] = []): BoardHeadlineInput {
+function input(overrides: Partial<BoardHeadlineFacts> = {}, signals: BoardHeadlineSignal[] = []): BoardHeadlineInput {
   const liveCopyFacts = facts(overrides);
 
   return toBoardHeadlineInput({

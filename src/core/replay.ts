@@ -1,5 +1,5 @@
 import { attentionPriority, deriveAttentionItems } from "./attention.ts";
-import { buildBoardLiveCopyFacts, type BoardTranscriptMessageFact } from "./boardLiveCopyFacts.ts";
+import { buildBoardHeadlineFacts, type BoardTranscriptMessageFact } from "./boardHeadlineFacts.ts";
 import { buildBoardBrief } from "./boardBrief.ts";
 import type { BoardHeadlineView } from "./boardHeadlineFrame.ts";
 import { toBoardHeadlineInput, type BoardHeadlineSignal } from "./boardHeadlineInput.ts";
@@ -260,7 +260,7 @@ function toCard(
     latestFeedbackSignal: feedbackSignal
   };
 
-  const facts = buildBoardLiveCopyFacts({
+  const facts = buildBoardHeadlineFacts({
     attentionItems: sessionAttention,
     card,
     canonicalEnrichment: cardEnrichment,

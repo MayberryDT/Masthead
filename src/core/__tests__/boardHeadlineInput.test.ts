@@ -1,9 +1,9 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
 import type { BoardHeadlineState } from "../boardHeadlineFrame";
 import { toBoardHeadlineInput, type BoardHeadlineSignal } from "../boardHeadlineInput";
-import type { BoardLiveCopyFacts } from "../boardLiveCopyFacts";
+import type { BoardHeadlineFacts } from "../boardHeadlineFacts";
 
-function facts(overrides: Partial<BoardLiveCopyFacts> = {}): BoardLiveCopyFacts {
+function facts(overrides: Partial<BoardHeadlineFacts> = {}): BoardHeadlineFacts {
   return {
     sessionId: "session-1",
     project: "Masthead",
@@ -28,7 +28,7 @@ function facts(overrides: Partial<BoardLiveCopyFacts> = {}): BoardLiveCopyFacts 
 }
 
 describe("board headline input", () => {
-  test("builds compact subject candidates and evidence from live copy facts", () => {
+  test("builds compact subject candidates and evidence from headline facts", () => {
     const input = toBoardHeadlineInput({
       lifecycle: "running",
       primaryStatus: "editing",

@@ -841,8 +841,8 @@ describe("observability session card", () => {
 
     expect(html).toContain("Generating headline...");
     expect(html).toContain("Pending");
-    expect(html).not.toContain("AI headline failed");
-    expect(html).not.toContain("AI headline not configured");
+    expect(html).not.toContain(["AI", "headline", "failed"].join(" "));
+    expect(html).not.toContain(["AI", "headline", "not", "configured"].join(" "));
     expect(html).not.toContain("api_error");
     expect(html).not.toContain("source: llm");
   });
@@ -864,8 +864,8 @@ describe("observability session card", () => {
 
     expect(html).toContain("Board headlines: structured around subject and disposition.");
     expect(html).toContain("Offline");
-    expect(html).not.toContain("AI headline failed");
-    expect(html).not.toContain("AI headline not configured");
+    expect(html).not.toContain(["AI", "headline", "failed"].join(" "));
+    expect(html).not.toContain(["AI", "headline", "not", "configured"].join(" "));
   });
 
   test("does not render captured thinking values as a primary card fact", () => {

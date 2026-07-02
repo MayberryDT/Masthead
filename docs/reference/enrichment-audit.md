@@ -1,6 +1,6 @@
 # Enrichment Audit
 
-Masthead can write enrichment audit events to local JSONL for debugging model inputs, responses, validation, persistence, and Board copy refreshes.
+Masthead can write enrichment audit events to local JSONL for debugging model inputs, responses, validation, persistence, and Board headline refreshes.
 
 Audit logging is disabled by default.
 
