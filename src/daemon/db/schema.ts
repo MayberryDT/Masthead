@@ -50,6 +50,11 @@ const migrations = [
     version: 9,
     name: "009_import_ledger",
     path: resolve(currentDir, "migrations/009_import_ledger.sql")
+  },
+  {
+    version: 10,
+    name: "010_board_headline_frames",
+    path: resolve(currentDir, "migrations/010_board_headline_frames.sql")
   }
 ];
 
@@ -77,7 +82,8 @@ const criticalTables = [
   "import_work_units",
   "import_failure_groups",
   "import_session_impacts",
-  "legacy_migrations"
+  "legacy_migrations",
+  "board_headline_frames"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {
