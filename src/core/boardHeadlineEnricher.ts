@@ -9,7 +9,7 @@ import {
   rewriteBoardHeadlineFrameWithOpenAI,
   type OpenAIBoardHeadlineFrameResult
 } from "./openaiBoardHeadlineFrame.ts";
-import type { LiveBoardProjection, SessionCardView, SessionDetailView, ExpandedSessionView } from "./types.ts";
+import type { BoardHeadlineRefreshState, LiveBoardProjection, SessionCardView, SessionDetailView, ExpandedSessionView } from "./types.ts";
 
 export const DEFAULT_MODEL = "gpt-5-nano-2025-08-07";
 
@@ -65,6 +65,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
     const currentStatus = status();
     const generatedAt = nowIso(config.now);
     const overlays = new Map<string, BoardHeadlineView>();
+    const refreshOverlays = new Map<string, BoardHeadlineRefreshState>();
     const countedFailedKeys = new Set<CacheKey>();
     const summary = {
       requested: 0,
@@ -81,6 +82,13 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
 
       if (!currentStatus.enabled || !currentStatus.configured) {
         overlays.set(card.sessionId, retained ?? buildOfflineBoardHeadlineView(input));
+        if (currentStatus.enabled && !currentStatus.configured) {
+          refreshOverlays.set(card.sessionId, {
+            provider: "openai",
+            requestedAt: generatedAt,
+            status: "not_configured"
+          });
+        }
         continue;
       }
 
@@ -89,6 +97,12 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
 
       if (cached) {
         overlays.set(card.sessionId, cached);
+        refreshOverlays.set(card.sessionId, {
+          provider: "openai",
+          model,
+          requestedAt: cached.generatedAt,
+          status: "success"
+        });
         emitFrameApplied(key, card.sessionId, cached);
         summary.succeeded += 1;
         continue;
@@ -96,9 +110,13 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
 
       trackPendingSession(key, card.sessionId);
 
-      if (failures.has(key) && !countedFailedKeys.has(key)) {
-        summary.failed += 1;
-        countedFailedKeys.add(key);
+      const failure = failures.get(key);
+      if (failure) {
+        refreshOverlays.set(card.sessionId, refreshFromFailure(failure, model, generatedAt));
+        if (!countedFailedKeys.has(key)) {
+          summary.failed += 1;
+          countedFailedKeys.add(key);
+        }
       }
 
       if (retained) {
@@ -108,6 +126,14 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       }
 
       summary.pending += 1;
+      if (!failure) {
+        refreshOverlays.set(card.sessionId, {
+          provider: "openai",
+          model,
+          requestedAt: generatedAt,
+          status: "pending"
+        });
+      }
       if (!inFlight.has(key)) {
         inFlight.set(key, requestHeadline(input, key, card.sessionId));
         summary.requested += 1;
@@ -116,12 +142,12 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
 
     return {
       ...projection,
-      cards: projection.cards.map((card) => overlayCardHeadline(card, overlays)),
+      cards: projection.cards.map((card) => overlayCardHeadline(card, overlays, refreshOverlays)),
       expandedSession: projection.expandedSession
-        ? overlayExpandedSessionHeadline(projection.expandedSession, overlays)
+        ? overlayExpandedSessionHeadline(projection.expandedSession, overlays, refreshOverlays)
         : undefined,
       selectedSession: projection.selectedSession
-        ? overlaySelectedSessionHeadline(projection.selectedSession, overlays)
+        ? overlaySelectedSessionHeadline(projection.selectedSession, overlays, refreshOverlays)
         : undefined,
       headlineRefreshSummary: summary
     };
@@ -222,25 +248,81 @@ function retainedReadyHeadline(headline: BoardHeadlineView): BoardHeadlineView |
   return headline;
 }
 
-function overlayCardHeadline(card: SessionCardView, overlays: Map<string, BoardHeadlineView>): SessionCardView {
+function overlayCardHeadline(
+  card: SessionCardView,
+  overlays: Map<string, BoardHeadlineView>,
+  refreshOverlays: Map<string, BoardHeadlineRefreshState>
+): SessionCardView {
   const headline = overlays.get(card.sessionId);
-  return headline ? { ...card, headline } : card;
+  const headlineRefresh = refreshOverlays.get(card.sessionId);
+  if (!headline && !headlineRefresh) return card;
+  return {
+    ...card,
+    ...(headline ? { headline } : {}),
+    ...(headlineRefresh ? { headlineRefresh } : {})
+  };
 }
 
 function overlayExpandedSessionHeadline(
   session: ExpandedSessionView,
-  overlays: Map<string, BoardHeadlineView>
+  overlays: Map<string, BoardHeadlineView>,
+  refreshOverlays: Map<string, BoardHeadlineRefreshState>
 ): ExpandedSessionView {
   const headline = overlays.get(session.sessionId);
-  return headline ? { ...session, headline } : session;
+  const headlineRefresh = refreshOverlays.get(session.sessionId);
+  if (!headline && !headlineRefresh) return session;
+  return {
+    ...session,
+    ...(headline ? { headline } : {}),
+    ...(headlineRefresh ? { headlineRefresh } : {})
+  };
 }
 
 function overlaySelectedSessionHeadline(
   session: SessionDetailView,
-  overlays: Map<string, BoardHeadlineView>
+  overlays: Map<string, BoardHeadlineView>,
+  refreshOverlays: Map<string, BoardHeadlineRefreshState>
 ): SessionDetailView {
   const headline = overlays.get(session.sessionId);
-  return headline ? { ...session, headline } : session;
+  const headlineRefresh = refreshOverlays.get(session.sessionId);
+  if (!headline && !headlineRefresh) return session;
+  return {
+    ...session,
+    ...(headline ? { headline } : {}),
+    ...(headlineRefresh ? { headlineRefresh } : {})
+  };
+}
+
+function refreshFromFailure(
+  result: OpenAIBoardHeadlineFrameResult,
+  model: string,
+  requestedAt: string
+): BoardHeadlineRefreshState {
+  return {
+    provider: "openai",
+    model,
+    requestedAt,
+    status: refreshStatusFromOpenAI(result.status),
+    ...(result.latencyMs !== undefined ? { latencyMs: result.latencyMs } : {}),
+    ...(result.failureMessage ? { failureMessage: result.failureMessage } : {})
+  };
+}
+
+function refreshStatusFromOpenAI(status: OpenAIBoardHeadlineFrameResult["status"]): BoardHeadlineRefreshState["status"] {
+  switch (status) {
+    case "timeout":
+      return "timeout";
+    case "invalid_output":
+      return "invalid_output";
+    case "validation_failed":
+      return "validation_failed";
+    case "not_configured":
+      return "not_configured";
+    case "api_error":
+    case "disabled":
+    case "llm":
+      return "api_error";
+  }
 }
 
 function cacheKey(model: string, input: BoardHeadlineInput): CacheKey {

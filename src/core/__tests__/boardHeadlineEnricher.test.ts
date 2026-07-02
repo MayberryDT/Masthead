@@ -138,6 +138,10 @@ describe("board headline enricher", () => {
       source: "pending",
       status: "pending"
     });
+    expect(result.cards[0]?.headlineRefresh).toMatchObject({
+      provider: "openai",
+      status: "pending"
+    });
     expect(result.cards[0]?.headline.headline).not.toBe("Board headlines: waiting for LLM headline access.");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(result.headlineRefreshSummary).toMatchObject({
@@ -168,6 +172,11 @@ describe("board headline enricher", () => {
       status: "ready",
       model: "gpt-5-nano-2025-08-07",
       provider: "openai"
+    });
+    expect(result.cards[0]?.headlineRefresh).toMatchObject({
+      model: "gpt-5-nano-2025-08-07",
+      provider: "openai",
+      status: "success"
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(result.headlineRefreshSummary).toMatchObject({
@@ -308,6 +317,10 @@ describe("board headline enricher", () => {
 
     expect(first.cards[0]?.headline.source).toBe("pending");
     expect(second.cards[0]?.headline.source).toBe("pending");
+    expect(second.cards[0]?.headlineRefresh).toMatchObject({
+      provider: "openai",
+      status: "api_error"
+    });
     expect(second.cards[0]?.headline.headline).not.toBe("Board headlines: waiting for LLM headline access.");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(second.headlineRefreshSummary).toMatchObject({
@@ -357,6 +370,7 @@ describe("board headline enricher", () => {
       failed: 0,
       pending: 0
     });
+    expect(cachedResult.cards.map((card) => card.headlineRefresh?.status)).toEqual(["success", "success"]);
   });
 
   test("uses offline headline only when live headline copy is disabled", async () => {
@@ -399,6 +413,10 @@ describe("board headline enricher", () => {
     const result = await enricher.enrichProjection(projection([card()]));
 
     expect(result.cards[0]?.headline.source).toBe("offline");
+    expect(result.cards[0]?.headlineRefresh).toMatchObject({
+      provider: "openai",
+      status: "not_configured"
+    });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

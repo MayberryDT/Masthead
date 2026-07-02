@@ -1433,7 +1433,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
-      const sessionHeadlineViews = currentBoardHeadlineFrames(database, projectionSessionIds);
+      const sessionHeadlineViews = currentBoardHeadlineFrames(
+        database,
+        [...projectionSessionIds].map((sourceSessionId) => ({
+          sessionId: canonicalSessionIdForSource(sourceSessionId),
+          sourceSessionId
+        }))
+      );
       const liveEnvelope = projectLiveEvents(projectionEvents, projectionGitSnapshots, {
         selectedSessionId,
         sessionEnrichments: liveProjectionEnrichments(database, projectionSessionIds),

@@ -147,6 +147,15 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
         validationReason: validation.reason
       };
     }
+    const inputValidationReason = validateFrameAgainstInput(validation.frame, input);
+    if (inputValidationReason) {
+      return {
+        failureMessage: "OpenAI board headline frame response was not supported by the input.",
+        latencyMs,
+        status: "validation_failed",
+        validationReason: inputValidationReason
+      };
+    }
 
     return { frame: validation.frame, latencyMs, status: "llm" };
   } catch (error) {
@@ -225,6 +234,85 @@ function toOpenAIProviderPayload(input: BoardHeadlineInput): OpenAIProviderPaylo
     }
   };
 }
+
+function validateFrameAgainstInput(frame: BoardHeadlineFrame, input: BoardHeadlineInput): string | undefined {
+  if (frame.evidence.length === 0) return "empty_evidence";
+  if (input.stateHint !== "unknown" && frame.state !== input.stateHint) return "state_mismatch";
+  if (frame.evidence.some((evidence) => !isSupportedEvidence(evidence, input))) return "unsupported_evidence";
+  if (hasUnsupportedClaim(frame, input)) return "unsupported_claim";
+  return undefined;
+}
+
+function isSupportedEvidence(evidence: string, input: BoardHeadlineInput): boolean {
+  const normalizedEvidence = normalizeForSupport(evidence);
+  if (!normalizedEvidence) return false;
+
+  const supportTexts = [
+    ...input.evidence,
+    ...input.subjectCandidates,
+    ...input.dispositionHints,
+    ...input.facts.recentFileBasenames,
+    ...input.facts.recentToolNames,
+    ...input.facts.recentCommandFailures,
+    ...input.facts.attentionTitles,
+    ...input.facts.conflictTitles,
+    ...(input.facts.recentTranscriptMessages ?? []),
+    ...input.facts.recentEvents.map((event) => event.summary)
+  ]
+    .map(normalizeForSupport)
+    .filter((value): value is string => Boolean(value));
+
+  if (supportTexts.some((support) => support.includes(normalizedEvidence) || normalizedEvidence.includes(support))) return true;
+
+  const evidenceTokens = supportTokens(normalizedEvidence);
+  if (evidenceTokens.length === 0) return false;
+  const supportTokenSet = new Set(supportTexts.flatMap(supportTokens));
+  const matchingTokens = evidenceTokens.filter((token) => supportTokenSet.has(token)).length;
+  return matchingTokens >= Math.max(2, Math.ceil(evidenceTokens.length * 0.6));
+}
+
+function hasUnsupportedClaim(frame: BoardHeadlineFrame, input: BoardHeadlineInput): boolean {
+  const text = `${frame.subject} ${frame.disposition}`.toLowerCase();
+  if (/\b(?:you|your)\b/.test(text)) return true;
+  if (/\bapproval|approve|approved\b/.test(text) && !input.signals.includes("approval_waiting") && input.primaryStatus !== "waiting_for_approval") {
+    return true;
+  }
+  if (/\b(?:completed|complete|finished|done|ready for review)\b/.test(text) && input.stateHint !== "completed") {
+    return true;
+  }
+  return false;
+}
+
+function normalizeForSupport(value: string): string | undefined {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9._ -]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized || undefined;
+}
+
+function supportTokens(value: string): string[] {
+  return value
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !supportStopWords.has(token));
+}
+
+const supportStopWords = new Set([
+  "and",
+  "are",
+  "around",
+  "before",
+  "for",
+  "from",
+  "into",
+  "now",
+  "the",
+  "this",
+  "that",
+  "with"
+]);
 
 function safeStrings(values: string[], limit: number): string[] {
   const result: string[] = [];

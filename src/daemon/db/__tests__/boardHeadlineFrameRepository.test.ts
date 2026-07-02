@@ -56,7 +56,12 @@ describe("board headline frame repository", () => {
       sourceSessionId: "source-session-1"
     });
 
-    const views = currentBoardHeadlineFrames(db, ["source-session-1", "source-session-1", "", "missing-session"]);
+    const views = currentBoardHeadlineFrames(db, [
+      { sessionId: "session-2", sourceSessionId: "source-session-1" },
+      { sessionId: "session-2", sourceSessionId: "source-session-1" },
+      { sessionId: "", sourceSessionId: "" },
+      { sessionId: "missing-session", sourceSessionId: "missing-session" }
+    ]);
 
     expect(views.get("source-session-1")).toEqual({
       frame: frame({
@@ -71,6 +76,41 @@ describe("board headline frame repository", () => {
       status: "ready"
     });
     expect(views.has("missing-session")).toBe(false);
+    db.close();
+  });
+
+  test("does not hydrate a frame from another canonical session with the same source id", async () => {
+    const db = await openTestDatabase();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session-local",
+      title: "Local Board headline"
+    });
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session-other-host",
+      title: "Other host Board headline"
+    });
+
+    upsertBoardHeadlineFrame(db, {
+      frame: frame({
+        disposition: "belongs to a different host runtime",
+        subject: "Other host headline"
+      }),
+      generatedAt: "2026-07-01T12:05:00.000Z",
+      model: "gpt-5",
+      provider: "openai",
+      sessionId: "session-other-host",
+      sourceSessionId: "duplicate-source-session"
+    });
+
+    const views = currentBoardHeadlineFrames(db, [{ sessionId: "session-local", sourceSessionId: "duplicate-source-session" }]);
+
+    expect(views.has("duplicate-source-session")).toBe(false);
     db.close();
   });
 
@@ -125,7 +165,7 @@ describe("board headline frame repository", () => {
       "2026-07-01T12:00:00.000Z"
     );
 
-    expect(currentBoardHeadlineFrames(db, ["source-session-1"])).toEqual(new Map());
+    expect(currentBoardHeadlineFrames(db, [{ sessionId: "session-1", sourceSessionId: "source-session-1" }])).toEqual(new Map());
     db.close();
   });
 });

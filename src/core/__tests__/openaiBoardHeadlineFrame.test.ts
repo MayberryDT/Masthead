@@ -216,6 +216,77 @@ describe("OpenAI board headline frame", () => {
     });
   });
 
+  test("rejects structurally valid frames that do not match the input state", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame({ state: "completed" })));
+
+    await expect(
+      rewriteBoardHeadlineFrameWithOpenAI(input(), {
+        enabled: true,
+        apiKey: "key",
+        fetchImpl,
+        model: "gpt-5-nano-2025-08-07"
+      })
+    ).resolves.toMatchObject({
+      status: "validation_failed",
+      validationReason: "state_mismatch"
+    });
+  });
+
+  test("rejects frames without supported evidence", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame({ evidence: [] })));
+
+    await expect(
+      rewriteBoardHeadlineFrameWithOpenAI(input(), {
+        enabled: true,
+        apiKey: "key",
+        fetchImpl,
+        model: "gpt-5-nano-2025-08-07"
+      })
+    ).resolves.toMatchObject({
+      status: "validation_failed",
+      validationReason: "empty_evidence"
+    });
+  });
+
+  test("rejects evidence not supported by the compact input", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame({ evidence: ["Unrelated payment workflow redesign."] })));
+
+    await expect(
+      rewriteBoardHeadlineFrameWithOpenAI(input(), {
+        enabled: true,
+        apiKey: "key",
+        fetchImpl,
+        model: "gpt-5-nano-2025-08-07"
+      })
+    ).resolves.toMatchObject({
+      status: "validation_failed",
+      validationReason: "unsupported_evidence"
+    });
+  });
+
+  test("rejects approval claims without approval evidence", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      responseWithFrame(
+        validFrame({
+          disposition: "needs your approval before continuing",
+          evidence: ["Use subject and disposition frames for Board headlines."]
+        })
+      )
+    );
+
+    await expect(
+      rewriteBoardHeadlineFrameWithOpenAI(input(), {
+        enabled: true,
+        apiKey: "key",
+        fetchImpl,
+        model: "gpt-5-nano-2025-08-07"
+      })
+    ).resolves.toMatchObject({
+      status: "validation_failed",
+      validationReason: "unsupported_claim"
+    });
+  });
+
   test("does not call OpenAI when disabled or missing a key", async () => {
     const fetchImpl = vi.fn();
 

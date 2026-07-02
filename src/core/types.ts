@@ -260,6 +260,7 @@ export type BoardHeadlineRefreshStatus =
   | "success"
   | "pending"
   | "not_configured"
+  | "timeout"
   | "api_error"
   | "invalid_output"
   | "validation_failed";
