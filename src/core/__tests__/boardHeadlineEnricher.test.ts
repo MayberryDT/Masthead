@@ -178,6 +178,83 @@ describe("board headline enricher", () => {
     });
   });
 
+  test("calls onFrameApplied when a background LLM frame completes", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+    const onFrameApplied = vi.fn();
+    const now = vi.fn(() => new Date("2026-07-01T12:34:56.000Z"));
+    const frame = validFrame();
+    const enricher = createBoardHeadlineEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      model: "gpt-test",
+      now,
+      onFrameApplied
+    });
+
+    await enricher.enrichProjection(projection([card()]));
+    response.resolve(responseWithFrame(frame));
+    await flushMicrotasks();
+
+    expect(onFrameApplied).toHaveBeenCalledTimes(1);
+    expect(onFrameApplied).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      frame,
+      headline: {
+        headline: "Board headlines: structured around subject and disposition.",
+        frame,
+        source: "llm",
+        status: "ready",
+        generatedAt: "2026-07-01T12:34:56.000Z",
+        model: "gpt-test",
+        provider: "openai"
+      },
+      provider: "openai",
+      model: "gpt-test",
+      generatedAt: "2026-07-01T12:34:56.000Z"
+    });
+  });
+
+  test("does not call onFrameApplied when the provider returns an invalid frame", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+    const onFrameApplied = vi.fn();
+    const enricher = createBoardHeadlineEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      onFrameApplied
+    });
+
+    await enricher.enrichProjection(projection([card()]));
+    response.resolve(responseWithFrame({ ...validFrame(), confidence: "certain" } as unknown as BoardHeadlineFrame));
+    await flushMicrotasks();
+
+    expect(onFrameApplied).not.toHaveBeenCalled();
+  });
+
+  test("calls onFrameApplied for each card sharing an in-flight frame request", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+    const onFrameApplied = vi.fn();
+    const frame = validFrame();
+    const enricher = createBoardHeadlineEnricher({
+      enabled: true,
+      apiKey: "key",
+      fetchImpl,
+      onFrameApplied
+    });
+
+    await enricher.enrichProjection(projection([card({ sessionId: "session-1" }), card({ sessionId: "session-2" })]));
+    response.resolve(responseWithFrame(frame));
+    await flushMicrotasks();
+
+    expect(onFrameApplied).toHaveBeenCalledTimes(2);
+    expect(onFrameApplied).toHaveBeenNthCalledWith(1, expect.objectContaining({ sessionId: "session-1", frame }));
+    expect(onFrameApplied).toHaveBeenNthCalledWith(2, expect.objectContaining({ sessionId: "session-2", frame }));
+  });
+
   test("refreshes changed headline input even when the card has a ready LLM headline", async () => {
     const response = deferred<Response>();
     const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
@@ -293,6 +370,25 @@ describe("board headline enricher", () => {
       source: "offline",
       status: "ready"
     });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  test("preserves an existing ready LLM headline when live headline copy is disabled", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const enricher = createBoardHeadlineEnricher({ enabled: false, fetchImpl });
+    const readyHeadline: BoardHeadlineView = {
+      headline: "Board headlines: structured around subject and disposition.",
+      frame: validFrame(),
+      source: "llm",
+      status: "ready",
+      generatedAt: "2026-07-01T12:00:00.000Z",
+      model: "gpt-5-nano-2025-08-07",
+      provider: "openai"
+    };
+
+    const result = await enricher.enrichProjection(projection([card({ headline: readyHeadline })]));
+
+    expect(result.cards[0]?.headline).toBe(readyHeadline);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

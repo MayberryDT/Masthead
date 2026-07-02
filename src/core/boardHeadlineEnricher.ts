@@ -20,6 +20,16 @@ export type BoardHeadlineEnricherConfig = {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   now?: () => Date;
+  onFrameApplied?: (event: BoardHeadlineAppliedEvent) => void;
+};
+
+export type BoardHeadlineAppliedEvent = {
+  sessionId: string;
+  frame: BoardHeadlineFrame;
+  headline: BoardHeadlineView;
+  provider: string;
+  model: string;
+  generatedAt: string;
 };
 
 export type BoardHeadlineEnricher = {
@@ -28,12 +38,20 @@ export type BoardHeadlineEnricher = {
 };
 
 type CacheKey = string;
+type ReadyLLMBoardHeadlineView = BoardHeadlineView & {
+  frame: BoardHeadlineFrame;
+  generatedAt: string;
+  model: string;
+  provider: "openai";
+};
 
 export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig = {}): BoardHeadlineEnricher {
   const model = config.model ?? DEFAULT_MODEL;
-  const completed = new Map<CacheKey, BoardHeadlineView>();
+  const completed = new Map<CacheKey, ReadyLLMBoardHeadlineView>();
   const failures = new Map<CacheKey, OpenAIBoardHeadlineFrameResult>();
   const inFlight = new Map<CacheKey, Promise<void>>();
+  const pendingSessionIds = new Map<CacheKey, Set<string>>();
+  const appliedSessionIds = new Map<CacheKey, Set<string>>();
 
   function status() {
     return {
@@ -59,9 +77,10 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
     for (const card of projection.cards) {
       const input = headlineInput(card);
       if (!input) continue;
+      const retained = retainedReadyHeadline(card.headline);
 
       if (!currentStatus.enabled || !currentStatus.configured) {
-        overlays.set(card.sessionId, buildOfflineBoardHeadlineView(input));
+        overlays.set(card.sessionId, retained ?? buildOfflineBoardHeadlineView(input));
         continue;
       }
 
@@ -70,16 +89,18 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
 
       if (cached) {
         overlays.set(card.sessionId, cached);
+        emitFrameApplied(key, card.sessionId, cached);
         summary.succeeded += 1;
         continue;
       }
+
+      trackPendingSession(key, card.sessionId);
 
       if (failures.has(key) && !countedFailedKeys.has(key)) {
         summary.failed += 1;
         countedFailedKeys.add(key);
       }
 
-      const retained = retainedReadyHeadline(card.headline);
       if (retained) {
         overlays.set(card.sessionId, retained);
       } else {
@@ -88,7 +109,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
 
       summary.pending += 1;
       if (!inFlight.has(key)) {
-        inFlight.set(key, requestHeadline(input, key));
+        inFlight.set(key, requestHeadline(input, key, card.sessionId));
         summary.requested += 1;
       }
     }
@@ -106,7 +127,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
     };
   }
 
-  async function requestHeadline(input: BoardHeadlineInput, key: CacheKey): Promise<void> {
+  async function requestHeadline(input: BoardHeadlineInput, key: CacheKey, sessionId: string): Promise<void> {
     try {
       const result = await rewriteBoardHeadlineFrameWithOpenAI(input, {
         enabled: true,
@@ -120,6 +141,9 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       if (view) {
         completed.set(key, view);
         failures.delete(key);
+        for (const pendingSessionId of pendingSessionIds.get(key) ?? [sessionId]) {
+          emitFrameApplied(key, pendingSessionId, view);
+        }
       } else {
         failures.set(key, result);
       }
@@ -130,8 +154,37 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       });
       // Keep configured LLM mode pending on failures; do not synthesize offline copy here.
     } finally {
+      pendingSessionIds.delete(key);
       inFlight.delete(key);
     }
+  }
+
+  function trackPendingSession(key: CacheKey, sessionId: string): void {
+    const sessionIds = pendingSessionIds.get(key);
+    if (sessionIds) {
+      sessionIds.add(sessionId);
+      return;
+    }
+    pendingSessionIds.set(key, new Set([sessionId]));
+  }
+
+  function emitFrameApplied(key: CacheKey, sessionId: string, view: ReadyLLMBoardHeadlineView): void {
+    let sessionIds = appliedSessionIds.get(key);
+    if (!sessionIds) {
+      sessionIds = new Set();
+      appliedSessionIds.set(key, sessionIds);
+    }
+    if (sessionIds.has(sessionId)) return;
+
+    config.onFrameApplied?.({
+      sessionId,
+      frame: view.frame,
+      headline: view,
+      provider: "openai",
+      model,
+      generatedAt: view.generatedAt
+    });
+    sessionIds.add(sessionId);
   }
 
   return {
@@ -144,7 +197,7 @@ function viewFromOpenAIResult(
   result: OpenAIBoardHeadlineFrameResult,
   model: string,
   generatedAt: string
-): BoardHeadlineView | undefined {
+): ReadyLLMBoardHeadlineView | undefined {
   if (result.status !== "llm" || !result.frame) return undefined;
 
   const frame: BoardHeadlineFrame = result.frame;

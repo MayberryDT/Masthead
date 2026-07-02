@@ -13,7 +13,7 @@ import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent } from "../core/ingestion.ts";
 import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
 import { projectLiveEvents } from "../core/liveProjection.ts";
-import { createBoardHeadlineEnricher } from "../core/boardHeadlineEnricher.ts";
+import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent } from "../core/boardHeadlineEnricher.ts";
 import { createFileBackedStore, type StoreRecord } from "../core/store.ts";
 import type { ReviewDisposition } from "../core/store.ts";
 import type { CodexHookDiagnostic } from "../core/codexAdapter.ts";
@@ -43,7 +43,7 @@ import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsReposit
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
-import { currentBoardHeadlineFrames } from "./db/boardHeadlineFrameRepository.ts";
+import { currentBoardHeadlineFrames, upsertBoardHeadlineFrame } from "./db/boardHeadlineFrameRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
@@ -178,10 +178,42 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       upsertFileEffectsFromGitSnapshot(database, canonicalSessionIdForSource(gitSnapshot.sessionId), gitSnapshot);
     }
     const gitSnapshotSignatures = new Map(gitSnapshots.map((snapshot) => [snapshot.sessionId, gitSnapshotSignature(snapshot)]));
+    const persistBoardHeadlineFrame = (event: BoardHeadlineAppliedEvent): void => {
+      try {
+        const sessionId = canonicalSessionIdForSource(event.sessionId);
+        const row = database
+          .prepare("SELECT session_id AS sessionId, source_session_id AS sourceSessionId FROM sessions WHERE source_session_id = ? AND session_id = ?")
+          .get(event.sessionId, sessionId) as { sessionId: string; sourceSessionId: string } | undefined;
+        if (!row) return;
+
+        upsertBoardHeadlineFrame(database, {
+          sessionId: row.sessionId,
+          sourceSessionId: row.sourceSessionId,
+          provider: event.provider,
+          model: event.model,
+          generatedAt: event.generatedAt,
+          frame: event.frame
+        });
+      } catch (error) {
+        recordRuntimeDiagnostic({
+          details: {
+            error,
+            generatedAt: event.generatedAt,
+            model: event.model,
+            provider: event.provider,
+            sourceSessionId: event.sessionId
+          },
+          kind: "board_headline_frame_persist_failed",
+          message: `Board headline frame persistence failed for ${event.sessionId}`,
+          severity: "warning"
+        });
+      }
+    };
     const boardHeadlineEnricher = createBoardHeadlineEnricher({
       enabled: config.liveCopyEnabled ?? config.llmCopyEnabled,
       apiKey: config.openaiApiKey,
       model: config.openaiModel,
+      onFrameApplied: persistBoardHeadlineFrame,
       timeoutMs: config.liveCopyTimeoutMs
     });
     const enrichmentProvider = config.remoteEnrichmentEnabled
