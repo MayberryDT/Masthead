@@ -84,6 +84,18 @@ describe("board headline frame contract", () => {
     expect(result.ok).toBe(true);
   });
 
+  test("allows ordinary product language that contains key-like substrings", () => {
+    expect(validateBoardHeadlineFrame(frame({ disposition: "adds keyboard navigation for settings rows" })).ok).toBe(
+      true
+    );
+    expect(validateBoardHeadlineFrame(frame({ disposition: "documents key settings row behavior" })).ok).toBe(
+      true
+    );
+    expect(validateBoardHeadlineFrame(frame({ disposition: "keeps monkey patch risk visible for review" })).ok).toBe(
+      true
+    );
+  });
+
   test("rejects unsupported state values", () => {
     expect(validateBoardHeadlineFrame(candidate({ state: "reviewing" }))).toEqual({
       ok: false,

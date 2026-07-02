@@ -175,12 +175,28 @@ export function isUsefulDisposition(value: string): boolean {
 
 export function isUnsafeText(value: string): boolean {
   return (
-    /\b[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD)[A-Z0-9_]*\b/i.test(value) ||
+    hasUnsafeCredentialName(value) ||
     /\bsk-[A-Za-z0-9_-]+\b/i.test(value) ||
     /\bhttps?:\/\//i.test(value) ||
     /::[-\w]+\{[^}]*\}/i.test(value) ||
     /\[url\]/i.test(value)
   );
+}
+
+function hasUnsafeCredentialName(value: string): boolean {
+  return value
+    .split(/[^A-Za-z0-9_]+/)
+    .filter(Boolean)
+    .some((token) => {
+      if (token !== token.toUpperCase()) return false;
+
+      const parts = token.split("_").filter(Boolean);
+      if (parts.some((part) => part === "SECRET" || part === "TOKEN" || part === "PASSWORD")) {
+        return true;
+      }
+
+      return parts.includes("KEY") && parts.some((part) => part === "API" || part === "AUTH" || part === "ACCESS");
+    });
 }
 
 function cleanSlot(value: string): string {
