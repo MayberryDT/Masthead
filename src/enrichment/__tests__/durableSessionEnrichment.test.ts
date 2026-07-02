@@ -76,6 +76,7 @@ describe("durable session enrichment", () => {
     expect(validateSessionSummaryText("Defined stable Logbook titles as durable noun phrases separate from rotating Board headlines.").ok).toBe(true);
     expect(validateSessionSummaryText("The session had recent activity.").ok).toBe(false);
     expect(validateSessionSummaryText("Work is being updated around the UI.").ok).toBe(false);
+    expect(validateSessionSummaryText("I found the root cause and fixed the Settings hash route cleanup.").ok).toBe(false);
     expect(validateSessionSummaryText("Missing punctuation").ok).toBe(false);
   });
 

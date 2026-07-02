@@ -8,12 +8,16 @@ describe("OpenAI enrichment provider", () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as {
         input: string;
+        instructions: string;
         max_output_tokens: number;
         reasoning: { effort: string };
         text: { format: { schema: { required: string[] } } };
       };
+      const input = JSON.parse(body.input);
       expect(body.input).not.toContain("/home/tyler");
       expect(body.input).not.toContain("OPENAI_API_KEY");
+      expect(body.instructions).toContain("neutral third-person");
+      expect(body.instructions).toContain("Do not write from the assistant's perspective");
       expect(body.max_output_tokens).toBe(760);
       expect(body.reasoning).toEqual({ effort: "minimal" });
       expect(body.text.format.schema.required).toEqual([
@@ -30,16 +34,21 @@ describe("OpenAI enrichment provider", () => {
         "sessionSummary",
         "sessionDossier"
       ]);
-      expect(JSON.parse(body.input).facts.coverage).toMatchObject({
+      expect(input.facts.coverage).toMatchObject({
         level: "complete",
         messageCount: 2
       });
-      expect(JSON.parse(body.input).evidenceCatalog).toEqual([]);
-      expect(JSON.parse(body.input).facts.commands[0]).toMatchObject({
-        exitCode: 0,
-        name: "npm test -- --run src/mcp/__tests__/toolsList.test.ts",
-        status: "succeeded"
-      });
+      expect(input.evidenceCatalog).toEqual([]);
+      expect(input.facts.userEvidence).toEqual([
+        "Fix MCP launch config validation before review.",
+        "Make sure the Dossier copy stays neutral."
+      ]);
+      expect(input.facts.assistantEvidence).toEqual([
+        "Added validation and tools-list coverage for MCP launch config.",
+        "The Dossier summary now describes the session in neutral language."
+      ]);
+      expect(input.facts.commands).toBeUndefined();
+      expect(input.facts.fileBasenames).toBeUndefined();
       return responseWithOutput({
         confidence: "high",
         liveSummary: "Durable enrichment provider returned structured session copy.",
@@ -217,6 +226,11 @@ function facts(): SessionFacts {
     evidence: [],
     files: ["/home/tyler/.codex/worktrees/7c35/Masthead/src/ui/AgentAccessPanel.tsx"],
     messages: ["Fix MCP launch config validation before review."],
+    userEvidence: ["Fix MCP launch config validation before review.", "Make sure the Dossier copy stays neutral."],
+    assistantEvidence: [
+      "Added validation and tools-list coverage for MCP launch config.",
+      "The Dossier summary now describes the session in neutral language."
+    ],
     narrative: {
       buildFailed: false,
       buildPassed: false,

@@ -136,6 +136,68 @@ describe("SessionDossier", () => {
     expect(html).toContain("Run the full Dossier verification suite.");
   });
 
+  test("uses neutral durable summary and plain-language retrieval notes in default dossier", () => {
+    const currentDossier = dossier();
+    currentDossier.narrative.finalAssistantMessage =
+      "I found a precise root cause and fix: the app does not support hash routes, but it leaves #settings in the address bar.";
+    currentDossier.reuse.copyableContext = [
+      "# Masthead Session Context",
+      "Canonical session: session:06850bab04dbc2101a3a380fd866b66d7",
+      "Files:",
+      "- src/app/App.tsx",
+      "Tools:",
+      "- shell: succeeded"
+    ].join("\n");
+    currentDossier.durableEnrichment = {
+      sessionDossier: {
+        blockers: [],
+        continuation: {
+          constraints: ["Keep the visible Dossier copy in plain language."],
+          nextStep: "Verify the Settings route opens without a lingering hash.",
+          openQuestions: []
+        },
+        decisions: ["Use startup cleanup instead of supporting hash routes."],
+        evidenceRefs: [],
+        keyWork: ["Removed the unsupported Settings hash from the startup path."],
+        outcome: "The Settings route no longer leaves an unsupported hash in the address bar.",
+        purpose: "Clean up unsupported Settings hash routing.",
+        verification: {
+          commands: [],
+          evidenceRefs: [],
+          failures: [],
+          status: "passed",
+          summary: "App route behavior was verified."
+        },
+        warnings: []
+      },
+      sessionSummary: {
+        confidence: "high",
+        evidenceRefs: [],
+        state: "completed",
+        text: "The session cleaned up unsupported Settings hash routing and verified the app no longer leaves the hash behind."
+      },
+      sessionTitle: {
+        basis: "dominant_work",
+        confidence: "high",
+        evidenceRefs: [],
+        text: "Settings hash route cleanup"
+      },
+      version: "session-capsule-v4"
+    };
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
+
+    expect(html).toContain("The session cleaned up unsupported Settings hash routing");
+    expect(html).not.toContain("I found a precise root cause");
+    expect(html).toContain("Clean up unsupported Settings hash routing.");
+    expect(html).toContain("Removed the unsupported Settings hash from the startup path.");
+    expect(html).toContain("Verify the Settings route opens without a lingering hash.");
+    expect(html).not.toContain("# Masthead Session Context");
+    expect(html).not.toContain("session:06850bab04dbc2101a3a380fd866b66d7");
+    expect(html).not.toContain("src/app/App.tsx");
+    expect(html).not.toContain("shell: succeeded");
+  });
+
   test("keeps transcript filter loading state out of the enrichment summary", async () => {
     const host = document.createElement("div");
     const root = createRoot(host);

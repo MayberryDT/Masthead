@@ -14,6 +14,8 @@ export type SessionFacts = {
   project: string;
   objective?: string;
   messages: string[];
+  userEvidence?: string[];
+  assistantEvidence?: string[];
   commands: string[];
   files: string[];
   evidence: EvidenceRef[];
@@ -29,6 +31,8 @@ export function fingerprintSessionFacts(facts: SessionFacts): string {
         commands: facts.commands,
         files: facts.files,
         messages: facts.messages,
+        userEvidence: facts.userEvidence,
+        assistantEvidence: facts.assistantEvidence,
         objective: facts.objective,
         narrative: facts.narrative,
         project: facts.project,

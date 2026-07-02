@@ -79,6 +79,7 @@ export function validateSessionSummaryText(value: string | undefined): TextValid
   if (containsSensitiveMarker(summary)) failures.push("secret_like");
   if (looksLikePathUrlOrEmail(summary)) failures.push("path_url_or_email");
   if (looksSerialized(summary)) failures.push("serialized");
+  if (containsFirstPersonOrDirectAddress(summary)) failures.push("perspective");
   if (BANNED_SUMMARY_PHRASES.some((phrase) => normalized.includes(phrase))) failures.push("banned_phrase");
   if (isWeakLiveSummary(summary)) failures.push("weak_live_summary");
 
@@ -340,6 +341,10 @@ function looksLikePathUrlOrEmail(value: string): boolean {
 
 function looksSerialized(value: string): boolean {
   return value.startsWith("{") || value.startsWith("[") || value.includes('"event"') || value.includes("\\n");
+}
+
+function containsFirstPersonOrDirectAddress(value: string): boolean {
+  return /\b(?:i|me|my|mine|we|us|our|ours|you|your|yours)\b/i.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

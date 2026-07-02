@@ -350,9 +350,9 @@ function DossierEnrichmentPanel({
       </div>
       <div className="summary-scroll">
         <DossierDurableMemory dossier={dossier} />
-        <SummarySection label="Transcript summary" section="summary" value={summary} extraParagraphs={[dossier?.narrative.outcome].filter((value): value is string => Boolean(value))} />
+        <SummarySection label="Transcript summary" section="summary" value={summary} extraParagraphs={dossierSummaryExtras(dossier)} />
         <SummarySection label="Latest prompt" section="latest-prompt" value={dossier?.narrative.latestUserPrompt} />
-        <SummarySection label="Retrieval notes" section="retrieval" value={dossier?.reuse.copyableContext} />
+        <SummarySection label="Retrieval notes" section="retrieval" values={dossierRetrievalNotes(dossier)} />
         <SummarySection label="Continuation notes" section="continuation" values={dossier?.attention.map((item) => item.title)} />
         <SummarySection label="Unresolved" section="unresolved" values={dossier?.narrative.unresolved} />
         {loading ? <SummarySection label="Loading" section="loading" value="Loading canonical session dossier..." /> : null}
@@ -526,7 +526,7 @@ function compactTranscriptRows(items?: SessionTranscriptItem[]): CompactTranscri
 function dossierSummary(dossier?: SessionDossierDto, live?: SessionDetailView): string | undefined {
   const narrative = dossier?.narrative;
   const candidates = [
-    narrative?.finalAssistantMessage,
+    dossier?.durableEnrichment?.sessionSummary.text,
     narrative?.liveSummary,
     narrative?.outcome,
     live?.headline.headline,
@@ -537,9 +537,55 @@ function dossierSummary(dossier?: SessionDossierDto, live?: SessionDetailView): 
     live?.headline.status
   ]
     .map(readableTranscriptText)
+    .filter(isPlainDossierCopy)
     .filter((value): value is string => Boolean(value));
   const summary = candidates.find((candidate, index) => !candidates.slice(0, index).some((earlier) => sameReadableText(candidate, earlier)));
   return summary ? sentence(summary) : undefined;
+}
+
+function dossierSummaryExtras(dossier?: SessionDossierDto): string[] {
+  return [dossier?.narrative.outcome].map(readableTranscriptText).filter(isPlainDossierCopy);
+}
+
+function dossierRetrievalNotes(dossier?: SessionDossierDto): string[] | undefined {
+  const memory = dossier?.durableEnrichment?.sessionDossier;
+  const durableValues = [
+    memory?.purpose,
+    memory?.outcome,
+    ...(memory?.keyWork ?? []),
+    ...(memory?.decisions ?? []),
+    ...(memory?.blockers ?? []),
+    memory?.verification.summary,
+    memory?.continuation.nextStep,
+    ...(memory?.continuation.openQuestions ?? []),
+    ...(memory?.continuation.constraints ?? [])
+  ];
+  const fallbackValues = [
+    dossier?.narrative.objective,
+    dossier?.narrative.liveSummary,
+    dossier?.narrative.outcome,
+    dossier?.verification.summary,
+    ...(dossier?.attention.map((item) => item.title) ?? []),
+    ...(dossier?.coverage.warnings.map((warning) => warning.message) ?? [])
+  ];
+  const values = (memory ? durableValues : fallbackValues)
+    .map(readableTranscriptText)
+    .filter(isPlainDossierCopy)
+    .filter((value, index, items) => items.findIndex((candidate) => sameReadableText(candidate, value)) === index)
+    .slice(0, 8);
+  return values.length > 0 ? values : undefined;
+}
+
+function isPlainDossierCopy(value: string | undefined): value is string {
+  if (!value) return false;
+  const text = value.trim();
+  if (!text) return false;
+  if (/\b(?:i|me|my|mine|we|us|our|ours|you|your|yours)\b/i.test(text)) return false;
+  if (/#\s*Masthead Session Context/i.test(text)) return false;
+  if (/\bsession:[0-9a-f-]{12,}\b/i.test(text)) return false;
+  if (/(?:^|\s)(?:src|dist|node_modules|\.codex|\/home)\/[^\s]+/i.test(text)) return false;
+  if (/\bshell:\s*(?:succeeded|failed|unknown)\b/i.test(text)) return false;
+  return true;
 }
 
 function sentence(value: string): string {

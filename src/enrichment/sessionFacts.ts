@@ -16,6 +16,10 @@ type TextRow = {
   observedAt: string;
 };
 
+type MessageRow = TextRow & {
+  role: string;
+};
+
 export function buildSessionFacts(db: MastheadDatabase, sessionId: string): SessionFacts {
   const session = db
     .prepare(
@@ -28,13 +32,15 @@ export function buildSessionFacts(db: MastheadDatabase, sessionId: string): Sess
 
   const messages = db
     .prepare(
-      `SELECT text_redacted AS text, observed_at AS observedAt
+      `SELECT role, text_redacted AS text, observed_at AS observedAt
       FROM messages
       WHERE session_id = ?
+        AND role IN ('user', 'assistant')
+        AND trim(COALESCE(text_redacted, '')) <> ''
       ORDER BY observed_at ASC
-      LIMIT 24`
+      `
     )
-    .all(sessionId) as TextRow[];
+    .all(sessionId) as MessageRow[];
   const commands = db
     .prepare("SELECT DISTINCT tool_name AS text, COALESCE(started_at, '') AS observedAt FROM tool_calls WHERE session_id = ? ORDER BY tool_name")
     .all(sessionId) as TextRow[];
@@ -50,6 +56,8 @@ export function buildSessionFacts(db: MastheadDatabase, sessionId: string): Sess
     evidence: evidenceRefs(sessionId, [...messages, ...commands, ...files, ...checkpoints]),
     files: files.map((row) => row.text),
     messages: [...messages, ...checkpoints].map((row) => row.text),
+    userEvidence: messages.filter((row) => row.role === "user").map((row) => row.text),
+    assistantEvidence: messages.filter((row) => row.role === "assistant").map((row) => row.text),
     narrative: buildSessionNarrativeFacts(db, sessionId),
     objective: session.objective ?? undefined,
     project: session.project_label ?? session.source_session_id,

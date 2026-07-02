@@ -50,6 +50,9 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
           "This is not a Board live headline. This is not a live status update.",
           "This enrichment is used by the Logbook and Session Dossier.",
           "Create a stable Logbook title, a one-sentence archival Logbook summary, and structured Session Dossier enrichment.",
+          "Write in neutral third-person voice.",
+          "Do not write from the assistant's perspective.",
+          "Summarize the provided userEvidence and assistantEvidence as a session record, not as a chat reply.",
           "Title rules: 3 to 8 words, sentence case, noun phrase, no trailing period.",
           "Use the first prompt as initial intent, but prefer dominant work actually performed if the session pivoted.",
           "Prefer concrete product areas, components, bugs, tests, imports, settings, docs, or source systems.",
@@ -262,6 +265,8 @@ function providerPayload(
   evidenceCatalog: ProviderEvidenceCatalogItem[]
 ): Record<string, unknown> {
   const narrative = facts.narrative;
+  const userEvidence = cleanEvidenceList(facts.userEvidence ?? [narrative?.firstUserPrompt, narrative?.lastUserPrompt]);
+  const assistantEvidence = cleanEvidenceList(facts.assistantEvidence ?? [narrative?.finalAssistantMessage]);
   return {
     evidenceCatalog: evidenceCatalog.map((item) => ({
       id: item.id,
@@ -280,25 +285,11 @@ function providerPayload(
       verificationSummary: fallback.verificationSummary
     },
     facts: {
-      checkpointSummaries: narrative?.checkpointSummaries.slice(0, 3) ?? [],
-      commands: narrative?.commands.map((command) => ({
-        category: command.category,
-        exitCode: command.exitCode,
-        name: safeCommandName(command.name),
-        outputPreview: safeOutputPreview(command.outputPreview),
-        status: command.status
-      })).slice(0, 8) ?? [],
       coverage: narrative?.coverage,
-      fileBasenames: narrative?.fileBasenames.slice(0, 12) ?? [],
-      fileDirectories: narrative?.fileDirectories.slice(0, 8) ?? [],
-      finalAssistantMessage: narrative?.finalAssistantMessage,
-      firstUserPrompt: narrative?.firstUserPrompt,
       objective: facts.objective,
       project: facts.project,
-      technologies: narrative?.technologies ?? [],
-      testsPassed: narrative?.testsPassed,
-      testsFailed: narrative?.testsFailed,
-      topics: narrative?.topics.slice(0, 12) ?? []
+      userEvidence,
+      assistantEvidence
     }
   };
 }
@@ -420,24 +411,21 @@ function missingEvidenceField(value: unknown): string[] | undefined {
   return value.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.trim()).filter(Boolean).slice(0, 8);
 }
 
-function safeCommandName(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  return value
-    .replace(/\/home\/[^/\s"'`]+(?:\/[^\s"'`]*)?/g, "[redacted-path]")
-    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted-secret]")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 160);
+function cleanEvidenceList(values: Array<string | undefined>): string[] {
+  return values
+    .map(safeEvidenceText)
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, items) => items.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index);
 }
 
-function safeOutputPreview(value: string | undefined): string | undefined {
+function safeEvidenceText(value: string | undefined): string | undefined {
   if (!value) return undefined;
   return value
     .replace(/\/home\/[^/\s"'`]+(?:\/[^\s"'`]*)?/g, "[redacted-path]")
     .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted-secret]")
+    .replace(/\b[A-Z][A-Z0-9_]{8,}\b/g, "[redacted-token]")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 240);
+    .trim();
 }
 
 function unique(values: string[]): string[] {
