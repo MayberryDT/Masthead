@@ -139,6 +139,60 @@ describe("board headline input", () => {
     expect(failed.stateHint).toBe("failed");
   });
 
+  test("maps running editing sessions to active", () => {
+    const input = toBoardHeadlineInput({
+      lifecycle: "running",
+      primaryStatus: "editing",
+      signals: [],
+      facts: facts()
+    });
+
+    expect(input.stateHint).toBe("active");
+  });
+
+  test("maps running sessions with unknown primary status to active", () => {
+    const input = toBoardHeadlineInput({
+      lifecycle: "running",
+      primaryStatus: "unknown",
+      signals: [],
+      facts: facts({ primaryStatus: "unknown" })
+    });
+
+    expect(input.stateHint).toBe("active");
+  });
+
+  test("maps idle and stalled sessions to paused", () => {
+    const idle = toBoardHeadlineInput({
+      lifecycle: "idle",
+      primaryStatus: "editing",
+      signals: [],
+      facts: facts({ lifecycle: "idle" })
+    });
+    const stalled = toBoardHeadlineInput({
+      lifecycle: "running",
+      primaryStatus: "editing",
+      signals: ["stalled"],
+      facts: facts()
+    });
+
+    expect(idle.stateHint).toBe("paused");
+    expect(stalled.stateHint).toBe("paused");
+  });
+
+  test("maps unrecognized lifecycle and status combinations to unknown", () => {
+    const input = toBoardHeadlineInput({
+      lifecycle: "launching",
+      primaryStatus: "warming",
+      signals: [],
+      facts: facts({
+        lifecycle: "launching",
+        primaryStatus: "warming"
+      })
+    });
+
+    expect(input.stateHint).toBe("unknown");
+  });
+
   test("dedupes and caps subject candidates and evidence", () => {
     const input = toBoardHeadlineInput({
       lifecycle: "running",
