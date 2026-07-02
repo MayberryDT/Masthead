@@ -120,6 +120,20 @@ describe("board headline input", () => {
     expect(input.stateHint).toBe("failed");
   });
 
+  test("preserves terminal blocked state for ended sessions", () => {
+    const input = toBoardHeadlineInput({
+      lifecycle: "ended",
+      primaryStatus: "blocked",
+      signals: [],
+      facts: facts({
+        lifecycle: "ended",
+        primaryStatus: "blocked"
+      })
+    });
+
+    expect(input.stateHint).toBe("blocked");
+  });
+
   test("uses board headline frame state values for state hints", () => {
     const waiting = toBoardHeadlineInput({
       lifecycle: "running",

@@ -93,6 +93,9 @@ function stateHintFor(input: {
   if (lifecycle === "ended" && (primaryStatus === "failed" || primaryStatus === "error")) {
     return "failed";
   }
+  if (lifecycle === "ended" && isBlockedStatus(primaryStatus)) {
+    return "blocked";
+  }
   if (lifecycle === "ended") {
     return "completed";
   }
@@ -112,6 +115,10 @@ function stateHintFor(input: {
     return "active";
   }
   return "unknown";
+}
+
+function isBlockedStatus(value: string): boolean {
+  return /(^|[\s_-])blocked($|[\s_-])/.test(value);
 }
 
 function transcriptSubjectCandidates(message: string): string[] {
