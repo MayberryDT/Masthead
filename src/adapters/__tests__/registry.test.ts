@@ -13,7 +13,6 @@ describe("adapter registry", () => {
       expect(adapterForRuntime(runtime)?.runtime).toBe(runtime);
     }
 
-    expect(adapterForRuntime("omp")).toBeUndefined();
     expect(adapterForRuntime("devin")).toBeUndefined();
     expect(adapterForRuntime("gemini_cli")).toBeUndefined();
     expect(sessionAdapters.map((adapter) => adapter.runtime)).not.toContain("gemini_cli");
@@ -23,7 +22,6 @@ describe("adapter registry", () => {
     expect(requiredScanRuntimes()).toEqual(scanTargetHarnesses().map((entry) => entry.runtime));
     expect(scanAdapters.map((adapter) => adapter.runtime)).toEqual(requiredScanRuntimes());
     expect(scanAdapters.find((adapter) => adapter.runtime === "omp")).toBeDefined();
-    expect(sessionAdapters.map((adapter) => adapter.runtime)).not.toContain("omp");
   });
 
   test("keeps Gemini CLI as legacy planned capability only", () => {

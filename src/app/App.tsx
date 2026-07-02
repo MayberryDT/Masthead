@@ -140,6 +140,7 @@ export function App() {
     importPage,
     importTranscripts: handleImportTranscripts,
     imports,
+    lastRefreshAt: sourcesLastRefreshAt,
     loadAdapterSources: handleLoadAdapterSources,
     pollActiveImports: handlePollActiveImports,
     refreshSources: handleRefreshSources,
@@ -416,8 +417,10 @@ export function App() {
           adapters={adapters}
           imports={imports}
           importTotal={importPage.total}
+          lastRefreshAt={sourcesLastRefreshAt}
           setup={sourcesSetup}
           busy={sourcesBusy}
+          readOnly={!connection.writable}
           status={sourcesStatus}
           onCancelImport={handleCancelImport}
           onConnectSelected={handleConnectSelectedSources}

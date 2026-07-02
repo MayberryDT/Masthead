@@ -1,8 +1,8 @@
-import type { AttentionItem, BoardBrief, LiveBoardProjection, SessionCopySource } from "./types";
+import type { AttentionItem, BoardBrief, LiveBoardProjection } from "./types";
 
 type BriefProjection = Pick<LiveBoardProjection, "summary" | "cards" | "attentionQueue" | "conflicts">;
 
-export function buildBoardBrief(projection: BriefProjection, source: SessionCopySource = "deterministic"): BoardBrief {
+export function buildBoardBrief(projection: BriefProjection, source: BoardBrief["source"] = "deterministic"): BoardBrief {
   const clauses: string[] = [];
   const attention = countAttentionTypes(projection.attentionQueue);
   const commandFailureCount = attention.command_failed + attention.repeated_failure;

@@ -152,10 +152,12 @@ describe("live projection client helpers", () => {
     expect(projection.lanes?.map((lane) => lane.laneId)).toEqual(["running", "idle", "needs_action", "history"]);
     expect(projection.summary.running).toBe(1);
     expect(projection.summary.needsAction).toBe(1);
-    expect(projection.cards[0].copy.headline).toBe("This work is paused for approval.");
-    expect(projection.cards[0].copy.source).toBe("fallback");
-    expect(projection.cards[1].copy.headline).toBe("This work is pending review.");
-    expect(projection.selectedSession?.copy.headline).toBe("This work is pending review.");
+    expect(projection.cards[0].headline.headline).toBe("Masthead Codex session: waiting for the next required input.");
+    expect(projection.cards[0].headline.source).toBe("offline");
+    expect("copy" in projection.cards[0]).toBe(false);
+    expect(projection.cards[1].headline.headline).toBe("Masthead Codex session: latest outcome is ready for review.");
+    expect(projection.selectedSession?.headline.headline).toBe("Masthead Codex session: latest outcome is ready for review.");
+    expect(projection.selectedSession && "copy" in projection.selectedSession).toBe(false);
     expect(projection.brief).toMatchObject({
       text: "Approval is pending in one active session. One session is running overall.",
       source: "fallback",
@@ -184,15 +186,17 @@ describe("live projection client helpers", () => {
 
     expect(selectedProjection.selectedSession).toMatchObject({
       sessionId: "running-session",
-      currentActivity: "Work is active.",
-      copy: {
-        headline: "This work is in progress.",
-        status: "Work is active."
+      currentActivity: "waiting for LLM headline access",
+      headline: {
+        headline: "Masthead Codex session: waiting for LLM headline access.",
+        source: "offline",
+        status: "ready"
       }
     });
+    expect(selectedProjection.selectedSession && "copy" in selectedProjection.selectedSession).toBe(false);
   });
 
-  test("replaces stale category-label copy from older live collectors", () => {
+  test("replaces stale category-label headlines from older live collectors", () => {
     const projection = normalizeLiveBoardProjection({
       summary: { active: 1, needsAttention: 0, conflicts: 0, completed: 0 },
       cards: [
@@ -209,11 +213,10 @@ describe("live projection client helpers", () => {
               sourceSignals: ["path:ui"]
             }
           }),
-          copy: {
+          headline: {
             headline: "UI work",
-            status: "Work is active.",
-            reason: "This session is active and has recent activity.",
-            source: "deterministic"
+            source: "enrichment",
+            status: "ready"
           }
         }
       ],
@@ -221,8 +224,9 @@ describe("live projection client helpers", () => {
       conflicts: []
     } as unknown as LiveBoardProjection);
 
-    expect(projection.cards[0].copy.headline).toBe("UI changes are in progress.");
-    expect(projection.cards[0].copy.source).toBe("fallback");
+    expect(projection.cards[0].headline.headline).toBe("Masthead Codex session: waiting for LLM headline access.");
+    expect(projection.cards[0].headline.source).toBe("offline");
+    expect("copy" in projection.cards[0]).toBe(false);
   });
 
   test("keeps null selection distinct from legacy selected-session fallback", () => {
@@ -255,8 +259,8 @@ function metaWithMode(mode: string): ImportMeta {
   return { env: { VITE_MASTHEAD_MODE: mode } } as unknown as ImportMeta;
 }
 
-function legacyCard(overrides: Partial<SessionCardView>): Omit<SessionCardView, "copy"> {
-  const card: Omit<SessionCardView, "copy"> = {
+function legacyCard(overrides: Partial<SessionCardView>): Omit<SessionCardView, "headline"> {
+  const card: Omit<SessionCardView, "headline"> = {
     sessionId: "session-1",
     project: "Masthead",
     title: "Masthead Codex session",
@@ -278,7 +282,7 @@ function legacyCard(overrides: Partial<SessionCardView>): Omit<SessionCardView, 
   return card;
 }
 
-function legacySessionDetail(overrides: Partial<SessionDetailView>): Omit<SessionDetailView, "copy"> {
+function legacySessionDetail(overrides: Partial<SessionDetailView>): Omit<SessionDetailView, "headline"> {
   return {
     ...legacyCard(overrides),
     currentActivity: "Waiting for review.",

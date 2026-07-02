@@ -116,7 +116,7 @@ describe("ingest server live projection", () => {
     expect(health).toMatchObject({ events: 0, diagnostics: 1 });
   });
 
-  test("reports non-secret LLM copy status without exposing the API key", async () => {
+  test("reports non-secret Board headline status without exposing the API key", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
     const server = await startServer(join(tempDir, "events.ndjson"), {
@@ -129,14 +129,36 @@ describe("ingest server live projection", () => {
     const health = await getJson(server.baseUrl, "/health");
     const serialized = JSON.stringify(health);
 
-    expect(health.llmCopy).toMatchObject({
+    expect(health.boardHeadlines).toMatchObject({
       enabled: true,
       configured: true,
-      model: "gpt-5-nano-2025-08-07",
-      cacheEntries: 0
+      model: "gpt-5-nano-2025-08-07"
     });
     expect(serialized).not.toContain("redacted-local-test-key");
     expect(serialized).not.toContain("OPENAI_API_KEY");
+  });
+
+  test("returns pending LLM-first Board headlines before OpenAI responds", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const server = await startServer(join(tempDir, "events.ndjson"), {
+      MASTHEAD_LIVE_COPY: "1",
+      OPENAI_API_KEY: "redacted-local-test-key"
+    });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveApprovalPayload("server-headline-pending"));
+
+    const projection = await getJson(server.baseUrl, "/projection?expandedSessionId=server-live");
+    const card = projection.projection.cards[0];
+
+    expect(card).toMatchObject({
+      sessionId: "server-live",
+      headline: {
+        source: "pending"
+      }
+    });
+    expect(card.headlineInput).toBeDefined();
   });
 
   test("applies local retention to persisted live event history", async () => {

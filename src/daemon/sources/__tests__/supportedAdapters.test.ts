@@ -23,13 +23,13 @@ describe("supportedAdapters", () => {
     expect(importAdapters.every((adapter) => adapter.enabled)).toBe(true);
     expect(importAdapters.every((adapter) => adapter.supportsMcpExposure)).toBe(true);
     expect(canImportTranscripts(supportedAdapters.find((adapter) => adapter.runtime === "cursor")!)).toBe(true);
-    expect(canImportMetadata(supportedAdapters.find((adapter) => adapter.runtime === "antigravity")!)).toBe(true);
+    expect(supportedAdapters.map((adapter) => adapter.runtime)).not.toContain("antigravity");
 
     const omp = supportedAdapters.find((adapter) => adapter.runtime === "omp")!;
-    expect(omp.implementationState).toBe("scan_target");
+    expect(omp.implementationState).toBe("active");
     expect(omp.enabled).toBe(true);
-    expect(canImportMetadata(omp)).toBe(false);
-    expect(canImportTranscripts(omp)).toBe(false);
+    expect(canImportMetadata(omp)).toBe(true);
+    expect(canImportTranscripts(omp)).toBe(true);
     expect(scanTargetHarnesses().map((entry) => entry.runtime)).toContain("omp");
   });
 });

@@ -65,6 +65,7 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
   const [setup, setSetup] = useState<SourcesSetupDto>();
   const [importPage, setImportPage] = useState<ImportPageState>({ limit: 50, offset: 0, total: 0 });
   const [busy, setBusy] = useState(false);
+  const [lastRefreshAt, setLastRefreshAt] = useState<string>();
   const [status, setStatus] = useState<string>();
   const inventoryLoadedAtRef = useRef<number | undefined>(undefined);
   const inventoryLoadedForUrlRef = useRef<string | undefined>(undefined);
@@ -99,6 +100,7 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
       if (setupResult.status === "fulfilled" || adapterResult.status === "fulfilled" || sourceResult.status === "fulfilled" || importResult.status === "fulfilled") {
         inventoryLoadedAtRef.current = Date.now();
         inventoryLoadedForUrlRef.current = activeProjectionUrl;
+        setLastRefreshAt(new Date().toISOString());
       }
       if (options.showStatus && sourceResult.status === "fulfilled") {
         setStatus(`${sourceResult.value.length} source${sourceResult.value.length === 1 ? "" : "s"} detected.`);
@@ -120,13 +122,19 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
   const refreshSources = useCallback(async () => {
     setBusy(true);
     try {
-      await loadInventory({ showStatus: true });
+      setStatus("Refreshing harness detection...");
+      const result = await scanSourcesSetup(activeProjectionUrl);
+      setSetup(result.setup);
+      const scanResult = result.scan ?? result.setup.latestScan ?? result.setup.scan;
+      const found = scanResult?.foundSources.filter((source) => source.importable === true || source.state === "importable").length ?? 0;
+      setStatus(`Detection refresh complete: ${found} importable source${found === 1 ? "" : "s"} found.`);
+      await loadInventory();
     } catch (error) {
-      setStatus(`Source refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus(`Detection refresh failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
-  }, [loadInventory]);
+  }, [activeProjectionUrl, loadInventory]);
 
   const loadAdapterSources = useCallback(async (runtime: string, page: { limit: number; offset: number }) => {
     return listAdapterSources(runtime, activeProjectionUrl, page);
@@ -178,8 +186,10 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     if (inventoryLoadInFlightRef.current) return;
     const lastLoadedAt = inventoryLoadedForUrlRef.current === activeProjectionUrl ? inventoryLoadedAtRef.current : undefined;
     if (!shouldRefreshSourceInventory({ activeSurface, lastLoadedAt, now: Date.now() })) return;
-    void refreshSources();
-  }, [activeProjectionUrl, activeSurface, refreshSources]);
+    void loadInventory().catch((error: unknown) => {
+      setStatus(`Source inventory refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, [activeProjectionUrl, activeSurface, loadInventory]);
 
   const pollActiveImports = useCallback(async () => {
     const activeImportIds = new Set(
@@ -392,6 +402,7 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     importPage,
     importTranscripts,
     imports,
+    lastRefreshAt,
     loadAdapterSources,
     pollActiveImports,
     previewImport,

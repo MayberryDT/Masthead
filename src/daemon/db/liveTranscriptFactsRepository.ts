@@ -43,7 +43,7 @@ export function liveProjectionTranscriptFacts(
     const sourceSessionId = row.sourceSessionId?.trim();
     const role = normalizeRole(row.role);
     const text = row.text?.replace(/\s+/g, " ").trim();
-    if (!sourceSessionId || !role || !text) continue;
+    if (!sourceSessionId || !role || !text || isLowValueLiveTranscriptText(text, role)) continue;
 
     const facts = factsBySourceSession.get(sourceSessionId) ?? { recentMessages: [] };
     if (facts.recentMessages.length >= maxMessagesPerSession) {
@@ -64,4 +64,16 @@ export function liveProjectionTranscriptFacts(
 function normalizeRole(role: string | null): "user" | "assistant" | undefined {
   if (role === "user" || role === "assistant") return role;
   return undefined;
+}
+
+function isLowValueLiveTranscriptText(value: string, role: "user" | "assistant"): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return true;
+  if (/^(codex hook event|runtime signal|unknown|shell)$/i.test(normalized)) return true;
+  if (role !== "assistant") return false;
+  if (/\bI(?:'|’)m\s+(?:checking|running|reading|looking|starting|rerunning|applying|writing|opening|waiting)\b/i.test(normalized)) {
+    return true;
+  }
+  if (/^I\s+(?:am|will|can)\s+/i.test(normalized)) return true;
+  return false;
 }

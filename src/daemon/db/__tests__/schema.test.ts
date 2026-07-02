@@ -60,7 +60,8 @@ describe("daemon database schema", () => {
         "import_work_units",
         "import_failure_groups",
         "import_session_impacts",
-        "legacy_migrations"
+        "legacy_migrations",
+        "board_headline_frames"
       ])
     );
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
@@ -73,7 +74,8 @@ describe("daemon database schema", () => {
       { version: 6, name: "006_source_setup" },
       { version: 7, name: "007_live_projection_enrichment_indexes" },
       { version: 8, name: "008_live_projection_usage_indexes" },
-      { version: 9, name: "009_import_ledger" }
+      { version: 9, name: "009_import_ledger" },
+      { version: 10, name: "010_board_headline_frames" }
     ]);
     expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     expect((db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toBe("wal");

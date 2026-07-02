@@ -9,7 +9,6 @@ describe("adapter capabilities", () => {
       "codex",
       "cursor",
       "claude_code",
-      "antigravity",
       "opencode",
       "aider",
       "openclaw",
@@ -52,17 +51,17 @@ describe("adapter capabilities", () => {
     expect(activeProfiles.map((profile) => profile.runtime)).toEqual(activeImportRuntimes());
   });
 
-  test("marks detector scan targets as non-importing capabilities", () => {
+  test("marks OMP as importable after schema verification", () => {
     expect(adapterCapabilityProfile("omp")).toMatchObject({
-      lifecycle: "scan_target",
-      maturity: "detector",
+      lifecycle: "active",
+      maturity: "transcript",
       runtime: "omp",
-      runtimeStatus: "scan_target",
-      supportsMetadataImport: false,
-      supportsTranscriptImport: false
+      runtimeStatus: "import_adapter",
+      supportsMetadataImport: true,
+      supportsTranscriptImport: true
     });
-    expect(canImportMetadata(adapterCapabilityProfile("omp"))).toBe(false);
-    expect(canImportTranscripts(adapterCapabilityProfile("omp"))).toBe(false);
+    expect(canImportMetadata(adapterCapabilityProfile("omp"))).toBe(true);
+    expect(canImportTranscripts(adapterCapabilityProfile("omp"))).toBe(true);
     expect(adapterCapabilityProfile("devin")).toMatchObject({
       lifecycle: "cloud_reference",
       maturity: "planned",

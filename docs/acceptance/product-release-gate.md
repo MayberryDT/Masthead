@@ -14,7 +14,7 @@
 - [x] Transcript import populates messages/tools. Evidence: `npm run verify` import and MCP smokes passed on 2026-06-26.
 
 ## Multi-adapter Sources
-- [x] Sources shows Codex, Cursor, Claude Code, Antigravity, OpenCode, Aider, OpenClaw, Hermes, and Pi. Evidence: `supportedAdapters`, registry, scan-service, and Sources UI tests added on 2026-06-27.
+- [x] Sources shows Codex, Cursor, Claude Code, OpenCode, Aider, OpenClaw, Hermes, Pi, and OMP. Evidence: `supportedAdapters`, registry, scan-service, and Sources UI tests added on 2026-06-27, with OMP promoted and Antigravity pruned on 2026-07-02.
 - [x] Scan this computer checks known local locations only. Evidence: `sourceScanService.test.ts` verifies arbitrary home files are ignored on 2026-06-27.
 - [x] Connect selected queues metadata import jobs. Evidence: `sourceConnectService.test.ts` verifies per-source metadata jobs on 2026-06-27.
 - [x] Transcript import requires explicit approval. Evidence: `/sources/connect` rejects transcript import without approval and adapter transcript routes use existing policy checks.
@@ -38,8 +38,8 @@
 - [x] Dossier has live-only fallback. Evidence: `SessionDossier.test.tsx` covers live-only fallback on 2026-06-26.
 - [x] Unsupported source-opening actions are hidden. Evidence: `SessionDossier.test.tsx` verifies source-opening actions are omitted on 2026-06-26.
 
-## Enrichment and Board copy
-- [x] Board live copy attempts fresh remote copy on projection refresh when enabled/configured. Evidence: `openaiSessionCopy.test.ts` verifies default cache disabled and two refreshes call the provider twice on 2026-06-29.
+## Enrichment and Board headlines
+- [x] Board headline frames refresh through the remote provider when enabled/configured. Evidence: `boardHeadlineEnricher.test.ts` and `openaiBoardHeadlineFrame.test.ts` verify pending, success, invalid-output, and refresh behavior.
 - [x] Remote enrichment failures do not silently fall back to deterministic success. Evidence: `openAIProvider.test.ts` and `enrichmentCoordinator.test.ts` verify structured failure results and failed rows on 2026-06-29.
 - [x] Failed enrichment is visible in diagnostics and dossier provenance. Evidence: daemon queue records `enrichment_failed`; `sessionDossierRepository.test.ts` verifies latest failed attempt fields on 2026-06-29.
 - [x] Audit export is available for shareable traces. Evidence: `enrichmentAudit.test.ts` and `node scripts/masthead-export-enrichment-audit.js --help` passed on 2026-06-29.

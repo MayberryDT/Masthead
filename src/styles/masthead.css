@@ -4504,7 +4504,7 @@ body {
   line-height: 1.28;
 }
 
-.copy-refresh-badge {
+.headline-source {
   position: absolute;
   z-index: 2;
   top: 96px;
@@ -4513,26 +4513,32 @@ body {
   max-width: calc(100% - (var(--space-md) * 2));
   min-height: 22px;
   align-items: center;
-  gap: 7px;
   overflow: hidden;
-  border: 1px solid rgba(255, 207, 54, 0.28);
+  border: 1px solid rgba(194, 221, 241, 0.13);
   border-radius: var(--radius-full);
-  background: rgba(247, 201, 72, 0.15);
-  color: #f8db78;
-  font-size: 11px;
+  background: rgba(8, 29, 42, 0.72);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   line-height: 1.2;
   padding: 3px 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.copy-refresh-badge span {
-  color: #91a8ba;
-  font-family: var(--font-mono);
-  font-size: 10px;
+.headline-source.is-pending {
+  border-color: rgba(247, 201, 72, 0.22);
+  background: rgba(247, 201, 72, 0.1);
+  color: #d9bd63;
 }
 
-.observability-card-grid.compact .copy-refresh-badge {
+.headline-source.is-offline {
+  border-color: rgba(145, 168, 186, 0.2);
+  background: rgba(97, 121, 142, 0.11);
+  color: #9cb1c1;
+}
+
+.observability-card-grid.compact .headline-source {
   top: 84px;
   min-height: 20px;
   padding: 2px 7px;

@@ -63,7 +63,9 @@ describe("SourcesPanel", () => {
 
     expect(html).toContain('class="sources-action-bar sources-toolbar observability-toolbar metal-toolbar"');
     expect(html).not.toContain("Source health");
-    expect(html).toContain("Set up more sources");
+    expect(html).toContain("Import data");
+    expect(html).toContain("Refresh detection");
+    expect(html).not.toContain("Repair missing data");
     expect(html).toContain("Live capture");
     expect(html).toContain("History");
     expect(html).toContain("Transcripts");
@@ -74,6 +76,9 @@ describe("SourcesPanel", () => {
     expect(html).toContain("120");
     expect(html).not.toContain("Advanced diagnostics");
     expect(html).not.toContain("Metadata import ready");
+    expect(html).toContain("sources-toolbar-facts");
+    expect(html).toContain("Last refresh");
+    expect(html).toContain("Active import");
     expect(html).not.toContain("Open Logbook");
     expect(html).not.toContain("/home/tyler/.codex/sessions");
     expect(html).not.toContain("hello from transcript");
@@ -103,7 +108,8 @@ describe("SourcesPanel", () => {
     );
 
     expect(html).not.toContain("Source health");
-    expect(html).toContain("Set up more sources");
+    expect(html).toContain("Import data");
+    expect(html).toContain("Refresh detection");
     expect(html).toContain("Codex sessions");
     expect(html).toContain("742 sessions");
     expect(html).toContain("<dt>Enriched</dt>");
@@ -152,21 +158,20 @@ describe("SourcesPanel", () => {
 
     expect(html.match(/connected-source-row/g)).toHaveLength(1);
     expect(html).toContain("Codex sessions");
-    expect(html).not.toContain("Masthead");
     expect(html).not.toContain("masthead-git-observer");
   });
 
-  test("groups repeated Antigravity source locations into one source family", () => {
+  test("groups repeated Hermes source locations into one source family", () => {
     const setup = connectedSetup();
     setup.connectedSources = Array.from({ length: 12 }, (_, index) => ({
       discoveredSessions: 2,
       importedSessions: 2,
-      label: "Antigravity",
+      label: "Hermes",
       lastSyncAt: `2026-06-27T${String(10 + (index % 3)).padStart(2, "0")}:00:00.000Z`,
-      path: `/home/tyler/.config/Antigravity/User/workspaceStorage/workspace-${index + 1}/state.vscdb`,
+      path: `/home/tyler/.hermes/workspace-${index + 1}/state.db`,
       queuedRecords: index === 0 ? 3 : 0,
-      runtime: "antigravity",
-      sourceId: `antigravity-${index + 1}`,
+      runtime: "hermes",
+      sourceId: `hermes-${index + 1}`,
       state: "connected",
       transcriptImportEnabled: true
     }));
@@ -190,7 +195,7 @@ describe("SourcesPanel", () => {
     );
 
     expect(html.match(/connected-source-row/g)).toHaveLength(1);
-    expect(html).toContain("Antigravity");
+    expect(html).toContain("Hermes");
     expect(html).toContain("12 locations");
     expect(html).toContain("24 sessions");
     expect(html).not.toContain("Showing 12 of 12 connected source records");
@@ -203,11 +208,11 @@ describe("SourcesPanel", () => {
       {
         discoveredCount: 12,
         failureCount: 0,
-        importJobId: "job-antigravity",
+        importJobId: "job-hermes",
         importedCount: 4,
         importKind: "metadata",
         queuedCount: 8,
-        sourceId: "antigravity-workspace",
+        sourceId: "hermes-workspace",
         status: "running",
         updatedAt: "2026-06-27T12:00:00.000Z"
       }
@@ -225,7 +230,8 @@ describe("SourcesPanel", () => {
     );
 
     expect(html).toContain("Import jobs");
-    expect(html).toContain("antigravity-workspace");
+    expect(html).toContain("Hermes");
+    expect(html).not.toContain("hermes-workspace");
     expect(html).toContain("metadata");
     expect(html).not.toContain("Advanced diagnostics");
   });
@@ -303,16 +309,49 @@ describe("SourcesPanel", () => {
     expect(css).toMatch(/\.sources-management \.status-badge\s*\{[\s\S]*border-radius: 1px;[\s\S]*clip-path: var\(--folded-control-clip/);
   });
 
-  test("centers a compact source action toolbar", () => {
+  test("keeps source actions inline with toolbar facts on the right", () => {
     const css = readFileSync("src/styles/sources.css", "utf8");
     const toolbarRule = css.match(/\.sources-action-bar\.sources-toolbar\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
     const toolbarGroupRule = css.match(/\.sources-action-bar\.sources-toolbar \.sources-action-group\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const toolbarFactsRule = css.match(/\.sources-toolbar-facts\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const toolbarFactCardRule = css.match(/\.sources-toolbar-facts div\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
 
-    expect(toolbarRule).toContain("justify-self: center;");
-    expect(toolbarRule).toContain("width: fit-content;");
-    expect(toolbarRule).toContain("justify-content: center;");
-    expect(toolbarRule).toContain("margin: 0 auto;");
-    expect(toolbarGroupRule).toContain("justify-content: center;");
+    expect(toolbarRule).toContain("width: 100%;");
+    expect(toolbarRule).toContain("justify-content: space-between;");
+    expect(toolbarRule).toContain("align-items: center;");
+    expect(toolbarGroupRule).toContain("justify-content: flex-start;");
+    expect(toolbarFactsRule).toContain("margin-left: auto;");
+    expect(toolbarFactCardRule).not.toContain("inset 2px 0 0");
+  });
+
+  test("keeps import modal cards compact without left accent stripes", () => {
+    const css = readFileSync("src/styles/sources.css", "utf8");
+    const importModalRule = css.match(/\.session-detail-modal\.sources-import-modal\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const harnessCardRule = css.match(/\.harness-import-card\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const footerRule = css.match(/\.sources-import-footer\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+
+    expect(importModalRule).toContain("grid-template-rows: auto minmax(0, 1fr) auto;");
+    expect(harnessCardRule).toContain("border-left: 0;");
+    expect(harnessCardRule).toContain("min-height: 104px;");
+    expect(harnessCardRule).toContain("animation: none;");
+    expect(harnessCardRule).toContain("transform: none;");
+    expect(footerRule).toContain("padding: 12px 16px;");
+  });
+
+  test("uses dossier modal motion for the import history modal", () => {
+    const css = readFileSync("src/styles/sources.css", "utf8");
+    const openingRule = css.match(/\.session-detail-modal\.sources-import-modal\.t-modal\.is-opening\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const openRule = css.match(/\.session-detail-modal\.sources-import-modal\.t-modal\.is-open\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const settledRule = css.match(/\.session-detail-modal\.sources-import-modal\.t-modal\.is-open\.is-settled\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const closingRule = css.match(/\.session-detail-modal\.sources-import-modal\.t-modal\.is-closing\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+
+    expect(openingRule).toContain("transform: translateY(9px) scale(var(--modal-scale));");
+    expect(openRule).toContain("transform: none;");
+    expect(openRule).toContain("animation: usage-card-enter var(--modal-open-dur) cubic-bezier(0.17, 0.78, 0.13, 1);");
+    expect(openRule).not.toContain("both");
+    expect(settledRule).toContain("transform: none;");
+    expect(settledRule).toContain("animation: none;");
+    expect(closingRule).toContain("animation: session-dossier-card-exit var(--modal-close-dur) cubic-bezier(0.17, 0.78, 0.13, 1) both;");
   });
 
   test("uses shared card entrance motion for source inventory cards", () => {

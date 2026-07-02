@@ -44,6 +44,57 @@ describe("live transcript facts repository", () => {
     ]);
     db.close();
   });
+
+  test("filters hook placeholders before applying the per-session message limit", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-live-transcript-facts-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedSession(db, "session-a", "source-a");
+
+    for (let index = 0; index < 30; index += 1) {
+      seedMessage(db, "session-a", "assistant", "Codex hook event", `2026-06-24T12:30:${String(index).padStart(2, "0")}.000Z`);
+    }
+    seedMessage(db, "session-a", "user", "Use the latest transcript turns for Board headlines.", "2026-06-24T12:01:00.000Z");
+    seedMessage(db, "session-a", "assistant", "Board headlines now refresh from transcript evidence.", "2026-06-24T12:02:00.000Z");
+
+    const facts = liveProjectionTranscriptFacts(db, new Set(["source-a"]), { maxMessagesPerSession: 4 });
+
+    expect(facts.get("source-a")?.recentMessages).toEqual([
+      {
+        observedAt: "2026-06-24T12:02:00.000Z",
+        role: "assistant",
+        text: "Board headlines now refresh from transcript evidence."
+      },
+      {
+        observedAt: "2026-06-24T12:01:00.000Z",
+        role: "user",
+        text: "Use the latest transcript turns for Board headlines."
+      }
+    ]);
+    db.close();
+  });
+
+  test("drops progress-only assistant messages from live headline facts", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-live-transcript-facts-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedSession(db, "session-a", "source-a");
+    seedMessage(db, "session-a", "assistant", "I’m checking the local tests now.", "2026-06-24T12:03:00.000Z");
+    seedMessage(db, "session-a", "user", "Headlines should refresh only when transcript messages change.", "2026-06-24T12:02:00.000Z");
+
+    const facts = liveProjectionTranscriptFacts(db, new Set(["source-a"]));
+
+    expect(facts.get("source-a")?.recentMessages).toEqual([
+      {
+        observedAt: "2026-06-24T12:02:00.000Z",
+        role: "user",
+        text: "Headlines should refresh only when transcript messages change."
+      }
+    ]);
+    db.close();
+  });
 });
 
 function seedSession(db: MastheadDatabase, sessionId: string, sourceSessionId: string): void {

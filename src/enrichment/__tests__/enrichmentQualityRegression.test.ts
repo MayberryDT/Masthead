@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, test, vi } from "vitest";
-import { createOpenAISessionCopyEnricher } from "../../core/openaiSessionCopy.ts";
-import type { LiveBoardProjection, SessionCardView } from "../../core/types.ts";
+import { renderBoardHeadlineFrame, type BoardHeadlineFrame } from "../../core/boardHeadlineFrame.ts";
+import type { BoardHeadlineInput } from "../../core/boardHeadlineInput.ts";
+import { rewriteBoardHeadlineFrameWithOpenAI } from "../../core/openaiBoardHeadlineFrame.ts";
 import { createOpenAIEnrichmentProvider } from "../openAIProvider.ts";
 import { deterministicCapsuleFromFacts, type SessionFacts } from "../sessionCompiler.ts";
 import { validateNarrativeField } from "../sessionNarrativeValidator.ts";
@@ -86,36 +87,45 @@ describe("enrichment quality regressions", () => {
     expect(result.source).toBe("none");
   });
 
-  test("board live copy backs off unchanged validation failures", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        output: [
-          {
-            content: [
-              {
-                text: JSON.stringify({
-                  headline: "Recent activity.",
-                  nextStep: "",
-                  reason: "Recent activity.",
-                  status: "running"
-                }),
-                type: "output_text"
-              }
-            ]
-          }
-        ]
+  test("board headline frame API validates provider output and renders accepted frames", async () => {
+    const invalidFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      responseWithFrame({
+        subject: "https://example.com/task",
+        disposition: "recent activity",
+        state: "active",
+        subjectKind: "unknown",
+        confidence: "low",
+        evidence: ["Recent activity."]
       })
+    );
+
+    await expect(
+      rewriteBoardHeadlineFrameWithOpenAI(headlineInput(), { apiKey: "key", enabled: true, fetchImpl: invalidFetch })
+    ).resolves.toMatchObject({
+      status: "invalid_output",
+      validationReason: "unsafe_text"
     });
-    const enricher = createOpenAISessionCopyEnricher({ apiKey: "key", enabled: true, fetchImpl });
-    const projection = liveProjection(card());
 
-    const first = await enricher.enrichProjection(projection);
-    const second = await enricher.enrichProjection(projection);
+    const frame: BoardHeadlineFrame = {
+      subject: "Board headlines",
+      disposition: "structured around subject and disposition",
+      state: "active",
+      subjectKind: "component",
+      confidence: "high",
+      evidence: ["Use subject and disposition frames for Board headlines."]
+    };
+    const validFetch = vi.fn<typeof fetch>().mockResolvedValue(responseWithFrame(frame));
+    const result = await rewriteBoardHeadlineFrameWithOpenAI(headlineInput(), {
+      apiKey: "key",
+      enabled: true,
+      fetchImpl: validFetch
+    });
 
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(first.copyRefreshSummary).toMatchObject({ failed: 1, requested: 1 });
-    expect(second.copyRefreshSummary).toMatchObject({ failed: 1, requested: 1 });
+    expect(result.status).toBe("llm");
+    expect(result.frame).toEqual(frame);
+    expect(result.frame ? renderBoardHeadlineFrame(result.frame) : undefined).toBe(
+      "Board headlines: structured around subject and disposition."
+    );
   });
 });
 
@@ -168,45 +178,41 @@ function facts(): SessionFacts {
   };
 }
 
-function card(): SessionCardView {
+function headlineInput(): BoardHeadlineInput {
   return {
-    changedFileCount: 0,
-    copy: {
-      headline: "This work is in progress.",
-      reason: "This session is active and has recent activity.",
-      source: "deterministic",
-      status: "Work is active."
-    },
-    durationLabel: "1m",
-    identityConfidence: "direct",
-    indicators: [],
-    isExpanded: false,
-    lastActivity: "2026-06-29T12:00:00.000Z",
-    lastActivityLabel: "now",
     lifecycle: "running",
     primaryStatus: "editing",
-    priorityRank: 50,
-    project: "Masthead",
-    safeActions: ["open_source_session"],
-    sessionId: "session-board-refresh",
-    stateLabel: "Running",
-    title: "Board refresh"
+    stateHint: "active",
+    signals: [],
+    subjectCandidates: ["Board headlines"],
+    dispositionHints: ["structured around subject and disposition"],
+    evidence: ["Use subject and disposition frames for Board headlines."],
+    facts: {
+      sessionId: "session-board-refresh",
+      project: "Masthead",
+      lifecycle: "running",
+      primaryStatus: "editing",
+      recentTranscriptMessages: ["Use subject and disposition frames for Board headlines."],
+      recentFileBasenames: ["boardHeadlineEnricher.ts"],
+      changedFileCount: 1,
+      recentEvents: [],
+      recentToolNames: [],
+      recentCommandFailures: [],
+      attentionTitles: [],
+      conflictTitles: []
+    }
   };
 }
 
-function liveProjection(cardView: SessionCardView): LiveBoardProjection {
-  return {
-    attentionQueue: [],
-    cards: [cardView],
-    conflicts: [],
-    summary: {
-      active: 1,
-      completed: 0,
-      conflicts: 0,
-      idle: 0,
-      needsAction: 0,
-      needsAttention: 0,
-      running: 1
-    }
-  };
+function responseWithFrame(frame: unknown): Response {
+  return new Response(
+    JSON.stringify({
+      output: [
+        {
+          content: [{ type: "output_text", text: JSON.stringify(frame) }]
+        }
+      ]
+    }),
+    { status: 200 }
+  );
 }

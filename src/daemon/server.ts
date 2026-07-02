@@ -12,7 +12,7 @@ import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent } from "../core/ingestion.ts";
 import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
 import { projectLiveEvents } from "../core/liveProjection.ts";
-import { createOpenAISessionCopyEnricher } from "../core/openaiSessionCopy.ts";
+import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent } from "../core/boardHeadlineEnricher.ts";
 import { createFileBackedStore, type StoreRecord } from "../core/store.ts";
 import type { ReviewDisposition } from "../core/store.ts";
 import type { CodexHookDiagnostic } from "../core/codexAdapter.ts";
@@ -42,6 +42,7 @@ import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsReposit
 import { createRawEventRepository } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
+import { currentBoardHeadlineFrames, upsertBoardHeadlineFrame } from "./db/boardHeadlineFrameRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
@@ -83,7 +84,7 @@ import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/so
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { buildMastheadHealth } from "./healthService.ts";
-import { recentHookEventsWithTranscriptPaths } from "./hookTranscriptRecovery.ts";
+import { recentHookEventsWithTranscriptPaths, recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
 import { createSettingsBackedEnrichmentProvider, listLlmProviderModels, updateLlmProviderSettings } from "./llmSettings.ts";
 import {
@@ -177,15 +178,43 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       upsertFileEffectsFromGitSnapshot(database, canonicalSessionIdForSource(gitSnapshot.sessionId), gitSnapshot);
     }
     const gitSnapshotSignatures = new Map(gitSnapshots.map((snapshot) => [snapshot.sessionId, gitSnapshotSignature(snapshot)]));
-    const sessionCopyEnricher = createOpenAISessionCopyEnricher({
+    const persistBoardHeadlineFrame = (event: BoardHeadlineAppliedEvent): void => {
+      try {
+        const sessionId = canonicalSessionIdForSource(event.sessionId);
+        const row = database
+          .prepare("SELECT session_id AS sessionId, source_session_id AS sourceSessionId FROM sessions WHERE source_session_id = ? AND session_id = ?")
+          .get(event.sessionId, sessionId) as { sessionId: string; sourceSessionId: string } | undefined;
+        if (!row) return;
+
+        upsertBoardHeadlineFrame(database, {
+          sessionId: row.sessionId,
+          sourceSessionId: row.sourceSessionId,
+          provider: event.provider,
+          model: event.model,
+          generatedAt: event.generatedAt,
+          frame: event.frame
+        });
+      } catch (error) {
+        recordRuntimeDiagnostic({
+          details: {
+            error,
+            generatedAt: event.generatedAt,
+            model: event.model,
+            provider: event.provider,
+            sourceSessionId: event.sessionId
+          },
+          kind: "board_headline_frame_persist_failed",
+          message: `Board headline frame persistence failed for ${event.sessionId}`,
+          severity: "warning"
+        });
+      }
+    };
+    const boardHeadlineEnricher = createBoardHeadlineEnricher({
       enabled: config.liveCopyEnabled ?? config.llmCopyEnabled,
       apiKey: config.openaiApiKey,
       model: config.openaiModel,
-      mode: "background",
-      ttlMs: config.liveCopyCacheMs,
-      timeoutMs: config.liveCopyTimeoutMs,
-      projectionBudgetMs: config.liveCopyProjectionBudgetMs,
-      maxConcurrent: config.liveCopyMaxConcurrent && config.liveCopyMaxConcurrent > 0 ? config.liveCopyMaxConcurrent : undefined
+      onFrameApplied: persistBoardHeadlineFrame,
+      timeoutMs: config.liveCopyTimeoutMs
     });
     const enrichmentProvider = createSettingsBackedEnrichmentProvider(database, config);
     const enrichment = createEnrichmentCoordinator(database, enrichmentProvider);
@@ -563,6 +592,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       if (!adapter) continue;
       controls?.throwIfCancelled();
       controls?.updateProgress({ currentPath: source.path ?? source.sourceId });
+      let recordsSinceYield = 0;
       for await (const record of adapter.backfill(source)) {
         controls?.throwIfCancelled();
         const { sessionId } = ingestAdapterRecord(database, record, {
@@ -581,6 +611,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           processedCount: result.processedCount,
           queuedCount: result.queuedCount
         });
+        recordsSinceYield += 1;
+        if (recordsSinceYield >= 25) {
+          recordsSinceYield = 0;
+          await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+          });
+          controls?.throwIfCancelled();
+        }
       }
     }
     return result;
@@ -902,6 +940,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     for (const event of events) scheduleHookTranscriptCatchup(event);
   }
 
+  function scheduleRecentHookTranscriptCatchupsForSessions(sourceSessionIds: Set<string>): void {
+    if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database) || sourceSessionIds.size === 0) return;
+    const events = recentHookEventsWithTranscriptPathsForSessions(database, codexHookSource.sourceId, sourceSessionIds, HOOK_TRANSCRIPT_RECOVERY_LIMIT);
+    for (const event of events) scheduleHookTranscriptCatchup(event);
+  }
+
   function approveTranscriptImports(runtime?: RuntimeKind): void {
     approveTranscriptImport(database, {
       approvedAt: new Date().toISOString(),
@@ -1120,7 +1164,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             reason: legacySqliteMigration.reason
           }
         },
-        llmCopy: sessionCopyEnricher.status()
+        boardHeadlines: boardHeadlineEnricher.status()
       });
       return;
     }
@@ -1277,7 +1321,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const generatedAt = new Date().toISOString();
         const previews = [];
         for (const runtime of runtimes) {
-          const sources = scan.adapters.find((adapter) => adapter.runtime === runtime)?.sources ?? [];
+          const adapterScan = scan.adapters.find((adapter) => adapter.runtime === runtime);
+          const sources = adapterScan?.sources ?? [];
           const transcriptFiles = (await Promise.all(sources.map((source) => transcriptSources(source)))).flat();
           const summary = await buildImportManifestPlan({
             cursors: readCursorsForSources(transcriptFiles),
@@ -1289,6 +1334,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             sourceId: sources[0]?.sourceId,
             sources: transcriptFiles
           });
+          summary.summary.estimatedRecords = adapterScan && adapterScan.discoveredSessions > 0 ? adapterScan.discoveredSessions : undefined;
           previews.push({ runtime, summary: summary.summary });
         }
         sendJson(request, response, config.allowedOrigins, 200, {
@@ -1393,19 +1439,29 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "GET" && url.pathname === "/projection") {
       const selectedSessionId = url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined;
-      const refreshIntervalMs = optionalPositiveQueryInteger(url.searchParams.get("refreshIntervalMs"));
+      const headlineMode = (config.liveCopyEnabled ?? config.llmCopyEnabled) && config.openaiApiKey?.trim() ? "llm" : "offline";
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
+      scheduleRecentHookTranscriptCatchupsForSessions(projectionSessionIds);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
+      const sessionHeadlineViews = currentBoardHeadlineFrames(
+        database,
+        [...projectionSessionIds].map((sourceSessionId) => ({
+          sessionId: canonicalSessionIdForSource(sourceSessionId),
+          sourceSessionId
+        }))
+      );
       const liveEnvelope = projectLiveEvents(projectionEvents, projectionGitSnapshots, {
         selectedSessionId,
         sessionEnrichments: liveProjectionEnrichments(database, projectionSessionIds),
+        sessionHeadlineViews,
         sessionTranscriptFacts: liveProjectionTranscriptFacts(database, projectionSessionIds),
+        headlineMode,
         diagnostics: state.diagnostics.length
       });
       liveEnvelope.events = state.events.length;
       liveEnvelope.gitSnapshots = gitSnapshots.length;
-      liveEnvelope.projection = await sessionCopyEnricher.enrichProjection(liveEnvelope.projection, { refreshIntervalMs });
+      liveEnvelope.projection = await boardHeadlineEnricher.enrichProjection(liveEnvelope.projection);
       liveEnvelope.projection = attachCanonicalCardIds(liveEnvelope.projection, {
         hostId: `host:${config.host}`,
         runtimeKind: "codex"
@@ -2844,20 +2900,14 @@ function parseBoundedInteger(
   return { ok: true, value: parsed };
 }
 
-function optionalPositiveQueryInteger(value: string | null): number | undefined {
-  if (value === null || value === "") return undefined;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 function isRuntimeKind(value: unknown): value is RuntimeKind {
   return typeof value === "string" && (RUNTIME_KINDS as readonly string[]).includes(value);
 }
 
 function setupRuntimesFromBody(body: Record<string, unknown>, scan: SourceScanResult): RuntimeKind[] {
   const requested = Array.isArray(body.runtimes) ? body.runtimes.filter((runtime): runtime is RuntimeKind => isRuntimeKind(runtime)) : [];
-  if (requested.length > 0) return requested;
-  return scan.adapters.filter((adapter) => adapter.sources.length > 0).map((adapter) => adapter.runtime);
+  if (requested.length > 0) return requested.filter((runtime) => Boolean(adapterForRuntime(runtime)));
+  return scan.adapters.filter((adapter) => adapter.sources.length > 0 && adapterForRuntime(adapter.runtime)).map((adapter) => adapter.runtime);
 }
 
 function isSourcePolicyKind(value: unknown): value is SourcePolicyKind {

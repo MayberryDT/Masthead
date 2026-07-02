@@ -54,6 +54,32 @@ describe("source connect service", () => {
     expect(requestedJobs).toEqual([{ kind: "metadata", runtime: "codex" }]);
     db.close();
   });
+
+  test("skips detector-only runtimes even when sources were detected", async () => {
+    const { db } = await openSourceConnectTestDatabase("masthead-source-connect-detector-");
+    const scan = scanResult([
+      adapterResult("cline", [source("cline", "cline:detector:local")])
+    ]);
+    seedSources(db, scan.adapters.flatMap((adapter) => adapter.sources));
+
+    const result = connectSelectedSources(
+      db,
+      scan,
+      {
+        importMetadata: true,
+        importTranscripts: true,
+        queueEnrichment: false,
+        runtimes: ["cline"],
+        transcriptApproved: true
+      },
+      async () => ({ discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 })
+    );
+
+    expect(result.jobs).toEqual([]);
+    expect(result.skipped).toEqual([{ runtime: "cline", reason: "Masthead can detect this harness, but import is not supported yet." }]);
+    expect(listImportJobs(db)).toEqual([]);
+    db.close();
+  });
 });
 
 async function openSourceConnectTestDatabase(prefix: string): Promise<{ db: MastheadDatabase }> {

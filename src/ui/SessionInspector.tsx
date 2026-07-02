@@ -30,7 +30,7 @@ export function SessionInspector({ session, onAction, actionStatus, compactHeade
             <p className="mono-label">
               {session.project} / {session.title}
             </p>
-            <h2>{session.copy.headline}</h2>
+            <h2>{session.headline.headline}</h2>
           </div>
           <span className={`state-token ${isBlockedSessionCard(session) ? "attention" : ""}`}>
             {statusTokenLabel(session)}
@@ -66,13 +66,15 @@ function SessionBrief({ session }: { session: SessionDetailView }) {
   const observed = session.evidence.observed.length;
   const inferred = session.evidence.inferred.length;
   const missing = session.evidence.missing.length;
+  const detail = headlineDetail(session);
+  const evidence = headlineEvidence(session);
 
   return (
     <section className="session-detail-summary" aria-label="Session brief">
       <div className="summary-hero">
         <p className="block-label">Session brief</p>
-        <h3>{session.copy.status}</h3>
-        <p>{session.copy.reason}</p>
+        <h3>{detail}</h3>
+        {evidence ? <p>{evidence}</p> : null}
       </div>
 
       <dl className="summary-facts" aria-label="Operational facts">
@@ -117,14 +119,15 @@ function StateSection({ session }: { session: SessionDetailView }) {
   const degradedSessionAttribution =
     session.identityConfidence === "shared_workspace" || session.identityConfidence === "unattributed";
   const degradedConflictAttribution = session.conflicts.some((item) => item.attribution === "degraded");
+  const detail = headlineDetail(session);
+  const evidence = headlineEvidence(session);
 
   return (
     <>
       <section className="detail-section detail-focus" aria-label="Current activity">
         <p className="block-label">Current activity</p>
-        <h3>{session.copy.status}</h3>
-        <p>{session.copy.reason}</p>
-        {session.copy.nextStep ? <p>{session.copy.nextStep}</p> : null}
+        <h3>{detail}</h3>
+        {evidence ? <p>{evidence}</p> : null}
         {degradedSessionAttribution || degradedConflictAttribution ? (
           <p className="attribution-note">
             Attribution degraded. Session: {session.identityConfidence.replace("_", " ")}. Conflict:{" "}
@@ -156,6 +159,21 @@ function StateSection({ session }: { session: SessionDetailView }) {
       </dl>
     </>
   );
+}
+
+function headlineDetail(session: SessionDetailView): string {
+  return sentence(session.headline.frame?.disposition ?? session.currentActivity ?? session.headline.headline);
+}
+
+function headlineEvidence(session: SessionDetailView): string | undefined {
+  return session.headline.frame?.evidence.find(Boolean);
+}
+
+function sentence(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const normalized = `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+  return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
 }
 
 function displayTimestamp(value: string): string {

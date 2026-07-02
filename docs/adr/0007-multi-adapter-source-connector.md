@@ -12,7 +12,7 @@ Masthead needs a real local connector that can scan multiple agent-history store
 
 ## Decision
 
-Masthead will use an adapter registry for active source scanning. The active scan targets are Codex, Cursor, Claude Code, Antigravity, OpenCode, Aider, OpenClaw, Hermes, and Pi. Gemini CLI remains legacy planned compatibility only.
+Masthead will use an adapter registry for active source scanning. The active scan targets are Codex, Cursor, Claude Code, OpenCode, Aider, OpenClaw, Hermes, Pi, and OMP. Gemini CLI remains legacy planned compatibility only.
 
 Each adapter declares candidate locations, capability maturity, and import behavior. Scans are read-only and bounded to known local locations plus configured overrides. Metadata import can be queued from selected connected sources. Transcript import requires explicit approval.
 

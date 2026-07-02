@@ -139,7 +139,6 @@ export function runtimeLabel(runtime: string): string {
     aider: "Aider",
     claude_code: "Claude Code",
     codex: "Codex",
-    antigravity: "Antigravity",
     cursor: "Cursor",
     gemini_cli: "Gemini CLI",
     hermes: "Hermes",

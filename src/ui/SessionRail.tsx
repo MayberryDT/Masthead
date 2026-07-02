@@ -45,12 +45,23 @@ export function SessionRail({ sourceLabel, summary, sessions, selectedSessionId,
               aria-current={session.sessionId === selectedSessionId ? "true" : undefined}
             >
               <span className="rail-session-project">{session.project}</span>
-              <strong>{session.copy.headline}</strong>
-              <span>{session.copy.status}</span>
+              <strong>{session.headline.headline}</strong>
+              <span>{headlineDetail(session)}</span>
             </button>
           ))
         )}
       </nav>
     </div>
   );
+}
+
+function headlineDetail(session: SessionCardView): string {
+  return sentence(session.headline.frame?.disposition ?? session.stateLabel);
+}
+
+function sentence(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const normalized = `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+  return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
 }

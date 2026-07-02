@@ -1,6 +1,5 @@
 import { buildBoardBrief } from "./boardBrief.ts";
 import { buildLanes } from "./replay.ts";
-import { buildDeterministicSessionCopy, toSessionCopyInput } from "./sessionCopy.ts";
 import type { ReviewDisposition, StoreRecord } from "./store";
 import type { AttentionItem, LiveBoardProjection, SafeAction, SessionCardView } from "./types";
 
@@ -197,10 +196,9 @@ function applyCardDisposition(
   disposition: ReviewDisposition | undefined
 ): SessionCardView {
   if (!disposition) {
-    const cardWithAttention = activeAttention.length > 0
+    return activeAttention.length > 0
       ? { ...card, attentionReason: activeAttention[0].title, indicators: withIndicator(card.indicators, "attention") }
       : { ...card, attentionReason: undefined, indicators: withoutIndicator(card.indicators, "attention") };
-    return withUpdatedCopy(cardWithAttention, activeAttention);
   }
 
   const indicators = activeAttention.length > 0 ? withIndicator(card.indicators, "attention") : withoutIndicator(card.indicators, "attention");
@@ -210,7 +208,7 @@ function applyCardDisposition(
     !stale && disposition.status === "reviewed" && card.lifecycle === "ended" && card.primaryStatus === "completed_unreviewed";
   const canUseDispositionLabel = !stale && card.lifecycle === "ended";
 
-  return withUpdatedCopy({
+  return {
     ...card,
     primaryStatus: canRewriteCompletedReview ? "completed_reviewed" : card.primaryStatus,
     outcomeLabel: canRewriteCompletedReview ? "completed" : card.outcomeLabel,
@@ -219,13 +217,6 @@ function applyCardDisposition(
     priorityRank: activeAttention.length > 0 ? card.priorityRank : Math.max(card.priorityRank, 50),
     attentionReason: activeAttention[0]?.title,
     indicators
-  }, activeAttention);
-}
-
-function withUpdatedCopy(card: SessionCardView, activeAttention: AttentionItem[]): SessionCardView {
-  return {
-    ...card,
-    copy: buildDeterministicSessionCopy(toSessionCopyInput(card, activeAttention, []))
   };
 }
 

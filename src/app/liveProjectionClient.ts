@@ -1,6 +1,9 @@
 import type { LiveProjectionEnvelope } from "../core/liveProjection";
 import { buildBoardBrief } from "../core/boardBrief";
-import { buildDeterministicSessionCopy, toSessionCopyInput, validateSessionCopy } from "../core/sessionCopy";
+import { toBoardHeadlineInput, type BoardHeadlineSignal } from "../core/boardHeadlineInput";
+import { validateBoardHeadlineFrame, renderBoardHeadlineFrame, type BoardHeadlineView } from "../core/boardHeadlineFrame";
+import { buildBoardHeadlineFacts } from "../core/boardHeadlineFacts";
+import { buildOfflineBoardHeadlineView } from "../core/offlineBoardHeadline";
 import type {
   AttentionItem,
   ConflictCard,
@@ -10,8 +13,7 @@ import type {
   LiveBoardProjection,
   NormalizedEvent,
   SessionCardView,
-  SessionDetailView,
-  SessionPlainCopy
+  SessionDetailView
 } from "../core/types";
 
 type ProjectionEnv = {
@@ -116,16 +118,16 @@ export function normalizeLiveBoardProjection(
   const attentionBySession = groupAttentionBySession(projection.attentionQueue);
   const conflictsBySession = groupConflictsBySession(projection.conflicts);
   const cards = projection.cards.map((card) =>
-    normalizeCardCopy(card, attentionBySession.get(card.sessionId) ?? [], conflictsBySession.get(card.sessionId) ?? [])
+    normalizeCardHeadline(card, attentionBySession.get(card.sessionId) ?? [], conflictsBySession.get(card.sessionId) ?? [])
   );
   const expandedSession = projection.expandedSession
-    ? normalizeCardCopy(projection.expandedSession, projection.expandedSession.attentionItems, projection.expandedSession.conflicts)
+    ? normalizeCardHeadline(projection.expandedSession, projection.expandedSession.attentionItems, projection.expandedSession.conflicts)
     : undefined;
   const selectedSession =
     selectedSessionId === null
       ? undefined
       : (projection.selectedSession
-          ? normalizeCardCopy(projection.selectedSession, projection.selectedSession.attentionItems, projection.selectedSession.conflicts)
+          ? normalizeCardHeadline(projection.selectedSession, projection.selectedSession.attentionItems, projection.selectedSession.conflicts)
           : undefined) ?? legacySelectedSession(selectedSessionId, expandedSession, cards, attentionBySession, conflictsBySession);
   const laneSessionIds: Record<LifecycleLaneId, string[]> = {
     running: [],
@@ -208,22 +210,34 @@ const lifecycleLaneTitles: Record<LifecycleLaneId, string> = {
   history: "History"
 };
 
-function normalizeCardCopy<T extends SessionCardView | SessionDetailView>(
+function normalizeCardHeadline<T extends SessionCardView | SessionDetailView>(
   card: T,
   attentionItems: AttentionItem[],
   conflicts: ConflictCard[]
 ): T {
-  const input = toSessionCopyInput(card, attentionItems, conflicts);
-  const existingCopy = (card as { copy?: unknown }).copy;
-  if (isSessionPlainCopy(existingCopy)) {
-    const validation = validateSessionCopy(existingCopy, input, existingCopy.source ?? "fallback");
-    if (validation.ok) return { ...card, copy: validation.copy };
-  }
+  const { copy: _copy, copyInput: _copyInput, copyRefresh: _copyRefresh, ...baseCard } = card as T & {
+    copy?: unknown;
+    copyInput?: unknown;
+    copyRefresh?: unknown;
+  };
+  const input = toBoardHeadlineInput({
+    lifecycle: baseCard.lifecycle,
+    primaryStatus: baseCard.primaryStatus,
+    signals: headlineSignals(baseCard, attentionItems, conflicts),
+    facts: buildBoardHeadlineFacts({
+      card: baseCard,
+      events: [],
+      gitSnapshots: [],
+      attentionItems,
+      conflicts
+    })
+  });
+  const headline = normalizeExistingHeadline((card as { headline?: unknown }).headline) ?? buildOfflineBoardHeadlineView(input);
 
   return {
-    ...card,
-    copy: buildDeterministicSessionCopy(input, "fallback")
-  };
+    ...baseCard,
+    headline
+  } as T;
 }
 
 function legacySelectedSession(
@@ -254,7 +268,7 @@ function detailFromCard(
 ): SessionDetailView {
   return {
     ...card,
-    currentActivity: card.attentionReason ?? card.copy.status,
+    currentActivity: card.attentionReason ?? headlineDetailText(card),
     inspectorSections: card.latestFeedbackSignal
       ? ["state", "latest_feedback", "attention_conflicts", "evidence", "timeline", "actions"]
       : ["state", "attention_conflicts", "evidence", "timeline", "actions"],
@@ -264,6 +278,38 @@ function detailFromCard(
     attentionItems,
     timeline: []
   };
+}
+
+function headlineSignals(
+  card: Pick<SessionCardView, "indicators" | "primaryStatus">,
+  attentionItems: AttentionItem[],
+  conflicts: ConflictCard[]
+): BoardHeadlineSignal[] {
+  const signals = new Set<BoardHeadlineSignal>();
+  if (conflicts.length > 0 || card.indicators.includes("conflict")) signals.add("conflict_detected");
+  if (card.indicators.includes("verification")) signals.add("verification_missing");
+  if (card.primaryStatus === "waiting_for_approval") signals.add("approval_waiting");
+  if (card.primaryStatus === "waiting_for_user") signals.add("user_reply_waiting");
+  if (card.primaryStatus === "blocked") signals.add("command_failed");
+  if (card.primaryStatus === "stalled" || card.primaryStatus === "possibly_looping") signals.add("stalled");
+
+  for (const item of attentionItems) {
+    if (item.type === "approval_requested") signals.add("approval_waiting");
+    if (item.type === "user_question") signals.add("user_reply_waiting");
+    if (item.type === "command_failed") signals.add("command_failed");
+    if (item.type === "repeated_failure") signals.add("repeated_failure");
+    if (item.type === "stalled") signals.add("stalled");
+    if (item.type === "completed_without_verification") signals.add("verification_missing");
+    if (item.type === "stale_verification") signals.add("verification_stale");
+    if (item.type === "high_risk_change") signals.add("high_risk_change");
+    if (item.type === "conflict") signals.add("conflict_detected");
+  }
+
+  return Array.from(signals);
+}
+
+function headlineDetailText(card: Pick<SessionCardView, "headline" | "stateLabel">): string {
+  return card.headline.frame?.disposition ?? card.headline.headline ?? card.stateLabel;
 }
 
 function laneForCard(card: SessionCardView): LifecycleLaneId {
@@ -306,15 +352,41 @@ function groupConflictsBySession(conflicts: ConflictCard[]): Map<string, Conflic
   return groups;
 }
 
-function isSessionPlainCopy(value: unknown): value is SessionPlainCopy {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "headline" in value &&
-    typeof value.headline === "string" &&
-    "status" in value &&
-    typeof value.status === "string" &&
-    "reason" in value &&
-    typeof value.reason === "string"
-  );
+function normalizeExistingHeadline(value: unknown): BoardHeadlineView | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.headline !== "string" || !isHeadlineSource(value.source) || !isHeadlineStatus(value.status)) return undefined;
+
+  if (value.status === "pending" || value.source === "pending") {
+    return {
+      headline: value.headline,
+      source: "pending",
+      status: "pending"
+    };
+  }
+
+  const validation = validateBoardHeadlineFrame(value.frame);
+  if (!validation.ok) return undefined;
+
+  return {
+    headline: renderBoardHeadlineFrame(validation.frame),
+    frame: validation.frame,
+    source: value.source,
+    status: value.status,
+    generatedAt: typeof value.generatedAt === "string" ? value.generatedAt : undefined,
+    model: typeof value.model === "string" ? value.model : undefined,
+    provider: typeof value.provider === "string" ? value.provider : undefined,
+    failureReason: typeof value.failureReason === "string" ? value.failureReason : undefined
+  };
+}
+
+function isHeadlineSource(value: unknown): value is BoardHeadlineView["source"] {
+  return value === "llm" || value === "offline" || value === "pending" || value === "enrichment";
+}
+
+function isHeadlineStatus(value: unknown): value is BoardHeadlineView["status"] {
+  return value === "ready" || value === "pending" || value === "unavailable";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

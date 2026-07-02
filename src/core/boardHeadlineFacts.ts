@@ -1,6 +1,6 @@
 import type { AttentionItem, ConflictCard, GitSnapshot, NormalizedEvent, SessionCardView, WorkAreaContext, LatestFeedbackSignal } from "./types";
 
-export type BoardLiveCopyFacts = {
+export type BoardHeadlineFacts = {
   sessionId: string;
   project?: string;
   runtime?: string;
@@ -52,7 +52,7 @@ export type BoardCanonicalEnrichmentFacts = {
   status?: string;
 };
 
-export function buildBoardLiveCopyFacts(input: {
+export function buildBoardHeadlineFacts(input: {
   card: Pick<
     SessionCardView,
     | "changedFileCount"
@@ -73,7 +73,7 @@ export function buildBoardLiveCopyFacts(input: {
   attentionItems: AttentionItem[];
   conflicts: ConflictCard[];
   maxEvents?: number;
-}): BoardLiveCopyFacts {
+}): BoardHeadlineFacts {
   const project = safeFactLabel(input.card.project);
   const title = safeFactLabel(input.card.title);
   const recentEvents = input.events
@@ -91,12 +91,12 @@ export function buildBoardLiveCopyFacts(input: {
     ...input.events.map(fileBasenameFromEvent).filter(isString),
     ...input.gitSnapshots.flatMap((snapshot) => snapshot.changedPaths.map((path) => pathBasename(path.path))).filter(isString)
   ]).slice(0, 8);
-  const attentionTitles = input.attentionItems.map((item) => item.title).filter((title) => !isLowValueLiveCopyText(title)).slice(0, 6);
-  const conflictTitles = input.conflicts.map((conflict) => conflict.title).filter((title) => !isLowValueLiveCopyText(title)).slice(0, 6);
+  const attentionTitles = input.attentionItems.map((item) => item.title).filter((title) => !isLowValueBoardHeadlineText(title)).slice(0, 6);
+  const conflictTitles = input.conflicts.map((conflict) => conflict.title).filter((title) => !isLowValueBoardHeadlineText(title)).slice(0, 6);
   const recentCommandFailures = input.events
     .filter(isCommandFailureEvent)
     .map((event) => event.summary)
-    .filter((summary) => !isLowValueLiveCopyText(summary))
+    .filter((summary) => !isLowValueBoardHeadlineText(summary))
     .slice(0, 6);
   const recentTranscriptMessages = unique(
     (input.recentTranscriptMessages ?? [])
@@ -141,14 +141,14 @@ export function buildBoardLiveCopyFacts(input: {
   };
 }
 
-export function isLowValueLiveCopyText(value: string): boolean {
+export function isLowValueBoardHeadlineText(value: string): boolean {
   const normalized = value.trim();
   return /^(codex hook event|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(normalized);
 }
 
 function eventSummary(event: NormalizedEvent): { type: string; summary: string; occurredAt: string } | undefined {
   const summary = String(event.summary || event.type).replace(/\s+/g, " ").trim();
-  if (!summary || isLowValueLiveCopyText(summary)) return undefined;
+  if (!summary || isLowValueBoardHeadlineText(summary)) return undefined;
   if (event.type === "approval.requested" && /^approval\.requested$/i.test(summary)) return undefined;
   return {
     occurredAt: event.occurredAt,
@@ -179,7 +179,7 @@ function isCommandFailureEvent(event: NormalizedEvent): boolean {
 
 function safeShortText(value: string): string | undefined {
   const cleaned = value.replace(/\/home\/[^/\s"'`]+(?:\/[^\s"'`]*)?/g, "[redacted-path]").replace(/\s+/g, " ").trim();
-  if (!cleaned || isLowValueLiveCopyText(cleaned)) return undefined;
+  if (!cleaned || isLowValueBoardHeadlineText(cleaned)) return undefined;
   if (isGenericHarnessToolName(cleaned)) return undefined;
   return cleaned.slice(0, 120);
 }
@@ -187,10 +187,10 @@ function safeShortText(value: string): string | undefined {
 function transcriptMessageEvidence(message: BoardTranscriptMessageFact): string | undefined {
   const neutralized = neutralizeTranscriptText(message.text).replace(/\s+/g, " ").trim();
   if (message.role === "assistant" && isAssistantProgressMessage(neutralized)) return undefined;
-  if (isUnsafeBoardCopyEvidence(neutralized)) return undefined;
+  if (isUnsafeBoardHeadlineEvidence(neutralized)) return undefined;
   const cleaned = safeShortText(neutralized);
   if (!cleaned) return undefined;
-  if (isUnsafeBoardCopyEvidence(cleaned)) return undefined;
+  if (isUnsafeBoardHeadlineEvidence(cleaned)) return undefined;
   return cleaned.length >= 12 ? cleaned : undefined;
 }
 
@@ -280,7 +280,7 @@ function sanitizeCanonicalEnrichment(
 
 function cleanCanonicalEnrichmentText(value: string | undefined): string | undefined {
   const normalized = value?.replace(/\s+/g, " ").trim();
-  if (!normalized || isLowValueLiveCopyText(normalized) || isWeakCanonicalEnrichmentText(normalized) || isUnsafeBoardCopyEvidence(normalized)) return undefined;
+  if (!normalized || isLowValueBoardHeadlineText(normalized) || isWeakCanonicalEnrichmentText(normalized) || isUnsafeBoardHeadlineEvidence(normalized)) return undefined;
   return normalized;
 }
 
@@ -288,7 +288,7 @@ function cleanCanonicalTags(values: string[] | undefined, evidenceMentionsMcp: b
   const cleaned = unique(
     (values ?? [])
       .map((value) => value.replace(/\s+/g, " ").trim())
-      .filter((value) => value && !isLowValueLiveCopyText(value))
+      .filter((value) => value && !isLowValueBoardHeadlineText(value))
       .filter((value) => evidenceMentionsMcp || !mentionsMcp(value))
   );
   return cleaned.length > 0 ? cleaned : undefined;
@@ -320,7 +320,7 @@ function isWeakCanonicalEnrichmentText(value: string): boolean {
   return normalized.startsWith("{") || normalized.includes('"event"');
 }
 
-function isUnsafeBoardCopyEvidence(value: string): boolean {
+function isUnsafeBoardHeadlineEvidence(value: string): boolean {
   return (
     /::[-\w]+\{[^}]*\}/i.test(value) ||
     /\[url\]/i.test(value) ||

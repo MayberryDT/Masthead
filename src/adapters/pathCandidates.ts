@@ -58,15 +58,6 @@ export const ADAPTER_PATH_CANDIDATES = [
     confidence: "heuristic",
     contentKind: "directory",
     maxDepth: 4,
-    purpose: "Antigravity local state",
-    relativePath: ".antigravity",
-    runtime: "antigravity",
-    sourceKind: "inference"
-  },
-  {
-    confidence: "heuristic",
-    contentKind: "directory",
-    maxDepth: 4,
     purpose: "OpenCode local state",
     relativePath: ".local/share/opencode",
     runtime: "opencode",

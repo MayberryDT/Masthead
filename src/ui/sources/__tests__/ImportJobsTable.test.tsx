@@ -26,9 +26,79 @@ describe("ImportJobsTable", () => {
     );
 
     expect(html).toContain("3 / 10 (30%)");
-    expect(html).toContain("/home/tyler/.codex/sessions/2026/06/25/session.jsonl");
+    expect(html).not.toContain("/home/tyler/.codex/sessions/2026/06/25/session.jsonl");
+    expect(html).toContain("session.jsonl");
     expect(html).toContain("running");
     expect(html).toContain("Cancel");
+  });
+
+  test("does not show fake 100 percent progress when active import total is only processed so far", () => {
+    const html = renderToStaticMarkup(
+      <ImportJobsTable
+        imports={[
+          importJob({
+            discoveredCount: 3953,
+            importedCount: 3953,
+            processedCount: 3953,
+            progressCurrent: 3953,
+            progressPercent: 100,
+            progressTotal: 3953,
+            status: "running"
+          })
+        ]}
+        onCancelImport={() => undefined}
+      />
+    );
+
+    expect(html).not.toContain("3953 / 3953");
+    expect(html).not.toContain("100%");
+    expect(html).toContain("3953 imported");
+  });
+
+  test("groups related import work by harness and shows stale heartbeat copy", () => {
+    const html = renderToStaticMarkup(
+      <ImportJobsTable
+        imports={[
+          importJob({
+            completedWorkUnits: 6,
+            failedWorkUnits: 1,
+            heartbeatAt: "2026-06-25T11:52:00.000Z",
+            importJobId: "codex-parent",
+            importedCount: 12,
+            processedCount: 18,
+            skippedWorkUnits: 2,
+            sourceId: "codex-sessions",
+            status: "running",
+            totalWorkUnits: 20,
+            updatedAt: "2026-06-25T12:00:00.000Z"
+          }),
+          importJob({
+            importJobId: "codex-child-1",
+            sourceId: "codex-sessions",
+            status: "succeeded",
+            updatedAt: "2026-06-25T11:58:00.000Z"
+          }),
+          importJob({
+            importJobId: "codex-child-2",
+            sourceId: "codex-sessions",
+            status: "failed",
+            updatedAt: "2026-06-25T11:59:00.000Z"
+          })
+        ]}
+        nowMs={new Date("2026-06-25T12:00:00.000Z").getTime()}
+        staleAfterMs={5 * 60 * 1000}
+      />
+    );
+
+    expect(html.match(/import-job-group-row/g)).toHaveLength(1);
+    expect(html).toContain("Codex");
+    expect(html).toContain("3 jobs");
+    expect(html).toContain("12 imported");
+    expect(html).toContain("2 skipped");
+    expect(html).toContain("1 failed");
+    expect(html).toContain("No heartbeat for 8 min");
+    expect(html).not.toContain("codex-child-1");
+    expect(html).not.toContain("codex-child-2");
   });
 
   test("renders retry affordance for failed and cancelled imports", () => {
@@ -43,7 +113,7 @@ describe("ImportJobsTable", () => {
     );
 
     expect(html).toContain("bad jsonl");
-    expect(html.match(/Retry/g)).toHaveLength(2);
+    expect(html.match(/Retry/g)).toHaveLength(1);
   });
 
   test("invokes cancel and retry callbacks with job ids", async () => {
@@ -57,7 +127,7 @@ describe("ImportJobsTable", () => {
         <ImportJobsTable
           imports={[
             importJob({ importJobId: "running-job", status: "running" }),
-            importJob({ importJobId: "failed-job", status: "failed" })
+            importJob({ importJobId: "failed-job", sourceId: "hermes-history", status: "failed" })
           ]}
           onCancelImport={onCancelImport}
           onRetryImport={onRetryImport}
@@ -89,9 +159,9 @@ describe("ImportJobsTable", () => {
       );
     });
 
-    expect(container.querySelector(".import-jobs-title")?.textContent).toBe("Import Queue");
-    expect(container.querySelector(".import-jobs-summary")?.textContent).toContain("Visible2");
-    expect(container.querySelector(".import-jobs-summary")?.textContent).toContain("Total3");
+    expect(container.querySelector(".import-jobs-title")?.textContent).toBe("Import activity");
+    expect(container.querySelector(".import-jobs-summary")?.textContent).toContain("Visible1");
+    expect(container.querySelector(".import-jobs-summary")?.textContent).toContain("Total2");
     expect(container.textContent).not.toContain("Import jobsShowing");
     expect(container.textContent).not.toContain("Showing 2 of 3 import jobs");
     expect(container.textContent).not.toContain("Load more");

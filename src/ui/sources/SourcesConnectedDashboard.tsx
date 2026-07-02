@@ -1,4 +1,4 @@
-import type { AdapterStatus } from "../../app/daemonClient";
+import type { AdapterStatus, ImportJob } from "../../app/daemonClient";
 import { harnessForRuntime } from "../../adapters/harnessCatalog";
 import type { RuntimeKind } from "../../adapters/types";
 import type { SourcesSetupConnectedSourceDto, SourcesSetupCoverageDto } from "../../shared/sourcesSetup";
@@ -8,11 +8,16 @@ type Props = {
   adapters: AdapterStatus[];
   connectedSources?: SourcesSetupConnectedSourceDto[];
   coverage?: SourcesSetupCoverageDto;
+  diagnosticCount?: number;
   busy?: boolean;
+  imports?: ImportJob[];
+  lastRefreshAt?: string;
+  readOnly?: boolean;
+  showDiagnostics?: boolean;
   status?: string;
-  onAddSource: () => void;
-  onRepairMissingData: () => void;
-  onSyncSources: () => void;
+  onImportHistory: () => void;
+  onRefreshDetection: () => void;
+  onViewDiagnostics: () => void;
 };
 
 export function SourcesConnectedDashboard({
@@ -20,9 +25,14 @@ export function SourcesConnectedDashboard({
   busy = false,
   connectedSources,
   coverage: setupCoverage,
-  onAddSource,
-  onRepairMissingData,
-  onSyncSources
+  diagnosticCount = 0,
+  imports = [],
+  lastRefreshAt,
+  onImportHistory,
+  onRefreshDetection,
+  onViewDiagnostics,
+  readOnly = false,
+  showDiagnostics = false
 }: Props) {
   const rows = (connectedSources?.length ? sourceFamiliesFromSetup(connectedSources) : adapters.map(sourceRowFromAdapter)).filter(isVisibleSourceRow);
   const coverage = setupCoverage ? normalizeSetupCoverage(setupCoverage) : coverageFromAdapters(adapters);
@@ -32,16 +42,17 @@ export function SourcesConnectedDashboard({
     <section className="sources-connected-dashboard" aria-label="Connected sources">
       <div className="sources-action-bar sources-toolbar observability-toolbar metal-toolbar">
         <div className="toolbar-select-row sources-action-group" aria-label="Source actions">
-          <AppButton type="button" onClick={onAddSource} disabled={busy}>
-            Set up more sources
+          <AppButton type="button" variant="primary" onClick={onImportHistory} disabled={busy || readOnly}>
+            Import data
           </AppButton>
-          <AppButton type="button" variant="primary" onClick={onSyncSources} disabled={busy || !hasSyncTarget}>
-            Sync sources
+          <AppButton type="button" onClick={onRefreshDetection} disabled={busy || readOnly || !hasSyncTarget}>
+            Refresh detection
           </AppButton>
-          <AppButton type="button" variant="quiet" onClick={onRepairMissingData} disabled={busy || !hasSyncTarget}>
-            Repair missing data
+          <AppButton type="button" variant="quiet" onClick={onViewDiagnostics} disabled={busy || diagnosticCount === 0}>
+            {showDiagnostics ? "Hide diagnostics" : "View diagnostics"}
           </AppButton>
         </div>
+        <ToolbarFacts imports={imports} lastRefreshAt={lastRefreshAt} />
       </div>
 
       <dl className="usage-summary-strip sources-summary-strip" aria-label="Source coverage summary">
@@ -51,7 +62,7 @@ export function SourcesConnectedDashboard({
         <SourceMetric label="Transcripts" tone="tools" value={coverage.transcripts} />
         <SourceMetric label="Enriched" tone="enriched" value={coverage.enriched} />
         <SourceMetric label="Queued" tone="files" value={coverage.queued} />
-        <SourceMetric label="Issues" tone="mcp" value={coverage.failures} />
+        <SourceMetric label="Issues" tone="mcp" value={Math.max(coverage.failures, diagnosticCount)} />
       </dl>
 
       <div className="connected-source-list" aria-label="Source inventory">
@@ -76,6 +87,27 @@ export function SourcesConnectedDashboard({
         ))}
       </div>
     </section>
+  );
+}
+
+function ToolbarFacts({ imports, lastRefreshAt }: { imports: ImportJob[]; lastRefreshAt?: string }) {
+  const active = imports.find((job) => job.status === "running" || job.status === "queued" || job.status === "cancelling");
+  const stalled = active ? importHeartbeatStale(active) : false;
+  return (
+    <dl className="sources-toolbar-facts" aria-label="Source activity facts">
+      <div>
+        <dt>Last refresh</dt>
+        <dd>{lastRefreshAt ? formatDateTime(lastRefreshAt) : "Not refreshed"}</dd>
+      </div>
+      <div className={stalled ? "is-stale" : undefined}>
+        <dt>Active import</dt>
+        <dd>
+          {active
+            ? `${active.importKind} ${active.stage ?? active.status}`.replaceAll("_", " ")
+            : "None"}
+        </dd>
+      </div>
+    </dl>
   );
 }
 
@@ -195,4 +227,16 @@ function proofRows(source: SourceRow): ProofRow[] {
     { label: "Issues", value: `${source.failures}`, tone: source.failures > 0 ? "warn" : "neutral" },
     { label: "Last activity", value: source.lastSyncAt ? new Date(source.lastSyncAt).toLocaleString() : "Not observed", tone: source.lastSyncAt ? "good" : "neutral" }
   ];
+}
+
+function importHeartbeatStale(job: ImportJob, now = Date.now(), stalledAfterMs = 30_000): boolean {
+  if (job.status !== "running") return false;
+  const heartbeat = new Date(job.heartbeatAt ?? job.updatedAt).getTime();
+  return Number.isFinite(heartbeat) && now - heartbeat > stalledAfterMs;
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }

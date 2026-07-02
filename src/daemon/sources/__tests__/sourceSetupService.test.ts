@@ -166,8 +166,8 @@ describe("source setup service", () => {
         }),
         expect.objectContaining({
           importable: false,
-          runtime: "omp",
-          sourceId: "omp:detector:local",
+          runtime: "cline",
+          sourceId: "cline:detector:local",
           state: "detected",
           transcriptApproval: expect.objectContaining({
             approved: false,
@@ -222,16 +222,16 @@ function realisticScanResult(): SourceScanResult {
         checkedPaths: [],
         diagnostics: [],
         discoveredSessions: 1,
-        label: "Oh My Pi",
+        label: "Cline",
         maturity: "detector",
-        runtime: "omp",
+        runtime: "cline",
         sources: [
           {
             confidence: "heuristic",
-            path: "/home/tyler/.local/share/omp",
-            runtime: "omp",
-            schemaVersion: "omp-detector-only",
-            sourceId: "omp:detector:local",
+            path: "/home/tyler/.local/share/cline",
+            runtime: "cline",
+            schemaVersion: "cline-detector-only",
+            sourceId: "cline:detector:local",
             sourceKind: "inference"
           }
         ],

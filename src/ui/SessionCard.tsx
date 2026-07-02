@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { SessionCardView } from "../core/types";
-import { firstUsefulSessionTitle, hasAcceptableDisplayCopy, isWeakLiveSummary } from "../shared/sessionTextQuality.ts";
+import { firstUsefulSessionTitle, isWeakLiveSummary } from "../shared/sessionTextQuality.ts";
 import { isBlockedSessionCard } from "./format";
 import { prefersReducedMotion } from "./motionPreference";
 import type { DemoSessionTelemetry } from "./observabilityDemo";
@@ -127,7 +127,7 @@ export function SessionCard({
         ) : null}
         <span className="headline-text headline-current">{visibleHeadline}</span>
       </h3>
-      <CopyRefreshBadge session={session} />
+      <HeadlineSourceBadge session={session} />
 
       <div className="fact-grid">
         <Fact label="Runtime" value={harness} />
@@ -148,19 +148,23 @@ export function SessionCard({
   );
 }
 
-function CopyRefreshBadge({ session }: { session: SessionCardView }) {
-  const refresh = session.copyRefresh;
-  if (!refresh || refresh.status === "success" || refresh.status === "disabled") return null;
-  if (hasAcceptableDisplayCopy({ headline: session.copy.headline, summary: session.copy.reason, title: session.title }, sessionTextContext(session))) return null;
-  const label = refresh.status === "not_configured" ? "AI headline not configured" : "AI headline failed";
-  const detail = [refresh.status, refresh.failureMessage].filter(Boolean).join(" · ");
+function HeadlineSourceBadge({ session }: { session: SessionCardView }) {
+  const label = headlineSourceLabel(session);
+  if (!label) return null;
+
   return (
-    <span className="copy-refresh-badge" title={detail}>
+    <span className={`headline-source is-${label.toLowerCase()}`} title={`Headline source: ${label}`}>
       {label}
-      <span aria-hidden="true">{refresh.status}</span>
     </span>
   );
 }
+
+function headlineSourceLabel(session: SessionCardView): "Pending" | "Offline" | undefined {
+  if (session.headline.status === "pending" || session.headline.source === "pending") return "Pending";
+  if (session.headline.source === "offline") return "Offline";
+  return undefined;
+}
+
 function viewTransitionNamePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
@@ -216,7 +220,7 @@ function sessionHeaderName(session: SessionCardView): string {
 }
 
 function sessionHeadline(session: SessionCardView): string {
-  const headline = cleanHeadline(session.copy.headline);
+  const headline = cleanHeadline(session.headline.headline);
   if (headline && !isWeakLiveSummary(headline)) return headline;
   return firstUsefulSessionTitle([session.title, session.workContext?.label], sessionTextContext(session)) ?? `${session.project} session update`;
 }

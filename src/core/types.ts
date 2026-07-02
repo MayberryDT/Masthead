@@ -1,3 +1,5 @@
+import type { BoardHeadlineView } from "./boardHeadlineFrame";
+
 export type EvidenceKind = "event" | "command" | "git_snapshot" | "file_change" | "conflict" | "redaction";
 
 export type EvidenceRef = {
@@ -213,11 +215,11 @@ export type ReviewAnnotation = {
   snoozedUntil?: string;
 };
 
-export type SessionCopySource = "deterministic" | "llm" | "fallback" | "enrichment";
+export type BoardBriefSource = "deterministic" | "fallback" | "enrichment";
 
 export type BoardBrief = {
   text: string;
-  source: SessionCopySource;
+  source: BoardBriefSource;
   priority: "normal" | "attention";
 };
 
@@ -254,26 +256,17 @@ export type InspectorSectionId =
   | "timeline"
   | "actions";
 
-export type SessionPlainCopy = {
-  headline: string;
-  status: string;
-  reason: string;
-  nextStep?: string;
-  source: SessionCopySource;
-};
-
-export type SessionCopyRefreshStatus =
+export type BoardHeadlineRefreshStatus =
   | "success"
-  | "disabled"
+  | "pending"
   | "not_configured"
   | "timeout"
   | "api_error"
-  | "invalid_output"
-  | "validation_failed";
+  | "invalid_output";
 
-export type SessionCopyRefreshState = {
+export type BoardHeadlineRefreshState = {
   requestedAt: string;
-  status: SessionCopyRefreshStatus;
+  status: BoardHeadlineRefreshStatus;
   provider?: string;
   model?: string;
   latencyMs?: number;
@@ -288,7 +281,7 @@ export type SessionCardView = {
   runtime?: string;
   project: string;
   title: string;
-  copy: SessionPlainCopy;
+  headline: BoardHeadlineView;
   stateLabel: string;
   primaryStatus: SessionStatus;
   lifecycle: SessionLifecycle;
@@ -312,8 +305,8 @@ export type SessionCardView = {
   isExpanded: boolean;
   workContext?: WorkAreaContext;
   latestFeedbackSignal?: LatestFeedbackSignal;
-  copyInput?: unknown;
-  copyRefresh?: SessionCopyRefreshState;
+  headlineInput?: unknown;
+  headlineRefresh?: BoardHeadlineRefreshState;
 };
 
 export type SessionDetailView = SessionCardView & {
@@ -371,11 +364,11 @@ export type LiveBoardProjection = {
   expandedSession?: ExpandedSessionView;
   selectedSession?: SessionDetailView;
   brief?: BoardBrief;
-  copyRefreshSummary?: {
+  headlineRefreshSummary?: {
     requested: number;
     succeeded: number;
     failed: number;
-    disabled: number;
+    pending: number;
     generatedAt: string;
   };
   attentionQueue: AttentionItem[];

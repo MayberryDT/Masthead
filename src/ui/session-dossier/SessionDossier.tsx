@@ -63,10 +63,10 @@ export function SessionDossier({
   const attentionItems = dossier?.attention ?? liveAttention(live);
   const timelineEvents = useMemo(() => (dossier?.timeline ?? liveTimeline(live)).filter((event) => event.kind !== "file"), [dossier?.timeline, live]);
   const transcriptRows = useMemo(() => compactTranscriptRows(transcript?.items), [transcript?.items]);
-  const title = identity?.title ?? live?.copy.headline ?? live?.title ?? "Session dossier";
+  const title = identity?.title ?? live?.headline.headline ?? live?.title ?? "Session dossier";
   const description =
     summary ??
-    readableTranscriptText(live?.copy.reason) ??
+    readableTranscriptText(live?.headline.frame?.disposition) ??
     readableTranscriptText(live?.currentActivity) ??
     "Canonical identifiers and reusable session context.";
   const endedAt = identity?.endedAt ?? identity?.lastActivityAt ?? live?.lastActivity;
@@ -486,11 +486,12 @@ function dossierSummary(dossier?: SessionDossierDto, live?: SessionDetailView): 
     narrative?.finalAssistantMessage,
     narrative?.liveSummary,
     narrative?.outcome,
-    live?.copy.headline,
+    live?.headline.headline,
     live?.currentActivity,
     narrative?.objective,
-    live?.copy.reason,
-    live?.copy.status
+    live?.headline.frame?.disposition,
+    ...(live?.headline.frame?.evidence ?? []),
+    live?.headline.status
   ]
     .map(readableTranscriptText)
     .filter((value): value is string => Boolean(value));

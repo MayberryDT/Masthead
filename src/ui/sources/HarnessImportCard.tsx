@@ -6,19 +6,21 @@ type Props = {
   adapter: AdapterStatus;
   checked: boolean;
   disabled?: boolean;
+  loading?: boolean;
+  metrics?: Array<{ label: string; value: string | number }>;
   onToggle: (runtime: string, checked: boolean) => void;
 };
 
-export function HarnessImportCard({ adapter, checked, disabled = false, onToggle }: Props) {
+export function HarnessImportCard({ adapter, checked, disabled = false, loading = false, metrics, onToggle }: Props) {
   const harness = harnessForRuntime(adapter.runtime as RuntimeKind);
   const label = adapter.name ?? harness?.label ?? adapter.runtime;
+  const cardMetrics = metrics ?? [
+    { label: "Sessions to import", value: loading ? "Loading sessions" : adapter.discoveredSessions || adapter.importedSessions || "No sessions found" }
+  ];
   return (
-    <label className={`harness-import-card adapter-card adapter-card-${adapter.state}`}>
+    <label className={`harness-import-card adapter-card adapter-card-${adapter.state}${checked ? " is-selected" : ""}${disabled ? " is-disabled" : ""}`}>
       <span className="adapter-card-head">
-        <span>
-          <span className="mono-label">Coding harness</span>
-          <strong>{label}</strong>
-        </span>
+        <strong>{label}</strong>
         <input
           type="checkbox"
           checked={checked}
@@ -26,16 +28,13 @@ export function HarnessImportCard({ adapter, checked, disabled = false, onToggle
           onChange={(event) => onToggle(adapter.runtime, event.currentTarget.checked)}
         />
       </span>
-      <span className="harness-import-card-description">{harness?.description ?? "Local session history detected by Masthead."}</span>
       <dl className="adapter-card-metrics">
-        <div>
-          <dt>Sessions</dt>
-          <dd>{adapter.importedSessions || adapter.discoveredSessions || 0}</dd>
-        </div>
-        <div>
-          <dt>Locations</dt>
-          <dd>{adapter.sourceLocationCount ?? adapter.sourceLocations.length}</dd>
-        </div>
+        {cardMetrics.map((metric) => (
+          <div key={metric.label}>
+            <dt>{metric.label}</dt>
+            <dd>{metric.value}</dd>
+          </div>
+        ))}
       </dl>
     </label>
   );

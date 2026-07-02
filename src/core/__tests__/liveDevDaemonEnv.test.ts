@@ -43,7 +43,7 @@ describe("live dev daemon environment", () => {
     });
   });
 
-  test("enables live copy by default when an OpenAI key is inherited", () => {
+  test("enables live headline by default when an OpenAI key is inherited", () => {
     const env = buildLiveDevDaemonEnv({
       ...baseInput,
       env: { OPENAI_API_KEY: "sk-test" }
@@ -54,7 +54,7 @@ describe("live dev daemon environment", () => {
     expect(env.MASTHEAD_REMOTE_ENRICHMENT).toBe("0");
   });
 
-  test("keeps legacy live copy opt-out when an OpenAI key is inherited", () => {
+  test("keeps legacy live headline opt-out when an OpenAI key is inherited", () => {
     const env = buildLiveDevDaemonEnv({
       ...baseInput,
       env: { OPENAI_API_KEY: "sk-test", MASTHEAD_LLM_COPY: "0" }

@@ -7,12 +7,12 @@ Masthead adapters scan known local agent-history locations and normalize recogni
 - Codex
 - Cursor
 - Claude Code
-- Antigravity
 - OpenCode
 - Aider
 - OpenClaw
 - Hermes
 - Pi
+- OMP
 
 Gemini CLI is legacy compatibility only for existing imported records. It is not an active scan target.
 
