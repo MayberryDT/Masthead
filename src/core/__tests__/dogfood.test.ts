@@ -135,11 +135,10 @@ describe("dogfood acceptance harness", () => {
     const projection = completeLiveProjection();
     projection.cards[0] = {
       ...projection.cards[0]!,
-      copy: {
+      headline: {
         headline: "Needs your approval",
-        status: "Critical issue",
-        reason: "You need to act.",
-        source: "deterministic"
+        source: "offline",
+        status: "ready"
       },
       latestFeedbackSignal: {
         present: true,
@@ -349,11 +348,10 @@ function liveCard(
     sessionId,
     project,
     title,
-    copy: {
+    headline: {
       headline: "Still running",
-      status: "Working now",
-      reason: "This session is active and has recent activity.",
-      source: "deterministic"
+      source: "offline",
+      status: "ready"
     },
     stateLabel: "Needs Attention",
     primaryStatus: "waiting_for_approval",

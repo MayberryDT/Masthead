@@ -615,7 +615,7 @@ const FORBIDDEN_FEEDBACK_TEXT_PATTERNS = [
 function evaluateCalmOpsCopy(projection: LiveBoardProjection): { ok: boolean; details: Record<string, unknown> } {
   const fields = [
     projection.brief?.text,
-    ...projection.cards.flatMap((card) => [card.copy.headline, card.copy.status, card.copy.reason, card.copy.nextStep])
+    ...projection.cards.map((card) => card.headline.headline)
   ].filter((value): value is string => typeof value === "string");
   const violations = fields.flatMap((field) =>
     FORBIDDEN_MAIN_BOARD_TERMS.filter((pattern) => pattern.test(field)).map((pattern) => ({ pattern: pattern.source, field }))

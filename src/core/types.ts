@@ -215,11 +215,11 @@ export type ReviewAnnotation = {
   snoozedUntil?: string;
 };
 
-export type SessionCopySource = "deterministic" | "llm" | "fallback" | "enrichment";
+export type BoardBriefSource = "deterministic" | "fallback" | "enrichment";
 
 export type BoardBrief = {
   text: string;
-  source: SessionCopySource;
+  source: BoardBriefSource;
   priority: "normal" | "attention";
 };
 

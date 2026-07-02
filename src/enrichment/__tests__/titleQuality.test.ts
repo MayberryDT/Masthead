@@ -121,7 +121,14 @@ describe("session title quality", () => {
     });
 
     expect(envelope.projection.cards[0]?.title).toBe("Masthead Codex session");
-    expect(envelope.projection.cards[0]?.copy.headline).toBe("Title quality fallback uses the provider summary.");
+    expect(envelope.projection.cards[0]?.headline).toMatchObject({
+      headline: "Generating headline...",
+      source: "pending",
+      status: "pending"
+    });
+    expect(
+      (envelope.projection.cards[0]?.headlineInput as { dispositionHints?: string[] } | undefined)?.dispositionHints
+    ).toContain("Title quality fallback uses the provider summary.");
   });
 
   test("Logbook list titles use liveSummary before bad stored titles", async () => {

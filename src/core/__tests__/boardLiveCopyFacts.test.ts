@@ -158,11 +158,10 @@ describe("board live copy facts", () => {
 function card(overrides: Partial<SessionCardView> = {}): SessionCardView {
   return {
     changedFileCount: 2,
-    copy: {
+    headline: {
       headline: "Dossier enrichment is active now.",
-      reason: "This session is active and has recent activity.",
-      source: "deterministic",
-      status: "Work is active."
+      source: "offline",
+      status: "ready"
     },
     durationLabel: "2m",
     identityConfidence: "direct",

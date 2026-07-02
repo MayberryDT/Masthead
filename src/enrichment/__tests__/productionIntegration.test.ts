@@ -43,9 +43,9 @@ describe("production enrichment integration", () => {
     });
 
     const projection = await getJson(baseUrl, "/projection?expandedSessionId=production-enrichment");
-    expect(projection.projection.cards[0].copy.headline).toContain("OAuth callback routing");
-    expect(projection.projection.cards[0].copy.headline).not.toContain("{");
-    expect(projection.projection.cards[0].copy.source).toBe("enrichment");
+    expect(projection.projection.cards[0].headline.headline).toContain("OAuth callback routing");
+    expect(projection.projection.cards[0].headline.headline).not.toContain("{");
+    expect(projection.projection.cards[0].headline.source).toBe("offline");
   });
 
   test("live ingestion refreshes stale running-session enrichment without projection side effects", async () => {
