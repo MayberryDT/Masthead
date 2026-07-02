@@ -106,6 +106,20 @@ describe("board headline input", () => {
     expect(input.dispositionHints).toContain("vitest failed on Settings danger zone tests");
   });
 
+  test("preserves terminal failed state when ended sessions carry command failure signals", () => {
+    const input = toBoardHeadlineInput({
+      lifecycle: "ended",
+      primaryStatus: "failed",
+      signals: ["command_failed"],
+      facts: facts({
+        lifecycle: "ended",
+        primaryStatus: "failed"
+      })
+    });
+
+    expect(input.stateHint).toBe("failed");
+  });
+
   test("uses board headline frame state values for state hints", () => {
     const waiting = toBoardHeadlineInput({
       lifecycle: "running",

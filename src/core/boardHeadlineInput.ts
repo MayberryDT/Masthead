@@ -90,6 +90,12 @@ function stateHintFor(input: {
   const primaryStatus = input.primaryStatus.toLowerCase();
   const signals = new Set(input.signals);
 
+  if (lifecycle === "ended" && (primaryStatus === "failed" || primaryStatus === "error")) {
+    return "failed";
+  }
+  if (lifecycle === "ended") {
+    return "completed";
+  }
   if (primaryStatus === "blocked" || signals.has("command_failed") || signals.has("repeated_failure")) {
     return "blocked";
   }
@@ -101,12 +107,6 @@ function stateHintFor(input: {
   }
   if (lifecycle === "idle" || lifecycle === "stalled" || primaryStatus === "idle" || primaryStatus === "stalled" || signals.has("stalled")) {
     return "paused";
-  }
-  if (lifecycle === "ended" && (primaryStatus === "failed" || primaryStatus === "error")) {
-    return "failed";
-  }
-  if (lifecycle === "ended") {
-    return "completed";
   }
   if (lifecycle === "running") {
     return "active";
