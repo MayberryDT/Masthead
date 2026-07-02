@@ -368,6 +368,65 @@
   border-top-color: rgba(247, 201, 72, 0.48);
 }
 
+.session-dossier .dossier-durable-memory {
+  border-bottom: 1px solid rgba(194, 221, 241, 0.12);
+  padding-bottom: 12px;
+}
+
+.session-dossier .dossier-durable-memory header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.session-dossier .dossier-durable-memory h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.session-dossier .dossier-durable-memory header p {
+  margin: 4px 0 0;
+  color: var(--body);
+  line-height: 1.35;
+}
+
+.session-dossier .dossier-durable-memory header > span {
+  flex: 0 0 auto;
+  border: 1px solid rgba(89, 212, 153, 0.28);
+  border-radius: 3px;
+  color: #b8f5d5;
+  font-size: 10px;
+  padding: 3px 6px;
+}
+
+.session-dossier .durable-list {
+  margin-top: 10px;
+}
+
+.session-dossier .durable-list > span {
+  display: block;
+  color: var(--mute);
+  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 10.5px;
+}
+
+.session-dossier .durable-list ul {
+  display: grid;
+  gap: 4px;
+  margin: 5px 0 0;
+  padding-left: 16px;
+}
+
+.session-dossier .durable-list li {
+  color: var(--body);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .session-dossier .summary-section {
   margin-top: 12px;
   border-top: 1px solid rgba(194, 221, 241, 0.12);
@@ -384,6 +443,7 @@
 .session-dossier .summary-section p {
   margin: 0;
   color: var(--body);
+  overflow-wrap: anywhere;
 }
 
 .session-dossier .summary-section p + p {

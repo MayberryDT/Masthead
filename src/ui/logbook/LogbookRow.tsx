@@ -13,8 +13,9 @@ type Props = {
 export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, session }: Props) {
   const primaryModel = session.models?.[0] ?? session.model ?? "Not captured";
   const lifecycle = session.lifecycle ?? session.state ?? "indexed";
-  const title = sessionTitle(session);
+  const title = session.sessionTitle?.text || sessionTitle(session);
   const subtitle = sessionSubtitle(session, title);
+  const chips = enrichmentChips(session);
   const style = {
     "--logbook-row-index": Math.min(rowIndex, 12)
   } as CSSProperties & { "--logbook-row-index": number };
@@ -56,6 +57,13 @@ export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, 
         >
           <strong>{title}</strong>
           {session.snippet ? <HighlightedSnippet snippet={session.snippet} /> : subtitle ? <span>{subtitle}</span> : null}
+          {chips.length > 0 ? (
+            <span className="logbook-enrichment-chips" aria-label="Enrichment details">
+              {chips.map((chip) => (
+                <span key={chip}>{chip}</span>
+              ))}
+            </span>
+          ) : null}
         </button>
       </td>
       <td className="logbook-col-project" title={session.project ?? ""}>{session.project ?? "Not captured"}</td>
@@ -111,7 +119,7 @@ function sessionSubtitle(session: LogbookSession, title: string): string | undef
     sessionId: session.sessionId,
     sourceSessionId: session.sourceSessionId
   };
-  for (const candidate of [session.objective, session.outcome]) {
+  for (const candidate of [session.sessionSummary?.text, session.objective, session.outcome]) {
     const cleaned = cleanSessionText(candidate, 120);
     if (!cleaned || sameText(cleaned, title) || isLifecycleLabel(cleaned) || isWeakLiveSummary(cleaned)) continue;
     return cleaned;
@@ -119,6 +127,14 @@ function sessionSubtitle(session: LogbookSession, title: string): string | undef
   const sourceSessionId = cleanSessionText(session.sourceSessionId, 120);
   if (sourceSessionId && !sameText(sourceSessionId, title) && isUsefulSessionTitle(sourceSessionId, context)) return sourceSessionId;
   return undefined;
+}
+
+function enrichmentChips(session: LogbookSession): string[] {
+  const chips: string[] = [];
+  if (session.sessionSummary?.state) chips.push(statusLabel(session.sessionSummary.state));
+  if (session.sessionTitle?.confidence) chips.push(`${statusLabel(session.sessionTitle.confidence)} confidence`);
+  if (!session.sessionTitle && session.enrichmentStatus === "missing") chips.push("Pending enrichment");
+  return chips;
 }
 
 function sameText(left: string, right: string): boolean {

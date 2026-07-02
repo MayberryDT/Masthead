@@ -1,4 +1,5 @@
 import type { EvidenceRef } from "../core/types";
+import type { DurableSessionEnrichment } from "./sessionEnrichment";
 import type { SessionTranscriptCoverage } from "./sessionTranscript";
 
 export type DossierSourceConfidence = "authoritative" | "inferred" | "heuristic";
@@ -160,6 +161,7 @@ export type SessionDossierCoverage = {
 
 export type SessionDossierDto = {
   identity: SessionDossierIdentity;
+  durableEnrichment?: DurableSessionEnrichment;
   coverage: SessionDossierCoverage;
   narrative: SessionDossierNarrative;
   files: SessionDossierFile[];

@@ -85,6 +85,57 @@ describe("SessionDossier", () => {
     root.unmount();
   });
 
+  test("renders durable title, summary, purpose, outcome, verification, and continuation before diagnostics", () => {
+    const currentDossier = dossier();
+    currentDossier.durableEnrichment = {
+      sessionDossier: {
+        blockers: [],
+        continuation: {
+          constraints: ["Keep diagnostics below durable memory."],
+          nextStep: "Run the full Dossier verification suite.",
+          openQuestions: []
+        },
+        decisions: ["Use durable memory before live transcript summary."],
+        evidenceRefs: [],
+        keyWork: ["Added durable Dossier work capsule."],
+        outcome: "Dossier durable memory appears before diagnostics.",
+        purpose: "Prioritize durable work memory in the Dossier.",
+        verification: {
+          commands: ["vitest"],
+          evidenceRefs: [],
+          failures: [],
+          status: "passed",
+          summary: "Dossier durable memory tests passed."
+        },
+        warnings: []
+      },
+      sessionSummary: {
+        confidence: "high",
+        evidenceRefs: [],
+        state: "completed",
+        text: "Moved durable Dossier purpose, outcome, verification, and continuation above diagnostics."
+      },
+      sessionTitle: {
+        basis: "dominant_work",
+        confidence: "high",
+        evidenceRefs: [],
+        text: "Durable Dossier memory priority"
+      },
+      version: "session-capsule-v4"
+    };
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
+    const memoryIndex = html.indexOf("data-dossier-section=\"durable-memory\"");
+    const diagnosticIndex = html.indexOf("data-dossier-section=\"diagnostic-coverage\"");
+
+    expect(memoryIndex).toBeGreaterThan(-1);
+    expect(diagnosticIndex).toBeGreaterThan(memoryIndex);
+    expect(html).toContain("Durable Dossier memory priority");
+    expect(html).toContain("Prioritize durable work memory in the Dossier.");
+    expect(html).toContain("Dossier durable memory tests passed.");
+    expect(html).toContain("Run the full Dossier verification suite.");
+  });
+
   test("keeps transcript filter loading state out of the enrichment summary", async () => {
     const host = document.createElement("div");
     const root = createRoot(host);

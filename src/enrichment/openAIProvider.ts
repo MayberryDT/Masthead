@@ -1,5 +1,11 @@
 import type { EnrichmentProviderResult, SessionEnrichmentProvider } from "./provider.ts";
-import { deterministicCapsuleFromFacts, type SessionFacts } from "./sessionCompiler.ts";
+import {
+  buildProviderEvidenceCatalog,
+  fallbackDurableSessionEnrichment,
+  mergeDurableProviderOutput,
+  type ProviderEvidenceCatalogItem
+} from "./durableSessionEnrichment.ts";
+import { deterministicCapsuleFromFacts, SESSION_CAPSULE_PROMPT_VERSION, type SessionFacts } from "./sessionCompiler.ts";
 import { validateNarrativeField } from "./sessionNarrativeValidator.ts";
 import type { SessionCapsule } from "./types.ts";
 
@@ -12,7 +18,7 @@ type OpenAIEnrichmentConfig = {
 };
 
 const DEFAULT_MODEL = "gpt-5-nano-2025-08-07";
-const DEFAULT_TIMEOUT_MS = 2_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = {}): SessionEnrichmentProvider {
   const enabled = config.enabled === true;
@@ -36,23 +42,34 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
       const startedAt = Date.now();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const deterministic = deterministicCapsuleFromFacts(input.facts);
+      const evidenceCatalog = buildProviderEvidenceCatalog(input.facts.evidence);
       const requestPayload = {
         model,
         instructions: [
-          "You are writing session metadata for Masthead.",
-          "Identify the concrete work subject, user goal, changed area, outcome if supported, and missing evidence.",
-          "Use only facts in the input. Do not infer from runtime names like Codex.",
-          "Do not use updated, session, work, or recent activity as the main subject.",
-          "If transcript coverage is weak, do not invent the task; use only concrete files and commands.",
-          "Do not mention raw paths, shell commands, secrets, hashes, IDs, lifecycle enum names, or provider events.",
-          "Do not address the user directly and do not use first person.",
-          "Title must be a 3 to 8 word noun phrase with a concrete work subject.",
-          "Confidence is high when transcript, files, and tools support the claim; medium when partial evidence supports it; low when evidence is hook-only or metadata-only.",
-          "Use empty strings for outcome, action, or object when the input does not directly support those fields.",
+          "You are generating durable enrichment for a Masthead session.",
+          "This is not a Board live headline. This is not a live status update.",
+          "This enrichment is used by the Logbook and Session Dossier.",
+          "Create a stable Logbook title, a one-sentence archival Logbook summary, and structured Session Dossier enrichment.",
+          "Title rules: 3 to 8 words, sentence case, noun phrase, no trailing period.",
+          "Use the first prompt as initial intent, but prefer dominant work actually performed if the session pivoted.",
+          "Prefer concrete product areas, components, bugs, tests, imports, settings, docs, or source systems.",
+          "Do not use live/status phrases like working on, being updated, blocked by, recent activity, or needs attention.",
+          "Do not mention session unless the Masthead session system itself is the topic.",
+          "Summary rules: one sentence, 90 to 180 characters preferred, past tense or result-oriented.",
+          "If blocked, say what blocked it. If verification was not run, do not imply it passed.",
+          "Dossier rules: be specific, do not write marketing copy, and do not overclaim completed work.",
+          "Separate purpose, outcome, key work, decisions, blockers, verification, continuation, evidence, and warnings.",
+          "Only include decisions and blockers directly supported by evidence.",
+          "Verification status must be passed, failed, mixed, missing, or unknown.",
+          "Continuation should help a future user or agent resume work.",
+          "Do not expose secrets, URLs, emails, raw tokens, hashes, long local paths, or raw commands.",
+          "Use evidenceRefIds from the provided catalog only. Use empty arrays when no catalog evidence applies.",
+          "If evidence is thin, mark confidence low and include a warning.",
+          "Use empty strings for unsupported string fields and empty arrays for unsupported list fields.",
           "Return only JSON that matches the schema."
         ].join(" "),
-        input: JSON.stringify(providerPayload(input.facts, deterministic)),
-        max_output_tokens: 360,
+        input: JSON.stringify(providerPayload(input.facts, deterministic, evidenceCatalog)),
+        max_output_tokens: 760,
         reasoning: { effort: "minimal" },
         store: false,
         text: {
@@ -63,7 +80,20 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
             schema: {
               type: "object",
               additionalProperties: false,
-              required: ["title", "liveSummary", "outcome", "searchSummary", "action", "object", "confidence", "missingEvidence"],
+              required: [
+                "title",
+                "liveSummary",
+                "outcome",
+                "searchSummary",
+                "action",
+                "object",
+                "confidence",
+                "missingEvidence",
+                "version",
+                "sessionTitle",
+                "sessionSummary",
+                "sessionDossier"
+              ],
               properties: {
                 title: { type: "string" },
                 liveSummary: { type: "string" },
@@ -72,7 +102,79 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
                 action: { type: "string" },
                 object: { type: "string" },
                 confidence: { type: "string", enum: ["high", "medium", "low"] },
-                missingEvidence: { type: "array", items: { type: "string" } }
+                missingEvidence: { type: "array", items: { type: "string" } },
+                version: { type: "string", enum: ["session-capsule-v4"] },
+                sessionTitle: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["text", "basis", "confidence", "evidenceRefIds"],
+                  properties: {
+                    text: { type: "string" },
+                    basis: {
+                      type: "string",
+                      enum: ["first_prompt", "dominant_work", "final_outcome", "file_cluster", "debug_target", "fallback"]
+                    },
+                    confidence: { type: "string", enum: ["high", "medium", "low"] },
+                    evidenceRefIds: { type: "array", items: { type: "string" } }
+                  }
+                },
+                sessionSummary: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["text", "state", "confidence", "evidenceRefIds"],
+                  properties: {
+                    text: { type: "string" },
+                    state: { type: "string", enum: ["completed", "blocked", "partial", "failed", "paused", "unknown"] },
+                    confidence: { type: "string", enum: ["high", "medium", "low"] },
+                    evidenceRefIds: { type: "array", items: { type: "string" } }
+                  }
+                },
+                sessionDossier: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: [
+                    "purpose",
+                    "outcome",
+                    "keyWork",
+                    "decisions",
+                    "blockers",
+                    "verification",
+                    "continuation",
+                    "evidenceRefIds",
+                    "warnings"
+                  ],
+                  properties: {
+                    purpose: { type: "string" },
+                    outcome: { type: "string" },
+                    keyWork: { type: "array", items: { type: "string" } },
+                    decisions: { type: "array", items: { type: "string" } },
+                    blockers: { type: "array", items: { type: "string" } },
+                    verification: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["status", "summary", "commands", "failures", "evidenceRefIds"],
+                      properties: {
+                        status: { type: "string", enum: ["passed", "failed", "mixed", "missing", "unknown"] },
+                        summary: { type: "string" },
+                        commands: { type: "array", items: { type: "string" } },
+                        failures: { type: "array", items: { type: "string" } },
+                        evidenceRefIds: { type: "array", items: { type: "string" } }
+                      }
+                    },
+                    continuation: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["nextStep", "openQuestions", "constraints"],
+                      properties: {
+                        nextStep: { type: "string" },
+                        openQuestions: { type: "array", items: { type: "string" } },
+                        constraints: { type: "array", items: { type: "string" } }
+                      }
+                    },
+                    evidenceRefIds: { type: "array", items: { type: "string" } },
+                    warnings: { type: "array", items: { type: "string" } }
+                  }
+                }
               }
             }
           }
@@ -114,7 +216,7 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
             requestPayload
           });
         }
-        const validation = mergeValidatedNarrative(deterministic, parsedOutput);
+        const validation = mergeValidatedNarrative(deterministic, input.facts, parsedOutput, evidenceCatalog, model);
         if (!validation.ok) {
           return failureResult("validation_failed", model, "OpenAI enrichment response failed validation.", {
             latencyMs,
@@ -154,11 +256,22 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
   };
 }
 
-function providerPayload(facts: SessionFacts, fallback: SessionCapsule): Record<string, unknown> {
+function providerPayload(
+  facts: SessionFacts,
+  fallback: SessionCapsule,
+  evidenceCatalog: ProviderEvidenceCatalogItem[]
+): Record<string, unknown> {
   const narrative = facts.narrative;
   return {
+    evidenceCatalog: evidenceCatalog.map((item) => ({
+      id: item.id,
+      label: item.label
+    })),
     fallback: {
       filesChangedSummary: fallback.filesChangedSummary,
+      sessionDossier: fallback.sessionDossier,
+      sessionSummary: fallback.sessionSummary,
+      sessionTitle: fallback.sessionTitle,
       liveSummary: fallback.liveSummary,
       outcome: fallback.outcome,
       searchSummary: fallback.searchSummary,
@@ -192,7 +305,10 @@ function providerPayload(facts: SessionFacts, fallback: SessionCapsule): Record<
 
 function mergeValidatedNarrative(
   fallback: SessionCapsule,
-  value: unknown
+  facts: SessionFacts,
+  value: unknown,
+  evidenceCatalog: ProviderEvidenceCatalogItem[],
+  model: string
 ): { ok: true; capsule: SessionCapsule } | { ok: false; validationFailures: string[] } {
   if (!isRecord(value)) return { ok: false, validationFailures: ["shape"] };
   const title = validatedField("title", value.title);
@@ -211,19 +327,36 @@ function mergeValidatedNarrative(
     return { ok: false, validationFailures: failures };
   }
   const outcome = validatedOptionalField("outcome", value.outcome);
+  const durableEnrichment = {
+    ...mergeDurableProviderOutput(
+      {
+        ...fallbackDurableSessionEnrichment(facts),
+        model,
+        promptVersion: SESSION_CAPSULE_PROMPT_VERSION
+      },
+      value,
+      evidenceCatalog
+    ),
+    model,
+    promptVersion: SESSION_CAPSULE_PROMPT_VERSION
+  };
   return {
     capsule: {
       ...fallback,
       action: stringField(value.action) ?? fallback.action,
       confidence,
+      durableEnrichment,
       liveSummary: liveSummary.value,
       missingEvidence,
       object: stringField(value.object) ?? fallback.object,
       outcome: outcome ?? fallback.outcome,
       providerStatus: "success",
-      searchPhrases: unique([...(fallback.searchPhrases ?? []), title.value, searchSummary.value]),
+      searchPhrases: unique([...(fallback.searchPhrases ?? []), durableEnrichment.sessionTitle.text, durableEnrichment.sessionSummary.text, searchSummary.value]),
       searchSummary: searchSummary.value,
-      title: title.value,
+      sessionDossier: durableEnrichment.sessionDossier,
+      sessionSummary: durableEnrichment.sessionSummary,
+      sessionTitle: durableEnrichment.sessionTitle,
+      title: durableEnrichment.sessionTitle.text,
       titleSource: "llm"
     },
     ok: true

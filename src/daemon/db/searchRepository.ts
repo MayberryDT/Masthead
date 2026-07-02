@@ -252,6 +252,7 @@ function textFromEnrichment(contentJson: string | null): string[] {
       stringField(content, "filesChangedSummary"),
       stringField(content, "commandsSummary"),
       stringField(content, "verificationSummary"),
+      ...durableText(content),
       stringField(content, "text"),
       stringField(content, "searchText"),
       ...stringArrayField(content, "topics"),
@@ -263,6 +264,29 @@ function textFromEnrichment(contentJson: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+function durableText(record: Record<string, unknown>): string[] {
+  const sessionTitle = isRecord(record.sessionTitle) ? record.sessionTitle : undefined;
+  const sessionSummary = isRecord(record.sessionSummary) ? record.sessionSummary : undefined;
+  const sessionDossier = isRecord(record.sessionDossier) ? record.sessionDossier : undefined;
+  const verification = isRecord(sessionDossier?.verification) ? sessionDossier.verification : undefined;
+  const continuation = isRecord(sessionDossier?.continuation) ? sessionDossier.continuation : undefined;
+  return [
+    stringField(sessionTitle ?? {}, "text"),
+    stringField(sessionSummary ?? {}, "text"),
+    stringField(sessionDossier ?? {}, "purpose"),
+    stringField(sessionDossier ?? {}, "outcome"),
+    ...stringArrayField(sessionDossier ?? {}, "keyWork"),
+    ...stringArrayField(sessionDossier ?? {}, "decisions"),
+    ...stringArrayField(sessionDossier ?? {}, "blockers"),
+    stringField(verification ?? {}, "summary"),
+    ...stringArrayField(verification ?? {}, "commands"),
+    ...stringArrayField(verification ?? {}, "failures"),
+    stringField(continuation ?? {}, "nextStep"),
+    ...stringArrayField(continuation ?? {}, "openQuestions"),
+    ...stringArrayField(continuation ?? {}, "constraints")
+  ].filter(isString);
 }
 
 function stringField(record: Record<string, unknown>, field: string): string | undefined {

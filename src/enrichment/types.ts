@@ -1,4 +1,10 @@
 import type { EvidenceRef } from "../core/types";
+import type {
+  DurableSessionEnrichment,
+  SessionDossierEnrichment,
+  SessionSummaryEnrichment,
+  SessionTitleEnrichment
+} from "../shared/sessionEnrichment";
 
 export type DerivedClaim = {
   text: string;
@@ -31,6 +37,10 @@ export type SessionCapsule = {
   confidence?: "high" | "medium" | "low";
   missingEvidence?: string[];
   providerStatus?: string;
+  durableEnrichment?: DurableSessionEnrichment;
+  sessionTitle?: SessionTitleEnrichment;
+  sessionSummary?: SessionSummaryEnrichment;
+  sessionDossier?: SessionDossierEnrichment;
   subject?: SessionNarrativeSubject;
   action?: string;
   object?: string;

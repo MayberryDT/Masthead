@@ -6,7 +6,7 @@ import { readCurrentSessionEnrichment, readSessionEnrichment } from "../../daemo
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { createDeterministicEnrichmentProvider } from "../deterministicProvider.ts";
-import { createEnrichmentCoordinator, EnrichmentFailedError } from "../enrichmentCoordinator.ts";
+import { createEnrichmentCoordinator, EnrichmentFailedError, shouldReplaceSessionTitle } from "../enrichmentCoordinator.ts";
 import type { SessionEnrichmentProvider } from "../provider.ts";
 
 const tempDirs: string[] = [];
@@ -138,6 +138,25 @@ describe("enrichment coordinator", () => {
       provider: "test-provider",
       status: "timeout"
     });
+  });
+
+  test("does not replace a high-confidence ended title with lower-confidence provider output", () => {
+    const current = {
+      basis: "dominant_work" as const,
+      confidence: "high" as const,
+      evidenceRefs: [],
+      text: "Durable ended session title"
+    };
+    const lower = {
+      basis: "fallback" as const,
+      confidence: "low" as const,
+      evidenceRefs: [],
+      text: "Masthead imported evidence"
+    };
+
+    expect(shouldReplaceSessionTitle({ current, incoming: lower, lifecycle: "ended" })).toBe(false);
+    expect(shouldReplaceSessionTitle({ current: lower, incoming: current, lifecycle: "ended" })).toBe(true);
+    expect(shouldReplaceSessionTitle({ current, incoming: lower, lifecycle: "running" })).toBe(true);
   });
 });
 

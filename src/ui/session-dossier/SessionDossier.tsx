@@ -349,6 +349,7 @@ function DossierEnrichmentPanel({
         <span className="rail-label">{status}</span>
       </div>
       <div className="summary-scroll">
+        <DossierDurableMemory dossier={dossier} />
         <SummarySection label="Transcript summary" section="summary" value={summary} extraParagraphs={[dossier?.narrative.outcome].filter((value): value is string => Boolean(value))} />
         <SummarySection label="Latest prompt" section="latest-prompt" value={dossier?.narrative.latestUserPrompt} />
         <SummarySection label="Retrieval notes" section="retrieval" value={dossier?.reuse.copyableContext} />
@@ -362,6 +363,48 @@ function DossierEnrichmentPanel({
         <DiagnosticCoverage coverage={coverage} />
       </div>
     </section>
+  );
+}
+
+function DossierDurableMemory({ dossier }: { dossier?: SessionDossierDto }) {
+  const durable = dossier?.durableEnrichment;
+  if (!durable) return null;
+  const memory = durable.sessionDossier;
+  const verification = memory.verification;
+  return (
+    <div className="dossier-durable-memory" data-dossier-section="durable-memory">
+      <header>
+        <div>
+          <h4>{durable.sessionTitle.text}</h4>
+          <p>{durable.sessionSummary.text}</p>
+        </div>
+        <span>{statusLabel(durable.sessionSummary.state)}</span>
+      </header>
+      <div className="summary-grid" aria-label="Durable session memory">
+        <SummaryFact label="Purpose" value={memory.purpose} />
+        <SummaryFact label="Outcome" value={memory.outcome} />
+        <SummaryFact label="Verification" value={`${statusLabel(verification.status)} - ${verification.summary}`} />
+        <SummaryFact label="Next step" value={memory.continuation.nextStep} />
+      </div>
+      <DurableList label="Key work" values={memory.keyWork} />
+      <DurableList label="Decisions" values={memory.decisions} />
+      <DurableList label="Blockers" values={memory.blockers} />
+      <DurableList label="Constraints" values={memory.continuation.constraints} />
+    </div>
+  );
+}
+
+function DurableList({ label, values }: { label: string; values: string[] }) {
+  if (values.length === 0) return null;
+  return (
+    <div className="durable-list">
+      <span>{label}</span>
+      <ul>
+        {values.slice(0, 5).map((value) => (
+          <li key={value}>{value}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -568,6 +611,14 @@ function rowTone(kind?: string): string {
 function coverageLabel(value?: SessionDossierDto["coverage"]["level"]): string {
   if (!value) return "Live";
   return value.replaceAll("_", " ");
+}
+
+function statusLabel(value: string): string {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function formatCompactNumber(value?: number): string {

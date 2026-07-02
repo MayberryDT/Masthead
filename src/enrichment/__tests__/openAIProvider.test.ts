@@ -14,7 +14,7 @@ describe("OpenAI enrichment provider", () => {
       };
       expect(body.input).not.toContain("/home/tyler");
       expect(body.input).not.toContain("OPENAI_API_KEY");
-      expect(body.max_output_tokens).toBe(360);
+      expect(body.max_output_tokens).toBe(760);
       expect(body.reasoning).toEqual({ effort: "minimal" });
       expect(body.text.format.schema.required).toEqual([
         "title",
@@ -24,12 +24,17 @@ describe("OpenAI enrichment provider", () => {
         "action",
         "object",
         "confidence",
-        "missingEvidence"
+        "missingEvidence",
+        "version",
+        "sessionTitle",
+        "sessionSummary",
+        "sessionDossier"
       ]);
       expect(JSON.parse(body.input).facts.coverage).toMatchObject({
         level: "complete",
         messageCount: 2
       });
+      expect(JSON.parse(body.input).evidenceCatalog).toEqual([]);
       expect(JSON.parse(body.input).facts.commands[0]).toMatchObject({
         exitCode: 0,
         name: "npm test -- --run src/mcp/__tests__/toolsList.test.ts",
@@ -37,11 +42,47 @@ describe("OpenAI enrichment provider", () => {
       });
       return responseWithOutput({
         confidence: "high",
-        liveSummary: "MCP launch config validation has tools-list coverage.",
+        liveSummary: "Durable enrichment provider returned structured session copy.",
+        action: "generate",
+        object: "structured session copy",
         missingEvidence: [],
-        outcome: "Added validation and tools-list coverage for MCP launch config.",
-        searchSummary: "Masthead session for MCP launch config validation with tools-list coverage.",
-        title: "MCP launch config validation"
+        outcome: "Structured session copy was generated.",
+        searchSummary: "Durable title, summary, and dossier enrichment were generated.",
+        sessionDossier: {
+          blockers: [],
+          continuation: {
+            constraints: [],
+            nextStep: "Persist the durable fields.",
+            openQuestions: []
+          },
+          decisions: [],
+          evidenceRefIds: [],
+          keyWork: ["Generated durable title and archival summary."],
+          outcome: "Durable title, summary, and Dossier sections were generated.",
+          purpose: "Generate structured session copy.",
+          verification: {
+            commands: ["vitest"],
+            evidenceRefIds: [],
+            failures: [],
+            status: "passed",
+            summary: "Provider parsing test passed."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "high",
+          evidenceRefIds: [],
+          state: "completed",
+          text: "Generated structured session copy with durable title, archival summary, and Dossier sections."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "high",
+          evidenceRefIds: [],
+          text: "Structured session copy generation"
+        },
+        title: "Legacy compatible title",
+        version: "session-capsule-v4"
       });
     });
     const provider = createOpenAIEnrichmentProvider({
@@ -59,12 +100,15 @@ describe("OpenAI enrichment provider", () => {
     expect(result.source).toBe("llm");
     expect(result.provider).toBe("openai");
     expect(result.model).toBe("test-model");
-    expect(result.capsule?.title).toBe("MCP launch config validation");
+    expect(result.capsule?.title).toBe("Structured session copy generation");
     expect(result.capsule?.titleSource).toBe("llm");
     expect(result.capsule?.confidence).toBe("high");
     expect(result.capsule?.missingEvidence).toEqual([]);
-    expect(result.capsule?.liveSummary).toBe("MCP launch config validation has tools-list coverage.");
-    expect(result.capsule?.searchSummary).toContain("tools-list coverage");
+    expect(result.capsule?.liveSummary).toBe("Durable enrichment provider returned structured session copy.");
+    expect(result.capsule?.searchSummary).toContain("dossier enrichment");
+    expect(result.capsule?.sessionTitle?.text).toBe("Structured session copy generation");
+    expect(result.capsule?.sessionSummary?.text).toContain("Generated structured session copy");
+    expect(result.capsule?.sessionDossier?.verification.status).toBe("passed");
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 

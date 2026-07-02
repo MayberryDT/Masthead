@@ -102,6 +102,71 @@ describe("session dossier repository", () => {
     db.close();
   });
 
+  test("includes durable enrichment in the session dossier", async () => {
+    const db = await openTestDatabase();
+    seedDossierSession(db, { sessionId: "session-durable-dossier" });
+    upsertSessionEnrichment(db, {
+      content: {
+        candidateDecisions: [],
+        liveSummary: "Live Dossier summary remains separate.",
+        searchPhrases: [],
+        sessionDossier: {
+          blockers: [],
+          continuation: {
+            constraints: ["Keep Board headlines separate from durable titles."],
+            nextStep: "Render durable Dossier sections first.",
+            openQuestions: []
+          },
+          decisions: ["Do not reuse Board live headlines as Logbook titles."],
+          evidenceRefs: [],
+          keyWork: ["Added durable Dossier enrichment."],
+          outcome: "Dossier durable enrichment is available to the UI.",
+          purpose: "Expose durable enrichment through the Dossier endpoint.",
+          verification: {
+            commands: ["vitest"],
+            evidenceRefs: [],
+            failures: [],
+            status: "passed",
+            summary: "Dossier repository tests passed."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "high",
+          evidenceRefs: [],
+          state: "completed",
+          text: "Exposed durable enrichment through the Session Dossier endpoint."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "high",
+          evidenceRefs: [],
+          text: "Session Dossier enrichment exposure"
+        },
+        technologies: [],
+        title: "Session Dossier enrichment exposure",
+        topics: [],
+        unresolved: []
+      },
+      contentFingerprint: "session-durable-dossier:fingerprint:v4",
+      enrichmentKind: "session_capsule",
+      generatedAt: "2026-06-26T12:13:00.000Z",
+      model: "gpt-5-nano",
+      promptVersion: "session-capsule-v4",
+      provider: "openai",
+      sessionId: "session-durable-dossier",
+      sourceRefs: [],
+      status: "current"
+    });
+
+    const dossier = getSessionDossier(db, "session-durable-dossier");
+
+    expect(dossier?.identity.title).toBe("Session Dossier enrichment exposure");
+    expect(dossier?.durableEnrichment?.sessionTitle.text).toBe("Session Dossier enrichment exposure");
+    expect(dossier?.durableEnrichment?.sessionDossier.decisions).toContain("Do not reuse Board live headlines as Logbook titles.");
+    db.close();
+  });
+
   test("labels hook-only tokenless sessions without useful transcript as incomplete capture", async () => {
     const db = await openTestDatabase();
     seedSession(db, {

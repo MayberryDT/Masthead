@@ -2,6 +2,7 @@ import { defaultLiveProjectionUrl } from "./liveProjectionClient";
 import { getJson, postJson } from "./httpJsonClient";
 import type { ReviewDisposition } from "../core/store";
 import type { SessionDossierDto } from "../shared/sessionDossier";
+import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
 import type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest } from "../shared/sourcesSetup";
 import type { ImportCompletionReportDto, ImportJobStatus, ImportManifestSummaryDto, ImportStage, ImportWorkUnitDto, ImportWorkUnitStatus } from "../shared/sourceImport";
@@ -288,6 +289,8 @@ export type LogbookSession = {
   toolCount: number;
   errorCount: number;
   enrichmentStatus?: "current" | "stale" | "failed" | "disabled" | "missing";
+  sessionTitle?: SessionTitleEnrichment;
+  sessionSummary?: SessionSummaryEnrichment;
   unresolved: string[];
   snippet?: string;
   sourceConfidence: "authoritative" | "inferred" | "heuristic";

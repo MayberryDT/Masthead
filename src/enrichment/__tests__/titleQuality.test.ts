@@ -131,7 +131,7 @@ describe("session title quality", () => {
     ).toContain("Title quality fallback uses the provider summary.");
   });
 
-  test("Logbook list titles use liveSummary before bad stored titles", async () => {
+  test("Logbook list titles do not use liveSummary as durable title fallback", async () => {
     const db = await openTestDatabase();
     seedSession(db, {
       objective: undefined,
@@ -157,6 +157,12 @@ describe("session title quality", () => {
         candidateDecisions: [],
         liveSummary: "Title quality fallback uses the provider summary.",
         searchPhrases: [],
+        sessionSummary: {
+          confidence: "high",
+          evidenceRefs: [],
+          state: "completed",
+          text: "Captured durable Logbook summary without promoting live summary into the title."
+        },
         technologies: [],
         title: "Codex session",
         topics: [],
@@ -165,7 +171,62 @@ describe("session title quality", () => {
       "[]"
     );
 
-    expect(querySessions(db, { limit: 10 }).sessions[0]?.title).toBe("Title quality fallback uses the provider summary.");
+    const row = querySessions(db, { limit: 10 }).sessions[0];
+    expect(row?.title).toBe("Masthead · 2026-06-25 12:00");
+    expect(row?.sessionSummary?.text).toContain("durable Logbook summary");
+    db.close();
+  });
+
+  test("Logbook list titles use durable sessionTitle when present", async () => {
+    const db = await openTestDatabase();
+    seedSession(db, {
+      objective: undefined,
+      sessionId: "session-logbook-durable-title",
+      title: "Codex session"
+    });
+    db.prepare(
+      `INSERT INTO session_enrichments (
+        enrichment_id, session_id, enrichment_kind, status, content_fingerprint, prompt_version,
+        provider, model, generated_at, content_json, source_refs_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "enrichment:logbook-durable-title",
+      "session-logbook-durable-title",
+      "session_capsule",
+      "current",
+      "fingerprint:logbook-durable-title",
+      "session-capsule-v4",
+      "fixture",
+      "fixture",
+      "2026-06-25T12:00:00.000Z",
+      JSON.stringify({
+        candidateDecisions: [],
+        liveSummary: "Live summary remains separate.",
+        searchPhrases: [],
+        sessionSummary: {
+          confidence: "high",
+          evidenceRefs: [],
+          state: "completed",
+          text: "Added durable Logbook title selection while keeping live summary separate."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "high",
+          evidenceRefs: [],
+          text: "Durable Logbook title selection"
+        },
+        technologies: [],
+        title: "Legacy compatible title",
+        topics: [],
+        unresolved: []
+      }),
+      "[]"
+    );
+
+    const row = querySessions(db, { limit: 10 }).sessions[0];
+    expect(row?.title).toBe("Durable Logbook title selection");
+    expect(row?.sessionTitle?.text).toBe("Durable Logbook title selection");
+    expect(row?.sessionSummary?.text).toContain("keeping live summary separate");
     db.close();
   });
 

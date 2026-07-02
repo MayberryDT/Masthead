@@ -1,5 +1,6 @@
 import type { SessionCapsule, SessionEnrichmentStatus } from "../../enrichment/types.ts";
 import { SESSION_CAPSULE_PROMPT_VERSION } from "../../enrichment/sessionCompiler.ts";
+import type { SessionDossierEnrichment, SessionSummaryEnrichment, SessionTitleEnrichment } from "../../shared/sessionEnrichment.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type SessionEnrichmentView = {
@@ -23,6 +24,9 @@ export type SessionEnrichmentView = {
   searchText?: string;
   provider?: string;
   model?: string;
+  sessionTitle?: SessionTitleEnrichment;
+  sessionSummary?: SessionSummaryEnrichment;
+  sessionDossier?: SessionDossierEnrichment;
 };
 
 export type LiveProjectionEnrichment = {
@@ -42,6 +46,9 @@ export type LiveProjectionEnrichment = {
   provider?: string;
   model?: string;
   status?: string;
+  sessionTitle?: SessionTitleEnrichment;
+  sessionSummary?: SessionSummaryEnrichment;
+  sessionDossier?: SessionDossierEnrichment;
 };
 
 type EnrichmentRow = {
@@ -160,6 +167,9 @@ export function liveProjectionEnrichments(db: MastheadDatabase, sourceSessionIds
           provider: view.provider,
           sourceSessionId,
           status: view.status,
+          sessionDossier: view.sessionDossier,
+          sessionSummary: view.sessionSummary,
+          sessionTitle: view.sessionTitle,
           subject: view.subject,
           technologies: view.technologies,
           title: view.title,
@@ -186,6 +196,9 @@ function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichment
   const capsule = contentFromRow<SessionCapsule>(capsuleRow);
   const liveSummary = contentFromRow<{ text?: string }>(liveSummaryRow);
   const searchProjection = contentFromRow<{ searchText?: string }>(searchProjectionRow);
+  const sessionTitle = capsule?.sessionTitle ?? capsule?.durableEnrichment?.sessionTitle;
+  const sessionSummary = capsule?.sessionSummary ?? capsule?.durableEnrichment?.sessionSummary;
+  const sessionDossier = capsule?.sessionDossier ?? capsule?.durableEnrichment?.sessionDossier;
   return {
     liveSummary: liveSummary?.text ?? capsule?.liveSummary,
     commandsSummary: capsule?.commandsSummary,
@@ -197,7 +210,10 @@ function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichment
     provider: capsuleRow?.provider ?? undefined,
     searchSummary: capsule?.searchSummary,
     searchText: searchProjection?.searchText,
+    sessionDossier,
     sessionId,
+    sessionSummary,
+    sessionTitle,
     status: "current",
     title: capsule?.title,
     titleSource: capsule?.titleSource,

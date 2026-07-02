@@ -123,6 +123,50 @@ describe("LogbookTable", () => {
     expect(html).not.toContain("<span>completed</span>");
   });
 
+  test("renders durable title, archival summary, and enrichment chips", () => {
+    const html = renderToStaticMarkup(
+      <LogbookTable
+        density="compact"
+        sessions={[
+          {
+            enrichmentStatus: "current",
+            errorCount: 0,
+            fileCount: 0,
+            hostId: "host:test",
+            lastActivityAt: "2026-07-01T10:38:00.000Z",
+            lifecycle: "ended",
+            models: [],
+            runtime: "codex",
+            sessionId: "session-durable-row",
+            sessionSummary: {
+              confidence: "high",
+              evidenceRefs: [],
+              state: "completed",
+              text: "Added durable Logbook title selection while keeping live summary separate."
+            },
+            sessionTitle: {
+              basis: "dominant_work",
+              confidence: "high",
+              evidenceRefs: [],
+              text: "Durable Logbook title selection"
+            },
+            sourceConfidence: "authoritative",
+            sourceSessionId: "source-durable-row",
+            title: "Legacy compatible title",
+            toolCount: 0,
+            topics: []
+          }
+        ]}
+        onSelect={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Durable Logbook title selection");
+    expect(html).toContain("Added durable Logbook title selection");
+    expect(html).toContain("Completed");
+    expect(html).toContain("High confidence");
+  });
+
   test("starts row entry cascade promptly enough to be visible", () => {
     const css = readFileSync("src/styles/logbook.css", "utf8");
 
