@@ -168,6 +168,46 @@ describe("live projection", () => {
     expect(headlineInput?.subjectCandidates).toContain("Board headlines");
   });
 
+  test("uses recent tool commands as live board headline evidence", () => {
+    const started = normalizeCodexHookPayload(
+      {
+        provider_event_id: "tool-backed-start",
+        event: "session_started",
+        session_id: "tool-backed-session",
+        timestamp: "2026-06-23T03:00:00.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        title: "Board headline refresh"
+      },
+      { receivedAt: "2026-06-23T03:00:00.010Z" }
+    );
+    const command = normalizeCodexHookPayload(
+      {
+        provider_event_id: "tool-backed-typecheck",
+        event: "PostToolUse",
+        session_id: "tool-backed-session",
+        timestamp: "2026-06-23T03:00:30.000Z",
+        cwd: "/workspace/masthead",
+        toolName: "Bash",
+        toolInput: {
+          command: "npm run typecheck"
+        },
+        exit_code: 0,
+        summary: "Typecheck completed for Board headline refresh."
+      },
+      { receivedAt: "2026-06-23T03:00:30.010Z" }
+    );
+
+    const envelope = projectLiveEvents([started, command], [], {
+      generatedAt: "2026-06-23T03:01:00.000Z"
+    });
+
+    const headlineInput = envelope.projection.cards[0]?.headlineInput as { evidence?: string[] } | undefined;
+
+    expect(headlineInput?.evidence).toContain("Typecheck completed for Board headline refresh.");
+    expect(headlineInput?.evidence).toContain("npm run typecheck");
+  });
+
   test("does not replace pending Board headlines with stale stored enrichment in LLM mode", () => {
     const started = normalizeCodexHookPayload(
       {
