@@ -114,6 +114,35 @@ describe("board headline frame repository", () => {
     db.close();
   });
 
+  test("does not hydrate a frame when the requested source id does not match the canonical session row", async () => {
+    const db = await openTestDatabase();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session-1",
+      title: "Canonical Board headline"
+    });
+
+    upsertBoardHeadlineFrame(db, {
+      frame: frame({
+        disposition: "belongs to the old source session id",
+        subject: "Old source headline"
+      }),
+      generatedAt: "2026-07-01T12:05:00.000Z",
+      model: "gpt-5",
+      provider: "openai",
+      sessionId: "session-1",
+      sourceSessionId: "old-source-session"
+    });
+
+    const views = currentBoardHeadlineFrames(db, [{ sessionId: "session-1", sourceSessionId: "current-source-session" }]);
+
+    expect(views.has("old-source-session")).toBe(false);
+    expect(views.has("current-source-session")).toBe(false);
+    db.close();
+  });
+
   test("throws when upserting an invalid frame", async () => {
     const db = await openTestDatabase();
     seedSession(db, {

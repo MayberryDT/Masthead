@@ -16,6 +16,7 @@ export type UpsertBoardHeadlineFrameInput = {
 };
 
 type BoardHeadlineFrameRow = {
+  sessionId: string;
   sourceSessionId: string;
   provider: string;
   model: string;
@@ -77,10 +78,12 @@ export function currentBoardHeadlineFrames(db: MastheadDatabase, sessions: Itera
     .filter((session) => session.sessionId && session.sourceSessionId)
     .filter((session, index, all) => all.findIndex((candidate) => candidate.sessionId === session.sessionId) === index);
   if (scopedSessions.length === 0) return new Map();
+  const scopedSessionKeys = new Set(scopedSessions.map((session) => scopedSessionKey(session)));
 
   const rows = db
     .prepare(
       `SELECT
+        session_id AS sessionId,
         source_session_id AS sourceSessionId,
         provider,
         model,
@@ -94,6 +97,7 @@ export function currentBoardHeadlineFrames(db: MastheadDatabase, sessions: Itera
 
   const views = new Map<string, BoardHeadlineView>();
   for (const row of rows) {
+    if (!scopedSessionKeys.has(scopedSessionKey(row))) continue;
     if (views.has(row.sourceSessionId)) continue;
 
     const frame = parseFrame(row.frameJson);
@@ -110,6 +114,10 @@ export function currentBoardHeadlineFrames(db: MastheadDatabase, sessions: Itera
     });
   }
   return views;
+}
+
+function scopedSessionKey(session: BoardHeadlineFrameScope): string {
+  return `${session.sessionId}\u0000${session.sourceSessionId}`;
 }
 
 function parseFrame(value: string): BoardHeadlineFrame | undefined {
