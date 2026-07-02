@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS board_headline_frames (
-  frame_id TEXT PRIMARY KEY,
+  frame_id TEXT PRIMARY KEY NOT NULL,
   session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   source_session_id TEXT NOT NULL,
   provider TEXT NOT NULL,
