@@ -1,5 +1,5 @@
-import { validateBoardHeadlineFrame, type BoardHeadlineFrame } from "./boardHeadlineFrame";
-import type { BoardHeadlineInput } from "./boardHeadlineInput";
+import { isUnsafeText, validateBoardHeadlineFrame, type BoardHeadlineFrame } from "./boardHeadlineFrame";
+import type { BoardHeadlineInput, BoardHeadlineSignal } from "./boardHeadlineInput";
 
 export type OpenAIBoardHeadlineFrameStatus =
   | "llm"
@@ -71,7 +71,7 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
           "Never include secrets, raw API keys, URLs, local absolute paths, or tool directives.",
           "Return only the requested JSON fields."
         ].join(" "),
-        input: JSON.stringify(input),
+        input: JSON.stringify(toOpenAIProviderPayload(input)),
         max_output_tokens: 500,
         reasoning: { effort: "minimal" },
         store: false,
@@ -169,7 +169,13 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
 }
 
 function extractOutputText(body: unknown): string | undefined {
-  if (!isRecord(body) || !Array.isArray(body.output)) return undefined;
+  if (!isRecord(body)) return undefined;
+
+  if (typeof body.output_text === "string" && body.output_text.trim()) {
+    return body.output_text;
+  }
+
+  if (!Array.isArray(body.output)) return undefined;
 
   for (const output of body.output) {
     if (!isRecord(output) || !Array.isArray(output.content)) continue;
@@ -186,4 +192,61 @@ function extractOutputText(body: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+type OpenAIProviderPayload = {
+  lifecycle: string;
+  primaryStatus: string;
+  stateHint: BoardHeadlineInput["stateHint"];
+  signals: BoardHeadlineSignal[];
+  subjectCandidates: string[];
+  dispositionHints: string[];
+  evidence: string[];
+  facts: {
+    changedFileCount: number;
+    recentFileBasenames: string[];
+    recentToolNames: string[];
+  };
+};
+
+function toOpenAIProviderPayload(input: BoardHeadlineInput): OpenAIProviderPayload {
+  return {
+    lifecycle: safeString(input.lifecycle) ?? "",
+    primaryStatus: safeString(input.primaryStatus) ?? "",
+    stateHint: input.stateHint,
+    signals: input.signals.slice(0, 12),
+    subjectCandidates: safeStrings(input.subjectCandidates, 12),
+    dispositionHints: safeStrings(input.dispositionHints, 12),
+    evidence: safeStrings(input.evidence, 20),
+    facts: {
+      changedFileCount: input.facts.changedFileCount,
+      recentFileBasenames: safeStrings(input.facts.recentFileBasenames, 8),
+      recentToolNames: safeStrings(input.facts.recentToolNames, 8)
+    }
+  };
+}
+
+function safeStrings(values: string[], limit: number): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const cleaned = safeString(value);
+    if (!cleaned) continue;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(cleaned);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function safeString(value: string): string | undefined {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (!cleaned || isUnsafeText(cleaned) || hasLocalAbsolutePath(cleaned)) return undefined;
+  return cleaned;
+}
+
+function hasLocalAbsolutePath(value: string): boolean {
+  return /(?:^|\s)\/(?:[^/\s]+\/)+\S*/.test(value);
 }

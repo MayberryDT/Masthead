@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import { toBoardHeadlineInput } from "../boardHeadlineInput";
 import type { BoardLiveCopyFacts } from "../boardLiveCopyFacts";
 import { rewriteBoardHeadlineFrameWithOpenAI } from "../openaiBoardHeadlineFrame";
+import type { BoardHeadlineFrame } from "../boardHeadlineFrame";
 
 function facts(overrides: Partial<BoardLiveCopyFacts> = {}): BoardLiveCopyFacts {
   return {
@@ -44,18 +45,21 @@ function responseWithFrame(frame: unknown) {
   };
 }
 
+function validFrame(overrides: Partial<BoardHeadlineFrame> = {}): BoardHeadlineFrame {
+  return {
+    subject: "Board headlines",
+    disposition: "structured around subject and disposition",
+    state: "active",
+    subjectKind: "component",
+    confidence: "high",
+    evidence: ["Use subject and disposition frames for Board headlines.", "SessionCard.tsx"],
+    ...overrides
+  };
+}
+
 describe("OpenAI board headline frame", () => {
   test("extracts a validated frame using the Responses API JSON schema", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      responseWithFrame({
-        subject: "Board headlines",
-        disposition: "structured around subject and disposition",
-        state: "active",
-        subjectKind: "component",
-        confidence: "high",
-        evidence: ["Use subject and disposition frames for Board headlines.", "SessionCard.tsx"]
-      })
-    );
+    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame()));
 
     const result = await rewriteBoardHeadlineFrameWithOpenAI(input(), {
       enabled: true,
@@ -85,8 +89,106 @@ describe("OpenAI board headline frame", () => {
     expect(body.text.format.schema.required).toEqual(["subject", "disposition", "state", "subjectKind", "confidence", "evidence"]);
     expect(body.instructions).toContain("Do not summarize the session");
     expect(body.instructions).toContain("smallest concrete work object");
-    expect(JSON.parse(body.input)).toEqual(input());
+    const expectedInput = input();
+    expect(JSON.parse(body.input)).toEqual({
+      lifecycle: expectedInput.lifecycle,
+      primaryStatus: expectedInput.primaryStatus,
+      stateHint: expectedInput.stateHint,
+      signals: expectedInput.signals,
+      subjectCandidates: expectedInput.subjectCandidates,
+      dispositionHints: expectedInput.dispositionHints,
+      evidence: expectedInput.evidence,
+      facts: {
+        changedFileCount: 1,
+        recentFileBasenames: ["SessionCard.tsx"],
+        recentToolNames: []
+      }
+    });
     expect(body.input).not.toContain("OPENAI_API_KEY");
+  });
+
+  test("sends a sanitized compact provider payload without full facts", async () => {
+    const unsafeInput = toBoardHeadlineInput({
+      lifecycle: "running",
+      primaryStatus: "editing",
+      signals: ["command_failed"],
+      facts: facts({
+        title: "OPENAI_API_KEY",
+        project: "https://example.com",
+        recentTranscriptMessages: [
+          "Board headline frame keeps concrete subject evidence.",
+          '::git-stage{cwd="/tmp"}',
+          "[url]",
+          "sk-proj-secret"
+        ],
+        recentFileBasenames: ["SessionCard.tsx", "/home/tyler/secret/path"],
+        recentEvents: [
+          { kind: "session.started", summary: "Headline work started" },
+          { kind: "tool.call", summary: "OPENAI_API_KEY" },
+          { kind: "tool.call", summary: "https://example.com" },
+          { kind: "tool.call", summary: '::git-stage{cwd="/tmp"}' },
+          { kind: "tool.call", summary: "[url]" },
+          { kind: "tool.call", summary: "sk-proj-secret" },
+          { kind: "tool.call", summary: "/home/tyler/secret/path" }
+        ],
+        recentCommandFailures: ["OPENAI_API_KEY"],
+        attentionTitles: ["https://example.com"],
+        conflictTitles: ['::git-stage{cwd="/tmp"}'],
+        recentToolNames: ["apply_patch"]
+      })
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(responseWithFrame(validFrame()));
+
+    await rewriteBoardHeadlineFrameWithOpenAI(unsafeInput, { enabled: true, apiKey: "key", fetchImpl });
+
+    const [, request] = fetchImpl.mock.calls[0]!;
+    const body = JSON.parse(String(request.body));
+    const providerInput = JSON.parse(body.input);
+    expect(providerInput).toMatchObject({
+      lifecycle: "running",
+      primaryStatus: "editing",
+      stateHint: "blocked",
+      signals: ["command_failed"]
+    });
+    expect(providerInput).not.toHaveProperty("facts.sessionId");
+    expect(providerInput).not.toHaveProperty("facts.project");
+    expect(providerInput).not.toHaveProperty("facts.recentTranscriptMessages");
+    expect(providerInput).not.toHaveProperty("facts.recentEvents");
+    expect(providerInput.facts).toEqual({
+      changedFileCount: 1,
+      recentFileBasenames: ["SessionCard.tsx"],
+      recentToolNames: ["apply_patch"]
+    });
+
+    expect(body.input).toContain("Headline work started");
+    expect(body.input).not.toContain("OPENAI_API_KEY");
+    expect(body.input).not.toContain("https://example.com");
+    expect(body.input).not.toContain("::git-stage");
+    expect(body.input).not.toContain("[url]");
+    expect(body.input).not.toContain("sk-proj-");
+    expect(body.input).not.toContain("/home/tyler/secret/path");
+  });
+
+  test("extracts top-level Responses API output_text", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ output_text: JSON.stringify(validFrame()) })
+    });
+
+    await expect(
+      rewriteBoardHeadlineFrameWithOpenAI(input(), {
+        enabled: true,
+        apiKey: "key",
+        fetchImpl,
+        model: "gpt-5-nano-2025-08-07"
+      })
+    ).resolves.toMatchObject({
+      status: "llm",
+      frame: {
+        subject: "Board headlines",
+        disposition: "structured around subject and disposition"
+      }
+    });
   });
 
   test("returns validation_failed for weak model frames", async () => {
@@ -140,10 +242,25 @@ describe("OpenAI board headline frame", () => {
   });
 
   test("returns timeout when the OpenAI request is aborted", async () => {
-    const fetchImpl = vi.fn().mockRejectedValue(Object.assign(new Error("aborted"), { name: "AbortError" }));
-
-    await expect(rewriteBoardHeadlineFrameWithOpenAI(input(), { enabled: true, apiKey: "key", fetchImpl })).resolves.toMatchObject({
-      status: "timeout"
+    vi.useFakeTimers();
+    let capturedSignal: AbortSignal | undefined;
+    const fetchImpl = vi.fn((_url, request) => {
+      capturedSignal = request?.signal;
+      return new Promise((_resolve, reject) => {
+        capturedSignal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+      });
     });
+
+    try {
+      const resultPromise = rewriteBoardHeadlineFrameWithOpenAI(input(), { enabled: true, apiKey: "key", fetchImpl, timeoutMs: 25 });
+      await vi.advanceTimersByTimeAsync(25);
+
+      await expect(resultPromise).resolves.toMatchObject({
+        status: "timeout"
+      });
+      expect(capturedSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
