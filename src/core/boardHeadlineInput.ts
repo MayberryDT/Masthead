@@ -1,4 +1,5 @@
 import type { BoardLiveCopyFacts } from "./boardLiveCopyFacts";
+import type { BoardHeadlineState } from "./boardHeadlineFrame";
 
 export type BoardHeadlineSignal =
   | "approval_waiting"
@@ -11,15 +12,7 @@ export type BoardHeadlineSignal =
   | "high_risk_change"
   | "conflict_detected";
 
-export type BoardHeadlineStateHint =
-  | "active"
-  | "blocked"
-  | "completed"
-  | "failed"
-  | "needs_verification"
-  | "paused"
-  | "unknown"
-  | "waiting";
+export type BoardHeadlineStateHint = BoardHeadlineState;
 
 export type BoardHeadlineInput = {
   lifecycle: string;
@@ -53,7 +46,7 @@ export function toBoardHeadlineInput(input: {
         canonical?.subject,
         canonical?.object,
         cleanWorkContextLabel(facts.workContext?.label),
-        ...facts.recentFileBasenames.map(fileSubject),
+        ...facts.recentFileBasenames.flatMap(fileSubjectCandidates),
         facts.title,
         facts.project
       ],
@@ -124,12 +117,14 @@ function stateHintFor(input: {
 function transcriptSubjectCandidates(message: string): string[] {
   const normalized = cleanText(message);
   if (!normalized) return [];
-  const withoutLeadingAction = normalized.replace(
-    /^(?:add|build|change|fix|implement|make|polish|repair|update|wire)\s+(?:the\s+)?/i,
-    ""
-  );
-  const candidates = [capitalizedPhrase(withoutLeadingAction), capitalizedPhrase(normalized)].filter(isString);
-  return candidates;
+
+  const withoutLeadingAction = stripLeadingTaskFiller(normalized);
+  const candidates = [
+    ...domainSubjectCandidates(withoutLeadingAction),
+    ...domainSubjectCandidates(normalized),
+    capitalizedPhrase(withoutLeadingAction)
+  ];
+  return uniqueBounded(candidates, 6);
 }
 
 function capitalizedPhrase(value: string): string | undefined {
@@ -145,8 +140,11 @@ function cleanWorkContextLabel(value: string | undefined): string | undefined {
   return cleaned?.replace(/\s+(?:changes|work)$/i, "");
 }
 
-function fileSubject(value: string): string | undefined {
-  return cleanText(value);
+function fileSubjectCandidates(value: string): string[] {
+  const basename = cleanText(value);
+  if (!basename) return [];
+
+  return uniqueBounded([...knownFileSubjects(basename), basename], 4);
 }
 
 function uniqueBounded(values: Array<string | undefined>, limit: number): string[] {
@@ -169,6 +167,79 @@ function cleanText(value: string | undefined): string | undefined {
   return cleaned || undefined;
 }
 
-function isString(value: string | undefined): value is string {
-  return typeof value === "string";
+function stripLeadingTaskFiller(value: string): string {
+  return value.replace(
+    /^(?:(?:please\s+)?(?:investigate\s+why|work\s+on|look\s+into|figure\s+out|add|build|change|fix|implement|make|polish|repair|update|wire)\s+(?:the\s+)?)+/i,
+    ""
+  );
+}
+
+function domainSubjectCandidates(value: string): string[] {
+  const candidates: string[] = [];
+  const normalized = value.replace(/[.?!,:;]+$/g, "");
+  const lower = normalized.toLowerCase();
+
+  const patterns: Array<[RegExp, string]> = [
+    [/\bboard headlines?\b/i, "Board headlines"],
+    [/\bheadline refresh(?:es)?\b/i, "headline refreshes"],
+    [/\bdata enrichment\b/i, "data enrichment"],
+    [/\bsettings danger zone\b/i, "Settings danger zone"],
+    [/\bsettings ui\b/i, "Settings UI"],
+    [/\bsession dossier\b/i, "Session dossier"],
+    [/\blogbook\b/i, "Logbook"],
+    [/\bsources screen\b/i, "Sources screen"],
+    [/\btranscript import\b/i, "transcript import"],
+    [/\bboard cards?\b/i, "Board cards"]
+  ];
+
+  for (const [pattern, subject] of patterns) {
+    if (pattern.test(normalized)) {
+      candidates.push(subject);
+    }
+  }
+
+  if (lower.includes("headline") && lower.includes("refresh") && !candidates.includes("headline refreshes")) {
+    candidates.push("headline refreshes");
+  }
+  if (lower.includes("source") && lower.includes("screen") && !candidates.includes("Sources screen")) {
+    candidates.push("Sources screen");
+  }
+  if (lower.includes("transcript") && lower.includes("import") && !candidates.includes("transcript import")) {
+    candidates.push("transcript import");
+  }
+
+  return candidates;
+}
+
+function knownFileSubjects(value: string): string[] {
+  const stem = value.replace(/\.[^.]+$/g, "");
+  const normalized = stem.replace(/[-_\s]+/g, "").toLowerCase();
+  const subjects: string[] = [];
+
+  if (normalized === "sessioncard" || normalized === "sessioncards") {
+    subjects.push("Board cards");
+  }
+  if (normalized === "dangerzone") {
+    subjects.push("Settings danger zone");
+  }
+  if (normalized.includes("settings")) {
+    subjects.push("Settings UI");
+  }
+  if (normalized.includes("sessiondossier")) {
+    subjects.push("Session dossier");
+  }
+  if (normalized.includes("logbook")) {
+    subjects.push("Logbook");
+  }
+  if (normalized.includes("sources")) {
+    subjects.push("Sources screen");
+  }
+  if (normalized.includes("transcriptimport")) {
+    subjects.push("transcript import");
+  }
+  if (normalized.includes("boardheadline")) {
+    subjects.push("Board headlines");
+  }
+
+  return subjects;
 }
