@@ -1,6 +1,7 @@
 import { basename, dirname, isAbsolute, sep } from "node:path";
 import { isHighRiskPath } from "../../core/risk.ts";
 import type { EvidenceRef } from "../../core/types.ts";
+import { SESSION_CAPSULE_PROMPT_VERSION } from "../../enrichment/sessionCompiler.ts";
 import type { SessionCapsule } from "../../enrichment/types.ts";
 import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
 import type {
@@ -439,8 +440,8 @@ function getNarrative(
   identity: SessionDossierIdentity,
   messages: MessageRow[]
 ): SessionDossierNarrative {
-  const enrichment = readCurrentSessionEnrichment(db, sessionId, "session_capsule");
-  const latestFailure = readLatestFailedSessionEnrichment(db, sessionId, "session_capsule");
+  const enrichment = readCurrentSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
+  const latestFailure = readLatestFailedSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
   const capsule = enrichment?.content as SessionCapsule | undefined;
   const userMessages = messages.filter((message) => message.role === "user");
   const assistantMessages = messages.filter((message) => message.role === "assistant");
@@ -487,7 +488,7 @@ function getNarrative(
 }
 
 function getDurableEnrichment(db: MastheadDatabase, sessionId: string): DurableSessionEnrichment | undefined {
-  const enrichment = readCurrentSessionEnrichment(db, sessionId, "session_capsule");
+  const enrichment = readCurrentSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
   const capsule = enrichment?.content as SessionCapsule | undefined;
   if (!enrichment || !capsule) return undefined;
   if (capsule.durableEnrichment) return capsule.durableEnrichment;

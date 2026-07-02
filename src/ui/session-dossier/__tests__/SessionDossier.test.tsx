@@ -214,6 +214,14 @@ describe("SessionDossier", () => {
     root.unmount();
   });
 
+  test("shows a stable enrichment loading state before dossier data arrives", () => {
+    const html = renderToStaticMarkup(<SessionDossier loading />);
+
+    expect(html).toContain("Enriching data");
+    expect(html).toContain("dossier-loading-state");
+    expect(html).not.toContain("Loading canonical session dossier");
+  });
+
   test("uses enriched dossier values for evidence blocks instead of hard-coded topics", () => {
     const currentDossier = dossier();
     currentDossier.narrative.topics = ["local import", "session capsule"];

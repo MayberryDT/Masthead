@@ -349,13 +349,13 @@ function DossierEnrichmentPanel({
         <span className="rail-label">{status}</span>
       </div>
       <div className="summary-scroll">
+        {loading && !dossier ? <DossierLoadingState /> : null}
         <DossierDurableMemory dossier={dossier} />
         <SummarySection label="Transcript summary" section="summary" value={summary} extraParagraphs={dossierSummaryExtras(dossier)} />
         <SummarySection label="Latest prompt" section="latest-prompt" value={dossier?.narrative.latestUserPrompt} />
         <SummarySection label="Retrieval notes" section="retrieval" values={dossierRetrievalNotes(dossier)} />
         <SummarySection label="Continuation notes" section="continuation" values={dossier?.attention.map((item) => item.title)} />
         <SummarySection label="Unresolved" section="unresolved" values={dossier?.narrative.unresolved} />
-        {loading ? <SummarySection label="Loading" section="loading" value="Loading canonical session dossier..." /> : null}
         {error ? <SummarySection label="Dossier error" section="error" value={error} /> : null}
         <DossierEvidenceBlocks dossier={dossier} />
         <SummarySection label="First prompt" section="first-prompt" value={dossier?.narrative.firstUserPrompt} />
@@ -363,6 +363,15 @@ function DossierEnrichmentPanel({
         <DiagnosticCoverage coverage={coverage} />
       </div>
     </section>
+  );
+}
+
+function DossierLoadingState() {
+  return (
+    <div className="dossier-loading-state" data-dossier-section="loading" aria-live="polite">
+      <span className="dossier-loading-dot" aria-hidden="true" />
+      <strong>Enriching data</strong>
+    </div>
   );
 }
 

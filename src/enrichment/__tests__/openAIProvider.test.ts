@@ -34,11 +34,9 @@ describe("OpenAI enrichment provider", () => {
         "sessionSummary",
         "sessionDossier"
       ]);
-      expect(input.facts.coverage).toMatchObject({
-        level: "complete",
-        messageCount: 2
-      });
       expect(input.evidenceCatalog).toEqual([]);
+      expect(Object.keys(input)).toEqual(["evidenceCatalog", "facts"]);
+      expect(Object.keys(input.facts).sort()).toEqual(["assistantEvidence", "userEvidence"]);
       expect(input.facts.userEvidence).toEqual([
         "Fix MCP launch config validation before review.",
         "Make sure the Dossier copy stays neutral."
@@ -47,8 +45,6 @@ describe("OpenAI enrichment provider", () => {
         "Added validation and tools-list coverage for MCP launch config.",
         "The Dossier summary now describes the session in neutral language."
       ]);
-      expect(input.facts.commands).toBeUndefined();
-      expect(input.facts.fileBasenames).toBeUndefined();
       return responseWithOutput({
         confidence: "high",
         liveSummary: "Durable enrichment provider returned structured session copy.",

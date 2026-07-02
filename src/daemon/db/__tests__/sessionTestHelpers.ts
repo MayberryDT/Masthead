@@ -112,7 +112,7 @@ export function seedSession(
     contentFingerprint: `${options.sessionId}:fingerprint`,
     enrichmentKind: "session_capsule",
     generatedAt: now,
-    promptVersion: "session-capsule-v1",
+    promptVersion: "session-capsule-v4",
     provider: "deterministic",
     sessionId: options.sessionId,
     sourceRefs: [],

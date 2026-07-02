@@ -450,6 +450,51 @@
   margin-top: 8px;
 }
 
+.session-dossier .dossier-loading-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border: 1px solid rgba(46, 167, 255, 0.18);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--ink);
+  background: rgba(6, 25, 37, 0.72);
+}
+
+.session-dossier .dossier-loading-state strong {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.session-dossier .dossier-loading-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--blue);
+  box-shadow: 0 0 0 0 rgba(46, 167, 255, 0.34);
+  animation: dossier-loading-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dossier-loading-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 0 rgba(46, 167, 255, 0.3);
+  }
+
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 5px rgba(46, 167, 255, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-dossier .dossier-loading-dot {
+    animation: none;
+  }
+}
+
 .session-dossier .transcript {
   grid-area: transcript;
 }

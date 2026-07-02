@@ -28,13 +28,9 @@ export function fingerprintSessionFacts(facts: SessionFacts): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
-        commands: facts.commands,
-        files: facts.files,
-        messages: facts.messages,
-        userEvidence: facts.userEvidence,
         assistantEvidence: facts.assistantEvidence,
+        userEvidence: facts.userEvidence,
         objective: facts.objective,
-        narrative: facts.narrative,
         project: facts.project,
         sessionId: facts.sessionId,
         sourceSessionId: facts.sourceSessionId,

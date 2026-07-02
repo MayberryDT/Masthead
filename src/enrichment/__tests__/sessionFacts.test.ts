@@ -14,26 +14,49 @@ afterEach(async () => {
 });
 
 describe("session facts", () => {
-  test("preserves all user and assistant transcript evidence by role", async () => {
+  test("preserves meaningful user and assistant transcript evidence by role", async () => {
     const db = await openTestDatabase();
     seedSession(db);
     appendMessage(db, "system", "Codex hook event", 0);
     appendMessage(db, "tool", "shell: succeeded", 1);
+    appendMessage(
+      db,
+      "user",
+      [
+        "# AGENTS.md instructions for /home/tyler/Documents/Masthead",
+        "<INSTRUCTIONS>",
+        "# Codex Behavioral Guidelines",
+        "Do not show this repository instruction block by default.",
+        "</INSTRUCTIONS>",
+        "<environment_context>",
+        "<cwd>/home/tyler/Documents/Masthead</cwd>",
+        "</environment_context>"
+      ].join("\n"),
+      2
+    );
+    appendMessage(
+      db,
+      "user",
+      "<codex_delegation><input>Settings Tab Deep Dive Read-Only</input></codex_delegation>",
+      3
+    );
     for (let index = 0; index < 26; index += 1) {
-      appendMessage(db, "user", `User request ${index + 1}`, index + 2);
+      appendMessage(db, "user", `User request ${index + 1}`, index + 4);
     }
     appendMessage(db, "assistant", "Assistant implemented the first change.", 40);
     appendMessage(db, "assistant", "Assistant verified the Dossier summary stayed neutral.", 41);
 
     const facts = buildSessionFacts(db, "session-facts");
 
-    expect(facts.userEvidence).toHaveLength(26);
-    expect(facts.userEvidence?.at(0)).toBe("User request 1");
+    expect(facts.userEvidence).toHaveLength(27);
+    expect(facts.userEvidence?.at(0)).toBe("Settings Tab Deep Dive Read-Only");
     expect(facts.userEvidence?.at(-1)).toBe("User request 26");
     expect(facts.assistantEvidence).toEqual([
       "Assistant implemented the first change.",
       "Assistant verified the Dossier summary stayed neutral."
     ]);
+    expect(facts.userEvidence?.join(" ")).not.toContain("AGENTS.md");
+    expect(facts.userEvidence?.join(" ")).not.toContain("Codex Behavioral Guidelines");
     expect(facts.messages).not.toContain("Codex hook event");
     expect(facts.messages).not.toContain("shell: succeeded");
     db.close();

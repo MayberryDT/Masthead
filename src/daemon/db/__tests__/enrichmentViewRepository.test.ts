@@ -63,6 +63,24 @@ describe("enrichment view repository", () => {
     db.close();
   });
 
+  test("does not treat older current prompt versions as usable current enrichment", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-enrichment-view-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedSession(db, "session-old", "source-old");
+    seedCapsule(db, "session-old", "Validated App for Codex hook event.", {
+      generatedAt: "2026-06-24T12:10:00.000Z",
+      id: "old-v3",
+      promptVersion: "session-capsule-v3"
+    });
+
+    const enrichments = liveProjectionEnrichments(db, new Set(["source-old"]));
+
+    expect(enrichments.has("source-old")).toBe(false);
+    db.close();
+  });
+
   test("persists durable title and summary in the current session capsule", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-enrichment-view-"));
     tempDirs.push(tempDir);
@@ -174,7 +192,7 @@ function seedCapsule(
     "session_capsule",
     "current",
     `fingerprint:${options.id ?? sessionId}`,
-    options.promptVersion ?? "session-capsule-v1",
+    options.promptVersion ?? "session-capsule-v4",
     "local",
     "deterministic",
     options.generatedAt ?? "2026-06-24T12:05:00.000Z",

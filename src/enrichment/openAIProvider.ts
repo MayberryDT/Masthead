@@ -71,7 +71,7 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
           "Use empty strings for unsupported string fields and empty arrays for unsupported list fields.",
           "Return only JSON that matches the schema."
         ].join(" "),
-        input: JSON.stringify(providerPayload(input.facts, deterministic, evidenceCatalog)),
+        input: JSON.stringify(providerPayload(input.facts)),
         max_output_tokens: 760,
         reasoning: { effort: "minimal" },
         store: false,
@@ -259,35 +259,13 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
   };
 }
 
-function providerPayload(
-  facts: SessionFacts,
-  fallback: SessionCapsule,
-  evidenceCatalog: ProviderEvidenceCatalogItem[]
-): Record<string, unknown> {
+function providerPayload(facts: SessionFacts): Record<string, unknown> {
   const narrative = facts.narrative;
   const userEvidence = cleanEvidenceList(facts.userEvidence ?? [narrative?.firstUserPrompt, narrative?.lastUserPrompt]);
   const assistantEvidence = cleanEvidenceList(facts.assistantEvidence ?? [narrative?.finalAssistantMessage]);
   return {
-    evidenceCatalog: evidenceCatalog.map((item) => ({
-      id: item.id,
-      label: item.label
-    })),
-    fallback: {
-      filesChangedSummary: fallback.filesChangedSummary,
-      sessionDossier: fallback.sessionDossier,
-      sessionSummary: fallback.sessionSummary,
-      sessionTitle: fallback.sessionTitle,
-      liveSummary: fallback.liveSummary,
-      outcome: fallback.outcome,
-      searchSummary: fallback.searchSummary,
-      subject: fallback.subject,
-      title: fallback.title,
-      verificationSummary: fallback.verificationSummary
-    },
+    evidenceCatalog: [],
     facts: {
-      coverage: narrative?.coverage,
-      objective: facts.objective,
-      project: facts.project,
       userEvidence,
       assistantEvidence
     }

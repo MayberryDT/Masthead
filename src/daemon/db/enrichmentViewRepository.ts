@@ -80,10 +80,11 @@ export function currentSessionEnrichmentView(db: MastheadDatabase, sessionId: st
       FROM session_enrichments
       WHERE session_id = ?
         AND status = 'current'
+        AND prompt_version = ?
         AND enrichment_kind IN ('session_capsule', 'live_summary', 'search_projection')
       ORDER BY enrichment_kind ASC, COALESCE(generated_at, '') DESC, enrichment_id DESC`
     )
-    .all(sessionId) as EnrichmentRow[];
+    .all(sessionId, SESSION_CAPSULE_PROMPT_VERSION) as EnrichmentRow[];
   return rows.length > 0 ? rowsToView(sessionId, rows) : undefined;
 }
 
@@ -104,10 +105,11 @@ export function currentSessionEnrichmentViews(db: MastheadDatabase, sessionIds: 
       FROM session_enrichments
       WHERE session_id IN (${sessionIds.map(() => "?").join(", ")})
         AND status = 'current'
+        AND prompt_version = ?
         AND enrichment_kind IN ('session_capsule', 'live_summary', 'search_projection')
       ORDER BY session_id ASC, enrichment_kind ASC, COALESCE(generated_at, '') DESC, enrichment_id DESC`
     )
-    .all(...sessionIds) as EnrichmentRow[];
+    .all(...sessionIds, SESSION_CAPSULE_PROMPT_VERSION) as EnrichmentRow[];
   const bySession = new Map<string, EnrichmentRow[]>();
   for (const row of rows) {
     const current = bySession.get(row.sessionId) ?? [];
@@ -137,11 +139,12 @@ export function liveProjectionEnrichments(db: MastheadDatabase, sourceSessionIds
       FROM session_enrichments
       JOIN sessions ON sessions.session_id = session_enrichments.session_id
       WHERE session_enrichments.status = 'current'
+        AND session_enrichments.prompt_version = ?
         AND session_enrichments.enrichment_kind IN ('session_capsule', 'live_summary')
         ${sourceSessionFilter}
       ORDER BY sessions.source_session_id ASC, session_enrichments.enrichment_kind ASC, COALESCE(session_enrichments.generated_at, '') DESC, session_enrichments.enrichment_id DESC`
     )
-    .all(...(scopedSourceSessionIds ?? [])) as EnrichmentRow[];
+    .all(SESSION_CAPSULE_PROMPT_VERSION, ...(scopedSourceSessionIds ?? [])) as EnrichmentRow[];
 
   const bySession = new Map<string, EnrichmentRow[]>();
   for (const row of rows) {
@@ -227,11 +230,7 @@ function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichment
 
 function rowForKind(rows: EnrichmentRow[], kind: EnrichmentRow["enrichmentKind"]): EnrichmentRow | undefined {
   const candidates = rows.filter((candidate) => candidate.enrichmentKind === kind);
-  return candidates.find((candidate) => candidate.promptVersion === SESSION_CAPSULE_PROMPT_VERSION) ?? candidates.toSorted(compareEnrichmentRows)[0];
-}
-
-function compareEnrichmentRows(left: EnrichmentRow, right: EnrichmentRow): number {
-  return (right.generatedAt ?? "").localeCompare(left.generatedAt ?? "") || right.enrichmentId.localeCompare(left.enrichmentId);
+  return candidates.find((candidate) => candidate.promptVersion === SESSION_CAPSULE_PROMPT_VERSION);
 }
 
 function contentFromRow<T>(row: EnrichmentRow | undefined): T | undefined {
