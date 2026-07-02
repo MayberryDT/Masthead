@@ -715,6 +715,50 @@ describe("ingest server live projection", () => {
     }
   });
 
+  test("projection does not import hook transcripts, but opening a session transcript triggers bounded catch-up", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const codexHome = join(tempDir, "home");
+    const sessionsDir = join(codexHome, ".codex", "sessions", "2026", "07", "02");
+    await mkdir(sessionsDir, { recursive: true });
+    const transcriptPath = join(sessionsDir, "server-live.jsonl");
+    await writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        content: "Transcript text imported when the session is opened.",
+        role: "user",
+        session_id: "server-live",
+        timestamp: "2026-07-02T12:03:00.000Z"
+      })}\n`,
+      "utf8"
+    );
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, {
+      MASTHEAD_CODEX_HOME: codexHome,
+      MASTHEAD_DB_PATH: databasePath
+    });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/sources/codex/approve-transcripts", {});
+    const accepted = await postJson(server.baseUrl, "/ingest", liveStopWithTranscriptPayload("server-open-transcript", transcriptPath));
+    const acceptedEvent = accepted.event as { sessionId?: string };
+    const canonicalSessionId = acceptedEvent.sessionId ? canonicalSessionIdFromDatabase(databasePath, acceptedEvent.sessionId) : undefined;
+    expect(canonicalSessionId).toBeTruthy();
+
+    await getJson(server.baseUrl, "/projection?expandedSessionId=server-live");
+    expect(transcriptMessageTexts(databasePath, canonicalSessionId as string)).not.toContain(
+      "Transcript text imported when the session is opened."
+    );
+
+    await getJson(server.baseUrl, `/sessions/${encodeURIComponent(canonicalSessionId as string)}/transcript`);
+    await waitFor(() => {
+      expect(transcriptMessageTexts(databasePath, canonicalSessionId as string)).toContain(
+        "Transcript text imported when the session is opened."
+      );
+    });
+  });
+
   test("collects live Git snapshots and projects exact-file conflicts", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
@@ -1017,6 +1061,22 @@ async function waitForProjectionCard(baseUrl: string, path: string): Promise<Rec
   return projection;
 }
 
+async function waitFor(assertion: () => void): Promise<void> {
+  const deadline = Date.now() + 1500;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  assertion();
+  throw lastError;
+}
+
 async function waitForImport(baseUrl: string, sourceId: string): Promise<Record<string, any>> {
   const deadline = Date.now() + 1500;
   let imports = await getJson(baseUrl, "/imports");
@@ -1095,6 +1155,20 @@ function liveQuestionPayload(providerEventId: string): Record<string, unknown> {
     project: "Masthead",
     title: "Lightweight live facts",
     message: "Make Masthead live facts lightweight."
+  };
+}
+
+function liveStopWithTranscriptPayload(providerEventId: string, transcriptPath: string): Record<string, unknown> {
+  return {
+    provider_event_id: providerEventId,
+    hook_event_name: "Stop",
+    session_id: "server-live",
+    timestamp: "2026-07-02T12:02:00.000Z",
+    cwd: "/workspace/masthead",
+    repo_root: "/workspace/masthead",
+    project: "Masthead",
+    summary: "Live session stopped.",
+    transcript_path: transcriptPath
   };
 }
 
@@ -1274,6 +1348,30 @@ function sessionLifecycleRows(databasePath: string): Array<{
     return db
       .prepare("SELECT source_session_id, lifecycle, outcome_label, ended_at FROM sessions ORDER BY source_session_id")
       .all() as Array<{ ended_at: string | null; lifecycle: string; outcome_label: string | null; source_session_id: string }>;
+  } finally {
+    db.close();
+  }
+}
+
+function canonicalSessionIdFromDatabase(databasePath: string, sourceSessionId: string): string | undefined {
+  const db = new DatabaseSync(databasePath);
+  try {
+    const row = db
+      .prepare("SELECT session_id AS sessionId FROM sessions WHERE source_session_id = ?")
+      .get(sourceSessionId) as { sessionId: string } | undefined;
+    return row?.sessionId;
+  } finally {
+    db.close();
+  }
+}
+
+function transcriptMessageTexts(databasePath: string, sessionId: string): string[] {
+  const db = new DatabaseSync(databasePath);
+  try {
+    const rows = db
+      .prepare("SELECT text_redacted AS text FROM messages WHERE session_id = ? ORDER BY observed_at ASC")
+      .all(sessionId) as Array<{ text: string }>;
+    return rows.map((row) => row.text);
   } finally {
     db.close();
   }

@@ -86,7 +86,7 @@ import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImpor
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { createLiveIngestQueue } from "./liveIngestQueue.ts";
 import { buildMastheadHealth } from "./healthService.ts";
-import { recentHookEventsWithTranscriptPaths, recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
+import { recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
 import { createSettingsBackedEnrichmentProvider, listLlmProviderModels, updateLlmProviderSettings } from "./llmSettings.ts";
 import {
@@ -107,7 +107,6 @@ export type MastheadDaemon = {
 };
 
 export const LIVE_BOARD_RAW_RECORD_LIMIT = 500;
-const HOOK_TRANSCRIPT_RECOVERY_LIMIT = 25;
 const HOOK_TRANSCRIPT_CATCHUP_RECORD_LIMIT = 200;
 const HOOK_TRANSCRIPT_CATCHUP_REQUEUE_MS = 250;
 const VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS = 750;
@@ -123,7 +122,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   let hookTranscriptCatchupQueue: Promise<void> = Promise.resolve();
   const hookTranscriptCatchups = new Map<string, Promise<void>>();
   const disabledHookTranscriptCatchupDiagnostics = new Set<string>();
-  const visibleTranscriptCatchupLastRunBySession = new Map<string, number>();
 
   try {
     // Legacy compatibility store. Do not add new product writes here.
@@ -1146,45 +1144,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return event.type === "session.completed";
   }
 
-  function scheduleRecentHookTranscriptCatchups(reason: "approval" | "startup"): void {
+  async function catchUpSessionTranscriptIfApproved(canonicalSessionIdValue: string): Promise<void> {
     if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database)) return;
-    const events = recentHookEventsWithTranscriptPaths(database, codexHookSource.sourceId, HOOK_TRANSCRIPT_RECOVERY_LIMIT);
-    if (events.length === 0) return;
-
-    recordRuntimeDiagnostic({
-      details: {
-        limit: HOOK_TRANSCRIPT_RECOVERY_LIMIT,
-        reason,
-        scheduled: events.length
-      },
-      kind: "hook_transcript_catchup_recovery_scheduled",
-      message: `Scheduled ${events.length} recent Codex hook transcript catch-up${events.length === 1 ? "" : "s"}.`,
-      severity: "info"
-    });
-
-    for (const event of events) scheduleHookTranscriptCatchup(event);
-  }
-
-  async function catchUpVisibleHookTranscripts(sourceSessionIds: Set<string>, refreshIntervalMs: number): Promise<void> {
-    if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database) || sourceSessionIds.size === 0) return;
-    const nowMs = Date.now();
-    const catchupIntervalMs = effectiveVisibleTranscriptCatchupIntervalMs(refreshIntervalMs);
-    const dueSessionIds = new Set<string>();
-    for (const sourceSessionId of sourceSessionIds) {
-      const lastRunAt = visibleTranscriptCatchupLastRunBySession.get(sourceSessionId);
-      if (lastRunAt === undefined || nowMs - lastRunAt >= catchupIntervalMs) {
-        dueSessionIds.add(sourceSessionId);
-        visibleTranscriptCatchupLastRunBySession.set(sourceSessionId, nowMs);
-      }
-    }
-    if (dueSessionIds.size === 0) return;
-
-    const events = recentHookEventsWithTranscriptPathsForSessions(
-      database,
-      codexHookSource.sourceId,
-      dueSessionIds,
-      Math.min(HOOK_TRANSCRIPT_RECOVERY_LIMIT, dueSessionIds.size)
-    );
+    const row = database
+      .prepare("SELECT source_session_id AS sourceSessionId FROM sessions WHERE session_id = ? AND deleted_at IS NULL")
+      .get(canonicalSessionIdValue) as { sourceSessionId: string } | undefined;
+    const sourceSessionId = row?.sourceSessionId?.trim();
+    if (!sourceSessionId) return;
+    const events = recentHookEventsWithTranscriptPathsForSessions(database, codexHookSource.sourceId, new Set([sourceSessionId]), 1);
     const scheduled = events
       .map((event) => scheduleHookTranscriptCatchup(event))
       .filter((promise): promise is Promise<void> => Boolean(promise));
@@ -1207,7 +1174,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         runtime
       });
     }
-    if (!runtime || runtime === "codex") scheduleRecentHookTranscriptCatchups("approval");
   }
 
   function transcriptImportApprovedForRuntime(runtime: RuntimeKind): boolean {
@@ -1692,7 +1658,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const refreshIntervalMs = parseBoardRefreshIntervalMs(url.searchParams.get("refreshIntervalMs"));
       const headlineMode = (config.liveCopyEnabled ?? config.llmCopyEnabled) && config.openaiApiKey?.trim() ? "llm" : "offline";
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
-      await catchUpVisibleHookTranscripts(projectionSessionIds, refreshIntervalMs);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
       const sessionHeadlineViews = currentBoardHeadlineFrames(
@@ -1938,7 +1903,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     const sessionDossierMatch = url.pathname.match(/^\/sessions\/([^/]+)\/dossier$/);
     if (request.method === "GET" && sessionDossierMatch?.[1]) {
-      const dossier = getSessionDossier(database, decodeURIComponent(sessionDossierMatch[1]));
+      const sessionId = decodeURIComponent(sessionDossierMatch[1]);
+      await catchUpSessionTranscriptIfApproved(sessionId);
+      const dossier = getSessionDossier(database, sessionId);
       sendJson(
         request,
         response,
@@ -1951,6 +1918,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     const sessionTranscriptMatch = url.pathname.match(/^\/sessions\/([^/]+)\/transcript$/);
     if (request.method === "GET" && sessionTranscriptMatch?.[1]) {
+      const sessionId = decodeURIComponent(sessionTranscriptMatch[1]);
+      await catchUpSessionTranscriptIfApproved(sessionId);
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
         ...getSessionTranscript(database, {
@@ -1958,7 +1927,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           kind: transcriptKindFromUrl(url),
           limit: Number.parseInt(url.searchParams.get("limit") || "100", 10),
           q: url.searchParams.get("q") ?? undefined,
-          sessionId: decodeURIComponent(sessionTranscriptMatch[1])
+          sessionId
         })
       });
       return;
@@ -2565,7 +2534,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             rememberCompletedLiveSession(result.event);
             indexCanonicalSessionSearch(database, sessionId);
             if (!shouldDeferLiveEnrichmentToHookTranscript(result.event)) queueSessionEnrichment(sessionId);
-            scheduleHookTranscriptCatchup(result.event);
           }
           appendStoreRecordToRawJournal({
             recordId: `event:${result.event.eventId}`,
@@ -2595,9 +2563,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           void refreshKnownGitSnapshotsSingleFlight();
         }, config.gitRefreshMs).unref()
       : undefined;
-  const startupHookTranscriptCatchupTimer = setTimeout(() => {
-    scheduleRecentHookTranscriptCatchups("startup");
-  }, 1000).unref();
 
   return {
     server,
@@ -2610,7 +2575,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       closePromise = (async () => {
         await hydrationPromise;
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
-        clearTimeout(startupHookTranscriptCatchupTimer);
         await new Promise<void>((resolve) => {
           server.close(() => resolve());
         });
@@ -2836,10 +2800,6 @@ function parseBoardRefreshIntervalMs(value: string | null): number {
   const intervalMs = Number(value);
   if (!Number.isFinite(intervalMs)) return 10_000;
   return Math.max(5_000, Math.min(60_000, intervalMs));
-}
-
-function effectiveVisibleTranscriptCatchupIntervalMs(refreshIntervalMs: number): number {
-  return Math.max(5_000, Math.min(60_000, refreshIntervalMs));
 }
 
 function unrefDelay(ms: number): Promise<void> {

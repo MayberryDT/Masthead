@@ -109,6 +109,8 @@ The hook helper:
 - Exits `0` even when Masthead is offline or the post fails.
 - Avoids normal stdout.
 
+Live hook ingestion keeps the Now board supplied with compact session facts. Successful tool-use details are deferred out of the immediate board path, while failed commands, approvals, user questions, session start/stop signals, and transcript source pointers remain live. Full transcript catch-up runs when transcript import is approved and the session dossier or transcript endpoint is opened.
+
 ## Install
 
 Install into the user-level Codex hook file:

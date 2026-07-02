@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
-import { recentHookEventsWithTranscriptPaths, recentHookEventsWithTranscriptPathsForSessions } from "../hookTranscriptRecovery.ts";
+import { recentHookEventsWithTranscriptPathsForSessions } from "../hookTranscriptRecovery.ts";
 
 const tempDirs: string[] = [];
 
@@ -12,30 +12,6 @@ afterEach(async () => {
 });
 
 describe("hook transcript recovery", () => {
-  test("selects distinct transcript paths before applying the recovery limit", async () => {
-    const db = await openTestDatabase();
-    seedHookRecord(db, {
-      eventId: "quiet-start",
-      observedAt: "2026-06-25T12:00:00.000Z",
-      sourceSessionId: "quiet-source",
-      transcriptPath: "/home/tyler/.codex/sessions/quiet.jsonl"
-    });
-    for (let index = 0; index < 30; index += 1) {
-      seedHookRecord(db, {
-        eventId: `noisy-${index}`,
-        observedAt: `2026-06-25T12:05:${String(index).padStart(2, "0")}.000Z`,
-        sourceSessionId: "noisy-source",
-        transcriptPath: "/home/tyler/.codex/sessions/noisy.jsonl"
-      });
-    }
-
-    const events = recentHookEventsWithTranscriptPaths(db, "codex-hook-local", 10);
-
-    expect(events.map((event) => event.sessionId)).toEqual(["noisy-source", "quiet-source"]);
-    expect(events).toHaveLength(2);
-    db.close();
-  });
-
   test("selects transcript paths for requested source sessions only", async () => {
     const db = await openTestDatabase();
     seedHookRecord(db, {
