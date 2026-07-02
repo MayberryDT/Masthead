@@ -283,6 +283,7 @@ start_dev_daemon() {
       MASTHEAD_DATA_DIR="$DATA_DIR" \\
       MASTHEAD_DB_PATH="$DB_PATH" \\
       MASTHEAD_HOST="127.0.0.1" \\
+      MASTHEAD_HOOK_TRANSCRIPT_CATCHUP="1" \\
       MASTHEAD_MCP_COMMAND="$NODE_BIN" \\
       MASTHEAD_MCP_ENTRY="$MCP_ENTRY" \\
       MASTHEAD_PORT="$port" \\
@@ -292,7 +293,7 @@ start_dev_daemon() {
 
   echo "$!" >"$LOG_DIR/dev-daemon.pid"
 
-  for _ in {1..80}; do
+  for _ in {1..240}; do
     if daemon_is_compatible "$port"; then
       set_active_daemon "$port"
       log "Masthead daemon is ready at $ACTIVE_DAEMON_BASE_URL."
