@@ -865,7 +865,111 @@ export async function searchLogbook(
   options: { signal?: AbortSignal } = {}
 ): Promise<LogbookSearchResult> {
   const filters: LogbookSearchFilters = typeof input === "string" ? { q: input } : input;
-  return getJson<LogbookSearchResult>(baseUrl, "/sessions", { label: "logbook search", query: filters, signal: options.signal });
+  const expandedFilters = expandLogbookMultiValueFilters(filters);
+  if (expandedFilters.length === 1) {
+    return getJson<LogbookSearchResult>(baseUrl, "/sessions", { label: "logbook search", query: expandedFilters[0], signal: options.signal });
+  }
+
+  const offset = logbookSearchOffset(filters);
+  const limit = logbookSearchLimit(filters);
+  const requestLimit = Math.min(100, offset + limit);
+  const results = await Promise.all(
+    expandedFilters.map((expandedFilter) =>
+      getJson<LogbookSearchResult>(baseUrl, "/sessions", {
+        label: "logbook search",
+        query: { ...expandedFilter, cursor: undefined, limit: requestLimit, offset: 0 },
+        signal: options.signal
+      })
+    )
+  );
+  return mergeLogbookSearchResults(results, filters.sort, offset, limit);
+}
+
+type MultiValueLogbookFilterKey = "runtime" | "project" | "model";
+
+const multiValueLogbookFilterKeys: MultiValueLogbookFilterKey[] = ["runtime", "project", "model"];
+
+function expandLogbookMultiValueFilters(filters: LogbookSearchFilters): LogbookSearchFilters[] {
+  const groups = multiValueLogbookFilterKeys.map((key) => ({ key, values: logbookFilterValues(filters[key]) }));
+  if (!groups.some((group) => group.values.length > 1)) return [filters];
+
+  return groups.reduce<LogbookSearchFilters[]>(
+    (queries, group) => {
+      if (group.values.length === 0) return queries.map((query) => ({ ...query, [group.key]: undefined }));
+      return queries.flatMap((query) => group.values.map((value) => ({ ...query, [group.key]: value })));
+    },
+    [filters]
+  );
+}
+
+function logbookFilterValues(value: string | string[] | undefined): string[] {
+  return Array.from(new Set((Array.isArray(value) ? value : [value]).filter((item): item is string => Boolean(item))));
+}
+
+function logbookSearchLimit(filters: LogbookSearchFilters): number {
+  return clampSearchPageValue(filters.limit, 50);
+}
+
+function logbookSearchOffset(filters: LogbookSearchFilters): number {
+  const cursorOffset = filters.cursor ? Number.parseInt(filters.cursor, 10) : undefined;
+  if (Number.isFinite(cursorOffset) && cursorOffset !== undefined) return Math.max(0, Math.trunc(cursorOffset));
+  return Math.max(0, Math.trunc(filters.offset ?? 0));
+}
+
+function clampSearchPageValue(value: number | undefined, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.min(Math.trunc(value as number), 100));
+}
+
+function mergeLogbookSearchResults(results: LogbookSearchResult[], sort: LogbookSort | undefined, offset: number, limit: number): LogbookSearchResult {
+  const bySessionId = new Map<string, LogbookSession>();
+  for (const result of results) {
+    for (const session of result.sessions) {
+      bySessionId.set(session.sessionId, session);
+    }
+  }
+
+  const sessions = Array.from(bySessionId.values()).toSorted((left, right) => compareLogbookSessions(left, right, sort));
+  return {
+    nextCursor: offset + limit < sessions.length ? String(offset + limit) : undefined,
+    sessions: sessions.slice(offset, offset + limit),
+    total: sessions.length
+  };
+}
+
+function compareLogbookSessions(left: LogbookSession, right: LogbookSession, sort: LogbookSort | undefined): number {
+  if (sort === "oldest") return compareTimestamps(left.lastActivityAt, right.lastActivityAt) || left.sessionId.localeCompare(right.sessionId);
+  if (sort === "duration_desc") return compareNumbers(sessionDuration(right), sessionDuration(left)) || compareRecentSessions(left, right);
+  if (sort === "files_desc") return compareNumbers(right.fileCount, left.fileCount) || compareRecentSessions(left, right);
+  if (sort === "tools_desc") return compareNumbers(right.toolCount, left.toolCount) || compareRecentSessions(left, right);
+  if (sort === "errors_desc") return compareNumbers(right.errorCount, left.errorCount) || compareRecentSessions(left, right);
+  if (sort === "project") {
+    return (left.project ?? "").toLowerCase().localeCompare((right.project ?? "").toLowerCase()) || compareRecentSessions(left, right);
+  }
+  return compareRecentSessions(left, right);
+}
+
+function compareRecentSessions(left: LogbookSession, right: LogbookSession): number {
+  return compareTimestamps(right.lastActivityAt, left.lastActivityAt) || right.sessionId.localeCompare(left.sessionId);
+}
+
+function compareTimestamps(left: string | undefined, right: string | undefined): number {
+  return compareNumbers(timestamp(left), timestamp(right));
+}
+
+function compareNumbers(left: number, right: number): number {
+  return left === right ? 0 : left - right;
+}
+
+function timestamp(value: string | undefined): number {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function sessionDuration(session: LogbookSession): number {
+  const startedAt = timestamp(session.startedAt);
+  const endedAt = timestamp(session.endedAt);
+  return startedAt > 0 && endedAt > 0 ? endedAt - startedAt : 0;
 }
 
 export async function getLogbookSummary(baseUrl = defaultLiveProjectionUrl(), options: { signal?: AbortSignal } = {}): Promise<LogbookSummary> {

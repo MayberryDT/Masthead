@@ -11,6 +11,7 @@ import {
   repairSources,
   runSourcesSetup,
   saveReviewDisposition,
+  searchLogbook,
   scanSourcesSetup,
   syncSources
 } from "../daemonClient";
@@ -20,6 +21,51 @@ afterEach(() => {
 });
 
 describe("daemon client review dispositions", () => {
+  test("unions multi-value Logbook filters when the daemon only honors the first repeated param", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        const requestUrl = new URL(String(url));
+        const project = requestUrl.searchParams.get("project");
+        return response({
+          nextCursor: undefined,
+          sessions: project
+            ? [
+                {
+                  errorCount: 0,
+                  fileCount: 0,
+                  hostId: "host:test",
+                  lastActivityAt: project === "Project one" ? "2026-07-03T10:00:00.000Z" : "2026-07-03T11:00:00.000Z",
+                  lifecycle: "ended",
+                  models: [],
+                  project,
+                  runtime: "codex",
+                  sessionId: project === "Project one" ? "session-one" : "session-two",
+                  sourceConfidence: "authoritative",
+                  sourceSessionId: `${project}:source`,
+                  title: `${project} session`,
+                  toolCount: 0,
+                  topics: [],
+                  unresolved: []
+                }
+              ]
+            : [],
+          total: project ? 1 : 0
+        });
+      })
+    );
+
+    await expect(
+      searchLogbook({ limit: 50, offset: 0, project: ["Project one", "Project two"], sort: "recent" }, "http://127.0.0.1:17373/projection")
+    ).resolves.toMatchObject({
+      sessions: [
+        { project: "Project two", sessionId: "session-two" },
+        { project: "Project one", sessionId: "session-one" }
+      ],
+      total: 2
+    });
+  });
+
   test("loads sources setup state from the daemon", async () => {
     vi.stubGlobal(
       "fetch",
