@@ -19,7 +19,10 @@ describe("toolbar dropdown motion", () => {
     expect(rootTokens).toContain("--dropdown-lock-ease: cubic-bezier(0.14, 0.74, 0.18, 1);");
 
     expect(cssRuleBody(mastheadCss, ".t-dropdown")).toContain("will-change: auto;");
-    expect(cssRuleBody(mastheadCss, ".t-dropdown.is-open")).toContain("animation: forged-plate-in var(--dropdown-open-dur) var(--dropdown-weight-ease) both;");
+    const openDropdownRule = cssRuleBody(mastheadCss, ".t-dropdown.is-open");
+    expect(openDropdownRule).toContain("opacity: 1;");
+    expect(openDropdownRule).toContain("transform: none;");
+    expect(openDropdownRule).toContain("animation: forged-plate-in var(--dropdown-open-dur) var(--dropdown-weight-ease) both;");
     expect(cssRuleBody(mastheadCss, ".t-dropdown.is-closing")).toContain("animation: forged-plate-out var(--dropdown-close-dur) cubic-bezier(0.42, 0, 0.7, 0.22) both;");
     expect(cssRuleBody(mastheadCss, ".t-dropdown.is-open .toolbar-select-option")).toContain("animation: plate-item-in var(--dropdown-item-dur) var(--dropdown-ease) both;");
     expect(cssRuleBody(mastheadCss, ".t-dropdown.is-open .toolbar-select-option")).toContain("animation-delay: calc(18ms + var(--option-index, 0) * 4ms);");

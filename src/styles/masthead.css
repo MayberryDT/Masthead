@@ -3901,6 +3901,8 @@ body {
 }
 
 .t-dropdown.is-open {
+  opacity: 1;
+  transform: none;
   pointer-events: auto;
   animation: forged-plate-in var(--dropdown-open-dur) var(--dropdown-weight-ease) both;
 }
