@@ -260,6 +260,30 @@ describe("session dossier repository", () => {
     db.close();
   });
 
+  test("bounds message rows used to build the dossier while preserving newest narrative facts", async () => {
+    const db = await openTestDatabase();
+    seedDossierSession(db, { sessionId: "session-many-messages" });
+    db.prepare("DELETE FROM messages WHERE session_id = ?").run("session-many-messages");
+    for (let index = 0; index < 320; index += 1) {
+      insertMessage(
+        db,
+        "session-many-messages",
+        `bulk-${index}`,
+        index % 2 === 0 ? "user" : "assistant",
+        `Bounded dossier message ${index}`,
+        `2026-06-26T12:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`
+      );
+    }
+
+    const dossier = getSessionDossier(db, "session-many-messages");
+
+    expect(dossier?.narrative.latestUserPrompt).toBe("Bounded dossier message 318");
+    expect(dossier?.narrative.finalAssistantMessage).toBe("Bounded dossier message 319");
+    expect(dossier?.timeline.length).toBeGreaterThan(200);
+    expect(dossier?.timeline.length).toBeLessThanOrEqual(260);
+    db.close();
+  });
+
   test("returns undefined for deleted sessions and marks changed sessions without verification", async () => {
     const db = await openTestDatabase();
     seedDossierSession(db, { sessionId: "session-deleted" });

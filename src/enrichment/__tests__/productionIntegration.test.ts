@@ -43,6 +43,9 @@ describe("production enrichment integration", () => {
     });
 
     const projection = await getJson(baseUrl, "/projection?expandedSessionId=production-enrichment");
+    expect(projection.projection.cards[0].headlineInput.facts.recentTranscriptMessages).toEqual(
+      expect.arrayContaining(["Fix OAuth callback routing."])
+    );
     expect(projection.projection.cards[0].headline.headline).toContain("OAuth callback routing");
     expect(projection.projection.cards[0].headline.headline).not.toContain("{");
     expect(projection.projection.cards[0].headline.source).toBe("offline");
