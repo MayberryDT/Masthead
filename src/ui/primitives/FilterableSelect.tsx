@@ -8,10 +8,9 @@ export type FilterableSelectOption = {
   label: string;
 };
 
-type FilterableSelectProps = {
+type FilterableSelectBaseProps = {
   label: string;
   icon: IconName;
-  value?: string;
   options: FilterableSelectOption[];
   placeholder: string;
   allowCustomValue?: boolean;
@@ -21,8 +20,19 @@ type FilterableSelectProps = {
   emptyLabel?: string;
   className?: string;
   disabled?: boolean;
-  onChange: (value: string | undefined) => void;
 };
+
+type FilterableSelectProps =
+  | (FilterableSelectBaseProps & {
+      value?: string;
+      multiple?: false;
+      onChange: (value: string | undefined) => void;
+    })
+  | (FilterableSelectBaseProps & {
+      value?: string[];
+      multiple: true;
+      onChange: (value: string[]) => void;
+    });
 
 type FilterableSelectMenuStyle = CSSProperties & {
   "--filterable-select-options-max-height"?: string;
@@ -37,6 +47,7 @@ export function FilterableSelect({
   emptyLabel = "No matches",
   icon,
   label,
+  multiple = false,
   onChange,
   options,
   placeholder,
@@ -57,8 +68,15 @@ export function FilterableSelect({
   const closeFrameRef = useRef<number | undefined>(undefined);
   const selectionTimerRef = useRef<number | undefined>(undefined);
   const [selectingKey, setSelectingKey] = useState<string | undefined>(undefined);
-  const selected = options.find((option) => option.value === value);
-  const displayValue = selected?.label ?? value ?? placeholder;
+  const selectedValues = useMemo(() => {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    return value ? [value] : [];
+  }, [value]);
+  const selectedValueSet = useMemo(() => new Set(selectedValues), [selectedValues]);
+  const selectedOptions = selectedValues.map((selectedValue) => options.find((option) => option.value === selectedValue) ?? { label: selectedValue, value: selectedValue });
+  const selected = !multiple && typeof value === "string" ? options.find((option) => option.value === value) : undefined;
+  const hasValue = selectedValues.length > 0;
+  const displayValue = multiple ? multiDisplayValue(selectedOptions, placeholder) : selected?.label ?? (typeof value === "string" ? value : undefined) ?? placeholder;
   const filteredOptions = useMemo(() => {
     const needle = draft.trim().toLowerCase();
     if (!needle) return options;
@@ -88,10 +106,10 @@ export function FilterableSelect({
     const rect = trigger.getBoundingClientRect();
     const viewportPadding = 12;
     const menuGap = 6;
-    const preferredMenuHeight = 320;
+    const preferredMenuHeight = multiple ? 430 : 320;
     const minimumMenuHeight = 128;
     const viewportHeight = Math.max(1, window.innerHeight - viewportPadding * 2);
-    const menuWidth = Math.min(Math.max(rect.width, 260), window.innerWidth - viewportPadding * 2);
+    const menuWidth = Math.min(Math.max(rect.width, multiple ? 360 : 260), window.innerWidth - viewportPadding * 2);
     const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - viewportPadding - menuWidth);
     const availableBelow = window.innerHeight - rect.bottom - viewportPadding - menuGap;
     const availableAbove = rect.top - viewportPadding - menuGap;
@@ -106,7 +124,7 @@ export function FilterableSelect({
     const top = Math.min(Math.max(viewportPadding, preferredTop), maxTop);
 
     setMenuStyle({
-      "--filterable-select-options-max-height": `${Math.max(24, availableHeight - 50)}px`,
+      "--filterable-select-options-max-height": `${Math.max(24, availableHeight - (hasValue ? 112 : 50))}px`,
       left,
       maxHeight: availableHeight,
       minWidth: menuWidth,
@@ -175,7 +193,7 @@ export function FilterableSelect({
     const nextKey = nextValue ?? "__clear__";
     clearCloseTimers();
     setSelectingKey(nextKey);
-    onChange(nextValue);
+    (onChange as (value: string | undefined) => void)(nextValue);
     setDraft("");
     selectionTimerRef.current = window.setTimeout(() => {
       selectionTimerRef.current = undefined;
@@ -184,8 +202,57 @@ export function FilterableSelect({
     }, 120);
   };
 
+  const toggleSelection = (nextValue: string) => {
+    clearCloseTimers();
+    setSelectingKey(nextValue);
+    const nextValues = selectedValueSet.has(nextValue)
+      ? selectedValues.filter((selectedValue) => selectedValue !== nextValue)
+      : [...selectedValues, nextValue];
+    (onChange as (value: string[]) => void)(nextValues);
+    setDraft("");
+    selectionTimerRef.current = window.setTimeout(() => {
+      setSelectingKey(undefined);
+      selectionTimerRef.current = undefined;
+      updateMenuPlacement();
+    }, 120);
+  };
+
+  const clearSelection = () => {
+    if (multiple) {
+      clearCloseTimers();
+      setSelectingKey("__clear__");
+      (onChange as (value: string[]) => void)([]);
+      selectionTimerRef.current = window.setTimeout(() => {
+        setSelectingKey(undefined);
+        selectionTimerRef.current = undefined;
+        updateMenuPlacement();
+      }, 120);
+      return;
+    }
+    choose(undefined);
+  };
+
+  const removeSelectedValue = (nextValue: string) => {
+    if (!multiple) {
+      choose(undefined);
+      return;
+    }
+    clearCloseTimers();
+    setSelectingKey(nextValue);
+    (onChange as (value: string[]) => void)(selectedValues.filter((selectedValue) => selectedValue !== nextValue));
+    selectionTimerRef.current = window.setTimeout(() => {
+      setSelectingKey(undefined);
+      selectionTimerRef.current = undefined;
+      updateMenuPlacement();
+    }, 120);
+  };
+
   const commitDraft = () => {
     const nextValue = draft.trim();
+    if (allowCustomValue && multiple) {
+      if (nextValue) toggleSelection(nextValue);
+      return;
+    }
     if (allowCustomValue) {
       choose(nextValue || undefined);
       return;
@@ -219,26 +286,38 @@ export function FilterableSelect({
         <Icon name="search" size="toolbar" weight={iconWeights.toolbar} className="search-icon" />
         <input ref={searchRef} value={draft} placeholder={searchPlaceholder} onChange={(event) => setDraft(event.currentTarget.value)} onKeyDown={onSearchKeyDown} />
       </label>
-      {value && clearable ? (
+      {hasValue && clearable ? (
         <div className="filterable-select-selection" aria-label={`${label} selection`}>
-          <span>
-            <small>Selected</small>
-            <strong>{displayValue}</strong>
-          </span>
-          <button type="button" onClick={() => choose(undefined)} aria-label={`Clear ${label}`}>
-            <Icon name="close" size="inline" weight={iconWeights.inline} />
-          </button>
+          <div className="filterable-select-selection-header">
+            <span>
+              <small>Selected</small>
+              <strong>{displayValue}</strong>
+            </span>
+            <button type="button" onClick={clearSelection} aria-label={`Clear ${label}`}>
+              {multiple ? "Clear" : <Icon name="close" size="inline" weight={iconWeights.inline} />}
+            </button>
+          </div>
+          {multiple ? (
+            <div className="filterable-select-selected-list" aria-label={`Selected ${label}`}>
+              {selectedOptions.map((option) => (
+                <button key={option.value} type="button" onClick={() => removeSelectedValue(option.value)} aria-label={`Remove ${option.label}`}>
+                  <span>{option.label}</span>
+                  <Icon name="close" size="inline" weight={iconWeights.inline} />
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
       <div className="filterable-select-options" role="listbox" aria-label={`${label} options`}>
-        {value && clearable ? (
+        {hasValue && clearable && !multiple ? (
           <button
             type="button"
             role="option"
             aria-selected="false"
             className={`toolbar-select-option filterable-select-clear ${selectingKey === "__clear__" ? "is-selecting" : ""}`.trim()}
             style={{ "--option-index": "0" } as CSSProperties}
-            onClick={() => choose(undefined)}
+            onClick={clearSelection}
           >
             {clearLabel ?? `Any ${label.toLowerCase().replace(" filter", "")}`}
           </button>
@@ -249,10 +328,10 @@ export function FilterableSelect({
               key={option.value}
               type="button"
               role="option"
-              aria-selected={option.value === value}
-              className={`toolbar-select-option ${option.value === value ? "selected" : ""} ${selectingKey === option.value ? "is-selecting" : ""}`.trim()}
-              style={{ "--option-index": String(value ? index + 1 : index) } as CSSProperties}
-              onClick={() => choose(option.value)}
+              aria-selected={selectedValueSet.has(option.value)}
+              className={`toolbar-select-option ${selectedValueSet.has(option.value) ? "selected" : ""} ${selectingKey === option.value ? "is-selecting" : ""}`.trim()}
+              style={{ "--option-index": String(hasValue && !multiple ? index + 1 : index) } as CSSProperties}
+              onClick={() => (multiple ? toggleSelection(option.value) : choose(option.value))}
             >
               {option.label}
             </button>
@@ -264,7 +343,7 @@ export function FilterableSelect({
             disabled={!allowCustomValue}
             aria-selected="false"
             className={`toolbar-select-option filterable-select-empty ${selectingKey === (draft.trim() || "__clear__") ? "is-selecting" : ""}`.trim()}
-            style={{ "--option-index": String(value ? 1 : 0) } as CSSProperties}
+            style={{ "--option-index": String(hasValue && !multiple ? 1 : 0) } as CSSProperties}
             onClick={allowCustomValue ? commitDraft : undefined}
           >
             {allowCustomValue && draft.trim() ? `Use “${draft.trim()}”` : emptyLabel}
@@ -275,7 +354,7 @@ export function FilterableSelect({
   );
 
   return (
-    <div ref={rootRef} className={`filterable-select toolbar-select metal-control ${open ? "open" : ""} ${value ? "has-value" : ""} ${className}`.trim()}>
+    <div ref={rootRef} className={`filterable-select toolbar-select metal-control ${open ? "open" : ""} ${hasValue ? "has-value" : ""} ${multiple ? "is-multiple" : ""} ${className}`.trim()}>
       <button
         ref={triggerRef}
         type="button"
@@ -294,4 +373,10 @@ export function FilterableSelect({
       {menuMounted && typeof document !== "undefined" ? createPortal(menu, document.body) : null}
     </div>
   );
+}
+
+function multiDisplayValue(selectedOptions: FilterableSelectOption[], placeholder: string): string {
+  if (selectedOptions.length === 0) return placeholder;
+  if (selectedOptions.length === 1) return selectedOptions[0]?.label ?? placeholder;
+  return `${selectedOptions.length} selected`;
 }

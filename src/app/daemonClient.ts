@@ -322,9 +322,9 @@ export type LogbookExcerpt = {
 
 export type LogbookSearchFilters = {
   q?: string;
-  runtime?: string;
-  project?: string;
-  model?: string;
+  runtime?: string | string[];
+  project?: string | string[];
+  model?: string | string[];
   host?: string;
   state?: string;
   lifecycle?: string;

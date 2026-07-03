@@ -119,6 +119,30 @@ describe("LogbookToolbar", () => {
     expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ project: undefined, runtime: "codex" }));
   });
 
+  test("keeps multi-select dropdowns open while values are selected", async () => {
+    const onFilterChange = vi.fn();
+    renderStatefulToolbar({ filterOptions: { projects: ["Masthead", "Pip"], models: ["gpt-5"], runtimes: ["codex"] }, onFilterChange });
+
+    await act(async () => {
+      buttonByLabel("Project filter").click();
+    });
+
+    const masthead = optionByName("Masthead");
+    await act(async () => {
+      masthead.click();
+    });
+
+    expect(onFilterChange).toHaveBeenLastCalledWith(expect.objectContaining({ project: ["Masthead"] }));
+    expect(document.body.querySelector(".filterable-select-menu")?.className).toContain("is-open");
+
+    await act(async () => {
+      optionByName("Pip").click();
+    });
+
+    expect(onFilterChange).toHaveBeenLastCalledWith(expect.objectContaining({ project: ["Masthead", "Pip"] }));
+    expect(document.body.querySelector(".filterable-select-menu")?.className).toContain("is-open");
+  });
+
   test("opens a compact date popover and updates typed date filters", async () => {
     const onFilterChange = vi.fn();
     renderToolbar({ onFilterChange });
@@ -209,9 +233,11 @@ describe("LogbookToolbar", () => {
 });
 
 function renderToolbar({
+  filterOptions = { projects: ["Masthead"], models: ["gpt-5"], runtimes: ["codex"] },
   filters = {},
   onFilterChange
 }: {
+  filterOptions?: { projects: string[]; models: string[]; runtimes: string[] };
   filters?: LogbookFilterState;
   onFilterChange: (filters: LogbookFilterState) => void;
 }) {
@@ -221,7 +247,7 @@ function renderToolbar({
   act(() => {
     root?.render(
       <LogbookToolbar
-        filterOptions={{ projects: ["Masthead"], models: ["gpt-5"], runtimes: ["codex"] }}
+        filterOptions={filterOptions}
         filters={filters}
         query=""
         sort="recent"
@@ -231,6 +257,37 @@ function renderToolbar({
       />
     );
   });
+}
+
+function renderStatefulToolbar({
+  filterOptions,
+  onFilterChange
+}: {
+  filterOptions: { projects: string[]; models: string[]; runtimes: string[] };
+  onFilterChange: (filters: LogbookFilterState) => void;
+}) {
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  let filters: LogbookFilterState = {};
+  const render = () => {
+    root?.render(
+      <LogbookToolbar
+        filterOptions={filterOptions}
+        filters={filters}
+        query=""
+        sort="recent"
+        onFilterChange={(nextFilters) => {
+          filters = nextFilters;
+          onFilterChange(nextFilters);
+          render();
+        }}
+        onQueryChange={() => undefined}
+        onSortChange={() => undefined}
+      />
+    );
+  };
+  act(render);
 }
 
 function buttonByLabel(label: string): HTMLButtonElement {
@@ -255,6 +312,12 @@ function inputByPlaceholder(placeholder: string): HTMLInputElement {
   const input = Array.from(document.body.querySelectorAll("input") ?? []).find((candidate) => candidate.getAttribute("placeholder") === placeholder);
   expect(input).toBeDefined();
   return input as HTMLInputElement;
+}
+
+function optionByName(name: string): HTMLButtonElement {
+  const button = Array.from(document.body.querySelectorAll('button[role="option"]')).find((candidate) => candidate.textContent?.trim() === name);
+  expect(button).toBeDefined();
+  return button as HTMLButtonElement;
 }
 
 function datePopover(): HTMLDivElement {
