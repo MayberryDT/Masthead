@@ -277,8 +277,12 @@ describe("session dossier repository", () => {
 
     const dossier = getSessionDossier(db, "session-many-messages");
 
+    expect(dossier?.narrative.firstUserPrompt).toBe("Bounded dossier message 0");
     expect(dossier?.narrative.latestUserPrompt).toBe("Bounded dossier message 318");
     expect(dossier?.narrative.finalAssistantMessage).toBe("Bounded dossier message 319");
+    expect(dossier?.excerpts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ role: "user", text: "Bounded dossier message 0" })])
+    );
     expect(dossier?.timeline.length).toBeGreaterThan(200);
     expect(dossier?.timeline.length).toBeLessThanOrEqual(260);
     db.close();
