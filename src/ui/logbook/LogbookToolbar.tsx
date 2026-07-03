@@ -44,7 +44,7 @@ function dropdownCloseDelayMs(): number {
 }
 
 export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, onQueryChange, onSortChange, query, sort }: Props) {
-  const runtimeOptions = [{ value: "", label: "All runtimes" }, ...optionRows(filterOptions?.runtimes)];
+  const runtimeOptions = optionRows(filterOptions?.runtimes, filters.runtime);
   const projectOptions = optionRows(filterOptions?.projects, filters.project);
   const modelOptions = optionRows(filterOptions?.models, filters.model);
   const activeDateFilterCount = [filters.dateFrom, filters.dateTo].filter(Boolean).length;
@@ -170,32 +170,35 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
         <FilterableSelect
           label="Runtime filter"
           icon="runtime"
-          value={filters.runtime ?? ""}
+          multiple
+          value={filterValues(filters.runtime)}
           options={runtimeOptions}
           placeholder="All runtimes"
           searchPlaceholder="Type or choose runtime"
           className="logbook-filter-select logbook-runtime-filter"
-          onChange={(value) => onFilterChange?.({ ...filters, runtime: value || undefined })}
+          onChange={(value) => onFilterChange?.({ ...filters, runtime: filterChangeValues(value) })}
         />
         <FilterableSelect
           label="Project filter"
           icon="project"
-          value={filters.project}
+          multiple
+          value={filterValues(filters.project)}
           options={projectOptions}
           placeholder="Any project"
           searchPlaceholder="Type or choose project"
           className="logbook-combobox-filter logbook-project-filter"
-          onChange={(value) => onFilterChange?.({ ...filters, project: value })}
+          onChange={(value) => onFilterChange?.({ ...filters, project: filterChangeValues(value) })}
         />
         <FilterableSelect
           label="Model filter"
           icon="model"
-          value={filters.model}
+          multiple
+          value={filterValues(filters.model)}
           options={modelOptions}
           placeholder="Any model"
           searchPlaceholder="Type or choose model"
           className="logbook-combobox-filter logbook-model-filter"
-          onChange={(value) => onFilterChange?.({ ...filters, model: value })}
+          onChange={(value) => onFilterChange?.({ ...filters, model: filterChangeValues(value) })}
         />
 
         <AppSelect label="Sort sessions" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
@@ -203,9 +206,19 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
     </div>
   );
 }
-function optionRows(values: string[] | undefined, currentValue?: string): Array<{ value: string; label: string }> {
-  const uniqueValues = Array.from(new Set([...(values ?? []), currentValue].filter((value): value is string => Boolean(value))));
+function optionRows(values: string[] | undefined, currentValue?: string | string[]): Array<{ value: string; label: string }> {
+  const uniqueValues = Array.from(new Set([...(values ?? []), ...filterValues(currentValue)].filter(Boolean)));
   return uniqueValues.map((value) => ({ value, label: formatFilterLabel(value) }));
+}
+
+function filterValues(value: string | string[] | undefined): string[] {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return value ? [value] : [];
+}
+
+function filterChangeValues(value: string | string[] | undefined): string[] | undefined {
+  const values = filterValues(value);
+  return values.length > 0 ? values : undefined;
 }
 
 function formatFilterLabel(value: string): string {

@@ -52,6 +52,47 @@ describe("canonical session search filters", () => {
     expect(result.sessions[0]).toEqual(expect.objectContaining({ project: "Pip", sessionId: "session-match" }));
     db.close();
   });
+
+  test("filters Logbook by multiple runtimes, projects, and models", async () => {
+    const db = await openTestDatabase();
+    seedFilteredSession(db, {
+      file: "auth/callback.ts",
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Pip",
+      runtime: "codex",
+      sessionId: "session-codex",
+      title: "OAuth callback repair"
+    });
+    seedFilteredSession(db, {
+      file: "settings/panel.tsx",
+      lifecycle: "ended",
+      model: "claude-sonnet-4",
+      project: "Masthead",
+      runtime: "claude",
+      sessionId: "session-claude",
+      title: "Settings panel repair"
+    });
+    seedFilteredSession(db, {
+      file: "billing/import.ts",
+      lifecycle: "ended",
+      model: "gemini-3.5-flash",
+      project: "Billing",
+      runtime: "gemini",
+      sessionId: "session-gemini",
+      title: "Billing repair"
+    });
+
+    const result = querySessions(db, {
+      limit: 25,
+      model: ["gpt-5", "claude-sonnet-4"],
+      project: ["pip", "masthead"],
+      runtime: ["codex", "claude"]
+    });
+
+    expect(result.sessions.map((session) => session.sessionId).toSorted()).toEqual(["session-claude", "session-codex"]);
+    db.close();
+  });
 });
 
 async function openTestDatabase(): Promise<MastheadDatabase> {

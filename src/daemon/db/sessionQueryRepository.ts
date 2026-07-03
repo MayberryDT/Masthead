@@ -32,9 +32,9 @@ export type SessionListItemDto = {
 
 export type SessionQuery = {
   query?: string;
-  runtime?: string;
-  project?: string;
-  model?: string;
+  runtime?: string | string[];
+  project?: string | string[];
+  model?: string | string[];
   host?: string;
   state?: string;
   lifecycle?: string;
@@ -344,9 +344,10 @@ function sessionWhereClause(
     where.push(`sessions.session_id IN (${candidateIds.map(() => "?").join(", ")})`);
     params.push(...candidateIds);
   }
-  if (query.runtime) {
-    where.push("lower(runtimes.runtime_kind) = lower(?)");
-    params.push(query.runtime);
+  const runtimes = queryValues(query.runtime);
+  if (runtimes.length > 0) {
+    where.push(`lower(runtimes.runtime_kind) IN (${runtimes.map(() => "lower(?)").join(", ")})`);
+    params.push(...runtimes);
   }
   if (query.host) {
     where.push("(lower(sessions.host_id) = lower(?) OR lower(COALESCE(hosts.hostname, '')) = lower(?))");
@@ -357,15 +358,16 @@ function sessionWhereClause(
     where.push("lower(sessions.lifecycle) = lower(?)");
     params.push(lifecycle);
   }
-  if (query.model) {
+  const models = queryValues(query.model);
+  if (models.length > 0) {
     where.push(
       `EXISTS (
         SELECT 1 FROM model_usage
         WHERE model_usage.session_id = sessions.session_id
-          AND lower(COALESCE(model_usage.model, '')) = lower(?)
+          AND lower(COALESCE(model_usage.model, '')) IN (${models.map(() => "lower(?)").join(", ")})
       )`
     );
-    params.push(query.model);
+    params.push(...models);
   }
   if (query.file) {
     where.push(
@@ -377,17 +379,24 @@ function sessionWhereClause(
     );
     params.push(`%${query.file.toLowerCase()}%`);
   }
-  if (query.project) {
+  const projects = queryValues(query.project);
+  if (projects.length > 0) {
     where.push(
-      `(lower(COALESCE(sessions.project_label, '')) LIKE ?
-        OR EXISTS (
-          SELECT 1 FROM session_aliases
-          WHERE session_aliases.session_id = sessions.session_id
-            AND lower(session_aliases.alias_value) LIKE ?
-        ))`
+      `(${projects
+        .map(
+          () => `(lower(COALESCE(sessions.project_label, '')) LIKE ?
+            OR EXISTS (
+              SELECT 1 FROM session_aliases
+              WHERE session_aliases.session_id = sessions.session_id
+                AND lower(session_aliases.alias_value) LIKE ?
+            ))`
+        )
+        .join(" OR ")})`
     );
-    const pattern = `%${query.project.toLowerCase()}%`;
-    params.push(pattern, pattern);
+    for (const project of projects) {
+      const pattern = `%${project.toLowerCase()}%`;
+      params.push(pattern, pattern);
+    }
   }
   const dateFrom = normalizeDateLowerBound(query.dateFrom);
   if (dateFrom) {
@@ -401,6 +410,10 @@ function sessionWhereClause(
   }
 
   return { where, params };
+}
+
+function queryValues(value: string | string[] | undefined): string[] {
+  return (Array.isArray(value) ? value : [value]).filter((item): item is string => Boolean(item));
 }
 
 function mcpSessionPolicySql(sessionAlias: string): string {

@@ -562,12 +562,9 @@ function activeFilterFacets(
   if (query) facets.push({ label: "Query", value: query, onRemove: () => onQueryChange("") });
   const addFilterFacet = (key: keyof LogbookFilterState, label: string) => {
     const value = filters[key];
-    if (!value) return;
+    if (!value || Array.isArray(value)) return;
     facets.push({ label, value, onRemove: () => onFilterChange?.({ ...filters, [key]: undefined }) });
   };
-  addFilterFacet("runtime", "Runtime");
-  addFilterFacet("project", "Project");
-  addFilterFacet("model", "Model");
   addFilterFacet("dateFrom", "From");
   addFilterFacet("dateTo", "To");
   addFilterFacet("file", "File");

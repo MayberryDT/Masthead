@@ -1,4 +1,4 @@
-type QueryValue = boolean | number | string | null | undefined;
+type QueryValue = boolean | number | string | Array<boolean | number | string> | null | undefined;
 
 type JsonRequestOptions = {
   label: string;
@@ -37,7 +37,13 @@ function daemonUrl(baseUrl: string, pathname: string, query: Record<string, Quer
   url.pathname = pathname;
   url.search = "";
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, String(value));
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== undefined && item !== null && item !== "") url.searchParams.append(key, String(item));
+      }
+    } else if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
   }
   return url.toString();
 }

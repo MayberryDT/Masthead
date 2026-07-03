@@ -30,6 +30,28 @@ describe("httpJsonClient", () => {
     });
   });
 
+  test("serializes array query params as repeated keys", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+          status: 200
+        })
+      )
+    );
+
+    await getJson<{ ok: true }>("http://127.0.0.1:17373/projection", "/sessions", {
+      label: "logbook search",
+      query: { model: ["gpt-5", "gpt-4.1"], project: [], runtime: ["codex"] }
+    });
+
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/sessions?model=gpt-5&model=gpt-4.1&runtime=codex", {
+      headers: { accept: "application/json" },
+      signal: undefined
+    });
+  });
+
   test("posts optional JSON bodies and labels HTTP failures", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("unavailable", { status: 503 })));
 

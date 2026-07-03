@@ -3020,14 +3020,20 @@ function sessionQueryFromUrl(url: URL): SessionQuery {
     host: url.searchParams.get("host") ?? undefined,
     lifecycle: url.searchParams.get("lifecycle") ?? undefined,
     limit: Number.parseInt(url.searchParams.get("limit") || "50", 10),
-    model: url.searchParams.get("model") ?? undefined,
+    model: searchParamValues(url, "model"),
     offset: Number.parseInt(url.searchParams.get("offset") || "0", 10),
-    project: url.searchParams.get("project") ?? undefined,
+    project: searchParamValues(url, "project"),
     query: url.searchParams.get("q") ?? "",
-    runtime: url.searchParams.get("runtime") ?? undefined,
+    runtime: searchParamValues(url, "runtime"),
     sort: logbookSortFromUrl(url.searchParams.get("sort")),
     state: url.searchParams.get("state") ?? undefined
   };
+}
+
+function searchParamValues(url: URL, key: string): string | string[] | undefined {
+  const values = url.searchParams.getAll(key).filter(Boolean);
+  if (values.length === 0) return undefined;
+  return values.length === 1 ? values[0] : values;
 }
 
 function logbookSortFromUrl(value: string | null): SessionQuery["sort"] {

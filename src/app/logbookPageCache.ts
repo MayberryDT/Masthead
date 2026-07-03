@@ -37,7 +37,12 @@ export function writeCachedLogbookPage(cache: Map<string, LogbookSearchResult>, 
 }
 
 function compactSearchFilters(filters: LogbookSearchFilters): LogbookSearchFilters {
-  return Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== undefined && value !== "")) as LogbookSearchFilters;
+  return Object.fromEntries(
+    Object.entries(filters).filter(([, value]) => {
+      if (Array.isArray(value)) return value.length > 0;
+      return value !== undefined && value !== "";
+    })
+  ) as LogbookSearchFilters;
 }
 
 function sortSearchFilters(filters: LogbookSearchFilters): LogbookSearchFilters {

@@ -84,6 +84,35 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("Showing 1 of 1");
   });
 
+  test("keeps dropdown-managed filters out of the external facet strip", () => {
+    const html = renderToStaticMarkup(
+      <HistoryPanel
+        filters={{
+          dateFrom: "2026-06-01",
+          model: "gpt-5",
+          project: "Masthead",
+          runtime: "codex"
+        }}
+        loadState={{ state: "ready", sessions: [], total: 1 }}
+        loading={false}
+        query=""
+        sort="recent"
+        onFilterChange={() => undefined}
+        onQueryChange={() => undefined}
+      />
+    );
+
+    expect(html).toContain('aria-label="Active Logbook filters"');
+    expect(html).toContain("From: 2026-06-01");
+    expect(html).toContain("Remove From filter");
+    expect(html).not.toContain("Project: Masthead");
+    expect(html).not.toContain("Runtime: codex");
+    expect(html).not.toContain("Model: gpt-5");
+    expect(html).not.toContain("Remove Project filter");
+    expect(html).not.toContain("Remove Runtime filter");
+    expect(html).not.toContain("Remove Model filter");
+  });
+
   test("renders invalid summary date ranges as n/a", () => {
     const html = renderToStaticMarkup(
       <HistoryPanel
