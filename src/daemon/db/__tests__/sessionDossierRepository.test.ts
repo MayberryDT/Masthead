@@ -167,6 +167,78 @@ describe("session dossier repository", () => {
     db.close();
   });
 
+  test("reports current, failed, and missing Dossier enrichment state", async () => {
+    const db = await openTestDatabase();
+    seedDossierSession(db, { sessionId: "session-current-state" });
+    seedDossierSession(db, { sessionId: "session-failed-state" });
+    seedDossierSession(db, { sessionId: "session-missing-state" });
+    db.prepare("DELETE FROM session_enrichments WHERE session_id IN (?, ?, ?)").run(
+      "session-current-state",
+      "session-failed-state",
+      "session-missing-state"
+    );
+    upsertSessionEnrichment(db, {
+      content: {
+        candidateDecisions: [],
+        liveSummary: "Current Dossier enrichment is available.",
+        searchPhrases: [],
+        sessionDossier: {
+          blockers: [],
+          continuation: { constraints: [], nextStep: "Use the current enrichment.", openQuestions: [] },
+          decisions: [],
+          evidenceRefs: [],
+          keyWork: ["Generated current enrichment."],
+          outcome: "The current Dossier enrichment is visible.",
+          purpose: "Expose current enrichment status.",
+          verification: { commands: [], evidenceRefs: [], failures: [], status: "passed", summary: "Status test passed." },
+          warnings: []
+        },
+        sessionSummary: { confidence: "high", evidenceRefs: [], state: "completed", text: "Current enrichment exists." },
+        sessionTitle: { basis: "dominant_work", confidence: "high", evidenceRefs: [], text: "Current enrichment state" },
+        technologies: [],
+        title: "Current enrichment state",
+        topics: [],
+        unresolved: []
+      },
+      contentFingerprint: "current-state:fingerprint",
+      enrichmentKind: "session_capsule",
+      generatedAt: "2026-07-03T18:00:00.000Z",
+      model: "test-model",
+      promptVersion: "session-capsule-v4",
+      provider: "test-provider",
+      sessionId: "session-current-state",
+      sourceRefs: [],
+      status: "current"
+    });
+    upsertSessionEnrichment(db, {
+      contentFingerprint: "failed-state:fingerprint:failed:timeout",
+      enrichmentKind: "session_capsule",
+      failureCode: "timeout",
+      failureMessage: "Provider timed out.",
+      generatedAt: "2026-07-03T18:01:00.000Z",
+      model: "test-model",
+      promptVersion: "session-capsule-v4",
+      provider: "test-provider",
+      sessionId: "session-failed-state",
+      sourceRefs: [],
+      status: "failed"
+    });
+
+    expect(getSessionDossier(db, "session-current-state")?.enrichment).toMatchObject({
+      generatedAt: "2026-07-03T18:00:00.000Z",
+      model: "test-model",
+      provider: "test-provider",
+      status: "current"
+    });
+    expect(getSessionDossier(db, "session-failed-state")?.enrichment).toMatchObject({
+      failureCode: "timeout",
+      failureMessage: "Provider timed out.",
+      status: "failed"
+    });
+    expect(getSessionDossier(db, "session-missing-state")?.enrichment).toEqual({ status: "not_enriched" });
+    db.close();
+  });
+
   test("ignores older current enrichment prompt versions in the session dossier", async () => {
     const db = await openTestDatabase();
     seedDossierSession(db, { sessionId: "session-old-enrichment" });
@@ -285,6 +357,49 @@ describe("session dossier repository", () => {
     );
     expect(dossier?.timeline.length).toBeGreaterThan(200);
     expect(dossier?.timeline.length).toBeLessThanOrEqual(260);
+    db.close();
+  });
+
+  test("limits dossier tools before joining tool results", async () => {
+    const db = await openTestDatabase();
+    seedDossierSession(db, { sessionId: "session-many-tool-results" });
+    db.prepare("DELETE FROM tool_results WHERE session_id = ?").run("session-many-tool-results");
+    db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run("session-many-tool-results");
+    for (let index = 0; index < 120; index += 1) {
+      const toolCallId = `session-many-tool-results:tool-${index}`;
+      const startedAt = `2026-06-26T13:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`;
+      db.prepare("INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, ?, ?, ?)").run(
+        toolCallId,
+        "session-many-tool-results",
+        `tool ${index}`,
+        startedAt,
+        JSON.stringify({ id: toolCallId })
+      );
+      for (let resultIndex = 0; resultIndex < 2; resultIndex += 1) {
+        db.prepare(
+          `INSERT INTO tool_results (
+            tool_result_id, tool_call_id, session_id, status, output_redacted, output_hash, exit_code, completed_at, source_ref_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          `${toolCallId}:result-${resultIndex}`,
+          toolCallId,
+          "session-many-tool-results",
+          "succeeded",
+          `tool ${index} result ${resultIndex}`,
+          `${toolCallId}:result-${resultIndex}:hash`,
+          0,
+          startedAt,
+          JSON.stringify({ id: `${toolCallId}:result-${resultIndex}` })
+        );
+      }
+    }
+
+    const dossier = getSessionDossier(db, "session-many-tool-results");
+    const toolIds = dossier?.tools.map((tool) => tool.toolCallId) ?? [];
+
+    expect(toolIds).toHaveLength(100);
+    expect(new Set(toolIds).size).toBe(100);
+    expect(toolIds).toContain("session-many-tool-results:tool-119");
     db.close();
   });
 

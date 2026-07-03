@@ -10,6 +10,9 @@ type Props = {
   dossier?: SessionDossierDto;
   dossierLoading?: boolean;
   dossierError?: string;
+  dossierEnrichmentBusy?: boolean;
+  dossierEnrichmentError?: string;
+  onEnrichDossier?: () => void;
   onRetryDossier?: () => void;
   transcript?: SessionTranscriptResult;
   transcriptLoading?: boolean;
@@ -26,11 +29,14 @@ type Props = {
 
 export function SessionLibraryDetail({
   dossier,
+  dossierEnrichmentBusy,
+  dossierEnrichmentError,
   dossierError,
   dossierLoading,
   excerpts = [],
   loading = false,
   onClose,
+  onEnrichDossier,
   onOpenSources,
   onRetryDossier,
   onRetryTranscript,
@@ -136,6 +142,9 @@ export function SessionLibraryDetail({
             dossier={dossier}
             loading={loading || dossierLoading}
             error={dossierError}
+            dossierEnrichmentBusy={dossierEnrichmentBusy}
+            dossierEnrichmentError={dossierEnrichmentError}
+            onEnrichDossier={onEnrichDossier}
             onRetry={onRetryDossier}
             transcript={transcript}
             transcriptLoading={transcriptLoading}

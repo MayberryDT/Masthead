@@ -14,6 +14,9 @@ type Props = {
   dossier?: SessionDossierDto;
   loading?: boolean;
   error?: string;
+  dossierEnrichmentBusy?: boolean;
+  dossierEnrichmentError?: string;
+  onEnrichDossier?: () => void;
   onRetry?: () => void;
   transcript?: SessionTranscriptResult;
   transcriptLoading?: boolean;
@@ -42,10 +45,13 @@ const transcriptFilters: Array<{ label: string; value: SessionTranscriptKindFilt
 
 export function SessionDossier({
   dossier,
+  dossierEnrichmentBusy = false,
+  dossierEnrichmentError,
   error,
   live,
   loading = false,
   onClose,
+  onEnrichDossier,
   onTranscriptFilterChange,
   onTranscriptLoadMore,
   titleId,
@@ -66,7 +72,7 @@ export function SessionDossier({
   const transcriptRows = useMemo(() => compactTranscriptRows(transcript?.items), [transcript?.items]);
   const title = dossierTitle(dossier, live);
   const description = dossierDescription(summary, live);
-  const enrichmentStatus = dossierEnrichmentStatus(dossier, loading);
+  const enrichmentStatus = dossierEnrichmentStatus(dossier, loading, dossierEnrichmentBusy);
   const narrativeDebug = currentNarrativeDebug(dossier);
   const endedAt = identity?.endedAt ?? identity?.lastActivityAt ?? live?.lastActivity;
   const advancedPanelId = `${identity?.sessionId ?? live?.canonicalSessionId ?? live?.sessionId ?? "session"}-advanced-details-panel`;
@@ -119,7 +125,15 @@ export function SessionDossier({
           </header>
 
           <div className="content-grid">
-            <DossierEnrichmentPanel dossier={dossier} error={error} loading={loading} summary={summary} />
+            <DossierEnrichmentPanel
+              dossier={dossier}
+              enrichmentBusy={dossierEnrichmentBusy}
+              enrichmentError={dossierEnrichmentError}
+              error={error}
+              loading={loading}
+              onEnrich={onEnrichDossier}
+              summary={summary}
+            />
 
             <section className="metrics" aria-label="Key stats">
               <Metric className="is-good" label="Source confidence" value={identity?.sourceConfidence ?? live?.identityConfidence ?? "Unknown"} />
@@ -328,32 +342,50 @@ function Metric({ className, label, value }: { className?: string; label: string
 
 function DossierEnrichmentPanel({
   dossier,
+  enrichmentBusy,
+  enrichmentError,
   error,
   loading,
+  onEnrich,
   summary
 }: {
   dossier?: SessionDossierDto;
+  enrichmentBusy?: boolean;
+  enrichmentError?: string;
   error?: string;
   loading?: boolean;
+  onEnrich?: () => void;
   summary?: string;
 }) {
   const coverage = dossier?.coverage.transcript;
-  const status = dossierEnrichmentStatus(dossier, loading);
+  const status = dossierEnrichmentStatus(dossier, loading, enrichmentBusy);
   const hasCurrentEnrichment = hasCurrentDossierEnrichment(dossier);
   return (
     <section className="panel summary" aria-label="Enrichment summary">
       <div className="panel-head">
         <h3>Enrichment summary</h3>
-        <span className="rail-label">{status}</span>
+        <div className="dossier-enrichment-actions">
+          <span className={["dossier-enrichment-status", `is-${status.toLowerCase().replace(/\s+/g, "-")}`].join(" ")}>{status}</span>
+          <AppButton className="dossier-enrich-button" type="button" onClick={onEnrich} disabled={!onEnrich || enrichmentBusy || (loading && !dossier)}>
+            {enrichmentBusy ? (
+              <>
+                <span className="dossier-loading-spinner" aria-hidden="true" />
+                Enriching
+              </>
+            ) : (
+              "Enrich data"
+            )}
+          </AppButton>
+        </div>
       </div>
       <div className="summary-scroll">
-        {loading && !dossier ? <DossierLoadingState /> : null}
         <DossierDurableMemory dossier={dossier} />
         <SummarySection label="Transcript summary" section="summary" value={summary} extraParagraphs={dossierSummaryExtras(dossier)} />
         <SummarySection label="Latest prompt" section="latest-prompt" value={dossier?.narrative.latestUserPrompt} />
         <SummarySection label="Retrieval notes" section="retrieval" values={dossierRetrievalNotes(dossier)} />
         <SummarySection label="Continuation notes" section="continuation" values={dossier?.attention.map((item) => item.title)} />
         <SummarySection label="Unresolved" section="unresolved" values={hasCurrentEnrichment ? dossier?.narrative.unresolved : undefined} />
+        {enrichmentError ? <SummarySection label="Enrichment error" section="error" value={enrichmentError} /> : null}
         {error ? <SummarySection label="Dossier error" section="error" value={error} /> : null}
         <DossierEvidenceBlocks dossier={dossier} hasCurrentEnrichment={hasCurrentEnrichment} />
         <SummarySection label="First prompt" section="first-prompt" value={dossier?.narrative.firstUserPrompt} />
@@ -361,15 +393,6 @@ function DossierEnrichmentPanel({
         <DiagnosticCoverage coverage={coverage} />
       </div>
     </section>
-  );
-}
-
-function DossierLoadingState() {
-  return (
-    <div className="dossier-loading-state" data-dossier-section="loading" aria-live="polite">
-      <span className="dossier-loading-spinner" aria-hidden="true" />
-      <strong>Enriching data, please stand by</strong>
-    </div>
   );
 }
 
@@ -552,13 +575,12 @@ function dossierDescription(summary: string | undefined, live?: SessionDetailVie
   return candidates.map(readableTranscriptText).find(isPlainDossierCopy) ?? "Canonical identifiers and reusable session context.";
 }
 
-function dossierEnrichmentStatus(dossier: SessionDossierDto | undefined, loading?: boolean): string {
-  if (!dossier) return loading ? `${CURRENT_SESSION_CAPSULE_VERSION} / loading` : "live projection";
-  if (hasCurrentDossierEnrichment(dossier)) return `${CURRENT_SESSION_CAPSULE_VERSION} / current`;
-  if (loading) return `${CURRENT_SESSION_CAPSULE_VERSION} / loading`;
-  const debug = dossier.narrative.narrativeDebug;
-  if (debug?.promptVersion === CURRENT_SESSION_CAPSULE_VERSION && (debug.failureCode || debug.providerStatus)) return `${CURRENT_SESSION_CAPSULE_VERSION} / failed`;
-  return "not enriched";
+function dossierEnrichmentStatus(dossier: SessionDossierDto | undefined, loading?: boolean, enrichmentBusy?: boolean): string {
+  if (enrichmentBusy || dossier?.enrichment.status === "enriching") return "Enriching";
+  if (!dossier) return loading ? "Loading" : "Live";
+  if (dossier.enrichment.status === "current") return "Current";
+  if (dossier.enrichment.status === "failed") return "Failed";
+  return "Not enriched";
 }
 
 function hasCurrentDossierEnrichment(dossier?: SessionDossierDto): boolean {

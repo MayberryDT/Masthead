@@ -559,6 +559,7 @@ function dossierFixture(): SessionDossierDto {
       },
       warnings: []
     },
+    enrichment: { status: "current" },
     excerpts: [],
     files: [],
     identity: {

@@ -1,7 +1,7 @@
 import { defaultLiveProjectionUrl } from "./liveProjectionClient";
 import { getJson, postJson } from "./httpJsonClient";
 import type { ReviewDisposition } from "../core/store";
-import type { SessionDossierDto } from "../shared/sessionDossier";
+import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
 import type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest } from "../shared/sourcesSetup";
@@ -1028,6 +1028,23 @@ export async function getSessionDossier(
     signal: options.signal
   });
   return body.dossier;
+}
+
+export async function enrichSessionDossier(
+  sessionId: string,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<SessionDossierManualEnrichmentJob> {
+  const body = await postJson<{ ok: true; enrichment: SessionDossierManualEnrichmentJob }>(
+    baseUrl,
+    `/sessions/${encodeURIComponent(sessionId)}/dossier/enrich`,
+    {
+      body: {},
+      label: "session dossier enrichment",
+      signal: options.signal
+    }
+  );
+  return body.enrichment;
 }
 
 export async function getSessionTranscript(

@@ -3,6 +3,7 @@ import type { LogbookFilterState, LogbookLoadState } from "../../ui/HistoryPanel
 import type { AppSurface } from "../../ui/ObservabilitySidebar";
 import type { SessionDossierDto } from "../../shared/sessionDossier";
 import {
+  enrichSessionDossier,
   getLogbookSummary,
   getLogbookSession,
   getLogbookSessionExcerpts,
@@ -19,6 +20,7 @@ import {
   type SessionTranscriptKindFilter,
   type SessionTranscriptResult
 } from "../daemonClient";
+import { pollDossierEnrichment } from "../sessionDossierEnrichmentPolling";
 import {
   logbookPageSearchFilters,
   readCachedLogbookPage,
@@ -61,6 +63,9 @@ export function useLogbookController({
   const [dossier, setDossier] = useState<SessionDossierDto>();
   const [dossierLoading, setDossierLoading] = useState(false);
   const [dossierError, setDossierError] = useState<string>();
+  const [dossierEnrichmentBusy, setDossierEnrichmentBusy] = useState(false);
+  const [dossierEnrichmentError, setDossierEnrichmentError] = useState<string>();
+  const dossierEnrichmentAbortRef = useRef<AbortController | null>(null);
   const [transcriptRetryKey, setTranscriptRetryKey] = useState(0);
   const [transcript, setTranscript] = useState<SessionTranscriptResult>();
   const [transcriptLoading, setTranscriptLoading] = useState(false);
@@ -115,6 +120,10 @@ export function useLogbookController({
     const timeout = window.setTimeout(() => setTranscriptDebouncedQuery(transcriptQuery), 200);
     return () => window.clearTimeout(timeout);
   }, [transcriptQuery]);
+
+  useEffect(() => {
+    return () => dossierEnrichmentAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     if (activeSurface !== "logbook" || !isLive) return;
@@ -327,6 +336,30 @@ export function useLogbookController({
     }
   };
 
+  const enrichDossier = async () => {
+    if (!selectedSessionId || dossierEnrichmentBusy) return;
+    dossierEnrichmentAbortRef.current?.abort();
+    const controller = new AbortController();
+    dossierEnrichmentAbortRef.current = controller;
+    setDossierEnrichmentBusy(true);
+    setDossierEnrichmentError(undefined);
+    try {
+      await enrichSessionDossier(selectedSessionId, activeProjectionUrl, { signal: controller.signal });
+      await pollDossierEnrichment({
+        baseUrl: activeProjectionUrl,
+        onDossier: setDossier,
+        sessionId: selectedSessionId,
+        signal: controller.signal
+      });
+    } catch (enrichmentError) {
+      if (!controller.signal.aborted) {
+        setDossierEnrichmentError(enrichmentError instanceof Error ? enrichmentError.message : String(enrichmentError));
+      }
+    } finally {
+      if (!controller.signal.aborted) setDossierEnrichmentBusy(false);
+    }
+  };
+
   return {
     changeFilters,
     changePage,
@@ -335,8 +368,11 @@ export function useLogbookController({
     closeSession: () => setSelectedSessionId(undefined),
     detailLoading,
     dossier,
+    dossierEnrichmentBusy,
+    dossierEnrichmentError,
     dossierError,
     dossierLoading,
+    enrichDossier,
     excerpts,
     filterOptions,
     filters,

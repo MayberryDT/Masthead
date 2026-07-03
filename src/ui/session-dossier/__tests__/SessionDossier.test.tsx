@@ -265,18 +265,45 @@ describe("SessionDossier", () => {
     root.unmount();
   });
 
-  test("shows a stable enrichment loading state before dossier data arrives", () => {
+  test("renders manual Dossier enrichment status and action", () => {
+    const currentDossier = dossier();
+    currentDossier.enrichment = { status: "not_enriched" };
+    const onEnrich = vi.fn();
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} onEnrichDossier={onEnrich} />);
+
+    expect(html).toContain("Not enriched");
+    expect(html).toContain("Enrich data");
+    expect(html).not.toContain("session-capsule-v4");
+  });
+
+  test("disables the Enrich data action while enrichment is running", async () => {
+    const host = document.createElement("div");
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<SessionDossier dossier={dossier()} dossierEnrichmentBusy onEnrichDossier={() => undefined} />);
+    });
+
+    expect(host.textContent).toContain("Enriching");
+    expect(host.querySelector(".dossier-enrich-button")?.getAttribute("disabled")).not.toBeNull();
+    root.unmount();
+  });
+
+  test("shows Dossier loading state in the enrichment header before dossier data arrives", () => {
     const html = renderToStaticMarkup(<SessionDossier loading />);
 
-    expect(html).toContain("Enriching data, please stand by");
-    expect(html).toContain("dossier-loading-state");
-    expect(html).toContain("dossier-loading-spinner");
+    expect(html).toContain("Loading");
+    expect(html).toContain("Enrich data");
+    expect(html).toContain("disabled");
+    expect(html).not.toContain("dossier-loading-state");
     expect(html).not.toContain("Loading canonical session dossier");
   });
 
   test("does not render legacy capsule copy as current enrichment", () => {
     const legacy = dossier();
     legacy.durableEnrichment = undefined;
+    legacy.enrichment = { status: "not_enriched" };
     legacy.identity.title = "Codex hook event";
     legacy.narrative.narrativeDebug = {
       model: "gpt-5-nano",
@@ -291,7 +318,7 @@ describe("SessionDossier", () => {
 
     const html = renderToStaticMarkup(<SessionDossier dossier={legacy} />);
 
-    expect(html).toContain("not enriched");
+    expect(html).toContain("Not enriched");
     expect(html).not.toContain("session-capsule-v2 / current");
     expect(html).not.toContain("<p>completed.</p>");
     expect(html).not.toContain("<p>completed</p>");
@@ -1011,6 +1038,7 @@ function dossier(): SessionDossierDto {
       },
       warnings: []
     },
+    enrichment: { status: "current" },
     files: [
       {
         basename: "App.tsx",

@@ -1,10 +1,15 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
+import { codexHookSource } from "../../adapters/codex/hookAdapter.ts";
 import type { DaemonConfig } from "../config.ts";
+import { upsertSessionEnrichment } from "../db/enrichmentRepository.ts";
+import { getSessionDossier } from "../db/sessionDossierRepository.ts";
+import { canonicalSessionId, runtimeIdFor } from "../db/sessionRepository.ts";
+import { recentHookEventsWithTranscriptPathsForSessions } from "../hookTranscriptRecovery.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
 
@@ -249,6 +254,230 @@ describe("settings API", () => {
     });
   });
 
+  test("session dossier GET is read-only and does not queue enrichment", async () => {
+    let providerCalls = 0;
+    const providerServer = createServer((request, response) => {
+      request.resume();
+      providerCalls += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ choices: [{ message: { content: "{}" } }] }));
+    });
+    servers.push(providerServer);
+    const providerBaseUrl = await listenHttp(providerServer);
+    const { daemon } = await createTestHarness();
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:dossier-read-only",
+      title: "Cached dossier"
+    });
+    daemon.database.prepare("DELETE FROM session_enrichments WHERE session_id = ?").run("session:dossier-read-only");
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "openai_compatible",
+      apiKey: "test-compatible-key",
+      baseUrl: `${providerBaseUrl}/v1`,
+      model: "llama-3.1",
+      remoteEnrichmentEnabled: true
+    });
+
+    const dossier = await getJson(baseUrl, `/sessions/${encodeURIComponent("session:dossier-read-only")}/dossier`);
+    await delay(250);
+
+    expect(dossier.dossier.enrichment.status).toBe("not_enriched");
+    expect(providerCalls).toBe(0);
+  });
+
+  test("manual Dossier enrichment retries old failed sessions in the background", async () => {
+    let providerCalls = 0;
+    const providerServer = createServer((request, response) => {
+      expect(request.url).toBe("/v1/chat/completions");
+      request.resume();
+      providerCalls += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify(
+                  durableProviderOutput({
+                    summary: "Manual Dossier enrichment refreshed a previously failed session.",
+                    title: "Manual Dossier enrichment retry"
+                  })
+                )
+              }
+            }
+          ]
+        })
+      );
+    });
+    servers.push(providerServer);
+    const providerBaseUrl = await listenHttp(providerServer);
+    const { daemon } = await createTestHarness();
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:manual-dossier-enrich",
+      title: "Old failed enrichment"
+    });
+    daemon.database.prepare("DELETE FROM session_enrichments WHERE session_id = ?").run("session:manual-dossier-enrich");
+    upsertSessionEnrichment(daemon.database, {
+      contentFingerprint: "manual-dossier:fingerprint:failed:timeout",
+      enrichmentKind: "session_capsule",
+      failureCode: "timeout",
+      failureMessage: "Previous enrichment timed out.",
+      generatedAt: "2026-07-03T18:00:00.000Z",
+      model: "llama-3.1",
+      promptVersion: "session-capsule-v4",
+      provider: "openai_compatible",
+      sessionId: "session:manual-dossier-enrich",
+      sourceRefs: [],
+      status: "failed"
+    });
+    const baseUrl = await listen(daemon);
+    await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "openai_compatible",
+      apiKey: "test-compatible-key",
+      baseUrl: `${providerBaseUrl}/v1`,
+      model: "llama-3.1",
+      remoteEnrichmentEnabled: true
+    });
+
+    const accepted = await postJson(baseUrl, `/sessions/${encodeURIComponent("session:manual-dossier-enrich")}/dossier/enrich`, {});
+
+    expect(accepted).toMatchObject({ ok: true, enrichment: { status: "enriching" } });
+    await waitFor(() => providerCalls === 1);
+    await waitFor(() => getSessionDossier(daemon.database, "session:manual-dossier-enrich")?.enrichment.status === "current");
+    const dossier = await getJson(baseUrl, `/sessions/${encodeURIComponent("session:manual-dossier-enrich")}/dossier`);
+    expect(dossier.dossier.enrichment.status).toBe("current");
+    expect(dossier.dossier.identity.title).toBe("Manual Dossier enrichment retry");
+  });
+
+  test("manual Dossier enrichment catches up hook transcript before provider request", async () => {
+    let providerCalls = 0;
+    const providerInputs: Array<{ facts?: { userEvidence?: string[]; assistantEvidence?: string[] } }> = [];
+    const providerServer = createServer(async (request, response) => {
+      const body = JSON.parse(await readRequestBody(request)) as { messages?: Array<{ content?: string }> };
+      providerInputs.push(JSON.parse(body.messages?.[1]?.content ?? "{}"));
+      providerCalls += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify(
+                  durableProviderOutput({
+                    summary: "Dossier enrichment ran after transcript catch-up imported the current transcript evidence.",
+                    title: "Dossier transcript catch-up"
+                  })
+                )
+              }
+            }
+          ]
+        })
+      );
+    });
+    servers.push(providerServer);
+    const providerBaseUrl = await listenHttp(providerServer);
+    const { daemon, tempDir } = await createTestHarness({ hookTranscriptCatchupEnabled: true });
+    const sourceSessionId = "source-session:dossier-catchup";
+    const sessionId = canonicalSessionId("host:127.0.0.1", runtimeIdFor("codex", undefined), sourceSessionId);
+    seedCanonicalDossierSession(daemon.database, { sessionId, sourceSessionId, title: "Cached dossier" });
+    daemon.database.prepare("DELETE FROM session_enrichments WHERE session_id = ?").run(sessionId);
+    const transcriptPath = join(tempDir, ".codex", "sessions", "2026", "07", "03", "dossier-catchup.jsonl");
+    await mkdir(dirname(transcriptPath), { recursive: true });
+    await writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        content: "Transcript prompt imported after Dossier response.",
+        role: "user",
+        session_id: sourceSessionId,
+        timestamp: "2026-07-03T12:05:00.000Z"
+      })}\n`,
+      "utf8"
+    );
+    seedHookTranscriptRecord(daemon.database, {
+      observedAt: "2026-07-03T12:06:00.000Z",
+      sourceSessionId,
+      transcriptPath
+    });
+    expect(
+      recentHookEventsWithTranscriptPathsForSessions(
+        daemon.database,
+        codexHookSource.sourceId,
+        new Set([sourceSessionId]),
+        1
+      )
+    ).toHaveLength(1);
+    const baseUrl = await listen(daemon);
+    await postJson(baseUrl, "/sources/codex/approve-transcripts", {});
+    await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "openai_compatible",
+      apiKey: "test-compatible-key",
+      baseUrl: `${providerBaseUrl}/v1`,
+      model: "llama-3.1",
+      remoteEnrichmentEnabled: true
+    });
+
+    const request = postJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/dossier/enrich`, {});
+    const race = await Promise.race([request.then(() => "returned"), delay(50).then(() => "blocked")]);
+    await request;
+    const first = await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/dossier`);
+
+    expect(race).toBe("returned");
+    expect(first.dossier.narrative.latestUserPrompt).toBe("Fix the OAuth authentication callback.");
+    await waitFor(() => providerCalls === 1);
+    expect(providerInputs[0]?.facts?.userEvidence ?? []).toContain("Transcript prompt imported after Dossier response.");
+    await waitFor(() =>
+      transcriptMessageTexts(daemon.database, sessionId).includes("Transcript prompt imported after Dossier response."),
+      3_000
+    );
+  });
+
+  test("session dossier GET skips hook transcript catch-up when transcript is already current", async () => {
+    const { daemon, tempDir } = await createTestHarness({ hookTranscriptCatchupEnabled: true });
+    const sourceSessionId = "source-session:dossier-catchup-current";
+    const sessionId = canonicalSessionId("host:127.0.0.1", runtimeIdFor("codex", undefined), sourceSessionId);
+    seedCanonicalDossierSession(daemon.database, { sessionId, sourceSessionId, title: "Caught-up dossier" });
+    dbInsertMessage(
+      daemon.database,
+      sessionId,
+      "caught-up-assistant",
+      "assistant",
+      "Assistant transcript already imported after the hook event.",
+      "2026-07-03T12:10:00.000Z"
+    );
+    const transcriptPath = join(tempDir, ".codex", "sessions", "2026", "07", "03", "already-current.jsonl");
+    await mkdir(dirname(transcriptPath), { recursive: true });
+    await writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        content: "This stale transcript row should not be imported again.",
+        role: "user",
+        session_id: sourceSessionId,
+        timestamp: "2026-07-03T12:04:00.000Z"
+      })}\n`,
+      "utf8"
+    );
+    seedHookTranscriptRecord(daemon.database, {
+      observedAt: "2026-07-03T12:05:00.000Z",
+      sourceSessionId,
+      transcriptPath
+    });
+    const baseUrl = await listen(daemon);
+    await postJson(baseUrl, "/sources/codex/approve-transcripts", {});
+
+    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/dossier`);
+    await delay(250);
+
+    expect(transcriptMessageTexts(daemon.database, sessionId)).not.toContain("This stale transcript row should not be imported again.");
+  });
+
   test("lists models from a local OpenAI-compatible provider", async () => {
     const modelServer = createServer((request, response) => {
       expect(request.url).toBe("/v1/models");
@@ -390,7 +619,9 @@ describe("settings API", () => {
   });
 });
 
-async function createTestHarness(): Promise<{ daemon: MastheadDaemon; databasePath: string; storePath: string; tempDir: string }> {
+async function createTestHarness(
+  overrides: Partial<DaemonConfig> = {}
+): Promise<{ daemon: MastheadDaemon; databasePath: string; storePath: string; tempDir: string }> {
   const tempDir = await mkdtemp(join(tmpdir(), "masthead-settings-api-"));
   tempDirs.push(tempDir);
   const databasePath = join(tempDir, "masthead.sqlite");
@@ -405,10 +636,149 @@ async function createTestHarness(): Promise<{ daemon: MastheadDaemon; databasePa
     hookTranscriptCatchupEnabled: false,
     llmCopyEnabled: false,
     port: 0,
-    storePath
+    storePath,
+    ...overrides
   } satisfies DaemonConfig);
   daemons.push(daemon);
   return { daemon, databasePath, storePath, tempDir };
+}
+
+function seedHookTranscriptRecord(
+  db: MastheadDaemon["database"],
+  input: { observedAt: string; sourceSessionId: string; transcriptPath: string }
+): void {
+  db.prepare(
+    `INSERT OR IGNORE INTO ingest_sources (
+      source_id, adapter, source_kind, endpoint, schema_version, runtime_version, confidence, discovered_at, last_seen_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    codexHookSource.sourceId,
+    codexHookSource.runtime,
+    codexHookSource.sourceKind,
+    codexHookSource.endpoint ?? null,
+    codexHookSource.schemaVersion ?? null,
+    codexHookSource.runtimeVersion ?? null,
+    codexHookSource.confidence,
+    input.observedAt,
+    input.observedAt
+  );
+  const record = {
+    capturedAt: input.observedAt,
+    recordId: "raw:hook:dossier-catchup",
+    recordType: "event",
+    value: {
+      eventId: "hook:dossier-catchup",
+      occurredAt: input.observedAt,
+      payload: { transcriptPath: input.transcriptPath },
+      sessionId: input.sourceSessionId,
+      source: { adapter: "codex", surface: "hook" }
+    }
+  };
+  db.prepare(
+    `INSERT INTO raw_events (
+      raw_event_id, source_id, source_record_key, observed_at, received_at, source_kind, payload_hash, payload_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "raw:hook:dossier-catchup",
+    codexHookSource.sourceId,
+    "hook:dossier-catchup",
+    input.observedAt,
+    input.observedAt,
+    "hook",
+    "hash:hook:dossier-catchup",
+    JSON.stringify(record)
+  );
+}
+
+function transcriptMessageTexts(db: MastheadDaemon["database"], sessionId: string): string[] {
+  const rows = db
+    .prepare("SELECT text_redacted AS text FROM messages WHERE session_id = ? ORDER BY observed_at")
+    .all(sessionId) as Array<{ text: string }>;
+  return rows.map((row) => row.text);
+}
+
+function dbInsertMessage(
+  db: MastheadDaemon["database"],
+  sessionId: string,
+  id: string,
+  role: string,
+  text: string,
+  observedAt: string
+): void {
+  db.prepare(
+    "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(`${sessionId}:${id}`, sessionId, role, text, `${sessionId}:${id}:hash`, observedAt, JSON.stringify({ id }), "authoritative");
+}
+
+function seedCanonicalDossierSession(
+  db: MastheadDaemon["database"],
+  input: { sessionId: string; sourceSessionId: string; title: string }
+): void {
+  const now = "2026-07-03T12:00:00.000Z";
+  db.prepare("INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
+    "host:127.0.0.1",
+    "127.0.0.1",
+    now,
+    now
+  );
+  db.prepare("INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
+    runtimeIdFor("codex", undefined),
+    "codex",
+    now,
+    now
+  );
+  db.prepare(
+    `INSERT INTO sessions (
+      session_id, host_id, runtime_id, source_session_id, project_label, repo_root, worktree_path,
+      branch, title, objective, lifecycle, outcome_label, started_at, last_activity_at, ended_at,
+      source_confidence, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.sessionId,
+    "host:127.0.0.1",
+    runtimeIdFor("codex", undefined),
+    input.sourceSessionId,
+    "Masthead",
+    "/workspace/masthead",
+    "/workspace/masthead",
+    "main",
+    input.title,
+    "Open the Dossier without blocking on transcript catch-up",
+    "ended",
+    "completed",
+    now,
+    now,
+    now,
+    "authoritative",
+    now,
+    now
+  );
+  db.prepare("INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+    `${input.sessionId}:message`,
+    input.sessionId,
+    "user",
+    "Fix the OAuth authentication callback.",
+    `${input.sessionId}:message-hash`,
+    now,
+    JSON.stringify({ source: "fixture", id: `${input.sessionId}:message` }),
+    "authoritative"
+  );
+  db.prepare("INSERT INTO model_usage (usage_id, session_id, model, provider, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)").run(
+    `${input.sessionId}:usage`,
+    input.sessionId,
+    "gpt-5",
+    "openai",
+    now,
+    "{}"
+  );
+  db.prepare("INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)").run(
+    `${input.sessionId}:file`,
+    input.sessionId,
+    "src/daemon/server.ts",
+    "modified",
+    now,
+    "{}"
+  );
 }
 
 function seedWeakSessionWithoutEffects(db: MastheadDaemon["database"]): void {
@@ -475,6 +845,28 @@ function listenHttp(server: Server): Promise<string> {
   });
 }
 
+async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await delay(10);
+  }
+  expect(predicate()).toBe(true);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readRequestBody(request: NodeJS.ReadableStream): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    request.on("error", reject);
+  });
+}
+
 async function getJson(baseUrl: string, path: string): Promise<Record<string, any>> {
   const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" } });
   expect(response.status).toBe(200);
@@ -489,4 +881,37 @@ async function postJson(baseUrl: string, path: string, body?: unknown, expectedS
   });
   expect(response.status).toBe(expectedStatus);
   return response.json() as Promise<Record<string, any>>;
+}
+
+function durableProviderOutput(input: { summary: string; title: string }): Record<string, unknown> {
+  return {
+    confidence: "high",
+    dossier: {
+      blockers: [],
+      continuation: {
+        constraints: [],
+        nextStep: "Use the durable Dossier enrichment after the background job finishes.",
+        openQuestions: []
+      },
+      decisions: [],
+      evidenceRefIds: [],
+      keyWork: ["Generated durable Dossier enrichment from transcript evidence."],
+      outcome: "Dossier enrichment completed with durable title and summary content.",
+      purpose: "Generate durable Dossier enrichment for an opened session.",
+      verification: {
+        commands: ["vitest"],
+        evidenceRefIds: [],
+        failures: [],
+        status: "passed",
+        summary: "The focused settings API test covered the route behavior."
+      },
+      warnings: []
+    },
+    missingEvidence: [],
+    outcome: "Dossier enrichment completed with durable title and summary content.",
+    searchSummary: input.summary,
+    summary: input.summary,
+    title: input.title,
+    version: "session-capsule-v4"
+  };
 }
