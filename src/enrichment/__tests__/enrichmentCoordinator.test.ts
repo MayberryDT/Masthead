@@ -123,18 +123,26 @@ describe("enrichment coordinator", () => {
     db.close();
   });
 
-  test("ensureCurrent retries validation failures without stale-failure backoff", async () => {
+  test("ensureCurrent backs off recent validation failures for unchanged facts", async () => {
     const db = await openTestDatabase();
     seedSession(db);
     const provider = countingFailingProvider("validation_failed");
+    let now = Date.parse("2026-06-25T12:00:00.000Z");
     const coordinator = createEnrichmentCoordinator(db, provider, {
       failureBackoffMs: 10 * 60_000,
-      now: () => Date.parse("2026-06-25T12:00:00.000Z")
+      now: () => now
     });
 
     await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
+    const backedOff = await coordinator.ensureCurrent("session-1");
+
+    now += 10 * 60_000 + 1;
     await expect(coordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "validation_failed" });
 
+    expect(backedOff).toMatchObject({
+      failureCode: "validation_failed",
+      status: "failed"
+    });
     expect(provider.calls()).toBe(2);
     db.close();
   });

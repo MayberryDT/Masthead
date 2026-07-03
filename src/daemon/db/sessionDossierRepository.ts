@@ -97,6 +97,9 @@ type UsageRow = {
   usageRows: number;
 };
 
+const DOSSIER_MESSAGE_LIMIT = 240;
+const DOSSIER_TIMELINE_LIMIT = 260;
+
 export function getSessionDossier(db: MastheadDatabase, sessionId: string): SessionDossierDto | undefined {
   const identity = getIdentity(db, sessionId);
   if (!identity) return undefined;
@@ -205,12 +208,29 @@ function getModels(db: MastheadDatabase, sessionId: string): string[] {
 function getMessages(db: MastheadDatabase, sessionId: string): MessageRow[] {
   return db
     .prepare(
-      `SELECT message_id AS messageId, role, text_redacted AS text, observed_at AS observedAt, source_ref_json AS sourceRefJson
-      FROM messages
-      WHERE session_id = ?
-      ORDER BY observed_at ASC`
+      `WITH first_user_message AS (
+        SELECT message_id AS messageId, role, text_redacted AS text, observed_at AS observedAt, source_ref_json AS sourceRefJson
+        FROM messages
+        WHERE session_id = ?
+          AND role = 'user'
+        ORDER BY observed_at ASC, message_id ASC
+        LIMIT 1
+      ),
+      recent_messages AS (
+        SELECT message_id AS messageId, role, text_redacted AS text, observed_at AS observedAt, source_ref_json AS sourceRefJson
+        FROM messages
+        WHERE session_id = ?
+        ORDER BY observed_at DESC, message_id DESC
+        LIMIT ?
+      )
+      SELECT messageId, role, text, observedAt, sourceRefJson
+      FROM first_user_message
+      UNION
+      SELECT messageId, role, text, observedAt, sourceRefJson
+      FROM recent_messages
+      ORDER BY observedAt ASC, messageId ASC`
     )
-    .all(sessionId) as MessageRow[];
+    .all(sessionId, sessionId, DOSSIER_MESSAGE_LIMIT) as MessageRow[];
 }
 
 function getFiles(db: MastheadDatabase, sessionId: string): SessionDossierFile[] {
@@ -719,7 +739,7 @@ function getTimeline(
   return events
     .filter((event) => event.observedAt)
     .toSorted((left, right) => left.observedAt.localeCompare(right.observedAt))
-    .slice(-200);
+    .slice(-DOSSIER_TIMELINE_LIMIT);
 }
 
 function isMcpIncluded(db: MastheadDatabase, sessionId: string): boolean {

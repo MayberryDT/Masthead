@@ -9,7 +9,8 @@ import { createDeterministicEnrichmentProvider } from "../enrichment/determinist
 import { createEnrichmentCoordinator, EnrichmentFailedError } from "../enrichment/enrichmentCoordinator.ts";
 import { RUNTIME_KINDS, type AdapterDiagnostic, type RuntimeKind } from "../adapters/types.ts";
 import type { DiscoveredSource } from "../adapters/types.ts";
-import { createIngestionState, ingestNormalizedEvent } from "../core/ingestion.ts";
+import { createIngestionState, ingestNormalizedEvent, removeEventFromLiveProjectionState } from "../core/ingestion.ts";
+import { eventLiveProcessingMode } from "../core/liveSessionFacts.ts";
 import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
 import { projectLiveEvents } from "../core/liveProjection.ts";
 import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent, type BoardHeadlineGenerationFinishedEvent } from "../core/boardHeadlineEnricher.ts";
@@ -83,8 +84,9 @@ import { connectSelectedSources, type ConnectSourcesRequest } from "./sources/so
 import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/sourceSetupService.ts";
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
+import { createLiveIngestQueue } from "./liveIngestQueue.ts";
 import { buildMastheadHealth } from "./healthService.ts";
-import { recentHookEventsWithTranscriptPaths, recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
+import { recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
 import { createSettingsBackedEnrichmentProvider, listLlmProviderModels, updateLlmProviderSettings } from "./llmSettings.ts";
 import {
@@ -105,7 +107,6 @@ export type MastheadDaemon = {
 };
 
 export const LIVE_BOARD_RAW_RECORD_LIMIT = 500;
-const HOOK_TRANSCRIPT_RECOVERY_LIMIT = 25;
 const HOOK_TRANSCRIPT_CATCHUP_RECORD_LIMIT = 200;
 const HOOK_TRANSCRIPT_CATCHUP_REQUEUE_MS = 250;
 const VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS = 750;
@@ -121,7 +122,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   let hookTranscriptCatchupQueue: Promise<void> = Promise.resolve();
   const hookTranscriptCatchups = new Map<string, Promise<void>>();
   const disabledHookTranscriptCatchupDiagnostics = new Set<string>();
-  const visibleTranscriptCatchupLastRunBySession = new Map<string, number>();
 
   try {
     // Legacy compatibility store. Do not add new product writes here.
@@ -174,12 +174,17 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     });
     const canonicalRuntimeId = runtimeIdFor("codex", undefined);
     const canonicalSessionIdForSource = (sourceSessionId: string): string => canonicalSessionId(`host:${config.host}`, canonicalRuntimeId, sourceSessionId);
-    const state = createIngestionState(canonicalLiveEvents(database));
+    const state = createIngestionState(canonicalLiveEvents(database), {
+      includeInLiveProjection: (event) => eventLiveProcessingMode(event) === "immediate"
+    });
     const gitSnapshots = canonicalGitSnapshots(database);
     for (const gitSnapshot of gitSnapshots) {
       upsertFileEffectsFromGitSnapshot(database, canonicalSessionIdForSource(gitSnapshot.sessionId), gitSnapshot);
     }
     const gitSnapshotSignatures = new Map(gitSnapshots.map((snapshot) => [snapshot.sessionId, gitSnapshotSignature(snapshot)]));
+    const terminalGitSnapshotSessionIds = new Set(gitSnapshots.filter(isTerminalGitSnapshot).map((snapshot) => snapshot.sessionId));
+    const completedLiveSessionIds = new Set<string>();
+    for (const event of state.events) rememberCompletedLiveSession(event);
     const persistBoardHeadlineFrame = (event: BoardHeadlineAppliedEvent): void => {
       try {
         const sessionId = canonicalSessionIdForSource(event.sessionId);
@@ -400,6 +405,62 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     observerRawJournal.appendStoreRecord(record);
   }
 
+  const deferredLiveIngestQueue = createLiveIngestQueue({
+    flushDelayMs: 750,
+    maxBatchSize: 100,
+    onError: (error, events) => {
+      recordRuntimeDiagnostic({
+        details: {
+          error,
+          eventIds: events.map((event) => event.eventId),
+          sourceSessionIds: [...new Set(events.flatMap((event) => (event.sessionId ? [event.sessionId] : [])))]
+        },
+        kind: "deferred_live_ingest_flush_failed",
+        message: `Deferred live ingest flush failed for ${events.length} event${events.length === 1 ? "" : "s"}.`,
+        severity: "warning"
+      });
+    },
+    onFlush: async (events) => {
+      const latestEventBySession = new Map<string, NormalizedEvent>();
+      database.exec("BEGIN IMMEDIATE;");
+      try {
+        for (const event of events) {
+          appendStoreRecordToRawJournal({
+            recordId: `event:${event.eventId}`,
+            recordType: "event",
+            observedAt: event.occurredAt,
+            value: event
+          });
+          const sessionId = sessions.upsertLiveEvent(event);
+          if (sessionId) indexCanonicalSessionSearch(database, sessionId);
+          if (event.sessionId) latestEventBySession.set(event.sessionId, event);
+        }
+        database.exec("COMMIT;");
+      } catch (error) {
+        database.exec("ROLLBACK;");
+        throw error;
+      }
+      for (const event of latestEventBySession.values()) {
+        try {
+          if (event.sessionId && isTerminalProtectedSession(event.sessionId)) continue;
+          const gitSnapshot = await collectGitSnapshot(event);
+          if (gitSnapshot) await appendGitSnapshotIfChanged(gitSnapshot);
+        } catch (error) {
+          recordRuntimeDiagnostic({
+            details: {
+              error,
+              eventId: event.eventId,
+              sourceSessionId: event.sessionId
+            },
+            kind: "deferred_live_ingest_git_snapshot_failed",
+            message: `Deferred live ingest Git snapshot failed for ${event.sessionId ?? event.eventId}.`,
+            severity: "warning"
+          });
+        }
+      }
+    }
+  });
+
   let closed = false;
   let closePromise: Promise<void> | undefined;
   let hydrationStarted = false;
@@ -482,35 +543,47 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   function rebuildLiveStateFromCanonical(): void {
-    const nextState = createIngestionState(canonicalLiveEvents(database));
+    const nextState = createIngestionState(canonicalLiveEvents(database), {
+      includeInLiveProjection: (event) => eventLiveProcessingMode(event) === "immediate"
+    });
     state.events.length = 0;
     state.events.push(...nextState.events);
     state.seenPayloadHashes.clear();
     for (const hash of nextState.seenPayloadHashes) state.seenPayloadHashes.add(hash);
     state.seenProviderEventIds.clear();
     for (const providerEventId of nextState.seenProviderEventIds) state.seenProviderEventIds.add(providerEventId);
+    rebuildCompletedLiveSessionIdsFromState();
 
     gitSnapshots.length = 0;
     gitSnapshots.push(...canonicalGitSnapshots(database));
     gitSnapshotSignatures.clear();
+    terminalGitSnapshotSessionIds.clear();
     for (const gitSnapshot of gitSnapshots) {
       gitSnapshotSignatures.set(gitSnapshot.sessionId, gitSnapshotSignature(gitSnapshot));
+      if (isTerminalGitSnapshot(gitSnapshot)) terminalGitSnapshotSessionIds.add(gitSnapshot.sessionId);
     }
   }
 
-  async function appendGitSnapshotIfChanged(gitSnapshot: GitSnapshot): Promise<boolean> {
+  async function appendGitSnapshotIfChanged(gitSnapshot: GitSnapshot, options: { terminalEvent?: NormalizedEvent } = {}): Promise<boolean> {
     const signature = gitSnapshotSignature(gitSnapshot);
-    if (gitSnapshotSignatures.get(gitSnapshot.sessionId) === signature) return false;
+    const terminalEvent = options.terminalEvent;
+    if (!terminalEvent && isTerminalProtectedSession(gitSnapshot.sessionId)) return false;
+    if (!terminalEvent && gitSnapshotSignatures.get(gitSnapshot.sessionId) === signature) return false;
 
     gitSnapshotSignatures.set(gitSnapshot.sessionId, signature);
-    gitSnapshots.push(gitSnapshot);
+    const snapshotToAppend = terminalEvent ? terminalGitSnapshot(gitSnapshot, terminalEvent) : gitSnapshot;
+    if (terminalEvent) {
+      rememberCompletedLiveSession(terminalEvent);
+      terminalGitSnapshotSessionIds.add(gitSnapshot.sessionId);
+    }
+    gitSnapshots.push(snapshotToAppend);
     appendStoreRecordToRawJournal({
-      recordId: `git_snapshot:${gitSnapshot.snapshotId}`,
+      recordId: `git_snapshot:${snapshotToAppend.snapshotId}`,
       recordType: "git_snapshot",
-      observedAt: gitSnapshot.observedAt,
-      value: gitSnapshot
+      observedAt: snapshotToAppend.observedAt,
+      value: snapshotToAppend
     });
-    upsertFileEffectsFromGitSnapshot(database, canonicalSessionIdForSource(gitSnapshot.sessionId), gitSnapshot);
+    upsertFileEffectsFromGitSnapshot(database, canonicalSessionIdForSource(snapshotToAppend.sessionId), snapshotToAppend);
     return true;
   }
 
@@ -519,12 +592,50 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const hook = hookRawJournal.clearStoreRecords();
     const observer = observerRawJournal.clearStoreRecords();
     state.events.length = 0;
+    completedLiveSessionIds.clear();
     gitSnapshots.length = 0;
     gitSnapshotSignatures.clear();
+    terminalGitSnapshotSessionIds.clear();
     return {
       removedRecords: legacy.removedRecords + hook.removedRecords + observer.removedRecords,
       touchedExternalState: false
     };
+  }
+
+  let destructiveDeferredLiveIngestBarrier: Promise<void> | undefined;
+  let destructiveMutationEpoch = 0;
+
+  async function waitForDeferredLiveIngestDestructiveBarrier(): Promise<void> {
+    while (destructiveDeferredLiveIngestBarrier) {
+      await destructiveDeferredLiveIngestBarrier;
+    }
+  }
+
+  async function withDeferredLiveIngestBarrierForDestructiveMutation<T>(mutation: () => Promise<T> | T): Promise<T> {
+    const previousBarrier = destructiveDeferredLiveIngestBarrier;
+    const activeGitRefreshPromise = activeGitRefreshWorkPromise;
+    let releaseBarrier: () => void = () => undefined;
+    const barrier = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
+    destructiveMutationEpoch += 1;
+    destructiveDeferredLiveIngestBarrier = barrier;
+    try {
+      if (previousBarrier) await previousBarrier;
+      if (activeGitRefreshPromise) await activeGitRefreshPromise;
+      try {
+        await deferredLiveIngestQueue.flushNow();
+      } catch {
+        // The queue's onError hook records flush diagnostics. Deletion privacy takes precedence over retrying deferred tool stats.
+        deferredLiveIngestQueue.discardPending();
+      }
+      return await mutation();
+    } finally {
+      if (destructiveDeferredLiveIngestBarrier === barrier) {
+        destructiveDeferredLiveIngestBarrier = undefined;
+      }
+      releaseBarrier();
+    }
   }
 
   function refreshVolatileStateFromRawRecords(): void {
@@ -534,41 +645,111 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       ...observerRawJournal.pageStoreRecords({ limit: 500 }).records
     ];
     state.events.length = 0;
-    state.events.push(...records.filter((record) => record.recordType === "event").map((record) => record.value as NormalizedEvent));
+    state.events.push(
+      ...records
+        .filter((record) => record.recordType === "event")
+        .map((record) => record.value as NormalizedEvent)
+        .filter((event) => eventLiveProcessingMode(event) === "immediate")
+    );
+    rebuildCompletedLiveSessionIdsFromState();
     gitSnapshots.length = 0;
     gitSnapshots.push(...records.filter((record) => record.recordType === "git_snapshot").map((record) => record.value as GitSnapshot));
     gitSnapshotSignatures.clear();
+    terminalGitSnapshotSessionIds.clear();
     for (const gitSnapshot of gitSnapshots) {
       gitSnapshotSignatures.set(gitSnapshot.sessionId, gitSnapshotSignature(gitSnapshot));
+      if (isTerminalGitSnapshot(gitSnapshot)) terminalGitSnapshotSessionIds.add(gitSnapshot.sessionId);
     }
   }
 
   async function refreshKnownGitSnapshots(): Promise<number> {
     let refreshed = 0;
-    for (const event of latestRefreshableGitEvents()) {
-      if (!event?.sessionId || event.type === "session.completed") continue;
+    for (const candidate of latestRefreshableGitEvents()) {
+      const event = candidate.event;
+      if (!event?.sessionId) continue;
       const gitSnapshot = await collectGitSnapshot(event, { includeDiffStats: false });
       if (!gitSnapshot) continue;
-      if (await appendGitSnapshotIfChanged(gitSnapshot)) refreshed += 1;
+      if (await appendGitSnapshotIfChanged(gitSnapshot, { terminalEvent: candidate.terminalEvent })) refreshed += 1;
     }
     return refreshed;
   }
 
-  function latestRefreshableGitEvents(): NormalizedEvent[] {
-    const eventsBySession = new Map<string, NormalizedEvent>();
+  function latestRefreshableGitEvents(): Array<{ event: NormalizedEvent; terminalEvent?: NormalizedEvent }> {
+    const eventsBySession = new Map<string, { event: NormalizedEvent; terminalEvent?: NormalizedEvent }>();
+    const skippedCompletedSessions = new Set<string>();
     const eventWindow = state.events.slice(-100);
+    const completedEventsBySession = latestCompletedEventsBySession(eventWindow);
     for (let index = eventWindow.length - 1; index >= 0 && eventsBySession.size < 5; index -= 1) {
       const event = eventWindow[index];
-      if (!event?.sessionId || eventsBySession.has(event.sessionId)) continue;
+      if (!event?.sessionId || eventsBySession.has(event.sessionId) || skippedCompletedSessions.has(event.sessionId)) continue;
+      const completedEvent = completedEventsBySession.get(event.sessionId);
+      if (completedEvent && hasTerminalGitSnapshot(completedEvent)) {
+        skippedCompletedSessions.add(event.sessionId);
+        continue;
+      }
+      if (completedEvent && event.type !== "session.completed" && event.occurredAt > completedEvent.occurredAt) continue;
       if (!event.workspace?.cwd && !event.workspace?.repoRoot && !event.workspace?.worktreePath) continue;
-      eventsBySession.set(event.sessionId, event);
+      eventsBySession.set(event.sessionId, { event, terminalEvent: completedEvent });
     }
     return [...eventsBySession.values()];
   }
 
+  function latestCompletedEventsBySession(events: NormalizedEvent[]): Map<string, NormalizedEvent> {
+    const completedEventsBySession = new Map<string, NormalizedEvent>();
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event.type !== "session.completed" || !event.sessionId || completedEventsBySession.has(event.sessionId)) continue;
+      completedEventsBySession.set(event.sessionId, event);
+    }
+    return completedEventsBySession;
+  }
+
+  function hasTerminalGitSnapshot(event: NormalizedEvent): boolean {
+    if (event.type !== "session.completed" || !event.sessionId) return false;
+    return terminalGitSnapshotSessionIds.has(event.sessionId);
+  }
+
+  function rememberCompletedLiveSession(event: NormalizedEvent): void {
+    if (event.type === "session.completed" && event.sessionId) completedLiveSessionIds.add(event.sessionId);
+  }
+
+  function rebuildCompletedLiveSessionIdsFromState(): void {
+    completedLiveSessionIds.clear();
+    for (const event of state.events) rememberCompletedLiveSession(event);
+  }
+
+  function isTerminalProtectedSession(sessionId: string): boolean {
+    return completedLiveSessionIds.has(sessionId) || terminalGitSnapshotSessionIds.has(sessionId);
+  }
+
+  function terminalGitSnapshot(gitSnapshot: GitSnapshot, event: NormalizedEvent): GitSnapshot {
+    return {
+      ...gitSnapshot,
+      snapshotId: `${gitSnapshot.snapshotId}:terminal:${event.eventId}`,
+      terminalEventId: event.eventId,
+      terminalObservedAt: event.occurredAt
+    } as GitSnapshot;
+  }
+
+  function isTerminalGitSnapshot(gitSnapshot: GitSnapshot): boolean {
+    return typeof (gitSnapshot as GitSnapshot & { terminalEventId?: unknown }).terminalEventId === "string";
+  }
+
   let gitRefreshPromise: Promise<number> | undefined;
+  let activeGitRefreshWorkPromise: Promise<number> | undefined;
+  async function refreshKnownGitSnapshotsAfterBarrier(): Promise<number> {
+    if (destructiveDeferredLiveIngestBarrier) await waitForDeferredLiveIngestDestructiveBarrier();
+    const workPromise = refreshKnownGitSnapshots();
+    activeGitRefreshWorkPromise = workPromise;
+    try {
+      return await workPromise;
+    } finally {
+      if (activeGitRefreshWorkPromise === workPromise) activeGitRefreshWorkPromise = undefined;
+    }
+  }
+
   function refreshKnownGitSnapshotsSingleFlight(): Promise<number> {
-    gitRefreshPromise ??= refreshKnownGitSnapshots().finally(() => {
+    gitRefreshPromise ??= refreshKnownGitSnapshotsAfterBarrier().finally(() => {
       gitRefreshPromise = undefined;
     });
     return gitRefreshPromise;
@@ -963,45 +1144,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return event.type === "session.completed";
   }
 
-  function scheduleRecentHookTranscriptCatchups(reason: "approval" | "startup"): void {
+  async function catchUpSessionTranscriptIfApproved(canonicalSessionIdValue: string): Promise<void> {
     if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database)) return;
-    const events = recentHookEventsWithTranscriptPaths(database, codexHookSource.sourceId, HOOK_TRANSCRIPT_RECOVERY_LIMIT);
-    if (events.length === 0) return;
-
-    recordRuntimeDiagnostic({
-      details: {
-        limit: HOOK_TRANSCRIPT_RECOVERY_LIMIT,
-        reason,
-        scheduled: events.length
-      },
-      kind: "hook_transcript_catchup_recovery_scheduled",
-      message: `Scheduled ${events.length} recent Codex hook transcript catch-up${events.length === 1 ? "" : "s"}.`,
-      severity: "info"
-    });
-
-    for (const event of events) scheduleHookTranscriptCatchup(event);
-  }
-
-  async function catchUpVisibleHookTranscripts(sourceSessionIds: Set<string>, refreshIntervalMs: number): Promise<void> {
-    if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database) || sourceSessionIds.size === 0) return;
-    const nowMs = Date.now();
-    const catchupIntervalMs = effectiveVisibleTranscriptCatchupIntervalMs(refreshIntervalMs);
-    const dueSessionIds = new Set<string>();
-    for (const sourceSessionId of sourceSessionIds) {
-      const lastRunAt = visibleTranscriptCatchupLastRunBySession.get(sourceSessionId);
-      if (lastRunAt === undefined || nowMs - lastRunAt >= catchupIntervalMs) {
-        dueSessionIds.add(sourceSessionId);
-        visibleTranscriptCatchupLastRunBySession.set(sourceSessionId, nowMs);
-      }
-    }
-    if (dueSessionIds.size === 0) return;
-
-    const events = recentHookEventsWithTranscriptPathsForSessions(
-      database,
-      codexHookSource.sourceId,
-      dueSessionIds,
-      Math.min(HOOK_TRANSCRIPT_RECOVERY_LIMIT, dueSessionIds.size)
-    );
+    const row = database
+      .prepare("SELECT source_session_id AS sourceSessionId FROM sessions WHERE session_id = ? AND deleted_at IS NULL")
+      .get(canonicalSessionIdValue) as { sourceSessionId: string } | undefined;
+    const sourceSessionId = row?.sourceSessionId?.trim();
+    if (!sourceSessionId) return;
+    const events = recentHookEventsWithTranscriptPathsForSessions(database, codexHookSource.sourceId, new Set([sourceSessionId]), 1);
     const scheduled = events
       .map((event) => scheduleHookTranscriptCatchup(event))
       .filter((promise): promise is Promise<void> => Boolean(promise));
@@ -1024,7 +1174,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         runtime
       });
     }
-    if (!runtime || runtime === "codex") scheduleRecentHookTranscriptCatchups("approval");
   }
 
   function transcriptImportApprovedForRuntime(runtime: RuntimeKind): boolean {
@@ -1085,12 +1234,15 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const retainedEvents = state.events.filter((event) => !eventMatchesDeleteScope(event, scope, sourceSessionIds));
     state.events.length = 0;
     state.events.push(...retainedEvents);
+    rebuildCompletedLiveSessionIdsFromState();
     const retainedGitSnapshots = gitSnapshots.filter((snapshot) => !sourceSessionIds.has(snapshot.sessionId));
     gitSnapshots.length = 0;
     gitSnapshots.push(...retainedGitSnapshots);
     gitSnapshotSignatures.clear();
+    terminalGitSnapshotSessionIds.clear();
     for (const gitSnapshot of gitSnapshots) {
       gitSnapshotSignatures.set(gitSnapshot.sessionId, gitSnapshotSignature(gitSnapshot));
+      if (isTerminalGitSnapshot(gitSnapshot)) terminalGitSnapshotSessionIds.add(gitSnapshot.sessionId);
     }
     return { removedRecords: result.removedRecords, touchedExternalState: false };
   }
@@ -1506,7 +1658,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const refreshIntervalMs = parseBoardRefreshIntervalMs(url.searchParams.get("refreshIntervalMs"));
       const headlineMode = (config.liveCopyEnabled ?? config.llmCopyEnabled) && config.openaiApiKey?.trim() ? "llm" : "offline";
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
-      await catchUpVisibleHookTranscripts(projectionSessionIds, refreshIntervalMs);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
       const sessionHeadlineViews = currentBoardHeadlineFrames(
@@ -1752,7 +1903,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     const sessionDossierMatch = url.pathname.match(/^\/sessions\/([^/]+)\/dossier$/);
     if (request.method === "GET" && sessionDossierMatch?.[1]) {
-      const dossier = getSessionDossier(database, decodeURIComponent(sessionDossierMatch[1]));
+      const sessionId = decodeURIComponent(sessionDossierMatch[1]);
+      await catchUpSessionTranscriptIfApproved(sessionId);
+      const dossier = getSessionDossier(database, sessionId);
       sendJson(
         request,
         response,
@@ -1765,6 +1918,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     const sessionTranscriptMatch = url.pathname.match(/^\/sessions\/([^/]+)\/transcript$/);
     if (request.method === "GET" && sessionTranscriptMatch?.[1]) {
+      const sessionId = decodeURIComponent(sessionTranscriptMatch[1]);
+      await catchUpSessionTranscriptIfApproved(sessionId);
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
         ...getSessionTranscript(database, {
@@ -1772,7 +1927,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           kind: transcriptKindFromUrl(url),
           limit: Number.parseInt(url.searchParams.get("limit") || "100", 10),
           q: url.searchParams.get("q") ?? undefined,
-          sessionId: decodeURIComponent(sessionTranscriptMatch[1])
+          sessionId
         })
       });
       return;
@@ -2079,16 +2234,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const parsed = body ? JSON.parse(body) : {};
         assertDatabaseIdMatches(stringRecordValue(objectRecord(parsed), "databaseId"), database, config);
         const scope = deleteScopeFromBody(parsed);
-        const preview = getDataSummary(database, scope);
-        const sourceSessionIds =
-          scope.kind === "all" || scope.kind === "raw_payloads" ? undefined : sourceSessionIdsForScope(scope);
-        const result = deleteMastheadData(database, scope);
-        const legacy =
-          scope.kind === "all"
-            ? await clearVolatileAndLegacyCompatibilityState()
-            : scope.kind === "raw_payloads"
-              ? await clearRawSourceCopies()
-              : await clearLiveStateForScope(scope, sourceSessionIds ?? new Set());
+        const { legacy, preview, result } = await withDeferredLiveIngestBarrierForDestructiveMutation(async () => {
+          const preview = getDataSummary(database, scope);
+          const sourceSessionIds =
+            scope.kind === "all" || scope.kind === "raw_payloads" ? undefined : sourceSessionIdsForScope(scope);
+          const result = deleteMastheadData(database, scope);
+          const legacy =
+            scope.kind === "all"
+              ? await clearVolatileAndLegacyCompatibilityState()
+              : scope.kind === "raw_payloads"
+                ? await clearRawSourceCopies()
+                : await clearLiveStateForScope(scope, sourceSessionIds ?? new Set());
+          return { legacy, preview, result };
+        });
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           preview,
@@ -2112,9 +2270,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const body = await readBody(request);
         const parsed = body ? JSON.parse(body) : {};
         assertDatabaseIdMatches(stringRecordValue(objectRecord(parsed), "databaseId"), database, config);
-        const preview = getDataSummary(database);
-        const result = applyDefaultRetention(database);
-        const legacy = await clearRawSourceCopies();
+        const { legacy, preview, result } = await withDeferredLiveIngestBarrierForDestructiveMutation(async () => {
+          const preview = getDataSummary(database);
+          const result = applyDefaultRetention(database);
+          const legacy = await clearRawSourceCopies();
+          return { legacy, preview, result };
+        });
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           legacy,
@@ -2136,29 +2297,32 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const body = await readBody(request);
         const parsed = body ? JSON.parse(body) : {};
         const policy = parsed.policy ?? parsed;
-        const legacy = await store.pruneLocalData(policy);
-        const hook = hookRawJournal.pruneStoreRecords(policy);
-        const observer = observerRawJournal.pruneStoreRecords(policy);
-        const result = {
-          removedRecords: legacy.removedRecords + hook.removedRecords + observer.removedRecords,
-          removedRecordIds: [...legacy.removedRecordIds, ...hook.removedRecordIds, ...observer.removedRecordIds],
-          removedByType: {
-            attention_item:
-              (legacy.removedByType.attention_item ?? 0) + (hook.removedByType.attention_item ?? 0) + (observer.removedByType.attention_item ?? 0),
-            conflict_card:
-              (legacy.removedByType.conflict_card ?? 0) + (hook.removedByType.conflict_card ?? 0) + (observer.removedByType.conflict_card ?? 0),
-            event: (legacy.removedByType.event ?? 0) + (hook.removedByType.event ?? 0) + (observer.removedByType.event ?? 0),
-            git_snapshot:
-              (legacy.removedByType.git_snapshot ?? 0) + (hook.removedByType.git_snapshot ?? 0) + (observer.removedByType.git_snapshot ?? 0),
-            review_disposition:
-              (legacy.removedByType.review_disposition ?? 0) +
-              (hook.removedByType.review_disposition ?? 0) +
-              (observer.removedByType.review_disposition ?? 0)
-          },
-          retainedRecords: legacy.retainedRecords + hook.retainedRecords + observer.retainedRecords,
-          touchedExternalState: false
-        };
-        refreshVolatileStateFromRawRecords();
+        const result = await withDeferredLiveIngestBarrierForDestructiveMutation(async () => {
+          const legacy = await store.pruneLocalData(policy);
+          const hook = hookRawJournal.pruneStoreRecords(policy);
+          const observer = observerRawJournal.pruneStoreRecords(policy);
+          const result = {
+            removedRecords: legacy.removedRecords + hook.removedRecords + observer.removedRecords,
+            removedRecordIds: [...legacy.removedRecordIds, ...hook.removedRecordIds, ...observer.removedRecordIds],
+            removedByType: {
+              attention_item:
+                (legacy.removedByType.attention_item ?? 0) + (hook.removedByType.attention_item ?? 0) + (observer.removedByType.attention_item ?? 0),
+              conflict_card:
+                (legacy.removedByType.conflict_card ?? 0) + (hook.removedByType.conflict_card ?? 0) + (observer.removedByType.conflict_card ?? 0),
+              event: (legacy.removedByType.event ?? 0) + (hook.removedByType.event ?? 0) + (observer.removedByType.event ?? 0),
+              git_snapshot:
+                (legacy.removedByType.git_snapshot ?? 0) + (hook.removedByType.git_snapshot ?? 0) + (observer.removedByType.git_snapshot ?? 0),
+              review_disposition:
+                (legacy.removedByType.review_disposition ?? 0) +
+                (hook.removedByType.review_disposition ?? 0) +
+                (observer.removedByType.review_disposition ?? 0)
+            },
+            retainedRecords: legacy.retainedRecords + hook.retainedRecords + observer.retainedRecords,
+            touchedExternalState: false
+          };
+          refreshVolatileStateFromRawRecords();
+          return result;
+        });
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           result,
@@ -2176,8 +2340,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/clear") {
       try {
-        const result = await clearVolatileAndLegacyCompatibilityState();
-        const canonical = deleteAllMastheadData(database);
+        const { canonical, result } = await withDeferredLiveIngestBarrierForDestructiveMutation(async () => {
+          const result = await clearVolatileAndLegacyCompatibilityState();
+          const canonical = deleteAllMastheadData(database);
+          return { canonical, result };
+        });
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
           result,
@@ -2317,11 +2484,22 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "POST" && url.pathname === "/ingest") {
+      const requestDestructiveMutationEpoch = destructiveMutationEpoch;
       const body = await readBody(request);
       const receivedAt = new Date().toISOString();
       const adapterRecord = adapterRecordFromCodexHook(body, receivedAt);
       const event = adapterRecord.normalized.value as NormalizedEvent | undefined;
 
+      if (requestDestructiveMutationEpoch !== destructiveMutationEpoch) {
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          status: "stale",
+          event,
+          gitSnapshots: gitSnapshots.length,
+          events: state.events.length
+        });
+        return;
+      }
       if (!event) {
         const diagnostic = toCodexHookDiagnostic(adapterRecord.diagnostics[0], receivedAt);
         state.diagnostics.push(diagnostic);
@@ -2333,23 +2511,37 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         });
         return;
       }
+      if (destructiveDeferredLiveIngestBarrier) await waitForDeferredLiveIngestDestructiveBarrier();
+      if (requestDestructiveMutationEpoch !== destructiveMutationEpoch) {
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          status: "stale",
+          event,
+          gitSnapshots: gitSnapshots.length,
+          events: state.events.length
+        });
+        return;
+      }
       const result = ingestNormalizedEvent(event, state);
 
       if (result.status === "accepted") {
-        const sessionId = sessions.upsertLiveEvent(result.event);
-        if (sessionId) {
-          indexCanonicalSessionSearch(database, sessionId);
-          if (!shouldDeferLiveEnrichmentToHookTranscript(result.event)) queueSessionEnrichment(sessionId);
-          scheduleHookTranscriptCatchup(result.event);
+        if (eventLiveProcessingMode(result.event) === "deferred") {
+          removeEventFromLiveProjectionState(state, result.event);
+          deferredLiveIngestQueue.enqueue(result.event);
+        } else {
+          const sessionId = sessions.upsertLiveEvent(result.event);
+          if (sessionId) {
+            rememberCompletedLiveSession(result.event);
+            indexCanonicalSessionSearch(database, sessionId);
+            if (!shouldDeferLiveEnrichmentToHookTranscript(result.event)) queueSessionEnrichment(sessionId);
+          }
+          appendStoreRecordToRawJournal({
+            recordId: `event:${result.event.eventId}`,
+            recordType: "event",
+            observedAt: result.event.occurredAt,
+            value: result.event
+          });
         }
-        appendStoreRecordToRawJournal({
-          recordId: `event:${result.event.eventId}`,
-          recordType: "event",
-          observedAt: result.event.occurredAt,
-          value: result.event
-        });
-        const gitSnapshot = await collectGitSnapshot(result.event);
-        if (gitSnapshot) await appendGitSnapshotIfChanged(gitSnapshot);
       }
 
       sendJson(request, response, config.allowedOrigins, 202, {
@@ -2371,9 +2563,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           void refreshKnownGitSnapshotsSingleFlight();
         }, config.gitRefreshMs).unref()
       : undefined;
-  const startupHookTranscriptCatchupTimer = setTimeout(() => {
-    scheduleRecentHookTranscriptCatchups("startup");
-  }, 1000).unref();
 
   return {
     server,
@@ -2385,20 +2574,33 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       closed = true;
       closePromise = (async () => {
         await hydrationPromise;
-        await new Promise<void>((resolve) => {
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
-        clearTimeout(startupHookTranscriptCatchupTimer);
-        server.close(() => {
+        await new Promise<void>((resolve) => {
+          server.close(() => resolve());
+        });
+        let gitRefreshError: unknown;
+        try {
+          await (gitRefreshPromise ?? activeGitRefreshWorkPromise);
+        } catch (error) {
+          gitRefreshError = error;
+        }
+        let deferredQueueError: unknown;
+        try {
+          await deferredLiveIngestQueue.close();
+        } catch (error) {
+          deferredQueueError = error;
+        } finally {
           try {
             checkpointMastheadDatabase(database);
           } catch (error) {
             console.error("[masthead] WAL checkpoint failed during shutdown", error);
           } finally {
             closeDatabase(database);
-            void writerLock.release().finally(resolve);
+            await writerLock.release();
           }
-        });
-      });
+        }
+        if (gitRefreshError) throw gitRefreshError;
+        if (deferredQueueError) throw deferredQueueError;
       })();
       return closePromise;
     }
@@ -2598,10 +2800,6 @@ function parseBoardRefreshIntervalMs(value: string | null): number {
   const intervalMs = Number(value);
   if (!Number.isFinite(intervalMs)) return 10_000;
   return Math.max(5_000, Math.min(60_000, intervalMs));
-}
-
-function effectiveVisibleTranscriptCatchupIntervalMs(refreshIntervalMs: number): number {
-  return Math.max(5_000, Math.min(60_000, refreshIntervalMs));
 }
 
 function unrefDelay(ms: number): Promise<void> {

@@ -20,24 +20,35 @@ export function liveProjectionTranscriptFacts(
   const scopedSourceSessionIds = sourceSessionIds ? [...new Set([...sourceSessionIds].filter(Boolean))] : undefined;
   if (scopedSourceSessionIds && scopedSourceSessionIds.length === 0) return new Map();
 
+  const maxMessagesPerSession = Math.max(1, Math.min(options.maxMessagesPerSession ?? 24, 48));
   const sourceSessionFilter = scopedSourceSessionIds ? `AND sessions.source_session_id IN (${scopedSourceSessionIds.map(() => "?").join(", ")})` : "";
   const rows = db
     .prepare(
-      `SELECT
-        sessions.source_session_id AS sourceSessionId,
-        messages.role AS role,
-        messages.text_redacted AS text,
-        messages.observed_at AS observedAt
-      FROM messages
-      JOIN sessions ON sessions.session_id = messages.session_id
-      WHERE messages.role IN ('user', 'assistant')
-        AND trim(COALESCE(messages.text_redacted, '')) <> ''
-        ${sourceSessionFilter}
-      ORDER BY sessions.source_session_id ASC, COALESCE(messages.observed_at, '') DESC, messages.message_id DESC`
+      `WITH ranked_messages AS (
+        SELECT
+          sessions.source_session_id AS sourceSessionId,
+          messages.role AS role,
+          messages.text_redacted AS text,
+          messages.observed_at AS observedAt,
+          messages.message_id AS messageId,
+          ROW_NUMBER() OVER (
+            PARTITION BY sessions.source_session_id
+            ORDER BY COALESCE(messages.observed_at, '') DESC, messages.message_id DESC
+          ) AS rowNumber
+        FROM messages
+        JOIN sessions ON sessions.session_id = messages.session_id
+        WHERE messages.role IN ('user', 'assistant')
+          AND trim(COALESCE(messages.text_redacted, '')) <> ''
+          AND lower(trim(COALESCE(messages.text_redacted, ''))) NOT IN ('codex hook event', 'runtime signal', 'unknown', 'shell')
+          ${sourceSessionFilter}
+      )
+      SELECT sourceSessionId, role, text, observedAt
+      FROM ranked_messages
+      WHERE rowNumber <= ?
+      ORDER BY sourceSessionId ASC, COALESCE(observedAt, '') DESC, messageId DESC`
     )
-    .all(...(scopedSourceSessionIds ?? [])) as TranscriptFactRow[];
+    .all(...(scopedSourceSessionIds ?? []), maxMessagesPerSession) as TranscriptFactRow[];
 
-  const maxMessagesPerSession = Math.max(1, Math.min(options.maxMessagesPerSession ?? 24, 48));
   const factsBySourceSession = new Map<string, LiveSessionTranscriptFacts>();
   for (const row of rows) {
     const sourceSessionId = row.sourceSessionId?.trim();

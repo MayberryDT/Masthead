@@ -188,8 +188,10 @@ async function waitForImportJob(baseUrl, importJobId) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const response = await getJson(baseUrl, `/imports/${importJobId}`);
-    if (response.job?.status === "succeeded") return response.job;
-    if (response.job?.status === "failed") throw new Error(`import job failed: ${response.job.failureMessage || importJobId}`);
+    if (response.job?.status === "succeeded" || response.job?.status === "succeeded_with_issues") return response.job;
+    if (response.job?.status === "failed" || response.job?.status === "cancelled") {
+      throw new Error(`import job ${response.job.status}: ${response.job.failureMessage || importJobId}`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`timed out waiting for import job: ${importJobId}`);

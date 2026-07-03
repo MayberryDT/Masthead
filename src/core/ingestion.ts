@@ -17,7 +17,14 @@ type IngestionOptions = {
   receivedAt?: string;
 };
 
-export function createIngestionState(events: NormalizedEvent[] = []): IngestionState {
+type CreateIngestionStateOptions = {
+  includeInLiveProjection?: (event: NormalizedEvent) => boolean;
+};
+
+export function createIngestionState(
+  events: NormalizedEvent[] = [],
+  options: CreateIngestionStateOptions = {}
+): IngestionState {
   const state: IngestionState = {
     events: [],
     diagnostics: [],
@@ -26,7 +33,7 @@ export function createIngestionState(events: NormalizedEvent[] = []): IngestionS
   };
   for (const event of events) {
     remember(state, event);
-    state.events.push(event);
+    if (options.includeInLiveProjection?.(event) ?? true) state.events.push(event);
   }
   return state;
 }
@@ -57,6 +64,10 @@ export function ingestNormalizedEvent(
   remember(state, event);
   state.events.push(event);
   return { status: "accepted", event };
+}
+
+export function removeEventFromLiveProjectionState(state: IngestionState, event: NormalizedEvent): void {
+  state.events = state.events.filter((candidate) => candidate.eventId !== event.eventId);
 }
 
 function hasSeen(state: IngestionState, event: NormalizedEvent): boolean {

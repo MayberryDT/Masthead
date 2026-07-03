@@ -144,7 +144,7 @@ describe("progressive Codex imports", () => {
     });
   });
 
-  test("imports messages and token counts from approved hook transcriptPath during live ingestion", async () => {
+  test("imports messages and token counts from approved hook transcriptPath when the session transcript opens", async () => {
     const { daemon, codexRoot } = await createTestHarness();
     const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "live-token-session.jsonl");
     await writeJsonl(transcriptPath, [
@@ -200,9 +200,16 @@ describe("progressive Codex imports", () => {
       timestamp: "2026-06-25T12:00:00.000Z",
       transcriptPath
     });
+    await yieldToEventLoop();
+    const sessionId = sessionIdFor(daemon.database, "live-token-session");
+    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    expect(countWhere(daemon.database, "messages", "session_id = ? AND text_redacted = ?", sessionId, "Capture this live transcript.")).toBe(
+      0
+    );
+
+    const transcript = await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
 
     await waitFor(() => tokenTotals(daemon.database).totalTokens === 37);
-    const sessionId = sessionIdFor(daemon.database, "live-token-session");
     await waitFor(() => countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId) === 1);
 
     expect(countRows(daemon.database, "sessions")).toBe(1);
@@ -225,8 +232,6 @@ describe("progressive Codex imports", () => {
       source_session_id: "live-token-session"
     });
 
-    const transcript = await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
-
     expect(transcript).toMatchObject({
       ok: true,
       coverage: {
@@ -240,7 +245,7 @@ describe("progressive Codex imports", () => {
     );
   });
 
-  test("recovers recent stored hook transcriptPath events after transcript approval", async () => {
+  test("does not recover stored hook transcriptPath on approval until the session transcript opens", async () => {
     const { daemon, codexRoot } = await createTestHarness();
     const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "approval-recovery-session.jsonl");
     await writeJsonl(transcriptPath, [
@@ -291,8 +296,15 @@ describe("progressive Codex imports", () => {
 
     await postJson(baseUrl, "/adapters/codex/approve-transcripts");
 
-    await waitFor(() => tokenTotals(daemon.database).totalTokens === 15);
+    await yieldToEventLoop();
+    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     const sessionId = sessionIdFor(daemon.database, "approval-recovery-session");
+    expect(
+      countWhere(daemon.database, "messages", "session_id = ? AND text_redacted = ?", sessionId, "Recover this stored hook transcript.")
+    ).toBe(0);
+
+    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
+    await waitFor(() => tokenTotals(daemon.database).totalTokens === 15);
     expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'user'", sessionId)).toBe(1);
     expect(tokenTotals(daemon.database)).toEqual({
       inputTokens: 11,
@@ -301,7 +313,7 @@ describe("progressive Codex imports", () => {
     });
   });
 
-  test("recovers distinct transcript paths even when recent hook rows are noisy duplicates", async () => {
+  test("opens the requested stored hook transcriptPath even when recent hook rows are noisy duplicates", async () => {
     const first = await createTestHarness({ hookTranscriptCatchupEnabled: false });
     const { codexRoot } = first;
     const quietTranscriptPath = join(codexRoot, "sessions", "2026", "06", "25", "quiet-recovery-session.jsonl");
@@ -393,23 +405,16 @@ describe("progressive Codex imports", () => {
     const second = await createTestHarness({ tempDir: first.tempDir });
     const secondBaseUrl = await listen(second.daemon);
 
-    await waitFor(() => tokenTotals(second.daemon.database).totalTokens === 27);
-    const diagnostics = (await getJson(secondBaseUrl, "/diagnostics/runtime")) as unknown as {
-      diagnostics?: { events?: Array<{ details?: { reason?: string; scheduled?: number }; kind?: string }> };
-    };
-    expect(diagnostics.diagnostics?.events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          details: expect.objectContaining({ reason: "startup", scheduled: 2 }),
-          kind: "hook_transcript_catchup_recovery_scheduled"
-        })
-      ])
-    );
+    await yieldToEventLoop();
+    expect(tokenTotals(second.daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     const quietSessionId = sessionIdFor(second.daemon.database, "quiet-recovery-session");
+
+    await getJson(secondBaseUrl, `/sessions/${encodeURIComponent(quietSessionId)}/transcript?limit=20`);
+    await waitFor(() => tokenTotals(second.daemon.database).totalTokens === 20);
     expect(countWhere(second.daemon.database, "messages", "session_id = ? AND role = 'user'", quietSessionId)).toBe(1);
   });
 
-  test("recovers approved stored hook transcriptPath events on daemon startup", async () => {
+  test("does not recover stored hook transcriptPath on startup until the session transcript opens", async () => {
     const first = await createTestHarness({ hookTranscriptCatchupEnabled: false });
     const transcriptPath = join(first.codexRoot, "sessions", "2026", "06", "25", "startup-recovery-session.jsonl");
     await writeJsonl(transcriptPath, [
@@ -461,10 +466,14 @@ describe("progressive Codex imports", () => {
     await closeTrackedDaemon(first.daemon);
 
     const second = await createTestHarness({ tempDir: first.tempDir });
-    await listen(second.daemon);
+    const secondBaseUrl = await listen(second.daemon);
 
-    await waitFor(() => tokenTotals(second.daemon.database).totalTokens === 26);
+    await yieldToEventLoop();
+    expect(tokenTotals(second.daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     const sessionId = sessionIdFor(second.daemon.database, "startup-recovery-session");
+
+    await getJson(secondBaseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
+    await waitFor(() => tokenTotals(second.daemon.database).totalTokens === 26);
     expect(countWhere(second.daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId)).toBe(1);
   });
 
@@ -509,6 +518,11 @@ describe("progressive Codex imports", () => {
       title: "Tail token session",
       transcriptPath
     });
+    await yieldToEventLoop();
+    const sessionId = sessionIdFor(daemon.database, "tail-token-session");
+    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+
+    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
     await waitFor(() => tokenTotals(daemon.database).totalTokens === 12);
 
     const original = await readFile(transcriptPath, "utf8");
@@ -531,21 +545,13 @@ describe("progressive Codex imports", () => {
       "utf8"
     );
 
-    await ingestHook(baseUrl, {
-      event: "session_started",
-      model: "gpt-5",
-      provider_event_id: "tail-token-session-start-2",
-      session_id: "tail-token-session",
-      timestamp: "2026-06-25T12:02:01.000Z",
-      title: "Tail token session updated",
-      transcriptPath
-    });
+    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
 
     await waitFor(() => tokenTotals(daemon.database).totalTokens === 37);
     expect(countWhere(daemon.database, "model_usage", "total_tokens IS NOT NULL")).toBe(2);
   });
 
-  test("tails visible hook transcriptPath rows during projection refresh", async () => {
+  test("projection refresh does not tail hook transcriptPath rows, but session transcript open does", async () => {
     const { daemon, codexRoot } = await createTestHarness();
     const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "projection-tail-session.jsonl");
     await writeJsonl(transcriptPath, [
@@ -581,6 +587,8 @@ describe("progressive Codex imports", () => {
       transcriptPath
     });
     const sessionId = sessionIdFor(daemon.database, "projection-tail-session");
+
+    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
     await waitFor(() => countWhere(daemon.database, "messages", "session_id = ? AND role = 'user'", sessionId) === 1);
 
     await delay(1100);
@@ -601,6 +609,10 @@ describe("progressive Codex imports", () => {
 
     const response = await fetch(`${baseUrl}/projection?refreshIntervalMs=5000`, { headers: { accept: "application/json" } });
     expect(response.status).toBe(200);
+    await yieldToEventLoop();
+    expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId)).toBe(0);
+
+    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
     await waitFor(() => countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId) === 1);
   });
 
@@ -635,9 +647,14 @@ describe("progressive Codex imports", () => {
     await yieldToEventLoop();
     expect(countRows(daemon.database, "sessions")).toBe(1);
     expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+
+    const sessionId = sessionIdFor(daemon.database, "unapproved-token-session");
+    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
+    await yieldToEventLoop();
+    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 
-  test("records a runtime diagnostic when hook transcript catch-up is disabled", async () => {
+  test("does not import hook transcriptPath on session open when hook transcript catch-up is disabled", async () => {
     const { daemon, codexRoot } = await createTestHarness({ hookTranscriptCatchupEnabled: false });
     const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "disabled-catchup-session.jsonl");
     await writeJsonl(transcriptPath, [
@@ -668,21 +685,12 @@ describe("progressive Codex imports", () => {
     await yieldToEventLoop();
 
     expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    const sessionId = sessionIdFor(daemon.database, "disabled-catchup-session");
 
-    const response = await fetch(`${baseUrl}/diagnostics/runtime`, { headers: { accept: "application/json" } });
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      diagnostics?: { events?: Array<{ details?: unknown; kind?: string; message?: string; severity?: string }> };
-    };
-    expect(body.diagnostics?.events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: "hook_transcript_catchup_disabled",
-          message: "Codex hook included a transcriptPath, but hook transcript catch-up is disabled.",
-          severity: "warning"
-        })
-      ])
-    );
+    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
+    await yieldToEventLoop();
+    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    expect(countWhere(daemon.database, "model_usage", "session_id = ?", sessionId)).toBe(0);
   });
 
   test("keeps hook ingestion accepted when approved transcriptPath is missing", async () => {
