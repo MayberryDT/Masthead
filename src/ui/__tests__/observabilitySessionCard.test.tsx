@@ -543,6 +543,7 @@ describe("observability session card", () => {
     vi.useFakeTimers();
     const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
     const originalAnimate = HTMLElement.prototype.animate;
+    const originalOffsetHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
     const animationListeners: Record<string, EventListenerOrEventListenerObject> = {};
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -551,8 +552,14 @@ describe("observability session card", () => {
       const sessionId = this.dataset.sessionId;
       if (!sessionId) return originalGetBoundingClientRect.call(this);
       const isCompact = this.parentElement?.classList.contains("compact") === true;
-      return testRect(0, 0, isCompact ? 240 : 320, isCompact ? 178 : 218);
+      return testRect(0, 0, isCompact ? 240 : 320, 238);
     };
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return this.dataset.sessionId ? 248 : 0;
+      }
+    });
     HTMLElement.prototype.animate = vi.fn(function () {
       return {
         addEventListener: vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
@@ -580,6 +587,8 @@ describe("observability session card", () => {
 
       expect(card?.className).toContain("is-layout-expanding");
       expect(card?.style.width).toBe("100%");
+      expect(card?.style.height).toBe("238px");
+      expect(card?.style.minHeight).toBe("238px");
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(SESSION_CARD_LAYOUT_EXPAND_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS);
@@ -593,6 +602,105 @@ describe("observability session card", () => {
       await act(async () => root.unmount());
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
       HTMLElement.prototype.animate = originalAnimate;
+      if (originalOffsetHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeightDescriptor);
+      } else {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>).offsetHeight;
+      }
+      vi.useRealTimers();
+    }
+  });
+
+  test("synchronizes staggered card growth expansions", async () => {
+    vi.useFakeTimers();
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const originalOffsetHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    const animationListeners: Record<string, Record<string, EventListenerOrEventListenerObject>> = {};
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const sessionId = this.dataset.sessionId;
+      if (!sessionId) return originalGetBoundingClientRect.call(this);
+      const siblings = Array.from(this.parentElement?.querySelectorAll<HTMLElement>(".session-card[data-session-id]") ?? []);
+      const index = Math.max(0, siblings.indexOf(this));
+      const isCompact = this.parentElement?.classList.contains("compact") === true;
+      const width = isCompact ? 240 : 320;
+      return testRect(index * (width + 12), 0, width, 238);
+    };
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return this.dataset.sessionId ? 248 : 0;
+      }
+    });
+    HTMLElement.prototype.animate = vi.fn(function (this: HTMLElement) {
+      const sessionId = this.dataset.sessionId;
+      return {
+        addEventListener: vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+          if (sessionId) {
+            animationListeners[sessionId] ??= {};
+            animationListeners[sessionId][type] = listener;
+          }
+        })
+      } as unknown as Animation;
+    });
+
+    try {
+      const first = boardSession({ sessionId: "session-1", title: "First session" });
+      const second = boardSession({ sessionId: "session-2", title: "Second session" });
+
+      await act(async () => {
+        root.render(<SessionBoard cards={[first, second]} variant="observability" density="compact" />);
+      });
+      await act(async () => {
+        root.render(<SessionBoard cards={[first, second]} variant="observability" density="comfortable" />);
+      });
+
+      const firstCard = container.querySelector<HTMLElement>('[data-session-id="session-1"]');
+      const secondCard = container.querySelector<HTMLElement>('[data-session-id="session-2"]');
+      expect(firstCard?.className).toContain("is-layout-growing");
+      expect(secondCard?.className).toContain("is-layout-growing");
+
+      await act(async () => {
+        const firstFinish = animationListeners["session-1"]?.finish;
+        if (typeof firstFinish === "function") firstFinish(new Event("finish"));
+      });
+
+      expect(firstCard?.className).toContain("is-layout-moving");
+      expect(firstCard?.className).not.toContain("is-layout-expanding");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_CARD_LAYOUT_STAGGER_MS - 1);
+      });
+
+      expect(firstCard?.className).not.toContain("is-layout-expanding");
+
+      await act(async () => {
+        const secondFinish = animationListeners["session-2"]?.finish;
+        if (typeof secondFinish === "function") secondFinish(new Event("finish"));
+      });
+
+      expect(secondCard?.className).toContain("is-layout-expanding");
+      expect(firstCard?.className).not.toContain("is-layout-expanding");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+
+      expect(firstCard?.className).toContain("is-layout-expanding");
+      expect(firstCard?.style.height).toBe("238px");
+      expect(secondCard?.style.height).toBe("238px");
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.animate = originalAnimate;
+      if (originalOffsetHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeightDescriptor);
+      } else {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>).offsetHeight;
+      }
       vi.useRealTimers();
     }
   });

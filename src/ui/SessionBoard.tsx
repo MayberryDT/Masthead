@@ -7,6 +7,15 @@ import { prefersReducedMotion } from "./motionPreference";
 
 type CardLayoutSnapshot = Map<string, DOMRect>;
 type CardLayoutChangeKind = "reorder" | "shrinking" | "growing";
+type CardLayoutAnimationPlan = {
+  card: HTMLElement;
+  delay: number;
+  deltaX: number;
+  deltaY: number;
+  nextRect: DOMRect;
+  previousRect: DOMRect;
+  targetLayoutHeight: number;
+};
 type InlineLayoutStyleSnapshot = {
   alignSelf: string;
   height: string;
@@ -229,12 +238,14 @@ function captureCardLayout(container: HTMLElement): CardLayoutSnapshot {
 }
 
 function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayoutSnapshot, changeKind: CardLayoutChangeKind): void {
-  container.querySelectorAll<HTMLElement>(".session-card[data-session-id]").forEach((card, index) => {
+  const plans: CardLayoutAnimationPlan[] = [];
+  Array.from(container.querySelectorAll<HTMLElement>(".session-card[data-session-id]")).forEach((card, index) => {
     const sessionId = card.dataset.sessionId;
     const previousRect = sessionId ? previousLayout.get(sessionId) : undefined;
     if (!previousRect) return;
 
     const nextRect = card.getBoundingClientRect();
+    const targetLayoutHeight = nextRect.height;
     const deltaX = previousRect.left - nextRect.left;
     const deltaY = previousRect.top - nextRect.top;
     const hasMeasurableSize = previousRect.width > 0 && previousRect.height > 0 && nextRect.width > 0 && nextRect.height > 0;
@@ -244,8 +255,22 @@ function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayou
     const resized = hasMeasurableSize && (Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01);
     if (!moved && !resized) return;
 
-    const delay = layoutPhaseDelay(changeKind, index);
+    plans.push({
+      card,
+      delay: layoutPhaseDelay(changeKind, index),
+      deltaX,
+      deltaY,
+      nextRect,
+      previousRect,
+      targetLayoutHeight
+    });
+  });
+
+  const growExpansionStartDelay = changeKind === "growing" ? Math.max(0, ...plans.map((plan) => plan.delay)) : 0;
+
+  plans.forEach(({ card, delay, deltaX, deltaY, nextRect, previousRect, targetLayoutHeight }) => {
     const keyframes = steelPlateLayoutKeyframes({ deltaX, deltaY });
+    const expansionDelay = changeKind === "growing" ? growExpansionStartDelay - delay : 0;
     cancelCardLayoutAnimation(card);
 
     const activeAnimation: ActiveLayoutAnimation = { timers: [] };
@@ -282,7 +307,9 @@ function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayou
         activeAnimation,
         changeKind,
         delay,
-        nextRect
+        expansionDelay,
+        nextRect,
+        targetLayoutHeight
       });
       return;
     }
@@ -297,7 +324,7 @@ function animateCardLayoutFrom(container: HTMLElement, previousLayout: CardLayou
     const finish = () => {
       if (activeLayoutAnimations.get(card) !== activeAnimation) return;
       if (changeKind === "growing") {
-        startCardLayoutExpansion(card, activeAnimation, nextRect);
+        scheduleCardLayoutExpansion(card, activeAnimation, targetLayoutHeight, expansionDelay);
       } else {
         settleCardLayoutAnimation(card, activeAnimation);
       }
@@ -353,10 +380,12 @@ function animateCardLayoutWithInlineStyle(
     activeAnimation: ActiveLayoutAnimation;
     changeKind: CardLayoutChangeKind;
     delay: number;
+    expansionDelay: number;
     nextRect: DOMRect;
+    targetLayoutHeight: number;
   }
 ): void {
-  const { activeAnimation, changeKind, delay, nextRect } = options;
+  const { activeAnimation, changeKind, delay, expansionDelay, nextRect, targetLayoutHeight } = options;
   activeAnimation.inlineStyle ??= snapshotCardLayoutStyles(card);
   card.style.transition = "none";
   card.style.transformOrigin = "top left";
@@ -366,7 +395,7 @@ function animateCardLayoutWithInlineStyle(
   window.requestAnimationFrame(() => {
     if (activeLayoutAnimations.get(card) !== activeAnimation) return;
     const moveTimer = window.setTimeout(() => {
-      startInlineCardLayoutMove(card, activeAnimation, changeKind, nextRect);
+      startInlineCardLayoutMove(card, activeAnimation, changeKind, nextRect, targetLayoutHeight, expansionDelay);
     }, delay);
     activeAnimation.timers.push(moveTimer);
   });
@@ -409,7 +438,7 @@ function animateShrinkingCardLayoutWithInlineStyle(
 
     const moveDelay = Math.max(0, delay - SESSION_CARD_LAYOUT_COMPACT_PHASE_MS);
     const moveTimer = window.setTimeout(
-      () => startInlineCardLayoutMove(card, activeAnimation, "shrinking", nextRect),
+      () => startInlineCardLayoutMove(card, activeAnimation, "shrinking", nextRect, nextRect.height, 0),
       moveDelay
     );
     activeAnimation.timers.push(moveTimer);
@@ -428,7 +457,9 @@ function startInlineCardLayoutMove(
   card: HTMLElement,
   activeAnimation: ActiveLayoutAnimation,
   changeKind: CardLayoutChangeKind,
-  nextRect: DOMRect
+  nextRect: DOMRect,
+  targetLayoutHeight: number,
+  expansionDelay: number
 ): void {
   if (activeLayoutAnimations.get(card) !== activeAnimation) return;
   card.classList.remove("is-layout-compacting");
@@ -439,7 +470,7 @@ function startInlineCardLayoutMove(
   const finishTimer = window.setTimeout(() => {
     if (activeLayoutAnimations.get(card) !== activeAnimation) return;
     if (changeKind === "growing") {
-      startCardLayoutExpansion(card, activeAnimation, nextRect);
+      scheduleCardLayoutExpansion(card, activeAnimation, targetLayoutHeight, expansionDelay);
     } else {
       settleCardLayoutAnimation(card, activeAnimation);
     }
@@ -487,7 +518,24 @@ function startCardLayoutCompaction(card: HTMLElement, activeAnimation: ActiveLay
   });
 }
 
-function startCardLayoutExpansion(card: HTMLElement, activeAnimation: ActiveLayoutAnimation, nextRect: DOMRect): void {
+function scheduleCardLayoutExpansion(
+  card: HTMLElement,
+  activeAnimation: ActiveLayoutAnimation,
+  targetLayoutHeight: number,
+  delay: number
+): void {
+  if (delay <= 0) {
+    startCardLayoutExpansion(card, activeAnimation, targetLayoutHeight);
+    return;
+  }
+  const expansionTimer = window.setTimeout(() => {
+    if (activeLayoutAnimations.get(card) !== activeAnimation) return;
+    startCardLayoutExpansion(card, activeAnimation, targetLayoutHeight);
+  }, delay);
+  activeAnimation.timers.push(expansionTimer);
+}
+
+function startCardLayoutExpansion(card: HTMLElement, activeAnimation: ActiveLayoutAnimation, targetLayoutHeight: number): void {
   card.classList.remove("is-layout-moving");
   card.classList.add("is-layout-expanding");
   card.style.transition = [
@@ -496,8 +544,8 @@ function startCardLayoutExpansion(card: HTMLElement, activeAnimation: ActiveLayo
     `height ${SESSION_CARD_LAYOUT_EXPAND_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`
   ].join(", ");
   card.style.width = "100%";
-  card.style.minHeight = `${roundLayoutNumber(nextRect.height)}px`;
-  card.style.height = `${roundLayoutNumber(nextRect.height)}px`;
+  card.style.minHeight = `${roundLayoutNumber(targetLayoutHeight)}px`;
+  card.style.height = `${roundLayoutNumber(targetLayoutHeight)}px`;
 
   const cleanupTimer = window.setTimeout(
     () => completeCardLayoutAnimation(card, activeAnimation),
