@@ -3861,6 +3861,79 @@ body {
   font-size: 12px;
 }
 
+.filterable-select-selection {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  margin-bottom: 4px;
+  border: 1px solid rgba(46, 167, 255, 0.26);
+  border-radius: 3px;
+  background:
+    linear-gradient(180deg, rgba(46, 167, 255, 0.1), rgba(46, 167, 255, 0.045)),
+    rgba(46, 167, 255, 0.055);
+  box-shadow: inset 0 1px 0 rgba(205, 235, 250, 0.045);
+  padding: 5px 5px 5px 9px;
+}
+
+.filterable-select-selection span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.filterable-select-selection small {
+  overflow: hidden;
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.filterable-select-selection strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filterable-select-selection button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(92, 153, 187, 0.18);
+  border-radius: 3px;
+  background: rgba(3, 16, 25, 0.28);
+  color: var(--body);
+  cursor: pointer;
+  transition-property: background-color, border-color, color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: var(--dropdown-ease);
+}
+
+.filterable-select-selection button:hover,
+.filterable-select-selection button:focus-visible {
+  outline: 0;
+  border-color: rgba(116, 185, 224, 0.34);
+  background: rgba(46, 167, 255, 0.1);
+  color: var(--ink);
+}
+
+.filterable-select-selection button:active {
+  transform: scale(0.96);
+}
+
 .filterable-select-options {
   display: grid;
   max-height: var(--filterable-select-options-max-height, 260px);

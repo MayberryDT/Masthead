@@ -565,9 +565,6 @@ function activeFilterFacets(
     if (!value) return;
     facets.push({ label, value, onRemove: () => onFilterChange?.({ ...filters, [key]: undefined }) });
   };
-  addFilterFacet("runtime", "Runtime");
-  addFilterFacet("project", "Project");
-  addFilterFacet("model", "Model");
   addFilterFacet("dateFrom", "From");
   addFilterFacet("dateTo", "To");
   addFilterFacet("file", "File");

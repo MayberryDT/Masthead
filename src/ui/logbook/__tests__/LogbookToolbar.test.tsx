@@ -101,6 +101,24 @@ describe("LogbookToolbar", () => {
     expect(document.body.textContent).toContain("Codex");
   });
 
+  test("manages selected filter values inside the dropdown", async () => {
+    const onFilterChange = vi.fn();
+    renderToolbar({ filters: { project: "Masthead", runtime: "codex" }, onFilterChange });
+
+    await act(async () => {
+      buttonByLabel("Project filter").click();
+    });
+
+    expect(document.body.querySelector(".filterable-select-selection")?.textContent).toContain("Selected");
+    expect(document.body.querySelector(".filterable-select-selection")?.textContent).toContain("Masthead");
+
+    await act(async () => {
+      buttonByDocumentLabel("Clear Project filter").click();
+    });
+
+    expect(onFilterChange).toHaveBeenCalledWith(expect.objectContaining({ project: undefined, runtime: "codex" }));
+  });
+
   test("opens a compact date popover and updates typed date filters", async () => {
     const onFilterChange = vi.fn();
     renderToolbar({ onFilterChange });
@@ -190,7 +208,13 @@ describe("LogbookToolbar", () => {
   });
 });
 
-function renderToolbar({ onFilterChange }: { onFilterChange: (filters: LogbookFilterState) => void }) {
+function renderToolbar({
+  filters = {},
+  onFilterChange
+}: {
+  filters?: LogbookFilterState;
+  onFilterChange: (filters: LogbookFilterState) => void;
+}) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -198,7 +222,7 @@ function renderToolbar({ onFilterChange }: { onFilterChange: (filters: LogbookFi
     root?.render(
       <LogbookToolbar
         filterOptions={{ projects: ["Masthead"], models: ["gpt-5"], runtimes: ["codex"] }}
-        filters={{}}
+        filters={filters}
         query=""
         sort="recent"
         onFilterChange={onFilterChange}
@@ -211,6 +235,12 @@ function renderToolbar({ onFilterChange }: { onFilterChange: (filters: LogbookFi
 
 function buttonByLabel(label: string): HTMLButtonElement {
   const button = Array.from(container?.querySelectorAll("button") ?? []).find((candidate) => candidate.getAttribute("aria-label") === label);
+  expect(button).toBeDefined();
+  return button as HTMLButtonElement;
+}
+
+function buttonByDocumentLabel(label: string): HTMLButtonElement {
+  const button = Array.from(document.body.querySelectorAll("button")).find((candidate) => candidate.getAttribute("aria-label") === label);
   expect(button).toBeDefined();
   return button as HTMLButtonElement;
 }

@@ -219,6 +219,17 @@ export function FilterableSelect({
         <Icon name="search" size="toolbar" weight={iconWeights.toolbar} className="search-icon" />
         <input ref={searchRef} value={draft} placeholder={searchPlaceholder} onChange={(event) => setDraft(event.currentTarget.value)} onKeyDown={onSearchKeyDown} />
       </label>
+      {value && clearable ? (
+        <div className="filterable-select-selection" aria-label={`${label} selection`}>
+          <span>
+            <small>Selected</small>
+            <strong>{displayValue}</strong>
+          </span>
+          <button type="button" onClick={() => choose(undefined)} aria-label={`Clear ${label}`}>
+            <Icon name="close" size="inline" weight={iconWeights.inline} />
+          </button>
+        </div>
+      ) : null}
       <div className="filterable-select-options" role="listbox" aria-label={`${label} options`}>
         {value && clearable ? (
           <button
