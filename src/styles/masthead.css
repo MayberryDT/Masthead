@@ -2832,8 +2832,7 @@ body {
 }
 
 .observability-console,
-.masthead-shell,
-.masthead-control-scope {
+.masthead-shell {
   --space-xs: 8px;
   --space-sm: 12px;
   --space-md: 16px;

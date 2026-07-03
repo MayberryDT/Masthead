@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { App } from "../../app/App";
 import { MastheadConnectionProvider } from "../../app/connection/MastheadConnectionProvider";
@@ -371,4 +372,32 @@ describe("Live Board UI", () => {
     expect(html).not.toContain("Acme payroll");
     expect(html).not.toContain("private customer detail");
   });
+
+  test("keeps Board dossier button scope out of app shell layout rules", () => {
+    const css = readFileSync("src/styles/masthead.css", "utf8");
+    const shellRule = cssRuleBody(css, ".observability-console,\n.masthead-shell");
+    const controlVariableRule = cssRuleBody(css, ".observability-console,\n.masthead-shell,\n.masthead-control-scope");
+
+    expect(shellRule).toContain("display: grid;");
+    expect(shellRule).not.toContain("masthead-control-scope");
+    expect(controlVariableRule).toContain("--folded-control-clip:");
+    expect(controlVariableRule).not.toContain("display: grid;");
+  });
 });
+
+function cssRuleBody(css: string, selector: string): string {
+  const selectorIndex = css.indexOf(`${selector} {`);
+  if (selectorIndex === -1) throw new Error(`Expected CSS rule for ${selector}`);
+  const openBraceIndex = css.indexOf("{", selectorIndex + selector.length);
+  if (openBraceIndex === -1) throw new Error(`Expected CSS rule for ${selector} to have a body`);
+  let depth = 0;
+  for (let index = openBraceIndex; index < css.length; index += 1) {
+    const character = css[index];
+    if (character === "{") depth += 1;
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return css.slice(openBraceIndex + 1, index);
+    }
+  }
+  throw new Error(`Expected CSS rule for ${selector} to close`);
+}

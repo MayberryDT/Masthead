@@ -576,6 +576,12 @@ describe("observability session card", () => {
       await act(async () => {
         const listener = animationListeners.finish;
         if (typeof listener === "function") listener(new Event("finish"));
+      });
+
+      expect(card?.className).toContain("is-layout-expanding");
+      expect(card?.style.width).toBe("100%");
+
+      await act(async () => {
         await vi.advanceTimersByTimeAsync(SESSION_CARD_LAYOUT_EXPAND_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS);
       });
 

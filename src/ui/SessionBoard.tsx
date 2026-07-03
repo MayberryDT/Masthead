@@ -495,7 +495,7 @@ function startCardLayoutExpansion(card: HTMLElement, activeAnimation: ActiveLayo
     `min-height ${SESSION_CARD_LAYOUT_EXPAND_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`,
     `height ${SESSION_CARD_LAYOUT_EXPAND_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`
   ].join(", ");
-  card.style.width = `${roundLayoutNumber(nextRect.width)}px`;
+  card.style.width = "100%";
   card.style.minHeight = `${roundLayoutNumber(nextRect.height)}px`;
   card.style.height = `${roundLayoutNumber(nextRect.height)}px`;
 
