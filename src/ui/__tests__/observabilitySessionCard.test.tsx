@@ -464,6 +464,7 @@ describe("observability session card", () => {
 
       expect(card?.style.transition).toContain(`width ${SESSION_CARD_LAYOUT_COMPACT_PHASE_MS}ms`);
       expect(card?.style.transition).toContain(`height ${SESSION_CARD_LAYOUT_COMPACT_PHASE_MS}ms`);
+      expect(card?.style.transition).not.toContain("transform");
       expect(card?.style.width).toBe("240px");
       expect(card?.style.height).toBe("178px");
     } finally {
@@ -521,6 +522,8 @@ describe("observability session card", () => {
       expect(card?.className).toContain("is-layout-moving");
       expect(card?.style.width).toBe("240px");
       expect(card?.style.height).toBe("178px");
+      expect(card?.style.transition).not.toContain("width");
+      expect(card?.style.transition).not.toContain("height");
       expect(animations[0]?.options).toEqual(
         expect.objectContaining({
           delay: 0,

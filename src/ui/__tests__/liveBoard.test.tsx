@@ -306,6 +306,7 @@ describe("Live Board UI", () => {
     const html = renderToStaticMarkup(<SessionDetailModal session={session} onClose={() => undefined} />);
 
     expect(html).toContain("modal-scroll-frame");
+    expect(html).toContain("modal-backdrop session-dossier-backdrop masthead-control-scope t-modal-backdrop");
     expect(html).toContain("session-dossier-modal");
     expect(html).toContain("meta-rail");
     expect(html).toContain("title-block");

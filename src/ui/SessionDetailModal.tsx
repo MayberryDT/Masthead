@@ -62,6 +62,7 @@ export function SessionDetailModal({
   const backdropClassName = [
     "modal-backdrop",
     "session-dossier-backdrop",
+    "masthead-control-scope",
     "t-modal-backdrop",
     modalState === "closing" ? "is-closing" : "",
     modalState === "open" ? "is-open" : "",

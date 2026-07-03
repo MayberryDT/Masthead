@@ -2832,7 +2832,8 @@ body {
 }
 
 .observability-console,
-.masthead-shell {
+.masthead-shell,
+.masthead-control-scope {
   --space-xs: 8px;
   --space-sm: 12px;
   --space-md: 16px;
@@ -5967,7 +5968,8 @@ body {
  * Folded Sheet-Metal Corner.
  */
 .observability-console,
-.masthead-shell {
+.masthead-shell,
+.masthead-control-scope {
   --folded-control-clip: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
   --folded-control-texture: repeating-linear-gradient(135deg, rgba(196, 226, 248, 0.012) 0 1px, transparent 1px 18px);
   --folded-control-fill: #04131f;
@@ -6148,6 +6150,7 @@ body {
 .masthead-shell .sidebar-link,
 .observability-console .app-button,
 .masthead-shell .app-button,
+.masthead-control-scope .app-button,
 .observability-console .toolbar-select,
 .masthead-shell .toolbar-select,
 .observability-console .collapsible-search-trigger,
@@ -6179,6 +6182,7 @@ body {
 .masthead-shell .sidebar-link,
 .observability-console .app-button,
 .masthead-shell .app-button,
+.masthead-control-scope .app-button,
 .observability-console .toolbar-select,
 .masthead-shell .toolbar-select,
 .observability-console .collapsible-search-trigger,
@@ -6208,6 +6212,7 @@ body {
 .masthead-shell .sidebar-link,
 .observability-console .app-button:not(.app-button-primary):not(.app-button-danger),
 .masthead-shell .app-button:not(.app-button-primary):not(.app-button-danger),
+.masthead-control-scope .app-button:not(.app-button-primary):not(.app-button-danger),
 .observability-console .toolbar-select,
 .masthead-shell .toolbar-select,
 .observability-console .collapsible-search-trigger,
@@ -6233,6 +6238,7 @@ body {
 .masthead-shell .sidebar-link:hover,
 .observability-console .app-button:hover:not(:disabled),
 .masthead-shell .app-button:hover:not(:disabled),
+.masthead-control-scope .app-button:hover:not(:disabled),
 .observability-console .toolbar-select:hover,
 .masthead-shell .toolbar-select:hover,
 .observability-console .usage-toolbar button:hover,
@@ -6241,12 +6247,14 @@ body {
 }
 
 .observability-console .app-button-danger:hover:not(:disabled),
-.masthead-shell .app-button-danger:hover:not(:disabled) {
+.masthead-shell .app-button-danger:hover:not(:disabled),
+.masthead-control-scope .app-button-danger:hover:not(:disabled) {
   background-color: #321820;
 }
 
 .observability-console .app-button-primary,
 .masthead-shell .app-button-primary,
+.masthead-control-scope .app-button-primary,
 .observability-console .usage-toolbar button.active,
 .masthead-shell .usage-toolbar button.active,
 .observability-console .sidebar-link.active,
@@ -6301,6 +6309,7 @@ body {
 .masthead-shell .toolbar-icon-button:focus-visible,
 .observability-console .app-button:focus-visible,
 .masthead-shell .app-button:focus-visible,
+.masthead-control-scope .app-button:focus-visible,
 .observability-console .collapsible-search-trigger:focus-visible,
 .masthead-shell .collapsible-search-trigger:focus-visible,
 .observability-console .sidebar-link:focus-visible,
