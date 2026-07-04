@@ -115,8 +115,27 @@ export function indexCanonicalSessionSearch(db: MastheadDatabase, sessionId: str
   if (!session) return;
 
   const messages = db
-    .prepare("SELECT role || ': ' || text_redacted AS text FROM messages WHERE session_id = ? ORDER BY observed_at ASC")
-    .all(sessionId) as TextRow[];
+    .prepare(
+      `SELECT role || ': ' || text_redacted AS text, observedAt, messageId
+      FROM (
+        SELECT message_id AS messageId, role, text_redacted, observed_at AS observedAt
+        FROM messages
+        WHERE session_id = ?
+        ORDER BY observed_at ASC, message_id ASC
+        LIMIT 40
+      )
+      UNION
+      SELECT role || ': ' || text_redacted AS text, observedAt, messageId
+      FROM (
+        SELECT message_id AS messageId, role, text_redacted, observed_at AS observedAt
+        FROM messages
+        WHERE session_id = ?
+        ORDER BY observed_at DESC, message_id DESC
+        LIMIT 80
+      )
+      ORDER BY observedAt ASC, messageId ASC`
+    )
+    .all(sessionId, sessionId) as TextRow[];
   const userMessages = db
     .prepare("SELECT text_redacted AS text FROM messages WHERE session_id = ? AND role = 'user' ORDER BY observed_at ASC LIMIT 1")
     .all(sessionId) as TextRow[];

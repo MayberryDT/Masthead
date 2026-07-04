@@ -13,6 +13,7 @@ export async function runImportWorkUnit(input: {
   hostname?: string;
   now?: () => string;
   adapterBackfill: (source: DiscoveredSource) => AsyncIterable<AdapterRecord>;
+  indexSession?: (sessionId: string) => void;
   onSessionImported?: (sessionId: string) => void;
 }): Promise<{ imported: number; failed: number; processed: number; sessionIds: string[] }> {
   const now = input.now ?? (() => new Date().toISOString());
@@ -74,7 +75,6 @@ export async function runImportWorkUnit(input: {
       if (result.sessionId) {
         imported += 1;
         sessionIds.add(result.sessionId);
-        indexCanonicalSessionSearch(input.db, result.sessionId);
         recordImportSessionImpact(input.db, {
           importJobId: unit.importJobId,
           impactKind: unit.unitKind === "enrichment_session"
@@ -98,6 +98,13 @@ export async function runImportWorkUnit(input: {
         processedRecords: processed,
         status: "running"
       });
+    }
+    for (const sessionId of sessionIds) {
+      if (input.indexSession) {
+        input.indexSession(sessionId);
+      } else {
+        indexCanonicalSessionSearch(input.db, sessionId);
+      }
     }
 
     updateImportWorkUnit(input.db, unit.workUnitId, {

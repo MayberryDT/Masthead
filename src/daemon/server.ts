@@ -271,8 +271,69 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       failureBackoffAfterMs: Date.parse(daemonStartedAt)
     });
     const queuedEnrichmentSessionIds = new Set<string>();
+    const queuedSearchIndexSessionIds = new Set<string>();
     const manualDossierEnrichmentJobs = new Map<string, SessionDossierManualEnrichmentJob>();
     let enrichmentQueueScheduled = false;
+    let searchIndexQueueScheduled = false;
+
+  function queueSessionSearchIndex(sessionId: string | undefined): void {
+    if (closed) return;
+    if (!sessionId) return;
+    queuedSearchIndexSessionIds.add(sessionId);
+    if (searchIndexQueueScheduled) return;
+    searchIndexQueueScheduled = true;
+    setImmediate(() => {
+      void flushSearchIndexQueue().catch((error) => {
+        recordRuntimeDiagnostic({
+          details: { error },
+          kind: "search_index_flush_failed",
+          message: "Session search indexing failed.",
+          severity: "warning"
+        });
+      });
+    });
+  }
+
+  async function flushSearchIndexQueue(): Promise<void> {
+    searchIndexQueueScheduled = false;
+    if (closed) {
+      queuedSearchIndexSessionIds.clear();
+      return;
+    }
+    const sessionIds = [...queuedSearchIndexSessionIds];
+    queuedSearchIndexSessionIds.clear();
+    for (let index = 0; index < sessionIds.length; index += 1) {
+      const sessionId = sessionIds[index];
+      try {
+        indexCanonicalSessionSearch(database, sessionId);
+      } catch (error) {
+        recordRuntimeDiagnostic({
+          details: { error, sessionId },
+          kind: "search_index_failed",
+          message: `Session search indexing failed for ${sessionId}`,
+          severity: "warning"
+        });
+      }
+      if ((index + 1) % 2 === 0) await yieldToEventLoop();
+    }
+    if (queuedSearchIndexSessionIds.size > 0 && !searchIndexQueueScheduled) {
+      if (closed) {
+        queuedSearchIndexSessionIds.clear();
+        return;
+      }
+      searchIndexQueueScheduled = true;
+      setImmediate(() => {
+        void flushSearchIndexQueue().catch((error) => {
+          recordRuntimeDiagnostic({
+            details: { error },
+            kind: "search_index_flush_failed",
+            message: "Session search indexing failed.",
+            severity: "warning"
+          });
+        });
+      });
+    }
+  }
 
   function queueSessionEnrichment(sessionId: string | undefined): void {
     if (!sessionId) return;
@@ -297,7 +358,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       if (!sessionId) continue;
       try {
         await enrichment.ensureCurrent(sessionId);
-        indexCanonicalSessionSearch(database, sessionId);
+        queueSessionSearchIndex(sessionId);
       } catch (error) {
         recordRuntimeDiagnostic({
           details:
@@ -356,7 +417,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     for (const sessionId of sessionIds) {
       try {
         await rebuildCoordinator.enrich(sessionId);
-        indexCanonicalSessionSearch(database, sessionId);
+        queueSessionSearchIndex(sessionId);
         succeeded += 1;
         sessions.push({ sessionId, status: "succeeded" });
       } catch (error) {
@@ -427,6 +488,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     },
     onFlush: async (events) => {
       const latestEventBySession = new Map<string, NormalizedEvent>();
+      const touchedSessionIds = new Set<string>();
       database.exec("BEGIN IMMEDIATE;");
       try {
         for (const event of events) {
@@ -437,7 +499,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             value: event
           });
           const sessionId = sessions.upsertLiveEvent(event);
-          if (sessionId) indexCanonicalSessionSearch(database, sessionId);
+          if (sessionId) touchedSessionIds.add(sessionId);
           if (event.sessionId) latestEventBySession.set(event.sessionId, event);
         }
         database.exec("COMMIT;");
@@ -445,6 +507,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         database.exec("ROLLBACK;");
         throw error;
       }
+      for (const sessionId of touchedSessionIds) queueSessionSearchIndex(sessionId);
       for (const event of latestEventBySession.values()) {
         try {
           if (event.sessionId && isTerminalProtectedSession(event.sessionId)) continue;
@@ -819,6 +882,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       if (!adapter) continue;
       controls?.throwIfCancelled();
       controls?.updateProgress({ currentPath: source.path ?? source.sourceId });
+      const touchedSessionIds = new Set<string>();
       let recordsSinceYield = 0;
       for await (const record of adapter.backfill(source)) {
         controls?.throwIfCancelled();
@@ -827,7 +891,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           hostname: config.host,
           runtimeKind: source.runtime
         });
-        if (sessionId) indexCanonicalSessionSearch(database, sessionId);
+        if (sessionId) touchedSessionIds.add(sessionId);
         queueSessionEnrichment(sessionId);
         countImportedRecord(result, record, Boolean(sessionId));
         controls?.updateProgress({
@@ -847,6 +911,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           controls?.throwIfCancelled();
         }
       }
+      for (const sessionId of touchedSessionIds) queueSessionSearchIndex(sessionId);
     }
     return result;
   }
@@ -896,7 +961,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           });
           latestOffset = nextOffset;
           if (sessionId) {
-            indexCanonicalSessionSearch(database, sessionId);
             enrichmentSessionIds.add(sessionId);
           }
           countImportedRecord(result, record, Boolean(sessionId));
@@ -921,6 +985,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             });
           }
         }
+        for (const sessionId of enrichmentSessionIds) queueSessionSearchIndex(sessionId);
         if (queueEnrichmentForImport && !result.limited) {
           for (const sessionId of enrichmentSessionIds) queueSessionEnrichment(sessionId);
         }
@@ -992,7 +1057,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         now: () => new Date().toISOString(),
         onSessionImported: (sessionId) => queueSessionEnrichment(sessionId),
         runtimeKind: unit.runtime,
-        workUnitId: unit.workUnitId
+        workUnitId: unit.workUnitId,
+        indexSession: queueSessionSearchIndex
       });
       result.discoveredCount += unit.estimatedRecords ?? unitResult.processed;
       result.processedCount += unitResult.processed;
@@ -1190,7 +1256,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     try {
       await catchUpSessionTranscriptIfApproved(sessionId);
       const record = await enrichment.enrich(sessionId);
-      indexCanonicalSessionSearch(database, sessionId);
+      queueSessionSearchIndex(sessionId);
       manualDossierEnrichmentJobs.set(sessionId, {
         completedAt: new Date().toISOString(),
         generatedAt: record.generatedAt,
@@ -2662,7 +2728,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           const sessionId = sessions.upsertLiveEvent(result.event);
           if (sessionId) {
             rememberCompletedLiveSession(result.event);
-            indexCanonicalSessionSearch(database, sessionId);
+            queueSessionSearchIndex(sessionId);
             if (!shouldDeferLiveEnrichmentToHookTranscript(result.event)) queueSessionEnrichment(sessionId);
           }
           appendStoreRecordToRawJournal({
@@ -2702,6 +2768,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     close: () => {
       if (closePromise) return closePromise;
       closed = true;
+      queuedSearchIndexSessionIds.clear();
+      searchIndexQueueScheduled = false;
       closePromise = (async () => {
         await hydrationPromise;
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);

@@ -72,6 +72,41 @@ describe("import work unit runner", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
   });
 
+  test("indexes each touched session once after an import unit completes", async () => {
+    const sourcePath = join(tempDir, "thread.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+    const records: AdapterRecord[] = [1, 2, 3].map((offset) => ({
+      diagnostics: [],
+      normalized: {
+        confidence: "authoritative",
+        kind: "session",
+        sourceRef: { sourceKind: "jsonl", sourcePath },
+        value: { observedAt: "2026-07-01T00:00:00.000Z", sessionId: "s1" }
+      },
+      observedAt: "2026-07-01T00:00:00.000Z",
+      payload: { id: "s1", offset },
+      payloadHash: `hash-${offset}`,
+      source: sourceForPath(sourcePath),
+      sourceRecordKey: `${sourcePath}:${offset}`
+    }));
+    const indexedSessionIds: string[] = [];
+
+    await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        yield* records;
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      indexSession: (sessionId) => indexedSessionIds.push(sessionId),
+      now: () => "2026-07-01T00:00:05.000Z",
+      runtimeKind: "codex",
+      workUnitId: unitId
+    });
+
+    expect(indexedSessionIds).toHaveLength(1);
+  });
+
   test("groups diagnostic records and marks the unit failed", async () => {
     const sourcePath = join(tempDir, "bad.jsonl");
     const unitId = seedWorkUnit(db, sourcePath);
