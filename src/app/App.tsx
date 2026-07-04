@@ -59,6 +59,7 @@ import { useUsageStatsController } from "./usage/useUsageStatsController";
 import { clearUnsupportedLocationHash } from "./locationHash";
 
 type ConnectorActionState = ConnectorActionView;
+type LiveProjectionLoadResult = "loaded" | "superseded" | "failed";
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
@@ -283,7 +284,7 @@ export function App() {
     if (selectedLiveSession) setSelectedSessionSnapshot(selectedLiveSession);
   }, [detailModalOpen, selectedLiveSession]);
 
-  const loadLiveProjection = useCallback(async () => {
+  const loadLiveProjection = useCallback(async (): Promise<LiveProjectionLoadResult> => {
     const requestId = liveRequestIdRef.current + 1;
     liveRequestIdRef.current = requestId;
     const selectedLiveSessionId = selectedSessionId ?? undefined;
@@ -293,11 +294,21 @@ export function App() {
     try {
       const body = await mastheadApi.getLiveProjection(selectedLiveSessionId, { refreshIntervalMs: refreshRateMs });
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
-      if (!isCurrentRequest()) return false;
+      if (!isCurrentRequest()) return "superseded";
       setLiveProjection(normalizeLiveBoardProjection(body.projection, selectedSessionId));
       setShowDemoData(false);
       setConnectorAction((current) =>
         current.state === "starting" || current.state === "started" ? { state: "started", message: "Collector connected." } : current
+      );
+      setCollectorStartupLog((current) =>
+        current.some((entry) => entry.id === "projection")
+          ? upsertCollectorStartupLogEntry(current, {
+              id: "projection",
+              label: "Live projection",
+              detail: "Loaded live projection.",
+              state: "done"
+            })
+          : current
       );
       setLiveConnection({
         state: "live",
@@ -306,9 +317,9 @@ export function App() {
         diagnostics: body.diagnostics,
         generatedAt: body.generatedAt
       });
-      return true;
+      return "loaded";
     } catch (error) {
-      if (!isCurrentRequest()) return false;
+      if (!isCurrentRequest()) return "superseded";
       setLiveProjection(undefined);
       setLiveEvents(undefined);
       setLiveGitSnapshots(undefined);
@@ -316,7 +327,7 @@ export function App() {
         state: "offline",
         error: error instanceof Error ? error.message : String(error)
       });
-      return false;
+      return "failed";
     }
   }, [activeProjectionUrl, refreshRateMs, selectedSessionId]);
 
@@ -416,15 +427,8 @@ export function App() {
             detail: "Live projection did not load.",
             state: "error"
           };
-          const projectionLoaded = await loadLiveProjection();
-          if (projectionLoaded) {
-            appendCollectorStartupLog({
-              id: "projection",
-              label: "Live projection",
-              detail: "Loaded live projection.",
-              state: "done"
-            });
-          } else {
+          const projectionLoadResult = await loadLiveProjection();
+          if (projectionLoadResult === "failed") {
             appendCollectorStartupLog({
               id: "projection",
               label: "Live projection",
@@ -522,7 +526,13 @@ export function App() {
     }
   };
 
-  const needsRecoveryPanel = connection.state.state === "offline" || connection.state.state === "incompatible";
+  const hasActiveCollectorStartup =
+    connectorAction.state === "starting" ||
+    connectorAction.state === "error" ||
+    connectorAction.state === "unsupported" ||
+    collectorStartupLog.some((entry) => entry.state === "running" || entry.state === "error");
+  const needsRecoveryPanel =
+    connection.state.state === "offline" || connection.state.state === "incompatible" || hasActiveCollectorStartup;
   const recoveryPanel = (
     <ConnectionRecoveryPanel
       action={connectorAction}

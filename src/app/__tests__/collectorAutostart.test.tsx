@@ -14,6 +14,88 @@ afterEach(() => {
 });
 
 describe("collector autostart", () => {
+  test("does not report projection failure when startup load is superseded by a later successful request", async () => {
+    const projectionRequests: Array<ReturnType<typeof deferred<unknown>>> = [];
+    const invoke = vi.fn(async (command: string) => {
+      expect(command).toBe("start_live_connector_command");
+      return {
+        ok: true,
+        started: true,
+        baseUrl: "http://127.0.0.1:17373",
+        command: "masthead daemon",
+        health: { apiVersion: 1, databaseId: "db", mode: "primary" },
+        message: "Started local Masthead collector.",
+        projectionUrl: "http://127.0.0.1:17373/projection"
+      };
+    });
+
+    window.mastheadDesktop = { invoke: invoke as unknown as NonNullable<Window["mastheadDesktop"]>["invoke"] };
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      return window.setTimeout(() => callback(performance.now()), 0);
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id: number) => window.clearTimeout(id));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string | URL | Request) => {
+        const requestUrl = String(url);
+        const { host, pathname } = new URL(requestUrl);
+        if (pathname === "/health" && host === "127.0.0.1:17372") return Promise.resolve(new Response("offline", { status: 503 }));
+        if (pathname === "/health" && host === "127.0.0.1:17373") return Promise.resolve(jsonResponse(currentHealth));
+        if (pathname === "/projection" && host === "127.0.0.1:17373") {
+          const request = deferred<unknown>();
+          projectionRequests.push(request);
+          return request.promise.then(jsonResponse);
+        }
+        if (pathname === "/projection") return Promise.resolve(new Response("offline", { status: 503 }));
+        return Promise.resolve(jsonResponse(responseForUrl(requestUrl)));
+      })
+    );
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MastheadConnectionProvider initialUrl="http://127.0.0.1:17372/projection">
+          <App />
+        </MastheadConnectionProvider>
+      );
+    });
+
+    await act(async () => {
+      await waitFor(() => invoke.mock.calls.length === 1);
+    });
+    await waitFor(() => projectionRequests.length === 1);
+    await act(async () => {
+      await chooseRefreshRate(container, "5s");
+      await flushTimers();
+    });
+    await act(async () => {
+      await flushTimers();
+      await flushTimers();
+    });
+    await waitFor(() => projectionRequests.length >= 2);
+
+    projectionRequests[1].resolve(liveProjectionResponse());
+    await act(async () => {
+      await flushTimers();
+    });
+    projectionRequests[0].resolve(liveProjectionResponse());
+    await act(async () => {
+      await flushTimers();
+      await flushTimers();
+      clickSidebarButton(container, "Sources");
+      await flushTimers();
+    });
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain("Live projection did not load");
+    expect(container.textContent).not.toContain("Collector started, but live projection did not load.");
+
+    root.unmount();
+  });
+
   test("shows collector startup progress while autostart is running", async () => {
     const connectorStart = deferred<{
       ok: true;
@@ -37,11 +119,12 @@ describe("collector autostart", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(new Response("offline", { status: 503 }))
-        .mockResolvedValueOnce(jsonResponse(currentHealth))
-        .mockResolvedValue(jsonResponse(liveProjectionResponse()))
+      vi.fn(async (url: string | URL | Request) => {
+        const requestUrl = String(url);
+        const { pathname } = new URL(requestUrl);
+        if (pathname === "/health" && !invoke.mock.calls.length) return new Response("offline", { status: 503 });
+        return jsonResponse(responseForUrl(requestUrl));
+      })
     );
 
     const container = document.createElement("div");
@@ -108,11 +191,12 @@ describe("collector autostart", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(new Response("offline", { status: 503 }))
-        .mockResolvedValueOnce(jsonResponse(currentHealth))
-        .mockResolvedValue(jsonResponse(liveProjectionResponse()))
+      vi.fn(async (url: string | URL | Request) => {
+        const requestUrl = String(url);
+        const { pathname } = new URL(requestUrl);
+        if (pathname === "/health" && !invoke.mock.calls.length) return new Response("offline", { status: 503 });
+        return jsonResponse(responseForUrl(requestUrl));
+      })
     );
 
     const container = document.createElement("div");
@@ -221,10 +305,30 @@ function flushTimers(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (condition()) return;
+    await flushTimers();
+  }
+  expect(condition()).toBe(true);
+}
+
 function clickSidebarButton(container: HTMLElement, label: string): void {
   const button = [...container.querySelectorAll("button")].find((candidate) => candidate.textContent?.includes(label));
   expect(button).toBeDefined();
   button?.click();
+}
+
+async function chooseRefreshRate(container: HTMLElement, label: string): Promise<void> {
+  const trigger = [...container.querySelectorAll("button")].find((candidate) =>
+    candidate.getAttribute("aria-label")?.startsWith("Refresh rate:")
+  );
+  expect(trigger).toBeDefined();
+  trigger?.click();
+  await flushTimers();
+  const option = [...document.body.querySelectorAll("button")].find((candidate) => candidate.textContent === label);
+  expect(option).toBeDefined();
+  option?.click();
 }
 
 function deferred<T>() {
@@ -266,6 +370,7 @@ function responseForUrl(url: string) {
   if (pathname === "/adapters") return { ok: true, adapters: [] };
   if (pathname === "/sources") return { ok: true, sources: [] };
   if (pathname === "/imports") return { ok: true, imports: [], limit: 50, offset: 0, total: 0 };
+  if (pathname === "/review-dispositions") return { ok: true, dispositions: [] };
   return { ok: true };
 }
 
