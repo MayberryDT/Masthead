@@ -54,7 +54,14 @@ assertFuse(fuseWire, FuseV1Options.GrantFileProtocolExtraPrivileges, false, "Gra
 const dataDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-smoke-"));
 const disableSandboxForCi = process.env.CI ? { ELECTRON_DISABLE_SANDBOX: "1" } : {};
 const child = spawn(binary, [], {
-  env: { ...process.env, ...disableSandboxForCi, MASTHEAD_DATA_DIR: dataDir, MASTHEAD_ELECTRON_SMOKE: "1", MASTHEAD_GIT_REFRESH_MS: "0" },
+  env: {
+    ...process.env,
+    ...disableSandboxForCi,
+    MASTHEAD_DATA_DIR: dataDir,
+    MASTHEAD_ELECTRON_SMOKE: "1",
+    MASTHEAD_ELECTRON_SMOKE_MODE: "renderer-autostart",
+    MASTHEAD_GIT_REFRESH_MS: "0"
+  },
   stdio: ["ignore", "pipe", "pipe"]
 });
 
@@ -80,6 +87,14 @@ if (code !== 0 || !jsonLine) {
 }
 
 const parsed = JSON.parse(jsonLine);
+if (parsed.connector?.smokeMode !== "renderer-autostart" || !parsed.connector?.message?.includes("Renderer autostart")) {
+  console.error(`Packaged renderer autostart connector check failed: ${JSON.stringify(parsed.connector)}`);
+  process.exit(1);
+}
+if (!parsed.connector?.started || parsed.connector?.health?.dataDirectory !== dataDir) {
+  console.error(`Packaged renderer autostart did not start the expected connector: ${JSON.stringify(parsed.connector)}`);
+  process.exit(1);
+}
 if (!parsed.renderer?.hasDesktopBridge || parsed.renderer?.hasNodeProcess || parsed.renderer?.hasRequire || parsed.renderer?.hasRawIpc) {
   console.error(`Packaged renderer security check failed: ${JSON.stringify(parsed.renderer)}`);
   process.exit(1);
