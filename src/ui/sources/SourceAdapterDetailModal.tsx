@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { AdapterStatus } from "../../app/daemonClient";
+import type { AdapterStatus, CodexHookSettingsDto, SettingsStateDto, UpdateLlmProviderSettingsInput } from "../../app/daemonClient";
 import { Icon } from "../icons/Icon";
 import { iconWeights } from "../icons/icon-tokens";
 import { AppButton } from "../primitives/AppButton";
 import { StatusBadge } from "../primitives/StatusBadge";
+import { LlmProviderControls } from "../settings/LlmProviderControls";
 import {
   adapterState,
   formatLastSync,
@@ -12,6 +13,7 @@ import {
   stateTone,
   type AdapterRowModel
 } from "./AdapterRow";
+import { HarnessLiveCaptureSection } from "./HarnessLiveCaptureSection";
 import { SourceDiagnosticPanel } from "./SourceDiagnosticPanel";
 import { SourcePathTable } from "./SourcePathTable";
 import { SourcePolicyControls } from "./SourcePolicyControls";
@@ -20,15 +22,22 @@ type Props = {
   adapter: AdapterStatus;
   busy: boolean;
   checked?: boolean;
+  enrichment?: SettingsStateDto["enrichment"];
+  hooks?: CodexHookSettingsDto;
+  hookActionBusy?: boolean;
+  llm?: SettingsStateDto["llm"];
   locationError?: string;
   locationLoading?: boolean;
   locationTotal?: number;
+  settingsBaseUrl?: string;
   onClose: () => void;
+  onCodexHookAction?: (action: "install" | "test" | "uninstall") => Promise<void> | void;
   onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
   onLoadMoreLocations?: () => void;
+  onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
   onSyncAdapter?: (runtime: string) => void;
   onToggleSelected?: (runtime: string, checked: boolean) => void;
 };
@@ -37,15 +46,22 @@ export function SourceAdapterDetailModal({
   adapter,
   busy,
   checked = false,
+  enrichment,
+  hooks,
+  hookActionBusy = false,
+  llm,
   locationError,
   locationLoading = false,
   locationTotal,
+  settingsBaseUrl,
   onClose,
+  onCodexHookAction,
   onEnableTranscriptImport,
   onExcludePath,
   onImportMetadata,
   onImportTranscripts,
   onLoadMoreLocations,
+  onSaveLlmProvider,
   onSyncAdapter,
   onToggleSelected
 }: Props) {
@@ -143,6 +159,38 @@ export function SourceAdapterDetailModal({
 
         <div className="modal-scroll-frame source-detail-scroll-frame">
           <div className="source-detail-content">
+            <section className="detail-section source-detail-section" aria-label={`${label} harness overview`}>
+              <div className="source-detail-section-head">
+                <div>
+                  <p className="mono-label">Harness overview</p>
+                  <h3>{label}</h3>
+                </div>
+                <StatusBadge tone={stateTone(state)}>{stateLabel(state)}</StatusBadge>
+              </div>
+              <dl className="harness-overview-proof">
+                <div>
+                  <dt>Runtime</dt>
+                  <dd>{view.runtime}</dd>
+                </div>
+                <div>
+                  <dt>Discovered</dt>
+                  <dd>{discoveredCount}</dd>
+                </div>
+                <div>
+                  <dt>Imported</dt>
+                  <dd>{importedCount}</dd>
+                </div>
+                <div>
+                  <dt>Locations</dt>
+                  <dd>{sourceLocationCount}</dd>
+                </div>
+                <div>
+                  <dt>Last sync</dt>
+                  <dd>{formatLastSync(view.lastSyncAt)}</dd>
+                </div>
+              </dl>
+            </section>
+
             <section className="detail-section source-detail-actions" aria-label={`${label} source actions`}>
               <div className="source-detail-action-summary">
                 <label className="adapter-card-select">
@@ -185,6 +233,61 @@ export function SourceAdapterDetailModal({
                   </>
                 )}
               </div>
+            </section>
+
+            <HarnessLiveCaptureSection
+              busy={busy || hookActionBusy}
+              hooks={hooks}
+              runtime={view.runtime}
+              onAction={onCodexHookAction}
+            />
+
+            {state !== "planned" ? (
+              <section className="detail-section source-detail-section" aria-label={`${label} history import`}>
+                <div className="source-detail-section-head">
+                  <div>
+                    <p className="mono-label">History import</p>
+                    <h3>Metadata and sync</h3>
+                  </div>
+                  <StatusBadge tone={view.policies.metadataImport ? "active" : "neutral"}>
+                    {view.policies.metadataImport ? "Metadata enabled" : "Metadata disabled"}
+                  </StatusBadge>
+                </div>
+                <p className="surface-status">Metadata import keeps Logbook searchable without bulk transcript ingestion.</p>
+              </section>
+            ) : null}
+
+            {state !== "planned" ? (
+              <section className="detail-section source-detail-section" aria-label={`${label} transcript policy`}>
+                <div className="source-detail-section-head">
+                  <div>
+                    <p className="mono-label">Transcript policy</p>
+                    <h3>Lazy Dossier hydration</h3>
+                  </div>
+                  <StatusBadge tone={view.policies.transcriptImport ? "active" : "neutral"}>
+                    {view.policies.transcriptImport ? "Approved" : "Metadata only"}
+                  </StatusBadge>
+                </div>
+                <p className="surface-status">
+                  Masthead imports transcript evidence for an individual session when its Dossier opens.
+                </p>
+              </section>
+            ) : null}
+
+            <section className="detail-section source-detail-section source-detail-enrichment" aria-label={`${label} Dossier enrichment`}>
+              <div className="source-detail-section-head">
+                <div>
+                  <p className="mono-label">Dossier enrichment</p>
+                  <h3>Provider and model</h3>
+                </div>
+              </div>
+              <LlmProviderControls
+                enrichment={enrichment}
+                llm={llm}
+                onSaveProvider={onSaveLlmProvider}
+                readOnly={busy || !onSaveLlmProvider}
+                settingsBaseUrl={settingsBaseUrl}
+              />
             </section>
 
             {state !== "planned" ? (

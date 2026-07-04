@@ -1,30 +1,63 @@
-import { useMemo, useState } from "react";
-import type { AdapterStatus } from "../../app/daemonClient";
+import { useEffect, useMemo, useState } from "react";
+import type { AdapterStatus, CodexHookSettingsDto, SettingsStateDto, UpdateLlmProviderSettingsInput } from "../../app/daemonClient";
+import { runSourcesSetupPlan, type SetupRunLogEntry, type SetupRunReport } from "../../app/sources/setupPlanRunner";
 import { onboardingHarnesses } from "../../adapters/harnessCatalog";
 import type { FoundSourceDto, SourcesOnboardingScanDto, SourcesSetupRunInput } from "../../shared/sourcesSetup";
 import { AppButton } from "../primitives/AppButton";
+import { LlmProviderControls } from "../settings/LlmProviderControls";
+import { HarnessSetupControls } from "./HarnessSetupControls";
+import { SetupRunProgress } from "./SetupRunProgress";
 
 type Props = {
   adapters: AdapterStatus[];
   busy?: boolean;
+  enrichment?: SettingsStateDto["enrichment"];
+  hooks?: CodexHookSettingsDto;
+  llm?: SettingsStateDto["llm"];
   open: boolean;
+  settingsBaseUrl?: string;
+  variant?: "modal" | "fullWindow";
   onClose: () => void;
+  onCodexHookAction?: (action: "install" | "test" | "uninstall") => Promise<void> | void;
   onConnectSelected?: (runtimes: string[]) => void;
+  onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
   onScan?: () => void;
   onScanSetup?: () => Promise<SourcesOnboardingScanDto | undefined> | SourcesOnboardingScanDto | undefined | void;
+  onSkip?: () => void;
   onRunSetup?: (input: SourcesSetupRunInput) => Promise<unknown> | unknown;
   scan?: SourcesOnboardingScanDto;
 };
 
-type Step = "intro" | "found" | "history" | "transcripts" | "enrichment" | "build" | "success";
+type Step = "intro" | "found" | "history" | "enrichment" | "build" | "success";
 type EnrichmentMode = SourcesSetupRunInput["enrichmentMode"];
 
-export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConnectSelected, onRunSetup, onScan, onScanSetup, open, scan }: Props) {
+export function SourcesOnboardingModal({
+  adapters,
+  busy = false,
+  enrichment,
+  hooks,
+  llm,
+  onClose,
+  onCodexHookAction,
+  onConnectSelected,
+  onRunSetup,
+  onSaveLlmProvider,
+  onScan,
+  onScanSetup,
+  onSkip,
+  open,
+  scan,
+  settingsBaseUrl,
+  variant = "modal"
+}: Props) {
   const [step, setStep] = useState<Step>("intro");
   const [localScan, setLocalScan] = useState<SourcesOnboardingScanDto | undefined>(undefined);
   const [running, setRunning] = useState(false);
-  const [importHistory, setImportHistory] = useState(true);
-  const [enrichmentMode, setEnrichmentMode] = useState<EnrichmentMode>("local");
+  const [importMetadata, setImportMetadata] = useState(true);
+  const [liveCaptureEnabled, setLiveCaptureEnabled] = useState(true);
+  const [enrichmentMode] = useState<EnrichmentMode>("skip");
+  const [setupLogs, setSetupLogs] = useState<SetupRunLogEntry[]>([]);
+  const [setupReport, setSetupReport] = useState<SetupRunReport>();
   const foundAdapters = useMemo(() => adapters.filter(isFoundAdapter), [adapters]);
   const setupScan = localScan ?? scan;
   const importableSources = useMemo(() => (setupScan?.foundSources ?? []).filter(isImportableSource), [setupScan]);
@@ -34,6 +67,15 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
   const selectedRuntimes = setupScan ? selectedSources.map((source) => source.runtime) : selectedIds;
   const usesSetupScan = Boolean(setupScan);
   const harnesses = onboardingHarnesses();
+
+  useEffect(() => {
+    if (!open || !scan) return;
+    const importable = scan.foundSources.filter(isImportableSource);
+    if (importable.length === 0) return;
+    setLocalScan(scan);
+    setSelected(new Set(importable.map((source) => source.sourceId)));
+    if (step === "intro") setStep("found");
+  }, [open, scan, step]);
 
   if (!open) return null;
 
@@ -61,21 +103,35 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
   };
 
   const handleBuild = async () => {
+    setSetupLogs([]);
+    setSetupReport(undefined);
     if (usesSetupScan && onRunSetup) {
       setRunning(true);
       try {
-        await onRunSetup({
+        const report = await runSourcesSetupPlan({
           enrichmentMode,
-          importMetadata: importHistory,
-          importTranscripts: importHistory,
-          queueEnrichment: enrichmentMode !== "skip",
+          importMetadata,
+          importTranscripts: false,
+          liveCapture:
+            liveCaptureEnabled && selectedSources.some((source) => source.runtime === "codex")
+              ? [{ action: "install", runtime: "codex" }]
+              : [],
+          queueEnrichment: false,
           sourceIds: selectedSources.map((source) => source.sourceId),
           transcriptApprovals: selectedSources.map((source) => ({
-            approved: importHistory && (source.transcriptApproval?.required ? true : Boolean(source.transcriptApproval?.approved)),
+            approved: false,
             runtime: source.runtime,
             sourceId: source.sourceId
           }))
+        }, {
+          onLog: (entry) => setSetupLogs((current) => [...current, entry]),
+          runHookAction: async (action) => {
+            if (!onCodexHookAction) return;
+            await onCodexHookAction(action);
+          },
+          runSetup: onRunSetup
         });
+        setSetupReport(report);
         setStep("success");
       } finally {
         setRunning(false);
@@ -86,15 +142,21 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
     setStep("success");
   };
 
+  const backdropClass = variant === "fullWindow" ? "sources-onboarding-full-window" : "modal-backdrop";
+  const modalClass = variant === "fullWindow" ? "session-detail-modal sources-onboarding-modal sources-onboarding-modal-full" : "session-detail-modal sources-onboarding-modal";
+
   return (
-    <div className="modal-backdrop" role="presentation">
-      <section className="session-detail-modal sources-onboarding-modal" role="dialog" aria-modal="true" aria-label="Set up sources">
+    <div className={backdropClass} role="presentation">
+      <section className={modalClass} role="dialog" aria-modal="true" aria-label="Set up sources">
         <header className="session-detail-header">
           <div>
             <p className="mono-label">Sources setup</p>
             <h2>Set up sources</h2>
           </div>
-          <AppButton type="button" variant="quiet" onClick={onClose}>Close</AppButton>
+          <div className="surface-actions">
+            {onSkip ? <AppButton type="button" variant="quiet" onClick={onSkip}>Skip setup</AppButton> : null}
+            {variant === "modal" ? <AppButton type="button" variant="quiet" onClick={onClose}>Close</AppButton> : null}
+          </div>
         </header>
 
         {step === "intro" ? (
@@ -172,50 +234,17 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
 
         {step === "history" ? (
           <div className="session-detail-body">
-            <h3>History import</h3>
-            <div className="source-choice-list">
-              <label className="source-choice">
-                <input type="radio" name="source-history-mode" checked={importHistory} onChange={() => setImportHistory(true)} />
-                <span>
-                  <strong>Connect live capture and import past sessions</strong>
-                  <small>Recommended when local history is available and you want Logbook to be useful immediately.</small>
-                </span>
-              </label>
-              <label className="source-choice">
-                <input type="radio" name="source-history-mode" checked={!importHistory} onChange={() => setImportHistory(false)} />
-                <span>
-                  <strong>Connect live capture only</strong>
-                  <small>Masthead starts saving new sessions from this point forward.</small>
-                </span>
-              </label>
-            </div>
+            <h3>Setup choices</h3>
+            <HarnessSetupControls
+              hooks={hooks}
+              importMetadata={importMetadata}
+              liveCaptureEnabled={liveCaptureEnabled}
+              selectedSources={selectedSources}
+              onImportMetadataChange={setImportMetadata}
+              onLiveCaptureEnabledChange={setLiveCaptureEnabled}
+            />
             <div className="surface-actions">
               <AppButton type="button" onClick={() => setStep("found")}>Back</AppButton>
-              <AppButton type="button" variant="primary" onClick={() => setStep("transcripts")}>Continue</AppButton>
-            </div>
-          </div>
-        ) : null}
-
-        {step === "transcripts" ? (
-          <div className="session-detail-body">
-            <h3>Transcript approval</h3>
-            {usesSetupScan ? (
-              <div className="source-adapter-grid">
-                {selectedSources.map((source) => (
-                  <article className="adapter-card" key={source.sourceId}>
-                    <p className="mono-label">{source.runtime}</p>
-                    <h4>{source.label ?? source.runtime}</h4>
-                    <p>{source.transcriptApproval?.summary ?? "Prompts, code, file paths, command output, and private data may be present."}</p>
-                    {source.path ? <p className="surface-status">{source.path}</p> : null}
-                    <span className="surface-status">{source.transcriptApproval?.required ? "Transcript import requires approval" : "Transcript approval not required"}</span>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <p>Transcripts can include prompts, code, file paths, command output, and private data. This first pass keeps approval explicit and continues to use the existing source policy flow.</p>
-            )}
-            <div className="surface-actions">
-              <AppButton type="button" onClick={() => setStep("history")}>Back</AppButton>
               <AppButton type="button" variant="primary" onClick={() => setStep("enrichment")}>Continue</AppButton>
             </div>
           </div>
@@ -224,30 +253,16 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
         {step === "enrichment" ? (
           <div className="session-detail-body">
             <h3>Enrichment</h3>
-            <div className="source-adapter-grid">
-              <label className="adapter-card source-select-card">
-                <span className="adapter-card-head">
-                  <span>
-                    <span className="mono-label">Recommended</span>
-                    <strong>Local deterministic summaries</strong>
-                  </span>
-                  <input type="radio" name="source-enrichment-mode" checked={enrichmentMode === "local"} onChange={() => setEnrichmentMode("local")} />
-                </span>
-                <span>Generate titles, summaries, and search context with local rules.</span>
-              </label>
-              <label className="adapter-card source-select-card">
-                <span className="adapter-card-head">
-                  <span>
-                    <span className="mono-label">Manual</span>
-                    <strong>Skip enrichment</strong>
-                  </span>
-                  <input type="radio" name="source-enrichment-mode" checked={enrichmentMode === "skip"} onChange={() => setEnrichmentMode("skip")} />
-                </span>
-                <span>Import source records now and enrich later from Sources diagnostics.</span>
-              </label>
-            </div>
+            <p className="surface-status">Configure provider settings now if you want. Setup will not queue enrichment across the whole library.</p>
+            <LlmProviderControls
+              enrichment={enrichment}
+              llm={llm}
+              onSaveProvider={onSaveLlmProvider}
+              readOnly={busy || !onSaveLlmProvider}
+              settingsBaseUrl={settingsBaseUrl}
+            />
             <div className="surface-actions">
-              <AppButton type="button" onClick={() => setStep("transcripts")}>Back</AppButton>
+              <AppButton type="button" onClick={() => setStep("history")}>Back</AppButton>
               <AppButton type="button" variant="primary" onClick={() => setStep("build")}>Continue</AppButton>
             </div>
           </div>
@@ -255,19 +270,23 @@ export function SourcesOnboardingModal({ adapters, busy = false, onClose, onConn
 
         {step === "build" ? (
           <div className="session-detail-body">
-            <h3>Start source setup</h3>
-            <p>Masthead will connect selected sources for live capture, import approved history, and queue approved enrichment work.</p>
+            <h3>Review setup</h3>
+            <p>Masthead will apply live capture choices and import selected metadata. Transcripts and enrichment run when Dossiers are opened.</p>
             <div className="surface-actions">
               <AppButton type="button" onClick={() => setStep("enrichment")}>Back</AppButton>
-              <AppButton type="button" variant="primary" onClick={handleBuild} disabled={busy || running || selectedIds.length === 0}>Start source setup</AppButton>
+              <AppButton type="button" variant="primary" onClick={handleBuild} disabled={busy || running || selectedIds.length === 0}>
+                {running ? "Starting setup..." : "Start setup"}
+              </AppButton>
             </div>
+            {setupLogs.length > 0 ? <SetupRunProgress logs={setupLogs} report={setupReport} /> : null}
           </div>
         ) : null}
 
         {step === "success" ? (
           <div className="session-detail-body">
-            <h3>Session library build started</h3>
-            <p>Sources are connected. Import jobs and any skipped work remain visible in the Sources inventory.</p>
+            <h3>{setupReport?.status === "needs_attention" ? "Setup needs attention" : "Session library build started"}</h3>
+            <p>Sources are connected where setup succeeded. Import jobs and any skipped work remain visible in the Sources inventory.</p>
+            <SetupRunProgress logs={setupLogs} report={setupReport} />
             <div className="surface-actions">
               <AppButton type="button" variant="primary" onClick={onClose}>Done</AppButton>
             </div>

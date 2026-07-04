@@ -10,6 +10,10 @@ export type TrayMenuTemplateItem = {
   type?: "separator";
 };
 
+export type CreateMastheadTrayOptions = {
+  tooltip?: string;
+};
+
 export function buildTrayMenuTemplate(handlers: TrayMenuActionHandlers): TrayMenuTemplateItem[] {
   return [
     { label: "Show Masthead", click: handlers.onShow },
@@ -19,10 +23,18 @@ export function buildTrayMenuTemplate(handlers: TrayMenuActionHandlers): TrayMen
   ];
 }
 
-export async function createMastheadTray(iconPath: string, handlers: TrayMenuActionHandlers): Promise<unknown> {
+export function trayTooltipLabel(isDev: boolean): string {
+  return isDev ? "Masthead Dev" : "Masthead";
+}
+
+export async function createMastheadTray(
+  iconPath: string,
+  handlers: TrayMenuActionHandlers,
+  options: CreateMastheadTrayOptions = {}
+): Promise<unknown> {
   const { Menu, Tray } = await import("electron");
   const tray = new Tray(iconPath);
-  tray.setToolTip("Masthead");
+  tray.setToolTip(options.tooltip ?? trayTooltipLabel(false));
   tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate(handlers)));
   tray.on("click", handlers.onShow);
   return tray;

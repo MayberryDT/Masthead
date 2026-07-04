@@ -1,16 +1,30 @@
 import { useEffect, useState } from "react";
-import type { AdapterStatus, SourceStatus, SourceStatusPage } from "../../app/daemonClient";
+import type {
+  AdapterStatus,
+  CodexHookSettingsDto,
+  SourceStatus,
+  SourceStatusPage,
+  SettingsStateDto,
+  UpdateLlmProviderSettingsInput
+} from "../../app/daemonClient";
 import { AdapterRow } from "./AdapterRow";
 import { SourceAdapterDetailModal } from "./SourceAdapterDetailModal";
 
 type Props = {
   adapters: AdapterStatus[];
   busy: boolean;
+  enrichment?: SettingsStateDto["enrichment"];
+  hooks?: CodexHookSettingsDto;
+  hookActionBusy?: boolean;
+  llm?: SettingsStateDto["llm"];
+  settingsBaseUrl?: string;
+  onCodexHookAction?: (action: "install" | "test" | "uninstall") => Promise<void> | void;
   onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
   onLoadAdapterSources?: (runtime: string, page: { limit: number; offset: number }) => Promise<SourceStatusPage>;
+  onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
   onToggleSelected?: (runtime: string, checked: boolean) => void;
   onSyncAdapter?: (runtime: string) => void;
   selectedRuntimes?: Set<string>;
@@ -19,14 +33,21 @@ type Props = {
 export function AdapterList({
   adapters,
   busy,
+  enrichment,
+  hooks,
+  hookActionBusy,
+  llm,
   onEnableTranscriptImport,
+  onCodexHookAction,
   onExcludePath,
   onImportMetadata,
   onImportTranscripts,
   onLoadAdapterSources,
+  onSaveLlmProvider,
   onSyncAdapter,
   onToggleSelected,
-  selectedRuntimes
+  selectedRuntimes,
+  settingsBaseUrl
 }: Props) {
   const [openRuntime, setOpenRuntime] = useState<string | undefined>(undefined);
   const [adapterSources, setAdapterSources] = useState<Record<string, { error?: string; loading: boolean; sources: SourceStatus[]; total: number }>>({});
@@ -129,15 +150,22 @@ export function AdapterList({
           adapter={openAdapterWithSources}
           busy={busy}
           checked={selectedRuntimes?.has(openAdapterWithSources.runtime) ?? false}
+          enrichment={enrichment}
+          hooks={hooks}
+          hookActionBusy={hookActionBusy}
+          llm={llm}
           locationError={openAdapterSources?.error}
           locationLoading={openAdapterSources?.loading}
           locationTotal={openAdapterSources?.total ?? openAdapterWithSources.sourceLocationCount}
+          settingsBaseUrl={settingsBaseUrl}
           onClose={() => setOpenRuntime(undefined)}
+          onCodexHookAction={onCodexHookAction}
           onEnableTranscriptImport={onEnableTranscriptImport}
           onExcludePath={onExcludePath}
           onImportMetadata={onImportMetadata}
           onImportTranscripts={onImportTranscripts}
           onLoadMoreLocations={() => handleLoadMoreSources(openAdapterWithSources.runtime)}
+          onSaveLlmProvider={onSaveLlmProvider}
           onSyncAdapter={onSyncAdapter}
           onToggleSelected={onToggleSelected}
         />

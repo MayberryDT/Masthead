@@ -422,7 +422,7 @@
 
 .adapter-card-metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
   gap: 10px;
   margin: 0;
 }
@@ -503,6 +503,14 @@
   border-radius: 5px;
   background: rgba(6, 25, 37, 0.58);
   padding: 11px;
+}
+
+.source-choice.is-static {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.source-choice.is-static strong {
+  color: var(--ink);
 }
 
 .source-choice strong,
@@ -733,6 +741,194 @@
   box-shadow:
     inset 0 0 0 1px rgba(46, 167, 255, 0.38),
     inset 0 1px 0 rgba(246, 251, 255, 0.055);
+}
+
+.sources-onboarding-full-window {
+  position: fixed;
+  inset: 0;
+  z-index: 46;
+  display: grid;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(3, 16, 25, 0.96), rgba(5, 18, 28, 0.98)),
+    #031019;
+}
+
+.session-detail-modal.sources-onboarding-modal {
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(900px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+}
+
+.session-detail-modal.sources-onboarding-modal-full {
+  align-self: stretch;
+  justify-self: stretch;
+  width: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.sources-onboarding-modal .session-detail-header {
+  align-items: center;
+}
+
+.sources-onboarding-modal .session-detail-body {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+  overflow: auto;
+  padding: 18px;
+  scrollbar-color: rgba(92, 153, 187, 0.26) transparent;
+}
+
+.sources-onboarding-modal-full .session-detail-body {
+  padding: clamp(18px, 3vw, 32px);
+}
+
+.sources-onboarding-modal .source-adapter-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+
+.harness-setup-controls {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.harness-live-capture-proof,
+.harness-overview-proof {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.harness-live-capture-proof div,
+.harness-overview-proof div {
+  min-width: 0;
+  border: 1px solid rgba(92, 153, 187, 0.13);
+  border-radius: 4px;
+  background: rgba(6, 25, 37, 0.5);
+  padding: 9px 10px;
+}
+
+.harness-live-capture-proof dt,
+.harness-overview-proof dt {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.harness-live-capture-proof dd,
+.harness-overview-proof dd {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-technical);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup-run-progress {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid rgba(92, 153, 187, 0.14);
+  border-radius: 5px;
+  background: rgba(5, 18, 28, 0.48);
+  padding: 13px;
+}
+
+.setup-run-log {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-run-log-entry {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) minmax(0, 1fr) minmax(0, auto);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  border-top: 1px solid rgba(194, 221, 241, 0.1);
+  padding-top: 8px;
+}
+
+.setup-run-log-entry:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.setup-run-log-entry > span {
+  min-height: 22px;
+  border: 1px solid rgba(92, 153, 187, 0.18);
+  border-radius: 3px;
+  background: rgba(6, 25, 37, 0.58);
+  color: var(--ash);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 20px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.setup-run-log-entry.succeeded > span {
+  border-color: rgba(91, 214, 138, 0.24);
+  color: var(--green);
+}
+
+.setup-run-log-entry.failed > span {
+  border-color: rgba(255, 99, 99, 0.24);
+  color: var(--red);
+}
+
+.setup-run-log-entry strong {
+  display: block;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.setup-run-log-entry p {
+  margin: 3px 0 0;
+  color: var(--body);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.setup-run-log-entry time {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .setup-run-log-entry {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setup-run-log-entry > span {
+    justify-self: start;
+    padding: 0 8px;
+  }
+
+  .setup-run-log-entry time {
+    max-width: 100%;
+  }
 }
 
 .sources-import-modal .source-choice strong {

@@ -341,25 +341,26 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Continue").click();
     });
     await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
-    await act(async () => {
-      buttonByText(container, "Start source setup").click();
+      buttonByText(container, "Start setup").click();
     });
 
     expect(onRunSetup).toHaveBeenCalledWith(
       expect.objectContaining({
+        enrichmentMode: "skip",
+        importMetadata: true,
+        importTranscripts: false,
+        queueEnrichment: false,
         sourceIds: ["codex-sessions", "omp-sessions"],
         transcriptApprovals: [
-          { approved: true, runtime: "codex", sourceId: "codex-sessions" },
-          { approved: true, runtime: "omp", sourceId: "omp-sessions" }
+          { approved: false, runtime: "codex", sourceId: "codex-sessions" },
+          { approved: false, runtime: "omp", sourceId: "omp-sessions" }
         ]
       })
     );
     await act(async () => root.unmount());
   });
 
-  test("transcript approval is source-specific after selecting found setup sources", async () => {
+  test("setup choices keep historical transcripts lazy after selecting found setup sources", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -368,18 +369,16 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       buttonByText(container, "Continue").click();
     });
-    await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
 
-    expect(container.textContent).toContain("Transcript approval");
-    expect(container.textContent).toContain("Codex sessions");
-    expect(container.textContent).toContain("/home/tyler/.codex/sessions");
-    expect(container.textContent).toContain("Prompts, code, command output");
+    expect(container.textContent).toContain("Setup choices");
+    expect(container.textContent).toContain("Metadata only");
+    expect(container.textContent).toContain("Transcripts hydrate when a Dossier opens");
+    expect(container.textContent).toContain("Install or repair Codex live capture");
+    expect(container.textContent).not.toContain("Transcript approval");
     await act(async () => root.unmount());
   });
 
-  test("enrichment step renders explicit setup choices", async () => {
+  test("enrichment step reuses provider configuration without queuing library enrichment", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -391,12 +390,11 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       buttonByText(container, "Continue").click();
     });
-    await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
 
-    expect(container.textContent).toContain("Local deterministic summaries");
-    expect(container.textContent).toContain("Skip enrichment");
+    expect(container.textContent).toContain("Enrichment");
+    expect(container.textContent).toContain("Configure provider settings now if you want.");
+    expect(container.textContent).toContain("Remote enrichment");
+    expect(container.textContent).toContain("Save provider");
     await act(async () => root.unmount());
   });
 
@@ -417,20 +415,17 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Continue").click();
     });
     await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
-    await act(async () => {
-      buttonByText(container, "Start source setup").click();
+      buttonByText(container, "Start setup").click();
     });
 
-    expect(onRunSetup).toHaveBeenCalledWith({
-      enrichmentMode: "local",
+    expect(onRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      enrichmentMode: "skip",
       importMetadata: true,
-      importTranscripts: true,
-      queueEnrichment: true,
+      importTranscripts: false,
+      queueEnrichment: false,
       sourceIds: ["codex-sessions"],
-      transcriptApprovals: [{ approved: true, runtime: "codex", sourceId: "codex-sessions" }]
-    });
+      transcriptApprovals: [{ approved: false, runtime: "codex", sourceId: "codex-sessions" }]
+    }));
     await act(async () => root.unmount());
   });
 
@@ -450,19 +445,20 @@ describe("SourcesPanel import controls", () => {
     await act(async () => root.unmount());
   });
 
-  test("live-only setup does not approve historical transcript import", async () => {
+  test("live-only setup does not run historical transcript import", async () => {
     const onRunSetup = vi.fn(async () => ({ jobs: [], queued: 0, skipped: [] }));
+    const onCodexHookAction = vi.fn(async () => undefined);
     const container = document.createElement("div");
     const root = createRoot(container);
 
-    await renderOpenScannedOnboarding(root, container, { onRunSetup });
+    await renderOpenScannedOnboarding(root, container, { onCodexHookAction, onRunSetup });
 
     await act(async () => {
       buttonByText(container, "Continue").click();
     });
     await act(async () => {
-      const liveOnly = [...container.querySelectorAll("input[name='source-history-mode']")][1] as HTMLInputElement;
-      liveOnly.click();
+      const metadata = [...container.querySelectorAll("input[type='checkbox']")][0] as HTMLInputElement;
+      metadata.click();
     });
     await act(async () => {
       buttonByText(container, "Continue").click();
@@ -471,20 +467,11 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Continue").click();
     });
     await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
-    await act(async () => {
-      buttonByText(container, "Start source setup").click();
+      buttonByText(container, "Start setup").click();
     });
 
-    expect(onRunSetup).toHaveBeenCalledWith({
-      enrichmentMode: "local",
-      importMetadata: false,
-      importTranscripts: false,
-      queueEnrichment: true,
-      sourceIds: ["codex-sessions"],
-      transcriptApprovals: [{ approved: false, runtime: "codex", sourceId: "codex-sessions" }]
-    });
+    expect(onCodexHookAction).toHaveBeenCalledWith("install");
+    expect(onRunSetup).not.toHaveBeenCalled();
     await act(async () => root.unmount());
   });
 });

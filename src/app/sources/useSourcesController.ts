@@ -5,9 +5,11 @@ import {
   approveAdapterTranscripts,
   cancelImport,
   connectSources,
+  getCodexHookSettings,
   getSourcesSetup,
   importAdapterMetadata,
   importAdapterTranscripts,
+  installCodexHooks,
   listAdapters,
   listAdapterSources,
   listImports,
@@ -20,7 +22,10 @@ import {
   scanSourcesSetup,
   syncAdapter,
   syncSources,
+  testCodexHooks,
+  uninstallCodexHooks,
   type AdapterStatus,
+  type CodexHookSettingsDto,
   type ImportJob,
   type ImportJobPage,
   type SourceStatus,
@@ -65,6 +70,8 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
   const [setup, setSetup] = useState<SourcesSetupDto>();
   const [importPage, setImportPage] = useState<ImportPageState>({ limit: 50, offset: 0, total: 0 });
   const [busy, setBusy] = useState(false);
+  const [hookActionBusy, setHookActionBusy] = useState(false);
+  const [hooks, setHooks] = useState<CodexHookSettingsDto>();
   const [lastRefreshAt, setLastRefreshAt] = useState<string>();
   const [status, setStatus] = useState<string>();
   const inventoryLoadedAtRef = useRef<number | undefined>(undefined);
@@ -75,16 +82,18 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     inventoryLoadInFlightRef.current = true;
     try {
       const importLimit = importPage.limit;
-      const [setupResult, adapterResult, sourceResult, importResult, activeImportResult] = await Promise.allSettled([
+      const [setupResult, adapterResult, sourceResult, importResult, activeImportResult, hookResult] = await Promise.allSettled([
         getSourcesSetup(activeProjectionUrl),
         listAdapters(activeProjectionUrl, { includeLocations: false }),
         listSources(activeProjectionUrl),
         listImports(activeProjectionUrl, { limit: importLimit, offset: 0 }),
-        listImports(activeProjectionUrl, { limit: 50, offset: 0, status: "active" })
+        listImports(activeProjectionUrl, { limit: 50, offset: 0, status: "active" }),
+        getCodexHookSettings(activeProjectionUrl)
       ]);
       if (setupResult.status === "fulfilled") setSetup(setupResult.value);
       if (adapterResult.status === "fulfilled") setAdapters(adapterResult.value);
       if (sourceResult.status === "fulfilled") setSources(sourceResult.value);
+      if (hookResult.status === "fulfilled") setHooks(hookResult.value);
       if (importResult.status === "fulfilled") {
         const activeImports = activeImportResult.status === "fulfilled" ? activeImportResult.value.imports : [];
         setImports(mergeImportRows(activeImports, importResult.value.imports));
@@ -209,6 +218,39 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     await loadInventory();
     onLibraryChanged();
   }, [loadInventory, onLibraryChanged]);
+
+  const runCodexHookAction = useCallback(async (action: "install" | "test" | "uninstall") => {
+    setHookActionBusy(true);
+    setStatus(
+      action === "install"
+        ? "Installing Codex hooks..."
+        : action === "test"
+          ? "Testing Codex hooks..."
+          : "Uninstalling Codex hooks..."
+    );
+    try {
+      const nextHooks =
+        action === "install"
+          ? await installCodexHooks(activeProjectionUrl)
+          : action === "test"
+            ? await testCodexHooks(activeProjectionUrl)
+            : await uninstallCodexHooks(activeProjectionUrl);
+      setHooks(nextHooks);
+      setStatus(
+        action === "install"
+          ? "Codex hooks installed."
+          : action === "test"
+            ? "Codex hook test complete."
+            : "Codex hooks uninstalled."
+      );
+      await loadInventory();
+    } catch (error) {
+      setStatus(`Codex hook ${action} failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    } finally {
+      setHookActionBusy(false);
+    }
+  }, [activeProjectionUrl, loadInventory]);
 
   const importMetadata = useCallback(async (runtime: string) => {
     setBusy(true);
@@ -398,6 +440,8 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     connectSelected,
     enableTranscriptImport,
     excludePath,
+    hookActionBusy,
+    hooks,
     importMetadata,
     importPage,
     importTranscripts,
@@ -409,6 +453,7 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     refreshSources,
     repair,
     retry,
+    runCodexHookAction,
     runSetup,
     scan,
     scanSetup,

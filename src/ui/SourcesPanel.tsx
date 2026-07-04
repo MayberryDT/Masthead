@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AdapterStatus, ImportJob, SourceStatus, SourceStatusPage } from "../app/daemonClient";
+import type {
+  AdapterStatus,
+  CodexHookSettingsDto,
+  ImportJob,
+  SourceStatus,
+  SourceStatusPage,
+  SettingsStateDto,
+  UpdateLlmProviderSettingsInput
+} from "../app/daemonClient";
 import type { SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunInput } from "../shared/sourcesSetup";
+import { AdapterList } from "./sources/AdapterList";
 import { ImportJobsTable } from "./sources/ImportJobsTable";
 import { SourcesConnectedDashboard } from "./sources/SourcesConnectedDashboard";
 import { SourcesEmptyState } from "./sources/SourcesEmptyState";
@@ -14,12 +23,20 @@ type Props = {
   imports?: ImportJob[];
   importTotal?: number;
   lastRefreshAt?: string;
+  hooks?: CodexHookSettingsDto;
+  hookActionBusy?: boolean;
+  enrichment?: SettingsStateDto["enrichment"];
+  llm?: SettingsStateDto["llm"];
+  settingsBaseUrl?: string;
+  onboardingOpen?: boolean;
   readOnly?: boolean;
   setup?: SourcesSetupDto;
   sources: SourceStatus[];
   busy: boolean;
   status?: string;
   onCancelImport?: (importJobId: string) => void;
+  onCloseOnboarding?: () => void;
+  onCodexHookAction?: (action: "install" | "test" | "uninstall") => Promise<void> | void;
   onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
@@ -31,8 +48,10 @@ type Props = {
   onRefresh: () => void;
   onRepairSources?: () => void;
   onRunSetup?: (input: SourcesSetupRunInput) => Promise<unknown> | unknown;
+  onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
   onScan?: () => void;
   onScanSetup?: () => Promise<SourcesOnboardingScanDto | undefined> | SourcesOnboardingScanDto | undefined | void;
+  onSkipOnboarding?: () => void;
   onRetryImport?: (importJobId: string) => void;
   onSyncAdapter?: (runtime: string) => void;
   onSyncSources?: () => void;
@@ -44,7 +63,7 @@ export function SourcesPanel(props: Props) {
   const diagnosticImports = (setup ? setup.advanced.imports : imports) as ImportJob[];
   const connectedAdapters = useMemo(() => adapterRows.filter(isConnectedAdapter), [adapterRows]);
   const connectedSources = setup?.connectedSources ?? [];
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [localOnboardingOpen, setLocalOnboardingOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const activeImportCount = diagnosticImports.filter((job) => job.status === "queued" || job.status === "running").length;
@@ -59,13 +78,19 @@ export function SourcesPanel(props: Props) {
   const hasConnectedSetup = connectedSources.length > 0;
   const hasConnectedAdapters = connectedAdapters.length > 0;
   const showConnectedDashboard = hasConnectedSetup || hasConnectedAdapters;
+  const onboardingOpen = props.onboardingOpen ?? localOnboardingOpen;
+  const closeOnboarding = () => {
+    props.onCloseOnboarding?.();
+    setLocalOnboardingOpen(false);
+  };
+  const openOnboarding = () => setLocalOnboardingOpen(true);
 
   return (
     <section id="sources" className="sources-panel sources-management surface-panel" aria-label="Session sources">
       {!showConnectedDashboard ? (
         <SourcesEmptyState
           busy={busy}
-          onConnectSources={() => setOnboardingOpen(true)}
+          onConnectSources={openOnboarding}
           readOnly={readOnly}
           status={status}
         />
@@ -86,6 +111,26 @@ export function SourcesPanel(props: Props) {
           status={status}
         />
       )}
+
+      {showConnectedDashboard ? (
+        <AdapterList
+          adapters={adapterRows}
+          busy={busy || readOnly}
+          enrichment={props.enrichment}
+          hooks={props.hooks}
+          hookActionBusy={props.hookActionBusy}
+          llm={props.llm}
+          onCodexHookAction={props.onCodexHookAction}
+          onEnableTranscriptImport={props.onEnableTranscriptImport}
+          onExcludePath={props.onExcludePath}
+          onImportMetadata={props.onImportMetadata}
+          onImportTranscripts={props.onImportTranscripts}
+          onLoadAdapterSources={props.onLoadAdapterSources}
+          onSaveLlmProvider={props.onSaveLlmProvider}
+          onSyncAdapter={props.onSyncAdapter}
+          settingsBaseUrl={props.settingsBaseUrl}
+        />
+      ) : null}
 
       {showConnectedDashboard ? (
         <ImportJobsTable
@@ -137,13 +182,21 @@ export function SourcesPanel(props: Props) {
       <SourcesOnboardingModal
         adapters={adapterRows}
         busy={busy || readOnly}
-        onClose={() => setOnboardingOpen(false)}
+        hooks={props.hooks}
+        llm={props.llm}
+        enrichment={props.enrichment}
+        onClose={closeOnboarding}
+        onCodexHookAction={props.onCodexHookAction}
         onConnectSelected={props.onConnectSelected}
         onRunSetup={props.onRunSetup}
+        onSaveLlmProvider={props.onSaveLlmProvider}
         onScan={props.onScan ?? props.onRefresh}
         onScanSetup={props.onScanSetup}
+        onSkip={props.onSkipOnboarding}
         open={onboardingOpen}
         scan={setup?.latestScan}
+        settingsBaseUrl={props.settingsBaseUrl}
+        variant={props.onboardingOpen === undefined ? "modal" : "fullWindow"}
       />
       <SourcesImportModal
         adapters={adapterRows}

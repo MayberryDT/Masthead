@@ -96,6 +96,10 @@ export function AdapterRow({
           <dt>Issues</dt>
           <dd>{diagnosticCount + failureCount}</dd>
         </div>
+        <div>
+          <dt>Live</dt>
+          <dd>{view.lastSyncAt ? "Observed" : "Idle"}</dd>
+        </div>
       </dl>
 
       <footer className="adapter-card-footer">

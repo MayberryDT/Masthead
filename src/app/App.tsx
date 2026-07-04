@@ -58,6 +58,7 @@ import { useSettingsDataController } from "./settings/useSettingsDataController"
 import { useSourcesController } from "./sources/useSourcesController";
 import { useUsageStatsController } from "./usage/useUsageStatsController";
 import { clearUnsupportedLocationHash } from "./locationHash";
+import { readOnboardingDismissed, writeOnboardingDismissed } from "./onboardingPreference";
 
 type ConnectorActionState = ConnectorActionView;
 type LiveProjectionLoadResult = "loaded" | "superseded" | "failed";
@@ -100,6 +101,8 @@ export function App() {
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
   const [motionDisabled, setMotionDisabled] = useState(() => readStoredMotionDisabled());
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => readOnboardingDismissed());
+  const [manualOnboardingOpen, setManualOnboardingOpen] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedSessionSnapshot, setSelectedSessionSnapshot] = useState<SessionDetailView>();
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
@@ -133,6 +136,8 @@ export function App() {
     connectSelected: handleConnectSelectedSources,
     enableTranscriptImport: handleEnableTranscriptImport,
     excludePath: handleExcludeSourcePath,
+    hookActionBusy,
+    hooks: sourceHooks,
     importMetadata: handleImportMetadata,
     importPage,
     importTranscripts: handleImportTranscripts,
@@ -143,6 +148,7 @@ export function App() {
     refreshSources: handleRefreshSources,
     repair: handleRepairSources,
     retry: handleRetryImport,
+    runCodexHookAction: handleCodexHookAction,
     runSetup: handleRunSourcesSetup,
     scan: handleScanSources,
     scanSetup: handleScanSourcesSetup,
@@ -267,6 +273,32 @@ export function App() {
     onReviewDispositionsChanged: handleReviewDispositionsChanged,
     writable: connection.writable
   });
+  const shouldShowFirstRunOnboarding =
+    !onboardingDismissed &&
+    effectiveLiveConnection.state === "live" &&
+    connection.writable &&
+    (sourcesSetup?.status === "empty" || sourcesSetup?.status === "scan_needed" || sourcesSetup?.status === "scan_available");
+  const onboardingOpen = manualOnboardingOpen || shouldShowFirstRunOnboarding;
+  const closeOnboarding = useCallback(() => {
+    setManualOnboardingOpen(false);
+    setOnboardingDismissed(true);
+    writeOnboardingDismissed(true);
+  }, []);
+  const skipOnboarding = useCallback(() => {
+    setManualOnboardingOpen(false);
+    setOnboardingDismissed(true);
+    writeOnboardingDismissed(true);
+  }, []);
+  const reopenOnboarding = useCallback(() => {
+    setActiveSurface("sources");
+    setOnboardingDismissed(false);
+    writeOnboardingDismissed(false);
+    setManualOnboardingOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (shouldShowFirstRunOnboarding) setActiveSurface("sources");
+  }, [shouldShowFirstRunOnboarding]);
 
   const toggleDensity = useCallback(() => {
     setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
@@ -572,9 +604,17 @@ export function App() {
           lastRefreshAt={sourcesLastRefreshAt}
           setup={sourcesSetup}
           busy={sourcesBusy}
+          enrichment={settingsData.settingsState?.enrichment}
+          hooks={sourceHooks}
+          hookActionBusy={hookActionBusy}
+          llm={settingsData.settingsState?.llm}
+          onboardingOpen={onboardingOpen}
           readOnly={!connection.writable}
+          settingsBaseUrl={activeProjectionUrl}
           status={sourcesStatus}
           onCancelImport={handleCancelImport}
+          onCloseOnboarding={closeOnboarding}
+          onCodexHookAction={handleCodexHookAction}
           onConnectSelected={handleConnectSelectedSources}
           onEnableTranscriptImport={handleEnableTranscriptImport}
           onExcludePath={handleExcludeSourcePath}
@@ -587,8 +627,10 @@ export function App() {
           onRefresh={handleRefreshSources}
           onRetryImport={handleRetryImport}
           onRunSetup={handleRunSourcesSetup}
+          onSaveLlmProvider={settingsData.saveLlmProviderSettings}
           onScan={handleScanSources}
           onScanSetup={handleScanSourcesSetup}
+          onSkipOnboarding={skipOnboarding}
           onSyncAdapter={handleSyncAdapter}
           onSyncSources={handleSyncSources}
         />
@@ -680,17 +722,23 @@ export function App() {
             deletionScopeTarget={settingsData.deletionScopeTarget}
             localDataStatus={settingsData.localDataStatus}
             motionDisabled={motionDisabled}
+            settingsError={settingsData.settingsError}
+            settingsLoadState={settingsData.settingsLoadState}
+            settingsState={settingsData.settingsState}
             onCancelLocalDataAction={settingsData.cancelLocalDataAction}
             onDeletionScopeKindChange={settingsData.changeDeletionScopeKind}
             onDeletionScopeTargetChange={settingsData.changeDeletionScopeTarget}
             onExportLocalData={settingsData.exportLocalData}
             onMotionDisabledChange={handleMotionDisabledChange}
+            onOpenOnboarding={reopenOnboarding}
+            onReloadSettings={() => void settingsData.loadSettingsState()}
             onRequestPruneLocalData={settingsData.requestPruneLocalData}
             onConfirmPruneLocalData={settingsData.confirmPruneLocalData}
             onRequestScopedDelete={settingsData.requestScopedDelete}
             onConfirmScopedDelete={settingsData.confirmScopedDelete}
             onRequestDeleteLocalData={settingsData.requestDeleteLocalData}
             onConfirmDeleteLocalData={settingsData.confirmDeleteLocalData}
+            onSaveLlmProvider={settingsData.saveLlmProviderSettings}
             readOnly={!connection.writable}
           />
         )}

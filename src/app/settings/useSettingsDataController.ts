@@ -7,9 +7,13 @@ import {
   deleteMastheadData,
   exportMastheadData,
   getDataSummary,
+  getSettingsState,
   listReviewDispositions,
+  updateLlmProviderSettings,
   type DataSummary,
-  type DeleteMastheadDataScope
+  type DeleteMastheadDataScope,
+  type SettingsStateDto,
+  type UpdateLlmProviderSettingsInput
 } from "../daemonClient";
 import { exportedRecordCount, exportLocalData as exportNativeLocalData } from "../nativeStoreClient";
 
@@ -36,9 +40,42 @@ export function useSettingsDataController({
   const [deletionScopeTarget, setDeletionScopeTarget] = useState("");
   const [pendingDeletionScope, setPendingDeletionScope] = useState<DeleteMastheadDataScope>();
   const [pendingDeletionDatabaseId, setPendingDeletionDatabaseId] = useState<string>();
+  const [settingsState, setSettingsState] = useState<SettingsStateDto>();
+  const [settingsError, setSettingsError] = useState<string>();
+  const [settingsLoadState, setSettingsLoadState] = useState<"loading" | "ready" | "error">("loading");
   const activeDatabaseId = databaseIdFromConnection(connectionState);
   const writeBlockedMessage =
     "This Masthead connection is read-only. Start the local writable collector before changing settings or deleting data.";
+
+  const loadSettingsState = useCallback(async (signal?: AbortSignal) => {
+    setSettingsLoadState("loading");
+    try {
+      const settings = await getSettingsState(activeProjectionUrl, { signal });
+      if (signal?.aborted) return;
+      setSettingsState(settings);
+      setSettingsError(undefined);
+      setSettingsLoadState("ready");
+    } catch (error) {
+      if (signal?.aborted) return;
+      setSettingsError(error instanceof Error ? error.message : String(error));
+      setSettingsLoadState("error");
+    }
+  }, [activeProjectionUrl]);
+
+  useEffect(() => {
+    if (!isLive) return;
+    const controller = new AbortController();
+    void loadSettingsState(controller.signal);
+    return () => controller.abort();
+  }, [isLive, loadSettingsState]);
+
+  const saveLlmProviderSettings = useCallback(async (input: UpdateLlmProviderSettingsInput) => {
+    if (!writable) throw new Error(writeBlockedMessage);
+    const nextSettings = await updateLlmProviderSettings(input, activeProjectionUrl);
+    setSettingsState(nextSettings);
+    setSettingsError(undefined);
+    setSettingsLoadState("ready");
+  }, [activeProjectionUrl, writable, writeBlockedMessage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -323,7 +360,12 @@ export function useSettingsDataController({
     localDataStatus,
     requestDeleteLocalData: handleRequestDeleteLocalData,
     requestPruneLocalData: handleRequestPruneLocalData,
-    requestScopedDelete: handleRequestScopedDelete
+    requestScopedDelete: handleRequestScopedDelete,
+    loadSettingsState,
+    saveLlmProviderSettings,
+    settingsError,
+    settingsLoadState,
+    settingsState
   };
 }
 

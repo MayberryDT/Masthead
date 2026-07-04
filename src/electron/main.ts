@@ -18,7 +18,7 @@ import {
 import { isMastheadOwnedDirectory } from "./pathPolicy";
 import { resolveProtocolPath } from "./protocol";
 import { configureElectronRuntime } from "./runtime";
-import { createMastheadTray } from "./tray";
+import { createMastheadTray, trayTooltipLabel } from "./tray";
 import {
   isAllowedRendererUrl,
   mainPreloadPath,
@@ -64,13 +64,17 @@ if (!app.requestSingleInstanceLock()) {
     registerRendererProtocol();
     registerDesktopIpc();
     mainWindow = await createMainWindow();
-    tray = await createMastheadTray(trayIconPath(), {
-      onOpenDataDirectory: () => {
-        void openDataDirectory(electronDataDirectory());
+    tray = await createMastheadTray(
+      trayIconPath(),
+      {
+        onOpenDataDirectory: () => {
+          void openDataDirectory(electronDataDirectory());
+        },
+        onQuit: () => app.quit(),
+        onShow: showMainWindow
       },
-      onQuit: () => app.quit(),
-      onShow: showMainWindow
-    });
+      { tooltip: trayTooltipLabel(isElectronDevMode()) }
+    );
     void tray;
     if (process.env.MASTHEAD_ELECTRON_SMOKE === "1") {
       void runSmokeAndQuit(mainWindow);
@@ -97,9 +101,12 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function trayIconPath(): string {
-  const sourceIcon = join(app.getAppPath(), "public", "assets", "masthead-logo-sail.png");
+  const iconFileName = isElectronDevMode() ? "masthead-logo-sail-dev.svg" : "masthead-logo-sail.png";
+  const sourceIcon = join(app.getAppPath(), "public", "assets", iconFileName);
   if (existsSync(sourceIcon)) return sourceIcon;
-  return join(process.resourcesPath, "masthead-logo-sail.png");
+  const resourceIcon = join(process.resourcesPath, iconFileName);
+  if (existsSync(resourceIcon)) return resourceIcon;
+  return join(process.resourcesPath, "daemon", iconFileName);
 }
 
 async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {

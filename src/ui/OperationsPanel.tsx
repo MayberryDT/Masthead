@@ -11,8 +11,8 @@ import type { MastheadConnectionState } from "../app/connection/MastheadConnecti
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EnrichmentSettings } from "./settings/EnrichmentSettings";
 import { DangerZone } from "./settings/DangerZone";
-import { HooksSettings } from "./settings/HooksSettings";
 import { McpSettings } from "./settings/McpSettings";
+import { OnboardingSettings } from "./settings/OnboardingSettings";
 import { PreferencesSettings } from "./settings/PreferencesSettings";
 import { StorageSettings } from "./settings/StorageSettings";
 import { AppButton } from "./primitives/AppButton";
@@ -40,6 +40,8 @@ type Props = {
   deletionScopeTarget?: string;
   localDataStatus?: LocalDataStatus;
   motionDisabled?: boolean;
+  settingsError?: string;
+  settingsLoadState?: "loading" | "ready" | "error";
   settingsState?: SettingsStateDto;
   readOnly?: boolean;
   connection?: MastheadConnectionState;
@@ -50,12 +52,15 @@ type Props = {
   onDeletionScopeTargetChange?: (target: string) => void;
   onExportLocalData?: () => void;
   onMotionDisabledChange?: (disabled: boolean) => void;
+  onOpenOnboarding?: () => void;
+  onReloadSettings?: () => void;
   onRequestPruneLocalData?: () => void;
   onConfirmPruneLocalData?: () => void;
   onRequestScopedDelete?: () => void;
   onConfirmScopedDelete?: () => void;
   onRequestDeleteLocalData?: () => void;
   onConfirmDeleteLocalData?: () => void;
+  onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
 };
 
 export function OperationsPanel({
@@ -65,6 +70,8 @@ export function OperationsPanel({
   deletionScopeTarget = "",
   localDataStatus = { state: "idle" },
   motionDisabled,
+  settingsError: controlledSettingsError,
+  settingsLoadState: controlledSettingsLoadState,
   onCancelLocalDataAction,
   onConfirmDeleteLocalData,
   onConfirmPruneLocalData,
@@ -73,40 +80,50 @@ export function OperationsPanel({
   onDeletionScopeTargetChange,
   onExportLocalData,
   onMotionDisabledChange,
+  onOpenOnboarding,
+  onReloadSettings,
   onRequestDeleteLocalData,
   onRequestPruneLocalData,
   onRequestScopedDelete,
+  onSaveLlmProvider,
   readOnly = false,
   settingsState
 }: Props) {
   const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
-  const [settingsError, setSettingsError] = useState<string>();
-  const [settingsLoadState, setSettingsLoadState] = useState<"loading" | "ready" | "error">(settingsState ? "ready" : "loading");
+  const [localSettingsError, setLocalSettingsError] = useState<string>();
+  const [localSettingsLoadState, setLocalSettingsLoadState] = useState<"loading" | "ready" | "error">(settingsState ? "ready" : "loading");
+  const settingsError = controlledSettingsError ?? localSettingsError;
+  const settingsLoadState = controlledSettingsLoadState ?? localSettingsLoadState;
   const effectiveSettings = loadedSettings ?? settingsState;
   const effectiveSummary = dataSummary ?? effectiveSettings?.storage.dataSummary;
   const busy = localDataStatus.state === "busy";
+  const settingsControlled = settingsState !== undefined || controlledSettingsLoadState !== undefined;
 
   const loadSettings = useCallback((signal?: AbortSignal) => {
-    if (settingsState) return;
-    setSettingsLoadState("loading");
+    if (settingsControlled) {
+      onReloadSettings?.();
+      return;
+    }
+    setLocalSettingsLoadState("loading");
     void getSettingsState(baseUrl, { signal })
       .then((settings) => {
         setLoadedSettings(settings);
-        setSettingsError(undefined);
-        setSettingsLoadState("ready");
+        setLocalSettingsError(undefined);
+        setLocalSettingsLoadState("ready");
       })
       .catch((error: unknown) => {
         if (signal?.aborted) return;
-        setSettingsError(error instanceof Error ? error.message : String(error));
-        setSettingsLoadState("error");
+        setLocalSettingsError(error instanceof Error ? error.message : String(error));
+        setLocalSettingsLoadState("error");
       });
-  }, [baseUrl, settingsState]);
+  }, [baseUrl, onReloadSettings, settingsControlled]);
 
   useEffect(() => {
+    if (settingsControlled) return undefined;
     const controller = new AbortController();
     loadSettings(controller.signal);
     return () => controller.abort();
-  }, [loadSettings]);
+  }, [loadSettings, settingsControlled]);
 
   const openDataDirectory = async () => {
     const dataDirectory = effectiveSettings?.storage.dataDirectory ?? effectiveSettings?.data.dataDirectory;
@@ -116,19 +133,23 @@ export function OperationsPanel({
         throw new Error("Opening the data directory requires the Masthead desktop app.");
       }
       await invokeDesktopCommand<void>("open_data_directory_command", { path: dataDirectory });
-      setSettingsError(undefined);
+      setLocalSettingsError(undefined);
     } catch (error) {
-      setSettingsError(error instanceof Error ? error.message : String(error));
+      setLocalSettingsError(error instanceof Error ? error.message : String(error));
     }
   };
 
   const saveLlmProviderSettings = useCallback(async (input: UpdateLlmProviderSettingsInput) => {
     if (readOnly) throw new Error("Settings are read-only in this connection.");
+    if (onSaveLlmProvider) {
+      await onSaveLlmProvider(input);
+      return;
+    }
     const nextSettings = await updateLlmProviderSettings(input, baseUrl);
     setLoadedSettings(nextSettings);
-    setSettingsError(undefined);
-    setSettingsLoadState("ready");
-  }, [baseUrl, readOnly]);
+    setLocalSettingsError(undefined);
+    setLocalSettingsLoadState("ready");
+  }, [baseUrl, onSaveLlmProvider, readOnly]);
 
   const writesDisabled = busy || readOnly;
   const showSettingsSections = Boolean(effectiveSettings) || settingsLoadState !== "error";
@@ -171,7 +192,7 @@ export function OperationsPanel({
             />
           </div>
           <div className="settings-priority-column settings-priority-column-session">
-            <HooksSettings baseUrl={baseUrl} hooks={effectiveSettings?.hooks} readOnly={readOnly} />
+            <OnboardingSettings onOpenOnboarding={onOpenOnboarding} readOnly={readOnly} />
             <PreferencesSettings motionDisabled={motionDisabled} onMotionDisabledChange={onMotionDisabledChange} />
           </div>
           <div className="settings-priority-column settings-priority-column-mcp">
