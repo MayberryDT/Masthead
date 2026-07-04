@@ -14,6 +14,65 @@ afterEach(() => {
 });
 
 describe("collector autostart", () => {
+  test("keeps connected secondary surfaces online after desktop bridge autostart", async () => {
+    const requestedUrls: string[] = [];
+    const invoke = vi.fn(async (command: string) => {
+      expect(command).toBe("start_live_connector_command");
+      return {
+        ok: true,
+        started: true,
+        baseUrl: "http://127.0.0.1:17373",
+        command: "masthead daemon",
+        health: { apiVersion: 1, databaseId: "db", mode: "primary" },
+        message: "Started local Masthead collector.",
+        projectionUrl: "http://127.0.0.1:17373/projection"
+      };
+    });
+
+    window.mastheadDesktop = { invoke: invoke as unknown as NonNullable<Window["mastheadDesktop"]>["invoke"] };
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      return window.setTimeout(() => callback(performance.now()), 0);
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id: number) => window.clearTimeout(id));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        const requestUrl = String(url);
+        requestedUrls.push(requestUrl);
+        const { host, pathname } = new URL(requestUrl);
+        if (pathname === "/health" && host === "127.0.0.1:17372") return new Response("offline", { status: 503 });
+        if (pathname === "/projection" && host === "127.0.0.1:17372") return new Response("offline", { status: 503 });
+        return jsonResponse(responseForUrl(requestUrl));
+      })
+    );
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MastheadConnectionProvider initialUrl="http://127.0.0.1:17372/projection">
+          <App />
+        </MastheadConnectionProvider>
+      );
+    });
+
+    await act(async () => {
+      await waitFor(() => invoke.mock.calls.length === 1);
+      await flushTimers();
+      await flushTimers();
+    });
+    await waitFor(() => requestedUrls.some((url) => urlMatches(url, "/projection", "127.0.0.1:17373")));
+
+    await assertSurfaceDoesNotShowOfflineRecovery(container, "Logbook");
+    await assertSurfaceDoesNotShowOfflineRecovery(container, "Sources");
+    await assertSurfaceDoesNotShowOfflineRecovery(container, "Usage");
+    await assertSurfaceDoesNotShowOfflineRecovery(container, "Settings");
+
+    root.unmount();
+  });
+
   test("does not report projection failure when startup load is superseded by a later successful request", async () => {
     const projectionRequests: Array<ReturnType<typeof deferred<unknown>>> = [];
     const invoke = vi.fn(async (command: string) => {
@@ -66,7 +125,7 @@ describe("collector autostart", () => {
     await act(async () => {
       await waitFor(() => invoke.mock.calls.length === 1);
     });
-    await waitFor(() => projectionRequests.length === 1);
+    await waitFor(() => projectionRequests.length >= 1);
     await act(async () => {
       await chooseRefreshRate(container, "5s");
       await flushTimers();
@@ -313,10 +372,28 @@ async function waitFor(condition: () => boolean): Promise<void> {
   expect(condition()).toBe(true);
 }
 
+function urlMatches(url: string, pathname: string, host: string): boolean {
+  const parsed = new URL(url);
+  return parsed.pathname === pathname && parsed.host === host;
+}
+
 function clickSidebarButton(container: HTMLElement, label: string): void {
   const button = [...container.querySelectorAll("button")].find((candidate) => candidate.textContent?.includes(label));
   expect(button).toBeDefined();
   button?.click();
+}
+
+async function assertSurfaceDoesNotShowOfflineRecovery(container: HTMLElement, label: string): Promise<void> {
+  await act(async () => {
+    clickSidebarButton(container, label);
+    await flushTimers();
+    await flushTimers();
+  });
+
+  expect(container.textContent).toContain(label);
+  expect(container.textContent).not.toContain("No live connection");
+  expect(container.textContent).not.toContain("No Masthead daemon is responding");
+  expect(container.textContent).not.toContain("Use the Connector panel to start or check the local collector.");
 }
 
 async function chooseRefreshRate(container: HTMLElement, label: string): Promise<void> {
@@ -370,6 +447,15 @@ function responseForUrl(url: string) {
   if (pathname === "/adapters") return { ok: true, adapters: [] };
   if (pathname === "/sources") return { ok: true, sources: [] };
   if (pathname === "/imports") return { ok: true, imports: [], limit: 50, offset: 0, total: 0 };
+  if (pathname === "/sessions") return { sessions: [], total: 0 };
+  if (pathname === "/logbook/summary") return { ok: true, summary: emptyLogbookSummary() };
+  if (pathname === "/projects") return { ok: true, projects: [] };
+  if (pathname === "/usage/summary") return { ok: true, usage: emptyUsageStats() };
+  if (pathname === "/settings") return { ok: true, settings: settingsState() };
+  if (pathname === "/mcp/status") return { ok: true, status: mcpStatus() };
+  if (pathname === "/mcp/tools") return { ok: true, tools: [] };
+  if (pathname === "/mcp/audit") return { ok: true, audit: [] };
+  if (pathname === "/data/summary") return { ok: true, summary: dataSummary() };
   if (pathname === "/review-dispositions") return { ok: true, dispositions: [] };
   return { ok: true };
 }
@@ -412,5 +498,169 @@ function emptySourcesSetup() {
       imports: [],
       sources: []
     }
+  };
+}
+
+function emptyLogbookSummary() {
+  return {
+    runtimes: [],
+    models: [],
+    lifecycles: [],
+    sessions: 0,
+    projects: 0,
+    messages: 0,
+    toolCalls: 0,
+    fileEffects: 0
+  };
+}
+
+function emptyUsageStats() {
+  return {
+    window: "today",
+    generatedAt: "2026-07-04T00:00:00.000Z",
+    range: {
+      to: "2026-07-04T00:00:00.000Z"
+    },
+    totals: {
+      sessions: 0,
+      projects: 0,
+      runtimes: 0,
+      models: 0,
+      messages: 0,
+      toolCalls: 0,
+      fileEffects: 0,
+      mcpQueries: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      tokenRows: 0,
+      tokenCoverageSessions: 0
+    },
+    byModel: [],
+    byProject: [],
+    byRuntime: [],
+    activity: [],
+    coverage: {
+      sources: 0,
+      importedSessions: 0,
+      sessionsWithTokenUsage: 0,
+      sessionsWithoutTokenUsage: 0,
+      currentEnrichments: 0,
+      mcpQueries: 0
+    }
+  };
+}
+
+function settingsState() {
+  return {
+    apiVersion: 1,
+    capabilities: ["settings"],
+    schemaVersion: 1,
+    product: "masthead",
+    runtime: {
+      host: "127.0.0.1",
+      mode: "primary",
+      port: 17373,
+      writable: true
+    },
+    data: {
+      databaseId: "db",
+      databasePath: "/tmp/masthead.sqlite",
+      dataDirectory: "/tmp/masthead",
+      migrationState: "ready",
+      storePath: "/tmp/masthead/events.ndjson"
+    },
+    deletionTargets: {
+      hosts: [],
+      projects: [],
+      runtimes: []
+    },
+    enrichment: {
+      currentEnrichments: 0,
+      health: {
+        complete: 0,
+        disabled: 0,
+        failed: 0,
+        queued: 0,
+        status: "complete"
+      },
+      model: "deterministic",
+      provider: "Deterministic fallback",
+      remoteModelEnabled: false,
+      sessionCount: 0
+    },
+    hooks: {
+      command: "masthead-hook",
+      configExists: false,
+      configPath: "/tmp/hooks.json",
+      endpoint: "http://127.0.0.1:17373/ingest",
+      installed: false,
+      integrations: [],
+      missingEvents: [],
+      mismatchedEvents: []
+    },
+    llm: {
+      activeProvider: "openai",
+      providers: [
+        {
+          apiKeyRequired: true,
+          apiStyle: "responses",
+          configured: false,
+          customBaseUrl: false,
+          id: "openai",
+          label: "OpenAI",
+          local: false,
+          model: "gpt-5-nano"
+        }
+      ],
+      remoteEnrichmentEnabled: false,
+      secretStorage: {
+        description: "API keys are stored locally.",
+        kind: "local_database"
+      }
+    },
+    privacy: {
+      mcpAccessEnabled: true,
+      redactionEnabled: true,
+      transcriptImportEnabled: true
+    },
+    storage: {
+      dataSummary: dataSummary(),
+      databasePath: "/tmp/masthead.sqlite",
+      dataDirectory: "/tmp/masthead",
+      storePath: "/tmp/masthead/events.ndjson"
+    }
+  };
+}
+
+function dataSummary() {
+  return {
+    auditRows: 0,
+    enrichments: 0,
+    messages: 0,
+    rawEvents: 0,
+    sessions: 0,
+    sources: 0,
+    storageClasses: {
+      audit_logs: { description: "MCP query audit records.", records: 0, retention: "configurable" },
+      canonical_metadata: { description: "Sessions and capsules.", records: 0, retention: "indefinite" },
+      derived_indexes: { description: "Indexes.", records: 0, retention: "rebuildable" },
+      large_outputs: { description: "Outputs.", records: 0, retention: "short_configurable" },
+      raw_payloads: { description: "Raw payloads.", records: 0, retention: "configurable" },
+      searchable_messages: { description: "Messages.", records: 0, retention: "indefinite_configurable" }
+    },
+    tables: {}
+  };
+}
+
+function mcpStatus() {
+  return {
+    ready: true,
+    databasePath: "/tmp/masthead.sqlite",
+    mode: "stdio",
+    readOnly: true,
+    toolCount: 0,
+    queryCount: 0,
+    globalAccessEnabled: true
   };
 }

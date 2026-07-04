@@ -41,6 +41,7 @@ import {
 import { startLiveConnector } from "./connectorClient";
 import { isDesktopBridgeAvailable } from "./desktopBridge";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
+import { MastheadApiClient } from "./api/MastheadApiClient";
 import { ConnectionRecoveryPanel, type CollectorStartupLogEntry, type ConnectorActionView } from "../ui/ConnectionRecoveryPanel";
 import { saveReviewDisposition } from "./daemonClient";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
@@ -60,6 +61,8 @@ import { clearUnsupportedLocationHash } from "./locationHash";
 
 type ConnectorActionState = ConnectorActionView;
 type LiveProjectionLoadResult = "loaded" | "superseded" | "failed";
+
+const STARTUP_PROJECTION_ERROR_MESSAGE = "Collector started, but live projection did not load.";
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
@@ -107,6 +110,7 @@ export function App() {
   const [collectorStartupLog, setCollectorStartupLog] = useState<CollectorStartupLogEntry[]>([]);
   const connection = useMastheadConnection();
   const activeProjectionUrl = connection.baseUrl;
+  const activeProjectionUrlRef = useRef(activeProjectionUrl);
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
   const [sourceLibraryRefreshKey, setSourceLibraryRefreshKey] = useState(0);
@@ -160,6 +164,7 @@ export function App() {
   const liveRequestIdRef = useRef(0);
   const autoStartAttemptedRef = useRef(false);
   const collectorStartInFlightRef = useRef(false);
+  const collectorProjectionLoadedRef = useRef(false);
   const fixtureBoard = useMemo(() => buildObservabilityDemoBoard(selectedSessionId), [selectedSessionId]);
   const baseBoard = showDemoData ? fixtureBoard : liveProjection ?? emptyLiveBoard;
   const board = useMemo(() => applyReviewDispositions(baseBoard, reviewDispositions), [baseBoard, reviewDispositions]);
@@ -238,6 +243,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    activeProjectionUrlRef.current = activeProjectionUrl;
+  }, [activeProjectionUrl]);
+
+  useEffect(() => {
     writeStoredMotionDisabled(motionDisabled);
   }, [motionDisabled]);
 
@@ -284,21 +293,25 @@ export function App() {
     if (selectedLiveSession) setSelectedSessionSnapshot(selectedLiveSession);
   }, [detailModalOpen, selectedLiveSession]);
 
-  const loadLiveProjection = useCallback(async (): Promise<LiveProjectionLoadResult> => {
+  const loadLiveProjection = useCallback(async (targetUrl?: string): Promise<LiveProjectionLoadResult> => {
     const requestId = liveRequestIdRef.current + 1;
     liveRequestIdRef.current = requestId;
     const selectedLiveSessionId = selectedSessionId ?? undefined;
     const isCurrentRequest = () => liveRequestIdRef.current === requestId;
 
-    const mastheadApi = connection.api;
+    const mastheadApi = targetUrl ? new MastheadApiClient(targetUrl) : connection.api;
+    const isSupersededRequest = () => !isCurrentRequest() || mastheadApi.baseUrl !== activeProjectionUrlRef.current;
     try {
       const body = await mastheadApi.getLiveProjection(selectedLiveSessionId, { refreshIntervalMs: refreshRateMs });
+      if (isSupersededRequest()) return "superseded";
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
-      if (!isCurrentRequest()) return "superseded";
       setLiveProjection(normalizeLiveBoardProjection(body.projection, selectedSessionId));
       setShowDemoData(false);
+      collectorProjectionLoadedRef.current = true;
       setConnectorAction((current) =>
-        current.state === "starting" || current.state === "started" ? { state: "started", message: "Collector connected." } : current
+        current.state === "starting" || current.state === "started" || current.message === STARTUP_PROJECTION_ERROR_MESSAGE
+          ? { state: "started", message: "Collector connected." }
+          : current
       );
       setCollectorStartupLog((current) =>
         current.some((entry) => entry.id === "projection")
@@ -319,7 +332,7 @@ export function App() {
       });
       return "loaded";
     } catch (error) {
-      if (!isCurrentRequest()) return "superseded";
+      if (isSupersededRequest()) return "superseded";
       setLiveProjection(undefined);
       setLiveEvents(undefined);
       setLiveGitSnapshots(undefined);
@@ -370,6 +383,7 @@ export function App() {
           state: "running"
         }
       ]);
+      collectorProjectionLoadedRef.current = false;
       let failureLogEntry: CollectorStartupLogEntry = {
         id: "bridge",
         label: "Desktop bridge",
@@ -405,6 +419,7 @@ export function App() {
             state: "error"
           };
           await connection.connectTo(result.projectionUrl);
+          activeProjectionUrlRef.current = result.baseUrl;
           appendCollectorStartupLog({
             id: "connect",
             label: "Connection",
@@ -427,8 +442,8 @@ export function App() {
             detail: "Live projection did not load.",
             state: "error"
           };
-          const projectionLoadResult = await loadLiveProjection();
-          if (projectionLoadResult === "failed") {
+          const projectionLoadResult = await loadLiveProjection(result.projectionUrl);
+          if (projectionLoadResult === "failed" && !collectorProjectionLoadedRef.current) {
             appendCollectorStartupLog({
               id: "projection",
               label: "Live projection",
@@ -437,7 +452,7 @@ export function App() {
             });
             setConnectorAction({
               state: "error",
-              message: "Collector started, but live projection did not load."
+              message: STARTUP_PROJECTION_ERROR_MESSAGE
             });
           }
           return;
