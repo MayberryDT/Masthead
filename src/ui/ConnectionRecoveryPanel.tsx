@@ -33,7 +33,7 @@ type RecoveryCopy = {
 };
 
 export function ConnectionRecoveryPanel({ action, connection, onRetry, onStart, retryLabel, startupLog }: ConnectionRecoveryPanelProps) {
-  const copy = recoveryCopy(connection);
+  const copy = recoveryCopy(connection, action);
   const message = messageFrom(connection);
   const hasStartupLog = startupLog !== undefined && startupLog.length > 0;
   const showStartup = action?.state !== undefined ? action.state !== "idle" || hasStartupLog : hasStartupLog;
@@ -102,7 +102,42 @@ function ConnectionStartupStatus({ action, startupLog }: { action?: ConnectorAct
   );
 }
 
-function recoveryCopy(connection: MastheadConnectionState): RecoveryCopy {
+function recoveryCopy(connection: MastheadConnectionState, action?: ConnectorActionView): RecoveryCopy {
+  if (action?.state === "error") {
+    return {
+      eyebrow: "Collector startup failed",
+      title: "Masthead could not finish connecting",
+      detail: action.message ?? "The local collector startup reached an error before live surfaces could connect.",
+      status: "Startup error",
+      tone: "offline",
+      startLabel: "Start collector",
+      retryLabel: "Retry"
+    };
+  }
+
+  if (action?.state === "unsupported") {
+    return {
+      eyebrow: "Collector startup unavailable",
+      title: "This shell cannot start the collector",
+      detail: action.message ?? "Start the local collector outside this app, then check the connection again.",
+      status: "Unsupported",
+      tone: "offline",
+      retryLabel: "Check again"
+    };
+  }
+
+  if (action?.state === "starting") {
+    return {
+      eyebrow: "Starting collector",
+      title: "Masthead is starting the local collector",
+      detail: action.message ?? "The app is requesting the bundled collector and connecting live surfaces.",
+      status: "Starting",
+      tone: "connecting",
+      startLabel: "Start collector",
+      retryLabel: "Check now"
+    };
+  }
+
   const state = connection.state as string;
 
   if (state === "incompatible") {

@@ -71,6 +71,21 @@ describe("ConnectionRecoveryPanel", () => {
     );
 
     expect(html).toContain("<button type=\"button\" class=\"app-button app-button-primary metal-control\" disabled=\"\">Start collector</button>");
-    expect(html).toContain(">Retry</button>");
+    expect(html).toContain(">Check now</button>");
+  });
+
+  test("uses startup error copy even when the daemon health probe is ready", () => {
+    const html = renderToStaticMarkup(
+      <ConnectionRecoveryPanel
+        connection={{ state: "ready", baseUrl: "http://127.0.0.1:17373", health: {}, writable: true } as MastheadConnectionState}
+        action={{ state: "error", message: "Collector started, but live projection did not load." }}
+        onRetry={noop}
+        onStart={noop}
+      />
+    );
+
+    expect(html).toContain("Masthead could not finish connecting");
+    expect(html).toContain("Collector started, but live projection did not load.");
+    expect(html).not.toContain("Masthead daemon is ready");
   });
 });
