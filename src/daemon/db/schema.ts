@@ -60,6 +60,11 @@ const migrations = [
     version: 11,
     name: "011_board_headline_generations",
     path: resolve(currentDir, "migrations/011_board_headline_generations.sql")
+  },
+  {
+    version: 13,
+    name: "013_dossier_enrichment_indexes",
+    path: resolve(currentDir, "migrations/013_dossier_enrichment_indexes.sql")
   }
 ];
 

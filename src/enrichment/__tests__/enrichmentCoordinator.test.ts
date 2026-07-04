@@ -2,11 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { readCurrentSessionEnrichment, readSessionEnrichment } from "../../daemon/db/enrichmentRepository.ts";
+import { readCurrentSessionEnrichment, readSessionEnrichment, upsertSessionEnrichment } from "../../daemon/db/enrichmentRepository.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { createDeterministicEnrichmentProvider } from "../deterministicProvider.ts";
 import { createEnrichmentCoordinator, EnrichmentFailedError, shouldReplaceSessionTitle } from "../enrichmentCoordinator.ts";
+import { buildSessionFacts } from "../sessionFacts.ts";
+import { fingerprintSessionFacts, SESSION_CAPSULE_PROMPT_VERSION } from "../sessionCompiler.ts";
 import type { SessionEnrichmentProvider } from "../provider.ts";
 
 const tempDirs: string[] = [];
@@ -147,6 +149,167 @@ describe("enrichment coordinator", () => {
     db.close();
   });
 
+  test("ensureCurrent retries recent failures that predate the current daemon run", async () => {
+    const db = await openTestDatabase();
+    seedSession(db);
+    const failedAt = Date.parse("2026-06-25T12:00:00.000Z");
+    const failingCoordinator = createEnrichmentCoordinator(db, countingFailingProvider("timeout"), {
+      failureBackoffMs: 10 * 60_000,
+      now: () => failedAt
+    });
+    await expect(failingCoordinator.ensureCurrent("session-1")).rejects.toMatchObject({ status: "timeout" });
+    const provider = countingSuccessfulProvider();
+    const restartedCoordinator = createEnrichmentCoordinator(db, provider, {
+      failureBackoffAfterMs: failedAt + 1,
+      failureBackoffMs: 10 * 60_000,
+      now: () => failedAt + 60_000
+    });
+
+    const refreshed = await restartedCoordinator.ensureCurrent("session-1");
+
+    expect(provider.calls()).toBe(1);
+    expect(refreshed).toMatchObject({
+      provider: "test-provider",
+      status: "current"
+    });
+    db.close();
+  });
+
+  test("ensureCurrent refreshes deterministic current enrichment when a model provider is configured", async () => {
+    const db = await openTestDatabase();
+    seedSession(db);
+    const deterministicCoordinator = createEnrichmentCoordinator(db, createDeterministicEnrichmentProvider());
+    await deterministicCoordinator.enrich("session-1");
+    const provider = countingSuccessfulProvider();
+    const modelCoordinator = createEnrichmentCoordinator(db, provider);
+
+    const refreshed = await modelCoordinator.ensureCurrent("session-1");
+
+    expect(provider.calls()).toBe(1);
+    expect(refreshed).toMatchObject({
+      model: "test-model",
+      provider: "test-provider",
+      status: "current"
+    });
+    expect(readCurrentSessionEnrichment(db, "session-1", "session_capsule", refreshed.promptVersion)).toMatchObject({
+      model: "test-model",
+      provider: "test-provider"
+    });
+    db.close();
+  });
+
+  test("ensureCurrent retries weak current fallback content when transcript facts are rich", async () => {
+    const db = await openTestDatabase();
+    seedSession(db);
+    appendMessage(db, "session-1", "assistant", "Implemented OAuth Logbook search and verified the focused tests passed.");
+    const facts = buildSessionFacts(db, "session-1");
+    const fingerprint = fingerprintSessionFacts(facts);
+    upsertSessionEnrichment(db, {
+      content: {
+        candidateDecisions: [],
+        confidence: "high",
+        durableEnrichment: {
+          sessionDossier: {
+            blockers: [],
+            continuation: {
+              constraints: [],
+              nextStep: "Review the original source transcript if more context is needed.",
+              openQuestions: []
+            },
+            decisions: [],
+            evidenceRefs: [],
+            keyWork: ["Changed 2 files."],
+            outcome: "Masthead imported limited session metadata for this record.",
+            purpose: "Not enough transcript evidence is available to identify the session purpose reliably.",
+            verification: {
+              commands: [],
+              evidenceRefs: [],
+              failures: [],
+              status: "missing",
+              summary: "No reliable verification evidence was captured."
+            },
+            warnings: ["Durable enrichment used a low-confidence fallback."]
+          },
+          sessionSummary: {
+            confidence: "low",
+            evidenceRefs: [],
+            state: "unknown",
+            text: "Imported historical Masthead session evidence with limited durable enrichment context."
+          },
+          sessionTitle: {
+            basis: "dominant_work",
+            confidence: "high",
+            evidenceRefs: [],
+            text: "OAuth Logbook search"
+          },
+          source: "remote_model",
+          version: "session-capsule-v4"
+        },
+        liveSummary: "Imported historical Masthead session evidence with limited durable enrichment context.",
+        searchPhrases: [],
+        searchSummary: "OAuth Logbook search Imported historical Masthead session evidence with limited durable enrichment context.",
+        sessionDossier: {
+          blockers: [],
+          continuation: {
+            constraints: [],
+            nextStep: "Review the original source transcript if more context is needed.",
+            openQuestions: []
+          },
+          decisions: [],
+          evidenceRefs: [],
+          keyWork: ["Changed 2 files."],
+          outcome: "Masthead imported limited session metadata for this record.",
+          purpose: "Not enough transcript evidence is available to identify the session purpose reliably.",
+          verification: {
+            commands: [],
+            evidenceRefs: [],
+            failures: [],
+            status: "missing",
+            summary: "No reliable verification evidence was captured."
+          },
+          warnings: ["Durable enrichment used a low-confidence fallback."]
+        },
+        sessionSummary: {
+          confidence: "low",
+          evidenceRefs: [],
+          state: "unknown",
+          text: "Imported historical Masthead session evidence with limited durable enrichment context."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "high",
+          evidenceRefs: [],
+          text: "OAuth Logbook search"
+        },
+        technologies: [],
+        title: "OAuth Logbook search",
+        topics: [],
+        unresolved: [],
+        validationWarnings: ["liveSummary:missing", "searchSummary:missing"]
+      },
+      contentFingerprint: fingerprint,
+      enrichmentKind: "session_capsule",
+      generatedAt: "2026-06-25T12:05:00.000Z",
+      model: "test-model",
+      promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
+      provider: "test-provider",
+      sessionId: "session-1",
+      sourceRefs: facts.evidence,
+      status: "current"
+    });
+    const provider = countingSuccessfulProvider();
+    const coordinator = createEnrichmentCoordinator(db, provider);
+
+    const refreshed = await coordinator.ensureCurrent("session-1");
+
+    expect(provider.calls()).toBe(1);
+    expect(refreshed).toMatchObject({
+      provider: "test-provider",
+      status: "current"
+    });
+    db.close();
+  });
+
   test("typed enrichment failure exposes provider status for diagnostics", () => {
     const error = new EnrichmentFailedError({
       failureMessage: "Provider timed out.",
@@ -249,6 +412,36 @@ function countingFailingProvider(status: "timeout" | "api_error" | "validation_f
         provider: "test-provider",
         source: "none",
         status
+      };
+    }
+  };
+}
+
+function countingSuccessfulProvider(): SessionEnrichmentProvider & { calls(): number } {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    id: "test-provider",
+    model: "test-model",
+    async enrich() {
+      calls += 1;
+      return {
+        capsule: {
+          candidateDecisions: [],
+          confidence: "high",
+          liveSummary: "Model provider refreshed deterministic fallback.",
+          missingEvidence: [],
+          outcome: "Configured provider current enrichment is available.",
+          searchPhrases: ["provider refresh"],
+          technologies: [],
+          title: "Provider refreshed enrichment",
+          topics: [],
+          unresolved: []
+        },
+        model: "test-model",
+        provider: "test-provider",
+        source: "llm",
+        status: "success"
       };
     }
   };

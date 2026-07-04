@@ -9,8 +9,11 @@ import { deterministicCapsuleFromFacts, SESSION_CAPSULE_PROMPT_VERSION, type Ses
 import { validateNarrativeField } from "./sessionNarrativeValidator.ts";
 import type { SessionCapsule } from "./types.ts";
 
-export const LLM_NARRATIVE_MAX_OUTPUT_TOKENS = 760;
+export const LLM_NARRATIVE_MAX_OUTPUT_TOKENS = 1_800;
 export const DEFAULT_LLM_TIMEOUT_MS = 10_000;
+const MAX_USER_EVIDENCE_CHARS = 28_000;
+const MAX_ASSISTANT_EVIDENCE_CHARS = 36_000;
+const MAX_EVIDENCE_ITEM_CHARS = 900;
 
 export type LlmNarrativeRequest = {
   evidenceCatalog: ProviderEvidenceCatalogItem[];
@@ -176,7 +179,7 @@ export function parseLlmNarrativeResult(input: {
 }): EnrichmentProviderResult {
   let parsedOutput: unknown;
   try {
-    parsedOutput = JSON.parse(input.outputText);
+    parsedOutput = JSON.parse(extractJsonObjectText(input.outputText));
   } catch {
     return failureResult("invalid_json", input.provider, input.model, `${providerLabel(input.provider)} enrichment response was not valid JSON.`, {
       latencyMs: input.latencyMs,
@@ -233,8 +236,12 @@ export function providerLabel(provider: string): string {
 
 function providerPayload(facts: SessionFacts): Record<string, unknown> {
   const narrative = facts.narrative;
-  const userEvidence = cleanEvidenceList(facts.userEvidence ?? [narrative?.firstUserPrompt, narrative?.lastUserPrompt]);
-  const assistantEvidence = cleanEvidenceList(facts.assistantEvidence ?? [narrative?.finalAssistantMessage]);
+  const userEvidence = budgetEvidenceList("user", cleanEvidenceList(facts.userEvidence ?? [narrative?.firstUserPrompt, narrative?.lastUserPrompt]), MAX_USER_EVIDENCE_CHARS);
+  const assistantEvidence = budgetEvidenceList(
+    "assistant",
+    cleanEvidenceList(facts.assistantEvidence ?? [narrative?.finalAssistantMessage]),
+    MAX_ASSISTANT_EVIDENCE_CHARS
+  );
   return {
     evidenceCatalog: [],
     facts: {
@@ -244,42 +251,85 @@ function providerPayload(facts: SessionFacts): Record<string, unknown> {
   };
 }
 
+function extractJsonObjectText(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{")) return trimmed;
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  if (fenced?.startsWith("{")) return fenced;
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
+  return trimmed;
+}
+
+function budgetEvidenceList(label: "user" | "assistant", values: string[], maxChars: number): string[] {
+  const normalized = values.map((value) => truncateEvidenceItem(value)).filter(Boolean);
+  if (totalChars(normalized) <= maxChars) return normalized;
+
+  const head: string[] = [];
+  const tail: string[] = [];
+  const halfBudget = Math.floor(maxChars / 2);
+  let headChars = 0;
+  let tailChars = 0;
+
+  for (const value of normalized) {
+    if (headChars + value.length > halfBudget) break;
+    head.push(value);
+    headChars += value.length;
+  }
+
+  for (let index = normalized.length - 1; index >= head.length; index -= 1) {
+    const value = normalized[index];
+    if (!value || tailChars + value.length > halfBudget) break;
+    tail.unshift(value);
+    tailChars += value.length;
+  }
+
+  const omitted = normalized.length - head.length - tail.length;
+  return omitted > 0 ? [...head, `[Masthead omitted ${omitted} middle ${label} evidence entries to fit provider context.]`, ...tail] : [...head, ...tail];
+}
+
+function truncateEvidenceItem(value: string): string {
+  return value.length <= MAX_EVIDENCE_ITEM_CHARS ? value : `${value.slice(0, MAX_EVIDENCE_ITEM_CHARS - 3).trimEnd()}...`;
+}
+
+function totalChars(values: string[]): number {
+  return values.reduce((total, value) => total + value.length, 0);
+}
+
 function mergeValidatedNarrative(
   fallback: SessionCapsule,
   facts: SessionFacts,
-  value: unknown,
+  rawValue: unknown,
   evidenceCatalog: ProviderEvidenceCatalogItem[],
   model: string
 ): { ok: true; capsule: SessionCapsule } | { ok: false; validationFailures: string[] } {
-  if (!isRecord(value)) return { ok: false, validationFailures: ["shape"] };
+  if (!isRecord(rawValue)) return { ok: false, validationFailures: ["shape"] };
+  const value = normalizeProviderOutputAliases(rawValue);
   const title = validatedField("title", value.title);
   const liveSummary = validatedField("liveSummary", value.liveSummary);
   const searchSummary = validatedField("searchSummary", value.searchSummary);
-  const confidence = confidenceField(value.confidence);
-  const missingEvidence = missingEvidenceField(value.missingEvidence);
+  const parsedConfidence = confidenceField(value.confidence);
+  const confidence = parsedConfidence ?? fallback.confidence ?? "medium";
+  const parsedMissingEvidence = missingEvidenceField(value.missingEvidence);
+  const missingEvidence = parsedMissingEvidence ?? [];
   const softFailures = [
     ...fieldValidationWarnings("title", title),
     ...fieldValidationWarnings("liveSummary", liveSummary),
     ...fieldValidationWarnings("searchSummary", searchSummary)
   ];
-  const softFailureSummary = [
-    ...fieldValidationFailureSummary("title", title),
-    ...fieldValidationFailureSummary("liveSummary", liveSummary),
-    ...fieldValidationFailureSummary("searchSummary", searchSummary)
+  const coercionWarnings = [
+    ...(parsedConfidence ? [] : ["confidence:coerced"]),
+    ...(parsedMissingEvidence ? [] : ["missingEvidence:coerced"])
   ];
-  const hardFailures = [
-    ...(confidence ? [] : ["confidence"]),
-    ...(missingEvidence ? [] : ["missingEvidence"])
-  ];
-  if (!confidence || !missingEvidence) {
-    return { ok: false, validationFailures: [...softFailureSummary, ...hardFailures] };
-  }
   const outcome = validatedOptionalField("outcome", value.outcome);
   const durableEnrichment = durableEnrichmentFromOutput(fallback, facts, value, evidenceCatalog, model, {
     confidence,
     liveSummary,
     title
   });
+  const hardFailures = durableValidationFailures(fallback, facts, value, durableEnrichment);
+  if (hardFailures.length > 0) return { ok: false, validationFailures: hardFailures };
   const liveSummaryValue =
     (liveSummary.ok ? liveSummary.value : undefined) || durableEnrichment.sessionSummary.text || fallback.liveSummary || fallback.title;
   const searchSummaryValue =
@@ -288,6 +338,7 @@ function mergeValidatedNarrative(
       .filter(Boolean)
       .join(" ");
   const validationWarnings = unique([...softFailures, ...outcome.failures.map((failure) => `outcome:${failure}`)]);
+  const allValidationWarnings = unique([...validationWarnings, ...coercionWarnings]);
   return {
     capsule: {
       ...fallback,
@@ -306,10 +357,48 @@ function mergeValidatedNarrative(
       sessionTitle: durableEnrichment.sessionTitle,
       title: durableEnrichment.sessionTitle.text,
       titleSource: "llm",
-      validationWarnings: validationWarnings.length > 0 ? validationWarnings : fallback.validationWarnings
+      validationWarnings: allValidationWarnings.length > 0 ? allValidationWarnings : fallback.validationWarnings
     },
     ok: true
   };
+}
+
+function normalizeProviderOutputAliases(value: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = { ...value };
+  const summary = typeof normalized.summary === "string" ? normalized.summary : undefined;
+  if (!isRecord(normalized.sessionDossier) && isRecord(normalized.dossier)) normalized.sessionDossier = normalized.dossier;
+  if (summary && typeof normalized.liveSummary !== "string") normalized.liveSummary = summary;
+  if (summary && typeof normalized.searchSummary !== "string") normalized.searchSummary = summary;
+  if (summary && !isRecord(normalized.sessionSummary)) {
+    normalized.sessionSummary = {
+      confidence: confidenceField(normalized.confidence) ?? "medium",
+      evidenceRefIds: [],
+      state: "completed",
+      text: summary
+    };
+  }
+  return normalized;
+}
+
+function durableValidationFailures(
+  fallback: SessionCapsule,
+  facts: SessionFacts,
+  value: Record<string, unknown>,
+  durableEnrichment: NonNullable<SessionCapsule["durableEnrichment"]>
+): string[] {
+  if (!hasRichTranscriptEvidence(facts)) return [];
+  const failures: string[] = [];
+  const hasProviderSummary = isRecord(value.sessionSummary) || typeof value.liveSummary === "string";
+  const hasProviderDossier = isRecord(value.sessionDossier);
+  if (!hasProviderSummary || durableEnrichment.sessionSummary.text === fallback.sessionSummary?.text) failures.push("sessionSummary:missing");
+  if (!hasProviderDossier || durableEnrichment.sessionDossier.purpose === fallback.sessionDossier?.purpose) failures.push("sessionDossier:missing");
+  return failures;
+}
+
+function hasRichTranscriptEvidence(facts: SessionFacts): boolean {
+  const userCount = facts.userEvidence?.filter((entry) => entry.trim().length > 0).length ?? 0;
+  const assistantCount = facts.assistantEvidence?.filter((entry) => entry.trim().length > 0).length ?? 0;
+  return assistantCount > 0 && userCount + assistantCount >= 2;
 }
 
 function validatedField(
@@ -332,10 +421,21 @@ function stringField(value: unknown): string | undefined {
 }
 
 function confidenceField(value: unknown): "high" | "medium" | "low" | undefined {
-  return value === "high" || value === "medium" || value === "low" ? value : undefined;
+  if (value === "high" || value === "medium" || value === "low") return value;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["authoritative", "direct", "complete", "certain", "strong"].includes(normalized)) return "high";
+  if (["partial", "mixed", "moderate", "inferred"].includes(normalized)) return "medium";
+  if (["thin", "weak", "unknown", "uncertain", "missing"].includes(normalized)) return "low";
+  return undefined;
 }
 
 function missingEvidenceField(value: unknown): string[] | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || /^(none|no|n\/a|\[\])$/i.test(trimmed)) return [];
+    return [trimmed].slice(0, 8);
+  }
   if (!Array.isArray(value)) return undefined;
   return value.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.trim()).filter(Boolean).slice(0, 8);
 }
@@ -393,13 +493,6 @@ function fieldValidationWarnings(
   result: ReturnType<typeof validatedField>
 ): string[] {
   return result.failures.map((failure) => `${field}:${failure}`);
-}
-
-function fieldValidationFailureSummary(
-  field: "title" | "liveSummary" | "searchSummary",
-  result: ReturnType<typeof validatedField>
-): string[] {
-  return result.failures.length > 0 ? [field, ...fieldValidationWarnings(field, result)] : [];
 }
 
 function cleanEvidenceList(values: Array<string | undefined>): string[] {

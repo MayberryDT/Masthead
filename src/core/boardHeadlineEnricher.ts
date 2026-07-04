@@ -121,15 +121,21 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       }
 
       const key = boardHeadlineRefreshKey(model, input);
+      const canRequestHeadline = shouldRequestHeadlineForCard(card);
+      const showPendingHeadline = shouldShowPendingHeadlineForCard(card);
       if (!key) {
-        overlays.set(card.sessionId, retained ?? buildWaitingForTranscriptBoardHeadlineView(input));
-        refreshOverlays.set(card.sessionId, {
-          provider: "openai",
-          model,
-          requestedAt: generatedAt,
-          status: "pending"
-        });
-        summary.pending += 1;
+        if (showPendingHeadline) {
+          overlays.set(card.sessionId, retained ?? buildWaitingForTranscriptBoardHeadlineView(input));
+          refreshOverlays.set(card.sessionId, {
+            provider: "openai",
+            model,
+            requestedAt: generatedAt,
+            status: "pending"
+          });
+          summary.pending += 1;
+        } else {
+          overlays.set(card.sessionId, retained ?? buildOfflineBoardHeadlineView(input));
+        }
         continue;
       }
 
@@ -148,15 +154,15 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
         continue;
       }
 
-      if (!shouldRequestHeadlineForCard(card)) {
-        if (retained) overlays.set(card.sessionId, retained);
+      if (!canRequestHeadline) {
+        overlays.set(card.sessionId, retained ?? buildOfflineBoardHeadlineView(input));
         continue;
       }
 
       trackPendingSession(key, card.sessionId);
 
       const failure = failures.get(key);
-      if (failure) {
+      if (failure && showPendingHeadline) {
         refreshOverlays.set(card.sessionId, refreshFromFailure(failure, model, generatedAt));
         if (!countedFailedKeys.has(key)) {
           summary.failed += 1;
@@ -166,12 +172,16 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
 
       if (retained) {
         overlays.set(card.sessionId, retained);
-      } else {
+      } else if (showPendingHeadline) {
         overlays.set(card.sessionId, buildPendingBoardHeadlineView(input));
+      } else {
+        overlays.set(card.sessionId, buildOfflineBoardHeadlineView(input));
       }
 
-      summary.pending += 1;
-      if (!failure) {
+      if (showPendingHeadline) {
+        summary.pending += 1;
+      }
+      if (!failure && showPendingHeadline) {
         refreshOverlays.set(card.sessionId, {
           provider: "openai",
           model,
@@ -431,6 +441,10 @@ function requestAllowedForSession(lastRequestedAtBySession: Map<string, number>,
 }
 
 function shouldRequestHeadlineForCard(card: SessionCardView): boolean {
+  return card.lifecycle === "running" || card.headline.source !== "llm";
+}
+
+function shouldShowPendingHeadlineForCard(card: SessionCardView): boolean {
   return card.lifecycle === "running";
 }
 

@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
+import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, test } from "vitest";
 import { codexHookSource } from "../../adapters/codex/hookAdapter.ts";
 import type { DaemonConfig } from "../config.ts";
@@ -357,6 +358,27 @@ describe("settings API", () => {
     expect(dossier.dossier.identity.title).toBe("Manual Dossier enrichment retry");
   });
 
+  test("manual Dossier enrichment enqueue is not blocked by old tool result bodies", async () => {
+    const { daemon } = await createTestHarness();
+    const sessionId = "session:manual-dossier-large-history";
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId,
+      title: "Large old Dossier"
+    });
+    seedLargeToolHistory(daemon.database, sessionId, 180);
+    const baseUrl = await listen(daemon);
+
+    const startedAt = performance.now();
+    const accepted = await postJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/dossier/enrich`, {});
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(accepted).toMatchObject({ ok: true, enrichment: { status: "enriching" } });
+    expect(elapsedMs).toBeLessThan(150);
+  });
+
   test("manual Dossier enrichment catches up hook transcript before provider request", async () => {
     let providerCalls = 0;
     const providerInputs: Array<{ facts?: { userEvidence?: string[]; assistantEvidence?: string[] } }> = [];
@@ -708,6 +730,23 @@ function dbInsertMessage(
   db.prepare(
     "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(`${sessionId}:${id}`, sessionId, role, text, `${sessionId}:${id}:hash`, observedAt, JSON.stringify({ id }), "authoritative");
+}
+
+function seedLargeToolHistory(db: MastheadDaemon["database"], sessionId: string, count: number): void {
+  const output = Array.from({ length: 2600 }, (_, index) => `large historical output line ${index}`).join("\n");
+  const insertTool = db.prepare("INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, ?, ?, ?)");
+  const insertResult = db.prepare(
+    `INSERT INTO tool_results (
+      tool_result_id, tool_call_id, session_id, status, output_redacted, output_hash, exit_code, completed_at, source_ref_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  for (let index = 0; index < count; index += 1) {
+    const padded = String(index).padStart(4, "0");
+    const toolCallId = `${sessionId}:tool-${padded}`;
+    const observedAt = `2026-07-03T13:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`;
+    insertTool.run(toolCallId, sessionId, "shell", observedAt, "{}");
+    insertResult.run(`${sessionId}:tool-result-${padded}`, toolCallId, sessionId, "succeeded", output, `hash-${padded}`, 0, observedAt, "{}");
+  }
 }
 
 function seedCanonicalDossierSession(

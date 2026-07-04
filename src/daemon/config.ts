@@ -41,7 +41,7 @@ export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Daemo
   const legacyLlmCopy = optionalBoolean(env.MASTHEAD_LLM_COPY);
   const liveCopyEnabled = optionalBoolean(env.MASTHEAD_LIVE_COPY) ?? legacyLlmCopy ?? Boolean(env.OPENAI_API_KEY?.trim());
   const remoteEnrichmentEnabled = optionalBoolean(env.MASTHEAD_REMOTE_ENRICHMENT) ?? legacyLlmCopy ?? false;
-  const remoteEnrichmentTimeoutMs = optionalPositiveInteger(env.MASTHEAD_REMOTE_ENRICHMENT_TIMEOUT_MS) ?? 12_000;
+  const remoteEnrichmentTimeoutMs = optionalPositiveInteger(env.MASTHEAD_REMOTE_ENRICHMENT_TIMEOUT_MS) ?? 60_000;
 
   return {
     host,

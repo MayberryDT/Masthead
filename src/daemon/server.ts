@@ -2023,8 +2023,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (request.method === "POST" && sessionDossierEnrichMatch?.[1]) {
       request.resume();
       const sessionId = decodeURIComponent(sessionDossierEnrichMatch[1]);
-      const dossier = getSessionDossier(database, sessionId);
-      if (!dossier) {
+      if (!sessionExists(database, sessionId)) {
         sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "session not found" });
         return;
       }
@@ -3275,6 +3274,13 @@ function stringRecordValue(value: Record<string, unknown>, key: string): string 
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw clientError(`${name} is required`);
   return value;
+}
+
+function sessionExists(db: MastheadDatabase, sessionId: string): boolean {
+  const row = db.prepare("SELECT 1 AS found FROM sessions WHERE session_id = ? AND deleted_at IS NULL LIMIT 1").get(sessionId) as
+    | { found: number }
+    | undefined;
+  return row?.found === 1;
 }
 
 function clientError(message: string): Error {

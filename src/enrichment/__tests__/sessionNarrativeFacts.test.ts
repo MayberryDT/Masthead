@@ -56,6 +56,50 @@ describe("session narrative facts", () => {
 
     db.close();
   });
+
+  test("limits narrative commands before attaching tool results", async () => {
+    const db = await openTestDatabase();
+    seedNarrativeSession(db);
+    db.prepare("DELETE FROM tool_results WHERE session_id = ?").run("session-narrative-facts");
+    db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run("session-narrative-facts");
+    for (let index = 0; index < 70; index += 1) {
+      const toolCallId = `tool:bulk:${index}`;
+      const startedAt = new Date(Date.UTC(2026, 5, 26, 14, index)).toISOString();
+      db.prepare("INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, ?, ?, ?)").run(
+        toolCallId,
+        "session-narrative-facts",
+        `command ${String(index).padStart(2, "0")}`,
+        startedAt,
+        "{}"
+      );
+      for (let resultIndex = 0; resultIndex < 2; resultIndex += 1) {
+        db.prepare(
+          `INSERT INTO tool_results (
+            tool_result_id, tool_call_id, session_id, status, output_redacted, output_hash, exit_code, completed_at, source_ref_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          `${toolCallId}:result:${resultIndex}`,
+          toolCallId,
+          "session-narrative-facts",
+          "succeeded",
+          `command ${index} result ${resultIndex}`,
+          `${toolCallId}:result:${resultIndex}:hash`,
+          0,
+          startedAt,
+          "{}"
+        );
+      }
+    }
+
+    const facts = buildSessionNarrativeFacts(db, "session-narrative-facts");
+    const commandNames = facts.commands.map((command) => command.name);
+
+    expect(commandNames).toHaveLength(50);
+    expect(new Set(commandNames).size).toBe(50);
+    expect(commandNames).toContain("command 69");
+    expect(commandNames).not.toContain("command 00");
+    db.close();
+  });
 });
 
 async function openTestDatabase(): Promise<MastheadDatabase> {

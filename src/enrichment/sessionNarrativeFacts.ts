@@ -79,6 +79,7 @@ type NarrativeSessionRow = {
 type TextRow = { text: string };
 type FileRow = { path: string; operation: string | null };
 type CommandRow = {
+  toolCallId: string;
   name: string;
   category: string | null;
   status: string | null;
@@ -87,6 +88,22 @@ type CommandRow = {
   startedAt: string | null;
   completedAt: string | null;
 };
+
+type ToolCallRow = {
+  toolCallId: string;
+  name: string;
+  startedAt: string | null;
+};
+
+type ToolResultRow = {
+  toolCallId: string;
+  status: string | null;
+  exitCode: number | null;
+  outputPreview: string | null;
+  completedAt: string | null;
+};
+
+const NARRATIVE_COMMAND_LIMIT = 50;
 
 export function buildSessionNarrativeFacts(db: MastheadDatabase, sessionId: string): SessionNarrativeFacts {
   const session = db
@@ -133,23 +150,7 @@ export function buildSessionNarrativeFacts(db: MastheadDatabase, sessionId: stri
       .prepare("SELECT DISTINCT path, effect_kind AS operation FROM file_effects WHERE session_id = ? ORDER BY path LIMIT 50")
       .all(sessionId) as FileRow[]
   ).map((row) => fileFactFromPath(row.path, row.operation ?? undefined));
-  const commands = db
-    .prepare(
-      `SELECT DISTINCT
-        tool_calls.tool_name AS name,
-        NULL AS category,
-        COALESCE(tool_results.status, '') AS status,
-        tool_results.exit_code AS exitCode,
-        tool_results.output_redacted AS outputPreview,
-        tool_calls.started_at AS startedAt,
-        tool_results.completed_at AS completedAt
-      FROM tool_calls
-      LEFT JOIN tool_results ON tool_results.tool_call_id = tool_calls.tool_call_id
-      WHERE tool_calls.session_id = ?
-      ORDER BY tool_calls.tool_name
-      LIMIT 50`
-    )
-    .all(sessionId) as CommandRow[];
+  const commands = narrativeCommands(db, sessionId);
 
   const commandText = commands.map((command) => `${command.name} ${command.status ?? ""}`).join(" ");
   const summaryText = [session.objective, firstUserPrompt, finalAssistantMessage, latestFeedbackSummary, ...checkpointSummaries, ...eventSummaries].join(" ");
@@ -197,6 +198,59 @@ export function buildSessionNarrativeFacts(db: MastheadDatabase, sessionId: stri
     topics,
     worktreePath: session.worktreePath ?? undefined
   };
+}
+
+function narrativeCommands(db: MastheadDatabase, sessionId: string): CommandRow[] {
+  const toolCalls = db
+    .prepare(
+      `SELECT tool_call_id AS toolCallId,
+        tool_name AS name,
+        started_at AS startedAt
+      FROM tool_calls
+      WHERE session_id = ?
+      ORDER BY COALESCE(started_at, '') DESC, tool_call_id DESC
+      LIMIT ?`
+    )
+    .all(sessionId, NARRATIVE_COMMAND_LIMIT) as ToolCallRow[];
+  const resultsByToolCallId = latestToolResultsByCallId(
+    db,
+    toolCalls.map((row) => row.toolCallId)
+  );
+  return toolCalls.map((toolCall) => {
+    const result = resultsByToolCallId.get(toolCall.toolCallId);
+    return {
+      category: null,
+      completedAt: result?.completedAt ?? null,
+      exitCode: result?.exitCode ?? null,
+      name: toolCall.name,
+      outputPreview: result?.outputPreview ?? null,
+      startedAt: toolCall.startedAt,
+      status: result?.status ?? null,
+      toolCallId: toolCall.toolCallId
+    };
+  });
+}
+
+function latestToolResultsByCallId(db: MastheadDatabase, toolCallIds: string[]): Map<string, ToolResultRow> {
+  if (toolCallIds.length === 0) return new Map();
+  const placeholders = toolCallIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT tool_call_id AS toolCallId,
+        status,
+        exit_code AS exitCode,
+        output_redacted AS outputPreview,
+        completed_at AS completedAt
+      FROM tool_results
+      WHERE tool_call_id IN (${placeholders})
+      ORDER BY COALESCE(completed_at, '') DESC, tool_result_id DESC`
+    )
+    .all(...toolCallIds) as ToolResultRow[];
+  const results = new Map<string, ToolResultRow>();
+  for (const row of rows) {
+    if (!results.has(row.toolCallId)) results.set(row.toolCallId, row);
+  }
+  return results;
 }
 
 export function isLowValueRuntimeSignal(value: string): boolean {
