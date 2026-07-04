@@ -311,16 +311,16 @@ export function App() {
       setConnectorAction((current) =>
         current.state === "idle" ? current : { state: "started", message: "Collector connected." }
       );
-      setCollectorStartupLog((current) =>
-        current.some((entry) => entry.id === "projection")
-          ? upsertCollectorStartupLogEntry(current, {
-              id: "projection",
-              label: "Live projection",
-              detail: "Loaded live projection.",
-              state: "done"
-            })
-          : current
-      );
+      setCollectorStartupLog((current) => {
+        const settled = current.map((entry) => (entry.state === "running" || entry.state === "error" ? { ...entry, state: "done" as const } : entry));
+        if (!settled.some((entry) => entry.id === "projection")) return settled;
+        return upsertCollectorStartupLogEntry(settled, {
+          id: "projection",
+          label: "Live projection",
+          detail: "Loaded live projection.",
+          state: "done"
+        });
+      });
       setLiveConnection({
         state: "live",
         events: body.events,
