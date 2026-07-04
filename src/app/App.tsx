@@ -41,7 +41,7 @@ import {
 import { startLiveConnector } from "./connectorClient";
 import { isDesktopBridgeAvailable } from "./desktopBridge";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
-import { ConnectionRecoveryPanel } from "../ui/ConnectionRecoveryPanel";
+import { ConnectionRecoveryPanel, type CollectorStartupLogEntry, type ConnectorActionView } from "../ui/ConnectionRecoveryPanel";
 import { saveReviewDisposition } from "./daemonClient";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
@@ -58,12 +58,7 @@ import { useSourcesController } from "./sources/useSourcesController";
 import { useUsageStatsController } from "./usage/useUsageStatsController";
 import { clearUnsupportedLocationHash } from "./locationHash";
 
-type ConnectorActionState =
-  | { state: "idle"; message?: string }
-  | { state: "starting"; message?: string }
-  | { state: "started"; message?: string }
-  | { state: "unsupported"; message?: string }
-  | { state: "error"; message?: string };
+type ConnectorActionState = ConnectorActionView;
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
@@ -108,6 +103,7 @@ export function App() {
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
   const [liveGitSnapshots, setLiveGitSnapshots] = useState<GitSnapshot[]>();
   const [connectorAction, setConnectorAction] = useState<ConnectorActionState>({ state: "idle" });
+  const [collectorStartupLog, setCollectorStartupLog] = useState<CollectorStartupLogEntry[]>([]);
   const connection = useMastheadConnection();
   const activeProjectionUrl = connection.baseUrl;
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
@@ -232,6 +228,9 @@ export function App() {
   });
   const handleReviewDispositionsChanged = useCallback((dispositions: ReviewDisposition[]) => setReviewDispositions(dispositions), []);
   const handleMotionDisabledChange = useCallback((disabled: boolean) => setMotionDisabled(disabled), []);
+  const appendCollectorStartupLog = useCallback((entry: CollectorStartupLogEntry) => {
+    setCollectorStartupLog((current) => upsertCollectorStartupLogEntry(current, entry));
+  }, []);
 
   useEffect(() => {
     clearUnsupportedLocationHash();
@@ -352,24 +351,106 @@ export function App() {
         state: "starting",
         message: automatic ? "Starting local collector after app launch..." : "Starting local collector..."
       });
+      setCollectorStartupLog([
+        {
+          id: "bridge",
+          label: "Desktop bridge",
+          detail: "Requesting collector startup.",
+          state: "running"
+        }
+      ]);
+      let failureLogEntry: CollectorStartupLogEntry = {
+        id: "bridge",
+        label: "Desktop bridge",
+        detail: "Collector startup failed.",
+        state: "error"
+      };
 
       try {
         const result = await startLiveConnector();
         if (result.ok) {
+          appendCollectorStartupLog({
+            id: "bridge",
+            label: "Desktop bridge",
+            detail: "Collector startup response received.",
+            state: "done"
+          });
+          appendCollectorStartupLog({
+            id: "daemon",
+            label: "Daemon",
+            detail: result.started ? "Started local daemon." : "Reused running daemon.",
+            state: "done"
+          });
+          appendCollectorStartupLog({
+            id: "connect",
+            label: "Connection",
+            detail: `Accepting ${result.projectionUrl}.`,
+            state: "running"
+          });
+          failureLogEntry = {
+            id: "connect",
+            label: "Connection",
+            detail: "Connection setup failed.",
+            state: "error"
+          };
           await connection.connectTo(result.projectionUrl);
+          appendCollectorStartupLog({
+            id: "connect",
+            label: "Connection",
+            detail: `Accepted ${result.projectionUrl}.`,
+            state: "done"
+          });
           setConnectorAction({
             state: "started",
             message: `${result.message} Connected to ${result.baseUrl}.`
           });
-          await loadLiveProjection();
+          appendCollectorStartupLog({
+            id: "projection",
+            label: "Live projection",
+            detail: "Loading live projection.",
+            state: "running"
+          });
+          failureLogEntry = {
+            id: "projection",
+            label: "Live projection",
+            detail: "Live projection did not load.",
+            state: "error"
+          };
+          const projectionLoaded = await loadLiveProjection();
+          if (projectionLoaded) {
+            appendCollectorStartupLog({
+              id: "projection",
+              label: "Live projection",
+              detail: "Loaded live projection.",
+              state: "done"
+            });
+          } else {
+            appendCollectorStartupLog({
+              id: "projection",
+              label: "Live projection",
+              detail: "Live projection did not load.",
+              state: "error"
+            });
+            setConnectorAction({
+              state: "error",
+              message: "Collector started, but live projection did not load."
+            });
+          }
           return;
         }
 
+        appendCollectorStartupLog({
+          id: "bridge",
+          label: "Desktop bridge",
+          detail: "Collector startup is unsupported here.",
+          state: "error"
+        });
         setConnectorAction({
           state: "unsupported",
           message: result.message
         });
       } catch (error) {
+        appendCollectorStartupLog(failureLogEntry);
         setConnectorAction({
           state: "error",
           message: `Could not start collector: ${error instanceof Error ? error.message : String(error)}`
@@ -378,7 +459,7 @@ export function App() {
         collectorStartInFlightRef.current = false;
       }
     },
-    [connection, loadLiveProjection]
+    [appendCollectorStartupLog, connection, loadLiveProjection]
   );
 
   const handleStartConnector = useCallback(() => {
@@ -443,7 +524,13 @@ export function App() {
 
   const needsRecoveryPanel = connection.state.state === "offline" || connection.state.state === "incompatible";
   const recoveryPanel = (
-    <ConnectionRecoveryPanel connection={connection.state} onRetry={connection.refresh} onStart={handleStartConnector} />
+    <ConnectionRecoveryPanel
+      action={connectorAction}
+      connection={connection.state}
+      startupLog={collectorStartupLog}
+      onRetry={connection.refresh}
+      onStart={handleStartConnector}
+    />
   );
 
 
@@ -689,6 +776,18 @@ function emptyBoardTitle({
   if (liveConnection.state === "live") return "No active sessions";
   if (liveConnection.state === "offline") return "No live connection";
   return "Connecting to Masthead collector";
+}
+
+function upsertCollectorStartupLogEntry(
+  entries: CollectorStartupLogEntry[],
+  entry: CollectorStartupLogEntry
+): CollectorStartupLogEntry[] {
+  const existingIndex = entries.findIndex((current) => current.id === entry.id);
+  if (existingIndex === -1) return [...entries, entry];
+
+  const next = [...entries];
+  next[existingIndex] = entry;
+  return next;
 }
 
 function emptyBoardMessage({

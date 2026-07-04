@@ -14,6 +14,78 @@ afterEach(() => {
 });
 
 describe("collector autostart", () => {
+  test("shows collector startup progress while autostart is running", async () => {
+    const connectorStart = deferred<{
+      ok: true;
+      started: boolean;
+      baseUrl: string;
+      command: string;
+      health: { apiVersion: number; databaseId: string; mode: string };
+      message: string;
+      projectionUrl: string;
+    }>();
+    const invoke = vi.fn(async (command: string) => {
+      expect(command).toBe("start_live_connector_command");
+      return connectorStart.promise;
+    });
+
+    window.mastheadDesktop = { invoke: invoke as unknown as NonNullable<Window["mastheadDesktop"]>["invoke"] };
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      return window.setTimeout(() => callback(performance.now()), 0);
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id: number) => window.clearTimeout(id));
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response("offline", { status: 503 }))
+        .mockResolvedValueOnce(jsonResponse(currentHealth))
+        .mockResolvedValue(jsonResponse(liveProjectionResponse()))
+    );
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MastheadConnectionProvider initialUrl="http://127.0.0.1:17373/projection">
+          <App />
+        </MastheadConnectionProvider>
+      );
+    });
+
+    await act(async () => {
+      await flushTimers();
+    });
+    await act(async () => {
+      clickSidebarButton(container, "Sources");
+      await flushTimers();
+      await flushTimers();
+      await flushTimers();
+    });
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Collector startup");
+    expect(container.textContent).toContain("Starting local collector after app launch");
+    expect(container.textContent).toContain("Desktop bridge");
+
+    connectorStart.resolve({
+      ok: true,
+      started: true,
+      baseUrl: "http://127.0.0.1:17373",
+      command: "masthead daemon",
+      health: { apiVersion: 1, databaseId: "db", mode: "primary" },
+      message: "Started local Masthead collector.",
+      projectionUrl: "http://127.0.0.1:17373/projection"
+    });
+
+    await act(async () => {
+      await flushTimers();
+    });
+    root.unmount();
+  });
+
   test("renders Masthead before starting the collector through the desktop bridge", async () => {
     const invoke = vi.fn(async (command: string) => {
       expect(command).toBe("start_live_connector_command");
@@ -147,6 +219,22 @@ function jsonResponse(body: unknown): Response {
 
 function flushTimers(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function clickSidebarButton(container: HTMLElement, label: string): void {
+  const button = [...container.querySelectorAll("button")].find((candidate) => candidate.textContent?.includes(label));
+  expect(button).toBeDefined();
+  button?.click();
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 function createAnimationFrameQueue() {
