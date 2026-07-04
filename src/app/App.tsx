@@ -164,7 +164,6 @@ export function App() {
   const liveRequestIdRef = useRef(0);
   const autoStartAttemptedRef = useRef(false);
   const collectorStartInFlightRef = useRef(false);
-  const collectorProjectionLoadedRef = useRef(false);
   const fixtureBoard = useMemo(() => buildObservabilityDemoBoard(selectedSessionId), [selectedSessionId]);
   const baseBoard = showDemoData ? fixtureBoard : liveProjection ?? emptyLiveBoard;
   const board = useMemo(() => applyReviewDispositions(baseBoard, reviewDispositions), [baseBoard, reviewDispositions]);
@@ -307,7 +306,6 @@ export function App() {
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
       setLiveProjection(normalizeLiveBoardProjection(body.projection, selectedSessionId));
       setShowDemoData(false);
-      collectorProjectionLoadedRef.current = true;
       setConnectorAction((current) =>
         current.state === "idle" ? current : { state: "started", message: "Collector connected." }
       );
@@ -381,7 +379,6 @@ export function App() {
           state: "running"
         }
       ]);
-      collectorProjectionLoadedRef.current = false;
       let failureLogEntry: CollectorStartupLogEntry = {
         id: "bridge",
         label: "Desktop bridge",
@@ -441,7 +438,7 @@ export function App() {
             state: "error"
           };
           const projectionLoadResult = await loadLiveProjection(result.projectionUrl);
-          if (projectionLoadResult === "failed" && !collectorProjectionLoadedRef.current) {
+          if (projectionLoadResult === "failed") {
             appendCollectorStartupLog({
               id: "projection",
               label: "Live projection",
