@@ -77,8 +77,18 @@ describe("daemon database schema", () => {
       { version: 8, name: "008_live_projection_usage_indexes" },
       { version: 9, name: "009_import_ledger" },
       { version: 10, name: "010_board_headline_frames" },
-      { version: 11, name: "011_board_headline_generations" }
+      { version: 11, name: "011_board_headline_generations" },
+      { version: 13, name: "013_dossier_enrichment_indexes" }
     ]);
+    const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
+    expect(indexes.map((row) => row.name)).toEqual(
+      expect.arrayContaining([
+        "tool_results_tool_call_completed_idx",
+        "tool_results_session_status_idx",
+        "runtime_signals_session_observed_idx",
+        "checkpoints_session_observed_idx"
+      ])
+    );
     expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     expect((db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toBe("wal");
     db.prepare("INSERT INTO session_search(session_id, title, normalized_text) VALUES (?, ?, ?)").run(

@@ -94,7 +94,7 @@ describe("daemon config", () => {
   });
 
   test("configures a durable remote enrichment timeout separately from live headline", () => {
-    expect(daemonConfigFromEnv({}).remoteEnrichmentTimeoutMs).toBe(12_000);
+    expect(daemonConfigFromEnv({}).remoteEnrichmentTimeoutMs).toBe(60_000);
     expect(daemonConfigFromEnv({ MASTHEAD_REMOTE_ENRICHMENT_TIMEOUT_MS: "15000" }).remoteEnrichmentTimeoutMs).toBe(15_000);
   });
 });

@@ -475,6 +475,9 @@ export function App() {
               dossier={logbook.dossier}
               dossierLoading={logbook.dossierLoading}
               dossierError={logbook.dossierError}
+              dossierEnrichmentBusy={logbook.dossierEnrichmentBusy}
+              dossierEnrichmentError={logbook.dossierEnrichmentError}
+              onEnrichDossier={() => void logbook.enrichDossier()}
               onRetryDossier={logbook.retryDossier}
               transcript={logbook.transcript}
               transcriptLoading={logbook.transcriptLoading}
@@ -602,6 +605,9 @@ export function App() {
           dossier={boardDetail.dossier}
           dossierLoading={boardDetail.dossierLoading}
           dossierError={boardDetail.dossierError}
+          dossierEnrichmentBusy={boardDetail.dossierEnrichmentBusy}
+          dossierEnrichmentError={boardDetail.dossierEnrichmentError}
+          onEnrichDossier={() => void boardDetail.enrichDossier()}
           onRetryDossier={boardDetail.retryDossier}
           transcript={boardDetail.transcript}
           transcriptLoading={boardDetail.transcriptLoading}

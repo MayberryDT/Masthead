@@ -276,7 +276,8 @@ function toCard(
     signals: signalsFromCard(card, sessionAttention, sessionConflicts),
     facts
   });
-  const headline = storedHeadline ?? (headlineMode === "llm" ? buildPendingBoardHeadlineView(headlineInput) : buildOfflineBoardHeadlineView(headlineInput));
+  const shouldAwaitLlmHeadline = headlineMode === "llm" && card.lifecycle === "running";
+  const headline = storedHeadline ?? (shouldAwaitLlmHeadline ? buildPendingBoardHeadlineView(headlineInput) : buildOfflineBoardHeadlineView(headlineInput));
   const enrichedCard = {
     ...card,
     headline,

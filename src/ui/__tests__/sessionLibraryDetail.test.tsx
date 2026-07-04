@@ -160,6 +160,7 @@ function dossier(): SessionDossierDto {
       },
       warnings: []
     },
+    enrichment: { status: "current" },
     excerpts: [],
     files: [
       {

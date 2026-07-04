@@ -83,6 +83,7 @@ import { scanLocalSources, type SourceScanResult } from "./sources/sourceScanSer
 import { connectSelectedSources, type ConnectSourcesRequest } from "./sources/sourceConnectService.ts";
 import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/sourceSetupService.ts";
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
+import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { createLiveIngestQueue } from "./liveIngestQueue.ts";
 import { buildMastheadHealth } from "./healthService.ts";
@@ -110,6 +111,7 @@ export const LIVE_BOARD_RAW_RECORD_LIMIT = 500;
 const HOOK_TRANSCRIPT_CATCHUP_RECORD_LIMIT = 200;
 const HOOK_TRANSCRIPT_CATCHUP_REQUEUE_MS = 250;
 const VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS = 750;
+const RESPONSE_BACKGROUND_GRACE_MS = 50;
 
 type TranscriptImportOptions = {
   maxRecordsPerSource?: number;
@@ -262,12 +264,76 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       onFrameApplied: persistBoardHeadlineFrame,
       timeoutMs: config.liveCopyTimeoutMs
     });
-    const enrichmentProvider = createSettingsBackedEnrichmentProvider(database, config);
-    const enrichment = createEnrichmentCoordinator(database, enrichmentProvider);
-    const queuedEnrichmentSessionIds = new Set<string>();
-    let enrichmentQueueScheduled = false;
     const daemonInstanceId = randomUUID();
     const daemonStartedAt = new Date().toISOString();
+    const enrichmentProvider = createSettingsBackedEnrichmentProvider(database, config);
+    const enrichment = createEnrichmentCoordinator(database, enrichmentProvider, {
+      failureBackoffAfterMs: Date.parse(daemonStartedAt)
+    });
+    const queuedEnrichmentSessionIds = new Set<string>();
+    const queuedSearchIndexSessionIds = new Set<string>();
+    const manualDossierEnrichmentJobs = new Map<string, SessionDossierManualEnrichmentJob>();
+    let enrichmentQueueScheduled = false;
+    let searchIndexQueueScheduled = false;
+
+  function queueSessionSearchIndex(sessionId: string | undefined): void {
+    if (closed) return;
+    if (!sessionId) return;
+    queuedSearchIndexSessionIds.add(sessionId);
+    if (searchIndexQueueScheduled) return;
+    searchIndexQueueScheduled = true;
+    setImmediate(() => {
+      void flushSearchIndexQueue().catch((error) => {
+        recordRuntimeDiagnostic({
+          details: { error },
+          kind: "search_index_flush_failed",
+          message: "Session search indexing failed.",
+          severity: "warning"
+        });
+      });
+    });
+  }
+
+  async function flushSearchIndexQueue(): Promise<void> {
+    searchIndexQueueScheduled = false;
+    if (closed) {
+      queuedSearchIndexSessionIds.clear();
+      return;
+    }
+    const sessionIds = [...queuedSearchIndexSessionIds];
+    queuedSearchIndexSessionIds.clear();
+    for (let index = 0; index < sessionIds.length; index += 1) {
+      const sessionId = sessionIds[index];
+      try {
+        indexCanonicalSessionSearch(database, sessionId);
+      } catch (error) {
+        recordRuntimeDiagnostic({
+          details: { error, sessionId },
+          kind: "search_index_failed",
+          message: `Session search indexing failed for ${sessionId}`,
+          severity: "warning"
+        });
+      }
+      if ((index + 1) % 2 === 0) await yieldToEventLoop();
+    }
+    if (queuedSearchIndexSessionIds.size > 0 && !searchIndexQueueScheduled) {
+      if (closed) {
+        queuedSearchIndexSessionIds.clear();
+        return;
+      }
+      searchIndexQueueScheduled = true;
+      setImmediate(() => {
+        void flushSearchIndexQueue().catch((error) => {
+          recordRuntimeDiagnostic({
+            details: { error },
+            kind: "search_index_flush_failed",
+            message: "Session search indexing failed.",
+            severity: "warning"
+          });
+        });
+      });
+    }
+  }
 
   function queueSessionEnrichment(sessionId: string | undefined): void {
     if (!sessionId) return;
@@ -292,7 +358,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       if (!sessionId) continue;
       try {
         await enrichment.ensureCurrent(sessionId);
-        indexCanonicalSessionSearch(database, sessionId);
+        queueSessionSearchIndex(sessionId);
       } catch (error) {
         recordRuntimeDiagnostic({
           details:
@@ -351,7 +417,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     for (const sessionId of sessionIds) {
       try {
         await rebuildCoordinator.enrich(sessionId);
-        indexCanonicalSessionSearch(database, sessionId);
+        queueSessionSearchIndex(sessionId);
         succeeded += 1;
         sessions.push({ sessionId, status: "succeeded" });
       } catch (error) {
@@ -422,6 +488,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     },
     onFlush: async (events) => {
       const latestEventBySession = new Map<string, NormalizedEvent>();
+      const touchedSessionIds = new Set<string>();
       database.exec("BEGIN IMMEDIATE;");
       try {
         for (const event of events) {
@@ -432,7 +499,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             value: event
           });
           const sessionId = sessions.upsertLiveEvent(event);
-          if (sessionId) indexCanonicalSessionSearch(database, sessionId);
+          if (sessionId) touchedSessionIds.add(sessionId);
           if (event.sessionId) latestEventBySession.set(event.sessionId, event);
         }
         database.exec("COMMIT;");
@@ -440,6 +507,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         database.exec("ROLLBACK;");
         throw error;
       }
+      for (const sessionId of touchedSessionIds) queueSessionSearchIndex(sessionId);
       for (const event of latestEventBySession.values()) {
         try {
           if (event.sessionId && isTerminalProtectedSession(event.sessionId)) continue;
@@ -814,6 +882,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       if (!adapter) continue;
       controls?.throwIfCancelled();
       controls?.updateProgress({ currentPath: source.path ?? source.sourceId });
+      const touchedSessionIds = new Set<string>();
       let recordsSinceYield = 0;
       for await (const record of adapter.backfill(source)) {
         controls?.throwIfCancelled();
@@ -822,7 +891,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           hostname: config.host,
           runtimeKind: source.runtime
         });
-        if (sessionId) indexCanonicalSessionSearch(database, sessionId);
+        if (sessionId) touchedSessionIds.add(sessionId);
         queueSessionEnrichment(sessionId);
         countImportedRecord(result, record, Boolean(sessionId));
         controls?.updateProgress({
@@ -842,6 +911,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           controls?.throwIfCancelled();
         }
       }
+      for (const sessionId of touchedSessionIds) queueSessionSearchIndex(sessionId);
     }
     return result;
   }
@@ -891,7 +961,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           });
           latestOffset = nextOffset;
           if (sessionId) {
-            indexCanonicalSessionSearch(database, sessionId);
             enrichmentSessionIds.add(sessionId);
           }
           countImportedRecord(result, record, Boolean(sessionId));
@@ -916,6 +985,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             });
           }
         }
+        for (const sessionId of enrichmentSessionIds) queueSessionSearchIndex(sessionId);
         if (queueEnrichmentForImport && !result.limited) {
           for (const sessionId of enrichmentSessionIds) queueSessionEnrichment(sessionId);
         }
@@ -987,7 +1057,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         now: () => new Date().toISOString(),
         onSessionImported: (sessionId) => queueSessionEnrichment(sessionId),
         runtimeKind: unit.runtime,
-        workUnitId: unit.workUnitId
+        workUnitId: unit.workUnitId,
+        indexSession: queueSessionSearchIndex
       });
       result.discoveredCount += unit.estimatedRecords ?? unitResult.processed;
       result.processedCount += unitResult.processed;
@@ -1145,19 +1216,118 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   async function catchUpSessionTranscriptIfApproved(canonicalSessionIdValue: string): Promise<void> {
-    if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database)) return;
-    const row = database
-      .prepare("SELECT source_session_id AS sourceSessionId FROM sessions WHERE session_id = ? AND deleted_at IS NULL")
-      .get(canonicalSessionIdValue) as { sourceSessionId: string } | undefined;
-    const sourceSessionId = row?.sourceSessionId?.trim();
-    if (!sourceSessionId) return;
-    const events = recentHookEventsWithTranscriptPathsForSessions(database, codexHookSource.sourceId, new Set([sourceSessionId]), 1);
+    const events = hookTranscriptCatchupEventsForSession(canonicalSessionIdValue);
+    if (events.length === 0) return;
     const scheduled = events
       .map((event) => scheduleHookTranscriptCatchup(event))
       .filter((promise): promise is Promise<void> => Boolean(promise));
     if (scheduled.length === 0) return;
 
     await Promise.race([Promise.allSettled(scheduled).then(() => undefined), unrefDelay(VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS)]);
+  }
+
+  function queueSessionEnrichmentAfterTranscriptCatchup(canonicalSessionIdValue: string): void {
+    setImmediate(() => {
+      void (async () => {
+        await catchUpSessionTranscriptIfApproved(canonicalSessionIdValue);
+        queueSessionEnrichment(canonicalSessionIdValue);
+      })();
+    });
+  }
+
+  function dossierWithManualEnrichmentState(dossier: SessionDossierDto, sessionId: string): SessionDossierDto {
+    const job = manualDossierEnrichmentJobs.get(sessionId);
+    if (!job) return dossier;
+    return {
+      ...dossier,
+      enrichment: {
+        ...dossier.enrichment,
+        failureCode: job.failureCode ?? dossier.enrichment.failureCode,
+        failureMessage: job.failureMessage ?? dossier.enrichment.failureMessage,
+        generatedAt: job.generatedAt ?? dossier.enrichment.generatedAt,
+        model: job.model ?? dossier.enrichment.model,
+        provider: job.provider ?? dossier.enrichment.provider,
+        status: job.status
+      }
+    };
+  }
+
+  async function runManualDossierEnrichment(sessionId: string): Promise<void> {
+    try {
+      await catchUpSessionTranscriptIfApproved(sessionId);
+      const record = await enrichment.enrich(sessionId);
+      queueSessionSearchIndex(sessionId);
+      manualDossierEnrichmentJobs.set(sessionId, {
+        completedAt: new Date().toISOString(),
+        generatedAt: record.generatedAt,
+        model: record.model,
+        provider: record.provider,
+        requestedAt: manualDossierEnrichmentJobs.get(sessionId)?.requestedAt ?? new Date().toISOString(),
+        status: "current"
+      });
+    } catch (error) {
+      const failed = error instanceof EnrichmentFailedError ? error : undefined;
+      manualDossierEnrichmentJobs.set(sessionId, {
+        completedAt: new Date().toISOString(),
+        failureCode: failed?.status,
+        failureMessage: failed?.failureMessage ?? (error instanceof Error ? error.message : String(error)),
+        model: failed?.model,
+        provider: failed?.provider,
+        requestedAt: manualDossierEnrichmentJobs.get(sessionId)?.requestedAt ?? new Date().toISOString(),
+        status: "failed"
+      });
+      recordRuntimeDiagnostic({
+        details: failed
+          ? {
+              failureCode: failed.status,
+              failureMessage: failed.failureMessage,
+              model: failed.model,
+              provider: failed.provider,
+              sessionId,
+              status: failed.status
+            }
+          : { error, sessionId },
+        kind: "manual_dossier_enrichment_failed",
+        message: `Manual Dossier enrichment failed for ${sessionId}`,
+        severity: "warning"
+      });
+    }
+
+    const cleanupTimer = setTimeout(() => {
+      const job = manualDossierEnrichmentJobs.get(sessionId);
+      if (job?.status !== "enriching") manualDossierEnrichmentJobs.delete(sessionId);
+    }, 120_000);
+    cleanupTimer.unref?.();
+  }
+
+  function hookTranscriptCatchupEventsForSession(canonicalSessionIdValue: string): NormalizedEvent[] {
+    if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database)) return [];
+    const row = database
+      .prepare("SELECT source_session_id AS sourceSessionId FROM sessions WHERE session_id = ? AND deleted_at IS NULL")
+      .get(canonicalSessionIdValue) as { sourceSessionId: string } | undefined;
+    const sourceSessionId = row?.sourceSessionId?.trim();
+    if (!sourceSessionId) return [];
+    return recentHookEventsWithTranscriptPathsForSessions(database, codexHookSource.sourceId, new Set([sourceSessionId]), 1).filter((event) =>
+      needsHookTranscriptCatchup(canonicalSessionIdValue, event)
+    );
+  }
+
+  function needsHookTranscriptCatchup(canonicalSessionIdValue: string, event: NormalizedEvent): boolean {
+    const eventAt = Date.parse(event.occurredAt);
+    if (!Number.isFinite(eventAt)) return true;
+    const row = database
+      .prepare(
+        `SELECT
+          MAX(observed_at) AS latestObservedAt,
+          SUM(CASE WHEN role = 'user' AND trim(text_redacted) NOT IN ('', 'Codex hook event', 'Runtime signal', 'Tool call', 'Unknown') THEN 1 ELSE 0 END) AS userMessages,
+          SUM(CASE WHEN role = 'assistant' AND trim(text_redacted) NOT IN ('', 'Codex hook event', 'Runtime signal', 'Tool call', 'Unknown') THEN 1 ELSE 0 END) AS assistantMessages
+        FROM messages
+        WHERE session_id = ?
+          AND role IN ('user', 'assistant')`
+      )
+      .get(canonicalSessionIdValue) as { assistantMessages: number | null; latestObservedAt: string | null; userMessages: number | null };
+    const latestObservedAt = row.latestObservedAt ? Date.parse(row.latestObservedAt) : Number.NaN;
+    return !row.userMessages || !row.assistantMessages || !Number.isFinite(latestObservedAt) || latestObservedAt < eventAt;
   }
 
   function approveTranscriptImports(runtime?: RuntimeKind): void {
@@ -1904,15 +2074,41 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const sessionDossierMatch = url.pathname.match(/^\/sessions\/([^/]+)\/dossier$/);
     if (request.method === "GET" && sessionDossierMatch?.[1]) {
       const sessionId = decodeURIComponent(sessionDossierMatch[1]);
-      await catchUpSessionTranscriptIfApproved(sessionId);
       const dossier = getSessionDossier(database, sessionId);
       sendJson(
         request,
         response,
         config.allowedOrigins,
         dossier ? 200 : 404,
-        dossier ? { ok: true, dossier } : { ok: false, error: "session not found" }
+        dossier ? { ok: true, dossier: dossierWithManualEnrichmentState(dossier, sessionId) } : { ok: false, error: "session not found" }
       );
+      return;
+    }
+
+    const sessionDossierEnrichMatch = url.pathname.match(/^\/sessions\/([^/]+)\/dossier\/enrich$/);
+    if (request.method === "POST" && sessionDossierEnrichMatch?.[1]) {
+      request.resume();
+      const sessionId = decodeURIComponent(sessionDossierEnrichMatch[1]);
+      if (!sessionExists(database, sessionId)) {
+        sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "session not found" });
+        return;
+      }
+
+      const activeJob = manualDossierEnrichmentJobs.get(sessionId);
+      if (activeJob?.status === "enriching") {
+        sendJson(request, response, config.allowedOrigins, 202, { ok: true, enrichment: activeJob });
+        return;
+      }
+
+      const job: SessionDossierManualEnrichmentJob = {
+        requestedAt: new Date().toISOString(),
+        status: "enriching"
+      };
+      manualDossierEnrichmentJobs.set(sessionId, job);
+      setImmediate(() => {
+        void runManualDossierEnrichment(sessionId);
+      });
+      sendJson(request, response, config.allowedOrigins, 202, { ok: true, enrichment: job });
       return;
     }
 
@@ -2532,7 +2728,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           const sessionId = sessions.upsertLiveEvent(result.event);
           if (sessionId) {
             rememberCompletedLiveSession(result.event);
-            indexCanonicalSessionSearch(database, sessionId);
+            queueSessionSearchIndex(sessionId);
             if (!shouldDeferLiveEnrichmentToHookTranscript(result.event)) queueSessionEnrichment(sessionId);
           }
           appendStoreRecordToRawJournal({
@@ -2572,6 +2768,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     close: () => {
       if (closePromise) return closePromise;
       closed = true;
+      queuedSearchIndexSessionIds.clear();
+      searchIndexQueueScheduled = false;
       closePromise = (async () => {
         await hydrationPromise;
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
@@ -2805,6 +3003,13 @@ function parseBoardRefreshIntervalMs(value: string | null): number {
 function unrefDelay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
+
+function afterResponse(response: ServerResponse, task: () => void): void {
+  response.once("finish", () => {
+    const timer = setTimeout(task, RESPONSE_BACKGROUND_GRACE_MS);
     timer.unref?.();
   });
 }
@@ -3137,6 +3342,13 @@ function stringRecordValue(value: Record<string, unknown>, key: string): string 
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw clientError(`${name} is required`);
   return value;
+}
+
+function sessionExists(db: MastheadDatabase, sessionId: string): boolean {
+  const row = db.prepare("SELECT 1 AS found FROM sessions WHERE session_id = ? AND deleted_at IS NULL LIMIT 1").get(sessionId) as
+    | { found: number }
+    | undefined;
+  return row?.found === 1;
 }
 
 function clientError(message: string): Error {

@@ -36,39 +36,54 @@ type CountRow = {
 };
 
 type MessageCoverageRow = {
-  role: string;
-  text: string;
+  assistantMessages: number;
+  lowValueMessages: number;
+  messages: number;
+  userMessages: number;
+};
+
+type TranscriptSelectPart = {
+  sql: string;
+  params: Array<number | string>;
 };
 
 export function getSessionTranscript(db: MastheadDatabase, query: SessionTranscriptQuery): SessionTranscriptResult {
   const limit = normalizeLimit(query.limit);
   const offset = cursorToOffset(query.cursor);
-  const allItems = getTranscriptItems(db, query);
-  const items = allItems.slice(offset, offset + limit);
+  const total = countTranscriptItems(db, query);
+  const items = getTranscriptItems(db, query, limit, offset);
   const nextOffset = offset + items.length;
   return {
     coverage: getTranscriptCoverage(db, query.sessionId),
     items,
-    nextCursor: nextOffset < allItems.length ? String(nextOffset) : undefined,
-    total: allItems.length
+    nextCursor: nextOffset < total ? String(nextOffset) : undefined,
+    total
   };
 }
 
 export function getTranscriptCoverage(db: MastheadDatabase, sessionId: string): SessionTranscriptCoverage {
   const messages = db
-    .prepare("SELECT role, text_redacted AS text FROM messages WHERE session_id = ?")
-    .all(sessionId) as MessageCoverageRow[];
-  const lowValueMessages = messages.filter((message) => isLowValueText(message.text)).length;
-  const userMessages = messages.filter((message) => message.role === "user").length;
-  const assistantMessages = messages.filter((message) => message.role === "assistant").length;
-  const lowValueItems = getTranscriptItems(db, { sessionId }).filter((item) => item.lowValue).length;
+    .prepare(
+      `SELECT
+        COUNT(*) AS messages,
+        SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) AS userMessages,
+        SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) AS assistantMessages,
+        SUM(CASE WHEN ${lowValueCondition("text_redacted")} THEN 1 ELSE 0 END) AS lowValueMessages
+      FROM messages
+      WHERE session_id = ?`
+    )
+    .get(sessionId) as MessageCoverageRow;
+  const messageCount = Number(messages.messages) || 0;
+  const userMessages = Number(messages.userMessages) || 0;
+  const assistantMessages = Number(messages.assistantMessages) || 0;
+  const lowValueMessages = Number(messages.lowValueMessages) || 0;
   return {
     assistantMessages,
     checkpoints: countRows(db, "checkpoints", sessionId),
     fileEffects: countRows(db, "file_effects", sessionId),
-    hasUsableTranscript: userMessages + assistantMessages > 0 && lowValueMessages < messages.length,
-    lowValueItems,
-    messages: messages.length,
+    hasUsableTranscript: userMessages + assistantMessages > 0 && lowValueMessages < messageCount,
+    lowValueItems: countLowValueTranscriptItems(db, sessionId),
+    messages: messageCount,
     runtimeSignals: countRows(db, "runtime_signals", sessionId),
     toolCalls: countRows(db, "tool_calls", sessionId),
     toolResults: countRows(db, "tool_results", sessionId),
@@ -76,32 +91,64 @@ export function getTranscriptCoverage(db: MastheadDatabase, sessionId: string): 
   };
 }
 
-function getTranscriptItems(db: MastheadDatabase, query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">): SessionTranscriptItem[] {
-  const kind = query.kind ?? "all";
-  const rows = [
-    ...(["all", "user", "assistant"].includes(kind) ? getMessageRows(db, query.sessionId, kind, query.q) : []),
-    ...(["all", "tools"].includes(kind) ? getToolCallRows(db, query.sessionId, query.q) : []),
-    ...(["all", "tools"].includes(kind) ? getToolResultRows(db, query.sessionId, query.q) : []),
-    ...(["all", "checkpoints"].includes(kind) ? getCheckpointRows(db, query.sessionId, query.q) : []),
-    ...(["all", "signals"].includes(kind) ? getRuntimeSignalRows(db, query.sessionId, query.q) : []),
-    ...(["all", "files"].includes(kind) ? getFileEffectRows(db, query.sessionId, query.q) : [])
-  ];
-  return rows
-    .map(normalizeTranscriptItem)
-    .sort((a, b) => a.observedAt.localeCompare(b.observedAt) || a.itemId.localeCompare(b.itemId));
+function getTranscriptItems(
+  db: MastheadDatabase,
+  query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">,
+  limit: number,
+  offset: number
+): SessionTranscriptItem[] {
+  const parts = transcriptSelectParts(query);
+  if (parts.length === 0) return [];
+  const rows = db
+    .prepare(
+      `SELECT itemId, sessionId, kind, role, label, text, observedAt, sourceRefJson, status, exitCode, toolName
+      FROM (${parts.map((part) => part.sql).join(" UNION ALL ")})
+      ORDER BY observedAt ASC, itemId ASC
+      LIMIT ? OFFSET ?`
+    )
+    .all(...parts.flatMap((part) => part.params), limit, offset) as TranscriptRow[];
+  return rows.map(normalizeTranscriptItem);
 }
 
-function getMessageRows(db: MastheadDatabase, sessionId: string, kind: string, query?: string): TranscriptRow[] {
+function countTranscriptItems(db: MastheadDatabase, query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">): number {
+  return transcriptCountParts(query).reduce((total, part) => {
+    const row = db.prepare(part.sql).get(...part.params) as CountRow;
+    return total + (Number(row.count) || 0);
+  }, 0);
+}
+
+function transcriptSelectParts(query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">): TranscriptSelectPart[] {
+  const kind = query.kind ?? "all";
+  const parts: TranscriptSelectPart[] = [];
+  if (["all", "user", "assistant"].includes(kind)) parts.push(messageSelectPart(query.sessionId, kind, query.q));
+  if (["all", "tools"].includes(kind)) {
+    parts.push(toolCallSelectPart(query.sessionId, query.q));
+    parts.push(toolResultSelectPart(query.sessionId, query.q));
+  }
+  if (["all", "checkpoints"].includes(kind)) parts.push(checkpointSelectPart(query.sessionId, query.q));
+  if (["all", "signals"].includes(kind)) parts.push(runtimeSignalSelectPart(query.sessionId, query.q));
+  if (["all", "files"].includes(kind)) parts.push(fileEffectSelectPart(query.sessionId, query.q));
+  return parts;
+}
+
+function transcriptCountParts(query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">): TranscriptSelectPart[] {
+  return transcriptSelectParts(query).map((part) => ({
+    params: part.params,
+    sql: `SELECT COUNT(*) AS count FROM (${part.sql})`
+  }));
+}
+
+function messageSelectPart(sessionId: string, kind: string, query?: string): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
-  const params: string[] = [sessionId];
+  const params: Array<number | string> = [sessionId];
   if (kind === "user" || kind === "assistant") {
     clauses.push("role = ?");
     params.push(kind);
   }
   addTextQuery(clauses, params, query, "text_redacted");
-  return db
-    .prepare(
-      `SELECT message_id AS itemId,
+  return {
+    params,
+    sql: `SELECT message_id AS itemId,
         session_id AS sessionId,
         'message' AS kind,
         role,
@@ -114,17 +161,16 @@ function getMessageRows(db: MastheadDatabase, sessionId: string, kind: string, q
         NULL AS toolName
       FROM messages
       WHERE ${clauses.join(" AND ")}`
-    )
-    .all(...params) as TranscriptRow[];
+  };
 }
 
-function getToolCallRows(db: MastheadDatabase, sessionId: string, query?: string): TranscriptRow[] {
+function toolCallSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
-  const params: string[] = [sessionId];
+  const params: Array<number | string> = [sessionId];
   addTextQuery(clauses, params, query, "tool_name");
-  return db
-    .prepare(
-      `SELECT tool_call_id AS itemId,
+  return {
+    params,
+    sql: `SELECT tool_call_id AS itemId,
         session_id AS sessionId,
         'tool_call' AS kind,
         'tool' AS role,
@@ -137,22 +183,21 @@ function getToolCallRows(db: MastheadDatabase, sessionId: string, query?: string
         tool_name AS toolName
       FROM tool_calls
       WHERE ${clauses.join(" AND ")}`
-    )
-    .all(...params) as TranscriptRow[];
+  };
 }
 
-function getToolResultRows(db: MastheadDatabase, sessionId: string, query?: string): TranscriptRow[] {
+function toolResultSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
-  const params: string[] = [sessionId];
+  const params: Array<number | string> = [sessionId];
   addTextQuery(clauses, params, query, "COALESCE(output_redacted, status)");
-  return db
-    .prepare(
-      `SELECT tool_result_id AS itemId,
+  return {
+    params,
+    sql: `SELECT tool_result_id AS itemId,
         session_id AS sessionId,
         'tool_result' AS kind,
         'tool' AS role,
         status AS label,
-        COALESCE(output_redacted, status) AS text,
+        SUBSTR(COALESCE(output_redacted, status, ''), 1, 801) AS text,
         COALESCE(completed_at, '') AS observedAt,
         source_ref_json AS sourceRefJson,
         status,
@@ -160,17 +205,16 @@ function getToolResultRows(db: MastheadDatabase, sessionId: string, query?: stri
         NULL AS toolName
       FROM tool_results
       WHERE ${clauses.join(" AND ")}`
-    )
-    .all(...params) as TranscriptRow[];
+  };
 }
 
-function getCheckpointRows(db: MastheadDatabase, sessionId: string, query?: string): TranscriptRow[] {
+function checkpointSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
-  const params: string[] = [sessionId];
+  const params: Array<number | string> = [sessionId];
   addTextQuery(clauses, params, query, "summary");
-  return db
-    .prepare(
-      `SELECT checkpoint_id AS itemId,
+  return {
+    params,
+    sql: `SELECT checkpoint_id AS itemId,
         session_id AS sessionId,
         'checkpoint' AS kind,
         'system' AS role,
@@ -183,17 +227,16 @@ function getCheckpointRows(db: MastheadDatabase, sessionId: string, query?: stri
         NULL AS toolName
       FROM checkpoints
       WHERE ${clauses.join(" AND ")}`
-    )
-    .all(...params) as TranscriptRow[];
+  };
 }
 
-function getRuntimeSignalRows(db: MastheadDatabase, sessionId: string, query?: string): TranscriptRow[] {
+function runtimeSignalSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
-  const params: string[] = [sessionId];
+  const params: Array<number | string> = [sessionId];
   addTextQuery(clauses, params, query, "title");
-  return db
-    .prepare(
-      `SELECT signal_id AS itemId,
+  return {
+    params,
+    sql: `SELECT signal_id AS itemId,
         session_id AS sessionId,
         'runtime_signal' AS kind,
         'system' AS role,
@@ -206,17 +249,16 @@ function getRuntimeSignalRows(db: MastheadDatabase, sessionId: string, query?: s
         NULL AS toolName
       FROM runtime_signals
       WHERE ${clauses.join(" AND ")}`
-    )
-    .all(...params) as TranscriptRow[];
+  };
 }
 
-function getFileEffectRows(db: MastheadDatabase, sessionId: string, query?: string): TranscriptRow[] {
+function fileEffectSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
-  const params: string[] = [sessionId];
+  const params: Array<number | string> = [sessionId];
   addTextQuery(clauses, params, query, "path");
-  return db
-    .prepare(
-      `SELECT file_effect_id AS itemId,
+  return {
+    params,
+    sql: `SELECT file_effect_id AS itemId,
         session_id AS sessionId,
         'file_effect' AS kind,
         'tool' AS role,
@@ -229,8 +271,7 @@ function getFileEffectRows(db: MastheadDatabase, sessionId: string, query?: stri
         NULL AS toolName
       FROM file_effects
       WHERE ${clauses.join(" AND ")}`
-    )
-    .all(...params) as TranscriptRow[];
+  };
 }
 
 function normalizeTranscriptItem(row: TranscriptRow): SessionTranscriptItem {
@@ -253,11 +294,31 @@ function normalizeTranscriptItem(row: TranscriptRow): SessionTranscriptItem {
   };
 }
 
-function addTextQuery(clauses: string[], params: string[], query: string | undefined, column: string): void {
+function addTextQuery(clauses: string[], params: Array<number | string>, query: string | undefined, column: string): void {
   const normalized = query?.trim().toLowerCase();
   if (!normalized) return;
   clauses.push(`lower(${column}) LIKE ?`);
   params.push(`%${normalized}%`);
+}
+
+function countLowValueTranscriptItems(db: MastheadDatabase, sessionId: string): number {
+  return (
+    countLowValueRows(db, "messages", sessionId, lowValueCondition("text_redacted")) +
+    countLowValueRows(db, "tool_calls", sessionId, lowValueCondition("COALESCE(tool_name, 'Tool call')")) +
+    countLowValueRows(db, "tool_results", sessionId, `(${lowValueCondition("output_redacted")} OR ${lowValueCondition("status")})`) +
+    countLowValueRows(db, "checkpoints", sessionId, lowValueCondition("summary")) +
+    countLowValueRows(db, "runtime_signals", sessionId, lowValueCondition("title")) +
+    countLowValueRows(db, "file_effects", sessionId, lowValueCondition("path"))
+  );
+}
+
+function countLowValueRows(db: MastheadDatabase, table: string, sessionId: string, condition: string): number {
+  return (db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE session_id = ? AND ${condition}`).get(sessionId) as CountRow).count;
+}
+
+function lowValueCondition(expression: string): string {
+  const normalized = `lower(trim(substr(COALESCE(${expression}, ''), 1, 820)))`;
+  return `(${normalized} IN ('codex hook event', 'runtime signal', 'tool call', 'shell', 'unknown') OR ${normalized} LIKE 'codex hook event:%')`;
 }
 
 function countRows(db: MastheadDatabase, table: string, sessionId: string): number {

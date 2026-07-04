@@ -422,6 +422,10 @@ describe("live projection", () => {
       lifecycle: "ended",
       outcomeLabel: "completed"
     });
+    expect(envelope.projection.cards[0]?.headline).toMatchObject({
+      source: "offline",
+      status: "ready"
+    });
     expect(envelope.projection.lanes).toContainEqual(
       expect.objectContaining({
         laneId: "history",

@@ -87,7 +87,7 @@ describe("session title quality", () => {
     db.close();
   });
 
-  test("Now projection keeps liveSummary in headline when an enrichment title is generic", () => {
+  test("Now projection keeps liveSummary in headline input when an enrichment title is generic", () => {
     const started = normalizeCodexHookPayload(
       {
         provider_event_id: "title-quality-start",
@@ -122,10 +122,10 @@ describe("session title quality", () => {
 
     expect(envelope.projection.cards[0]?.title).toBe("Masthead Codex session");
     expect(envelope.projection.cards[0]?.headline).toMatchObject({
-      headline: "Generating headline...",
-      source: "pending",
-      status: "pending"
+      source: "offline",
+      status: "ready"
     });
+    expect(envelope.projection.cards[0]?.headline.headline).not.toBe("Generating headline...");
     expect(
       (envelope.projection.cards[0]?.headlineInput as { dispositionHints?: string[] } | undefined)?.dispositionHints
     ).toContain("Title quality fallback uses the provider summary.");

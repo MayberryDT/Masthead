@@ -266,6 +266,46 @@
   font-size: 10.5px;
 }
 
+.session-dossier .dossier-enrichment-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-dossier .dossier-enrichment-status {
+  color: var(--mute);
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.session-dossier .dossier-enrichment-status.is-current {
+  color: var(--green);
+}
+
+.session-dossier .dossier-enrichment-status.is-failed {
+  color: var(--red);
+}
+
+.session-dossier .dossier-enrichment-status.is-enriching {
+  color: var(--blue);
+}
+
+.session-dossier .dossier-enrich-button {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.session-dossier .dossier-enrich-button .dossier-loading-spinner {
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+}
+
 .session-dossier .summary-scroll {
   min-height: 0;
   overflow-y: auto;
@@ -444,23 +484,6 @@
 
 .session-dossier .summary-section p + p {
   margin-top: 8px;
-}
-
-.session-dossier .dossier-loading-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 38px;
-  border: 1px solid rgba(46, 167, 255, 0.24);
-  border-radius: 6px;
-  padding: 8px 11px;
-  color: var(--ink);
-  background: rgba(6, 25, 37, 0.72);
-}
-
-.session-dossier .dossier-loading-state strong {
-  font-size: 12px;
-  line-height: 1.2;
 }
 
 .session-dossier .dossier-loading-spinner {

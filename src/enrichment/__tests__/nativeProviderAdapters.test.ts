@@ -50,7 +50,7 @@ describe("native LLM enrichment providers", () => {
       system: string;
     };
     expect(body.model).toBe("claude-sonnet-4-6");
-    expect(body.max_tokens).toBe(760);
+    expect(body.max_tokens).toBe(1_800);
     expect(body.system).toContain("You are generating durable enrichment for a Masthead session.");
     expect(body.system).toContain("neutral third-person");
     expect(body.messages[0]?.role).toBe("user");
@@ -125,7 +125,7 @@ describe("native LLM enrichment providers", () => {
     expect(body.contents[0]?.parts[0]?.text).not.toContain("/home/tyler");
     expect(body.contents[0]?.parts[0]?.text).not.toContain("OPENAI_API_KEY");
     expect(body.generationConfig).toMatchObject({
-      maxOutputTokens: 760,
+      maxOutputTokens: 1_800,
       responseMimeType: "application/json",
       temperature: 0
     });

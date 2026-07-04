@@ -19,7 +19,7 @@ describe("OpenAI enrichment provider", () => {
       expect(body.input).not.toContain("OPENAI_API_KEY");
       expect(body.instructions).toContain("neutral third-person");
       expect(body.instructions).toContain("Do not write from the assistant's perspective");
-      expect(body.max_output_tokens).toBe(760);
+      expect(body.max_output_tokens).toBe(1_800);
       expect(body.reasoning).toEqual({ effort: "minimal" });
       expect(body.text.format.schema.required).toEqual([
         "title",
@@ -131,14 +131,14 @@ describe("OpenAI enrichment provider", () => {
       expect(body.messages[1]?.role).toBe("user");
       expect(body.messages[1]?.content).not.toContain("/home/tyler");
       expect(body.response_format).toEqual({ type: "json_object" });
-      return responseWithChatOutput({
-        confidence: "medium",
-        liveSummary: "MCP launch config validation has compatible endpoint coverage.",
-        missingEvidence: [],
-        outcome: "Validated compatible provider request wiring.",
-        searchSummary: "Masthead session for compatible provider request wiring.",
-        title: "Compatible provider request wiring"
-      });
+      return responseWithChatOutput(
+        durableProviderOutput({
+          confidence: "medium",
+          searchSummary: "Masthead session for compatible provider request wiring.",
+          summary: "MCP launch config validation has compatible endpoint coverage.",
+          title: "Compatible provider request wiring"
+        })
+      );
     });
     const provider = createOpenAIEnrichmentProvider({
       apiKey: "test-key",
@@ -159,20 +159,171 @@ describe("OpenAI enrichment provider", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  test("accepts compact provider aliases for durable summary and dossier", async () => {
+    const fetchImpl = vi.fn(async () =>
+      responseWithChatOutput({
+        dossier: {
+          blockers: [],
+          continuation: {
+            constraints: [],
+            nextStep: "Keep the compatible provider path covered by regression tests.",
+            openQuestions: []
+          },
+          decisions: ["Preserve compact provider aliases from OpenRouter-style responses."],
+          evidenceRefIds: [],
+          keyWork: ["Parsed title, summary, and dossier aliases from the provider response."],
+          outcome: "Useful provider output was preserved instead of replaced with fallback copy.",
+          purpose: "Repair durable enrichment parsing for compact provider responses.",
+          verification: {
+            commands: ["vitest"],
+            evidenceRefIds: [],
+            failures: [],
+            status: "passed",
+            summary: "Provider alias parsing was covered by a focused regression test."
+          },
+          warnings: []
+        },
+        summary: "Repaired durable enrichment parsing so compact provider responses keep useful Dossier content.",
+        title: "Compact provider alias parsing"
+      })
+    );
+    const provider = createOpenAIEnrichmentProvider({
+      apiKey: "test-key",
+      apiStyle: "chat_completions",
+      baseUrl: "https://openrouter.ai/api/v1",
+      enabled: true,
+      fetchImpl,
+      model: "openai/gpt-oss-20b",
+      providerId: "openai_compatible"
+    });
+
+    const result = await provider.enrich({ facts: facts() });
+
+    expect(result.status).toBe("success");
+    expect(result.capsule?.title).toBe("Compact provider alias parsing");
+    expect(result.capsule?.sessionSummary?.text).toContain("compact provider responses");
+    expect(result.capsule?.sessionDossier?.purpose).toBe("Repair durable enrichment parsing for compact provider responses.");
+    expect(result.capsule?.validationWarnings ?? []).not.toContain("liveSummary:missing");
+  });
+
+  test("rejects incomplete model output for rich transcript evidence", async () => {
+    const provider = createOpenAIEnrichmentProvider({
+      apiKey: "test-key",
+      apiStyle: "chat_completions",
+      baseUrl: "https://openrouter.ai/api/v1",
+      enabled: true,
+      fetchImpl: vi.fn(async () =>
+        responseWithChatOutput({
+          title: "Incomplete durable enrichment"
+        })
+      ),
+      model: "openai/gpt-oss-20b",
+      providerId: "openai_compatible"
+    });
+
+    const result = await provider.enrich({ facts: facts() });
+
+    expect(result.status).toBe("validation_failed");
+    expect(result.capsule).toBeUndefined();
+    expect(result.failureMessage).toContain("failed validation");
+  });
+
+  test("parses fenced JSON chat completion output", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: [
+                "Here is the JSON:",
+                "```json",
+                JSON.stringify(
+                  durableProviderOutput({
+                    searchSummary: "Fenced JSON provider response parsing.",
+                    summary: "Compatible provider returned fenced JSON that was extracted before narrative validation.",
+                    title: "Fenced JSON parsing"
+                  })
+                ),
+                "```"
+              ].join("\n")
+            }
+          }
+        ]
+      })
+    } as Response));
+    const provider = createOpenAIEnrichmentProvider({
+      apiKey: "test-key",
+      apiStyle: "chat_completions",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      enabled: true,
+      fetchImpl,
+      model: "llama-3.1",
+      providerId: "openai_compatible"
+    });
+
+    const result = await provider.enrich({ facts: facts() });
+
+    expect(result.status).toBe("success");
+    expect(result.capsule?.title).toBe("Fenced JSON parsing");
+  });
+
+  test("budgets oversized transcript evidence before sending provider payload", async () => {
+    let inputChars = 0;
+    let userEvidenceCount = 0;
+    let assistantEvidenceCount = 0;
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+      const input = body.messages[1]?.content ?? "";
+      const parsed = JSON.parse(input) as { facts: { userEvidence: string[]; assistantEvidence: string[] } };
+      inputChars = input.length;
+      userEvidenceCount = parsed.facts.userEvidence.length;
+      assistantEvidenceCount = parsed.facts.assistantEvidence.length;
+      return responseWithChatOutput(
+        durableProviderOutput({
+          searchSummary: "Budgeted narrative provider payload.",
+          summary: "Oversized transcript evidence was budgeted before enrichment and kept within provider limits.",
+          title: "Budgeted provider payload"
+        })
+      );
+    });
+    const provider = createOpenAIEnrichmentProvider({
+      apiKey: "test-key",
+      apiStyle: "chat_completions",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      enabled: true,
+      fetchImpl,
+      model: "llama-3.1",
+      providerId: "openai_compatible"
+    });
+    const oversizedFacts = {
+      ...facts(),
+      assistantEvidence: Array.from({ length: 500 }, (_, index) => `Assistant evidence ${index}: ${"implementation detail ".repeat(20)}`),
+      userEvidence: Array.from({ length: 200 }, (_, index) => `User evidence ${index}: ${"request detail ".repeat(20)}`)
+    } satisfies SessionFacts;
+
+    const result = await provider.enrich({ facts: oversizedFacts });
+
+    expect(result.status).toBe("success");
+    expect(inputChars).toBeLessThan(80_000);
+    expect(userEvidenceCount).toBeLessThan(200);
+    expect(assistantEvidenceCount).toBeLessThan(500);
+  });
+
   test("omits authorization for local OpenAI-compatible providers without API keys", async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       expect(String(url)).toBe("http://127.0.0.1:11434/v1/chat/completions");
       const headers = init?.headers as Record<string, string>;
       expect(headers.authorization).toBeUndefined();
       expect(headers["content-type"]).toBe("application/json");
-      return responseWithChatOutput({
-        confidence: "medium",
-        liveSummary: "Local enrichment completed through Ollama.",
-        missingEvidence: [],
-        outcome: "Validated optional-key local model request wiring.",
-        searchSummary: "Masthead session for local Ollama enrichment.",
-        title: "Local Ollama enrichment"
-      });
+      return responseWithChatOutput(
+        durableProviderOutput({
+          confidence: "medium",
+          searchSummary: "Masthead session for local Ollama enrichment.",
+          summary: "Local enrichment completed through Ollama with optional API key request wiring validated.",
+          title: "Local Ollama enrichment"
+        })
+      );
     });
     const provider = createOpenAIEnrichmentProvider({
       apiKeyRequired: false,
@@ -192,25 +343,29 @@ describe("OpenAI enrichment provider", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  test("returns validation failure without deterministic fallback when Responses output is invalid", async () => {
+  test("coerces loose provider metadata instead of failing enrichment", async () => {
     const provider = createOpenAIEnrichmentProvider({
       apiKey: "test-key",
       enabled: true,
       fetchImpl: vi.fn(async () =>
-        responseWithOutput({
-          liveSummary: "Updated files.",
-          searchSummary: "Changed files were updated in this session.",
-          title: "Codex session"
-        })
+        responseWithOutput(
+          durableProviderOutput({
+            confidence: "authoritative",
+            searchSummary: "Changed files were updated in this session.",
+            summary: "Updated provider metadata coercion coverage while preserving durable Dossier fields.",
+            title: "Codex session"
+          })
+        )
       )
     });
 
     const result = await provider.enrich({ facts: facts() });
 
-    expect(result.status).toBe("validation_failed");
-    expect(result.source).toBe("none");
-    expect(result.capsule).toBeUndefined();
-    expect(result.validationFailures).toContain("title");
+    expect(result.status).toBe("success");
+    expect(result.source).toBe("llm");
+    expect(result.capsule?.confidence).toBe("high");
+    expect(result.capsule?.missingEvidence).toEqual([]);
+    expect(result.capsule?.validationWarnings).toContain("title:generic");
   });
 
   test("keeps structured LLM enrichment when soft narrative copy rules fail", async () => {
@@ -448,4 +603,54 @@ function responseWithChatOutput(output: Record<string, unknown>): Response {
       ]
     })
   } as Response;
+}
+
+function durableProviderOutput(input: {
+  confidence?: string;
+  searchSummary: string;
+  summary: string;
+  title: string;
+}): Record<string, unknown> {
+  return {
+    confidence: input.confidence ?? "high",
+    liveSummary: input.summary,
+    missingEvidence: [],
+    outcome: "Durable enrichment was generated for the session.",
+    searchSummary: input.searchSummary,
+    sessionDossier: {
+      blockers: [],
+      continuation: {
+        constraints: [],
+        nextStep: "Use the durable enrichment in the session dossier.",
+        openQuestions: []
+      },
+      decisions: [],
+      evidenceRefIds: [],
+      keyWork: ["Generated durable enrichment from transcript evidence."],
+      outcome: "Durable title, summary, and Dossier sections were generated.",
+      purpose: "Generate durable session enrichment from transcript evidence.",
+      verification: {
+        commands: ["vitest"],
+        evidenceRefIds: [],
+        failures: [],
+        status: "passed",
+        summary: "Provider parsing test passed."
+      },
+      warnings: []
+    },
+    sessionSummary: {
+      confidence: input.confidence === "medium" ? "medium" : "high",
+      evidenceRefIds: [],
+      state: "completed",
+      text: input.summary
+    },
+    sessionTitle: {
+      basis: "dominant_work",
+      confidence: input.confidence === "medium" ? "medium" : "high",
+      evidenceRefIds: [],
+      text: input.title
+    },
+    title: input.title,
+    version: "session-capsule-v4"
+  };
 }

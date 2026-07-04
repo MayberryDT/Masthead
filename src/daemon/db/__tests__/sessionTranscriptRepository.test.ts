@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, test } from "vitest";
 import { getSessionTranscript } from "../sessionTranscriptRepository.ts";
 import { migrateDatabase } from "../schema.ts";
@@ -163,6 +164,25 @@ describe("session transcript repository", () => {
     expect(result.total).toBe(4);
     db.close();
   });
+
+  test("pages old tool-heavy transcripts without materializing every tool result body", async () => {
+    const db = await openTestDatabase();
+    seedToolHeavyTranscriptSession(db, 180);
+
+    const startedAt = performance.now();
+    const result = getSessionTranscript(db, { limit: 5, sessionId: "session-tool-heavy" });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result.items).toHaveLength(5);
+    expect(result.nextCursor).toBe("5");
+    expect(result.total).toBe(360);
+    expect(result.coverage).toMatchObject({
+      toolCalls: 180,
+      toolResults: 180
+    });
+    expect(elapsedMs).toBeLessThan(150);
+    db.close();
+  });
 });
 
 async function openTestDatabase(): Promise<MastheadDatabase> {
@@ -263,6 +283,41 @@ function seedHookOnlySession(db: MastheadDatabase): void {
     "2026-06-26T13:03:00.000Z",
     "{}"
   );
+}
+
+function seedToolHeavyTranscriptSession(db: MastheadDatabase, count: number): void {
+  seedSession(db, {
+    lifecycle: "ended",
+    model: "gpt-5",
+    project: "Masthead",
+    sessionId: "session-tool-heavy",
+    title: "Tool heavy"
+  });
+  clearCanonicalRows(db, "session-tool-heavy");
+  const output = Array.from({ length: 2600 }, (_, index) => `tool result output line ${index}`).join("\n");
+  const insertTool = db.prepare("INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, ?, ?, ?)");
+  const insertResult = db.prepare(
+    `INSERT INTO tool_results (
+      tool_result_id, tool_call_id, session_id, status, output_redacted, output_hash, exit_code, completed_at, source_ref_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  for (let index = 0; index < count; index += 1) {
+    const padded = String(index).padStart(4, "0");
+    const toolCallId = `session-tool-heavy:tool-${padded}`;
+    const observedAt = `2026-06-26T14:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`;
+    insertTool.run(toolCallId, "session-tool-heavy", "shell", observedAt, "{}");
+    insertResult.run(
+      `session-tool-heavy:tool-result-${padded}`,
+      toolCallId,
+      "session-tool-heavy",
+      "succeeded",
+      output,
+      `hash-${padded}`,
+      0,
+      observedAt,
+      "{}"
+    );
+  }
 }
 
 function clearCanonicalRows(db: MastheadDatabase, sessionId: string): void {

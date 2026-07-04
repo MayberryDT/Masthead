@@ -66,6 +66,7 @@ function confidenceRank(value: "high" | "medium" | "low"): number {
 
 export type EnrichmentCoordinatorOptions = {
   auditLogger?: EnrichmentAuditLogger;
+  failureBackoffAfterMs?: number;
   failureBackoffMs?: number;
   now?: () => number;
 };
@@ -79,6 +80,7 @@ export function createEnrichmentCoordinator(
 ): EnrichmentCoordinator {
   const options = isAuditLogger(optionsOrAudit) ? { auditLogger: optionsOrAudit } : optionsOrAudit;
   const audit = options.auditLogger ?? createEnrichmentAuditLogger();
+  const failureBackoffAfterMs = options.failureBackoffAfterMs ?? 0;
   const failureBackoffMs = options.failureBackoffMs ?? DEFAULT_FAILURE_BACKOFF_MS;
   const now = options.now ?? Date.now;
 
@@ -218,9 +220,9 @@ export function createEnrichmentCoordinator(
       const facts = buildSessionFacts(db, sessionId);
       const fingerprint = fingerprintSessionFacts(facts);
       const current = readCurrentSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
-      if (current?.contentFingerprint === fingerprint) return current;
+      if (current?.contentFingerprint === fingerprint && recordMatchesProvider(current, provider) && !isWeakCurrentEnrichment(current, facts)) return current;
       const latestFailed = readLatestFailedSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
-      if (isRecentFailureForFingerprint(latestFailed, fingerprint, now(), failureBackoffMs)) return latestFailed;
+      if (isRecentFailureForFingerprint(latestFailed, fingerprint, now(), failureBackoffMs, provider, failureBackoffAfterMs)) return latestFailed;
       return this.enrich(sessionId);
     }
   };
@@ -261,12 +263,43 @@ function isRecentFailureForFingerprint(
   record: SessionEnrichmentRecord | undefined,
   fingerprint: string,
   nowMs: number,
-  failureBackoffMs: number
+  failureBackoffMs: number,
+  provider: SessionEnrichmentProvider,
+  failureBackoffAfterMs: number
 ): record is SessionEnrichmentRecord {
   if (!record?.generatedAt || !record.contentFingerprint.startsWith(`${fingerprint}:failed:`)) return false;
+  if (!recordMatchesProvider(record, provider)) return false;
   const generatedAtMs = Date.parse(record.generatedAt);
   if (!Number.isFinite(generatedAtMs)) return false;
+  if (generatedAtMs < failureBackoffAfterMs) return false;
   return nowMs - generatedAtMs < failureBackoffMs;
+}
+
+function recordMatchesProvider(record: SessionEnrichmentRecord, provider: SessionEnrichmentProvider): boolean {
+  return record.provider === provider.id && record.model === provider.model;
+}
+
+function isWeakCurrentEnrichment(record: SessionEnrichmentRecord, facts: SessionFacts): boolean {
+  if (!hasRichTranscriptEvidence(facts)) return false;
+  const capsule = record.content as SessionCapsule | undefined;
+  if (!capsule) return true;
+  const warnings = [
+    ...(capsule.validationWarnings ?? []),
+    ...(capsule.sessionDossier?.warnings ?? []),
+    ...(capsule.durableEnrichment?.sessionDossier.warnings ?? [])
+  ];
+  if (warnings.some((warning) => /fallback|liveSummary:missing|searchSummary:missing|sessionSummary:missing|sessionDossier:missing/i.test(warning))) {
+    return true;
+  }
+  if (capsule.sessionSummary?.confidence === "low" && /limited durable enrichment context/i.test(capsule.sessionSummary.text)) return true;
+  if (/not enough transcript evidence/i.test(capsule.sessionDossier?.purpose ?? "")) return true;
+  return false;
+}
+
+function hasRichTranscriptEvidence(facts: SessionFacts): boolean {
+  const userCount = facts.userEvidence?.filter((entry) => entry.trim().length > 0).length ?? 0;
+  const assistantCount = facts.assistantEvidence?.filter((entry) => entry.trim().length > 0).length ?? 0;
+  return assistantCount > 0 && userCount + assistantCount >= 2;
 }
 
 function isAuditLogger(value: EnrichmentCoordinatorOptions | EnrichmentAuditLogger): value is EnrichmentAuditLogger {

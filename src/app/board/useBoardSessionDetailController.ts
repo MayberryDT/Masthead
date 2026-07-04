@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionDossierDto } from "../../shared/sessionDossier";
 import {
+  enrichSessionDossier,
   getSessionDossier,
   getSessionTranscript,
   type SessionTranscriptKindFilter,
   type SessionTranscriptResult
 } from "../daemonClient";
+import { pollDossierEnrichment } from "../sessionDossierEnrichmentPolling";
 
 type UseBoardSessionDetailControllerOptions = {
   activeProjectionUrl: string;
@@ -24,6 +26,9 @@ export function useBoardSessionDetailController({
   const [dossier, setDossier] = useState<SessionDossierDto>();
   const [dossierLoading, setDossierLoading] = useState(false);
   const [dossierError, setDossierError] = useState<string>();
+  const [dossierEnrichmentBusy, setDossierEnrichmentBusy] = useState(false);
+  const [dossierEnrichmentError, setDossierEnrichmentError] = useState<string>();
+  const dossierEnrichmentAbortRef = useRef<AbortController | null>(null);
   const [transcriptRetryKey, setTranscriptRetryKey] = useState(0);
   const [transcript, setTranscript] = useState<SessionTranscriptResult>();
   const [transcriptLoading, setTranscriptLoading] = useState(false);
@@ -36,6 +41,10 @@ export function useBoardSessionDetailController({
     const timeout = window.setTimeout(() => setTranscriptDebouncedQuery(transcriptQuery), 200);
     return () => window.clearTimeout(timeout);
   }, [transcriptQuery]);
+
+  useEffect(() => {
+    return () => dossierEnrichmentAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     if (!open || showDemoData || !sessionId) {
@@ -124,13 +133,38 @@ export function useBoardSessionDetailController({
     }
   }, [activeProjectionUrl, sessionId, transcript, transcriptDebouncedQuery, transcriptFilter, transcriptLoading]);
 
+  const enrichDossier = useCallback(async () => {
+    if (!sessionId || dossierEnrichmentBusy) return;
+    dossierEnrichmentAbortRef.current?.abort();
+    const controller = new AbortController();
+    dossierEnrichmentAbortRef.current = controller;
+    setDossierEnrichmentBusy(true);
+    setDossierEnrichmentError(undefined);
+    try {
+      await enrichSessionDossier(sessionId, activeProjectionUrl, { signal: controller.signal });
+      await pollDossierEnrichment({
+        baseUrl: activeProjectionUrl,
+        onDossier: setDossier,
+        sessionId,
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (!controller.signal.aborted) setDossierEnrichmentError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (!controller.signal.aborted) setDossierEnrichmentBusy(false);
+    }
+  }, [activeProjectionUrl, dossierEnrichmentBusy, sessionId]);
+
   const retryDossier = useCallback(() => setDossierRetryKey((current) => current + 1), []);
   const retryTranscript = useCallback(() => setTranscriptRetryKey((current) => current + 1), []);
 
   return {
     dossier,
+    dossierEnrichmentBusy,
+    dossierEnrichmentError,
     dossierError,
     dossierLoading,
+    enrichDossier,
     loadMoreTranscript,
     retryDossier,
     retryTranscript,

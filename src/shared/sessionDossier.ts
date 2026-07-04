@@ -159,8 +159,24 @@ export type SessionDossierCoverage = {
   transcript: SessionTranscriptCoverage;
 };
 
+export type SessionDossierEnrichmentState = {
+  status: "current" | "not_enriched" | "failed" | "enriching";
+  generatedAt?: string;
+  provider?: string;
+  model?: string;
+  failureCode?: string;
+  failureMessage?: string;
+};
+
+export type SessionDossierManualEnrichmentJob = Omit<SessionDossierEnrichmentState, "status"> & {
+  status: "enriching" | "current" | "failed";
+  requestedAt: string;
+  completedAt?: string;
+};
+
 export type SessionDossierDto = {
   identity: SessionDossierIdentity;
+  enrichment: SessionDossierEnrichmentState;
   durableEnrichment?: DurableSessionEnrichment;
   coverage: SessionDossierCoverage;
   narrative: SessionDossierNarrative;

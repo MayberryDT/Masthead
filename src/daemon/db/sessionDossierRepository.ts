@@ -10,6 +10,7 @@ import type {
   SessionDossierCoverageLevel,
   SessionDossierCoverageWarning,
   SessionDossierDto,
+  SessionDossierEnrichmentState,
   SessionDossierExcerpt,
   SessionDossierFile,
   SessionDossierIdentity,
@@ -51,11 +52,15 @@ type MessageRow = {
   sourceRefJson: string;
 };
 
-type ToolRow = {
+type ToolCallRow = {
   toolCallId: string;
   toolName: string;
   startedAt: string | null;
   sourceRefJson: string;
+};
+
+type ToolResultRow = {
+  toolCallId: string;
   status: string | null;
   exitCode: number | null;
   completedAt: string | null;
@@ -99,6 +104,7 @@ type UsageRow = {
 
 const DOSSIER_MESSAGE_LIMIT = 240;
 const DOSSIER_TIMELINE_LIMIT = 260;
+const DOSSIER_TOOL_LIMIT = 100;
 
 export function getSessionDossier(db: MastheadDatabase, sessionId: string): SessionDossierDto | undefined {
   const identity = getIdentity(db, sessionId);
@@ -114,12 +120,14 @@ export function getSessionDossier(db: MastheadDatabase, sessionId: string): Sess
   const usage = getUsage(db, sessionId);
   const coverage = getDossierCoverage(db, sessionId, files, tools, runtimeSignals, attention, usage, verification);
   const durableEnrichment = getDurableEnrichment(db, sessionId);
+  const enrichment = getDossierEnrichmentState(db, sessionId);
   const dossierIdentity = durableEnrichment ? { ...identity, title: durableEnrichment.sessionTitle.text } : identity;
   const narrative = withCoverageCaveat(getNarrative(db, sessionId, dossierIdentity, messages), coverage);
   const partial: DossierWithoutReuse = {
     attention,
     coverage,
     durableEnrichment,
+    enrichment,
     excerpts: getExcerpts(messages, checkpoints, runtimeSignals),
     files,
     identity: dossierIdentity,
@@ -269,33 +277,54 @@ function getFiles(db: MastheadDatabase, sessionId: string): SessionDossierFile[]
 }
 
 function getTools(db: MastheadDatabase, sessionId: string): SessionDossierTool[] {
-  const rows = db
+  const toolCalls = db
     .prepare(
       `SELECT tool_calls.tool_call_id AS toolCallId,
         tool_calls.tool_name AS toolName,
         tool_calls.started_at AS startedAt,
-        tool_calls.source_ref_json AS sourceRefJson,
-        tool_results.status,
-        tool_results.exit_code AS exitCode,
-        tool_results.completed_at AS completedAt,
-        tool_results.output_redacted AS outputRedacted
+        tool_calls.source_ref_json AS sourceRefJson
       FROM tool_calls
-      LEFT JOIN tool_results ON tool_results.tool_call_id = tool_calls.tool_call_id
       WHERE tool_calls.session_id = ?
-      ORDER BY COALESCE(tool_calls.started_at, tool_results.completed_at, '') DESC
-      LIMIT 100`
+      ORDER BY COALESCE(tool_calls.started_at, '') DESC, tool_calls.tool_call_id DESC
+      LIMIT ?`
     )
-    .all(sessionId) as ToolRow[];
-  return rows.map((row) => ({
-    completedAt: row.completedAt ?? undefined,
-    exitCode: row.exitCode ?? undefined,
-    outputPreview: preview(row.outputRedacted),
+    .all(sessionId, DOSSIER_TOOL_LIMIT) as ToolCallRow[];
+  const resultsByToolCallId = latestToolResultsByCallId(db, toolCalls.map((row) => row.toolCallId));
+  return toolCalls.map((row) => {
+    const result = resultsByToolCallId.get(row.toolCallId);
+    return {
+    completedAt: result?.completedAt ?? undefined,
+    exitCode: result?.exitCode ?? undefined,
+    outputPreview: preview(result?.outputRedacted ?? null),
     sourceRef: parseJson(row.sourceRefJson),
     startedAt: row.startedAt ?? undefined,
-    status: row.status ?? undefined,
+    status: result?.status ?? undefined,
     toolCallId: row.toolCallId,
     toolName: row.toolName
-  }));
+  };
+  });
+}
+
+function latestToolResultsByCallId(db: MastheadDatabase, toolCallIds: string[]): Map<string, ToolResultRow> {
+  if (toolCallIds.length === 0) return new Map();
+  const placeholders = toolCallIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT tool_call_id AS toolCallId,
+        status,
+        exit_code AS exitCode,
+        completed_at AS completedAt,
+        output_redacted AS outputRedacted
+      FROM tool_results
+      WHERE tool_call_id IN (${placeholders})
+      ORDER BY COALESCE(completed_at, '') DESC, tool_result_id DESC`
+    )
+    .all(...toolCallIds) as ToolResultRow[];
+  const results = new Map<string, ToolResultRow>();
+  for (const row of rows) {
+    if (!results.has(row.toolCallId)) results.set(row.toolCallId, row);
+  }
+  return results;
 }
 
 function getRuntimeSignals(db: MastheadDatabase, sessionId: string): RuntimeSignalRow[] {
@@ -525,6 +554,32 @@ function getDurableEnrichment(db: MastheadDatabase, sessionId: string): DurableS
     };
   }
   return undefined;
+}
+
+function getDossierEnrichmentState(db: MastheadDatabase, sessionId: string): SessionDossierEnrichmentState {
+  const current = readCurrentSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
+  if (current) {
+    return {
+      generatedAt: current.generatedAt,
+      model: current.model,
+      provider: current.provider,
+      status: "current"
+    };
+  }
+
+  const latestFailed = readLatestFailedSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
+  if (latestFailed) {
+    return {
+      failureCode: latestFailed.failureCode,
+      failureMessage: latestFailed.failureMessage,
+      generatedAt: latestFailed.generatedAt,
+      model: latestFailed.model,
+      provider: latestFailed.provider,
+      status: "failed"
+    };
+  }
+
+  return { status: "not_enriched" };
 }
 
 function withCoverageCaveat(narrative: SessionDossierNarrative, coverage: SessionDossierCoverage): SessionDossierNarrative {

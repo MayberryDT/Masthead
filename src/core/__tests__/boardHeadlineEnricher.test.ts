@@ -357,6 +357,43 @@ describe("board headline enricher", () => {
     });
   });
 
+  test("does not leave ended cards waiting for transcript evidence", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+
+    const result = await enricher.enrichProjection(
+      projection([
+        card({
+          lifecycle: "ended",
+          primaryStatus: "completed_unreviewed",
+          headlineInput: input({
+            lifecycle: "ended",
+            primaryStatus: "completed_unreviewed",
+            stateHint: "completed",
+            facts: {
+              ...input().facts,
+              lifecycle: "ended",
+              primaryStatus: "completed_unreviewed",
+              recentTranscriptMessages: []
+            }
+          })
+        })
+      ])
+    );
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.cards[0]?.headline).toMatchObject({
+      source: "offline",
+      status: "ready"
+    });
+    expect(result.cards[0]?.headline.headline).not.toBe("Waiting for transcript...");
+    expect(result.cards[0]?.headlineRefresh).toBeUndefined();
+    expect(result.headlineRefreshSummary).toMatchObject({
+      requested: 0,
+      pending: 0
+    });
+  });
+
   test("does not request a new headline when the transcript refresh key is unchanged", async () => {
     const response = deferred<Response>();
     const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
@@ -424,6 +461,49 @@ describe("board headline enricher", () => {
       requested: 0,
       pending: 0
     });
+  });
+
+  test("requests an initial headline for ended cards with transcript while keeping stable copy visible", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+    const endedCard = card({
+      lifecycle: "ended",
+      primaryStatus: "completed_unreviewed",
+      headlineInput: input({
+        lifecycle: "ended",
+        primaryStatus: "completed_unreviewed",
+        stateHint: "completed",
+        facts: {
+          ...input().facts,
+          lifecycle: "ended",
+          primaryStatus: "completed_unreviewed",
+          recentTranscriptMessages: ["The portfolio deployment was restored from the known-good artifact."]
+        }
+      })
+    });
+
+    const first = await enricher.enrichProjection(projection([endedCard]));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(first.cards[0]?.headline).toMatchObject({
+      source: "offline",
+      status: "ready"
+    });
+    expect(first.cards[0]?.headline.headline).not.toBe("Generating headline...");
+    expect(first.cards[0]?.headlineRefresh).toBeUndefined();
+
+    response.resolve(responseWithFrame(validFrame({ disposition: "restored from the known-good artifact", state: "completed" })));
+    await flushMicrotasks();
+
+    const second = await enricher.enrichProjection(projection([endedCard]));
+
+    expect(second.cards[0]?.headline).toMatchObject({
+      headline: "Board headlines: restored from the known-good artifact.",
+      source: "llm",
+      status: "ready"
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   test("requests a new headline when transcript evidence changes", async () => {
