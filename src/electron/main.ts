@@ -5,9 +5,10 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, net, protocol, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
-import { ELECTRON_CHANNELS, registerMastheadIpc } from "./ipc";
+import { ELECTRON_CHANNELS, isAllowedIpcSender, registerMastheadIpc } from "./ipc";
 import {
   type StartLiveConnectorResult,
+  connectorBaseUrl,
   mcpLaunchConfig,
   resolveDaemonLaunchTarget,
   startLiveConnector,
@@ -286,6 +287,15 @@ function registerDesktopIpc(): void {
     env: electronDaemonEnv(),
     resourcesPath: process.resourcesPath,
     userDataDir: app.getPath("userData")
+  });
+
+  ipcMain.on(ELECTRON_CHANNELS.rendererConfig, (event) => {
+    if (!isAllowedIpcSender(event.senderFrame?.url, { allowDevRenderer: isElectronDevMode() })) {
+      event.returnValue = { projectionUrl: "http://127.0.0.1:17373/projection" };
+      return;
+    }
+    const target = resolveDaemonLaunchTarget(targetInput());
+    event.returnValue = { projectionUrl: `${connectorBaseUrl(target.port)}/projection` };
   });
 
   registerMastheadIpc(
