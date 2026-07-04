@@ -39,6 +39,7 @@ import {
   normalizeLiveBoardProjection,
 } from "./liveProjectionClient";
 import { startLiveConnector } from "./connectorClient";
+import { isDesktopBridgeAvailable } from "./desktopBridge";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
 import { ConnectionRecoveryPanel } from "../ui/ConnectionRecoveryPanel";
 import { saveReviewDisposition } from "./daemonClient";
@@ -160,6 +161,8 @@ export function App() {
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
   const searchInputRef = useRef<CollapsibleSearchHandle | null>(null);
   const liveRequestIdRef = useRef(0);
+  const autoStartAttemptedRef = useRef(false);
+  const collectorStartInFlightRef = useRef(false);
   const fixtureBoard = useMemo(() => buildObservabilityDemoBoard(selectedSessionId), [selectedSessionId]);
   const baseBoard = showDemoData ? fixtureBoard : liveProjection ?? emptyLiveBoard;
   const board = useMemo(() => applyReviewDispositions(baseBoard, reviewDispositions), [baseBoard, reviewDispositions]);
@@ -341,30 +344,69 @@ export function App() {
     setDetailModalOpen(true);
   };
 
-  const handleStartConnector = async () => {
-    setConnectorAction({ state: "starting", message: "Starting local connector..." });
-    try {
-      const result = await startLiveConnector();
-      if (result.ok) {
-        connection.setBaseUrl(result.projectionUrl);
-        setConnectorAction({
-          state: "started",
-          message: `${result.message} Connected to ${result.baseUrl}.`
-        });
-        return;
-      }
+  const startCollector = useCallback(
+    async ({ automatic = false }: { automatic?: boolean } = {}) => {
+      if (collectorStartInFlightRef.current) return;
+      collectorStartInFlightRef.current = true;
+      setConnectorAction({
+        state: "starting",
+        message: automatic ? "Starting local collector after app launch..." : "Starting local collector..."
+      });
 
-      setConnectorAction({
-        state: "unsupported",
-        message: result.message
+      try {
+        const result = await startLiveConnector();
+        if (result.ok) {
+          await connection.connectTo(result.projectionUrl);
+          setConnectorAction({
+            state: "started",
+            message: `${result.message} Connected to ${result.baseUrl}.`
+          });
+          await loadLiveProjection();
+          return;
+        }
+
+        setConnectorAction({
+          state: "unsupported",
+          message: result.message
+        });
+      } catch (error) {
+        setConnectorAction({
+          state: "error",
+          message: `Could not start collector: ${error instanceof Error ? error.message : String(error)}`
+        });
+      } finally {
+        collectorStartInFlightRef.current = false;
+      }
+    },
+    [connection, loadLiveProjection]
+  );
+
+  const handleStartConnector = useCallback(() => {
+    void startCollector();
+  }, [startCollector]);
+
+  useEffect(() => {
+    if (showDemoData) return;
+    if (!isDesktopBridgeAvailable()) return;
+    if (autoStartAttemptedRef.current) return;
+    if (connection.state.state !== "offline" && connection.state.state !== "incompatible") return;
+
+    let cancelled = false;
+    let secondFrame: number | undefined;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        if (cancelled || autoStartAttemptedRef.current) return;
+        autoStartAttemptedRef.current = true;
+        void startCollector({ automatic: true });
       });
-    } catch (error) {
-      setConnectorAction({
-        state: "error",
-        message: `Could not start connector: ${error instanceof Error ? error.message : String(error)}`
-      });
-    }
-  };
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame !== undefined) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [connection.state.state, showDemoData, startCollector]);
 
   const handleSessionAction = async (action: SafeAction, session: SessionDetailView) => {
     if (!isReviewSafeAction(action)) {
