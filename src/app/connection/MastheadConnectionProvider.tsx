@@ -14,6 +14,7 @@ export type MastheadConnectionState =
 export type MastheadConnectionContextValue = {
   api: MastheadApiClient;
   baseUrl: string;
+  connectTo: (url: string) => Promise<void>;
   setBaseUrl: (url: string) => void;
   refresh: () => Promise<void>;
   state: MastheadConnectionState;
@@ -32,76 +33,109 @@ export function MastheadConnectionProvider({
   const [baseUrl, setBaseUrlState] = useState(() => normalizeDaemonBaseUrl(initialUrl));
   const [state, setState] = useState<MastheadConnectionState>({ state: "probing", baseUrl });
   const refreshRequestIdRef = useRef(0);
+  const skipNextEffectProbeBaseUrlRef = useRef<string | null>(null);
   const api = useMemo(() => new MastheadApiClient(baseUrl), [baseUrl]);
 
-  const setBaseUrl = useCallback((url: string) => {
-    setBaseUrlState(normalizeDaemonBaseUrl(url));
-  }, []);
-
-  const refresh = useCallback(async () => {
+  const probeBaseUrl = useCallback(async (targetBaseUrl: string) => {
     const requestId = refreshRequestIdRef.current + 1;
     refreshRequestIdRef.current = requestId;
     const isCurrentRequest = () => refreshRequestIdRef.current === requestId;
+    const targetApi = new MastheadApiClient(targetBaseUrl);
     const startedAt = performance.now();
-    setState({ state: "probing", baseUrl });
+    setState({ state: "probing", baseUrl: targetBaseUrl });
     try {
-      const health = await api.getHealth();
+      const health = await targetApi.getHealth();
       if (!isCurrentRequest()) return;
       if (health.runtime?.writable === false) {
         logConnectionProbe({
-          baseUrl,
+          baseUrl: targetBaseUrl,
           elapsedMs: elapsedMs(startedAt),
           state: "read_only"
         });
-        setState({ state: "read_only", baseUrl, health, writable: false });
+        setState({ state: "read_only", baseUrl: targetBaseUrl, health, writable: false });
         return;
       }
       logConnectionProbe({
-        baseUrl,
+        baseUrl: targetBaseUrl,
         elapsedMs: elapsedMs(startedAt),
         state: "ready"
       });
-      setState({ state: "ready", baseUrl, health, writable: true });
+      setState({ state: "ready", baseUrl: targetBaseUrl, health, writable: true });
     } catch (error) {
       if (!isCurrentRequest()) return;
       if (error instanceof MastheadApiError && error.kind === "incompatible") {
         logConnectionProbe({
-          baseUrl,
+          baseUrl: targetBaseUrl,
           elapsedMs: elapsedMs(startedAt),
           error: error.message,
           state: "incompatible",
           status: error.status,
           url: error.url
         });
-        setState({ state: "incompatible", baseUrl, error: error.message });
+        setState({ state: "incompatible", baseUrl: targetBaseUrl, error: error.message });
       } else {
         logConnectionProbe({
-          baseUrl,
+          baseUrl: targetBaseUrl,
           elapsedMs: elapsedMs(startedAt),
           error: error instanceof Error ? error.message : String(error),
           state: "offline",
           status: error instanceof MastheadApiError ? error.status : undefined,
           url: error instanceof MastheadApiError ? error.url : undefined
         });
-        setState({ state: "offline", baseUrl, error: error instanceof Error ? error.message : String(error) });
+        setState({
+          state: "offline",
+          baseUrl: targetBaseUrl,
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
     }
-  }, [api, baseUrl]);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    await probeBaseUrl(baseUrl);
+  }, [baseUrl, probeBaseUrl]);
+
+  const setBaseUrl = useCallback(
+    (url: string) => {
+      const nextBaseUrl = normalizeDaemonBaseUrl(url);
+      skipNextEffectProbeBaseUrlRef.current = null;
+      setBaseUrlState(nextBaseUrl);
+      if (nextBaseUrl === baseUrl) {
+        void probeBaseUrl(nextBaseUrl);
+      }
+    },
+    [baseUrl, probeBaseUrl]
+  );
+
+  const connectTo = useCallback(
+    async (url: string) => {
+      const nextBaseUrl = normalizeDaemonBaseUrl(url);
+      skipNextEffectProbeBaseUrlRef.current = nextBaseUrl === baseUrl ? null : nextBaseUrl;
+      setBaseUrlState(nextBaseUrl);
+      await probeBaseUrl(nextBaseUrl);
+    },
+    [baseUrl, probeBaseUrl]
+  );
 
   useEffect(() => {
+    if (skipNextEffectProbeBaseUrlRef.current === baseUrl) {
+      skipNextEffectProbeBaseUrlRef.current = null;
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [baseUrl, refresh]);
 
   const value = useMemo(
     () => ({
       api,
       baseUrl,
+      connectTo,
       refresh,
       setBaseUrl,
       state,
       writable: state.state === "ready" && state.writable
     }),
-    [api, baseUrl, refresh, setBaseUrl, state]
+    [api, baseUrl, connectTo, refresh, setBaseUrl, state]
   );
 
   return <MastheadConnectionContext.Provider value={value}>{children}</MastheadConnectionContext.Provider>;
