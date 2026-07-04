@@ -5,6 +5,7 @@ declare const __APP_VERSION__: string;
 
 type MastheadDesktopBridge = {
   invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+  projectionUrl?: string;
 };
 
 interface Window {

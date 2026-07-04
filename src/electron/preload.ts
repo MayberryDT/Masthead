@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld("mastheadDesktop", {
       throw new Error(`Unsupported Masthead desktop command: ${command}`);
     }
     return ipcRenderer.invoke(channel, args) as Promise<T>;
-  }
+  },
+  projectionUrl: `http://127.0.0.1:${process.env.MASTHEAD_PORT || "17373"}/projection`
 });
