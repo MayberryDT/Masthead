@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { LEGACY_COMMAND_TO_CHANNEL } from "./channels";
 
+const runtimeProcess = globalThis.process as { env?: Record<string, string | undefined> } | undefined;
+const projectionPort = runtimeProcess?.env?.MASTHEAD_PORT || "17373";
+
 contextBridge.exposeInMainWorld("mastheadDesktop", {
   invoke: async <T>(command: string, args?: Record<string, unknown>): Promise<T> => {
     const channel = LEGACY_COMMAND_TO_CHANNEL[command];
@@ -9,5 +12,5 @@ contextBridge.exposeInMainWorld("mastheadDesktop", {
     }
     return ipcRenderer.invoke(channel, args) as Promise<T>;
   },
-  projectionUrl: `http://127.0.0.1:${process.env.MASTHEAD_PORT || "17373"}/projection`
+  projectionUrl: `http://127.0.0.1:${projectionPort}/projection`
 });
