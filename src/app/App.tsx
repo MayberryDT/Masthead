@@ -438,7 +438,14 @@ export function App() {
             state: "error"
           };
           const projectionLoadResult = await loadLiveProjection(result.projectionUrl);
-          if (projectionLoadResult === "failed") {
+          if (projectionLoadResult === "superseded") {
+            appendCollectorStartupLog({
+              id: "projection",
+              label: "Live projection",
+              detail: "Handed off to the refreshed connection.",
+              state: "done"
+            });
+          } else if (projectionLoadResult === "failed") {
             appendCollectorStartupLog({
               id: "projection",
               label: "Live projection",
