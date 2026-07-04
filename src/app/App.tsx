@@ -309,9 +309,7 @@ export function App() {
       setShowDemoData(false);
       collectorProjectionLoadedRef.current = true;
       setConnectorAction((current) =>
-        current.state === "starting" || current.state === "started" || current.message === STARTUP_PROJECTION_ERROR_MESSAGE
-          ? { state: "started", message: "Collector connected." }
-          : current
+        current.state === "idle" ? current : { state: "started", message: "Collector connected." }
       );
       setCollectorStartupLog((current) =>
         current.some((entry) => entry.id === "projection")
