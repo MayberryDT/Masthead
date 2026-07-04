@@ -3,6 +3,7 @@ import { access, mkdtemp, readdir, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
@@ -52,6 +53,7 @@ assertFuse(fuseWire, FuseV1Options.OnlyLoadAppFromAsar, true, "OnlyLoadAppFromAs
 assertFuse(fuseWire, FuseV1Options.GrantFileProtocolExtraPrivileges, false, "GrantFileProtocolExtraPrivileges");
 
 const dataDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-smoke-"));
+const smokePort = await availablePort();
 const disableSandboxForCi = process.env.CI ? { ELECTRON_DISABLE_SANDBOX: "1" } : {};
 const child = spawn(binary, [], {
   env: {
@@ -60,6 +62,7 @@ const child = spawn(binary, [], {
     MASTHEAD_DATA_DIR: dataDir,
     MASTHEAD_ELECTRON_SMOKE: "1",
     MASTHEAD_ELECTRON_SMOKE_MODE: "renderer-autostart",
+    MASTHEAD_PORT: String(smokePort),
     MASTHEAD_GIT_REFRESH_MS: "0"
   },
   stdio: ["ignore", "pipe", "pipe"]
@@ -91,7 +94,7 @@ if (parsed.connector?.smokeMode !== "renderer-autostart" || !parsed.connector?.m
   console.error(`Packaged renderer autostart connector check failed: ${JSON.stringify(parsed.connector)}`);
   process.exit(1);
 }
-if (!parsed.connector?.started || parsed.connector?.health?.dataDirectory !== dataDir) {
+if (!parsed.connector?.started || parsed.connector?.health?.dataDirectory !== dataDir || parsed.connector?.baseUrl !== `http://127.0.0.1:${smokePort}`) {
   console.error(`Packaged renderer autostart did not start the expected connector: ${JSON.stringify(parsed.connector)}`);
   process.exit(1);
 }
@@ -127,7 +130,7 @@ function assertFuse(fuseWire, option, expected, name) {
 
 async function assertSmokeConnectorStopped(dataDir) {
   for (let attempt = 0; attempt < 24; attempt += 1) {
-    const health = await fetch("http://127.0.0.1:17373/health", { signal: AbortSignal.timeout(500) })
+    const health = await fetch(`http://127.0.0.1:${smokePort}/health`, { signal: AbortSignal.timeout(500) })
       .then((response) => (response.ok ? response.json() : undefined))
       .catch(() => undefined);
     if (!health || health?.data?.dataDirectory !== dataDir) return;
@@ -136,4 +139,18 @@ async function assertSmokeConnectorStopped(dataDir) {
 
   console.error(`Packaged Electron smoke connector was still running from ${dataDir} after the app exited.`);
   process.exit(1);
+}
+
+async function availablePort() {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  await new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+  return port;
 }
