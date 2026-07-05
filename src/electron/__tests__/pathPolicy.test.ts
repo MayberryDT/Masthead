@@ -13,6 +13,7 @@ describe("Electron path policy", () => {
     expect(packagedDaemonPaths("/opt/Masthead/resources")).toEqual({
       nodePath: "/opt/Masthead/resources/daemon/node",
       daemonEntry: "/opt/Masthead/resources/daemon/dist/src/daemon/main.js",
+      hookScript: "/opt/Masthead/resources/daemon/scripts/masthead-hook.js",
       mcpEntry: "/opt/Masthead/resources/daemon/dist/src/mcp/server.js"
     });
   });

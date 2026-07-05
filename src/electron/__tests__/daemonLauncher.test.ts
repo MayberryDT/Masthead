@@ -48,6 +48,7 @@ describe("Electron daemon launcher policy", () => {
         allowedOrigins: ["masthead://app", "http://localhost:5173"],
         dataDirectory: "/tmp/masthead",
         databasePath: "/tmp/masthead/masthead.sqlite",
+        hookScript: "/opt/Masthead/resources/daemon/scripts/masthead-hook.js",
         legacyStorePath: "/tmp/masthead/legacy/events.ndjson",
         mcpCommand: "/opt/Masthead/resources/daemon/node",
         mcpEntry: "/opt/Masthead/resources/daemon/dist/src/mcp/server.js",
@@ -58,6 +59,7 @@ describe("Electron daemon launcher policy", () => {
       MASTHEAD_DATA_DIR: "/tmp/masthead",
       MASTHEAD_DB_PATH: "/tmp/masthead/masthead.sqlite",
       MASTHEAD_HOST: "127.0.0.1",
+      MASTHEAD_HOOK_SCRIPT: "/opt/Masthead/resources/daemon/scripts/masthead-hook.js",
       MASTHEAD_MCP_COMMAND: "/opt/Masthead/resources/daemon/node",
       MASTHEAD_MCP_ENTRY: "/opt/Masthead/resources/daemon/dist/src/mcp/server.js",
       MASTHEAD_PORT: "17373",
@@ -104,6 +106,22 @@ describe("Electron daemon launcher policy", () => {
       dataDirectory: "/home/tyler/.local/share/masthead-dev",
       databasePath: "/home/tyler/.local/share/masthead-dev/masthead.sqlite",
       legacyStorePath: "/home/tyler/.local/share/masthead-dev/legacy/events.ndjson"
+    });
+  });
+
+  test("resolves packaged hook script from daemon resources", () => {
+    expect(
+      resolveDaemonLaunchTarget({
+        currentDir: "/ignored",
+        env: {},
+        resourcesPath: "/opt/Masthead/resources",
+        userDataDir: "/home/tyler/.config/Masthead"
+      })
+    ).toMatchObject({
+      cwd: "/home/tyler/.config/Masthead",
+      entryPath: "/opt/Masthead/resources/daemon/dist/src/daemon/main.js",
+      hookScript: "/opt/Masthead/resources/daemon/scripts/masthead-hook.js",
+      nodePath: "/opt/Masthead/resources/daemon/node"
     });
   });
 });

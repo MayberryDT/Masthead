@@ -21,6 +21,7 @@ export type DaemonLaunchTarget = {
   dataDirectory: string;
   databasePath: string;
   entryPath: string;
+  hookScript?: string;
   legacyStorePath: string;
   mcpEntry: string;
   nodePath: string;
@@ -83,6 +84,7 @@ export function resolveDaemonLaunchTarget(input: ResolveDaemonLaunchTargetInput)
       dataDirectory,
       databasePath,
       entryPath: input.env.MASTHEAD_DAEMON_ENTRY,
+      hookScript: input.env.MASTHEAD_HOOK_SCRIPT || join(input.currentDir, "scripts", "masthead-hook.js"),
       legacyStorePath,
       mcpEntry: mcpEntryOverride || join(input.currentDir, "dist", "daemon", "src", "mcp", "server.js"),
       nodePath: input.env.MASTHEAD_NODE_PATH || process.execPath,
@@ -96,6 +98,7 @@ export function resolveDaemonLaunchTarget(input: ResolveDaemonLaunchTargetInput)
     dataDirectory,
     databasePath,
     entryPath: packaged.daemonEntry,
+    hookScript: input.env.MASTHEAD_HOOK_SCRIPT || packaged.hookScript,
     legacyStorePath,
     mcpEntry: mcpEntryOverride || packaged.mcpEntry,
     nodePath: input.env.MASTHEAD_NODE_PATH || packaged.nodePath,
@@ -107,6 +110,7 @@ export function buildDaemonEnv(input: {
   allowedOrigins: string[];
   dataDirectory: string;
   databasePath: string;
+  hookScript?: string;
   legacyStorePath: string;
   mcpCommand: string;
   mcpEntry: string;
@@ -117,6 +121,7 @@ export function buildDaemonEnv(input: {
     MASTHEAD_DATA_DIR: input.dataDirectory,
     MASTHEAD_DB_PATH: input.databasePath,
     MASTHEAD_HOST: "127.0.0.1",
+    ...(input.hookScript ? { MASTHEAD_HOOK_SCRIPT: input.hookScript } : {}),
     MASTHEAD_MCP_COMMAND: input.mcpCommand,
     MASTHEAD_MCP_ENTRY: input.mcpEntry,
     MASTHEAD_PORT: String(input.port),
@@ -166,6 +171,7 @@ export async function startLiveConnector(input: ResolveDaemonLaunchTargetInput, 
     allowedOrigins,
     dataDirectory: target.dataDirectory,
     databasePath: target.databasePath,
+    hookScript: target.hookScript,
     legacyStorePath: target.legacyStorePath,
     mcpCommand: target.nodePath,
     mcpEntry: target.mcpEntry,

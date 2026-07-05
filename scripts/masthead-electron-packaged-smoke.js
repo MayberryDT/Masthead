@@ -43,6 +43,7 @@ const resources = join(dirname(binary), "resources", "daemon");
 await access(join(resources, process.platform === "win32" ? "node.exe" : "node"), constants.X_OK);
 await access(join(resources, "dist", "src", "daemon", "main.js"), constants.R_OK);
 await access(join(resources, "dist", "src", "mcp", "server.js"), constants.R_OK);
+await access(join(resources, "scripts", "masthead-hook.js"), constants.R_OK);
 
 const fuseWire = await getCurrentFuseWire(binary);
 assertFuse(fuseWire, FuseV1Options.RunAsNode, false, "RunAsNode");
