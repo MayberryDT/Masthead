@@ -29,7 +29,7 @@ type EnvWithProjectionUrl = ImportMeta & {
 };
 
 export function defaultLiveProjectionUrl(meta: ImportMeta = import.meta): string {
-  return importMetaEnv(meta).VITE_MASTHEAD_PROJECTION_URL ?? "http://127.0.0.1:17373/projection";
+  return desktopProjectionUrl() ?? importMetaEnv(meta).VITE_MASTHEAD_PROJECTION_URL ?? "http://127.0.0.1:17373/projection";
 }
 export function normalizeDaemonBaseUrl(inputUrl: string): string {
   const url = new URL(inputUrl);
@@ -173,6 +173,12 @@ export function normalizeLiveBoardProjection(
 
 function locationSearch(): string {
   return typeof window === "undefined" ? "" : window.location.search;
+}
+
+function desktopProjectionUrl(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const projectionUrl = window.mastheadDesktop?.projectionUrl;
+  return projectionUrl && projectionUrl.trim().length > 0 ? projectionUrl : undefined;
 }
 
 function importMetaEnv(meta: ImportMeta): ProjectionEnv {

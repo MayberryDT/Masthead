@@ -1,11 +1,25 @@
 import type { MastheadConnectionState } from "../app/connection/MastheadConnectionProvider";
 import { AppButton } from "./primitives/AppButton";
 
+export type ConnectorActionView = {
+  state: "idle" | "starting" | "started" | "unsupported" | "error";
+  message?: string;
+};
+
+export type CollectorStartupLogEntry = {
+  id: string;
+  label: string;
+  detail?: string;
+  state: "pending" | "running" | "done" | "error";
+};
+
 type ConnectionRecoveryPanelProps = {
   connection: MastheadConnectionState;
+  action?: ConnectorActionView;
   onRetry: () => void;
   onStart: () => void;
   retryLabel?: string;
+  startupLog?: CollectorStartupLogEntry[];
 };
 
 type RecoveryCopy = {
@@ -18,9 +32,11 @@ type RecoveryCopy = {
   retryLabel: string;
 };
 
-export function ConnectionRecoveryPanel({ connection, onRetry, onStart, retryLabel }: ConnectionRecoveryPanelProps) {
-  const copy = recoveryCopy(connection);
+export function ConnectionRecoveryPanel({ action, connection, onRetry, onStart, retryLabel, startupLog }: ConnectionRecoveryPanelProps) {
+  const copy = recoveryCopy(connection, action);
   const message = messageFrom(connection);
+  const hasStartupLog = startupLog !== undefined && startupLog.length > 0;
+  const showStartup = action?.state !== undefined ? action.state !== "idle" || hasStartupLog : hasStartupLog;
   return (
     <section className={`connection-strip connection-recovery observability-toolbar metal-toolbar ${copy.tone}`} aria-label="Connection recovery">
       <div className="connection-primary">
@@ -40,7 +56,7 @@ export function ConnectionRecoveryPanel({ connection, onRetry, onStart, retryLab
 
       <div className="nav-actions">
         {copy.startLabel ? (
-          <AppButton variant="primary" onClick={onStart}>
+          <AppButton variant="primary" onClick={onStart} disabled={action?.state === "starting"}>
             {copy.startLabel}
           </AppButton>
         ) : null}
@@ -48,11 +64,80 @@ export function ConnectionRecoveryPanel({ connection, onRetry, onStart, retryLab
           {retryLabel ?? copy.retryLabel}
         </AppButton>
       </div>
+
+      {showStartup ? <ConnectionStartupStatus action={action} startupLog={startupLog ?? []} /> : null}
     </section>
   );
 }
 
-function recoveryCopy(connection: MastheadConnectionState): RecoveryCopy {
+function ConnectionStartupStatus({ action, startupLog }: { action?: ConnectorActionView; startupLog: CollectorStartupLogEntry[] }) {
+  const actionState = action?.state ?? "idle";
+  const actionLabel = connectorActionLabel(actionState);
+  const actionMessage = action?.message ?? actionLabel;
+
+  return (
+    <div className="connection-startup" aria-live={actionState === "starting" ? "polite" : undefined}>
+      <div className="connection-startup-status">
+        <span className={`connection-startup-dot ${actionState}`} aria-hidden="true" />
+        <span className="mono-label">Collector startup</span>
+        <strong>{actionLabel}</strong>
+        {actionMessage !== actionLabel ? <span>{actionMessage}</span> : null}
+      </div>
+
+      {startupLog.length > 0 ? (
+        <ol className="connection-startup-list" aria-label="Collector startup log">
+          {startupLog.map((entry) => (
+            <li key={entry.id} className={`connection-startup-entry ${entry.state}`}>
+              <span className={`connection-startup-dot ${entry.state}`} aria-hidden="true" />
+              <span className="connection-startup-copy">
+                <span className="connection-startup-label">{entry.label}</span>
+                {entry.detail ? <span className="connection-startup-detail">{entry.detail}</span> : null}
+              </span>
+              <span className="connection-startup-state">{startupLogStateLabel(entry.state)}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </div>
+  );
+}
+
+function recoveryCopy(connection: MastheadConnectionState, action?: ConnectorActionView): RecoveryCopy {
+  if (action?.state === "error") {
+    return {
+      eyebrow: "Collector startup failed",
+      title: "Masthead could not finish connecting",
+      detail: action.message ?? "The local collector startup reached an error before live surfaces could connect.",
+      status: "Startup error",
+      tone: "offline",
+      startLabel: "Start collector",
+      retryLabel: "Retry"
+    };
+  }
+
+  if (action?.state === "unsupported") {
+    return {
+      eyebrow: "Collector startup unavailable",
+      title: "This shell cannot start the collector",
+      detail: action.message ?? "Start the local collector outside this app, then check the connection again.",
+      status: "Unsupported",
+      tone: "offline",
+      retryLabel: "Check again"
+    };
+  }
+
+  if (action?.state === "starting") {
+    return {
+      eyebrow: "Starting collector",
+      title: "Masthead is starting the local collector",
+      detail: action.message ?? "The app is requesting the bundled collector and connecting live surfaces.",
+      status: "Starting",
+      tone: "connecting",
+      startLabel: "Start collector",
+      retryLabel: "Check now"
+    };
+  }
+
   const state = connection.state as string;
 
   if (state === "incompatible") {
@@ -123,4 +208,32 @@ function messageFrom(connection: MastheadConnectionState): string | undefined {
   }
 
   return undefined;
+}
+
+function connectorActionLabel(state: ConnectorActionView["state"]): string {
+  switch (state) {
+    case "starting":
+      return "Starting";
+    case "started":
+      return "Started";
+    case "unsupported":
+      return "Unsupported";
+    case "error":
+      return "Error";
+    case "idle":
+      return "Idle";
+  }
+}
+
+function startupLogStateLabel(state: CollectorStartupLogEntry["state"]): string {
+  switch (state) {
+    case "pending":
+      return "Pending";
+    case "running":
+      return "Running";
+    case "done":
+      return "Done";
+    case "error":
+      return "Error";
+  }
 }

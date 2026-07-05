@@ -91,10 +91,16 @@ export function SourcesImportModal({
   useEffect(() => {
     if (choiceRuntimes.length === 0) return;
     setSelected((current) => {
-      if (current.size > 0) return current;
-      return new Set(choiceRuntimes);
+      const next = new Set(Array.from(current).filter((runtime) => choiceRuntimeSet.has(runtime)));
+      let changed = next.size !== current.size;
+      for (const runtime of choiceRuntimes) {
+        if (next.has(runtime)) continue;
+        next.add(runtime);
+        changed = true;
+      }
+      return changed ? next : current;
     });
-  }, [choiceRuntimeKey, choiceRuntimes]);
+  }, [choiceRuntimeKey, choiceRuntimes, choiceRuntimeSet]);
 
   useEffect(() => {
     if (!open) {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildTrayMenuTemplate } from "../tray";
+import { buildTrayMenuTemplate, trayTooltipLabel } from "../tray";
 
 describe("Electron tray menu", () => {
   test("keeps the expected Masthead tray action order", () => {
@@ -15,5 +15,10 @@ describe("Electron tray menu", () => {
     template[1]?.click?.();
     template[3]?.click?.();
     expect(actions).toEqual(["show", "open-data", "quit"]);
+  });
+
+  test("uses a dev-specific tooltip label for dev Electron", () => {
+    expect(trayTooltipLabel(true)).toBe("Masthead Dev");
+    expect(trayTooltipLabel(false)).toBe("Masthead");
   });
 });

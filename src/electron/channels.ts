@@ -7,6 +7,7 @@ export const ELECTRON_CHANNELS = {
   openDataDirectory: "masthead:data:open-directory",
   pruneLocalData: "masthead:store:prune",
   readStoreRecords: "masthead:store:read",
+  rendererConfig: "masthead:renderer:config",
   startLiveConnector: "masthead:connector:start",
   windowClose: "masthead:window:close",
   windowMaximize: "masthead:window:maximize",

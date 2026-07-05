@@ -27,7 +27,7 @@ type InlineStatus = {
   message: string;
 };
 
-export function EnrichmentSettings({
+export function LlmProviderControls({
   enrichment,
   llm,
   onSaveProvider,
@@ -155,11 +155,7 @@ export function EnrichmentSettings({
   };
 
   return (
-    <SettingsSection
-      eyebrow="Enrichment"
-      title="LLM provider"
-      description="Connect optional LLM enrichment. Masthead still works locally when this is off."
-    >
+    <>
       <SettingsRow
         description="When enabled, Masthead sends redacted session facts to the selected provider for titles and summaries."
         label="Remote enrichment"
@@ -283,6 +279,18 @@ export function EnrichmentSettings({
         </AppButton>
         {status ? <p className={`settings-provider-status ${status.tone}`}>{status.message}</p> : null}
       </div>
+    </>
+  );
+}
+
+export function EnrichmentSettings(props: EnrichmentSettingsProps) {
+  return (
+    <SettingsSection
+      eyebrow="Enrichment"
+      title="LLM provider"
+      description="Connect optional LLM enrichment. Masthead still works locally when this is off."
+    >
+      <LlmProviderControls {...props} />
     </SettingsSection>
   );
 }

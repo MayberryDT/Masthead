@@ -70,6 +70,173 @@ describe("MastheadConnectionProvider helpers", () => {
     root.unmount();
   });
 
+  test("setBaseUrl probes when the normalized base URL is unchanged", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("offline", { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse(currentHealth));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    let latest: MastheadConnectionContextValue | undefined;
+
+    function Consumer() {
+      latest = useMastheadConnection();
+      return <span>{`${latest.state.state}|${latest.baseUrl}`}</span>;
+    }
+
+    await act(async () => {
+      root.render(
+        <MastheadConnectionProvider initialUrl="http://127.0.0.1:17373/projection">
+          <Consumer />
+        </MastheadConnectionProvider>
+      );
+      await flushEffects();
+    });
+
+    expect(latest?.state.state).toBe("offline");
+
+    await act(async () => {
+      latest?.setBaseUrl("http://127.0.0.1:17373/projection");
+      await flushEffects();
+    });
+
+    expect(latest?.state.state).toBe("ready");
+    expect(latest?.baseUrl).toBe("http://127.0.0.1:17373");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://127.0.0.1:17373/health", expect.anything());
+    root.unmount();
+  });
+
+  test("connectTo probes the returned URL even when the normalized base URL is unchanged", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("offline", { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse(currentHealth));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    let latest: MastheadConnectionContextValue | undefined;
+
+    function Consumer() {
+      latest = useMastheadConnection();
+      return <span>{latest.state.state}</span>;
+    }
+
+    await act(async () => {
+      root.render(
+        <MastheadConnectionProvider initialUrl="http://127.0.0.1:17373/projection">
+          <Consumer />
+        </MastheadConnectionProvider>
+      );
+      await flushEffects();
+    });
+
+    expect(latest?.state.state).toBe("offline");
+
+    await act(async () => {
+      await latest?.connectTo("http://127.0.0.1:17373/projection");
+      await flushEffects();
+    });
+
+    expect(latest?.state.state).toBe("ready");
+    expect(latest?.baseUrl).toBe("http://127.0.0.1:17373");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    root.unmount();
+  });
+
+  test("connectTo probes a changed URL once and awaits the final ready state", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("offline", { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse(currentHealth));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    let latest: MastheadConnectionContextValue | undefined;
+
+    function Consumer() {
+      latest = useMastheadConnection();
+      return <span>{`${latest.state.state}|${latest.baseUrl}`}</span>;
+    }
+
+    await act(async () => {
+      root.render(
+        <MastheadConnectionProvider initialUrl="http://127.0.0.1:17373/projection">
+          <Consumer />
+        </MastheadConnectionProvider>
+      );
+      await flushEffects();
+    });
+
+    expect(latest?.state.state).toBe("offline");
+
+    await act(async () => {
+      await latest?.connectTo("http://127.0.0.1:17374/projection");
+      await flushEffects();
+    });
+
+    expect(latest?.state.state).toBe("ready");
+    expect(latest?.baseUrl).toBe("http://127.0.0.1:17374");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://127.0.0.1:17374/health", expect.anything());
+    root.unmount();
+  });
+
+  test("setBaseUrl probes a URL even when it matches a stale connectTo skip marker", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("offline", { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse(currentHealth))
+      .mockResolvedValueOnce(jsonResponse(currentHealth))
+      .mockResolvedValueOnce(jsonResponse(currentHealth));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    let latest: MastheadConnectionContextValue | undefined;
+
+    function Consumer() {
+      latest = useMastheadConnection();
+      return <span>{`${latest.state.state}|${latest.baseUrl}`}</span>;
+    }
+
+    await act(async () => {
+      root.render(
+        <MastheadConnectionProvider initialUrl="http://127.0.0.1:17373/projection">
+          <Consumer />
+        </MastheadConnectionProvider>
+      );
+      await flushEffects();
+    });
+
+    expect(latest?.state.state).toBe("offline");
+
+    await act(async () => {
+      await latest?.connectTo("http://127.0.0.1:17374/projection");
+      latest?.setBaseUrl("http://127.0.0.1:17375/projection");
+      await flushEffects();
+    });
+
+    expect(latest?.baseUrl).toBe("http://127.0.0.1:17375");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "http://127.0.0.1:17375/health", expect.anything());
+
+    await act(async () => {
+      latest?.setBaseUrl("http://127.0.0.1:17374/projection");
+      await flushEffects();
+    });
+
+    expect(latest?.state.state).toBe("ready");
+    expect(latest?.baseUrl).toBe("http://127.0.0.1:17374");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "http://127.0.0.1:17374/health", expect.anything());
+    root.unmount();
+  });
+
   test("marks bridge health as read_only when writable is false", async () => {
     vi.stubGlobal(
       "fetch",

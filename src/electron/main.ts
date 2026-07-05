@@ -5,8 +5,10 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, net, protocol, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
-import { ELECTRON_CHANNELS, registerMastheadIpc } from "./ipc";
+import { ELECTRON_CHANNELS, isAllowedIpcSender, registerMastheadIpc } from "./ipc";
 import {
+  type StartLiveConnectorResult,
+  connectorBaseUrl,
   mcpLaunchConfig,
   resolveDaemonLaunchTarget,
   startLiveConnector,
@@ -16,7 +18,7 @@ import {
 import { isMastheadOwnedDirectory } from "./pathPolicy";
 import { resolveProtocolPath } from "./protocol";
 import { configureElectronRuntime } from "./runtime";
-import { createMastheadTray } from "./tray";
+import { createMastheadTray, trayTooltipLabel } from "./tray";
 import {
   isAllowedRendererUrl,
   mainPreloadPath,
@@ -43,6 +45,12 @@ configureElectronRuntime(app);
 const ownedDaemonChildren = new Set<ChildProcess>();
 let mainWindow: BrowserWindow | undefined;
 let tray: unknown;
+let smokeRendererConnectorResult: StartLiveConnectorResult | undefined;
+let smokeRendererConnectorError: unknown;
+const smokeRendererConnectorWaiters = new Set<{
+  reject: (error: unknown) => void;
+  resolve: (result: StartLiveConnectorResult) => void;
+}>();
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -56,13 +64,17 @@ if (!app.requestSingleInstanceLock()) {
     registerRendererProtocol();
     registerDesktopIpc();
     mainWindow = await createMainWindow();
-    tray = await createMastheadTray(trayIconPath(), {
-      onOpenDataDirectory: () => {
-        void openDataDirectory(electronDataDirectory());
+    tray = await createMastheadTray(
+      trayIconPath(),
+      {
+        onOpenDataDirectory: () => {
+          void openDataDirectory(electronDataDirectory());
+        },
+        onQuit: () => app.quit(),
+        onShow: showMainWindow
       },
-      onQuit: () => app.quit(),
-      onShow: showMainWindow
-    });
+      { tooltip: trayTooltipLabel(isElectronDevMode()) }
+    );
     void tray;
     if (process.env.MASTHEAD_ELECTRON_SMOKE === "1") {
       void runSmokeAndQuit(mainWindow);
@@ -89,24 +101,33 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function trayIconPath(): string {
-  const sourceIcon = join(app.getAppPath(), "public", "assets", "masthead-logo-sail.png");
+  const iconFileName = isElectronDevMode() ? "masthead-logo-sail-dev.svg" : "masthead-logo-sail.png";
+  const sourceIcon = join(app.getAppPath(), "public", "assets", iconFileName);
   if (existsSync(sourceIcon)) return sourceIcon;
-  return join(process.resourcesPath, "masthead-logo-sail.png");
+  const resourceIcon = join(process.resourcesPath, iconFileName);
+  if (existsSync(resourceIcon)) return resourceIcon;
+  return join(process.resourcesPath, "daemon", iconFileName);
 }
 
 async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
   try {
-    const connector = await startLiveConnector(
-      {
-        currentDir: process.cwd(),
-        defaultDataDir: isElectronDevMode() ? electronDevDataDirectory() : undefined,
-        env: electronDaemonEnv(),
-        resourcesPath: process.resourcesPath,
-        userDataDir: app.getPath("userData")
-      },
-      rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }),
-      ownedDaemonChildren
-    );
+    const smokeMode = process.env.MASTHEAD_ELECTRON_SMOKE_MODE || "main-start";
+    const connector =
+      smokeMode === "renderer-autostart"
+        ? await waitForRendererStartedConnector()
+        : smokeMode === "main-start"
+          ? await startLiveConnector(
+              {
+                currentDir: process.cwd(),
+                defaultDataDir: isElectronDevMode() ? electronDevDataDirectory() : undefined,
+                env: electronDaemonEnv(),
+                resourcesPath: process.resourcesPath,
+                userDataDir: app.getPath("userData")
+              },
+              rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }),
+              ownedDaemonChildren
+            )
+          : unsupportedSmokeMode(smokeMode);
     const renderer = await window.webContents.executeJavaScript(`
       (async () => {
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -138,7 +159,10 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
       JSON.stringify({
         smoke: "electron",
         electron: process.versions.electron,
-        connector,
+        connector:
+          smokeMode === "renderer-autostart"
+            ? { ...connector, message: `Renderer autostart: ${connector.message}`, smokeMode }
+            : connector,
         gpu: collectGpuDiagnostics(app),
         renderer
       })
@@ -210,6 +234,49 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function unsupportedSmokeMode(mode: string): never {
+  throw new Error(`Unsupported Masthead Electron smoke mode: ${mode}`);
+}
+
+function recordRendererStartedConnector(result: StartLiveConnectorResult): void {
+  smokeRendererConnectorResult = result;
+  for (const waiter of smokeRendererConnectorWaiters) waiter.resolve(result);
+  smokeRendererConnectorWaiters.clear();
+}
+
+function recordRendererStartedConnectorError(error: unknown): void {
+  smokeRendererConnectorError = error;
+  for (const waiter of smokeRendererConnectorWaiters) waiter.reject(error);
+  smokeRendererConnectorWaiters.clear();
+}
+
+function waitForRendererStartedConnector(timeoutMs = 30_000): Promise<StartLiveConnectorResult> {
+  if (smokeRendererConnectorResult) return Promise.resolve(smokeRendererConnectorResult);
+  if (smokeRendererConnectorError) return Promise.reject(smokeRendererConnectorError);
+
+  return new Promise((resolve, reject) => {
+    let waiter: {
+      reject: (error: unknown) => void;
+      resolve: (result: StartLiveConnectorResult) => void;
+    };
+    const timeout = setTimeout(() => {
+      smokeRendererConnectorWaiters.delete(waiter);
+      reject(new Error("Timed out waiting for renderer collector autostart."));
+    }, timeoutMs);
+    waiter = {
+      reject: (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+      resolve: (result) => {
+        clearTimeout(timeout);
+        resolve(result);
+      }
+    };
+    smokeRendererConnectorWaiters.add(waiter);
+  });
+}
+
 function registerRendererProtocol(): void {
   protocol.handle("masthead", (request) => {
     const filePath = resolveProtocolPath(join(app.getAppPath(), ".vite", "renderer", MAIN_WINDOW_VITE_NAME), request.url);
@@ -229,11 +296,32 @@ function registerDesktopIpc(): void {
     userDataDir: app.getPath("userData")
   });
 
+  ipcMain.on(ELECTRON_CHANNELS.rendererConfig, (event) => {
+    if (!isAllowedIpcSender(event.senderFrame?.url, { allowDevRenderer: isElectronDevMode() })) {
+      event.returnValue = { projectionUrl: "http://127.0.0.1:17373/projection" };
+      return;
+    }
+    const target = resolveDaemonLaunchTarget(targetInput());
+    event.returnValue = { projectionUrl: `${connectorBaseUrl(target.port)}/projection` };
+  });
+
   registerMastheadIpc(
     ipcMain,
     {
-      [ELECTRON_CHANNELS.startLiveConnector]: () =>
-        startLiveConnector(targetInput(), rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }), ownedDaemonChildren),
+      [ELECTRON_CHANNELS.startLiveConnector]: async () => {
+        try {
+          const result = await startLiveConnector(targetInput(), rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }), ownedDaemonChildren);
+          if (process.env.MASTHEAD_ELECTRON_SMOKE === "1" && process.env.MASTHEAD_ELECTRON_SMOKE_MODE === "renderer-autostart") {
+            recordRendererStartedConnector(result);
+          }
+          return result;
+        } catch (error) {
+          if (process.env.MASTHEAD_ELECTRON_SMOKE === "1" && process.env.MASTHEAD_ELECTRON_SMOKE_MODE === "renderer-autostart") {
+            recordRendererStartedConnectorError(error);
+          }
+          throw error;
+        }
+      },
       [ELECTRON_CHANNELS.windowClose]: () => {
         mainWindow?.close();
         return { ok: true };

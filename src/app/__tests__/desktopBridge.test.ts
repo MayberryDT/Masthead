@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { getDesktopBridge, invokeDesktopCommand, isDesktopBridgeAvailable } from "../desktopBridge";
+import { defaultLiveProjectionUrl } from "../liveProjectionClient";
 
 describe("desktop bridge", () => {
   afterEach(() => {
@@ -21,6 +22,17 @@ describe("desktop bridge", () => {
     expect(getDesktopBridge()?.kind).toBe("electron");
     await expect(invokeDesktopCommand("start_live_connector_command", { from: "test" })).resolves.toEqual({ ok: true });
     expect(calls).toEqual([{ command: "start_live_connector_command", args: { from: "test" } }]);
+  });
+
+  test("uses the Electron preload projection URL as the default live projection", () => {
+    vi.stubGlobal("window", {
+      mastheadDesktop: {
+        invoke: async <T>() => ({ ok: true }) as T,
+        projectionUrl: "http://127.0.0.1:18444/projection"
+      }
+    });
+
+    expect(defaultLiveProjectionUrl()).toBe("http://127.0.0.1:18444/projection");
   });
 
   test("uses the Electron preload bridge for desktop commands", async () => {

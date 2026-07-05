@@ -262,6 +262,142 @@ describe("SourcesPanel import controls", () => {
     await act(async () => root.unmount());
   });
 
+  test("controlled setup action requests the app-owned onboarding state", async () => {
+    const onOpenOnboarding = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[detectedCodexAdapter(), notDetectedGeminiAdapter()]}
+          busy={false}
+          imports={[]}
+          onboardingOpen={false}
+          onCloseOnboarding={noop}
+          onExcludePath={noop}
+          onOpenOnboarding={onOpenOnboarding}
+          onRefresh={noop}
+          setup={emptySetup()}
+          sources={[]}
+        />
+      );
+    });
+
+    await act(async () => {
+      buttonByText(container, "Set up sources").click();
+    });
+
+    expect(onOpenOnboarding).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+  });
+
+  test("detected-only setup keeps onboarding available and hides the adapter catalog", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[]}
+          busy={false}
+          imports={[]}
+          onExcludePath={noop}
+          onRefresh={noop}
+          setup={detectedOnlySetup()}
+          sources={[]}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain("No sources set up");
+    expect(container.textContent).toContain("Set up sources");
+    expect(container.textContent).not.toContain("Import data");
+    expect(container.textContent).not.toContain("ADAPTERS");
+    expect(container.querySelector(".adapter-list")).toBeNull();
+    expect(container.querySelector(".connected-source-list")).toBeNull();
+    expect(container.textContent).not.toContain("Gemini CLI");
+
+    await act(async () => {
+      buttonByText(container, "Set up sources").click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector(".sources-onboarding-modal")).not.toBeNull();
+    expect(container.textContent).toContain("Sources setup");
+    expect(container.textContent).toContain("Codex");
+    expect(container.textContent).toContain("742 sessions");
+    expect(container.textContent).not.toContain("Gemini CLI history");
+    await act(async () => root.unmount());
+  });
+
+  test("first-run onboarding uses the command console spine layout without premature review", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[]}
+          busy={false}
+          imports={[]}
+          onboardingOpen
+          onCloseOnboarding={noop}
+          onExcludePath={noop}
+          onRefresh={noop}
+          onSkipOnboarding={noop}
+          setup={emptySetup()}
+          sources={[]}
+        />
+      );
+    });
+
+    expect(container.querySelector(".sources-onboarding-command-layout")).not.toBeNull();
+    expect(container.querySelector(".sources-onboarding-step-rail")).not.toBeNull();
+    expect(container.querySelector(".sources-onboarding-workspace")).not.toBeNull();
+    expect(container.querySelector(".sources-onboarding-review-rail")).toBeNull();
+    expect(container.textContent).toContain("Start");
+    expect(container.textContent).toContain("Detect");
+    expect(container.textContent).toContain("Configure");
+    expect(container.textContent).toContain("Provider");
+    expect(container.textContent).toContain("Apply");
+    expect(container.textContent).not.toContain("Review before start");
+    expect(container.textContent).not.toContain("On Dossier open");
+    await act(async () => root.unmount());
+  });
+
+  test("first-run onboarding shows setup review only on the apply step", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await renderOpenScannedOnboarding(root, container);
+
+    expect(container.textContent).not.toContain("Review before start");
+
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+
+    expect(container.textContent).toContain("Review setup");
+    expect(container.textContent).toContain("Sources");
+    expect(container.textContent).toContain("1 selected");
+    expect(container.textContent).toContain("History");
+    expect(container.textContent).toContain("Last 30 days");
+    expect(container.textContent).toContain("Live capture");
+    expect(container.textContent).toContain("Required");
+    expect(container.textContent).toContain("Transcripts");
+    expect(container.textContent).toContain("When opened");
+    expect(container.textContent).not.toContain("Metadata only");
+    expect(container.textContent).not.toContain("On Dossier open");
+    await act(async () => root.unmount());
+  });
+
   test("scan step renders importable setup sources only", async () => {
     const onScanSetup = vi.fn(async () => scanDto());
     const container = document.createElement("div");
@@ -290,9 +426,82 @@ describe("SourcesPanel import controls", () => {
     });
 
     expect(onScanSetup).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("Codex sessions");
+    expect(container.textContent).toContain("Codex");
     expect(container.textContent).toContain("742 sessions");
+    expect(container.textContent).toContain("1 location");
     expect(container.textContent).not.toContain("Gemini CLI history");
+    await act(async () => root.unmount());
+  });
+
+  test("scan step groups multiple importable sources into one card per detected harness", async () => {
+    const onRunSetup = vi.fn(async () => ({ jobs: [], queued: 0, skipped: [] }));
+    const onScanSetup = vi.fn(async () => multiSourceScanDto());
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[]}
+          busy={false}
+          imports={[]}
+          onExcludePath={noop}
+          onRefresh={noop}
+          onRunSetup={onRunSetup}
+          onScanSetup={onScanSetup}
+          setup={emptySetup()}
+          sources={[]}
+        />
+      );
+    });
+
+    await act(async () => {
+      buttonByText(container, "Set up sources").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Check local sources").click();
+    });
+
+    expect(container.querySelectorAll(".source-select-card")).toHaveLength(2);
+    expect(container.querySelectorAll(".source-select-card .mono-label")).toHaveLength(0);
+    expect(container.textContent).toContain("Codex");
+    expect(container.textContent).toContain("Cursor");
+    expect(container.textContent).not.toContain("codexCodex");
+    expect(container.textContent).not.toContain("cursorCursor");
+    expect(container.textContent).toContain("2 locations");
+    expect(container.textContent).toContain("1 location");
+    expect(container.textContent).toContain("/home/tyler/.codex");
+    expect(container.textContent).toContain("/home/tyler/.config/Cursor");
+    expect(container.textContent).not.toContain("session_index.jsonl");
+    expect(container.textContent).not.toContain("2026-07-04.jsonl");
+    expect(container.textContent).not.toContain("state.vscdb");
+    expect(container.textContent).not.toContain("globalStorage");
+    expect(container.textContent).not.toContain("Codex archived sessions");
+
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Start setup").click();
+    });
+
+    expect(onRunSetup).toHaveBeenCalledTimes(2);
+    expect(onRunSetup).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+      runtimes: ["codex"],
+      sourceIds: ["codex-sessions", "codex-archive"]
+    }));
+    expect(onRunSetup).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+      runtimes: ["cursor"],
+      sourceIds: ["cursor-sessions"]
+    }));
     await act(async () => root.unmount());
   });
 
@@ -326,9 +535,11 @@ describe("SourcesPanel import controls", () => {
     });
 
     expect(container.textContent).toContain("Codex");
-    expect(container.textContent).toContain("/home/tyler/.codex/sessions");
+    expect(container.textContent).toContain("/home/tyler/.codex");
+    expect(container.textContent).not.toContain("/home/tyler/.codex/sessions");
     expect(container.textContent).toContain("Oh My Pi");
-    expect(container.textContent).toContain("/home/tyler/.omp/agent/sessions");
+    expect(container.textContent).toContain("/home/tyler/.omp");
+    expect(container.textContent).not.toContain("/home/tyler/.omp/agent/sessions");
     expect(container.textContent).not.toContain("No importable local sources found yet");
 
     await act(async () => {
@@ -341,25 +552,87 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Continue").click();
     });
     await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
-    await act(async () => {
-      buttonByText(container, "Start source setup").click();
+      buttonByText(container, "Start setup").click();
     });
 
-    expect(onRunSetup).toHaveBeenCalledWith(
+    expect(onRunSetup).toHaveBeenCalledTimes(2);
+    expect(onRunSetup).toHaveBeenNthCalledWith(1,
       expect.objectContaining({
-        sourceIds: ["codex-sessions", "omp-sessions"],
-        transcriptApprovals: [
-          { approved: true, runtime: "codex", sourceId: "codex-sessions" },
-          { approved: true, runtime: "omp", sourceId: "omp-sessions" }
-        ]
+        enrichmentMode: "skip",
+        importMetadata: true,
+        importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+        importTranscripts: false,
+        queueEnrichment: false,
+        runtimes: ["codex"],
+        sourceIds: ["codex-sessions"],
+        transcriptApprovals: [{ approved: false, runtime: "codex", sourceId: "codex-sessions" }]
       })
     );
+    expect(onRunSetup).toHaveBeenNthCalledWith(2,
+      expect.objectContaining({
+        enrichmentMode: "skip",
+        importMetadata: true,
+        importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+        importTranscripts: false,
+        queueEnrichment: false,
+        runtimes: ["omp"],
+        sourceIds: ["omp-sessions"],
+        transcriptApprovals: [{ approved: false, runtime: "omp", sourceId: "omp-sessions" }]
+      })
+    );
+    expect(container.querySelector(".sources-onboarding-modal")).toBeNull();
     await act(async () => root.unmount());
   });
 
-  test("transcript approval is source-specific after selecting found setup sources", async () => {
+  test("setup choices only ask for session history source and import range", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[]}
+          busy={false}
+          imports={[]}
+          onExcludePath={noop}
+          onRefresh={noop}
+          onScanSetup={async () => scanResultToOnboardingScan(realisticScanResult())}
+          setup={emptySetup()}
+          sources={[]}
+        />
+      );
+    });
+    await act(async () => {
+      buttonByText(container, "Set up sources").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Check local sources").click();
+    });
+
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+
+    const activeStep = container.querySelector(".sources-onboarding-step-content") as HTMLElement;
+    expect(activeStep.textContent).toContain("Setup choices");
+    expect(activeStep.textContent).toContain("Which harnesses' session history do you want to import?");
+    expect(activeStep.textContent).toContain("Last 30 days");
+    expect(activeStep.textContent).toContain("Everything");
+    expect(activeStep.textContent).toContain("Codex");
+    expect(activeStep.textContent).toContain("Oh My Pi");
+    expect(activeStep.querySelectorAll(".sources-history-harness-card")).toHaveLength(2);
+    expect(activeStep.textContent).not.toContain("Metadata only");
+    expect(activeStep.textContent).not.toContain("Live capture");
+    expect(activeStep.textContent).not.toContain("Transcripts hydrate when a Dossier opens");
+    expect(activeStep.textContent).not.toContain("Enrich Dossiers when opened");
+    expect(activeStep.textContent).not.toContain("Include Codex live capture setup");
+    expect(activeStep.textContent).not.toContain("Not wired yet");
+    expect(activeStep.querySelectorAll(".harness-live-capture")).toHaveLength(0);
+    expect(activeStep.textContent).not.toContain("Transcript approval");
+    await act(async () => root.unmount());
+  });
+
+  test("enrichment step reuses provider configuration without queuing library enrichment", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -372,31 +645,10 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Continue").click();
     });
 
-    expect(container.textContent).toContain("Transcript approval");
-    expect(container.textContent).toContain("Codex sessions");
-    expect(container.textContent).toContain("/home/tyler/.codex/sessions");
-    expect(container.textContent).toContain("Prompts, code, command output");
-    await act(async () => root.unmount());
-  });
-
-  test("enrichment step renders explicit setup choices", async () => {
-    const container = document.createElement("div");
-    const root = createRoot(container);
-
-    await renderOpenScannedOnboarding(root, container);
-
-    await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
-    await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
-    await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
-
-    expect(container.textContent).toContain("Local deterministic summaries");
-    expect(container.textContent).toContain("Skip enrichment");
+    expect(container.textContent).toContain("Enrichment");
+    expect(container.textContent).toContain("Configure provider settings now if you want.");
+    expect(container.textContent).toContain("Remote enrichment");
+    expect(container.textContent).toContain("Save provider");
     await act(async () => root.unmount());
   });
 
@@ -417,20 +669,19 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Continue").click();
     });
     await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
-    await act(async () => {
-      buttonByText(container, "Start source setup").click();
+      buttonByText(container, "Start setup").click();
     });
 
-    expect(onRunSetup).toHaveBeenCalledWith({
-      enrichmentMode: "local",
+    expect(onRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      enrichmentMode: "skip",
       importMetadata: true,
-      importTranscripts: true,
-      queueEnrichment: true,
+      importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+      importTranscripts: false,
+      queueEnrichment: false,
+      runtimes: ["codex"],
       sourceIds: ["codex-sessions"],
-      transcriptApprovals: [{ approved: true, runtime: "codex", sourceId: "codex-sessions" }]
-    });
+      transcriptApprovals: [{ approved: false, runtime: "codex", sourceId: "codex-sessions" }]
+    }));
     await act(async () => root.unmount());
   });
 
@@ -450,7 +701,40 @@ describe("SourcesPanel import controls", () => {
     await act(async () => root.unmount());
   });
 
-  test("live-only setup does not approve historical transcript import", async () => {
+  test("setup automatically installs required live capture and imports selected history", async () => {
+    const onRunSetup = vi.fn(async () => ({ jobs: [], queued: 0, skipped: [] }));
+    const onCodexHookAction = vi.fn(async () => undefined);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await renderOpenScannedOnboarding(root, container, { onCodexHookAction, onRunSetup });
+
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Start setup").click();
+    });
+
+    expect(onCodexHookAction).toHaveBeenCalledWith("install");
+    expect(onRunSetup).toHaveBeenCalledWith(expect.objectContaining({
+      importMetadata: true,
+      importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+      importTranscripts: false,
+      queueEnrichment: false,
+      runtimes: ["codex"],
+      sourceIds: ["codex-sessions"]
+    }));
+    await act(async () => root.unmount());
+  });
+
+  test("start setup closes onboarding so Sources shows import progress", async () => {
     const onRunSetup = vi.fn(async () => ({ jobs: [], queued: 0, skipped: [] }));
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -461,30 +745,19 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Continue").click();
     });
     await act(async () => {
-      const liveOnly = [...container.querySelectorAll("input[name='source-history-mode']")][1] as HTMLInputElement;
-      liveOnly.click();
-    });
-    await act(async () => {
       buttonByText(container, "Continue").click();
     });
     await act(async () => {
       buttonByText(container, "Continue").click();
     });
     await act(async () => {
-      buttonByText(container, "Continue").click();
-    });
-    await act(async () => {
-      buttonByText(container, "Start source setup").click();
+      buttonByText(container, "Start setup").click();
     });
 
-    expect(onRunSetup).toHaveBeenCalledWith({
-      enrichmentMode: "local",
-      importMetadata: false,
-      importTranscripts: false,
-      queueEnrichment: true,
-      sourceIds: ["codex-sessions"],
-      transcriptApprovals: [{ approved: false, runtime: "codex", sourceId: "codex-sessions" }]
-    });
+    expect(onRunSetup).toHaveBeenCalled();
+    expect(container.querySelector(".sources-onboarding-modal")).toBeNull();
+    expect(container.textContent).not.toContain("Session library build started");
+    expect(container.textContent).not.toContain("Setup needs attention");
     await act(async () => root.unmount());
   });
 });
@@ -507,7 +780,7 @@ function codexAdapter(): AdapterStatus {
         confidence: "authoritative",
         failures: 0,
         importedCount: 120,
-        path: "/home/tyler/.codex/sessions",
+        path: "/home/tyler/.codex/session_index.jsonl",
         queuedCount: 0,
         runtime: "codex",
         sessionCount: 742,
@@ -563,6 +836,70 @@ function emptySetup(): SourcesSetupDto {
     setupId: "setup-empty",
     status: "empty",
     updatedAt: "2026-06-27T12:00:00.000Z"
+  };
+}
+
+function detectedOnlySetup(): SourcesSetupDto {
+  return {
+    ...emptySetup(),
+    connectedSources: [
+      {
+        discoveredSessions: 0,
+        importedSessions: 0,
+        label: "Codex",
+        path: "/home/tyler/.codex/session_index.jsonl",
+        runtime: "codex",
+        sourceId: "codex-sessions",
+        state: "connected"
+      }
+    ],
+    scan: scanDto(),
+    status: "detected"
+  };
+}
+
+function detectedCodexAdapter(): AdapterStatus {
+  return {
+    discoveredSessions: 0,
+    importedSessions: 0,
+    policies: {
+      enrichment: false,
+      mcpAccess: false,
+      metadataImport: true,
+      transcriptImport: false
+    },
+    runtime: "codex",
+    sourceLocationCount: 4,
+    sourceLocations: [
+      {
+        confidence: "authoritative",
+        failures: 0,
+        importedCount: 0,
+        path: "/home/tyler/.codex/session_index.jsonl",
+        queuedCount: 0,
+        runtime: "codex",
+        sessionCount: 0,
+        sourceId: "codex-sessions",
+        sourceKind: "jsonl"
+      }
+    ],
+    state: "connected"
+  };
+}
+
+function notDetectedGeminiAdapter(): AdapterStatus {
+  return {
+    discoveredSessions: 0,
+    importedSessions: 0,
+    policies: {
+      enrichment: false,
+      mcpAccess: false,
+      metadataImport: false,
+      transcriptImport: false
+    },
+    runtime: "gemini_cli",
+    sourceLocations: [],
+    state: "not_detected"
   };
 }
 
@@ -640,6 +977,54 @@ function scanDto(): SourcesOnboardingScanDto {
       detectedHarnesses: 1,
       foundSources: 2,
       scannedHarnesses: 2
+    }
+  };
+}
+
+function multiSourceScanDto(): SourcesOnboardingScanDto {
+  return {
+    adapters: [],
+    foundSources: [
+      {
+        discoveredSessions: 742,
+        importable: true,
+        label: "Codex sessions",
+        path: "/home/tyler/.codex/sessions",
+        runtime: "codex",
+        sourceId: "codex-sessions"
+      },
+      {
+        discoveredSessions: 31,
+        importable: true,
+        label: "Codex archived sessions",
+        path: "/home/tyler/.codex/archive/2026-07-04.jsonl",
+        runtime: "codex",
+        sourceId: "codex-archive"
+      },
+      {
+        discoveredSessions: 28,
+        importable: true,
+        label: "Cursor sessions",
+        path: "/home/tyler/.config/Cursor/User/globalStorage/state.vscdb",
+        runtime: "cursor",
+        sourceId: "cursor-sessions"
+      },
+      {
+        discoveredSessions: 9,
+        importable: false,
+        label: "Gemini CLI history",
+        path: "/home/tyler/.gemini/history",
+        runtime: "gemini_cli",
+        sourceId: "gemini-history"
+      }
+    ],
+    generatedAt: "2026-06-27T12:00:00.000Z",
+    scanId: "scan-multi-source",
+    status: "completed",
+    summary: {
+      detectedHarnesses: 3,
+      foundSources: 4,
+      scannedHarnesses: 3
     }
   };
 }

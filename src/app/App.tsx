@@ -39,8 +39,10 @@ import {
   normalizeLiveBoardProjection,
 } from "./liveProjectionClient";
 import { startLiveConnector } from "./connectorClient";
+import { isDesktopBridgeAvailable } from "./desktopBridge";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
-import { ConnectionRecoveryPanel } from "../ui/ConnectionRecoveryPanel";
+import { MastheadApiClient } from "./api/MastheadApiClient";
+import { ConnectionRecoveryPanel, type CollectorStartupLogEntry, type ConnectorActionView } from "../ui/ConnectionRecoveryPanel";
 import { saveReviewDisposition } from "./daemonClient";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
@@ -56,13 +58,48 @@ import { useSettingsDataController } from "./settings/useSettingsDataController"
 import { useSourcesController } from "./sources/useSourcesController";
 import { useUsageStatsController } from "./usage/useUsageStatsController";
 import { clearUnsupportedLocationHash } from "./locationHash";
+import { readOnboardingDismissed, writeOnboardingDismissed } from "./onboardingPreference";
 
-type ConnectorActionState =
-  | { state: "idle"; message?: string }
-  | { state: "starting"; message?: string }
-  | { state: "started"; message?: string }
-  | { state: "unsupported"; message?: string }
-  | { state: "error"; message?: string };
+type ConnectorActionState = ConnectorActionView;
+type LiveProjectionLoadResult = "loaded" | "superseded" | "failed";
+
+const STARTUP_PROJECTION_ERROR_MESSAGE = "Collector started, but live projection did not load.";
+const firstRunSetupStatuses = new Set(["empty", "scan_needed", "scan_available", "detected"]);
+
+type FirstRunSourceCandidate = {
+  enrichedSessions?: number;
+  importedCount?: number;
+  importedRecords?: number;
+  importedSessions?: number;
+  lastSync?: string;
+  lastSyncAt?: string;
+  metadataSessions?: number;
+  queuedCount?: number;
+  queuedRecords?: number;
+  transcriptSessions?: number;
+};
+
+function shouldOpenSourcesOnboardingForSetup(setup: {
+  connectedSources?: FirstRunSourceCandidate[];
+  status?: string;
+} | undefined): boolean {
+  if (!setup) return false;
+  if (setup.status && firstRunSetupStatuses.has(setup.status)) return true;
+  const connectedSources = setup.connectedSources ?? [];
+  return connectedSources.length > 0 && connectedSources.every(isDetectedOnlyFirstRunSource);
+}
+
+function isDetectedOnlyFirstRunSource(source: FirstRunSourceCandidate): boolean {
+  return !(
+    (source.importedSessions ?? 0) > 0 ||
+    (source.importedRecords ?? source.importedCount ?? 0) > 0 ||
+    (source.metadataSessions ?? 0) > 0 ||
+    (source.transcriptSessions ?? 0) > 0 ||
+    (source.enrichedSessions ?? 0) > 0 ||
+    (source.queuedRecords ?? source.queuedCount ?? 0) > 0 ||
+    Boolean(source.lastSyncAt ?? source.lastSync)
+  );
+}
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
@@ -100,6 +137,8 @@ export function App() {
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
   const [motionDisabled, setMotionDisabled] = useState(() => readStoredMotionDisabled());
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => readOnboardingDismissed());
+  const [manualOnboardingOpen, setManualOnboardingOpen] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedSessionSnapshot, setSelectedSessionSnapshot] = useState<SessionDetailView>();
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
@@ -107,8 +146,10 @@ export function App() {
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
   const [liveGitSnapshots, setLiveGitSnapshots] = useState<GitSnapshot[]>();
   const [connectorAction, setConnectorAction] = useState<ConnectorActionState>({ state: "idle" });
+  const [collectorStartupLog, setCollectorStartupLog] = useState<CollectorStartupLogEntry[]>([]);
   const connection = useMastheadConnection();
   const activeProjectionUrl = connection.baseUrl;
+  const activeProjectionUrlRef = useRef(activeProjectionUrl);
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
   const [sourceLibraryRefreshKey, setSourceLibraryRefreshKey] = useState(0);
@@ -131,6 +172,8 @@ export function App() {
     connectSelected: handleConnectSelectedSources,
     enableTranscriptImport: handleEnableTranscriptImport,
     excludePath: handleExcludeSourcePath,
+    hookActionBusy,
+    hooks: sourceHooks,
     importMetadata: handleImportMetadata,
     importPage,
     importTranscripts: handleImportTranscripts,
@@ -141,6 +184,7 @@ export function App() {
     refreshSources: handleRefreshSources,
     repair: handleRepairSources,
     retry: handleRetryImport,
+    runCodexHookAction: handleCodexHookAction,
     runSetup: handleRunSourcesSetup,
     scan: handleScanSources,
     scanSetup: handleScanSourcesSetup,
@@ -160,6 +204,8 @@ export function App() {
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
   const searchInputRef = useRef<CollapsibleSearchHandle | null>(null);
   const liveRequestIdRef = useRef(0);
+  const autoStartAttemptedRef = useRef(false);
+  const collectorStartInFlightRef = useRef(false);
   const fixtureBoard = useMemo(() => buildObservabilityDemoBoard(selectedSessionId), [selectedSessionId]);
   const baseBoard = showDemoData ? fixtureBoard : liveProjection ?? emptyLiveBoard;
   const board = useMemo(() => applyReviewDispositions(baseBoard, reviewDispositions), [baseBoard, reviewDispositions]);
@@ -229,10 +275,17 @@ export function App() {
   });
   const handleReviewDispositionsChanged = useCallback((dispositions: ReviewDisposition[]) => setReviewDispositions(dispositions), []);
   const handleMotionDisabledChange = useCallback((disabled: boolean) => setMotionDisabled(disabled), []);
+  const appendCollectorStartupLog = useCallback((entry: CollectorStartupLogEntry) => {
+    setCollectorStartupLog((current) => upsertCollectorStartupLogEntry(current, entry));
+  }, []);
 
   useEffect(() => {
     clearUnsupportedLocationHash();
   }, []);
+
+  useEffect(() => {
+    activeProjectionUrlRef.current = activeProjectionUrl;
+  }, [activeProjectionUrl]);
 
   useEffect(() => {
     writeStoredMotionDisabled(motionDisabled);
@@ -256,6 +309,32 @@ export function App() {
     onReviewDispositionsChanged: handleReviewDispositionsChanged,
     writable: connection.writable
   });
+  const shouldShowFirstRunOnboarding =
+    !onboardingDismissed &&
+    effectiveLiveConnection.state === "live" &&
+    connection.writable &&
+    shouldOpenSourcesOnboardingForSetup(sourcesSetup);
+  const onboardingOpen = manualOnboardingOpen || shouldShowFirstRunOnboarding;
+  const closeOnboarding = useCallback(() => {
+    setManualOnboardingOpen(false);
+    setOnboardingDismissed(true);
+    writeOnboardingDismissed(true);
+  }, []);
+  const skipOnboarding = useCallback(() => {
+    setManualOnboardingOpen(false);
+    setOnboardingDismissed(true);
+    writeOnboardingDismissed(true);
+  }, []);
+  const reopenOnboarding = useCallback(() => {
+    setActiveSurface("sources");
+    setOnboardingDismissed(false);
+    writeOnboardingDismissed(false);
+    setManualOnboardingOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (shouldShowFirstRunOnboarding) setActiveSurface("sources");
+  }, [shouldShowFirstRunOnboarding]);
 
   const toggleDensity = useCallback(() => {
     setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
@@ -281,22 +360,33 @@ export function App() {
     if (selectedLiveSession) setSelectedSessionSnapshot(selectedLiveSession);
   }, [detailModalOpen, selectedLiveSession]);
 
-  const loadLiveProjection = useCallback(async () => {
+  const loadLiveProjection = useCallback(async (targetUrl?: string): Promise<LiveProjectionLoadResult> => {
     const requestId = liveRequestIdRef.current + 1;
     liveRequestIdRef.current = requestId;
     const selectedLiveSessionId = selectedSessionId ?? undefined;
     const isCurrentRequest = () => liveRequestIdRef.current === requestId;
 
-    const mastheadApi = connection.api;
+    const mastheadApi = targetUrl ? new MastheadApiClient(targetUrl) : connection.api;
+    const isSupersededRequest = () => !isCurrentRequest() || mastheadApi.baseUrl !== activeProjectionUrlRef.current;
     try {
       const body = await mastheadApi.getLiveProjection(selectedLiveSessionId, { refreshIntervalMs: refreshRateMs });
+      if (isSupersededRequest()) return "superseded";
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
-      if (!isCurrentRequest()) return false;
       setLiveProjection(normalizeLiveBoardProjection(body.projection, selectedSessionId));
       setShowDemoData(false);
       setConnectorAction((current) =>
-        current.state === "starting" || current.state === "started" ? { state: "started", message: "Collector connected." } : current
+        current.state === "idle" ? current : { state: "started", message: "Collector connected." }
       );
+      setCollectorStartupLog((current) => {
+        const settled = current.map((entry) => (entry.state === "running" || entry.state === "error" ? { ...entry, state: "done" as const } : entry));
+        if (!settled.some((entry) => entry.id === "projection")) return settled;
+        return upsertCollectorStartupLogEntry(settled, {
+          id: "projection",
+          label: "Live projection",
+          detail: "Loaded live projection.",
+          state: "done"
+        });
+      });
       setLiveConnection({
         state: "live",
         events: body.events,
@@ -304,9 +394,9 @@ export function App() {
         diagnostics: body.diagnostics,
         generatedAt: body.generatedAt
       });
-      return true;
+      return "loaded";
     } catch (error) {
-      if (!isCurrentRequest()) return false;
+      if (isSupersededRequest()) return "superseded";
       setLiveProjection(undefined);
       setLiveEvents(undefined);
       setLiveGitSnapshots(undefined);
@@ -314,7 +404,7 @@ export function App() {
         state: "offline",
         error: error instanceof Error ? error.message : String(error)
       });
-      return false;
+      return "failed";
     }
   }, [activeProjectionUrl, refreshRateMs, selectedSessionId]);
 
@@ -341,30 +431,152 @@ export function App() {
     setDetailModalOpen(true);
   };
 
-  const handleStartConnector = async () => {
-    setConnectorAction({ state: "starting", message: "Starting local connector..." });
-    try {
-      const result = await startLiveConnector();
-      if (result.ok) {
-        connection.setBaseUrl(result.projectionUrl);
-        setConnectorAction({
-          state: "started",
-          message: `${result.message} Connected to ${result.baseUrl}.`
-        });
-        return;
-      }
+  const startCollector = useCallback(
+    async ({ automatic = false }: { automatic?: boolean } = {}) => {
+      if (collectorStartInFlightRef.current) return;
+      collectorStartInFlightRef.current = true;
+      setConnectorAction({
+        state: "starting",
+        message: automatic ? "Starting local collector after app launch..." : "Starting local collector..."
+      });
+      setCollectorStartupLog([
+        {
+          id: "bridge",
+          label: "Desktop bridge",
+          detail: "Requesting collector startup.",
+          state: "running"
+        }
+      ]);
+      let failureLogEntry: CollectorStartupLogEntry = {
+        id: "bridge",
+        label: "Desktop bridge",
+        detail: "Collector startup failed.",
+        state: "error"
+      };
 
-      setConnectorAction({
-        state: "unsupported",
-        message: result.message
+      try {
+        const result = await startLiveConnector();
+        if (result.ok) {
+          appendCollectorStartupLog({
+            id: "bridge",
+            label: "Desktop bridge",
+            detail: "Collector startup response received.",
+            state: "done"
+          });
+          appendCollectorStartupLog({
+            id: "daemon",
+            label: "Daemon",
+            detail: result.started ? "Started local daemon." : "Reused running daemon.",
+            state: "done"
+          });
+          appendCollectorStartupLog({
+            id: "connect",
+            label: "Connection",
+            detail: `Accepting ${result.projectionUrl}.`,
+            state: "running"
+          });
+          failureLogEntry = {
+            id: "connect",
+            label: "Connection",
+            detail: "Connection setup failed.",
+            state: "error"
+          };
+          await connection.connectTo(result.projectionUrl);
+          activeProjectionUrlRef.current = result.baseUrl;
+          appendCollectorStartupLog({
+            id: "connect",
+            label: "Connection",
+            detail: `Accepted ${result.projectionUrl}.`,
+            state: "done"
+          });
+          setConnectorAction({
+            state: "started",
+            message: `${result.message} Connected to ${result.baseUrl}.`
+          });
+          appendCollectorStartupLog({
+            id: "projection",
+            label: "Live projection",
+            detail: "Loading live projection.",
+            state: "running"
+          });
+          failureLogEntry = {
+            id: "projection",
+            label: "Live projection",
+            detail: "Live projection did not load.",
+            state: "error"
+          };
+          const projectionLoadResult = await loadLiveProjection(result.projectionUrl);
+          if (projectionLoadResult === "superseded") {
+            appendCollectorStartupLog({
+              id: "projection",
+              label: "Live projection",
+              detail: "Handed off to the refreshed connection.",
+              state: "done"
+            });
+          } else if (projectionLoadResult === "failed") {
+            appendCollectorStartupLog({
+              id: "projection",
+              label: "Live projection",
+              detail: "Live projection did not load.",
+              state: "error"
+            });
+            setConnectorAction({
+              state: "error",
+              message: STARTUP_PROJECTION_ERROR_MESSAGE
+            });
+          }
+          return;
+        }
+
+        appendCollectorStartupLog({
+          id: "bridge",
+          label: "Desktop bridge",
+          detail: "Collector startup is unsupported here.",
+          state: "error"
+        });
+        setConnectorAction({
+          state: "unsupported",
+          message: result.message
+        });
+      } catch (error) {
+        appendCollectorStartupLog(failureLogEntry);
+        setConnectorAction({
+          state: "error",
+          message: `Could not start collector: ${error instanceof Error ? error.message : String(error)}`
+        });
+      } finally {
+        collectorStartInFlightRef.current = false;
+      }
+    },
+    [appendCollectorStartupLog, connection, loadLiveProjection]
+  );
+
+  const handleStartConnector = useCallback(() => {
+    void startCollector();
+  }, [startCollector]);
+
+  useEffect(() => {
+    if (showDemoData) return;
+    if (!isDesktopBridgeAvailable()) return;
+    if (autoStartAttemptedRef.current) return;
+    if (connection.state.state !== "offline" && connection.state.state !== "incompatible") return;
+
+    let cancelled = false;
+    let secondFrame: number | undefined;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        if (cancelled || autoStartAttemptedRef.current) return;
+        autoStartAttemptedRef.current = true;
+        void startCollector({ automatic: true });
       });
-    } catch (error) {
-      setConnectorAction({
-        state: "error",
-        message: `Could not start connector: ${error instanceof Error ? error.message : String(error)}`
-      });
-    }
-  };
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame !== undefined) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [connection.state.state, showDemoData, startCollector]);
 
   const handleSessionAction = async (action: SafeAction, session: SessionDetailView) => {
     if (!isReviewSafeAction(action)) {
@@ -399,9 +611,21 @@ export function App() {
     }
   };
 
-  const needsRecoveryPanel = connection.state.state === "offline" || connection.state.state === "incompatible";
+  const hasActiveCollectorStartup =
+    connectorAction.state === "starting" ||
+    connectorAction.state === "error" ||
+    connectorAction.state === "unsupported" ||
+    collectorStartupLog.some((entry) => entry.state === "running" || entry.state === "error");
+  const needsRecoveryPanel =
+    connection.state.state === "offline" || connection.state.state === "incompatible" || hasActiveCollectorStartup;
   const recoveryPanel = (
-    <ConnectionRecoveryPanel connection={connection.state} onRetry={connection.refresh} onStart={handleStartConnector} />
+    <ConnectionRecoveryPanel
+      action={connectorAction}
+      connection={connection.state}
+      startupLog={collectorStartupLog}
+      onRetry={connection.refresh}
+      onStart={handleStartConnector}
+    />
   );
 
 
@@ -416,23 +640,34 @@ export function App() {
           lastRefreshAt={sourcesLastRefreshAt}
           setup={sourcesSetup}
           busy={sourcesBusy}
+          enrichment={settingsData.settingsState?.enrichment}
+          hooks={sourceHooks}
+          hookActionBusy={hookActionBusy}
+          llm={settingsData.settingsState?.llm}
+          onboardingOpen={onboardingOpen}
           readOnly={!connection.writable}
+          settingsBaseUrl={activeProjectionUrl}
           status={sourcesStatus}
           onCancelImport={handleCancelImport}
+          onCloseOnboarding={closeOnboarding}
+          onCodexHookAction={handleCodexHookAction}
           onConnectSelected={handleConnectSelectedSources}
           onEnableTranscriptImport={handleEnableTranscriptImport}
           onExcludePath={handleExcludeSourcePath}
           onImportMetadata={handleImportMetadata}
           onImportTranscripts={handleImportTranscripts}
           onLoadAdapterSources={handleLoadAdapterSources}
+          onOpenOnboarding={reopenOnboarding}
           onPollImports={handlePollActiveImports}
           onPreviewImport={sourcesController.previewImport}
           onRepairSources={handleRepairSources}
           onRefresh={handleRefreshSources}
           onRetryImport={handleRetryImport}
           onRunSetup={handleRunSourcesSetup}
+          onSaveLlmProvider={settingsData.saveLlmProviderSettings}
           onScan={handleScanSources}
           onScanSetup={handleScanSourcesSetup}
+          onSkipOnboarding={skipOnboarding}
           onSyncAdapter={handleSyncAdapter}
           onSyncSources={handleSyncSources}
         />
@@ -524,17 +759,23 @@ export function App() {
             deletionScopeTarget={settingsData.deletionScopeTarget}
             localDataStatus={settingsData.localDataStatus}
             motionDisabled={motionDisabled}
+            settingsError={settingsData.settingsError}
+            settingsLoadState={settingsData.settingsLoadState}
+            settingsState={settingsData.settingsState}
             onCancelLocalDataAction={settingsData.cancelLocalDataAction}
             onDeletionScopeKindChange={settingsData.changeDeletionScopeKind}
             onDeletionScopeTargetChange={settingsData.changeDeletionScopeTarget}
             onExportLocalData={settingsData.exportLocalData}
             onMotionDisabledChange={handleMotionDisabledChange}
+            onOpenOnboarding={reopenOnboarding}
+            onReloadSettings={() => void settingsData.loadSettingsState()}
             onRequestPruneLocalData={settingsData.requestPruneLocalData}
             onConfirmPruneLocalData={settingsData.confirmPruneLocalData}
             onRequestScopedDelete={settingsData.requestScopedDelete}
             onConfirmScopedDelete={settingsData.confirmScopedDelete}
             onRequestDeleteLocalData={settingsData.requestDeleteLocalData}
             onConfirmDeleteLocalData={settingsData.confirmDeleteLocalData}
+            onSaveLlmProvider={settingsData.saveLlmProviderSettings}
             readOnly={!connection.writable}
           />
         )}
@@ -647,6 +888,18 @@ function emptyBoardTitle({
   if (liveConnection.state === "live") return "No active sessions";
   if (liveConnection.state === "offline") return "No live connection";
   return "Connecting to Masthead collector";
+}
+
+function upsertCollectorStartupLogEntry(
+  entries: CollectorStartupLogEntry[],
+  entry: CollectorStartupLogEntry
+): CollectorStartupLogEntry[] {
+  const existingIndex = entries.findIndex((current) => current.id === entry.id);
+  if (existingIndex === -1) return [...entries, entry];
+
+  const next = [...entries];
+  next[existingIndex] = entry;
+  return next;
 }
 
 function emptyBoardMessage({

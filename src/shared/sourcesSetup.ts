@@ -203,3 +203,10 @@ export type SourcesSetupRunRequest = {
 };
 
 export type SourcesSetupRunInput = SourcesSetupRunRequest;
+
+export type SourcesSetupLiveCaptureAction = "install" | "test" | "uninstall" | "leave";
+
+export type SourcesSetupLiveCaptureSelection = {
+  runtime: string;
+  action: SourcesSetupLiveCaptureAction;
+};

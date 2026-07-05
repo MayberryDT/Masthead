@@ -177,7 +177,7 @@ export function HistoryPanel({
   useEffect(() => {
     wasLoadingRef.current = isLoading;
   }, [isLoading]);
-  const showPagination = usesLogbookStore && Boolean(onPageChange) && visibleTotal > pageSize;
+  const showPagination = usesLogbookStore && Boolean(onPageChange) && visibleTotal > 0;
   const handlePageChange = (nextPageIndex: number) => {
     const boundedPageIndex = Math.min(Math.max(0, nextPageIndex), totalPages - 1);
     if (boundedPageIndex === visiblePageIndex) return;

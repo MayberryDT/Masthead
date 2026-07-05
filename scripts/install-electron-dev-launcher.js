@@ -16,7 +16,7 @@ const stateDir = join(home, ".local", "state", "masthead");
 const launcherPath = join(binDir, "masthead-dev-desktop");
 const desktopPath = join(applicationsDir, "ai.animas.masthead-dev.desktop");
 const servicePath = join(systemdUserDir, "masthead-dev-electron.service");
-const iconPath = join(repo, "public", "assets", "masthead-logo-sail.png");
+const iconPath = join(repo, "public", "assets", "masthead-logo-sail-dev.svg");
 
 function shellQuote(value) {
   return `'${value.replace(/'/g, `'\\''`)}'`;

@@ -19,6 +19,14 @@ describe("Masthead Dev launcher template", () => {
     expect(source).toContain("KillMode=control-group");
   });
 
+  test("keeps the desktop identity branded as Masthead Dev with the dev icon", async () => {
+    const source = await readFile("scripts/install-electron-dev-launcher.js", "utf8");
+
+    expect(source).toContain('const iconPath = join(repo, "public", "assets", "masthead-logo-sail-dev.svg");');
+    expect(source).toContain("Name=Masthead Dev");
+    expect(source).toContain("Icon=${iconPath}");
+  });
+
   test("claims canonical port 5173 by stopping same-repo browser dev launchers", async () => {
     const source = await readFile("scripts/install-electron-dev-launcher.js", "utf8");
 

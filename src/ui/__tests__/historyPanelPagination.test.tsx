@@ -39,6 +39,18 @@ describe("HistoryPanel pagination", () => {
     expect(currentContainer().textContent).not.toContain("Session 1");
   });
 
+  test("shows disabled pagination controls for a single canonical page", async () => {
+    const onPageChange = vi.fn();
+    await renderPanel(onPageChange, { total: 21, visibleSessions: 21 });
+
+    expect(currentContainer().textContent).toContain("Page 1 of 1");
+    expect(currentContainer().querySelector(".logbook-footer.has-pagination")).not.toBeNull();
+    expect(currentContainer().querySelector<HTMLButtonElement>('button[aria-label="First page"]')?.disabled).toBe(true);
+    expect(currentContainer().querySelector<HTMLButtonElement>('button[aria-label="Previous page"]')?.disabled).toBe(true);
+    expect(currentContainer().querySelector<HTMLButtonElement>('button[aria-label="Next page"]')?.disabled).toBe(true);
+    expect(currentContainer().querySelector<HTMLButtonElement>('button[aria-label="Last page"]')?.disabled).toBe(true);
+  });
+
   test("updates visible pagination before notifying the parent page change handler", async () => {
     const onPageChange = vi.fn(() => {
       expect(currentContainer().textContent).toContain("Page 2 of 3");
@@ -92,23 +104,25 @@ describe("HistoryPanel pagination", () => {
   });
 });
 
-async function renderPanel(onPageChange: (pageIndex: number) => void) {
+async function renderPanel(onPageChange: (pageIndex: number) => void, options: { total?: number; visibleSessions?: number } = {}) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
+  const visibleSessions = options.visibleSessions ?? 50;
+  const total = options.total ?? 125;
 
   await act(async () => {
     root?.render(
       <HistoryPanel
         loadState={{
           state: "ready",
-          sessions: Array.from({ length: 50 }, (_, index) => ({
+          sessions: Array.from({ length: visibleSessions }, (_, index) => ({
             project: "Masthead",
             runtime: "codex",
             sessionId: `session-${index + 1}`,
             title: `Session ${index + 1}`
           })),
-          total: 125
+          total
         }}
         loading={false}
         pageIndex={0}

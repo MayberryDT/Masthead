@@ -6190,6 +6190,141 @@ body {
   justify-content: flex-end;
 }
 
+.observability-console .connection-recovery .connection-startup,
+.masthead-shell .connection-recovery .connection-startup {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(92, 153, 187, 0.16);
+  color: var(--body);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.observability-console .connection-startup-status,
+.masthead-shell .connection-startup-status,
+.observability-console .connection-startup-entry,
+.masthead-shell .connection-startup-entry {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.observability-console .connection-startup-status,
+.masthead-shell .connection-startup-status {
+  gap: 6px;
+}
+
+.observability-console .connection-startup-status .mono-label,
+.masthead-shell .connection-startup-status .mono-label {
+  margin: 0;
+  color: var(--mute);
+}
+
+.observability-console .connection-startup-status strong,
+.masthead-shell .connection-startup-status strong,
+.observability-console .connection-startup-label,
+.masthead-shell .connection-startup-label {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.observability-console .connection-startup-list,
+.masthead-shell .connection-startup-list {
+  display: flex;
+  flex: 1 1 280px;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.observability-console .connection-startup-entry,
+.masthead-shell .connection-startup-entry {
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid rgba(92, 153, 187, 0.14);
+  border-radius: 1px;
+  background-color: rgba(3, 16, 25, 0.32);
+}
+
+.observability-console .connection-startup-copy,
+.masthead-shell .connection-startup-copy {
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.observability-console .connection-startup-detail,
+.masthead-shell .connection-startup-detail,
+.observability-console .connection-startup-state,
+.masthead-shell .connection-startup-state {
+  color: var(--mute);
+}
+
+.observability-console .connection-startup-dot,
+.masthead-shell .connection-startup-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background-color: var(--ash);
+  box-shadow: 0 0 0 1px rgba(246, 251, 255, 0.12);
+}
+
+.observability-console .connection-startup-dot.starting,
+.observability-console .connection-startup-dot.running,
+.masthead-shell .connection-startup-dot.starting,
+.masthead-shell .connection-startup-dot.running {
+  background-color: var(--blue);
+  box-shadow: 0 0 0 1px rgba(87, 193, 255, 0.34), 0 0 10px var(--blue-soft);
+  animation: connection-startup-pulse 1200ms ease-in-out infinite;
+}
+
+.observability-console .connection-startup-dot.started,
+.observability-console .connection-startup-dot.done,
+.masthead-shell .connection-startup-dot.started,
+.masthead-shell .connection-startup-dot.done {
+  background-color: var(--green);
+}
+
+.observability-console .connection-startup-dot.unsupported,
+.observability-console .connection-startup-dot.pending,
+.masthead-shell .connection-startup-dot.unsupported,
+.masthead-shell .connection-startup-dot.pending {
+  background-color: var(--yellow);
+}
+
+.observability-console .connection-startup-dot.error,
+.masthead-shell .connection-startup-dot.error {
+  background-color: var(--red);
+}
+
+@keyframes connection-startup-pulse {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.72;
+  }
+
+  50% {
+    transform: scale(1.24);
+    opacity: 1;
+  }
+}
+
+.observability-console .connection-recovery .app-button:disabled,
+.masthead-shell .connection-recovery .app-button:disabled {
+  cursor: progress;
+  opacity: 0.62;
+}
+
 .observability-console .settings-recovery.connection-recovery,
 .masthead-shell .settings-recovery.connection-recovery {
   grid-template-columns: minmax(0, 1fr) auto;
@@ -6242,6 +6377,12 @@ body {
   .observability-console .connection-recovery .nav-actions,
   .masthead-shell .connection-recovery .nav-actions {
     justify-content: flex-start;
+  }
+
+  .observability-console .connection-startup-copy,
+  .masthead-shell .connection-startup-copy {
+    flex-direction: column;
+    gap: 0;
   }
 }
 
@@ -6565,7 +6706,11 @@ body {
   .observability-console .session-card.dovetail-card .bottom-signal,
   .observability-console .session-card.dovetail-card .bottom-signal::before,
   .masthead-shell .session-card.dovetail-card .bottom-signal,
-  .masthead-shell .session-card.dovetail-card .bottom-signal::before {
+  .masthead-shell .session-card.dovetail-card .bottom-signal::before,
+  .observability-console .connection-startup-dot.starting,
+  .observability-console .connection-startup-dot.running,
+  .masthead-shell .connection-startup-dot.starting,
+  .masthead-shell .connection-startup-dot.running {
     animation: none !important;
   }
 
