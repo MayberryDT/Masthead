@@ -414,11 +414,9 @@ describe("OperationsPanel", () => {
     });
 
     const remoteToggle = container.querySelector<HTMLInputElement>('input[aria-label="Use remote LLM enrichment"]');
-    const saveButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Save provider");
     await act(async () => {
-      if (!remoteToggle || !saveButton) throw new Error("missing local provider controls");
+      if (!remoteToggle) throw new Error("missing local provider controls");
       remoteToggle.click();
-      saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await act(async () => {
       await Promise.resolve();
@@ -428,9 +426,6 @@ describe("OperationsPanel", () => {
       {
         body: {
           activeProvider: "ollama",
-          baseUrl: "http://127.0.0.1:11434/v1",
-          clearApiKey: false,
-          model: "llama3.1",
           remoteEnrichmentEnabled: true
         },
         url: "http://127.0.0.1:17373/settings/llm-provider"

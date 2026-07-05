@@ -5,6 +5,7 @@ import {
   type ImportJobKind,
   updateImportJob
 } from "../db/importJobRepository.ts";
+import { deriveImportVisibilityState } from "../../shared/sourceImport.ts";
 import type { ImportStage } from "../../shared/sourceImport.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 import { recordRuntimeDiagnostic } from "../diagnostics.ts";
@@ -327,16 +328,8 @@ function cancelQueuedImportJob(db: MastheadDatabase, importJobId: string, now: (
   return cancelled;
 }
 
-export function deriveImportVisibilityState(
-  job: { status: string; heartbeatAt?: string; updatedAt: string },
-  now = Date.now(),
-  stalledAfterMs = 30_000
-): string {
-  if (job.status !== "running") return job.status;
-  const heartbeat = new Date(job.heartbeatAt ?? job.updatedAt).getTime();
-  if (!Number.isFinite(heartbeat)) return job.status;
-  return now - heartbeat > stalledAfterMs ? "stalled" : job.status;
-}
+export { deriveImportVisibilityState };
+
 
 function parseImportConcurrency(value: string | undefined): number {
   const parsed = Number.parseInt(value || "", 10);

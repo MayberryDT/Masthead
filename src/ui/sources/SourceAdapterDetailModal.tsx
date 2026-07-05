@@ -13,7 +13,7 @@ import {
   stateTone,
   type AdapterRowModel
 } from "./AdapterRow";
-import { HarnessLiveCaptureSection } from "./HarnessLiveCaptureSection";
+import { HarnessLiveCaptureSection, liveCaptureStatusForRuntime } from "./HarnessLiveCaptureSection";
 import { SourceDiagnosticPanel } from "./SourceDiagnosticPanel";
 import { SourcePathTable } from "./SourcePathTable";
 import { SourcePolicyControls } from "./SourcePolicyControls";
@@ -76,6 +76,7 @@ export function SourceAdapterDetailModal({
   const discoveredCount = view.discoveredCount ?? view.discoveredSessions;
   const importedCount = view.importedCount ?? view.importedSessions;
   const sourceLocationCount = locationTotal ?? view.sourceLocationCount ?? view.sourceLocations.length;
+  const liveConnector = liveCaptureStatusForRuntime(hooks, view.runtime);
   const modalClassName = [
     "session-detail-modal",
     "source-detail-modal",
@@ -146,14 +147,18 @@ export function SourceAdapterDetailModal({
             <span>{sourceLocationCount} locations</span>
             <span>{formatLastSync(view.lastSyncAt)}</span>
           </div>
-          <div className="modal-title-row">
+          <div className="modal-title-row source-detail-title-row">
+            <button type="button" className="icon-button" aria-label="Close source detail" onClick={requestClose}>
+              <Icon name="close" size="toolbar" weight={iconWeights.toolbar} />
+            </button>
+          </div>
+          <div className="source-detail-head-badges" aria-label="Harness and connector status">
             <div>
               <p className="mono-label">Source adapter</p>
               <h2 id={titleId}>{label}</h2>
             </div>
-            <button type="button" className="icon-button" aria-label="Close source detail" onClick={requestClose}>
-              <Icon name="close" size="toolbar" weight={iconWeights.toolbar} />
-            </button>
+            <StatusBadge tone={stateTone(state)}>{stateLabel(state)}</StatusBadge>
+            <StatusBadge tone={liveConnector.tone}>Live: {liveConnector.label}</StatusBadge>
           </div>
         </header>
 

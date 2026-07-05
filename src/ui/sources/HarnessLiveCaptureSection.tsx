@@ -74,6 +74,16 @@ export function HarnessLiveCaptureSection({ busy = false, hooks, onAction, runti
   );
 }
 
+export function liveCaptureStatusForRuntime(
+  hooks: CodexHookSettingsDto | undefined,
+  runtime: string
+): { label: string; message?: string; tone: StatusBadgeTone } {
+  const catalogEntry = harnessForRuntime(runtime as RuntimeKind);
+  const integration = hooks?.integrations.find((item) => item.runtime === runtime);
+  const label = integration?.label ?? catalogEntry?.label ?? runtime;
+  return liveCaptureStatus(hooks, integration, runtime, label);
+}
+
 function liveCaptureStatus(
   hooks: CodexHookSettingsDto | undefined,
   integration: HarnessCaptureIntegrationDto | undefined,

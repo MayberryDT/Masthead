@@ -10,6 +10,11 @@ import { iconWeights } from "../icons/icon-tokens";
 import { prefersReducedMotion } from "../motionPreference";
 
 type Props = {
+  bulkEnrichBusy?: boolean;
+  bulkEnrichError?: string;
+  bulkSelectionCount?: number;
+  onBulkEnrich?: () => void;
+  onClearBulkSelection?: () => void;
   query: string;
   sort: LogbookSort;
   filters?: LogbookFilterState;
@@ -43,7 +48,7 @@ function dropdownCloseDelayMs(): number {
   return cssDurationMs(window.getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur"), 150);
 }
 
-export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, onQueryChange, onSortChange, query, sort }: Props) {
+export function LogbookToolbar({ bulkEnrichBusy = false, bulkEnrichError, bulkSelectionCount = 0, filterOptions, filters = {}, onBulkEnrich, onClearBulkSelection, onFilterChange, onQueryChange, onSortChange, query, sort }: Props) {
   const runtimeOptions = optionRows(filterOptions?.runtimes, filters.runtime);
   const projectOptions = optionRows(filterOptions?.projects, filters.project);
   const modelOptions = optionRows(filterOptions?.models, filters.model);
@@ -200,6 +205,19 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
           className="logbook-combobox-filter logbook-model-filter"
           onChange={(value) => onFilterChange?.({ ...filters, model: filterChangeValues(value) })}
         />
+
+        {bulkSelectionCount > 0 ? (
+          <div className="logbook-bulk-actions" data-logbook-row-stop>
+            <span className="mono-label">{bulkSelectionCount} selected</span>
+            <AppButton disabled={bulkEnrichBusy} onClick={() => onBulkEnrich?.()}>
+              {bulkEnrichBusy ? "Enriching..." : "Enrich selected"}
+            </AppButton>
+            <AppButton disabled={bulkEnrichBusy} onClick={() => onClearBulkSelection?.()}>
+              Clear
+            </AppButton>
+          </div>
+        ) : null}
+        {bulkEnrichError ? <p className="surface-status">{bulkEnrichError}</p> : null}
 
         <AppSelect label="Sort sessions" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
       </div>

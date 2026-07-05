@@ -4,6 +4,7 @@ import type { AppSurface } from "../../ui/ObservabilitySidebar";
 import type { SessionDossierDto } from "../../shared/sessionDossier";
 import {
   enrichSessionDossier,
+  rebuildEnrichments,
   getLogbookSummary,
   getLogbookSession,
   getLogbookSessionExcerpts,
@@ -56,6 +57,9 @@ export function useLogbookController({
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
   const [filters, setFilters] = useState<LogbookFilterState>({});
   const [selectedSessionId, setSelectedSessionId] = useState<string>();
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [bulkEnrichBusy, setBulkEnrichBusy] = useState(false);
+  const [bulkEnrichError, setBulkEnrichError] = useState<string>();
   const [selectedSession, setSelectedSession] = useState<LogbookSessionDetail>();
   const [excerpts, setExcerpts] = useState<LogbookExcerpt[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -336,6 +340,31 @@ export function useLogbookController({
     }
   };
 
+  const toggleBulkSelection = (sessionId: string) => {
+    setSelectedSessionIds((current) =>
+      current.includes(sessionId) ? current.filter((id) => id !== sessionId) : [...current, sessionId]
+    );
+  };
+
+  const clearBulkSelection = () => setSelectedSessionIds([]);
+
+  const bulkEnrichSelected = async () => {
+    if (bulkEnrichBusy || selectedSessionIds.length === 0) return;
+    setBulkEnrichBusy(true);
+    setBulkEnrichError(undefined);
+    try {
+      await rebuildEnrichments(
+        { scope: "sessionIds", sessionIds: selectedSessionIds, limit: selectedSessionIds.length },
+        activeProjectionUrl
+      );
+      setRetryKey((current) => current + 1);
+    } catch (enrichmentError) {
+      setBulkEnrichError(enrichmentError instanceof Error ? enrichmentError.message : String(enrichmentError));
+    } finally {
+      setBulkEnrichBusy(false);
+    }
+  };
+
   const enrichDossier = async () => {
     if (!selectedSessionId || dossierEnrichmentBusy) return;
     dossierEnrichmentAbortRef.current?.abort();
@@ -372,6 +401,10 @@ export function useLogbookController({
     dossierEnrichmentError,
     dossierError,
     dossierLoading,
+    bulkEnrichBusy,
+    bulkEnrichError,
+    bulkEnrichSelected,
+    clearBulkSelection,
     enrichDossier,
     excerpts,
     filterOptions,
@@ -388,6 +421,8 @@ export function useLogbookController({
     selectSession: setSelectedSessionId,
     selectedSession,
     selectedSessionId,
+    selectedSessionIds,
+    toggleBulkSelection,
     sort,
     summary,
     transcript,

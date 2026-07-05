@@ -117,6 +117,7 @@ export function SessionCard({
         </span>
         <span className="runtime-tag">{harness}</span>
         <span className="state-pill">{sessionStatePillLabel(session)}</span>
+        <HeadlineSourceBadge session={session} />
       </header>
 
       <h3 className="headline">
@@ -127,7 +128,6 @@ export function SessionCard({
         ) : null}
         <span className="headline-text headline-current">{visibleHeadline}</span>
       </h3>
-      <HeadlineSourceBadge session={session} />
 
       <div className="fact-grid">
         <Fact label="Runtime" value={harness} />

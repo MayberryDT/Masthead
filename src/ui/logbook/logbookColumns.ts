@@ -1,4 +1,5 @@
 export const logbookColumns = [
+  { key: "select", label: "", className: "logbook-col-select" },
   { key: "date", label: "DATE", className: "logbook-col-date" },
   { key: "session", label: "SESSION / MATCH", className: "logbook-col-session" },
   { key: "project", label: "PROJECT", className: "logbook-col-project" },

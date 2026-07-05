@@ -14,7 +14,14 @@ import { HistoryPanel } from "../ui/HistoryPanel";
 import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
 import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
 import { OperationsPanel } from "../ui/OperationsPanel";
-import { prefersReducedMotion, readStoredMotionDisabled, writeStoredMotionDisabled } from "../ui/motionPreference";
+import {
+  prefersReducedMotion,
+  readStoredMotionDisabled,
+  readStoredSessionEndedNotificationsEnabled,
+  writeStoredMotionDisabled,
+  writeStoredSessionEndedNotificationsEnabled
+} from "../ui/motionPreference";
+import { emitSessionEndedNotifications } from "./liveSessionEndedNotifications";
 import {
   SessionBoard
 } from "../ui/SessionBoard";
@@ -137,11 +144,16 @@ export function App() {
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
   const [motionDisabled, setMotionDisabled] = useState(() => readStoredMotionDisabled());
+  const [sessionEndedNotificationsEnabled, setSessionEndedNotificationsEnabled] = useState(() =>
+    readStoredSessionEndedNotificationsEnabled()
+  );
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => readOnboardingDismissed());
   const [manualOnboardingOpen, setManualOnboardingOpen] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedSessionSnapshot, setSelectedSessionSnapshot] = useState<SessionDetailView>();
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
+  const liveProjectionRef = useRef<LiveBoardProjection | undefined>(undefined);
+  const notifiedSessionEndedIdsRef = useRef(new Set<string>());
   const [liveConnection, setLiveConnection] = useState<ConnectionState>({ state: "connecting" });
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
   const [liveGitSnapshots, setLiveGitSnapshots] = useState<GitSnapshot[]>();
@@ -292,10 +304,16 @@ export function App() {
   }, [motionDisabled]);
 
   useEffect(() => {
+    writeStoredSessionEndedNotificationsEnabled(sessionEndedNotificationsEnabled);
+  }, [sessionEndedNotificationsEnabled]);
+
+  useEffect(() => {
     document.documentElement.dataset.mastheadMotion = motionDisabled ? "off" : "daily";
   }, [motionDisabled]);
 
   const handleCanonicalDataDeleted = useCallback(() => {
+    liveProjectionRef.current = undefined;
+    notifiedSessionEndedIdsRef.current.clear();
     setLiveProjection(emptyLiveBoard);
     setLiveEvents([]);
     setLiveGitSnapshots([]);
@@ -372,7 +390,14 @@ export function App() {
       const body = await mastheadApi.getLiveProjection(selectedLiveSessionId, { refreshIntervalMs: refreshRateMs });
       if (isSupersededRequest()) return "superseded";
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
-      setLiveProjection(normalizeLiveBoardProjection(body.projection, selectedSessionId));
+      const previousProjection = liveProjectionRef.current;
+      const normalized = normalizeLiveBoardProjection(body.projection, selectedSessionId);
+      liveProjectionRef.current = normalized;
+      setLiveProjection(normalized);
+      void emitSessionEndedNotifications(previousProjection, normalized, {
+        enabled: sessionEndedNotificationsEnabled,
+        notifiedSessionIds: notifiedSessionEndedIdsRef.current
+      });
       setShowDemoData(false);
       setConnectorAction((current) =>
         current.state === "idle" ? current : { state: "started", message: "Collector connected." }
@@ -397,6 +422,8 @@ export function App() {
       return "loaded";
     } catch (error) {
       if (isSupersededRequest()) return "superseded";
+      liveProjectionRef.current = undefined;
+      notifiedSessionEndedIdsRef.current.clear();
       setLiveProjection(undefined);
       setLiveEvents(undefined);
       setLiveGitSnapshots(undefined);
@@ -406,7 +433,7 @@ export function App() {
       });
       return "failed";
     }
-  }, [activeProjectionUrl, refreshRateMs, selectedSessionId]);
+  }, [activeProjectionUrl, connection.api, refreshRateMs, selectedSessionId, sessionEndedNotificationsEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -688,8 +715,14 @@ export function App() {
             query={logbook.query}
             density="compact"
             loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbook.loadState}
+            bulkEnrichBusy={logbook.bulkEnrichBusy}
+            bulkEnrichError={logbook.bulkEnrichError}
+            onBulkEnrich={() => void logbook.bulkEnrichSelected()}
+            onClearBulkSelection={logbook.clearBulkSelection}
+            onToggleBulkSelect={logbook.toggleBulkSelection}
             refreshError={logbook.refreshError}
             selectedSessionId={logbook.selectedSessionId}
+            selectedSessionIds={logbook.selectedSessionIds}
             sort={logbook.sort}
             sources={sources}
             summary={logbook.summary}
@@ -759,6 +792,8 @@ export function App() {
             deletionScopeTarget={settingsData.deletionScopeTarget}
             localDataStatus={settingsData.localDataStatus}
             motionDisabled={motionDisabled}
+            sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled}
+            onSessionEndedNotificationsEnabledChange={setSessionEndedNotificationsEnabled}
             settingsError={settingsData.settingsError}
             settingsLoadState={settingsData.settingsLoadState}
             settingsState={settingsData.settingsState}

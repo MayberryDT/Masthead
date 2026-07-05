@@ -8,6 +8,7 @@ describe("Electron IPC security policy", () => {
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.windowClose)).toBe(true);
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.windowMaximize)).toBe(true);
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.windowMinimize)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.notifySessionEnded)).toBe(true);
     expect(isAllowedIpcChannel("shell:openExternal")).toBe(false);
     expect(isAllowedIpcChannel("__proto__")).toBe(false);
   });

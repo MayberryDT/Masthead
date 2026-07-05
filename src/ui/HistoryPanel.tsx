@@ -32,7 +32,13 @@ type Props = {
   filters?: LogbookFilterState;
   filterOptions?: LogbookFilterOptions;
   density?: "comfortable" | "compact";
+  bulkEnrichBusy?: boolean;
+  bulkEnrichError?: string;
+  onBulkEnrich?: () => void;
+  onClearBulkSelection?: () => void;
+  onToggleBulkSelect?: (sessionId: string) => void;
   selectedSessionId?: string;
+  selectedSessionIds?: string[];
   sources?: SourceStatus[];
   adapters?: AdapterStatus[];
   imports?: ImportJob[];
@@ -140,8 +146,14 @@ export function HistoryPanel({
   pageSize = 100,
   query,
   records = [],
+  bulkEnrichBusy,
+  bulkEnrichError,
+  onBulkEnrich,
+  onClearBulkSelection,
+  onToggleBulkSelect,
   refreshError,
   selectedSessionId,
+  selectedSessionIds = [],
   sessions,
   sort = "recent",
   sources = [],
@@ -229,10 +241,15 @@ export function HistoryPanel({
     <section id="history" className="history-panel logbook-panel surface-panel" aria-label="Logbook">
 
       <LogbookToolbar
+        bulkEnrichBusy={bulkEnrichBusy}
+        bulkEnrichError={bulkEnrichError}
+        bulkSelectionCount={selectedSessionIds.length}
         filters={filters}
         filterOptions={filterOptions}
         query={query}
         sort={sort}
+        onBulkEnrich={onBulkEnrich}
+        onClearBulkSelection={onClearBulkSelection}
         onFilterChange={onFilterChange ?? (() => undefined)}
         onQueryChange={onQueryChange}
         onSortChange={onSortChange ?? (() => undefined)}
@@ -256,8 +273,10 @@ export function HistoryPanel({
           density={density}
           sessions={tableSessions}
           selectedSessionId={selectedSessionId}
+          selectedSessionIds={selectedSessionIds}
           updating={isLoading}
           onSelect={(sessionId) => onSessionSelect?.(sessionId)}
+          onToggleBulkSelect={onToggleBulkSelect}
         />
       )}
 

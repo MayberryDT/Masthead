@@ -127,3 +127,14 @@ export type ImportCompletionReportDto = {
   skippedUnits: number;
   nextActions: Array<"retry_failed_units" | "import_full_archive" | "approve_transcripts" | "run_enrichment" | "open_logbook">;
 };
+
+export function deriveImportVisibilityState(
+  job: { status: string; heartbeatAt?: string; updatedAt: string },
+  now = Date.now(),
+  stalledAfterMs = 30_000
+): ImportVisibilityState {
+  if (job.status !== "running") return job.status as ImportVisibilityState;
+  const heartbeat = new Date(job.heartbeatAt ?? job.updatedAt).getTime();
+  if (!Number.isFinite(heartbeat)) return job.status as ImportVisibilityState;
+  return now - heartbeat > stalledAfterMs ? "stalled" : (job.status as ImportVisibilityState);
+}

@@ -3,7 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, Menu, net, protocol, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
 import { ELECTRON_CHANNELS, isAllowedIpcSender, registerMastheadIpc } from "./ipc";
 import {
@@ -360,6 +360,13 @@ function registerDesktopIpc(): void {
         touchedExternalState: false
       }),
       [ELECTRON_CHANNELS.readStoreRecords]: () => [],
+      [ELECTRON_CHANNELS.notifySessionEnded]: (args) => {
+        const title = stringArg(args, "title") || "Session ended";
+        const body = stringArg(args, "body");
+        const notification = new Notification({ title, body: body || undefined, silent: false });
+        notification.show();
+        return { ok: true };
+      },
       [ELECTRON_CHANNELS.appendStoreRecords]: () => undefined
     },
     { allowDevRenderer: isElectronDevMode() }

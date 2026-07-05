@@ -1,6 +1,10 @@
+// @vitest-environment happy-dom
+
 import { readFileSync } from "node:fs";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import type { SettingsStateDto } from "../../../app/daemonClient";
 import { SettingsSurface } from "../../../app/surfaces/SettingsSurface";
 import { OperationsPanel } from "../../OperationsPanel";
@@ -23,7 +27,8 @@ describe("Settings surface", () => {
     expect(html).toContain("settings-layout");
     expect(html).toContain("settings-section-wide");
     expect(html).toContain("settings-section-danger");
-    expect(html).toContain("LLM provider");
+    expect(html).toContain("Remote enrichment");
+    expect(html).toContain("Provider connection");
     expect(html).toContain("Use remote LLM enrichment");
     expect(html).toContain("OpenAI");
     expect(html).toContain("API key");
@@ -77,16 +82,26 @@ describe("Settings surface", () => {
     expect(html).not.toContain("<select");
   });
 
-  test("renders disabled motion as the off state", () => {
-    const html = renderToStaticMarkup(
-      <OperationsPanel motionDisabled onMotionDisabledChange={() => undefined} settingsState={settings} />
-    );
+  test("renders disabled motion as the off state", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(
+        <OperationsPanel motionDisabled onMotionDisabledChange={() => undefined} settingsState={settings} />
+      );
+    });
 
-    expect(html).toContain("Enable motion");
-    expect(html).toContain("settings-toggle");
-    expect(html).not.toContain("settings-toggle checked");
-    expect(html).not.toContain("checked=\"\"");
-    expect(html).toContain("Motion off");
+    const motionInput = host.querySelector<HTMLInputElement>('input[aria-label="Enable motion"]');
+    expect(motionInput?.checked).toBe(false);
+    const motionLabel = motionInput?.closest("label.settings-toggle");
+    expect(motionLabel?.className).not.toContain("checked");
+    expect(motionLabel?.textContent).toContain("Motion off");
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
   });
 
   test("renders a separate confirmation dialog for destructive actions", () => {

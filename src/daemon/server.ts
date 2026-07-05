@@ -3180,6 +3180,23 @@ function selectEnrichmentRebuildSessionIds(
       db.prepare(`${baseSelect} WHERE 1 = 1 ${orderLimit}`).all(limit) as Array<{ sessionId: string }>
     ).map((row) => row.sessionId);
   }
+  if (scope === "sessionIds") {
+    const raw = input.sessionIds;
+    if (!Array.isArray(raw)) throw new Error("missing_sessionIds");
+    const requested = raw
+      .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+      .map((id) => id.trim())
+      .slice(0, limit);
+    if (requested.length === 0) return [];
+    const placeholders = requested.map(() => "?").join(", ");
+    return (
+      db
+        .prepare(
+          `${baseSelect} WHERE sessions.session_id IN (${placeholders}) AND sessions.deleted_at IS NULL ORDER BY COALESCE(sessions.last_activity_at, sessions.updated_at, sessions.created_at, '') DESC LIMIT ?`
+        )
+        .all(...requested, limit) as Array<{ sessionId: string }>
+    ).map((row) => row.sessionId);
+  }
   if (scope === "session") {
     const sessionId = stringInput(input.sessionId, "sessionId");
     return (

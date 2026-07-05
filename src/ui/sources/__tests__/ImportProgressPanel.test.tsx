@@ -65,4 +65,31 @@ describe("ImportProgressPanel", () => {
     expect(html).toContain("Malformed JSON.");
     expect(html).toContain("session.jsonl");
   });
+
+  test("shows record progress bar and stale heartbeat warning", () => {
+    const html = renderToStaticMarkup(
+      <ImportProgressPanel
+        job={{
+          discoveredCount: 10,
+          failureCount: 0,
+          heartbeatAt: "2026-07-01T00:00:00.000Z",
+          importJobId: "job-2",
+          importKind: "metadata",
+          importedCount: 0,
+          processedCount: 5,
+          queuedCount: 0,
+          sourceId: "codex-sessions",
+          status: "running",
+          updatedAt: "2026-07-01T00:00:00.000Z"
+        }}
+        nowMs={new Date("2026-07-01T00:02:00.000Z").getTime()}
+      />
+    );
+
+    expect(html).toContain("import-progress-bar");
+    expect(html).toContain("50%");
+    expect(html).toContain("is-stale");
+    expect(html).toContain("No import heartbeat");
+    expect(html).toContain("stalled");
+  });
 });

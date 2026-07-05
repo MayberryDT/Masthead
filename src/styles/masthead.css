@@ -4639,44 +4639,41 @@ body {
   line-height: 1.28;
 }
 
-.headline-source {
-  position: absolute;
-  z-index: 2;
-  top: 96px;
-  left: var(--space-md);
+.observability-console .session-card .headline-source,
+.masthead-shell .session-card .headline-source {
   display: inline-flex;
-  max-width: calc(100% - (var(--space-md) * 2));
-  min-height: 22px;
+  flex: 0 0 auto;
   align-items: center;
+  max-width: 7.5rem;
   overflow: hidden;
-  border: 1px solid rgba(194, 221, 241, 0.13);
-  border-radius: var(--radius-full);
-  background: rgba(8, 29, 42, 0.72);
+  border: 1px solid rgba(194, 221, 241, 0.1);
+  border-radius: var(--radius-control);
+  background: rgba(6, 25, 37, 0.55);
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 9.5px;
+  font-weight: 500;
   line-height: 1.2;
-  padding: 3px 8px;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+  padding: 0 6px;
+  height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.headline-source.is-pending {
-  border-color: rgba(247, 201, 72, 0.22);
-  background: rgba(247, 201, 72, 0.1);
-  color: #d9bd63;
+.observability-console .session-card .headline-source.is-pending,
+.masthead-shell .session-card .headline-source.is-pending {
+  border-color: rgba(247, 201, 72, 0.2);
+  background: rgba(247, 201, 72, 0.08);
+  color: #c9b06a;
 }
 
-.headline-source.is-offline {
-  border-color: rgba(145, 168, 186, 0.2);
-  background: rgba(97, 121, 142, 0.11);
-  color: #9cb1c1;
-}
-
-.observability-card-grid.compact .headline-source {
-  top: 84px;
-  min-height: 20px;
-  padding: 2px 7px;
+.observability-console .session-card .headline-source.is-offline,
+.masthead-shell .session-card .headline-source.is-offline {
+  border-color: rgba(145, 168, 186, 0.18);
+  background: rgba(97, 121, 142, 0.09);
+  color: #8fa5b5;
 }
 
 .observability-card-facts {
@@ -6754,3 +6751,7 @@ body {
   pointer-events: none;
   border: 1px solid #000;
 }
+
+.logbook-col-select { width: 36px; text-align: center; }
+.logbook-col-select input { accent-color: var(--blue, #2ea7ff); }
+.logbook-bulk-actions { display: inline-flex; align-items: center; gap: 8px; margin-right: 8px; }

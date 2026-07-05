@@ -1126,6 +1126,28 @@ export async function getSettingsState(baseUrl = defaultLiveProjectionUrl(), opt
   return body.settings;
 }
 
+
+export type EnrichmentRebuildResult = {
+  dryRun?: boolean;
+  mode?: "configured" | "deterministic";
+  requested: number;
+  succeeded: number;
+  failed: number;
+  sessions: Array<{ sessionId: string; status: "dry_run" | "succeeded" | "failed"; failureCode?: string; failureMessage?: string }>;
+};
+
+export async function rebuildEnrichments(
+  input: { scope?: string; sessionIds?: string[]; limit?: number; dryRun?: boolean; deterministicOnly?: boolean },
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<EnrichmentRebuildResult> {
+  const body = await postJson<{ ok: true } & EnrichmentRebuildResult>(baseUrl, "/enrichment/rebuild", {
+    body: input,
+    label: "enrichment rebuild"
+  });
+  const { ok: _ok, ...result } = body;
+  return result as EnrichmentRebuildResult;
+}
+
 export async function updateLlmProviderSettings(
   input: UpdateLlmProviderSettingsInput,
   baseUrl = defaultLiveProjectionUrl()

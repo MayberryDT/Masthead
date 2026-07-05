@@ -40,6 +40,8 @@ type Props = {
   deletionScopeTarget?: string;
   localDataStatus?: LocalDataStatus;
   motionDisabled?: boolean;
+  sessionEndedNotificationsEnabled?: boolean;
+  onSessionEndedNotificationsEnabledChange?: (enabled: boolean) => void;
   settingsError?: string;
   settingsLoadState?: "loading" | "ready" | "error";
   settingsState?: SettingsStateDto;
@@ -70,6 +72,8 @@ export function OperationsPanel({
   deletionScopeTarget = "",
   localDataStatus = { state: "idle" },
   motionDisabled,
+  sessionEndedNotificationsEnabled,
+  onSessionEndedNotificationsEnabledChange,
   settingsError: controlledSettingsError,
   settingsLoadState: controlledSettingsLoadState,
   onCancelLocalDataAction,
@@ -193,7 +197,7 @@ export function OperationsPanel({
           </div>
           <div className="settings-priority-column settings-priority-column-session">
             <OnboardingSettings onOpenOnboarding={onOpenOnboarding} readOnly={readOnly} />
-            <PreferencesSettings motionDisabled={motionDisabled} onMotionDisabledChange={onMotionDisabledChange} />
+            <PreferencesSettings motionDisabled={motionDisabled} onMotionDisabledChange={onMotionDisabledChange} sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled} onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange} />
           </div>
           <div className="settings-priority-column settings-priority-column-mcp">
             <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />

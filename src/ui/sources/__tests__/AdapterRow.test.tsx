@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import type { AdapterStatus } from "../../../app/daemonClient";
+import type { AdapterStatus, CodexHookSettingsDto } from "../../../app/daemonClient";
 import { AdapterRow } from "../AdapterRow";
 import { SourceAdapterDetailModal } from "../SourceAdapterDetailModal";
 
@@ -171,6 +171,23 @@ describe("SourceAdapterDetailModal", () => {
     expect(html).toContain("/home/tyler/.claude/projects");
   });
 
+  test("renders live connector status in harness detail header", () => {
+    const html = renderToStaticMarkup(
+      <SourceAdapterDetailModal
+        adapter={codexAdapter({ transcriptImport: true })}
+        busy={false}
+        hooks={codexHookSettings()}
+        onClose={noop}
+        onExcludePath={noop}
+        onCodexHookAction={noop}
+      />
+    );
+
+    expect(html).toContain("source-detail-head-badges");
+    expect(html).toContain("Live: Installed");
+    expect(html).toContain("Test live connectors");
+  });
+
   test("invokes Codex metadata, transcript, approval, and sync callbacks", async () => {
     const onImportMetadata = vi.fn();
     const onImportTranscripts = vi.fn();
@@ -251,6 +268,35 @@ function codexAdapter({ transcriptImport }: { transcriptImport: boolean }): Adap
         sourceKind: "jsonl"
       }
     ]
+  };
+}
+
+function codexHookSettings(): CodexHookSettingsDto {
+  return {
+    command: "masthead hook",
+    configExists: true,
+    configPath: "/home/tyler/.codex/config.toml",
+    endpoint: "http://127.0.0.1:17373/ingest",
+    installed: true,
+    integrations: [
+      {
+        actionSurface: "sources",
+        captureMode: "live_hook",
+        description: "Codex live hooks",
+        label: "Codex",
+        runtime: "codex",
+        status: "installed",
+        supportsActions: true
+      }
+    ],
+    lastEventAt: "2026-07-04T12:00:00.000Z",
+    lastTest: {
+      message: "ok",
+      status: "passed",
+      testedAt: "2026-07-04T12:01:00.000Z"
+    },
+    missingEvents: [],
+    mismatchedEvents: []
   };
 }
 

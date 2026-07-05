@@ -40,14 +40,18 @@ export function LlmProviderControls({
   const [model, setModel] = useState(activeProviderModel(providers, llm?.activeProvider ?? "openai"));
   const [providerBaseUrl, setProviderBaseUrl] = useState(activeProviderBaseUrl(providers, llm?.activeProvider ?? "openai"));
   const [apiKey, setApiKey] = useState("");
-  const [status, setStatus] = useState<InlineStatus>();
+  const [remoteStatus, setRemoteStatus] = useState<InlineStatus>();
+  const [providerStatus, setProviderStatus] = useState<InlineStatus>();
   const [modelRefreshStatus, setModelRefreshStatus] = useState<InlineStatus>();
   const [modelOptions, setModelOptions] = useState<LlmProviderModelOptionDto[]>([]);
   const [refreshingModels, setRefreshingModels] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [savingRemote, setSavingRemote] = useState(false);
+  const [savingProvider, setSavingProvider] = useState(false);
   const selectedProvider = providers.find((provider) => provider.id === activeProvider) ?? providers[0];
   const health = enrichment?.health;
-  const disabled = readOnly || !llm || !onSaveProvider || saving;
+  const controlsDisabled = readOnly || !llm || !onSaveProvider;
+  const remoteDisabled = controlsDisabled || savingRemote;
+  const providerDisabled = controlsDisabled || savingProvider || savingRemote;
   const canRefreshModels = Boolean(selectedProvider?.customBaseUrl) && !readOnly && Boolean(llm);
   const apiKeyRequired = selectedProvider?.apiKeyRequired !== false;
   const canClearSavedKey = Boolean(selectedProvider?.keyPreview && selectedProvider.keySource === "settings" && onSaveProvider && !readOnly);
@@ -75,7 +79,34 @@ export function LlmProviderControls({
     setApiKey("");
     setModelOptions([]);
     setModelRefreshStatus(undefined);
-    setStatus(undefined);
+    setProviderStatus(undefined);
+  };
+
+  const saveRemoteEnrichment = async (nextEnabled: boolean) => {
+    if (!onSaveProvider || !llm) return;
+    setSavingRemote(true);
+    setRemoteStatus(undefined);
+    try {
+      await onSaveProvider({
+        activeProvider,
+        remoteEnrichmentEnabled: nextEnabled
+      });
+      setRemoteEnabled(nextEnabled);
+      setRemoteStatus({
+        tone: "success",
+        message: nextEnabled ? "Remote enrichment enabled." : "Remote enrichment disabled."
+      });
+    } catch (error) {
+      setRemoteEnabled(llm.remoteEnrichmentEnabled);
+      setRemoteStatus({ tone: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSavingRemote(false);
+    }
+  };
+
+  const changeRemoteEnrichment = (nextEnabled: boolean) => {
+    if (remoteDisabled) return;
+    void saveRemoteEnrichment(nextEnabled);
   };
 
   const refreshModels = async () => {
@@ -114,21 +145,22 @@ export function LlmProviderControls({
     }
   };
 
-  const save = async (clearApiKey = false) => {
+  const saveProvider = async (clearApiKey = false) => {
     if (!onSaveProvider || !llm) return;
     const trimmedModel = model.trim();
     const trimmedBaseUrl = providerBaseUrl.trim();
     const trimmedKey = apiKey.trim();
-    if (remoteEnabled && selectedProvider?.customBaseUrl && !trimmedBaseUrl) {
-      setStatus({ tone: "error", message: `Add a base URL before enabling ${selectedProvider.label}.` });
+    const remoteEnrichmentEnabled = llm.remoteEnrichmentEnabled;
+    if (remoteEnrichmentEnabled && selectedProvider?.customBaseUrl && !trimmedBaseUrl) {
+      setProviderStatus({ tone: "error", message: `Add a base URL before enabling ${selectedProvider.label}.` });
       return;
     }
-    if (remoteEnabled && !trimmedModel) {
-      setStatus({ tone: "error", message: "Add a model before enabling remote enrichment." });
+    if (remoteEnrichmentEnabled && !trimmedModel) {
+      setProviderStatus({ tone: "error", message: "Add a model while remote enrichment is on." });
       return;
     }
-    if (remoteEnabled && apiKeyRequired && !trimmedKey && !selectedProvider?.configured && !clearApiKey) {
-      setStatus({ tone: "error", message: "Add an API key before enabling remote enrichment." });
+    if (remoteEnrichmentEnabled && apiKeyRequired && !trimmedKey && !selectedProvider?.configured && !clearApiKey) {
+      setProviderStatus({ tone: "error", message: "Add an API key while remote enrichment is on." });
       return;
     }
 
@@ -136,164 +168,171 @@ export function LlmProviderControls({
       activeProvider,
       clearApiKey,
       model: trimmedModel,
-      remoteEnrichmentEnabled: remoteEnabled
+      remoteEnrichmentEnabled
     };
     if (selectedProvider?.customBaseUrl) input.baseUrl = trimmedBaseUrl;
     if (trimmedKey && !clearApiKey) input.apiKey = trimmedKey;
 
-    setSaving(true);
-    setStatus(undefined);
+    setSavingProvider(true);
+    setProviderStatus(undefined);
     try {
       await onSaveProvider(input);
       setApiKey("");
-      setStatus({ tone: "success", message: clearApiKey ? "Saved key cleared." : "LLM provider saved." });
+      setProviderStatus({ tone: "success", message: clearApiKey ? "Saved key cleared." : "LLM provider saved." });
     } catch (error) {
-      setStatus({ tone: "error", message: error instanceof Error ? error.message : String(error) });
+      setProviderStatus({ tone: "error", message: error instanceof Error ? error.message : String(error) });
     } finally {
-      setSaving(false);
+      setSavingProvider(false);
     }
   };
 
   return (
     <>
-      <SettingsRow
-        description="When enabled, Masthead sends redacted session facts to the selected provider for titles and summaries."
-        label="Remote enrichment"
-        value={
-          <SettingsToggle
-            checked={remoteEnabled}
-            disabled={disabled}
-            label="Use remote LLM enrichment"
-            offLabel="Remote off"
-            onChange={setRemoteEnabled}
-            onLabel="Remote on"
-          />
-        }
-      />
-      <SettingsRow
-        description={selectedProvider ? apiStyleLabel(selectedProvider) : "Loading provider configuration."}
-        label="Provider"
-        control={
-          <FilterableSelect
-            allowCustomValue={false}
-            clearable={false}
-            disabled={disabled}
-            emptyLabel="No providers"
-            icon="model"
-            label="LLM provider"
-            onChange={changeProvider}
-            options={providers.map((provider) => ({ label: provider.label, value: provider.id }))}
-            placeholder="Choose provider"
-            searchPlaceholder="Search providers"
-            value={activeProvider}
-          />
-        }
-      />
-      <SettingsRow
-        description={selectedProvider ? connectionDescription(selectedProvider) : "Loading provider configuration."}
-        label="Connection"
-        control={
-          <div className="settings-provider-form">
-            {selectedProvider?.customBaseUrl ? (
+      <SettingsSection
+        eyebrow="Enrichment"
+        title="Remote enrichment"
+        description="Optional durable titles and summaries from your provider. Live board headlines use separate live copy settings."
+      >
+        <SettingsRow
+          description="When enabled, Masthead sends redacted session facts to the selected provider for titles and summaries."
+          label="Remote enrichment"
+          value={
+            <SettingsToggle
+              checked={remoteEnabled}
+              disabled={remoteDisabled}
+              label="Use remote LLM enrichment"
+              offLabel="Remote off"
+              onChange={changeRemoteEnrichment}
+              onLabel="Remote on"
+            />
+          }
+        />
+        <SettingsRow
+          description={health ? `Queued ${formatCount(health.queued)}, failed ${formatCount(health.failed)}, disabled ${formatCount(health.disabled)}.` : undefined}
+          label="Coverage"
+          value={coverage}
+        />
+        {remoteStatus ? <p className={`settings-provider-status ${remoteStatus.tone}`}>{remoteStatus.message}</p> : null}
+        {savingRemote ? <p className="settings-provider-status">Saving...</p> : null}
+      </SettingsSection>
+      <SettingsSection
+        eyebrow="Enrichment"
+        title="Provider connection"
+        description="Choose and authenticate the provider used when remote enrichment is on. Credentials stay on this device."
+      >
+        <SettingsRow
+          description={selectedProvider ? apiStyleLabel(selectedProvider) : "Loading provider configuration."}
+          label="Provider"
+          control={
+            <FilterableSelect
+              allowCustomValue={false}
+              clearable={false}
+              disabled={providerDisabled}
+              emptyLabel="No providers"
+              icon="model"
+              label="LLM provider"
+              onChange={changeProvider}
+              options={providers.map((provider) => ({ label: provider.label, value: provider.id }))}
+              placeholder="Choose provider"
+              searchPlaceholder="Search providers"
+              value={activeProvider}
+            />
+          }
+        />
+        <SettingsRow
+          description={selectedProvider ? connectionDescription(selectedProvider) : "Loading provider configuration."}
+          label="Connection"
+          control={
+            <div className="settings-provider-form">
+              {selectedProvider?.customBaseUrl ? (
+                <label className="settings-provider-field">
+                  <span>Base URL</span>
+                  <input
+                    type="url"
+                    value={providerBaseUrl}
+                    disabled={providerDisabled}
+                    placeholder="http://127.0.0.1:11434/v1"
+                    onChange={(event) => {
+                      setProviderBaseUrl(event.currentTarget.value);
+                      setModelOptions([]);
+                      setModelRefreshStatus(undefined);
+                    }}
+                  />
+                </label>
+              ) : null}
               <label className="settings-provider-field">
-                <span>Base URL</span>
+                <span>Model</span>
+                {modelOptions.length > 0 ? (
+                  <FilterableSelect
+                    allowCustomValue
+                    clearable={false}
+                    disabled={providerDisabled}
+                    emptyLabel="No models"
+                    icon="model"
+                    label="Model"
+                    onChange={(value) => setModel(value ?? "")}
+                    options={modelOptions.map((option) => ({ label: option.label, value: option.id }))}
+                    placeholder={modelPlaceholder(activeProvider)}
+                    searchPlaceholder="Search models"
+                    value={model || undefined}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={model}
+                    disabled={providerDisabled}
+                    placeholder={modelPlaceholder(activeProvider)}
+                    onChange={(event) => setModel(event.currentTarget.value)}
+                  />
+                )}
+              </label>
+              {canRefreshModels ? (
+                <div className="settings-provider-inline-actions">
+                  <AppButton disabled={providerDisabled || refreshingModels} onClick={() => void refreshModels()}>
+                    {refreshingModels ? "Refreshing..." : "Refresh models"}
+                  </AppButton>
+                  {modelRefreshStatus ? (
+                    <p className={`settings-provider-status ${modelRefreshStatus.tone}`}>{modelRefreshStatus.message}</p>
+                  ) : null}
+                </div>
+              ) : null}
+              <label className="settings-provider-field">
+                <span>{apiKeyRequired ? "API key" : "API key (optional)"}</span>
                 <input
-                  type="url"
-                  value={providerBaseUrl}
-                  disabled={disabled}
-                  placeholder="http://127.0.0.1:11434/v1"
-                  onChange={(event) => {
-                    setProviderBaseUrl(event.currentTarget.value);
-                    setModelOptions([]);
-                    setModelRefreshStatus(undefined);
-                  }}
+                  type="password"
+                  value={apiKey}
+                  disabled={providerDisabled}
+                  placeholder={apiKeyPlaceholder(selectedProvider)}
+                  autoComplete="off"
+                  onChange={(event) => setApiKey(event.currentTarget.value)}
                 />
               </label>
-            ) : null}
-            <label className="settings-provider-field">
-              <span>Model</span>
-              {modelOptions.length > 0 ? (
-                <FilterableSelect
-                  allowCustomValue
-                  clearable={false}
-                  disabled={disabled}
-                  emptyLabel="No models"
-                  icon="model"
-                  label="Model"
-                  onChange={(value) => setModel(value ?? "")}
-                  options={modelOptions.map((option) => ({ label: option.label, value: option.id }))}
-                  placeholder={modelPlaceholder(activeProvider)}
-                  searchPlaceholder="Search models"
-                  value={model || undefined}
-                />
-              ) : (
-                <input
-                  type="text"
-                  value={model}
-                  disabled={disabled}
-                  placeholder={modelPlaceholder(activeProvider)}
-                  onChange={(event) => setModel(event.currentTarget.value)}
-                />
-              )}
-            </label>
-            {canRefreshModels ? (
-              <div className="settings-provider-inline-actions">
-                <AppButton disabled={disabled || refreshingModels} onClick={() => void refreshModels()}>
-                  {refreshingModels ? "Refreshing..." : "Refresh models"}
-                </AppButton>
-                {modelRefreshStatus ? (
-                  <p className={`settings-provider-status ${modelRefreshStatus.tone}`}>{modelRefreshStatus.message}</p>
-                ) : null}
-              </div>
-            ) : null}
-            <label className="settings-provider-field">
-              <span>{apiKeyRequired ? "API key" : "API key (optional)"}</span>
-              <input
-                type="password"
-                value={apiKey}
-                disabled={disabled}
-                placeholder={apiKeyPlaceholder(selectedProvider)}
-                autoComplete="off"
-                onChange={(event) => setApiKey(event.currentTarget.value)}
-              />
-            </label>
-          </div>
-        }
-      />
-      <SettingsRow
-        description={llm?.secretStorage.description ?? "API keys are stored locally and never shown after saving."}
-        label="Saved key"
-        value={<StatusBadge tone={selectedProvider?.configured ? "active" : "neutral"}>{keyStatus(selectedProvider)}</StatusBadge>}
-      />
-      <SettingsRow
-        description={health ? `Queued ${formatCount(health.queued)}, failed ${formatCount(health.failed)}, disabled ${formatCount(health.disabled)}.` : undefined}
-        label="Coverage"
-        value={coverage}
-      />
-      <div className="settings-provider-actions">
-        <AppButton variant="primary" disabled={disabled} onClick={() => void save(false)}>
-          {saving ? "Saving..." : "Save provider"}
-        </AppButton>
-        <AppButton disabled={!canClearSavedKey || saving} onClick={() => void save(true)}>
-          Clear saved key
-        </AppButton>
-        {status ? <p className={`settings-provider-status ${status.tone}`}>{status.message}</p> : null}
-      </div>
+            </div>
+          }
+        />
+        <SettingsRow
+          description={llm?.secretStorage.description ?? "API keys are stored locally and never shown after saving."}
+          label="Saved key"
+          value={<StatusBadge tone={selectedProvider?.configured ? "active" : "neutral"}>{keyStatus(selectedProvider)}</StatusBadge>}
+        />
+        <div className="settings-provider-actions">
+          <AppButton variant="primary" disabled={providerDisabled} onClick={() => void saveProvider(false)}>
+            {savingProvider ? "Saving..." : "Save provider"}
+          </AppButton>
+          <AppButton disabled={!canClearSavedKey || savingProvider} onClick={() => void saveProvider(true)}>
+            Clear saved key
+          </AppButton>
+          {providerStatus ? <p className={`settings-provider-status ${providerStatus.tone}`}>{providerStatus.message}</p> : null}
+        </div>
+      </SettingsSection>
     </>
   );
 }
 
 export function EnrichmentSettings(props: EnrichmentSettingsProps) {
-  return (
-    <SettingsSection
-      eyebrow="Enrichment"
-      title="LLM provider"
-      description="Connect optional LLM enrichment. Masthead still works locally when this is off."
-    >
-      <LlmProviderControls {...props} />
-    </SettingsSection>
-  );
+  return <LlmProviderControls {...props} />;
 }
+
 
 const fallbackProviders: LlmProviderDto[] = [
   {

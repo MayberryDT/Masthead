@@ -56,7 +56,7 @@ The daemon is the runtime owner of canonical state.
 - `src/daemon/sources/sourceSetupService.ts` derives source setup status and onboarding-friendly scan results.
 - `src/core/ingestion.ts`, `src/core/liveProjection.ts`, and `src/core/sessionReducer.ts` provide the pure transformations that turn events into board/session state.
 
-`src/core/index.ts` re-exports the shared domain helpers. The files under `src/core` are where the business rules are easiest to inspect when changing attention, conflicts, outcomes, redaction, or session history behavior. Recent work also tightened the live hook adapter in `src/core/liveHookAdapter.ts` and the board-headline framing path in `src/core/openaiBoardHeadlineFrame.ts`, so keep the canonical event model and the card headline contract in sync with any UI or daemon changes that depend on them.
+`src/core/index.ts` re-exports the shared domain helpers. The files under `src/core` are where the business rules are easiest to inspect when changing attention, conflicts, outcomes, redaction, or session history behavior. Recent work also tightened the live hook adapter in `src/core/liveHookAdapter.ts` and the board-headline framing path in `src/core/openaiBoardHeadlineFrame.ts`, so keep the canonical event model and the card headline contract in sync with any UI or daemon changes that depend on them. The renderer now also owns session-ended desktop notifications and logbook bulk-enrich selection state in `src/app/App.tsx`, while `src/app/logbook/useLogbookController.ts` handles bulk enrichment requests against the daemon.
 
 ## Enrichment and MCP
 

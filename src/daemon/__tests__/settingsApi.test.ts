@@ -200,6 +200,38 @@ describe("settings API", () => {
     });
   });
 
+  test("disabling remote enrichment without resubmitting credentials retains provider settings", async () => {
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "ollama",
+      apiKey: "sk-test-settings-secret-3456",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      model: "llama-3.1",
+      remoteEnrichmentEnabled: true
+    });
+
+    const disabled = await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "ollama",
+      remoteEnrichmentEnabled: false
+    });
+
+    expect(disabled.settings.llm).toMatchObject({
+      activeProvider: "ollama",
+      remoteEnrichmentEnabled: false,
+      providers: expect.arrayContaining([
+        expect.objectContaining({
+          configured: true,
+          id: "ollama",
+          keyPreview: "••••3456",
+          model: "llama-3.1"
+        })
+      ])
+    });
+    expect(JSON.stringify(disabled)).not.toContain("sk-test-settings-secret-3456");
+  });
+
   test("rejects incomplete OpenAI-compatible provider settings", async () => {
     const { daemon } = await createTestHarness();
     const baseUrl = await listen(daemon);

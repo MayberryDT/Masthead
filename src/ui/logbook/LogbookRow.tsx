@@ -3,14 +3,16 @@ import { cleanSessionText, isUsefulSessionTitle, isWeakLiveSummary } from "../..
 import type { LogbookSession } from "../HistoryPanel";
 
 type Props = {
+  bulkSelected?: boolean;
   density: "comfortable" | "compact";
   rowIndex?: number;
   selected?: boolean;
   session: LogbookSession;
   onSelect: (sessionId: string) => void;
+  onToggleBulkSelect?: (sessionId: string) => void;
 };
 
-export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, session }: Props) {
+export function LogbookRow({ bulkSelected = false, density, onSelect, onToggleBulkSelect, rowIndex = 0, selected = false, session }: Props) {
   const primaryModel = session.models?.[0] ?? session.model ?? "Not captured";
   const lifecycle = session.lifecycle ?? session.state ?? "indexed";
   const title = session.sessionTitle?.text || sessionTitle(session);
@@ -41,6 +43,15 @@ export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, 
       onClick={handleRowClick}
       onKeyDown={handleRowKeyDown}
     >
+      <td className="logbook-col-select" data-logbook-row-stop>
+        <input
+          type="checkbox"
+          aria-label={`Select ${title} for bulk enrich`}
+          checked={bulkSelected}
+          onChange={() => onToggleBulkSelect?.(session.sessionId)}
+          onClick={(event) => event.stopPropagation()}
+        />
+      </td>
       <td className="logbook-date logbook-col-date">
         <time dateTime={session.lastActivityAt}>{formatDate(session.lastActivityAt)}</time>
         <span>{formatTime(session.lastActivityAt)}</span>
