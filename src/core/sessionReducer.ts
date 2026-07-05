@@ -39,7 +39,17 @@ export function deriveSessions(
     const latestSnapshot = sessionSnapshots.toSorted((a, b) => a.observedAt.localeCompare(b.observedAt)).at(-1);
     const workspace = mergeWorkspace(latestSnapshot, latest?.workspace);
     const failedCommands = ordered.filter(isFailedCommandEvent);
-    const metadataEvent = ordered.find((event) => stringPayload(event, "project") || stringPayload(event, "title")) ?? start ?? latest;
+    const metadataEvent =
+      ordered.find(
+        (event) =>
+          stringPayload(event, "project") ||
+          stringPayload(event, "title") ||
+          stringPayload(event, "sourceSessionId") ||
+          stringPayload(event, "runtime") ||
+          stringPayload(event, "harness")
+      ) ??
+      start ??
+      latest;
     const successfulVerification = ordered.some(isSuccessfulVerificationCommandEvent);
     const completed = latest?.type === "session.completed";
     const pendingApproval = latest?.type === "approval.requested";
@@ -102,15 +112,21 @@ export function deriveSessions(
       stringPayload(metadataEvent, "project") ??
       workspaceProject ??
       "Unknown project";
+    const sourceSessionId = stringPayload(metadataEvent, "sourceSessionId") ?? stringPayload(start, "sourceSessionId") ?? sessionId;
+    const runtime = stringPayload(metadataEvent, "runtime") ?? stringPayload(start, "runtime") ?? metadataEvent?.source.adapter ?? start?.source.adapter ?? latest?.source.adapter;
+    const harness = stringPayload(metadataEvent, "harness") ?? stringPayload(start, "harness") ?? harnessLabel(runtime);
     const title =
       stringPayload(start, "title") ??
       stringPayload(start, "objective") ??
       stringPayload(metadataEvent, "title") ??
       stringPayload(metadataEvent, "objective") ??
-      `${project} Codex session`;
+      `${project} session`;
 
     return {
       sessionId,
+      sourceSessionId,
+      runtime,
+      harness,
       project,
       title,
       objective: stringPayload(start, "objective") ?? stringPayload(metadataEvent, "objective"),
@@ -200,6 +216,23 @@ function hasEquivalentRepeatedFailures(events: NormalizedEvent[]): boolean {
 function stringPayload(event: NormalizedEvent | undefined, key: string): string | undefined {
   const value = event?.payload[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function harnessLabel(runtime: string | undefined): string | undefined {
+  switch (runtime) {
+    case "codex":
+      return "Codex";
+    case "claude_code":
+      return "Claude Code";
+    case "cursor":
+      return "Cursor";
+    case "grok":
+      return "Grok Build";
+    case "opencode":
+      return "OpenCode";
+    default:
+      return undefined;
+  }
 }
 
 function pushUnique<T>(items: T[], item: T): void {

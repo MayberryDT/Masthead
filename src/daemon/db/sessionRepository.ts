@@ -3,9 +3,12 @@ import { basename } from "node:path";
 import type { AdapterRecord } from "../../adapters/types.ts";
 import { redactText } from "../../core/redaction.ts";
 import type { LiveBoardProjection, NormalizedEvent } from "../../core/types.ts";
+import { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
 import { upsertSessionSource } from "./sessionSourceRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 import { deriveTranscriptFileEffects } from "./transcriptEffects.ts";
+
+export { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
 
 export type SessionRepositoryContext = {
   hostId: string;
@@ -112,19 +115,20 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
     db.exec("BEGIN IMMEDIATE;");
     try {
       for (const card of projection.cards) {
-        const sessionId = canonicalSessionId(context.hostId, runtimeId, card.sessionId);
+        const sourceSessionId = card.sourceSessionId ?? card.sessionId;
+        const sessionId = canonicalSessionId(context.hostId, runtimeId, sourceSessionId);
         const canonicalCard = {
           ...card,
           canonicalSessionId: sessionId,
           hostId: context.hostId,
           runtime: context.runtimeKind,
-          sourceSessionId: card.sourceSessionId ?? card.sessionId
+          sourceSessionId
         };
         upsertSessionStub.run(
           sessionId,
           context.hostId,
           runtimeId,
-          card.sessionId,
+          sourceSessionId,
           card.project,
           card.title,
           card.lifecycle,
@@ -646,14 +650,6 @@ function sessionExists(db: MastheadDatabase, sessionId: string): boolean {
 }
 
 const terminalEventTypes = new Set<NormalizedEvent["type"]>(["command.finished", "file.changed", "session.completed"]);
-
-export function canonicalSessionId(hostId: string, runtimeId: string, sourceSessionId: string): string {
-  return `session:${hash(`${hostId}\0${runtimeId}\0${sourceSessionId}`).slice(0, 32)}`;
-}
-
-export function runtimeIdFor(runtimeKind: string, runtimeVersion: string | undefined): string {
-  return `runtime:${runtimeKind}:${hash(runtimeVersion ?? "unknown").slice(0, 16)}`;
-}
 
 function turnId(sessionId: string, eventId: string): string {
   return `turn:${hash(`${sessionId}\0${eventId}`)}`;

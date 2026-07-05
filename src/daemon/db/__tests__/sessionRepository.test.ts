@@ -6,7 +6,7 @@ import { projectLiveEvents } from "../../../core/liveProjection.ts";
 import type { NormalizedEvent } from "../../../core/types.ts";
 import type { AdapterRecord } from "../../../adapters/types.ts";
 import { migrateDatabase } from "../schema.ts";
-import { createSessionRepository, ingestAdapterRecord } from "../sessionRepository.ts";
+import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor } from "../sessionRepository.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
 
 const tempDirs: string[] = [];
@@ -183,6 +183,46 @@ describe("session repository", () => {
       }
     ]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM board_sessions").get()).toEqual({ count: 1 });
+    db.close();
+  });
+
+  test("materializes scoped Board projection cards under raw source session identity", async () => {
+    const db = await openMigratedDatabase();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "codex"
+    });
+    const event = liveEvent("start", "session.started", { project: "Masthead", title: "Scoped card" });
+    const envelope = projectLiveEvents([event], [], { generatedAt: "2026-06-24T15:05:00.000Z" });
+    const rawSourceSessionId = "raw/session";
+    const projectionSessionId = "codex:raw%2Fsession";
+    envelope.projection.cards = envelope.projection.cards.map((card) => ({
+      ...card,
+      runtime: "codex",
+      sessionId: projectionSessionId,
+      sourceSessionId: rawSourceSessionId
+    }));
+    const expectedCanonicalSessionId = canonicalSessionId("host:test", runtimeIdFor("codex", undefined), rawSourceSessionId);
+
+    repository.replaceBoardProjection(envelope.projection, envelope.generatedAt);
+
+    expect(db.prepare("SELECT session_id, source_session_id FROM sessions").all()).toEqual([
+      {
+        session_id: expectedCanonicalSessionId,
+        source_session_id: rawSourceSessionId
+      }
+    ]);
+    const boardRow = db.prepare("SELECT session_id, projection_json FROM board_sessions").get() as {
+      projection_json: string;
+      session_id: string;
+    };
+    expect(boardRow.session_id).toBe(expectedCanonicalSessionId);
+    expect(JSON.parse(boardRow.projection_json)).toMatchObject({
+      canonicalSessionId: expectedCanonicalSessionId,
+      sessionId: projectionSessionId,
+      sourceSessionId: rawSourceSessionId
+    });
     db.close();
   });
 

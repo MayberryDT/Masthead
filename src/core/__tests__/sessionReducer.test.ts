@@ -208,7 +208,33 @@ describe("session reducer", () => {
 
     expect(sessions[0]).toMatchObject({
       project: "Masthead",
-      title: "Masthead Codex session"
+      title: "Masthead session"
+    });
+  });
+
+  test("uses runtime-scoped metadata without Codex fallback title", () => {
+    const sessions = deriveSessions([
+      {
+        schemaVersion: 1,
+        eventId: "claude:start",
+        sessionId: "claude_code:raw-1",
+        source: { adapter: "claude_code", surface: "hook", sourceEventId: "raw-1:start" },
+        occurredAt: "2026-07-05T12:00:00.000Z",
+        receivedAt: "2026-07-05T12:00:00.000Z",
+        type: "session.started",
+        summary: "Started",
+        payload: { runtime: "claude_code", sourceSessionId: "raw-1", project: "Masthead" },
+        sensitivity: "metadata",
+        payloadHash: "hash",
+        evidence: [{ id: "claude:start", kind: "event", observedAt: "2026-07-05T12:00:00.000Z", source: "claude_code.hook" }]
+      }
+    ]);
+
+    expect(sessions[0]).toMatchObject({
+      harness: "Claude Code",
+      runtime: "claude_code",
+      sourceSessionId: "raw-1",
+      title: "Masthead session"
     });
   });
 });

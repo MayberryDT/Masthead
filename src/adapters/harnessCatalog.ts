@@ -57,6 +57,10 @@ export const HARNESS_CATALOG: HarnessCatalogEntry[] = [
     "~/.local/share/opencode",
     "~/.config/opencode"
   ], ["MASTHEAD_OPENCODE_HOME", "OPENCODE_HOME"], { tokens: true, files: true }),
+  active("grok", "Grok Build", ["Grok", "xAI Grok Build"], "Grok Build local hooks and session transcripts.", "detector_only", ["hook", "jsonl"], [
+    "~/.grok/hooks",
+    "~/.grok/sessions"
+  ], ["MASTHEAD_GROK_HOME", "GROK_HOME"], { live: true, tokens: true, files: true }),
   active("crush", "Crush", ["Charm Crush"], "Crush local session history, grouped with OpenCode-style sources where possible.", "detector_only", ["jsonl", "sqlite"], [
     "~/.crush",
     "~/.local/share/crush",

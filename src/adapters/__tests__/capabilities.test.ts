@@ -10,6 +10,7 @@ describe("adapter capabilities", () => {
       "cursor",
       "claude_code",
       "opencode",
+      "grok",
       "aider",
       "openclaw",
       "hermes",

@@ -3,6 +3,7 @@ export const RUNTIME_KINDS = [
   "cursor",
   "claude_code",
   "opencode",
+  "grok",
   "aider",
   "openclaw",
   "hermes",

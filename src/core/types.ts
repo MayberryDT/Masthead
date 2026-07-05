@@ -33,7 +33,7 @@ export type NormalizedEvent = {
   sessionId?: string;
   source: {
     adapter: string;
-    surface: "hook" | "fixture" | "observer" | "user";
+    surface: "hook" | "plugin" | "tailer" | "fixture" | "observer" | "user";
     sourceEventId?: string;
   };
   occurredAt: string;
@@ -127,6 +127,9 @@ export type AttributionLevel = "direct" | "correlated" | "shared_workspace" | "u
 
 export type DerivedSession = {
   sessionId: string;
+  sourceSessionId?: string;
+  runtime?: string;
+  harness?: string;
   project: string;
   title: string;
   objective?: string;
