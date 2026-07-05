@@ -1,9 +1,10 @@
 import { parseCodexHookPayload, type CodexHookDiagnostic } from "./codexAdapter.ts";
+import type { LiveHookDiagnostic } from "./liveHookAdapter.ts";
 import type { NormalizedEvent } from "./types";
 
 export type IngestionState = {
   events: NormalizedEvent[];
-  diagnostics: CodexHookDiagnostic[];
+  diagnostics: LiveHookDiagnostic[];
   seenEventIds: Set<string>;
   seenProviderEventIds: Set<string>;
   seenPayloadHashes: Set<string>;
@@ -12,7 +13,7 @@ export type IngestionState = {
 export type IngestionResult =
   | { status: "accepted"; event: NormalizedEvent }
   | { status: "duplicate"; event: NormalizedEvent }
-  | { status: "malformed"; diagnostic: CodexHookDiagnostic };
+  | { status: "malformed"; diagnostic: LiveHookDiagnostic };
 
 type IngestionOptions = {
   receivedAt?: string;

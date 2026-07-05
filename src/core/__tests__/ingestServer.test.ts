@@ -255,6 +255,63 @@ describe("ingest server live projection", () => {
     expect(rawJournalRows(databasePath)).toEqual([]);
   });
 
+  test("ingests and replays non-Codex live hooks under runtime-specific sources", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const firstServer = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(firstServer.child);
+
+    const accepted = await postJson(firstServer.baseUrl, "/ingest?runtime=claude_code", liveClaudePromptPayload("claude-server-prompt"));
+
+    expect(accepted).toMatchObject({
+      status: "accepted",
+      events: 1,
+      event: {
+        eventId: "claude_code:claude-server-prompt",
+        sessionId: "claude-server-live",
+        source: {
+          adapter: "claude_code",
+          surface: "hook"
+        }
+      }
+    });
+    expect(rawJournalRows(databasePath).map((row) => row.source_record_key)).toEqual([
+      "event:claude_code:claude-server-prompt"
+    ]);
+    expect(ingestSourceRows(databasePath)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          adapter: "claude_code",
+          endpoint: "http://127.0.0.1:17373/ingest",
+          source_id: "claude-code-hook-local",
+          source_kind: "hook"
+        })
+      ])
+    );
+    expect(sessionRuntimeRows(databasePath)).toEqual([
+      {
+        runtime_kind: "claude_code",
+        source_session_id: "claude-server-live"
+      }
+    ]);
+
+    await stopServer(firstServer.child);
+    servers.length = 0;
+
+    const restartedServer = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(restartedServer.child);
+    const restartedProjection = await getJson(restartedServer.baseUrl, "/projection?expandedSessionId=claude-server-live");
+
+    expect(restartedProjection.events).toBe(1);
+    expect(restartedProjection.projection.cards[0]).toMatchObject({
+      sessionId: "claude-server-live",
+      runtime: "claude_code",
+      title: "Claude live projection"
+    });
+  });
+
   test("updates canonical session graph without mutating Board state on projection reads", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
@@ -1158,6 +1215,21 @@ function liveQuestionPayload(providerEventId: string): Record<string, unknown> {
   };
 }
 
+function liveClaudePromptPayload(providerEventId: string): Record<string, unknown> {
+  return {
+    provider_event_id: providerEventId,
+    hookEventName: "UserPromptSubmit",
+    sessionId: "claude-server-live",
+    timestamp: "2026-06-23T03:31:00.000Z",
+    cwd: "/workspace/masthead",
+    workspaceRoot: "/workspace/masthead",
+    gitBranch: "agent/claude-live",
+    project: "Masthead",
+    title: "Claude live projection",
+    prompt: "RAW_PROMPT_NOT_STORED"
+  };
+}
+
 function liveStopWithTranscriptPayload(providerEventId: string, transcriptPath: string): Record<string, unknown> {
   return {
     provider_event_id: providerEventId,
@@ -1348,6 +1420,22 @@ function sessionLifecycleRows(databasePath: string): Array<{
     return db
       .prepare("SELECT source_session_id, lifecycle, outcome_label, ended_at FROM sessions ORDER BY source_session_id")
       .all() as Array<{ ended_at: string | null; lifecycle: string; outcome_label: string | null; source_session_id: string }>;
+  } finally {
+    db.close();
+  }
+}
+
+function sessionRuntimeRows(databasePath: string): Array<{ runtime_kind: string; source_session_id: string }> {
+  const db = new DatabaseSync(databasePath);
+  try {
+    return db
+      .prepare(
+        `SELECT sessions.source_session_id, runtimes.runtime_kind
+        FROM sessions
+        JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+        ORDER BY sessions.source_session_id`
+      )
+      .all() as Array<{ runtime_kind: string; source_session_id: string }>;
   } finally {
     db.close();
   }

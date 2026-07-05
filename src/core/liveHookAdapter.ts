@@ -13,7 +13,6 @@ const SUPPRESSED_RAW_PAYLOAD_KEYS = new Set([
   "fullDiff",
   "diff",
   "patch",
-  "message",
   "messages",
   "commandOutput",
   "stdout",
@@ -145,7 +144,7 @@ export function normalizeLiveHookPayload(input: unknown, options: LiveHookNormal
     workspace,
     summary: summaryFrom(redactedInput, payload, profile),
     payload,
-    sensitivity: rawPayloadSuppressed(redactedInput) ? "redacted" : sensitivity,
+    sensitivity: rawPayloadSuppressed(redactedInput, profile) ? "redacted" : sensitivity,
     payloadHash,
     evidence: [
       {
@@ -356,7 +355,7 @@ function buildPayload(
       addToolInputMetadata(payload, value);
       continue;
     }
-    if (normalizedKey === "message" && isRecord(value)) {
+    if (normalizedKey === "message" && (isRecord(value) || profile.runtime !== "codex")) {
       payload.messageSummary = summarizeSuppressedValue(value);
       continue;
     }
@@ -393,10 +392,12 @@ function redactValue(value: unknown): Record<string, unknown> {
   return redactRecord(value);
 }
 
-function rawPayloadSuppressed(input: Record<string, unknown>): boolean {
+function rawPayloadSuppressed(input: Record<string, unknown>, profile: LiveRuntimeProfile): boolean {
   return (
     Object.keys(input).some((key) => SUPPRESSED_RAW_PAYLOAD_KEYS.has(toCamelCase(key))) ||
-    hasPatchCommand(input.toolInput)
+    hasPatchCommand(input.toolInput) ||
+    isRecord(input.message) ||
+    (profile.runtime !== "codex" && typeof input.message === "string")
   );
 }
 
