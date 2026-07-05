@@ -16,6 +16,23 @@ The product hierarchy is:
 
 Observability is a view over continuously collected session data.
 
+## OpenWiki
+
+This repository has agent-oriented documentation in `openwiki/`.
+
+Before nontrivial work, read `openwiki/quickstart.md`, then follow its links to the relevant
+architecture, source/import, data, MCP, enrichment, or UI notes.
+
+When committing Masthead work, run:
+
+```bash
+openwiki --update
+```
+
+Review any generated wiki changes for accuracy and include them in the commit when they document the
+work being committed. Do not read or document `.env` files, credentials, private keys, tokens, or
+other secrets.
+
 ## Read-Only Run Exceptions
 
 When Tyler asks for a read-only run, do not change product code, data, or runtime state.
