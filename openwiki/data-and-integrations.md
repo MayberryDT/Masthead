@@ -28,7 +28,9 @@ A few important contracts:
 - runtime-specific `/settings/hooks/:runtime` routes manage one connector at a time for the non-Codex release targets,
 - write endpoints like `/ingest`, `/sources/connect`, `/imports`, `/data/delete`, and hook-management routes stay local to the daemon and are not exposed through MCP.
 
-`POST /ingest` defaults to Codex. Other release target hooks use the runtime query parameter or header so live data is stored under the correct runtime-specific source and canonical session identity. The live hook normalizer in `src/core/liveHookAdapter.ts` and the runtime profiles in `src/adapters/live/runtimeProfiles.ts` keep Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode events aligned before they reach the canonical store.
+`POST /ingest` defaults to Codex. Other release target hooks use the runtime query parameter or header so live data is stored under the correct runtime-specific source and canonical session identity. Connector tests now hit a validation-only ingest variant (`validate=1` or `dryRun=true`) so installer/test flows can verify the hook path without mutating the canonical store. The live hook normalizer in `src/core/liveHookAdapter.ts` and the runtime profiles in `src/adapters/live/runtimeProfiles.ts` keep Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode events aligned before they reach the canonical store.
+
+`src/daemon/codexTranscriptLive.ts` adds a lightweight Codex transcript scanner that watches the most recently updated `.codex/sessions/**/*.jsonl` file under the configured home directory. `/projection` now refreshes that scanner before building the board, which means a recent desktop transcript can surface as a live Codex session even before a transcript import is approved. The scanner emits metadata-only events and redacts prompt text; it is a live projection aid, not a replacement for the explicit Sources import flow.
 
 ## MCP
 

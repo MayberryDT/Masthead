@@ -57,6 +57,27 @@ const snapshot = (snapshotId: string, sessionId: string, path: string): GitSnaps
 });
 
 describe("Live Board projection", () => {
+  test("projects model and token metadata from live events", () => {
+    const board = projectFixture(
+      {
+        events: [
+          event("metadata-start", "metadata-session", "session.started", "2026-06-23T02:00:00.000Z", {
+            model: "gpt-5-codex",
+            title: "Metadata work",
+            totalTokens: 1840
+          })
+        ],
+        gitSnapshots: []
+      },
+      { now: new Date("2026-06-23T02:01:00.000Z") }
+    );
+
+    expect(board.cards[0]).toMatchObject({
+      model: "gpt-5-codex",
+      totalTokens: 1840
+    });
+  });
+
   test("projects lifecycle lanes as four Kanban columns", () => {
     const board = projectFixture(
       {

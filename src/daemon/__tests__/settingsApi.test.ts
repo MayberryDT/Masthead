@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -608,6 +608,78 @@ describe("settings API", () => {
     expect(await confirm.text()).toContain("Masthead database changed");
   });
 
+  test("projects a recent Codex desktop transcript as a live session", async () => {
+    const { daemon, tempDir } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+    const cwd = join(tempDir, "worktrees", "masthead-live");
+    const transcriptPath = join(tempDir, ".codex", "sessions", "2026", "07", "05", "rollout.jsonl");
+    const observedAt = new Date();
+    await mkdir(dirname(transcriptPath), { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    await writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        payload: {
+          cwd,
+          id: "codex-desktop-active",
+          model: "gpt-5-codex"
+        },
+        timestamp: observedAt.toISOString(),
+        type: "session_meta"
+      })}\n${JSON.stringify({
+        payload: {
+          info: {
+            last_token_usage: {
+              input_tokens: 42,
+              output_tokens: 8,
+              total_tokens: 50
+            }
+          },
+          type: "token_count"
+        },
+        timestamp: observedAt.toISOString(),
+        type: "event_msg"
+      })}\n`,
+      "utf8"
+    );
+    await utimes(transcriptPath, observedAt, observedAt);
+
+    const projection = await getJson(baseUrl, "/projection");
+
+    expect(projection.projection.cards).toHaveLength(1);
+    expect(projection.projection.cards[0]).toMatchObject({
+      branchOrWorktree: "masthead-live",
+      harness: "Codex",
+      model: "gpt-5-codex",
+      runtime: "codex",
+      sourceSessionId: "codex-desktop-active",
+      totalTokens: 50
+    });
+
+    const laterObservedAt = new Date(observedAt.getTime() + 2_500);
+    await appendFile(
+      transcriptPath,
+      `${JSON.stringify({
+        payload: {
+          cwd,
+          model: "gpt-5-codex"
+        },
+        timestamp: laterObservedAt.toISOString(),
+        type: "turn_context"
+      })}\n`,
+      "utf8"
+    );
+    await utimes(transcriptPath, laterObservedAt, laterObservedAt);
+    await delay(2_100);
+
+    const updatedProjection = await getJson(baseUrl, "/projection");
+    expect(updatedProjection.projection.cards).toHaveLength(1);
+    expect(updatedProjection.projection.cards[0]).toMatchObject({
+      sourceSessionId: "codex-desktop-active",
+      totalTokens: 50
+    });
+  });
+
   test("installs, tests, and uninstalls the live connector hook files", async () => {
     const { daemon, tempDir } = await createTestHarness();
     const baseUrl = await listen(daemon);
@@ -680,25 +752,18 @@ describe("settings API", () => {
       message: expect.stringContaining("Masthead accepted synthetic live events"),
       status: "passed"
     });
-    const runtimeRows = daemon.database
+    const syntheticRows = daemon.database
       .prepare(
-        `SELECT runtimes.runtime_kind AS runtime, COUNT(*) AS count
+        `SELECT runtimes.runtime_kind AS runtime, sessions.source_session_id AS sourceSessionId
         FROM sessions
         JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
-        GROUP BY runtimes.runtime_kind
+        WHERE sessions.source_session_id LIKE 'masthead-hook-test-%'
         ORDER BY runtimes.runtime_kind`
       )
-      .all() as Array<{ count: number; runtime: string }>;
-    expect(runtimeRows).toEqual(
-      expect.arrayContaining([
-        { count: 1, runtime: "claude_code" },
-        { count: 1, runtime: "codex" },
-        { count: 1, runtime: "cursor" },
-        { count: 1, runtime: "grok" },
-        { count: 1, runtime: "omp" },
-        { count: 1, runtime: "opencode" }
-      ])
-    );
+      .all() as Array<{ runtime: string; sourceSessionId: string }>;
+    expect(syntheticRows).toEqual([]);
+    const projection = await getJson(baseUrl, "/projection");
+    expect(projection.projection.cards).toHaveLength(0);
 
     const uninstalled = await postJson(baseUrl, "/settings/hooks/codex/uninstall");
     expect(uninstalled.hooks).toMatchObject({

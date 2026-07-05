@@ -676,7 +676,7 @@ function runtimeSignalId(sessionId: string, event: NormalizedEvent, kind: string
 }
 
 function modelUsageId(sessionId: string, event: NormalizedEvent): string {
-  return `usage:${hash(`${sessionId}\0${event.eventId}`)}`;
+  return `usage:${hash(`${sessionId}\0${stringPayload(event, ["usageId", "usage_id"]) ?? event.eventId}`)}`;
 }
 
 function turnIndex(event: NormalizedEvent): number {

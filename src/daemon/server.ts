@@ -89,6 +89,7 @@ import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { createLiveIngestQueue } from "./liveIngestQueue.ts";
 import { buildMastheadHealth } from "./healthService.ts";
 import { recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
+import { createCodexTranscriptLiveScanner } from "./codexTranscriptLive.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
 import { createSettingsBackedEnrichmentProvider, listLlmProviderModels, updateLlmProviderSettings } from "./llmSettings.ts";
 import {
@@ -203,6 +204,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const terminalGitSnapshotSessionIds = new Set(gitSnapshots.filter(isTerminalGitSnapshot).map((snapshot) => snapshot.sessionId));
     const completedLiveSessionIds = new Set<string>();
     for (const event of state.events) rememberCompletedLiveSession(event);
+    const codexTranscriptLiveScanner = createCodexTranscriptLiveScanner({ homeDir: config.codexHomeDir });
     const persistBoardHeadlineFrame = (event: BoardHeadlineAppliedEvent): void => {
       try {
         const sessionId = canonicalSessionIdForSource(event.sessionId, liveRuntimeForSourceSessionId(event.sessionId));
@@ -612,6 +614,62 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   let closePromise: Promise<void> | undefined;
   let hydrationStarted = false;
   let hydrationPromise: Promise<void> = Promise.resolve();
+
+  async function refreshCodexTranscriptLiveState(): Promise<void> {
+    const refresh = await codexTranscriptLiveScanner.refresh();
+    if (refresh.events.length === 0) return;
+
+    const acceptedEvents: NormalizedEvent[] = [];
+    const touchedSessionIds = new Set<string>();
+    database.exec("BEGIN IMMEDIATE;");
+    try {
+      for (const event of refresh.events) {
+        const result = ingestNormalizedEvent(event, state);
+        if (result.status !== "accepted") continue;
+        if (eventLiveProcessingMode(result.event) === "deferred") {
+          removeEventFromLiveProjectionState(state, result.event);
+          deferredLiveIngestQueue.enqueue(result.event);
+          continue;
+        }
+        const sessionId = liveSessionRepositoryForEvent(result.event).upsertLiveEvent(result.event);
+        if (sessionId) touchedSessionIds.add(sessionId);
+        appendStoreRecordToRawJournal({
+          recordId: `event:${result.event.eventId}`,
+          recordType: "event",
+          observedAt: result.event.occurredAt,
+          value: result.event
+        });
+        acceptedEvents.push(result.event);
+        rememberCompletedLiveSession(result.event);
+      }
+      database.exec("COMMIT;");
+    } catch (error) {
+      database.exec("ROLLBACK;");
+      throw error;
+    }
+
+    for (const sessionId of touchedSessionIds) {
+      queueSessionSearchIndex(sessionId);
+    }
+    for (const event of acceptedEvents) {
+      try {
+        if (event.sessionId && isTerminalProtectedSession(event.sessionId)) continue;
+        const gitSnapshot = await collectGitSnapshot(event);
+        if (gitSnapshot) await appendGitSnapshotIfChanged(gitSnapshot);
+      } catch (error) {
+        recordRuntimeDiagnostic({
+          details: {
+            error,
+            eventId: event.eventId,
+            sourceSessionId: event.sessionId
+          },
+          kind: "codex_transcript_live_git_snapshot_failed",
+          message: `Codex transcript live Git snapshot failed for ${event.sessionId ?? event.eventId}.`,
+          severity: "warning"
+        });
+      }
+    }
+  }
 
   function startBackgroundHydration(): void {
     if (hydrationStarted) return;
@@ -1909,6 +1967,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/projection") {
+      await refreshCodexTranscriptLiveState();
       const selectedSessionId = url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined;
       const refreshIntervalMs = parseBoardRefreshIntervalMs(url.searchParams.get("refreshIntervalMs"));
       const headlineMode = (config.liveCopyEnabled ?? config.llmCopyEnabled) && config.openaiApiKey?.trim() ? "llm" : "offline";
@@ -2876,6 +2935,17 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         });
         return;
       }
+      if (isLiveIngestValidationRequest(url)) {
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          status: "accepted",
+          validationOnly: true,
+          event,
+          gitSnapshots: gitSnapshots.length,
+          events: state.events.length
+        });
+        return;
+      }
       if (destructiveDeferredLiveIngestBarrier) await waitForDeferredLiveIngestDestructiveBarrier();
       if (requestDestructiveMutationEpoch !== destructiveMutationEpoch) {
         sendJson(request, response, config.allowedOrigins, 202, {
@@ -3223,6 +3293,11 @@ function stringPayload(event: NormalizedEvent, key: string): string | undefined 
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function isLiveIngestValidationRequest(url: URL): boolean {
+  const value = url.searchParams.get("validate") ?? url.searchParams.get("dryRun");
+  return value === "1" || value === "true";
+}
+
 function toLiveHookDiagnostic(diagnostic: AdapterDiagnostic | undefined, receivedAt: string): LiveHookDiagnostic {
   const code =
     diagnostic?.code === "malformed_json" || diagnostic?.code === "unsupported_runtime"
@@ -3356,6 +3431,7 @@ function withSessionTokenTotals(db: MastheadDatabase, projection: LiveBoardProje
 
   const withTokens = <T extends SessionCardView | undefined>(session: T): T => {
     if (!session) return session;
+    if (session.totalTokens !== undefined) return session;
     const totalTokens = tokenTotals.get(session.sessionId);
     if (totalTokens === undefined) return session;
     return { ...session, totalTokens };

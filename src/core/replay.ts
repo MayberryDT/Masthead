@@ -206,6 +206,7 @@ function toCard(
   const feedbackSignal = latestFeedbackSignal(latestFeedback);
   const branchOrWorktree = session.workspace?.branch ?? session.workspace?.worktreePath?.split("/").at(-1);
   const model = latestStringPayload(sessionEvents, ["model", "modelName", "modelId"]);
+  const totalTokens = latestNumberPayload(sessionEvents, ["totalTokens", "total_tokens"]);
   const thinkingLevel = normalizedThinkingLevel(
     latestStringPayload(sessionEvents, [
       "thinkingLevel",
@@ -244,6 +245,7 @@ function toCard(
     endReason: session.endReason,
     priorityRank: sessionAttention[0] ? attentionPriority(sessionAttention[0]) : 50,
     durationLabel: durationLabel(session.sessionId, events),
+    totalTokens,
     branchOrWorktree,
     model,
     thinkingLevel,
@@ -353,7 +355,7 @@ function sanitizeLiveCardTitle(title: string, evidenceTexts: string[], fallbackT
 }
 
 function isLowValueLiveTitle(value: string): boolean {
-  return /^(?:codex hook event|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(value.trim());
+  return /^(?:codex hook event|codex desktop transcript activity|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(value.trim());
 }
 
 function isSafeFallbackTitle(value: string): boolean {
@@ -398,6 +400,16 @@ function liveCardEvidenceTexts(
 function stringPayload(event: NormalizedEvent, key: string): string | undefined {
   const value = event.payload[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function latestNumberPayload(events: NormalizedEvent[], keys: string[]): number | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    for (const key of keys) {
+      const value = events[index]?.payload[key];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+    }
+  }
+  return undefined;
 }
 
 function isNonEmptyString(value: unknown): value is string {

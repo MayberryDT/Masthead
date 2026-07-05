@@ -160,7 +160,7 @@ export async function runLiveConnectorRoundTrip(
   const failures: string[] = [];
 
   for (const runtime of runtimes) {
-    const endpoint = liveConnectorEndpoint(config, runtime, options.endpoint);
+    const endpoint = liveConnectorValidationEndpoint(config, runtime, options.endpoint);
     const sourceEventId = `masthead-settings-${runtime}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try {
       const response = await fetch(endpoint, {
@@ -219,6 +219,12 @@ export function liveConnectorEndpoint(config: DaemonConfig, runtime: LiveConnect
   if (runtime === "codex") return endpoint;
   const url = new URL(endpoint);
   url.searchParams.set("runtime", runtime);
+  return url.toString();
+}
+
+function liveConnectorValidationEndpoint(config: DaemonConfig, runtime: LiveConnectorRuntime, endpoint = baseIngestEndpoint(config)): string {
+  const url = new URL(liveConnectorEndpoint(config, runtime, endpoint));
+  url.searchParams.set("validate", "1");
   return url.toString();
 }
 
