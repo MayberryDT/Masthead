@@ -105,7 +105,7 @@
     .phase-bar span { font-family: var(--mono); font-size: 11px; color: var(--mute); }
     .phase-bar .step { color: var(--ink); }
     footer { margin-top: 40px; font-size: 12px; color: var(--mute); }
-  </style>
+  
     .score-box { background: var(--raised); border: 1px solid var(--line); border-radius: 5px; padding: 14px 18px; margin-bottom: 24px; font-size: 13px; }
     .score-box strong { color: var(--ink); }
     table.gate { width: 100%; border-collapse: collapse; font-size: 12px; margin: 12px 0; }
@@ -115,12 +115,13 @@
     .oos { color: var(--mute); font-size: 13px; margin-bottom: 24px; }
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <h1>Masthead pre-release issue plan</h1>
     <p class="lede">
       Optimized execution plan for Tyler’s production brain-dump. Code anchor: branch
-      <code>feat/live-multi-harness-connectors</code>, docs commit <code>2d7d33b</code>+.
+      <code>feat/live-multi-harness-connectors</code> at product baseline <code>489b8ca</code> (implement against current <code>HEAD</code> on that branch).
       Contracts: <code>design.md</code>, <code>prd.md</code>, <code>openwiki/*</code>,
       acceptance <code>docs/acceptance/product-release-gate.md</code>.
       <strong>Thread A (live headlines) ≠ Thread B (durable remote enrichment).</strong>
@@ -194,7 +195,7 @@
         <tr><td>Enrichment &amp; Board headlines</td><td>2, 3, 6, Thread A/B docs in UI</td><td>Headline cue not confused with remote off; rebuild dry-run</td></tr>
         <tr><td>Sources / import</td><td>4, 5</td><td>Progress counts move; adapter modal hook test OK</td></tr>
         <tr><td>Logbook</td><td>6</td><td>Filtered enrich updates title/headline columns</td></tr>
-        <tr><td>Verification</td><td>All phases</td><td><code>npm run verify</code>; targeted Vitest; Browser surfaces</td></tr>
+        <tr><td>Verification</td><td>All phases</td><td><code>npm run verify</code>; Vitest; Browser for UI surfaces; Electron desktop for notifications (issue 1)</td></tr>
       </tbody>
     </table>
 
@@ -265,7 +266,7 @@
           <li>Extend <code>PreferencesSettings.tsx</code> with “Session ended notifications” toggle + short description (desktop only label).</li>
           <li>Unit-test transition detector with fixture cards; manual verify on Linux desktop build.</li>
         </ol>
-        <p class="verify"><strong>Verify:</strong> End or block a live session → one notification with session title/headline; toggle off → silent; reduced motion unrelated.</p>
+        <p class="verify"><strong>Verify (Electron desktop only — not in-app Browser):</strong> <code>npm run dev:desktop</code>; end or idle a live session → one OS notification; Preferences toggle off → silent. Vitest covers transition detector only.</p>
       </div>
     </article>
 
@@ -449,7 +450,8 @@
     <ol class="dep-list">
       <li>Targeted Vitest for touched packages (daemon settings, UI component tests).</li>
       <li><code>npm run verify</code> before merge to release branch.</li>
-      <li>In-app Browser: Now, Settings, Sources, Logbook at desktop + narrow widths (AGENTS surface contract).</li>
+      <li><strong>Browser (Vite/Electron renderer via in-app Browser):</strong> Now, Settings, Sources, Logbook at desktop + narrow widths — does <em>not</em> sign off issue 1 (OS notifications).</li>
+      <li><strong>Electron desktop only:</strong> issue 1 via <code>npm run dev:desktop</code> + real session lifecycle (IPC <code>main.ts</code> / <code>preload.ts</code>).</li>
       <li><code>npm run doctor:json</code> after connector/import changes.</li>
       <li>Update product-release-gate checkboxes + evidence lines when claiming release-ready.</li>
     </ol>
