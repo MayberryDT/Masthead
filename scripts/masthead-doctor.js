@@ -68,6 +68,7 @@ checks.push(await checkUsage());
 checks.push(await checkHookTranscriptCapture());
 checks.push(await checkSettings());
 checks.push(await checkDestructivePreviewSafety());
+checks.push(await checkLiveConnectors());
 checks.push(await checkHooks());
 
 const report = {
@@ -759,6 +760,54 @@ async function checkHooks() {
       status: strictHooks ? "fail" : "warn",
       message: errorMessage(error),
       details: { hookConfigPath, strict: strictHooks }
+    };
+  }
+}
+
+async function checkLiveConnectors() {
+  try {
+    const body = await getJson("/settings/hooks");
+    const hooks = isRecord(body.hooks) ? body.hooks : {};
+    const integrations = Array.isArray(hooks.integrations) ? hooks.integrations.filter(isRecord) : [];
+    const targetRuntimes = ["codex", "claude_code", "cursor", "grok", "opencode"];
+    const targets = targetRuntimes.map((runtime) => {
+      const integration = integrations.find((item) => item.runtime === runtime);
+      return {
+        runtime,
+        label: stringValue(integration?.label) ?? runtime,
+        status: stringValue(integration?.status) ?? "missing",
+        configPath: stringValue(integration?.configPath),
+        endpoint: stringValue(integration?.endpoint),
+        supportsActions: integration?.supportsActions === true
+      };
+    });
+    const missing = targets.filter((target) => target.status === "missing");
+    const needsRepair = targets.filter((target) => target.status === "needs_repair");
+    const installed = targets.filter((target) => target.status === "installed");
+    const ok = missing.length === 0 && needsRepair.length === 0 && installed.length === targetRuntimes.length;
+
+    return {
+      id: "live-connectors",
+      label: "live connectors",
+      status: ok ? "ok" : strictHooks ? "fail" : "warn",
+      message: ok
+        ? "All release target live connectors are installed."
+        : `${installed.length}/${targetRuntimes.length} release target live connectors installed; ${needsRepair.length} need repair; ${missing.length} missing.`,
+      details: {
+        strict: strictHooks,
+        targets,
+        aggregateInstalled: hooks.installed === true,
+        missingEvents: Array.isArray(hooks.missingEvents) ? hooks.missingEvents : [],
+        mismatchedEvents: Array.isArray(hooks.mismatchedEvents) ? hooks.mismatchedEvents : []
+      }
+    };
+  } catch (error) {
+    return {
+      id: "live-connectors",
+      label: "live connectors",
+      status: strictHooks ? "fail" : "warn",
+      message: errorMessage(error),
+      details: { baseUrl, strict: strictHooks }
     };
   }
 }

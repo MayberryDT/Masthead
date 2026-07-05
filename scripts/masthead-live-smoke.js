@@ -19,19 +19,33 @@ try {
   assert(health.databasePath === databasePath, "health reported the wrong database path");
   assert(health.storePath === storePath, "health reported the wrong store path");
 
-  const accepted = await postJson(server.baseUrl, "/ingest", liveApprovalPayload("live-smoke-approval"));
+  const accepted = await postJson(server.baseUrl, "/ingest", livePayload("codex", "live-smoke-approval"));
   assert(accepted.status === "accepted", `expected accepted ingest, got ${accepted.status}`);
   assert(accepted.events === 1, `expected one live event, got ${accepted.events}`);
 
-  const duplicate = await postJson(server.baseUrl, "/ingest", liveApprovalPayload("live-smoke-approval"));
+  const duplicate = await postJson(server.baseUrl, "/ingest", livePayload("codex", "live-smoke-approval"));
   assert(duplicate.status === "duplicate", `expected duplicate ingest, got ${duplicate.status}`);
   assert(duplicate.events === 1, "duplicate ingest should not append an event");
 
+  let expectedLiveEvents = 1;
+  for (const runtime of ["claude_code", "cursor", "grok", "opencode"]) {
+    expectedLiveEvents += 1;
+    const runtimeAccepted = await postJson(server.baseUrl, `/ingest?runtime=${runtime}`, livePayload(runtime, `live-smoke-${runtime}`));
+    assert(runtimeAccepted.status === "accepted", `expected accepted ${runtime} ingest, got ${runtimeAccepted.status}`);
+    assert(runtimeAccepted.events === expectedLiveEvents, `expected ${expectedLiveEvents} cumulative live events after ${runtime}, got ${runtimeAccepted.events}`);
+  }
+
   const projection = await getJson(server.baseUrl, "/projection?expandedSessionId=live-smoke-session");
   assert(projection.projection?.cards?.some((card) => card.sessionId === "live-smoke-session"), "projection missing live smoke session");
+  for (const runtime of ["codex", "claude_code", "cursor", "grok", "opencode"]) {
+    const expectedSourceSessionId = liveSessionId(runtime);
+    const card = projection.projection?.cards?.find((item) => item.runtime === runtime && item.sourceSessionId === expectedSourceSessionId);
+    assert(card, `projection missing ${runtime} live smoke card`);
+    assert(card.canonicalSessionId && card.canonicalSessionId !== expectedSourceSessionId, `${runtime} card missing canonical session id`);
+  }
 
   const events = await getJson(server.baseUrl, "/events");
-  assert(events.events?.length === 1, "events endpoint should return one accepted event");
+  assert(events.events?.length === 5, "events endpoint should return five accepted events");
 
   const logbook = await getJson(server.baseUrl, "/logbook/search?q=Live%20smoke");
   assert(logbook.sessions?.some((session) => session.title === "Live smoke approval"), "logbook search missing live smoke session");
@@ -46,11 +60,10 @@ try {
   if (process.env.MASTHEAD_KEEP_SMOKE_DIR !== "1") await rm(tempDir, { force: true, recursive: true });
 }
 
-function liveApprovalPayload(providerEventId) {
-  return {
+function livePayload(runtime, providerEventId) {
+  const sessionId = liveSessionId(runtime);
+  const shared = {
     provider_event_id: providerEventId,
-    event: "approval_requested",
-    session_id: "live-smoke-session",
     timestamp: "2026-06-25T00:00:00.000Z",
     cwd: "/workspace/masthead-smoke",
     repo_root: "/workspace/masthead-smoke",
@@ -62,6 +75,38 @@ function liveApprovalPayload(providerEventId) {
     blast_radius: "local",
     summary: "Live smoke approval"
   };
+  if (runtime === "cursor") {
+    return {
+      ...shared,
+      hookEventName: "sessionStart",
+      sessionId
+    };
+  }
+  if (runtime === "claude_code" || runtime === "grok") {
+    return {
+      ...shared,
+      hookEventName: "SessionStart",
+      sessionId
+    };
+  }
+  if (runtime === "opencode") {
+    return {
+      ...shared,
+      directory: shared.cwd,
+      sessionID: sessionId,
+      time: shared.timestamp,
+      type: "session.created"
+    };
+  }
+  return {
+    ...shared,
+    event: "approval_requested",
+    session_id: sessionId
+  };
+}
+
+function liveSessionId(runtime) {
+  return runtime === "codex" ? "live-smoke-session" : `live-smoke-${runtime}-session`;
 }
 
 function assertDatabase(databasePath) {
@@ -73,6 +118,18 @@ function assertDatabase(databasePath) {
     assert(sessions === 1, `expected one canonical session row, got ${sessions}`);
     assert(signals >= 1, "expected at least one runtime signal row");
     assert(rawEvents === 1, `expected one raw event row, got ${rawEvents}`);
+    const runtimeRows = db
+      .prepare(
+        `SELECT runtimes.runtime_kind AS runtime, COUNT(*) AS count
+        FROM sessions
+        JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+        GROUP BY runtimes.runtime_kind`
+      )
+      .all();
+    const runtimeCounts = new Map(runtimeRows.map((row) => [row.runtime, row.count]));
+    for (const runtime of ["codex", "claude_code", "cursor", "grok", "opencode"]) {
+      assert(runtimeCounts.get(runtime) === 1, `expected one canonical ${runtime} session row, got ${runtimeCounts.get(runtime) ?? 0}`);
+    }
   } finally {
     db.close();
   }
