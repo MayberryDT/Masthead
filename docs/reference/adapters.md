@@ -19,7 +19,7 @@ Gemini CLI is legacy compatibility only for existing imported records. It is not
 
 ## Live-Capable Release Targets
 
-Codex, Claude Code, Cursor, Grok Build, and OpenCode are live-capable release targets. Their live connector events enter Masthead through `/ingest`, are normalized with runtime-scoped identity, and feed the same canonical session graph as imported history.
+Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode are live-capable release targets. Their live connector events enter Masthead through `/ingest`, are normalized with runtime-scoped identity, and feed the same canonical session graph as imported history.
 
 See [live-connectors.md](live-connectors.md).
 

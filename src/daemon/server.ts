@@ -118,7 +118,7 @@ const HOOK_TRANSCRIPT_CATCHUP_RECORD_LIMIT = 200;
 const HOOK_TRANSCRIPT_CATCHUP_REQUEUE_MS = 250;
 const VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS = 750;
 const RESPONSE_BACKGROUND_GRACE_MS = 50;
-const LIVE_INGEST_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "opencode"] as const satisfies readonly RuntimeKind[];
+const LIVE_INGEST_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "omp", "opencode"] as const satisfies readonly RuntimeKind[];
 
 type TranscriptImportOptions = {
   maxRecordsPerSource?: number;

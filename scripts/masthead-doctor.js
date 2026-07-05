@@ -769,7 +769,7 @@ async function checkLiveConnectors() {
     const body = await getJson("/settings/hooks");
     const hooks = isRecord(body.hooks) ? body.hooks : {};
     const integrations = Array.isArray(hooks.integrations) ? hooks.integrations.filter(isRecord) : [];
-    const targetRuntimes = ["codex", "claude_code", "cursor", "grok", "opencode"];
+    const targetRuntimes = ["codex", "claude_code", "cursor", "grok", "omp", "opencode"];
     const targets = targetRuntimes.map((runtime) => {
       const integration = integrations.find((item) => item.runtime === runtime);
       return {

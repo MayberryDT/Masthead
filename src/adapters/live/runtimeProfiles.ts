@@ -110,6 +110,36 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
       sessionend: "session.completed"
     }
   },
+  omp: {
+    runtime: "omp",
+    label: "Oh My Pi",
+    surface: "plugin",
+    sourceName: "omp.extension",
+    includeRuntimePayloadMetadata: true,
+    sessionIdKeys: ["sessionId", "session_id", "sessionID"],
+    eventNameKeys: ["type", "event", "hookEventName", "hook_event_name"],
+    timestampKeys: ["timestamp", "time", "createdAt"],
+    workspaceKeys: {
+      cwd: ["cwd"],
+      repoRoot: ["workspaceRoot", "repoRoot"],
+      branch: ["branch"]
+    },
+    eventMap: {
+      sessionstart: "session.started",
+      agentstart: "session.started",
+      input: "user.question",
+      beforeagentstart: "user.question",
+      toolapprovalrequested: "approval.requested",
+      toolapprovalresolved: "approval.requested",
+      toolcall: "command.started",
+      toolexecutionstart: "command.started",
+      toolresult: "command.finished",
+      toolexecutionend: "command.finished",
+      sessionstop: "session.completed",
+      agentend: "session.completed",
+      sessionshutdown: "session.completed"
+    }
+  },
   opencode: {
     runtime: "opencode",
     label: "OpenCode",

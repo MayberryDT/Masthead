@@ -615,6 +615,7 @@ describe("settings API", () => {
     const claudePath = join(tempDir, ".claude", "settings.json");
     const cursorPath = join(tempDir, ".cursor", "hooks.json");
     const grokPath = join(tempDir, ".grok", "hooks", "masthead.json");
+    const ompPath = join(tempDir, ".omp", "agent", "extensions", "masthead-live.js");
     const opencodePath = join(tempDir, ".config", "opencode", "plugins", "masthead-live.js");
 
     const before = await getJson(baseUrl, "/settings/hooks");
@@ -659,6 +660,9 @@ describe("settings API", () => {
     expect(cursorMastheadPromptHooks[0]?.command).not.toContain("/old/");
     expect(cursorConfig.hooks.afterFileEdit).toEqual([expect.objectContaining({ command: expect.stringContaining("runtime=cursor") })]);
     expect(await readFile(grokPath, "utf8")).toContain("runtime=grok");
+    expect(await readFile(ompPath, "utf8")).toContain("masthead-live-connector");
+    expect(await readFile(ompPath, "utf8")).toContain("runtime=omp");
+    expect(await readFile(ompPath, "utf8")).toContain("session_start");
     expect(await readFile(opencodePath, "utf8")).toContain("masthead-live-connector");
     expect(await readFile(opencodePath, "utf8")).toContain("runtime=opencode");
     expect(installed.hooks.integrations).toEqual(
@@ -666,6 +670,7 @@ describe("settings API", () => {
         expect.objectContaining({ configPath: claudePath, runtime: "claude_code", status: "installed" }),
         expect.objectContaining({ configPath: cursorPath, runtime: "cursor", status: "installed" }),
         expect.objectContaining({ configPath: grokPath, runtime: "grok", status: "installed" }),
+        expect.objectContaining({ configPath: ompPath, runtime: "omp", status: "installed" }),
         expect.objectContaining({ configPath: opencodePath, runtime: "opencode", status: "installed" })
       ])
     );
@@ -690,6 +695,7 @@ describe("settings API", () => {
         { count: 1, runtime: "codex" },
         { count: 1, runtime: "cursor" },
         { count: 1, runtime: "grok" },
+        { count: 1, runtime: "omp" },
         { count: 1, runtime: "opencode" }
       ])
     );
@@ -702,6 +708,7 @@ describe("settings API", () => {
     const uninstalledCursorConfig = JSON.parse(await readFile(cursorPath, "utf8")) as { hooks: Record<string, Array<{ command: string }>> };
     expect(uninstalledCursorConfig.hooks.beforeSubmitPrompt).toEqual([{ command: "node existing-cursor-hook.js" }]);
     expect(uninstalledCursorConfig.hooks.afterFileEdit).toEqual([]);
+    await expect(readFile(ompPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(opencodePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -737,6 +744,41 @@ describe("settings API", () => {
       configExists: true,
       installed: false
     });
+  });
+
+  test("supports runtime-specific OMP live connector extension actions", async () => {
+    const { daemon, tempDir } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+    const ompPath = join(tempDir, ".omp", "agent", "extensions", "masthead-live.js");
+
+    const before = await getJson(baseUrl, "/settings/hooks/omp");
+    expect(before.hooks).toMatchObject({
+      configExists: false,
+      configPath: ompPath,
+      endpoint: expect.stringContaining("runtime=omp"),
+      installed: false
+    });
+
+    const installed = await postJson(baseUrl, "/settings/hooks/omp/install");
+    expect(installed.hooks).toMatchObject({
+      configExists: true,
+      configPath: ompPath,
+      installed: true
+    });
+    expect(await readFile(ompPath, "utf8")).toContain("runtime=omp");
+
+    const tested = await postJson(baseUrl, "/settings/hooks/omp/test");
+    expect(tested.hooks.lastTest).toMatchObject({
+      message: expect.stringContaining("Oh My Pi"),
+      status: "passed"
+    });
+
+    const uninstalled = await postJson(baseUrl, "/settings/hooks/omp/uninstall");
+    expect(uninstalled.hooks).toMatchObject({
+      configExists: false,
+      installed: false
+    });
+    await expect(readFile(ompPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
 

@@ -9,7 +9,7 @@ import {
 } from "../core/hookAdmin.ts";
 import type { DaemonConfig } from "./config.ts";
 
-export const LIVE_CONNECTOR_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "opencode"] as const satisfies readonly RuntimeKind[];
+export const LIVE_CONNECTOR_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "omp", "opencode"] as const satisfies readonly RuntimeKind[];
 
 export type LiveConnectorRuntime = (typeof LIVE_CONNECTOR_RUNTIMES)[number];
 
@@ -51,6 +51,7 @@ type CursorHookConfig = {
 
 const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
 const OPENCODE_PLUGIN_MARKER = "masthead-live-connector";
+const OMP_EXTENSION_MARKER = "masthead-live-connector";
 const CODEX_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"] as const;
 const CLAUDE_STYLE_EVENTS = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "PostToolUse", "Stop"] as const;
 const CURSOR_EVENTS = ["sessionStart", "beforeSubmitPrompt", "beforeShellExecution", "afterShellExecution", "afterFileEdit", "postToolUse", "stop"] as const;
@@ -60,6 +61,7 @@ const LABELS: Record<LiveConnectorRuntime, string> = {
   codex: "Codex",
   cursor: "Cursor",
   grok: "Grok Build",
+  omp: "Oh My Pi",
   opencode: "OpenCode"
 };
 
@@ -81,7 +83,23 @@ export async function getLiveConnectorSetting(config: DaemonConfig, runtime: Liv
     }
 
     if (runtime === "opencode") {
-      const verification = await verifyOpenCodePlugin(configPath, endpoint);
+      const verification = await verifyMarkedPluginFile(configPath, endpoint, OPENCODE_PLUGIN_MARKER);
+      return {
+        command,
+        configExists: verification.configExists,
+        configPath,
+        endpoint,
+        installed: verification.installed,
+        label: LABELS[runtime],
+        latestBackupPath,
+        mismatchedEvents: verification.mismatchedEvents,
+        missingEvents: verification.missingEvents,
+        runtime
+      };
+    }
+
+    if (runtime === "omp") {
+      const verification = await verifyMarkedPluginFile(configPath, endpoint, OMP_EXTENSION_MARKER);
       return {
         command,
         configExists: verification.configExists,
@@ -185,6 +203,8 @@ export function liveConnectorConfigPath(config: DaemonConfig, runtime: LiveConne
       return resolve(process.env.MASTHEAD_CURSOR_HOOKS || join(homeDir, ".cursor", "hooks.json"));
     case "grok":
       return resolve(process.env.MASTHEAD_GROK_HOOKS || join(homeDir, ".grok", "hooks", "masthead.json"));
+    case "omp":
+      return resolve(process.env.MASTHEAD_OMP_EXTENSION || join(homeDir, ".omp", "agent", "extensions", "masthead-live.js"));
     case "opencode":
       return resolve(process.env.MASTHEAD_OPENCODE_PLUGIN || join(homeDir, ".config", "opencode", "plugins", "masthead-live.js"));
   }
@@ -235,6 +255,12 @@ export async function installLiveConnector(config: DaemonConfig, runtime: LiveCo
     return;
   }
 
+  if (runtime === "omp") {
+    if (await pathExists(configPath)) await createHookBackup(configPath, "install");
+    await writeTextConfig(configPath, ompExtensionSource(liveConnectorEndpoint(config, runtime)));
+    return;
+  }
+
   const { config: hookConfig, existed } = await readJsonConfig<CodexHookConfig>(configPath, { allowMissing: true });
   if (existed) await createHookBackup(configPath, "install");
   await writeJsonConfig(
@@ -263,6 +289,16 @@ export async function uninstallLiveConnector(config: DaemonConfig, runtime: Live
     await assertRegularHookFile(configPath);
     const raw = await readFile(configPath, "utf8");
     if (!raw.includes(OPENCODE_PLUGIN_MARKER)) throw new Error(`Refusing to uninstall non-Masthead OpenCode plugin: ${configPath}`);
+    await createHookBackup(configPath, "uninstall");
+    await rm(configPath, { force: true });
+    return;
+  }
+
+  if (runtime === "omp") {
+    if (!(await pathExists(configPath))) return;
+    await assertRegularHookFile(configPath);
+    const raw = await readFile(configPath, "utf8");
+    if (!raw.includes(OMP_EXTENSION_MARKER)) throw new Error(`Refusing to uninstall non-Masthead OMP extension: ${configPath}`);
     await createHookBackup(configPath, "uninstall");
     await rm(configPath, { force: true });
     return;
@@ -352,7 +388,7 @@ function verifyCursorHookConfig(config: CursorHookConfig, expected: { command: s
   };
 }
 
-async function verifyOpenCodePlugin(configPath: string, endpoint: string): Promise<{
+async function verifyMarkedPluginFile(configPath: string, endpoint: string, marker: string): Promise<{
   configExists: boolean;
   installed: boolean;
   missingEvents: string[];
@@ -368,7 +404,7 @@ async function verifyOpenCodePlugin(configPath: string, endpoint: string): Promi
     throw error;
   }
 
-  const hasMarker = raw.includes(OPENCODE_PLUGIN_MARKER);
+  const hasMarker = raw.includes(marker);
   const hasEndpoint = raw.includes(endpoint);
   return {
     configExists: true,
@@ -400,6 +436,15 @@ function syntheticPayload(runtime: LiveConnectorRuntime, sourceEventId: string, 
       provider_event_id: sourceEventId,
       sessionId,
       timestamp: testedAt
+    };
+  }
+  if (runtime === "omp") {
+    return {
+      cwd: process.cwd(),
+      provider_event_id: sourceEventId,
+      sessionId,
+      timestamp: testedAt,
+      type: "session_start"
     };
   }
   if (runtime === "claude_code" || runtime === "grok") {
@@ -465,6 +510,128 @@ export const MastheadLiveConnector = async () => ({
 });
 
 export default MastheadLiveConnector;
+`;
+}
+
+function ompExtensionSource(endpoint: string): string {
+  return `// ${OMP_EXTENSION_MARKER}: installed by Masthead.
+const MASTHEAD_ENDPOINT = ${JSON.stringify(endpoint)};
+let mastheadSequence = 0;
+
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+function countText(value) {
+  if (typeof value !== "string") return undefined;
+  return { characters: value.length, lines: value.length === 0 ? 0 : value.split(/\\r?\\n/).length };
+}
+
+function summarizeValue(value) {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) return { kind: "array", count: value.length };
+  if (typeof value === "object") return { kind: "object", keys: Object.keys(value).slice(0, 12) };
+  if (typeof value === "string") return countText(value);
+  return { kind: typeof value };
+}
+
+function sessionIdFor(event, ctx) {
+  return firstString(
+    event?.sessionId,
+    event?.session_id,
+    event?.sessionID,
+    event?.session_file,
+    event?.sessionFile,
+    ctx?.sessionManager?.getSessionId?.(),
+    ctx?.sessionManager?.getSessionFile?.(),
+    ctx?.sessionManager?.getSessionName?.()
+  );
+}
+
+function sourceEventIdFor(type, event, sessionId) {
+  return firstString(
+    event?.provider_event_id,
+    event?.providerEventId,
+    event?.event_id,
+    event?.eventId,
+    event?.toolCallId,
+    event?.turn_id !== undefined ? \`\${type}:\${event.turn_id}\` : undefined,
+    sessionId ? \`\${sessionId}:\${type}:\${++mastheadSequence}\` : undefined
+  ) || \`\${type}:\${Date.now()}:\${++mastheadSequence}\`;
+}
+
+async function postMastheadEvent(type, event, ctx, extra = {}) {
+  const sessionId = sessionIdFor(event, ctx);
+  const payload = {
+    type,
+    sessionId,
+    provider_event_id: sourceEventIdFor(type, event, sessionId),
+    timestamp: new Date().toISOString(),
+    cwd: firstString(ctx?.cwd, ctx?.sessionManager?.getCwd?.(), event?.cwd),
+    sessionFile: firstString(event?.session_file, event?.sessionFile, ctx?.sessionManager?.getSessionFile?.()),
+    sessionName: firstString(ctx?.sessionManager?.getSessionName?.()),
+    source: "masthead-live-connector",
+    ...extra
+  };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 750);
+  try {
+    await fetch(MASTHEAD_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+  } catch {
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export default function MastheadLiveConnector(pi) {
+  pi.on("session_start", (event, ctx) => postMastheadEvent("session_start", event, ctx));
+  pi.on("input", (event, ctx) =>
+    postMastheadEvent("input", event, ctx, {
+      inputSource: event?.source,
+      messageSummary: countText(event?.text),
+      imageCount: Array.isArray(event?.images) ? event.images.length : 0
+    })
+  );
+  pi.on("tool_approval_requested", (event, ctx) =>
+    postMastheadEvent("tool_approval_requested", event, ctx, {
+      toolCallId: event?.toolCallId,
+      toolName: event?.toolName,
+      approvalMode: event?.approvalMode
+    })
+  );
+  pi.on("tool_call", (event, ctx) =>
+    postMastheadEvent("tool_call", event, ctx, {
+      toolCallId: event?.toolCallId,
+      toolName: event?.toolName,
+      inputSummary: summarizeValue(event?.input)
+    })
+  );
+  pi.on("tool_result", (event, ctx) =>
+    postMastheadEvent("tool_result", event, ctx, {
+      toolCallId: event?.toolCallId,
+      toolName: event?.toolName,
+      isError: event?.isError === true,
+      contentSummary: summarizeValue(event?.content),
+      detailsSummary: summarizeValue(event?.details)
+    })
+  );
+  pi.on("session_stop", (event, ctx) =>
+    postMastheadEvent("session_stop", event, ctx, {
+      turnId: event?.turn_id,
+      messageCount: Array.isArray(event?.messages) ? event.messages.length : undefined,
+      hasLastAssistantMessage: Boolean(event?.last_assistant_message)
+    })
+  );
+  pi.on("session_shutdown", (event, ctx) => postMastheadEvent("session_shutdown", event, ctx));
+}
 `;
 }
 

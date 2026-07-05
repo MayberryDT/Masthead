@@ -28,7 +28,7 @@ try {
   assert(duplicate.events === 1, "duplicate ingest should not append an event");
 
   let expectedLiveEvents = 1;
-  for (const runtime of ["claude_code", "cursor", "grok", "opencode"]) {
+  for (const runtime of ["claude_code", "cursor", "grok", "omp", "opencode"]) {
     expectedLiveEvents += 1;
     const runtimeAccepted = await postJson(server.baseUrl, `/ingest?runtime=${runtime}`, livePayload(runtime, `live-smoke-${runtime}`));
     assert(runtimeAccepted.status === "accepted", `expected accepted ${runtime} ingest, got ${runtimeAccepted.status}`);
@@ -37,7 +37,7 @@ try {
 
   const projection = await getJson(server.baseUrl, "/projection?expandedSessionId=live-smoke-session");
   assert(projection.projection?.cards?.some((card) => card.sessionId === "live-smoke-session"), "projection missing live smoke session");
-  for (const runtime of ["codex", "claude_code", "cursor", "grok", "opencode"]) {
+  for (const runtime of ["codex", "claude_code", "cursor", "grok", "omp", "opencode"]) {
     const expectedSourceSessionId = liveSessionId(runtime);
     const card = projection.projection?.cards?.find((item) => item.runtime === runtime && item.sourceSessionId === expectedSourceSessionId);
     assert(card, `projection missing ${runtime} live smoke card`);
@@ -45,7 +45,7 @@ try {
   }
 
   const events = await getJson(server.baseUrl, "/events");
-  assert(events.events?.length === 5, "events endpoint should return five accepted events");
+  assert(events.events?.length === 6, "events endpoint should return six accepted events");
 
   const logbook = await getJson(server.baseUrl, "/logbook/search?q=Live%20smoke");
   assert(logbook.sessions?.some((session) => session.title === "Live smoke approval"), "logbook search missing live smoke session");
@@ -89,6 +89,13 @@ function livePayload(runtime, providerEventId) {
       sessionId
     };
   }
+  if (runtime === "omp") {
+    return {
+      ...shared,
+      sessionId,
+      type: "session_start"
+    };
+  }
   if (runtime === "opencode") {
     return {
       ...shared,
@@ -127,7 +134,7 @@ function assertDatabase(databasePath) {
       )
       .all();
     const runtimeCounts = new Map(runtimeRows.map((row) => [row.runtime, row.count]));
-    for (const runtime of ["codex", "claude_code", "cursor", "grok", "opencode"]) {
+    for (const runtime of ["codex", "claude_code", "cursor", "grok", "omp", "opencode"]) {
       assert(runtimeCounts.get(runtime) === 1, `expected one canonical ${runtime} session row, got ${runtimeCounts.get(runtime) ?? 0}`);
     }
   } finally {

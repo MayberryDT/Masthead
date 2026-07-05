@@ -11,6 +11,7 @@ describe("live hook adapter", () => {
     ["claude_code", "claude-user-prompt-submit.json", "user.question", "claude-session-1"],
     ["cursor", "cursor-before-submit-prompt.json", "user.question", "cursor-session-1"],
     ["grok", "grok-pre-tool-use.json", "command.started", "grok-session-1"],
+    ["omp", "omp-session-start.json", "session.started", "omp-session-1"],
     ["opencode", "opencode-chat-message.json", "session.started", "opencode-session-1"]
   ])("normalizes %s fixture", (runtime, fixture, type, sourceSessionId) => {
     const raw = readFileSync(join(fixtureDir, fixture), "utf8");
@@ -20,7 +21,7 @@ describe("live hook adapter", () => {
     if (!parsed.ok) return;
     expect(parsed.event).toMatchObject({
       sessionId: sourceSessionId,
-      source: { adapter: runtime, surface: runtime === "opencode" ? "plugin" : "hook" },
+      source: { adapter: runtime, surface: runtime === "opencode" || runtime === "omp" ? "plugin" : "hook" },
       type
     });
     if (runtime === "codex") {
@@ -34,7 +35,7 @@ describe("live hook adapter", () => {
         sourceSessionId
       });
     }
-    expect(parsed.event.evidence[0]?.source).toBe(`${runtime}.${runtime === "opencode" ? "plugin" : "hook"}`);
+    expect(parsed.event.evidence[0]?.source).toBe(runtime === "omp" ? "omp.extension" : `${runtime}.${runtime === "opencode" ? "plugin" : "hook"}`);
     expect(JSON.stringify(parsed.event.payload)).not.toContain("Inspect Masthead sources");
     expect(JSON.stringify(parsed.event.payload)).not.toContain("Fix the failing tests");
   });

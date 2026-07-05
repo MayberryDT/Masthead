@@ -12,6 +12,7 @@ describe("live hook adapter records", () => {
     ["claude_code", "claude-user-prompt-submit.json", "claude-code-hook-local", "hook-v1"],
     ["cursor", "cursor-before-submit-prompt.json", "cursor-hook-local", "hook-v1"],
     ["grok", "grok-pre-tool-use.json", "grok-hook-local", "hook-v1"],
+    ["omp", "omp-session-start.json", "omp-extension-local", "plugin-v1"],
     ["opencode", "opencode-chat-message.json", "opencode-plugin-local", "plugin-v1"]
   ] satisfies Array<[RuntimeKind, string, string, string]>)(
     "retains source and event id contracts for %s",

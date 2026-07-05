@@ -17,7 +17,7 @@ Local paths remain advanced diagnostics and provenance. The user-facing approval
 The onboarding catalog separates import support from awareness:
 
 - Active import adapters: Codex, Cursor, Claude Code, OpenCode, Aider, OpenClaw, Hermes, Pi, and OMP.
-- Live-capable release targets: Codex, Claude Code, Cursor, Grok Build, and OpenCode.
+- Live-capable release targets: Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode.
 - Detector-only local harnesses: Crush, Cline, Roo Code, Kilo Code, Continue.dev, OpenHands, GitHub Copilot, Windsurf, Zed AI, Amazon Q Developer, Sourcegraph Amp, JetBrains AI, Qodo, Tabnine, and IBM Bob.
 - Cloud-reference harnesses: Devin and Jules.
 - Legacy hidden compatibility: Gemini CLI for existing imported records only.

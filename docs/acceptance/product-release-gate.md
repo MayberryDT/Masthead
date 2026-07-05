@@ -61,9 +61,9 @@
 ## Settings
 - [x] Settings loads real state. Evidence: `npm run doctor:json` settings contract passed on 2026-06-26.
 - [x] Hook test round-trips. Evidence: settings API tests passed through `npm run verify` on 2026-06-26.
-- [x] Live connector settings cover Codex, Claude Code, Cursor, Grok Build, and OpenCode. Evidence: focused settings API tests and `npm run smoke:live` passed on 2026-07-05.
+- [x] Live connector settings cover Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode. Evidence: focused settings API tests and `npm run smoke:live` passed on 2026-07-05.
 - [x] Live connector install preserves unrelated user hooks and repairs stale Masthead hook commands. Evidence: `settingsApi.test.ts` and `hookAdmin.test.ts` passed on 2026-07-05.
-- [x] Multi-runtime live smoke creates separate canonical sessions for all five release targets. Evidence: `npm run smoke:live` passed on 2026-07-05.
+- [x] Multi-runtime live smoke creates separate canonical sessions for all six release targets. Evidence: `npm run smoke:live` passed on 2026-07-05.
 - [ ] Open folder works in Electron.
 - [x] Delete preview includes database ID. Evidence: Settings UI renders target database and stale-ID preview guard passed on 2026-06-26.
 

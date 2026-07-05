@@ -8,6 +8,7 @@ const LIVE_SOURCE_IDS: Partial<Record<RuntimeKind, string>> = {
   claude_code: "claude-code-hook-local",
   cursor: "cursor-hook-local",
   grok: "grok-hook-local",
+  omp: "omp-extension-local",
   opencode: "opencode-plugin-local"
 };
 
