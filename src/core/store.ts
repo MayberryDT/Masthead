@@ -1,9 +1,10 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { applyRetentionPolicy, retentionPruneResult } from "./retention.ts";
+import { applyRetentionPolicy, retentionPruneResult, validateRetentionPolicy } from "./retention.ts";
 import type { PruneLocalDataResult, RetentionPolicy } from "./retention";
 import type { AttentionItem, ConflictCard, GitSnapshot, NormalizedEvent } from "./types";
 
+export { validateRetentionPolicy };
 export type { PruneLocalDataResult, RetentionPolicy } from "./retention";
 
 export type ReviewDisposition = {

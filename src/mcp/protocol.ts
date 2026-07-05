@@ -85,12 +85,12 @@ function callTool(db: MastheadDatabase, tool: string, args: Record<string, unkno
     });
   }
   if (tool === "get_session") {
-    return getSessionTool(db, { maxBytes: numberArg(args.maxBytes), sessionId: requiredString(args.sessionId, "sessionId") });
+    return getSessionTool(db, { maxBytes: maxBytesArg(args.maxBytes), sessionId: requiredString(args.sessionId, "sessionId") });
   }
   if (tool === "get_session_excerpt") {
     return getSessionExcerptTool(db, {
       limit: numberArg(args.limit),
-      maxBytes: numberArg(args.maxBytes),
+      maxBytes: maxBytesArg(args.maxBytes),
       query: optionalString(args.query),
       sessionId: requiredString(args.sessionId, "sessionId")
     });
@@ -128,13 +128,13 @@ export function toolDefinitions() {
     {
       name: "get_session",
       description: "Get one normalized Masthead session with bounded historical evidence.",
-      inputSchema: objectSchema({ maxBytes: { type: "number" }, sessionId: { type: "string", minLength: 1 } }, ["sessionId"])
+      inputSchema: objectSchema({ maxBytes: { type: "number", minimum: 1, maximum: 16000 }, sessionId: { type: "string", minLength: 1 } }, ["sessionId"])
     },
     {
       name: "get_session_excerpt",
       description: "Get a bounded query-relevant historical transcript excerpt labeled as untrusted evidence.",
       inputSchema: objectSchema(
-        { limit: { type: "number" }, maxBytes: { type: "number" }, query: { type: "string" }, sessionId: { type: "string", minLength: 1 } },
+        { limit: { type: "number" }, maxBytes: { type: "number", minimum: 1, maximum: 16000 }, query: { type: "string" }, sessionId: { type: "string", minLength: 1 } },
         ["sessionId"]
       )
     },
@@ -156,7 +156,7 @@ export function toolDefinitions() {
   ];
 }
 
-function objectSchema(properties: Record<string, { type: string; minLength?: number }>, required: string[] = []) {
+function objectSchema(properties: Record<string, { type: string; minLength?: number; minimum?: number; maximum?: number }>, required: string[] = []) {
   return { additionalProperties: false, properties, required, type: "object" };
 }
 
@@ -175,4 +175,9 @@ function objectArg(value: unknown): Record<string, unknown> {
 
 function numberArg(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function maxBytesArg(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) return undefined;
+  return Math.max(1, Math.min(value, 16_000));
 }

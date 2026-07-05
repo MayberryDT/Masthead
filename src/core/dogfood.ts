@@ -564,7 +564,7 @@ function evaluateModalEvidenceCompactness(projection: LiveBoardProjection): { ok
       selected &&
         selectedCard &&
         !cardHasEvidencePayload &&
-        selected.evidence.observed.length >= 0 &&
+        selected.evidence.observed.length > 0 &&
         Array.isArray(selected.timeline) &&
         Array.isArray(selected.reviewAnnotations)
     ),

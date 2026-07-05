@@ -52,6 +52,7 @@ export function deriveSessions(
       latest;
     const successfulVerification = ordered.some(isSuccessfulVerificationCommandEvent);
     const completed = latest?.type === "session.completed";
+    const blocked = latest ? isBlockedEvent(latest) : false;
     const pendingApproval = latest?.type === "approval.requested";
     const pendingQuestion = latest?.type === "user.question";
     const latestFailedCommand = latest ? isFailedCommandEvent(latest) : false;
@@ -67,7 +68,9 @@ export function deriveSessions(
     });
     const endReason = terminal ? endReasonForLatestEvent(latest) : undefined;
 
-    if (pendingApproval) {
+    if (blocked) {
+      primaryStatus = "blocked";
+    } else if (pendingApproval) {
       primaryStatus = "waiting_for_approval";
       flags.push("approval_pending");
     } else if (pendingQuestion) {
@@ -216,6 +219,13 @@ function hasEquivalentRepeatedFailures(events: NormalizedEvent[]): boolean {
 function stringPayload(event: NormalizedEvent | undefined, key: string): string | undefined {
   const value = event?.payload[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function isBlockedEvent(event: NormalizedEvent): boolean {
+  if (event.payload.blocked === true) return true;
+  return ["status", "state", "primaryStatus", "disposition", "endReason", "reason"].some(
+    (key) => stringPayload(event, key)?.toLowerCase() === "blocked"
+  );
 }
 
 function harnessLabel(runtime: string | undefined): string | undefined {

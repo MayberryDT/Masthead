@@ -15,7 +15,7 @@ import { eventLiveProcessingMode } from "../core/liveSessionFacts.ts";
 import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
 import { projectLiveEvents } from "../core/liveProjection.ts";
 import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent, type BoardHeadlineGenerationFinishedEvent } from "../core/boardHeadlineEnricher.ts";
-import { createFileBackedStore, type StoreRecord } from "../core/store.ts";
+import { createFileBackedStore, validateRetentionPolicy, type StoreRecord } from "../core/store.ts";
 import type { ReviewDisposition } from "../core/store.ts";
 import type { LiveHookDiagnostic } from "../core/liveHookAdapter.ts";
 import type { GitSnapshot, LiveBoardProjection, NormalizedEvent, SessionCardView } from "../core/types.ts";
@@ -119,6 +119,8 @@ const HOOK_TRANSCRIPT_CATCHUP_RECORD_LIMIT = 200;
 const HOOK_TRANSCRIPT_CATCHUP_REQUEUE_MS = 250;
 const VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS = 750;
 const RESPONSE_BACKGROUND_GRACE_MS = 50;
+const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
+const INGEST_BODY_LIMIT_BYTES = 262_144;
 const LIVE_INGEST_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "omp", "opencode"] as const satisfies readonly RuntimeKind[];
 
 type TranscriptImportOptions = {
@@ -1074,7 +1076,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       for (const transcriptSource of await transcriptSources(source)) {
         controls?.throwIfCancelled();
         controls?.updateProgress({ currentPath: transcriptSource.path ?? transcriptSource.sourceId });
-        if (!transcriptSource.path || sourceIsExcluded(database, transcriptSource.path)) {
+        if (!transcriptSource.path || sourceIsExcluded(database, { sourceId: transcriptSource.sourceId, sourcePath: transcriptSource.path })) {
           result.queuedCount += 1;
           controls?.updateProgress({
             currentPath: transcriptSource.path ?? transcriptSource.sourceId,
@@ -1155,7 +1157,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const runtime = sources[0]?.runtime ?? "codex";
     const transcriptFiles = (
       await Promise.all(sources.map((source) => transcriptSources(source)))
-    ).flat().filter((source) => !source.path || !sourceIsExcluded(database, source.path));
+    ).flat().filter((source) => !source.path || !sourceIsExcluded(database, { sourceId: source.sourceId, sourcePath: source.path }));
     const cursors = readCursorsForSources(transcriptFiles);
     controls.updateProgress({
       currentPath: sources[0]?.path ?? sources[0]?.sourceId ?? runtime,
@@ -1265,6 +1267,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return Promise.resolve(emptyImportResult());
   }
 
+  function runImportWorkerForSources(
+    importKind: ImportJobKind,
+    runtime: RuntimeKind,
+    sources: DiscoveredSource[],
+    controls: ImportJobControls,
+    scope: ImportScopeDto = defaultTranscriptImportScope()
+  ): Promise<ImportWorkResult> {
+    const runtimeSources = sources.filter((source) => source.runtime === runtime);
+    if (importKind === "metadata") return importMetadataSources(runtimeSources, controls);
+    if (importKind === "transcript") return importTranscriptSourcesWithLedger(runtimeSources, controls, scope);
+    return Promise.resolve(emptyImportResult());
+  }
+
   async function queueAdapterMetadataImports(runtime?: string): Promise<{ jobs: ReturnType<typeof queueImportJob>[]; sources: number }> {
     const sources = (await discoverAllSourcesAndPersist()).filter((source) => !runtime || source.runtime === runtime);
     const jobs = sources.map((source) =>
@@ -1331,7 +1346,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     try {
       const source = await transcriptSourceFromHookEvent(event, config.codexHomeDir);
-      if (!source?.path || sourceIsExcluded(database, source.path)) return;
+      if (!source?.path || sourceIsExcluded(database, { sourceId: source.sourceId, sourcePath: source.path })) return;
       const result = await importTranscriptSources([source], undefined, {
         maxRecordsPerSource: HOOK_TRANSCRIPT_CATCHUP_RECORD_LIMIT,
         queueEnrichment: shouldQueueHookTranscriptEnrichment(event)
@@ -1647,12 +1662,21 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       });
     });
   });
+  server.on("listening", () => {
+    const address = server.address();
+    if (typeof address === "object" && address?.port) config.port = address.port;
+  });
 
   async function handleDaemonRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url || "/", `http://${config.host}:${config.port}`);
 
     if (request.method === "OPTIONS") {
       sendJson(request, response, config.allowedOrigins, 204, undefined);
+      return;
+    }
+
+    if (!isTrustedWriteOrigin(request, config.allowedOrigins)) {
+      sendJson(request, response, config.allowedOrigins, 403, { ok: false, error: "origin not allowed" });
       return;
     }
 
@@ -1851,7 +1875,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const previews = [];
         for (const runtime of runtimes) {
           const adapterScan = scan.adapters.find((adapter) => adapter.runtime === runtime);
-          const sources = adapterScan?.sources ?? [];
+          const sources = sourcesForBodySelection(body, adapterScan?.sources ?? []);
           const transcriptFiles = (await Promise.all(sources.map((source) => transcriptSources(source)))).flat();
           const summary = await buildImportManifestPlan({
             cursors: readCursorsForSources(transcriptFiles),
@@ -1905,10 +1929,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             importScope,
             queueEnrichment: body.queueEnrichment === true,
             runtimes,
+            sourceIds: sourceIdsFromBody(body),
             transcriptApproved: body.transcriptApproved === true
           },
-          async (kind, runtime, controls) => {
-            return runImportWorkerForRuntime(kind, runtime, controls, importScope);
+          async (kind, runtime, sources, controls) => {
+            return runImportWorkerForSources(kind, runtime, sources, controls, importScope);
           }
         );
         sendJson(request, response, config.allowedOrigins, 202, {
@@ -2078,8 +2103,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/mcp/test-connection") {
       try {
-        const fallback = getMcpLaunchConfig(config.databasePath, config.dataDirectory);
-        const launchConfig = coerceMcpLaunchConfig(await optionalJsonBody(request), fallback);
+        const launchConfig = getMcpLaunchConfig(config.databasePath, config.dataDirectory);
         sendJson(request, response, config.allowedOrigins, 200, {
           ok: true,
           result: await testMcpConnection(launchConfig, config.databasePath)
@@ -2197,9 +2221,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "POST" && url.pathname === "/settings/hooks/codex/test") {
-      const hookTestEndpoint = `http://${request.headers.host ?? `${config.host}:${config.port}`}/ingest`;
       sendJson(request, response, config.allowedOrigins, 202, {
-        hooks: await testCodexHooks(database, config, { endpoint: hookTestEndpoint }),
+        hooks: await testCodexHooks(database, config),
         ok: true
       });
       return;
@@ -2256,9 +2279,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
 
       if (request.method === "POST" && action === "test") {
-        const hookTestEndpoint = `http://${request.headers.host ?? `${config.host}:${config.port}`}/ingest`;
         sendJson(request, response, config.allowedOrigins, 202, {
-          hooks: await testRuntimeHooks(database, config, runtime, { endpoint: hookTestEndpoint }),
+          hooks: await testRuntimeHooks(database, config, runtime),
           ok: true
         });
         return;
@@ -2554,8 +2576,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           });
           return;
         }
-        const result = connectSelectedSources(database, scan, body, async (kind, runtime, controls) => {
-          return runImportWorkerForRuntime(kind, runtime, controls, body.importScope ?? defaultTranscriptImportScope());
+        const result = connectSelectedSources(database, scan, body, async (kind, runtime, sources, controls) => {
+          return runImportWorkerForSources(kind, runtime, sources, controls, body.importScope ?? defaultTranscriptImportScope());
         });
         recordRuntimeDiagnostic({
           details: {
@@ -2628,7 +2650,17 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/data/export") {
+    if (request.method === "POST" && url.pathname === "/data/export") {
+      try {
+        const parsed = objectRecord(await optionalJsonBody(request));
+        assertDatabaseIdMatches(stringRecordValue(parsed, "databaseId"), database, config);
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        return;
+      }
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
         export: exportSessionGraph(database)
@@ -2638,9 +2670,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/data/delete") {
       try {
-        const body = await readBody(request);
-        const parsed = body ? JSON.parse(body) : {};
-        assertDatabaseIdMatches(stringRecordValue(objectRecord(parsed), "databaseId"), database, config);
+        const parsed = objectRecord(await optionalJsonBody(request));
+        assertDatabaseIdMatches(stringRecordValue(parsed, "databaseId"), database, config);
         const scope = deleteScopeFromBody(parsed);
         const { legacy, preview, result } = await withDeferredLiveIngestBarrierForDestructiveMutation(async () => {
           const preview = getDataSummary(database, scope);
@@ -2675,9 +2706,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/data/retention/default") {
       try {
-        const body = await readBody(request);
-        const parsed = body ? JSON.parse(body) : {};
-        assertDatabaseIdMatches(stringRecordValue(objectRecord(parsed), "databaseId"), database, config);
+        const parsed = objectRecord(await optionalJsonBody(request));
+        assertDatabaseIdMatches(stringRecordValue(parsed, "databaseId"), database, config);
         const { legacy, preview, result } = await withDeferredLiveIngestBarrierForDestructiveMutation(async () => {
           const preview = getDataSummary(database);
           const result = applyDefaultRetention(database);
@@ -2702,9 +2732,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/retention") {
       try {
-        const body = await readBody(request);
-        const parsed = body ? JSON.parse(body) : {};
-        const policy = parsed.policy ?? parsed;
+        const parsed = objectRecord(await optionalJsonBody(request));
+        assertDatabaseIdMatches(stringRecordValue(parsed, "databaseId"), database, config);
+        const policy = validateRetentionPolicy(parsed.policy ?? parsed);
         const result = await withDeferredLiveIngestBarrierForDestructiveMutation(async () => {
           const legacy = await store.pruneLocalData(policy);
           const hook = pruneLiveRawJournals(policy);
@@ -2748,6 +2778,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/clear") {
       try {
+        const parsed = objectRecord(await optionalJsonBody(request));
+        assertDatabaseIdMatches(stringRecordValue(parsed, "databaseId"), database, config);
         const { canonical, result } = await withDeferredLiveIngestBarrierForDestructiveMutation(async () => {
           const result = await clearVolatileAndLegacyCompatibilityState();
           const canonical = deleteAllMastheadData(database);
@@ -2893,7 +2925,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/ingest") {
       const requestDestructiveMutationEpoch = destructiveMutationEpoch;
-      const body = await readBody(request);
+      const body = await readBody(request, INGEST_BODY_LIMIT_BYTES);
       const receivedAt = new Date().toISOString();
       const runtime = liveRuntimeFromIngestRequest(url, request);
       if (!runtime) {
@@ -3103,19 +3135,33 @@ async function backupDatabaseBeforeMigration(databasePath: string): Promise<void
 }
 
 
-function readBody(request: IncomingMessage): Promise<string> {
-  return new Promise((resolve) => {
+function readBody(request: IncomingMessage, limitBytes = DEFAULT_BODY_LIMIT_BYTES): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const contentLength = request.headers["content-length"];
+    if (typeof contentLength === "string" && Number(contentLength) > limitBytes) {
+      reject(clientError(`Request body exceeds ${limitBytes} bytes.`));
+      request.destroy();
+      return;
+    }
     let body = "";
+    let bytes = 0;
     request.setEncoding("utf8");
     request.on("data", (chunk) => {
+      bytes += Buffer.byteLength(chunk, "utf8");
+      if (bytes > limitBytes) {
+        reject(clientError(`Request body exceeds ${limitBytes} bytes.`));
+        request.destroy();
+        return;
+      }
       body += chunk;
     });
+    request.on("error", reject);
     request.on("end", () => resolve(body));
   });
 }
 
-async function optionalJsonBody(request: IncomingMessage): Promise<unknown> {
-  const body = (await readBody(request)).trim();
+async function optionalJsonBody(request: IncomingMessage, limitBytes = DEFAULT_BODY_LIMIT_BYTES): Promise<unknown> {
+  const body = (await readBody(request, limitBytes)).trim();
   return body ? JSON.parse(body) : undefined;
 }
 
@@ -3548,12 +3594,25 @@ function assertReviewDisposition(value: unknown): asserts value is ReviewDisposi
   if (typeof record.recordedAt !== "string" || Number.isNaN(Date.parse(record.recordedAt))) {
     throw new Error("recordedAt must be an ISO timestamp.");
   }
+  const now = Date.now();
+  if (Date.parse(record.recordedAt) > now + 60_000) {
+    throw new Error("recordedAt cannot be in the future.");
+  }
+  if (record.status === "snoozed") {
+    if (typeof record.snoozedUntil !== "string" || Number.isNaN(Date.parse(record.snoozedUntil))) {
+      throw new Error("snoozedUntil must be an ISO timestamp when status is snoozed.");
+    }
+    if (Date.parse(record.snoozedUntil) > now + 1000 * 60 * 60 * 24 * 30) {
+      throw new Error("snoozedUntil cannot be more than 30 days in the future.");
+    }
+  }
 }
 
 function deleteScopeFromBody(value: unknown): DeleteMastheadDataScope {
   const body = objectRecord(value);
   const scope = objectRecord(body.scope ?? body);
-  const kind = typeof scope.kind === "string" ? scope.kind : "all";
+  const kind = typeof scope.kind === "string" ? scope.kind : undefined;
+  if (!kind) throw clientError("delete scope is required");
 
   if (kind === "all") return { kind };
   if (kind === "raw_payloads" || kind === "raw_payloads_only") return { kind: "raw_payloads" };
@@ -3576,11 +3635,18 @@ function deleteScopeFromUrl(url: URL): DeleteMastheadDataScope {
 }
 
 function assertDatabaseIdMatches(value: string | null | undefined, database: MastheadDatabase, config: DaemonConfig): void {
-  if (!value) return;
+  if (!value) throw clientError("databaseId is required.");
   const currentDatabaseId = settingsRuntimeIdentity(config, database).data.databaseId;
   if (value !== currentDatabaseId) {
     throw clientError("Masthead database changed. Refresh settings before deleting data.");
   }
+}
+
+function isTrustedWriteOrigin(request: IncomingMessage, allowedOrigins: string[]): boolean {
+  if (request.method === "GET" || request.method === "HEAD") return true;
+  const origin = request.headers.origin;
+  if (origin === undefined) return true;
+  return typeof origin === "string" && allowedOrigins.includes(origin);
 }
 
 function objectRecord(value: unknown): Record<string, unknown> {
@@ -3679,7 +3745,25 @@ function rawEventSourceFromDiscoveredSource(source: DiscoveredSource): RawEventS
 function setupRuntimesFromBody(body: Record<string, unknown>, scan: SourceScanResult): RuntimeKind[] {
   const requested = Array.isArray(body.runtimes) ? body.runtimes.filter((runtime): runtime is RuntimeKind => isRuntimeKind(runtime)) : [];
   if (requested.length > 0) return requested.filter((runtime) => Boolean(adapterForRuntime(runtime)));
+  const sourceIds = sourceIdsFromBody(body);
+  if (sourceIds.length > 0) {
+    const selectedSourceIds = new Set(sourceIds);
+    return scan.adapters
+      .filter((adapter) => adapterForRuntime(adapter.runtime) && adapter.sources.some((source) => selectedSourceIds.has(source.sourceId)))
+      .map((adapter) => adapter.runtime);
+  }
   return scan.adapters.filter((adapter) => adapter.sources.length > 0 && adapterForRuntime(adapter.runtime)).map((adapter) => adapter.runtime);
+}
+
+function sourceIdsFromBody(body: Record<string, unknown>): string[] {
+  return Array.isArray(body.sourceIds) ? body.sourceIds.filter((sourceId): sourceId is string => typeof sourceId === "string" && sourceId.trim().length > 0) : [];
+}
+
+function sourcesForBodySelection(body: Record<string, unknown>, sources: DiscoveredSource[]): DiscoveredSource[] {
+  const sourceIds = sourceIdsFromBody(body);
+  if (sourceIds.length === 0) return sources;
+  const selectedSourceIds = new Set(sourceIds);
+  return sources.filter((source) => selectedSourceIds.has(source.sourceId));
 }
 
 function isSourcePolicyKind(value: unknown): value is SourcePolicyKind {

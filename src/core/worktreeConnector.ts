@@ -78,9 +78,7 @@ const staticReadOnlyBridgePaths = new Set([
 ]);
 
 export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathname: string): boolean {
-  if (method === "POST" && (pathname === "/mcp/launch-config/validate" || pathname === "/mcp/test-connection")) return true;
-  if (method === "POST" && pathname === "/settings/llm-provider/models") return true;
-  if (method === "POST" && pathname === "/sources/scan") return true;
+  if (method === "POST" && pathname === "/mcp/launch-config/validate") return true;
   if (method !== "GET") return false;
   if (staticReadOnlyBridgePaths.has(pathname)) return true;
   return (

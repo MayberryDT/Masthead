@@ -81,6 +81,8 @@ export function getDataSummary(db: MastheadDatabase, scope: DeleteMastheadDataSc
     session_search: tableCount(db, "session_search"),
     sessions: tableCount(db, "sessions"),
     source_policies: tableCount(db, "source_policies"),
+    source_scan_runs: tableCount(db, "source_scan_runs"),
+    source_setup_state: tableCount(db, "source_setup_state"),
     tool_results: tableCount(db, "tool_results")
   });
 }
@@ -245,6 +247,8 @@ function deleteAllCanonicalData(db: MastheadDatabase): CanonicalDeleteResult {
       DELETE FROM ingest_cursors;
       DELETE FROM source_policies;
       DELETE FROM source_exclusions;
+      DELETE FROM source_setup_state;
+      DELETE FROM source_scan_runs;
       DELETE FROM ingest_sources;
       DELETE FROM runtimes;
       DELETE FROM hosts;
@@ -386,11 +390,6 @@ function rawEventMatchesScope(
   sourceSessionIds: Set<string>
 ): boolean {
   if (rawEventPayloadMatchesScope(row.payload_json, scope, sourceSessionIds)) return true;
-  for (const sourceSessionId of sourceSessionIds) {
-    if (row.source_id.includes(sourceSessionId)) return true;
-    if (row.source_record_key.includes(sourceSessionId)) return true;
-    if (row.source_path?.includes(sourceSessionId)) return true;
-  }
   return false;
 }
 

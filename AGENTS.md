@@ -18,20 +18,14 @@ Observability is a view over continuously collected session data.
 
 ## OpenWiki
 
-This repository has agent-oriented documentation in `openwiki/`.
+This repository has documentation located in the /openwiki directory.
 
-Before nontrivial work, read `openwiki/quickstart.md`, then follow its links to the relevant
-architecture, source/import, data, MCP, enrichment, or UI notes.
+Start here:
+- [OpenWiki quickstart](openwiki/quickstart.md)
 
-When committing Masthead work, run:
+OpenWiki includes repository overview, architecture notes, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
 
-```bash
-openwiki --update
-```
-
-Review any generated wiki changes for accuracy and include them in the commit when they document the
-work being committed. Do not read or document `.env` files, credentials, private keys, tokens, or
-other secrets.
+When working in this repository, read the OpenWiki quickstart first, then follow its links to the relevant architecture, workflow, domain, operation, and testing notes.
 
 ## Read-Only Run Exceptions
 

@@ -227,7 +227,13 @@ function firstValid(field: "title" | "liveSummary" | "outcome" | "searchSummary"
     if (validation.ok) return validation.value;
   }
   if (optional) return undefined;
-  return normalizeNarrativeText(candidates.find(isString) ?? (field === "title" ? "Session narrative work" : "Session narrative work is active."));
+  return safeFallbackForField(field);
+}
+
+function safeFallbackForField(field: "title" | "liveSummary" | "outcome" | "searchSummary"): string {
+  if (field === "title") return "Imported session narrative";
+  if (field === "searchSummary") return "Imported session narrative covering local Masthead work.";
+  return "Imported session narrative is available for review.";
 }
 
 function validationWarningsFor(fields: { title: string; liveSummary: string; outcome?: string; searchSummary: string }): string[] {

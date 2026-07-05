@@ -33,7 +33,12 @@ export function LogbookTable({ animateOnMount = false, density, onSelect, select
   }, [mountAnimation]);
 
   useEffect(() => {
-    if (incomingSignature === signatureRef.current) return undefined;
+    if (incomingSignature === signatureRef.current) {
+      setDisplayedSessions(sessions);
+      setOutgoingSessions(undefined);
+      setSwapState("idle");
+      return undefined;
+    }
 
     signatureRef.current = incomingSignature;
     const previousSessions = displayedRef.current;

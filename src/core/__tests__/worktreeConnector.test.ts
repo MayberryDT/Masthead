@@ -150,12 +150,12 @@ describe("Masthead worktree connector planning", () => {
     expect(isAllowedReadOnlyBridgeRequest("GET", pathname)).toBe(true);
   });
 
-  test.each(["/mcp/launch-config/validate", "/mcp/test-connection", "/settings/llm-provider/models"])("forwards read-only POST endpoint %s", async (pathname) => {
+  test.each(["/mcp/launch-config/validate"])("forwards read-only POST endpoint %s", async (pathname) => {
     expect(isAllowedReadOnlyBridgeRequest("POST", pathname)).toBe(true);
   });
 
   test("forwards read-only source scans but blocks source writes", () => {
-    expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/scan")).toBe(true);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/scan")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/connect")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/codex/import-metadata")).toBe(false);
   });

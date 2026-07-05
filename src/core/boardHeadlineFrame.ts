@@ -140,7 +140,10 @@ export function isUnsafeText(value: string): boolean {
     hasUnsafeCredentialName(value) ||
     hasInternalStatusToken(value) ||
     /\bsk-[A-Za-z0-9_-]+\b/i.test(value) ||
-    /\bhttps?:\/\//i.test(value) ||
+    /[a-z][a-z0-9+.-]*:\/\//i.test(value) ||
+    /\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\?)+/.test(value) ||
+    /\\\\[^\\\s]+\\[^\\\s]+/.test(value) ||
+    /(?:~|\.{1,2})?\/(?:[\w.@-]+\/)+[\w.@-]+/.test(value) ||
     /::[-\w]+\{[^}]*\}/i.test(value) ||
     /\[url\]/i.test(value)
   );

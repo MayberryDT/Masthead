@@ -1,9 +1,11 @@
 import { createDeterministicEnrichmentProvider } from "../enrichment/deterministicProvider.ts";
+import { isIP } from "node:net";
 import { createAnthropicEnrichmentProvider } from "../enrichment/anthropicProvider.ts";
 import { createGeminiEnrichmentProvider } from "../enrichment/geminiProvider.ts";
 import { createOpenAIEnrichmentProvider } from "../enrichment/openAIProvider.ts";
 import type { SessionEnrichmentProvider } from "../enrichment/provider.ts";
 import type { DaemonConfig } from "./config.ts";
+import { sourcePolicyEnabled } from "./db/sourcePolicyRepository.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
 
 export type LlmProviderId =
@@ -219,7 +221,11 @@ export function updateLlmProviderSettings(
   const provider = next.providers[activeProvider];
 
   if (typeof input.model === "string") provider.model = normalizeModel(input.model, activeProvider);
-  if (input.baseUrl !== undefined) provider.baseUrl = normalizeBaseUrl(input.baseUrl, activeProvider);
+  if (input.baseUrl !== undefined) {
+    const previousBaseUrl = provider.baseUrl ?? providerDefinitions[activeProvider].baseUrl;
+    provider.baseUrl = normalizeBaseUrl(input.baseUrl, activeProvider);
+    if (provider.baseUrl !== previousBaseUrl && typeof input.apiKey !== "string") delete provider.apiKey;
+  }
   if (input.clearApiKey === true) delete provider.apiKey;
   if (typeof input.apiKey === "string" && input.apiKey.trim()) provider.apiKey = input.apiKey.trim();
 
@@ -279,7 +285,8 @@ export async function listLlmProviderModels(
   const baseUrl = normalizeBaseUrl(typeof input.baseUrl === "string" ? input.baseUrl : provider.baseUrl ?? definition.baseUrl, activeProvider);
   if (!baseUrl) throw new Error(providerRequirementMessage(activeProvider, definition, "an HTTP base URL"));
   const inputApiKey = typeof input.apiKey === "string" && input.apiKey.trim() ? input.apiKey.trim() : undefined;
-  const apiKey = inputApiKey ?? provider.apiKey;
+  const persistedBaseUrl = provider.baseUrl ?? definition.baseUrl;
+  const apiKey = inputApiKey ?? (sameBaseUrl(baseUrl, persistedBaseUrl) ? provider.apiKey : undefined);
   const headers: Record<string, string> = { accept: "application/json" };
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
 
@@ -336,9 +343,20 @@ export function createSettingsBackedEnrichmentProvider(db: MastheadDatabase, con
       return currentRemote()?.model ?? deterministic.model;
     },
     enrich(input) {
-      return (currentRemote() ?? deterministic).enrich(input);
+      const remote = currentRemote();
+      const effective = effectiveLlmProvider(db, config);
+      if (!remote || (!effective.local && !remoteEnrichmentAllowedForSession(db, input.facts.sessionId))) return deterministic.enrich(input);
+      return remote.enrich(input);
     }
   };
+}
+
+function remoteEnrichmentAllowedForSession(db: MastheadDatabase, sessionId: string): boolean {
+  const rows = db
+    .prepare("SELECT source_id AS sourceId FROM session_sources WHERE session_id = ?")
+    .all(sessionId) as Array<{ sourceId: string }>;
+  if (rows.length === 0) return sourcePolicyEnabled(db, "enrichment");
+  return rows.some((row) => sourcePolicyEnabled(db, "enrichment", row.sourceId));
 }
 
 function providerConfig(stored: StoredLlmProviderSettings, config: DaemonConfig, id: LlmProviderId): LlmProviderDto {
@@ -457,7 +475,54 @@ function normalizeBaseUrl(value: unknown, provider: LlmProviderId): string | und
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error(providerRequirementMessage(provider, providerDefinitions[provider], "an HTTP base URL"));
   }
+  assertAllowedProviderUrl(parsed, provider);
   return parsed.toString().replace(/\/$/, "");
+}
+
+function assertAllowedProviderUrl(url: URL, provider: LlmProviderId): void {
+  const definition = providerDefinitions[provider];
+  const hostname = url.hostname.toLowerCase();
+  if (definition.local) {
+    if (!isLoopbackHost(hostname)) throw new Error(`${definition.label} base URL must use localhost or loopback.`);
+    return;
+  }
+  if (url.protocol !== "https:") throw new Error(`${definition.label} base URL must use HTTPS.`);
+  if (isUnsafeRemoteHost(hostname)) throw new Error(`${definition.label} base URL cannot target local or private network hosts.`);
+}
+
+function isUnsafeRemoteHost(hostname: string): boolean {
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  if (hostname === "metadata.google.internal") return true;
+  const normalized = hostname.replace(/^\[|\]$/g, "");
+  const ipVersion = isIP(normalized);
+  if (ipVersion === 4) return isPrivateIpv4(normalized);
+  if (ipVersion === 6) return normalized === "::1" || normalized.startsWith("fe80:") || normalized.startsWith("fc") || normalized.startsWith("fd");
+  return false;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.replace(/^\[|\]$/g, "");
+  if (normalized === "localhost") return true;
+  if (isIP(normalized) === 4) return normalized.startsWith("127.");
+  return normalized === "::1";
+}
+
+function isPrivateIpv4(ip: string): boolean {
+  const [a = 0, b = 0] = ip.split(".").map((part) => Number(part));
+  return (
+    a === 10 ||
+    a === 127 ||
+    a === 0 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+}
+
+function sameBaseUrl(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  return a.replace(/\/$/, "") === b.replace(/\/$/, "");
 }
 
 function providerRequirementMessage(provider: LlmProviderId, definition: ProviderDefinition, requirement: string): string {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
 import type { AdapterRecord } from "../../adapters/types.ts";
-import { redactText } from "../../core/redaction.ts";
+import { redactJsonValue, redactText } from "../../core/redaction.ts";
 import type { LiveBoardProjection, NormalizedEvent } from "../../core/types.ts";
 import { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
 import { upsertSessionSource } from "./sessionSourceRepository.ts";
@@ -242,7 +242,7 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
         toolCallIdFromRecord(sessionId, record),
         sessionId,
         value.toolName ?? "tool",
-        JSON.stringify(value.arguments ?? {}),
+        JSON.stringify(redactJsonValue(value.arguments ?? {})),
         observedAt,
         transcriptSourceRefJson(record)
       );
@@ -313,8 +313,8 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
         sessionId,
         value.signalKind ?? "runtime_signal",
         value.severity ?? null,
-        value.message ?? value.summary ?? "Runtime signal",
-        JSON.stringify(record.normalized.value),
+        redactText(value.message ?? value.summary ?? "Runtime signal"),
+        JSON.stringify(redactJsonValue(record.normalized.value)),
         observedAt,
         transcriptSourceRefJson(record)
       );
@@ -329,7 +329,7 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
         transcriptCheckpointIdFromRecord(sessionId, record, value.checkpointId),
         sessionId,
         value.checkpointKind ?? "compacted",
-        value.summary ?? "Checkpoint",
+        redactText(value.summary ?? "Checkpoint"),
         observedAt,
         transcriptSourceRefJson(record)
       );

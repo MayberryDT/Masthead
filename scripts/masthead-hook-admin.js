@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
 const REQUIRED_HOOK_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"];
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_HOOK_COMMAND = `MASTHEAD_INGEST_URL=http://127.0.0.1:17373/ingest MASTHEAD_HOOK_TIMEOUT_MS=750 node ${path.join(scriptDir, "masthead-hook.js")}`;
+const DEFAULT_HOOK_COMMAND = `MASTHEAD_INGEST_URL=http://127.0.0.1:17373/ingest MASTHEAD_HOOK_TIMEOUT_MS=750 ${quoteShell(process.execPath)} ${quoteShell(path.join(scriptDir, "masthead-hook.js"))}`;
 const DEFAULT_TIMEOUT_SECONDS = 1;
 
 class CliError extends Error {}
@@ -217,9 +217,14 @@ async function writeJsonConfig(configPath, config) {
   await mkdir(dir, { recursive: true });
   const mode = await targetMode(configPath);
   const tmpPath = path.join(dir, `.${path.basename(configPath)}.masthead-tmp-${backupStamp()}.json`);
-  await writeFile(tmpPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await writeFile(tmpPath, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
   await chmod(tmpPath, mode);
   await rename(tmpPath, configPath);
+}
+
+function quoteShell(value) {
+  if (!/[\s"'$`\\&;?]/.test(value)) return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 async function createBackup(configPath, operation) {

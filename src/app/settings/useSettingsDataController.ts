@@ -127,7 +127,7 @@ export function useSettingsDataController({
   const handleExportLocalData = useCallback(async () => {
     setLocalDataStatus({ state: "busy", message: "Preparing local export..." });
     try {
-      const canonicalExport = isLive ? await exportMastheadData(activeProjectionUrl) : undefined;
+      const canonicalExport = isLive ? await exportMastheadData(activeProjectionUrl, { databaseId: activeDatabaseId }) : undefined;
       const exported = canonicalExport ? JSON.stringify(canonicalExport, null, 2) : await exportNativeLocalData();
       const count = canonicalExport ? exportedSessionCount(canonicalExport) : exportedRecordCount(exported);
       downloadTextFile(`masthead-export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, exported);
@@ -141,7 +141,7 @@ export function useSettingsDataController({
         message: `Export failed: ${error instanceof Error ? error.message : String(error)}`
       });
     }
-  }, [activeProjectionUrl, isLive]);
+  }, [activeDatabaseId, activeProjectionUrl, isLive]);
 
   const loadDataDeletionPreview = useCallback(async (scope?: DeleteMastheadDataScope, databaseId = activeDatabaseId): Promise<DataSummary> => {
     const summary = await getDataSummary(activeProjectionUrl, scope, { databaseId });

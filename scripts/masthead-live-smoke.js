@@ -152,6 +152,9 @@ async function startDaemon({ codexHome, databasePath, storePath }) {
       MASTHEAD_DATA_DIR: dirname(databasePath),
       MASTHEAD_DB_PATH: databasePath,
       MASTHEAD_GIT_REFRESH_MS: "0",
+      MASTHEAD_HOST: "127.0.0.1",
+      MASTHEAD_LEGACY_DATA_DIR: "",
+      MASTHEAD_LLM_COPY: "0",
       MASTHEAD_PORT: "0",
       MASTHEAD_STORE_PATH: storePath
     },

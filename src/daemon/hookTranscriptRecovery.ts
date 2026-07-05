@@ -38,6 +38,10 @@ export function recentHookEventsWithTranscriptPathsForSessions(
         WHERE source_id = ?
           AND source_kind = 'hook'
           AND json_valid(payload_json)
+          AND COALESCE(
+            json_extract(payload_json, '$.value.source.surface'),
+            json_extract(payload_json, '$.source.surface')
+          ) = 'hook'
           AND (payload_json LIKE '%"transcriptPath"%' OR payload_json LIKE '%"transcript_path"%')
       ),
       ranked AS (

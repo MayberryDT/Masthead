@@ -54,6 +54,11 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const narrative = buildLlmNarrativeRequest(input.facts);
       const requestPayload = buildRequestPayload(apiStyle, model, narrative.inputText);
+      const requestMetadata = {
+        apiStyle,
+        inputBytes: Buffer.byteLength(narrative.inputText, "utf8"),
+        model
+      };
       try {
         const headers: Record<string, string> = {
           "content-type": "application/json"
@@ -70,7 +75,7 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
         if (!response.ok) {
           return failureResult("api_error", providerId, model, `${label} enrichment request failed with HTTP ${response.status}.`, {
             latencyMs,
-            requestPayload
+            requestPayload: requestMetadata
           });
         }
         const rawOutput = await response.json();
@@ -79,7 +84,7 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
           return failureResult("invalid_output", providerId, model, `${label} enrichment response did not include output text.`, {
             latencyMs,
             rawOutput,
-            requestPayload
+            requestPayload: requestMetadata
           });
         }
         return parseLlmNarrativeResult({
@@ -91,19 +96,19 @@ export function createOpenAIEnrichmentProvider(config: OpenAIEnrichmentConfig = 
           outputText,
           provider: providerId,
           rawOutput,
-          requestPayload
+          requestPayload: requestMetadata
         });
       } catch (error) {
         const latencyMs = Date.now() - startedAt;
         if (error instanceof Error && error.name === "AbortError") {
           return failureResult("timeout", providerId, model, `${label} enrichment timed out after ${timeoutMs}ms.`, {
             latencyMs,
-            requestPayload
+            requestPayload: requestMetadata
           });
         }
         return failureResult("api_error", providerId, model, error instanceof Error ? error.message : `${label} enrichment request failed.`, {
           latencyMs,
-          requestPayload
+          requestPayload: requestMetadata
         });
       } finally {
         clearTimeout(timeout);

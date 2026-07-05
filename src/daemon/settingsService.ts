@@ -421,8 +421,7 @@ export async function uninstallRuntimeHooks(db: MastheadDatabase, config: Daemon
 
 export async function testCodexHooks(
   db: MastheadDatabase,
-  config: DaemonConfig,
-  options: { endpoint?: string } = {}
+  config: DaemonConfig
 ): Promise<CodexHookSettingsDto> {
   const settings = await getCodexHookSettings(db, config);
   let lastTest: HookLastTestDto;
@@ -434,7 +433,7 @@ export async function testCodexHooks(
       testedAt: new Date().toISOString()
     };
   } else {
-    lastTest = await runLiveConnectorRoundTrip(config, { endpoint: options.endpoint, runtimes: LIVE_CONNECTOR_RUNTIMES });
+    lastTest = await runLiveConnectorRoundTrip(config, { runtimes: LIVE_CONNECTOR_RUNTIMES });
   }
 
   writeHookLastTest(db, lastTest);
@@ -444,8 +443,7 @@ export async function testCodexHooks(
 export async function testRuntimeHooks(
   db: MastheadDatabase,
   config: DaemonConfig,
-  runtime: LiveConnectorRuntime,
-  options: { endpoint?: string } = {}
+  runtime: LiveConnectorRuntime
 ): Promise<CodexHookSettingsDto> {
   const settings = await getRuntimeHookSettings(db, config, runtime);
   let lastTest: HookLastTestDto;
@@ -458,7 +456,7 @@ export async function testRuntimeHooks(
       testedAt: new Date().toISOString()
     };
   } else {
-    lastTest = await runLiveConnectorRoundTrip(config, { endpoint: options.endpoint, runtimes: [runtime] });
+    lastTest = await runLiveConnectorRoundTrip(config, { runtimes: [runtime] });
   }
 
   writeHookLastTest(db, lastTest);

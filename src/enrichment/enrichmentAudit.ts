@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 
 export type EnrichmentAuditKind =
   | "durable.started"
@@ -48,7 +49,7 @@ export type EnrichmentAuditLogger = {
   record(event: Omit<EnrichmentAuditEvent, "id" | "at">): void;
 };
 
-const DEFAULT_AUDIT_FILE = "/tmp/masthead-enrichment-audit.jsonl";
+const DEFAULT_AUDIT_FILE = `${homedir()}/.masthead/enrichment-audit.jsonl`;
 const DEFAULT_MAX_TEXT = 1_200;
 
 export function createEnrichmentAuditLogger(env: NodeJS.ProcessEnv = process.env): EnrichmentAuditLogger {
@@ -72,7 +73,7 @@ export function createEnrichmentAuditLogger(env: NodeJS.ProcessEnv = process.env
       };
       try {
         mkdirSync(dirname(file), { recursive: true });
-        appendFileSync(file, `${JSON.stringify(row)}\n`, "utf8");
+        appendFileSync(file, `${JSON.stringify(row)}\n`, { encoding: "utf8", mode: 0o600 });
       } catch (error) {
         console.error("[masthead] failed to write enrichment audit event", sanitizeEnrichmentAuditValue(error, options));
       }

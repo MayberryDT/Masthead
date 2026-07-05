@@ -30,6 +30,8 @@ A few important contracts:
 
 `POST /ingest` defaults to Codex. Other release target hooks use the runtime query parameter or header so live data is stored under the correct runtime-specific source and canonical session identity. Connector tests now hit a validation-only ingest variant (`validate=1` or `dryRun=true`) so installer/test flows can verify the hook path without mutating the canonical store. The live hook normalizer in `src/core/liveHookAdapter.ts` and the runtime profiles in `src/adapters/live/runtimeProfiles.ts` keep Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode events aligned before they reach the canonical store.
 
+`src/core/liveIdentity.ts` now scopes live projection sessions by host, runtime, and source session ID, so identical source IDs from different runtimes remain distinct in the canonical store. That identity shape is also what the live projection and replay logic use when they scope events and snapshots for projection.
+
 `src/daemon/codexTranscriptLive.ts` adds a lightweight Codex transcript scanner that watches the most recently updated `.codex/sessions/**/*.jsonl` file under the configured home directory. `/projection` now refreshes that scanner before building the board, which means a recent desktop transcript can surface as a live Codex session even before a transcript import is approved. The scanner emits metadata-only events and redacts prompt text; it is a live projection aid, not a replacement for the explicit Sources import flow.
 
 ## MCP

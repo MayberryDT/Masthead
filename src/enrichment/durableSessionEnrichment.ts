@@ -316,7 +316,10 @@ function stringArray(value: unknown, limit: number): string[] {
 }
 
 function stringField(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? cleanSessionText(value, 240) : undefined;
+  if (typeof value !== "string" || value.trim().length === 0) return undefined;
+  const cleaned = cleanSessionText(value, 240);
+  if (!cleaned) return undefined;
+  return isUnsafeDossierText(cleaned) ? undefined : cleaned;
 }
 
 function normalize(value: string | undefined): string {
@@ -336,7 +339,13 @@ function containsSensitiveMarker(value: string): boolean {
 }
 
 function looksLikePathUrlOrEmail(value: string): boolean {
-  return /https?:\/\//i.test(value) || /@/.test(value) || /(?:~|\.{1,2})?\/(?:[\w.@-]+\/)+[\w.@-]+/.test(value);
+  return (
+    /[a-z][a-z0-9+.-]*:\/\//i.test(value) ||
+    /\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\?)+/.test(value) ||
+    /\\\\[^\\\s]+\\[^\\\s]+/.test(value) ||
+    /@/.test(value) ||
+    /(?:~|\.{1,2})?\/(?:[\w.@-]+\/)+[\w.@-]+/.test(value)
+  );
 }
 
 function looksSerialized(value: string): boolean {
@@ -345,6 +354,10 @@ function looksSerialized(value: string): boolean {
 
 function containsFirstPersonOrDirectAddress(value: string): boolean {
   return /\b(?:i|me|my|mine|we|us|our|ours|you|your|yours)\b/i.test(value);
+}
+
+function isUnsafeDossierText(value: string): boolean {
+  return looksLikeRawCommand(value) || containsSensitiveMarker(value) || looksLikePathUrlOrEmail(value) || looksSerialized(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

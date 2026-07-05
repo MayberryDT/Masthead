@@ -35,6 +35,10 @@ const SUPPRESSED_RAW_PAYLOAD_KEYS = new Set([
   "toolResults",
   "lastAssistantMessage"
 ]);
+const MAX_LIVE_HOOK_BYTES = 262_144;
+const MAX_LIVE_HOOK_DEPTH = 20;
+const MAX_LIVE_HOOK_ARRAY_LENGTH = 500;
+const MAX_LIVE_HOOK_OBJECT_KEYS = 200;
 
 export type LiveHookDiagnostic = {
   code: "malformed_json" | "invalid_payload" | "unsupported_runtime";
@@ -55,6 +59,16 @@ export type LiveHookNormalizeOptions = {
 export function parseLiveHookPayload(raw: string, options: LiveHookNormalizeOptions = {}): LiveHookParseResult {
   const receivedAt = options.receivedAt ?? new Date().toISOString();
   const runtime = options.runtime ?? "codex";
+  if (Buffer.byteLength(raw, "utf8") > MAX_LIVE_HOOK_BYTES) {
+    return {
+      ok: false,
+      diagnostic: {
+        code: "invalid_payload",
+        message: `${diagnosticRuntimeLabel(runtime)} hook payload exceeds ${MAX_LIVE_HOOK_BYTES} bytes.`,
+        receivedAt
+      }
+    };
+  }
   try {
     profileForRuntime(runtime);
   } catch (error) {
@@ -106,6 +120,7 @@ export function normalizeLiveHookPayload(input: unknown, options: LiveHookNormal
   if (!isRecord(input)) {
     throw new TypeError("expected object payload");
   }
+  assertLiveHookShape(input);
 
   const receivedAt = options.receivedAt ?? new Date().toISOString();
   const profile = profileForRuntime(options.runtime);
@@ -164,7 +179,6 @@ function fallbackSourceEventId(
   occurredAt: string,
   payloadHash: string
 ): string {
-  if (profile.runtime === "codex") return payloadHash;
   return hashStable({
     runtime: profile.runtime,
     sessionId,
@@ -470,6 +484,25 @@ function redactRecord(input: Record<string, unknown>): Record<string, unknown> {
     output[key] = redactUnknown(value);
   }
   return output;
+}
+
+function assertLiveHookShape(value: unknown): void {
+  const stack: Array<{ depth: number; value: unknown }> = [{ depth: 0, value }];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    if (current.depth > MAX_LIVE_HOOK_DEPTH) throw new TypeError("hook payload is too deeply nested");
+    if (Array.isArray(current.value)) {
+      if (current.value.length > MAX_LIVE_HOOK_ARRAY_LENGTH) throw new TypeError("hook payload array is too large");
+      for (const item of current.value) stack.push({ depth: current.depth + 1, value: item });
+      continue;
+    }
+    if (isRecord(current.value)) {
+      const entries = Object.values(current.value);
+      if (entries.length > MAX_LIVE_HOOK_OBJECT_KEYS) throw new TypeError("hook payload object has too many keys");
+      for (const item of entries) stack.push({ depth: current.depth + 1, value: item });
+    }
+  }
 }
 
 function redactUnknown(value: unknown): unknown {

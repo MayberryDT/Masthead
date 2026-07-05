@@ -12,7 +12,8 @@ export type SourcePolicyInput = {
 };
 
 export function setSourcePolicy(db: MastheadDatabase, input: SourcePolicyInput): void {
-  const sourceKey = input.sourceId ?? "global";
+  if (input.sourceId === "global") throw new Error("global is a reserved source id.");
+  const sourceKey = input.sourceId ? `source:${input.sourceId}` : "global";
   db.prepare(
     `INSERT INTO source_policies (
       source_policy_id,
@@ -39,13 +40,14 @@ export function setSourcePolicy(db: MastheadDatabase, input: SourcePolicyInput):
 }
 
 export function sourcePolicyEnabled(db: MastheadDatabase, policyKind: SourcePolicyKind, sourceId?: string): boolean {
+  if (sourceId === "global") return false;
   const row = db
     .prepare(
       `SELECT enabled
       FROM source_policies
       WHERE policy_kind = ?
-        AND ${sourceId ? "source_id = ?" : "source_id IS NULL"}
-      ORDER BY decided_at DESC
+        AND ${sourceId ? "(source_id = ? OR source_id IS NULL)" : "source_id IS NULL"}
+      ORDER BY source_id IS NOT NULL DESC, decided_at DESC
       LIMIT 1`
     )
     .get(...(sourceId ? [policyKind, sourceId] : [policyKind])) as { enabled: number } | undefined;

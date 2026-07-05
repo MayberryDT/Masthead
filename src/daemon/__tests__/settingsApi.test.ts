@@ -143,7 +143,7 @@ describe("settings API", () => {
     const baseUrl = await listen(daemon);
 
     const saved = await postJson(baseUrl, "/settings/llm-provider", {
-      activeProvider: "openai_compatible",
+      activeProvider: "ollama",
       apiKey: "sk-test-settings-secret-3456",
       baseUrl: "http://127.0.0.1:11434/v1",
       model: "llama-3.1",
@@ -152,13 +152,13 @@ describe("settings API", () => {
 
     expect(JSON.stringify(saved)).not.toContain("sk-test-settings-secret-3456");
     expect(saved.settings.llm).toMatchObject({
-      activeProvider: "openai_compatible",
+      activeProvider: "ollama",
       remoteEnrichmentEnabled: true,
       providers: expect.arrayContaining([
         expect.objectContaining({
           baseUrl: "http://127.0.0.1:11434/v1",
           configured: true,
-          id: "openai_compatible",
+          id: "ollama",
           keyPreview: "••••3456",
           model: "llama-3.1"
         })
@@ -166,7 +166,7 @@ describe("settings API", () => {
     });
     expect(saved.settings.enrichment).toMatchObject({
       model: "llama-3.1",
-      provider: "OpenAI-compatible",
+      provider: "Ollama",
       remoteModelEnabled: true
     });
 
@@ -180,7 +180,7 @@ describe("settings API", () => {
     expect(stored?.settingJson).toContain("sk-test-settings-secret-3456");
 
     const cleared = await postJson(baseUrl, "/settings/llm-provider", {
-      activeProvider: "openai_compatible",
+      activeProvider: "ollama",
       baseUrl: "http://127.0.0.1:11434/v1",
       clearApiKey: true,
       model: "llama-3.1",
@@ -189,8 +189,7 @@ describe("settings API", () => {
     expect(cleared.settings.llm.providers).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          configured: false,
-          id: "openai_compatible"
+          id: "ollama"
         })
       ])
     );
@@ -277,7 +276,7 @@ describe("settings API", () => {
     const baseUrl = await listen(daemon);
 
     await postJson(baseUrl, "/settings/llm-provider", {
-      activeProvider: "openai_compatible",
+      activeProvider: "ollama",
       apiKey: "test-compatible-key",
       baseUrl: `${providerBaseUrl}/v1`,
       model: "llama-3.1",
@@ -341,7 +340,7 @@ describe("settings API", () => {
     });
     const baseUrl = await listen(daemon);
     await postJson(baseUrl, "/settings/llm-provider", {
-      activeProvider: "openai_compatible",
+      activeProvider: "ollama",
       apiKey: "test-compatible-key",
       baseUrl: `${providerBaseUrl}/v1`,
       model: "llama-3.1",
@@ -439,7 +438,7 @@ describe("settings API", () => {
     const baseUrl = await listen(daemon);
     await postJson(baseUrl, "/sources/codex/approve-transcripts", {});
     await postJson(baseUrl, "/settings/llm-provider", {
-      activeProvider: "openai_compatible",
+      activeProvider: "ollama",
       apiKey: "test-compatible-key",
       baseUrl: `${providerBaseUrl}/v1`,
       model: "llama-3.1",
@@ -454,7 +453,7 @@ describe("settings API", () => {
     expect(race).toBe("returned");
     expect(first.dossier.narrative.latestUserPrompt).toBe("Fix the OAuth authentication callback.");
     await waitFor(() => providerCalls === 1);
-    expect(providerInputs[0]?.facts?.userEvidence ?? []).toContain("Transcript prompt imported after Dossier response.");
+    expect(providerInputs[0]?.facts?.userEvidence ?? []).toContain("Historical untrusted transcript evidence: Transcript prompt imported after Dossier response.");
     await waitFor(() =>
       transcriptMessageTexts(daemon.database, sessionId).includes("Transcript prompt imported after Dossier response."),
       3_000

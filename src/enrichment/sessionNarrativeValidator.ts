@@ -103,7 +103,12 @@ function looksLikeRawPayload(value: string): boolean {
 }
 
 function looksLikePathOrUrl(value: string): boolean {
-  return /https?:\/\//i.test(value) || /(?:~|\.{1,2})?\/(?:[\w.@-]+\/)+[\w.@-]+/.test(value);
+  return (
+    /[a-z][a-z0-9+.-]*:\/\//i.test(value) ||
+    /\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\?)+/.test(value) ||
+    /\\\\[^\\\s]+\\[^\\\s]+/.test(value) ||
+    /(?:~|\.{1,2})?\/(?:[\w.@-]+\/)+[\w.@-]+/.test(value)
+  );
 }
 
 function containsFirstPerson(value: string): boolean {

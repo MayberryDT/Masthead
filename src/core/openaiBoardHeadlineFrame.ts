@@ -284,5 +284,10 @@ function safeString(value: string): string | undefined {
 }
 
 function hasLocalAbsolutePath(value: string): boolean {
-  return /(?:^|\s)\/(?:[^/\s]+\/)+\S*/.test(value);
+  return (
+    /(?:^|\s)\/(?:[^/\s]+\/)+\S*/.test(value) ||
+    /(?:^|\s)~\/\S+/.test(value) ||
+    /\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\?)+/.test(value) ||
+    /\\\\[^\\\s]+\\[^\\\s]+/.test(value)
+  );
 }

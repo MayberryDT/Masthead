@@ -1224,8 +1224,12 @@ export async function deleteMastheadData(
   return response.json() as Promise<DataLifecycleResponse>;
 }
 
-export async function exportMastheadData(baseUrl = defaultLiveProjectionUrl()): Promise<unknown> {
-  const response = await fetch(dataUrl(baseUrl, "/data/export").toString(), { headers: { accept: "application/json" } });
+export async function exportMastheadData(baseUrl = defaultLiveProjectionUrl(), options: { databaseId?: string } = {}): Promise<unknown> {
+  const response = await fetch(dataUrl(baseUrl, "/data/export").toString(), {
+    body: JSON.stringify({ databaseId: options.databaseId }),
+    headers: { accept: "application/json", "content-type": "application/json" },
+    method: "POST"
+  });
   if (!response.ok) throw new Error(`data export failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; export: unknown };
   return body.export;

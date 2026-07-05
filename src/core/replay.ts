@@ -637,6 +637,7 @@ function labelForStatus(status: SessionStatus): string {
 
 function labelForSession(session: ReturnType<typeof deriveSessions>[number]): string {
   if (session.lifecycle === "running") {
+    if (session.primaryStatus === "blocked") return "Blocked";
     if (session.primaryStatus === "waiting_for_approval") return "Needs approval";
     if (session.primaryStatus === "waiting_for_user") return "Needs input";
     return "Running";

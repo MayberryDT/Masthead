@@ -15,6 +15,7 @@ type StorageSettingsProps = {
 
 export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDataDirectory, onRequestPrune, settings, writeDisabled = busy }: StorageSettingsProps) {
   const summary = dataSummary ?? settings?.storage.dataSummary;
+  const hasDatabaseIdentity = Boolean(settings?.data.databaseId);
   return (
     <SettingsSection className="settings-section-wide" eyebrow="Storage" title="Storage">
       <SettingsRow
@@ -38,7 +39,7 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
       />
       <SettingsRow
         control={
-          <AppButton disabled={writeDisabled || !summary} onClick={onRequestPrune} variant="danger">
+          <AppButton disabled={writeDisabled || !summary || !hasDatabaseIdentity} onClick={onRequestPrune} variant="danger">
             Delete raw copies
           </AppButton>
         }
@@ -48,7 +49,7 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
       />
       <SettingsRow
         control={
-          <AppButton disabled={busy} onClick={onExport}>
+          <AppButton disabled={busy || !hasDatabaseIdentity} onClick={onExport}>
             Export data
           </AppButton>
         }

@@ -93,6 +93,16 @@ export function SourcesOnboardingModal({
     if (step === "intro") setStep("found");
   }, [open, scan, step]);
 
+  useEffect(() => {
+    if (open) return;
+    setStep("intro");
+    setLocalScan(undefined);
+    setRunning(false);
+    setHistoryImportScope("recent");
+    setSetupLogs([]);
+    setSelected(new Set());
+  }, [open]);
+
   if (!open) return null;
 
   const toggle = (id: string, checked: boolean) => {

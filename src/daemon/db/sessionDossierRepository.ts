@@ -24,6 +24,7 @@ import type { SessionTranscriptCoverage } from "../../shared/sessionTranscript.t
 import { readCurrentSessionEnrichment, readLatestFailedSessionEnrichment } from "./enrichmentRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 import { getTranscriptCoverage } from "./sessionTranscriptRepository.ts";
+import { sessionMcpAllowed } from "../../mcp/policy.ts";
 
 type IdentityRow = {
   branch: string | null;
@@ -798,10 +799,7 @@ function getTimeline(
 }
 
 function isMcpIncluded(db: MastheadDatabase, sessionId: string): boolean {
-  const row = db.prepare("SELECT excluded_from_mcp_at AS value FROM sessions WHERE session_id = ?").get(sessionId) as
-    | { value: string | null }
-    | undefined;
-  return !row?.value;
+  return sessionMcpAllowed(db, sessionId);
 }
 
 function buildCopyableContext(dossier: DossierWithoutReuse, mcpIncluded: boolean): string {

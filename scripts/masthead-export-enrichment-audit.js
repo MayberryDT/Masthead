@@ -81,9 +81,16 @@ function sanitizeValue(value, depth = 0) {
 
 function sanitizeText(value) {
   return value
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted-private-key]")
+    .replace(/Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Authorization: Bearer [redacted-secret]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted-secret]")
+    .replace(/Cookie:\s*[^\n\r]+/gi, "Cookie: [redacted-secret]")
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g, "[redacted-secret]")
+    .replace(/\b(postgres(?:ql)?:\/\/)[^\s'"`]+/gi, "[redacted-database-url]")
     .replace(/\bOPENAI_API_KEY\s*=\s*\S+/gi, "[redacted-secret]")
     .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted-secret]")
     .replace(/\b(password|token|secret|key)\s*[:=]\s*["']?[^"',\s}]+/gi, "$1=[redacted-secret]")
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)([^/\s:@]+):([^/\s@]+)@/gi, "$1[redacted-credentials]@")
     .replace(/\/home\/[^/\s"'`]+(?:\/[^\s"'`]*)?/g, "[redacted-path]")
     .replace(/https?:\/\/[^\s"'`]+/gi, "[redacted-url]");
 }

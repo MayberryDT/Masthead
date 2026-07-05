@@ -31,6 +31,13 @@ export function redactText(input: string): string {
   return redacted;
 }
 
+export function redactJsonValue(value: unknown): unknown {
+  if (typeof value === "string") return redactText(value);
+  if (Array.isArray(value)) return value.map(redactJsonValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactJsonValue(entry)]));
+}
+
 export function redactCommandOutput(input: string, maxLength = 2000): { text: string; truncated: boolean } {
   const redacted = redactText(input);
   if (redacted.length <= maxLength) {

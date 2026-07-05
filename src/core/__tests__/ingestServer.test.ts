@@ -980,10 +980,15 @@ async function startServer(
   storePath: string,
   env: Record<string, string> = {}
 ): Promise<{ baseUrl: string; child: TestServerProcess }> {
+  const defaultCodexHome = join(dirname(storePath), "codex-home");
+  if (!env.MASTHEAD_CODEX_HOME) {
+    await mkdir(join(defaultCodexHome, ".codex"), { recursive: true });
+  }
   const child = spawn(process.execPath, [serverScript], {
     cwd: projectRoot,
     env: {
       ...process.env,
+      MASTHEAD_CODEX_HOME: defaultCodexHome,
       MASTHEAD_DATA_DIR: dirname(storePath),
       MASTHEAD_PORT: "0",
       MASTHEAD_DB_PATH: join(dirname(storePath), "masthead.sqlite"),

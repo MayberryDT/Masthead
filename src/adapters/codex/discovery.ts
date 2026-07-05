@@ -1,4 +1,4 @@
-import { access, readdir, stat } from "node:fs/promises";
+import { access, lstat, readdir, realpath } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { DiscoveryContext, DiscoveredSource } from "../types.ts";
 import type { AdapterPathCandidate } from "../pathTypes.ts";
@@ -101,7 +101,10 @@ export async function discoverCodexSources(context: DiscoveryContext): Promise<D
   for (const candidate of candidates) {
     if (isExcluded(candidate.path, context.exclusions)) continue;
     if (!(await exists(candidate.path))) continue;
-    const info = await stat(candidate.path);
+    const info = await lstat(candidate.path);
+    if (info.isSymbolicLink()) continue;
+    if (candidate.expectedKind === "directory" && !info.isDirectory()) continue;
+    if (candidate.expectedKind === "file" && !info.isFile()) continue;
     sources.push({
       confidence: "authoritative",
       path: candidate.path,
@@ -132,7 +135,8 @@ export async function discoverCodexTranscriptFiles(context: DiscoveryContext): P
   for (const root of roots) {
     if (isExcluded(root.path, context.exclusions)) continue;
     if (!(await exists(root.path))) continue;
-    const info = await stat(root.path);
+    const info = await lstat(root.path);
+    if (info.isSymbolicLink()) continue;
     if (info.isDirectory()) {
       for (const file of await jsonlFiles(root.path, context.exclusions)) {
         const relativePath = relative(root.path, file).replaceAll("\\", "/");
@@ -164,14 +168,19 @@ function isExcluded(path: string, exclusions: DiscoveryContext["exclusions"]): b
   return exclusions.some((exclusion) => path.includes(exclusion.pattern));
 }
 
-async function jsonlFiles(directory: string, exclusions: DiscoveryContext["exclusions"]): Promise<string[]> {
+async function jsonlFiles(directory: string, exclusions: DiscoveryContext["exclusions"], rootRealPath?: string): Promise<string[]> {
+  const realRoot = rootRealPath ?? (await realpath(directory));
   const entries = await readdir(directory, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {
     const path = join(directory, entry.name);
     if (isExcluded(path, exclusions)) continue;
+    if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
-      files.push(...(await jsonlFiles(path, exclusions)));
+      const realChild = await realpath(path);
+      const relativePath = relative(realRoot, realChild).replaceAll("\\", "/");
+      if (!relativePath || relativePath.startsWith("../") || relativePath === "..") continue;
+      files.push(...(await jsonlFiles(path, exclusions, realRoot)));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
       files.push(path);
     }

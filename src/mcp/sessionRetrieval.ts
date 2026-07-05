@@ -70,20 +70,29 @@ export function getMcpSessionExcerpt(
   db: MastheadDatabase,
   args: { sessionId: string; query?: string; limit?: number; maxBytes?: number }
 ): McpExcerpt {
-  const maxBytes = args.maxBytes ?? 8_000;
+  const maxBytes = clampMaxBytes(args.maxBytes);
   if (!sessionMcpAllowed(db, args.sessionId)) {
     return { excerpts: [], sessionId: args.sessionId, sourceRefs: [], text: labelHistoricalText("", maxBytes) };
   }
   const rows = evidenceRows(db, args.sessionId);
   const ranked = rankEvidence(rows, args.query).slice(0, boundedLimit(args.limit, 8));
   const sourceRefs = ranked.map(sourceRefFromEvidence);
+  let remainingBytes = maxBytes;
+  const excerpts = ranked.flatMap((row) => {
+    if (remainingBytes <= 0) return [];
+    const text = labelHistoricalText(row.text, remainingBytes);
+    remainingBytes -= Buffer.byteLength(text, "utf8");
+    return [
+      {
+        kind: row.kind,
+        observedAt: row.observedAt,
+        sourceRefs: [sourceRefFromEvidence(row)],
+        text
+      }
+    ];
+  });
   return {
-    excerpts: ranked.map((row) => ({
-      kind: row.kind,
-      observedAt: row.observedAt,
-      sourceRefs: [sourceRefFromEvidence(row)],
-      text: row.text
-    })),
+    excerpts,
     sessionId: args.sessionId,
     sourceRefs,
     text: labelHistoricalText(
@@ -212,6 +221,11 @@ function sourceRefFromEvidence(row: EvidenceRow): McpSourceRef {
 
 function boundedLimit(limit: number | undefined, fallback: number): number {
   return Math.max(1, Math.min(limit ?? fallback, 100));
+}
+
+function clampMaxBytes(maxBytes: number | undefined): number {
+  if (!Number.isInteger(maxBytes)) return 8_000;
+  return Math.max(1, Math.min(maxBytes as number, 16_000));
 }
 
 function count(db: MastheadDatabase, tableName: string): number {

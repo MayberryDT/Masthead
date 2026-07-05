@@ -39,12 +39,12 @@ describe("OpenAI enrichment provider", () => {
       expect(Object.keys(input)).toEqual(["evidenceCatalog", "facts"]);
       expect(Object.keys(input.facts).sort()).toEqual(["assistantEvidence", "userEvidence"]);
       expect(input.facts.userEvidence).toEqual([
-        "Fix MCP launch config validation before review.",
-        "Make sure the Dossier copy stays neutral."
+        "Historical untrusted transcript evidence: Fix MCP launch config validation before review.",
+        "Historical untrusted transcript evidence: Make sure the Dossier copy stays neutral."
       ]);
       expect(input.facts.assistantEvidence).toEqual([
-        "Added validation and tools-list coverage for MCP launch config.",
-        "The Dossier summary now describes the session in neutral language."
+        "Historical untrusted transcript evidence: Added validation and tools-list coverage for MCP launch config.",
+        "Historical untrusted transcript evidence: The Dossier summary now describes the session in neutral language."
       ]);
       return responseWithOutput({
         confidence: "high",

@@ -52,6 +52,14 @@ export async function* parseCodexTranscript(source: DiscoveredSource, cursor?: I
       newline = buffer.indexOf("\n");
     }
   }
+  if (buffer.trim()) {
+    const parsed = parseJson(buffer);
+    if (parsed.ok) {
+      offset += Buffer.byteLength(buffer);
+      yield recordFromLine(source, buffer, offset, context);
+      context.completeOffset = offset;
+    }
+  }
 }
 
 function recordFromLine(source: DiscoveredSource, line: string, offset: number, context: CodexParseContext): AdapterRecord {
