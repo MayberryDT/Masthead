@@ -10,7 +10,13 @@ describe("session narrative validator", () => {
     "Masthead session had recent activity.",
     "Changed files were updated in this session.",
     '{"event":"session.completed"}',
-    'Updated ::-stage{cwd=""} ::-commit{cwd=""}.'
+    'Updated ::-stage{cwd=""} ::-commit{cwd=""}.',
+    "Credential payload data:text/plain,ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+    "Contact handoff mailto:tyler@example.com",
+    "Provider identifier urn:secret:project-alpha",
+    "Copied local path C:/Users/Alice/project",
+    "Copied local path (/home/alice/file)",
+    "Copied local path (~/notes)"
   ])("rejects low-quality title %s", (value) => {
     expect(validateNarrativeField("title", value).ok).toBe(false);
   });

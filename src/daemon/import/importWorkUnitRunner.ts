@@ -3,6 +3,7 @@ import { indexCanonicalSessionSearch } from "../db/searchRepository.ts";
 import { getImportWorkUnit, recordImportFailureGroup, updateImportWorkUnit } from "../db/importLedgerRepository.ts";
 import { recordImportSessionImpact } from "../db/importSessionImpactRepository.ts";
 import { ingestAdapterRecord } from "../db/sessionRepository.ts";
+import { sourceRecordIsExcluded } from "../db/sourceRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 
 export async function runImportWorkUnit(input: {
@@ -60,6 +61,15 @@ export async function runImportWorkUnit(input: {
         updateImportWorkUnit(input.db, unit.workUnitId, {
           failedRecords: failed,
           failureGroupId: failureGroup.failureGroupId,
+          heartbeatAt: now(),
+          processedRecords: processed,
+          status: "running"
+        });
+        continue;
+      }
+
+      if (sourceRecordIsExcluded(input.db, record)) {
+        updateImportWorkUnit(input.db, unit.workUnitId, {
           heartbeatAt: now(),
           processedRecords: processed,
           status: "running"

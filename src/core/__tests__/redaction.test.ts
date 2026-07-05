@@ -8,7 +8,12 @@ describe("privacy redaction", () => {
       "DATABASE_URL=postgres://user:secret@db.example.com:5432/app",
       "Cookie: session=abc123.def456",
       "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-      "https://user:password@example.com/private"
+      "https://user:password@example.com/private",
+      "email tyler@example.com",
+      "github_pat_11AAAAAAA0BBBBBBBB1CCCCCCCC2DDDDDDDD3EEEEEEEE4",
+      "xoxb-123456789012-abcdefghijklmnop",
+      "AKIAIOSFODNN7EXAMPLE",
+      "0123456789abcdef0123456789abcdef"
     ].join("\n");
 
     const redacted = redactText(input);
@@ -18,11 +23,20 @@ describe("privacy redaction", () => {
     expect(redacted).not.toContain("abc123.def456");
     expect(redacted).not.toContain("wJalrXUtnFEMI");
     expect(redacted).not.toContain("user:password@example.com");
+    expect(redacted).not.toContain("tyler@example.com");
+    expect(redacted).not.toContain("github_pat_");
+    expect(redacted).not.toContain("xoxb-123456789012");
+    expect(redacted).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(redacted).not.toContain("0123456789abcdef0123456789abcdef");
     expect(redacted).toContain("[SECRET:bearer_token]");
     expect(redacted).toContain("[SECRET:database_url]");
     expect(redacted).toContain("[SECRET:cookie]");
     expect(redacted).toContain("[SECRET:env_secret]");
     expect(redacted).toContain("https://[SECRET:credentials]@example.com/private");
+    expect(redacted).toContain("[SECRET:email]");
+    expect(redacted).toContain("[SECRET:slack_token]");
+    expect(redacted).toContain("[SECRET:aws_access_key]");
+    expect(redacted).toContain("[SECRET:hex_token]");
   });
 
   test("redacts private key blocks", () => {

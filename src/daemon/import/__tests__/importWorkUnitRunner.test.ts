@@ -10,6 +10,7 @@ import {
   listImportWorkUnits
 } from "../../db/importLedgerRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
+import { addSourceExclusion } from "../../db/sourceRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
 import { runImportWorkUnit } from "../importWorkUnitRunner.ts";
 
@@ -70,6 +71,49 @@ describe("import work unit runner", () => {
       status: "succeeded"
     });
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
+  });
+
+  test("skips records whose project metadata is excluded", async () => {
+    const sourcePath = join(tempDir, "thread.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+    addSourceExclusion(db, {
+      createdAt: "2026-07-01T00:00:00.000Z",
+      exclusionKind: "project",
+      pattern: "PrivateClient",
+      reason: "Excluded project transcripts."
+    });
+
+    await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        yield {
+          diagnostics: [],
+          normalized: {
+            confidence: "authoritative",
+            kind: "session",
+            sourceRef: { sourceKind: "jsonl", sourcePath },
+            value: { cwd: "/workspace/PrivateClient", observedAt: "2026-07-01T00:00:00.000Z", sessionId: "s1" }
+          },
+          observedAt: "2026-07-01T00:00:00.000Z",
+          payload: { id: "s1" },
+          payloadHash: "hash",
+          source: sourceForPath(sourcePath),
+          sourceRecordKey: `${sourcePath}:1`
+        };
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      runtimeKind: "codex",
+      workUnitId: unitId
+    });
+
+    expect(listImportWorkUnits(db, { importJobId: "import-1" })[0]).toMatchObject({
+      importedRecords: 0,
+      processedRecords: 1,
+      status: "succeeded"
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 0 });
   });
 
   test("indexes each touched session once after an import unit completes", async () => {

@@ -58,6 +58,28 @@ describe("Masthead daemon startup", () => {
     });
     expect(countRows(daemon, "session_enrichments")).toBe(before);
   });
+
+  test("previews enrichment rebuild for sessionIds scope without writing rows", async () => {
+    const daemon = await createTestDaemon();
+    seedSession(daemon.database, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:rebuild", title: "Rebuild preview" });
+    const before = countRows(daemon, "session_enrichments");
+    const baseUrl = await listen(daemon);
+
+    const response = await postJson(baseUrl, "/enrichment/rebuild", {
+      dryRun: true,
+      limit: 2,
+      scope: "sessionIds",
+      sessionIds: ["session:rebuild", "missing"]
+    });
+
+    expect(response).toMatchObject({
+      dryRun: true,
+      ok: true,
+      requested: 1,
+      sessions: [{ sessionId: "session:rebuild", status: "dry_run" }]
+    });
+    expect(countRows(daemon, "session_enrichments")).toBe(before);
+  });
 });
 
 async function createTestDaemon(): Promise<MastheadDaemon> {

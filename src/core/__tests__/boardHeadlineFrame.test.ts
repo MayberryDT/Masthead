@@ -62,6 +62,26 @@ describe("board headline frame contract", () => {
       ok: false,
       reason: "unsafe_text"
     });
+    expect(validateBoardHeadlineFrame(frame({ subject: "/tmp" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ disposition: "uses ~/notes for context" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ subject: "C:/Users/Alice/project" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ disposition: "copied from (/home/alice/file)" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ disposition: "copied from (~/notes)" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
   });
 
   test("allows concrete OpenAI board headline refresh frame", () => {

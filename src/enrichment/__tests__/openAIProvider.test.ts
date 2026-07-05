@@ -118,6 +118,51 @@ describe("OpenAI enrichment provider", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  test("redacts standalone credentials from transcript evidence before provider requests", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { input: string };
+      const input = JSON.parse(body.input) as { facts: { userEvidence: string[]; assistantEvidence: string[] } };
+
+      expect(body.input).not.toContain("tyler@example.com");
+      expect(body.input).not.toContain("github_pat_");
+      expect(body.input).not.toContain("xoxb-123456789012");
+      expect(body.input).not.toContain("AKIAIOSFODNN7EXAMPLE");
+      expect(body.input).not.toContain("0123456789abcdef0123456789abcdef");
+      expect([...input.facts.userEvidence, ...input.facts.assistantEvidence].join("\n")).toContain("[SECRET:email]");
+      expect([...input.facts.userEvidence, ...input.facts.assistantEvidence].join("\n")).toContain("[SECRET:github_token]");
+      expect([...input.facts.userEvidence, ...input.facts.assistantEvidence].join("\n")).toContain("[SECRET:slack_token]");
+
+      return responseWithOutput(
+        durableProviderOutput({
+          searchSummary: "Sensitive evidence redaction provider payload.",
+          summary: "Sensitive transcript evidence was redacted before the remote provider request was sent.",
+          title: "Sensitive evidence redaction"
+        })
+      );
+    });
+    const provider = createOpenAIEnrichmentProvider({
+      apiKey: "test-key",
+      enabled: true,
+      fetchImpl,
+      model: "test-model"
+    });
+    const sensitiveFacts = {
+      ...facts(),
+      assistantEvidence: [
+        "Saved Slack token xoxb-123456789012-abcdefghijklmnop and AWS key AKIAIOSFODNN7EXAMPLE."
+      ],
+      userEvidence: [
+        "Email tyler@example.com about github_pat_11AAAAAAA0BBBBBBBB1CCCCCCCC2DDDDDDDD3EEEEEEEE4.",
+        "Hash 0123456789abcdef0123456789abcdef should not leave locally."
+      ]
+    } satisfies SessionFacts;
+
+    const result = await provider.enrich({ facts: sensitiveFacts });
+
+    expect(result.status).toBe("success");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   test("uses chat completions for OpenAI-compatible endpoints", async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       expect(String(url)).toBe("http://127.0.0.1:11434/v1/chat/completions");

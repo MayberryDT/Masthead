@@ -76,3 +76,4 @@
 - [x] cargo tests pass. Evidence: 23 Rust tests passed on 2026-06-26.
 - [x] npm run doctor passes. Evidence: isolated current-branch daemon doctor passed on 2026-06-26.
 - [ ] GitHub Actions run passes for the final commit.
+

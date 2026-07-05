@@ -147,6 +147,10 @@ async function startDaemon({ codexHome, databasePath, storePath }) {
     cwd: process.cwd(),
     env: {
       ...process.env,
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_AUTH_TOKEN: "",
+      GEMINI_API_KEY: "",
+      GOOGLE_API_KEY: "",
       MASTHEAD_ALLOWED_ORIGINS: "http://127.0.0.1:5173",
       MASTHEAD_CODEX_HOME: codexHome,
       MASTHEAD_DATA_DIR: dirname(databasePath),
@@ -154,9 +158,12 @@ async function startDaemon({ codexHome, databasePath, storePath }) {
       MASTHEAD_GIT_REFRESH_MS: "0",
       MASTHEAD_HOST: "127.0.0.1",
       MASTHEAD_LEGACY_DATA_DIR: "",
+      MASTHEAD_LIVE_COPY: "0",
       MASTHEAD_LLM_COPY: "0",
       MASTHEAD_PORT: "0",
-      MASTHEAD_STORE_PATH: storePath
+      MASTHEAD_REMOTE_ENRICHMENT: "0",
+      MASTHEAD_STORE_PATH: storePath,
+      OPENAI_API_KEY: ""
     },
     stdio: ["ignore", "pipe", "pipe"]
   });

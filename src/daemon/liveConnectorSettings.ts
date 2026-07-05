@@ -729,7 +729,6 @@ function backupStamp(): string {
 }
 
 function quoteShell(value: string): string {
-  if (!/[\s"'$`\\&;?]/.test(value)) return value;
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 

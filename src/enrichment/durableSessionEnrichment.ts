@@ -1,4 +1,5 @@
 import type { EvidenceRef } from "../core/types";
+import { redactText } from "../core/redaction.ts";
 import { cleanSessionText, isWeakLiveSummary } from "../shared/sessionTextQuality.ts";
 import type {
   DurableSessionEnrichment,
@@ -319,6 +320,7 @@ function stringField(value: unknown): string | undefined {
   if (typeof value !== "string" || value.trim().length === 0) return undefined;
   const cleaned = cleanSessionText(value, 240);
   if (!cleaned) return undefined;
+  if (redactText(cleaned) !== cleaned) return undefined;
   return isUnsafeDossierText(cleaned) ? undefined : cleaned;
 }
 
@@ -335,16 +337,17 @@ function looksLikeRawCommand(value: string): boolean {
 }
 
 function containsSensitiveMarker(value: string): boolean {
-  return /\b(?:private|confidential|secret|token|password)\b/i.test(value) || /\bsk-[A-Za-z0-9_-]+\b/.test(value);
+  return /\b(?:private|confidential|secret|token|password)\b/i.test(value) || redactText(value) !== value;
 }
 
 function looksLikePathUrlOrEmail(value: string): boolean {
   return (
     /[a-z][a-z0-9+.-]*:\/\//i.test(value) ||
     /\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\?)+/.test(value) ||
+    /\b[A-Za-z]:\/(?:[^/:*?"<>|\r\n\s]+\/?)+/.test(value) ||
     /\\\\[^\\\s]+\\[^\\\s]+/.test(value) ||
     /@/.test(value) ||
-    /(?:~|\.{1,2})?\/(?:[\w.@-]+\/)+[\w.@-]+/.test(value)
+    /(?:^|[^A-Za-z0-9_])(?:~|\.{1,2})?\/\S+/.test(value)
   );
 }
 

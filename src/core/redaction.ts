@@ -4,12 +4,17 @@ const PRIVATE_KEY_PATTERN =
 const REDACTION_PATTERNS: Array<[RegExp, string]> = [
   [/Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Authorization: Bearer [SECRET:bearer_token]"],
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [SECRET:bearer_token]"],
+  [/(https?:\/\/)([^/\s:@]+):([^/\s@]+)@/gi, "$1[SECRET:credentials]@"],
+  [/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[SECRET:email]"],
+  [/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "[SECRET:github_token]"],
   [/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g, "[SECRET:github_token]"],
+  [/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, "[SECRET:slack_token]"],
+  [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[SECRET:aws_access_key]"],
   [/\bsk-[A-Za-z0-9_-]{16,}\b/g, "[SECRET:api_key]"],
+  [/\b[0-9a-f]{32,}\b/gi, "[SECRET:hex_token]"],
   [/\b(postgres(?:ql)?:\/\/)[^\s'"`]+/gi, "[SECRET:database_url]"],
   [/Cookie:\s*[^\n\r]+/gi, "Cookie: [SECRET:cookie]"],
-  [/\b(AWS|GOOGLE|OPENAI|ANTHROPIC|SUPABASE|GITHUB)?_?(SECRET|TOKEN|KEY|PASSWORD)[A-Z0-9_]*\s*=\s*[^\s\n\r]+/gi, "[SECRET:env_secret]"],
-  [/(https?:\/\/)([^/\s:@]+):([^/\s@]+)@/gi, "$1[SECRET:credentials]@"]
+  [/\b(AWS|GOOGLE|OPENAI|ANTHROPIC|SUPABASE|GITHUB)?_?(SECRET|TOKEN|KEY|PASSWORD)[A-Z0-9_]*\s*=\s*[^\s\n\r]+/gi, "[SECRET:env_secret]"]
 ];
 
 const SENSITIVE_PATH_PATTERNS = [

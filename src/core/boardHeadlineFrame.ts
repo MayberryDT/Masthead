@@ -1,3 +1,5 @@
+import { redactText } from "./redaction.ts";
+
 export type BoardHeadlineState =
   | "active"
   | "blocked"
@@ -139,11 +141,14 @@ export function isUnsafeText(value: string): boolean {
   return (
     hasUnsafeCredentialName(value) ||
     hasInternalStatusToken(value) ||
+    redactText(value) !== value ||
     /\bsk-[A-Za-z0-9_-]+\b/i.test(value) ||
+    /\b[a-z][a-z0-9+.-]{1,31}:[^\s]/i.test(value) ||
     /[a-z][a-z0-9+.-]*:\/\//i.test(value) ||
     /\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\?)+/.test(value) ||
+    /\b[A-Za-z]:\/(?:[^/:*?"<>|\r\n\s]+\/?)+/.test(value) ||
     /\\\\[^\\\s]+\\[^\\\s]+/.test(value) ||
-    /(?:~|\.{1,2})?\/(?:[\w.@-]+\/)+[\w.@-]+/.test(value) ||
+    /(?:^|[^A-Za-z0-9_])(?:~|\.{1,2})?\/\S+/.test(value) ||
     /::[-\w]+\{[^}]*\}/i.test(value) ||
     /\[url\]/i.test(value)
   );

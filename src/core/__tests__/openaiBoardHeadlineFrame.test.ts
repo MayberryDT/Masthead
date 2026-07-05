@@ -96,29 +96,23 @@ describe("OpenAI board headline frame", () => {
     expect(body.text.format.schema.required).toEqual(["subject", "disposition", "state", "subjectKind", "confidence", "evidence"]);
     expect(body.instructions).toContain("Do not summarize the session");
     expect(body.instructions).toContain("smallest concrete work object");
-    expect(body.instructions).toContain("facts.transcriptExcerpt");
+    expect(body.instructions).not.toContain("facts.transcriptExcerpt");
     const expectedInput = input();
-    expect(JSON.parse(body.input)).toEqual({
+    expect(JSON.parse(body.input)).toMatchObject({
       lifecycle: expectedInput.lifecycle,
       primaryStatus: expectedInput.primaryStatus,
       stateHint: expectedInput.stateHint,
       signals: expectedInput.signals,
       subjectCandidates: expectedInput.subjectCandidates,
-      dispositionHints: expectedInput.dispositionHints,
-      evidence: expectedInput.evidence,
       facts: {
         changedFileCount: 1,
         recentFileBasenames: ["SessionCard.tsx"],
-        recentToolNames: [],
-        transcriptExcerpt: [
-          {
-            role: "user",
-            text: "Use subject and disposition frames for Board headlines."
-          }
-        ],
-        recentTranscriptMessages: ["Use subject and disposition frames for Board headlines."]
+        recentToolNames: []
       }
     });
+    expect(body.input).not.toContain("Use subject and disposition frames for Board headlines.");
+    expect(JSON.parse(body.input).facts).not.toHaveProperty("transcriptExcerpt");
+    expect(JSON.parse(body.input).facts).not.toHaveProperty("recentTranscriptMessages");
     expect(body.input).not.toContain("OPENAI_API_KEY");
   });
 
@@ -161,7 +155,9 @@ describe("OpenAI board headline frame", () => {
           { type: "tool.call", summary: '::git-stage{cwd="/tmp"}', occurredAt: "2026-07-01T19:00:03.000Z" },
           { type: "tool.call", summary: "[url]", occurredAt: "2026-07-01T19:00:04.000Z" },
           { type: "tool.call", summary: "sk-proj-secret", occurredAt: "2026-07-01T19:00:05.000Z" },
-          { type: "tool.call", summary: "/home/tyler/secret/path", occurredAt: "2026-07-01T19:00:06.000Z" }
+          { type: "tool.call", summary: "/home/tyler/secret/path", occurredAt: "2026-07-01T19:00:06.000Z" },
+          { type: "tool.call", summary: "C:/Users/Alice/project", occurredAt: "2026-07-01T19:00:07.000Z" },
+          { type: "tool.call", summary: "copied from (~/notes)", occurredAt: "2026-07-01T19:00:08.000Z" }
         ],
         recentCommandFailures: ["OPENAI_API_KEY"],
         attentionTitles: ["https://example.com"],
@@ -188,23 +184,19 @@ describe("OpenAI board headline frame", () => {
     expect(providerInput.facts).toEqual({
       changedFileCount: 1,
       recentFileBasenames: ["SessionCard.tsx"],
-      recentToolNames: ["apply_patch"],
-      transcriptExcerpt: [
-        {
-          role: "assistant",
-          text: "Board headline frame keeps concrete subject evidence."
-        }
-      ],
-      recentTranscriptMessages: ["Board headline frame keeps concrete subject evidence."]
+      recentToolNames: ["apply_patch"]
     });
 
     expect(body.input).toContain("Headline work started");
+    expect(body.input).not.toContain("Board headline frame keeps concrete subject evidence.");
     expect(body.input).not.toContain("OPENAI_API_KEY");
     expect(body.input).not.toContain("https://example.com");
     expect(body.input).not.toContain("::git-stage");
     expect(body.input).not.toContain("[url]");
     expect(body.input).not.toContain("sk-proj-");
     expect(body.input).not.toContain("/home/tyler/secret/path");
+    expect(body.input).not.toContain("C:/Users/Alice/project");
+    expect(body.input).not.toContain("~/notes");
   });
 
   test("extracts top-level Responses API output_text", async () => {

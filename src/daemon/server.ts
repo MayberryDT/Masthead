@@ -62,7 +62,7 @@ import {
 } from "./db/sqlite.ts";
 import { legacyCandidatesFromDirectory, maybeCopyLegacySqliteBeforeOpen } from "./legacyDataMigration.ts";
 import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
-import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
+import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, sourceRecordIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
 import { setSourcePolicy, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
 import {
   cancelImportJob,
@@ -1094,6 +1094,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         for await (const record of adapter.backfill(transcriptSource, cursor)) {
           controls?.throwIfCancelled();
           const nextOffset = offsetFromSourceRecordKey(record.sourceRecordKey) ?? latestOffset;
+          if (sourceRecordIsExcluded(database, record)) {
+            latestOffset = nextOffset;
+            countImportedRecord(result, record, false);
+            controls?.updateProgress({
+              currentPath: transcriptSource.path,
+              discoveredCount: result.discoveredCount,
+              failureCount: result.failureCount,
+              importedCount: result.importedCount,
+              processedCount: result.processedCount,
+              queuedCount: result.queuedCount
+            });
+            continue;
+          }
           cursorContext = cursorContextFromRecord(record, cursorContext);
           const { sessionId } = ingestAdapterRecord(database, record, {
             cursor: {

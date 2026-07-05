@@ -223,7 +223,6 @@ async function writeJsonConfig(configPath, config) {
 }
 
 function quoteShell(value) {
-  if (!/[\s"'$`\\&;?]/.test(value)) return value;
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 

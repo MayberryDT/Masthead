@@ -1,5 +1,6 @@
 import { isUnsafeText, validateBoardHeadlineFrame, type BoardHeadlineFrame } from "./boardHeadlineFrame.ts";
 import type { BoardHeadlineInput, BoardHeadlineSignal } from "./boardHeadlineInput.ts";
+import { redactText } from "./redaction.ts";
 
 export type OpenAIBoardHeadlineFrameStatus =
   | "llm"
@@ -68,10 +69,8 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
           "Keep subject compact, ideally 2 to 6 words and at most 56 characters.",
           "Keep disposition compact, ideally 4 to 12 words and at most 96 characters.",
           "The rendered headline must fit on a session card in no more than three lines.",
-          "Use facts.transcriptExcerpt as the primary source when present.",
-          "facts.transcriptExcerpt is ordered oldest-to-newest and includes only user and assistant messages.",
           "Treat subjectCandidates as trust-ordered. Prefer transcript-derived subjects over work-context or file-derived subjects.",
-          "Prefer the latest user request and latest assistant substantive update over tool names or hook events.",
+          "Prefer compact subject and disposition evidence over tool names or hook events.",
           "If transcript evidence is thin, keep the frame literal and conservative.",
           "Use stateHint and explicit evidence for state. Do not infer completion, urgency, ownership, or user intent.",
           "Never copy raw internal status tokens such as completed_unreviewed, validation_failed, api_error, or not_configured into subject or disposition.",
@@ -214,61 +213,35 @@ type OpenAIProviderPayload = {
     changedFileCount: number;
     recentFileBasenames: string[];
     recentToolNames: string[];
-    transcriptExcerpt: Array<{
-      role: "user" | "assistant";
-      text: string;
-    }>;
-    recentTranscriptMessages: string[];
   };
 };
 
 function toOpenAIProviderPayload(input: BoardHeadlineInput): OpenAIProviderPayload {
+  const transcriptTexts = transcriptTextSet(input);
   return {
     lifecycle: safeString(input.lifecycle) ?? "",
     primaryStatus: safeString(input.primaryStatus) ?? "",
     stateHint: input.stateHint,
     signals: input.signals.slice(0, 12),
-    subjectCandidates: safeStrings(input.subjectCandidates, 12),
-    dispositionHints: safeStrings(input.dispositionHints, 12),
-    evidence: safeStrings(input.evidence, 20),
+    subjectCandidates: safeStrings(input.subjectCandidates, 12, transcriptTexts),
+    dispositionHints: safeStrings(input.dispositionHints, 12, transcriptTexts),
+    evidence: safeStrings(input.evidence, 20, transcriptTexts),
     facts: {
       changedFileCount: input.facts.changedFileCount,
       recentFileBasenames: safeStrings(input.facts.recentFileBasenames, 8),
-      recentToolNames: safeStrings(input.facts.recentToolNames, 8),
-      transcriptExcerpt: safeTranscriptExcerpt(input.facts.transcriptExcerpt ?? [], 20),
-      recentTranscriptMessages: safeStrings(input.facts.recentTranscriptMessages ?? [], 8)
+      recentToolNames: safeStrings(input.facts.recentToolNames, 8)
     }
   };
 }
 
-function safeTranscriptExcerpt(
-  values: Array<{ role: "user" | "assistant"; text: string }>,
-  limit: number
-): Array<{ role: "user" | "assistant"; text: string }> {
-  const result: Array<{ role: "user" | "assistant"; text: string }> = [];
-  const seen = new Set<string>();
-  for (const value of values) {
-    const cleaned = safeString(value.text);
-    if (!cleaned) continue;
-    const key = `${value.role}:${cleaned.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push({
-      role: value.role,
-      text: cleaned
-    });
-    if (result.length >= limit) break;
-  }
-  return result;
-}
-
-function safeStrings(values: string[], limit: number): string[] {
+function safeStrings(values: string[], limit: number, excludedTexts = new Set<string>()): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const value of values) {
     const cleaned = safeString(value);
     if (!cleaned) continue;
     const key = cleaned.toLowerCase();
+    if (excludedTexts.has(key)) continue;
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(cleaned);
@@ -280,14 +253,26 @@ function safeStrings(values: string[], limit: number): string[] {
 function safeString(value: string): string | undefined {
   const cleaned = value.replace(/\s+/g, " ").trim();
   if (!cleaned || isUnsafeText(cleaned) || hasLocalAbsolutePath(cleaned)) return undefined;
+  if (redactText(cleaned) !== cleaned) return undefined;
   return cleaned;
+}
+
+function transcriptTextSet(input: BoardHeadlineInput): Set<string> {
+  return new Set(
+    [
+      ...(input.facts.recentTranscriptMessages ?? []),
+      ...(input.facts.transcriptExcerpt ?? []).map((message) => message.text)
+    ]
+      .map((value) => value.replace(/\s+/g, " ").trim().toLowerCase())
+      .filter(Boolean)
+  );
 }
 
 function hasLocalAbsolutePath(value: string): boolean {
   return (
-    /(?:^|\s)\/(?:[^/\s]+\/)+\S*/.test(value) ||
-    /(?:^|\s)~\/\S+/.test(value) ||
+    /(?:^|[^A-Za-z0-9_])(?:~|\.{1,2})?\/\S+/.test(value) ||
     /\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\?)+/.test(value) ||
+    /\b[A-Za-z]:\/(?:[^/:*?"<>|\r\n\s]+\/?)+/.test(value) ||
     /\\\\[^\\\s]+\\[^\\\s]+/.test(value)
   );
 }

@@ -1,5 +1,6 @@
 import { stableRecordId } from "../identity.ts";
-import { relative, resolve } from "node:path";
+import { basename, relative, resolve } from "node:path";
+import type { AdapterRecord } from "../../adapters/types.ts";
 import { setSourcePolicy, sourcePolicyEnabled } from "./sourcePolicyRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
@@ -38,11 +39,33 @@ export function sourceIsExcluded(
   });
 }
 
+export function sourceRecordIsExcluded(db: MastheadDatabase, record: AdapterRecord): boolean {
+  return sourceIsExcluded(db, {
+    project: projectFromRecord(record.normalized.value),
+    sourceId: record.source.sourceId,
+    sourcePath: record.normalized.sourceRef.sourcePath ?? record.source.path
+  });
+}
+
 function pathMatchesExclusion(sourcePath: string, pattern: string): boolean {
   const source = resolve(sourcePath);
   const excluded = resolve(pattern);
   const rel = relative(excluded, source);
   return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/") && rel !== "..");
+}
+
+function projectFromRecord(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  return stringValue(record.project) ?? projectLabelFromPath(stringValue(record.cwd) ?? stringValue(record.repoRoot) ?? stringValue(record.repo_root));
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function projectLabelFromPath(path: string | undefined): string | undefined {
+  return path ? basename(path) : undefined;
 }
 
 export function approveTranscriptImport(

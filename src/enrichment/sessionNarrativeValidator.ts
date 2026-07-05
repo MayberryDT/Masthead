@@ -1,3 +1,5 @@
+import { redactText } from "../core/redaction.ts";
+
 export type NarrativeField = "title" | "liveSummary" | "outcome" | "searchSummary";
 
 export type NarrativeValidationFailure =
@@ -104,10 +106,12 @@ function looksLikeRawPayload(value: string): boolean {
 
 function looksLikePathOrUrl(value: string): boolean {
   return (
+    /\b[a-z][a-z0-9+.-]{1,31}:[^\s]/i.test(value) ||
     /[a-z][a-z0-9+.-]*:\/\//i.test(value) ||
     /\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\?)+/.test(value) ||
+    /\b[A-Za-z]:\/(?:[^/:*?"<>|\r\n\s]+\/?)+/.test(value) ||
     /\\\\[^\\\s]+\\[^\\\s]+/.test(value) ||
-    /(?:~|\.{1,2})?\/(?:[\w.@-]+\/)+[\w.@-]+/.test(value)
+    /(?:^|[^A-Za-z0-9_])(?:~|\.{1,2})?\/\S+/.test(value)
   );
 }
 
@@ -120,7 +124,7 @@ function containsDirectAddress(value: string): boolean {
 }
 
 function containsSecretLikeValue(value: string): boolean {
-  return /\b[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD)[A-Z0-9_]*\b/i.test(value) || /\bsk-[A-Za-z0-9_-]+\b/i.test(value);
+  return /\b[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD)[A-Z0-9_]*\b/i.test(value) || redactText(value) !== value;
 }
 
 function looksLikeCommand(value: string): boolean {

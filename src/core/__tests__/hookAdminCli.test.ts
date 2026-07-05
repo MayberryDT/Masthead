@@ -50,6 +50,20 @@ describe("Masthead hook admin CLI", () => {
     });
   });
 
+  test("quotes generated default command executable and hook path", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "masthead-hook-admin-"));
+    const configPath = path.join(dir, "hooks.json");
+
+    const result = await runAdmin(["preview", "--config", configPath]);
+
+    expect(result).toMatchObject({ code: 0, stderr: "" });
+    const config = JSON.parse(result.stdout);
+    const command = config.hooks.SessionStart[0].hooks[0].command;
+    const expectedHookPath = path.join(path.dirname(adminScript.pathname), "masthead-hook.js");
+    expect(command).toContain(quoteShell(process.execPath));
+    expect(command).toContain(quoteShell(expectedHookPath));
+  });
+
   test("install creates a backup and merges Masthead handlers with existing hook groups", async () => {
     const { configPath, dir } = await writeConfig({
       hooks: {
@@ -252,6 +266,10 @@ async function writeConfig(config: unknown): Promise<{ configPath: string; dir: 
   const configPath = path.join(dir, "hooks.json");
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return { configPath, dir };
+}
+
+function quoteShell(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 async function readConfig(configPath: string): Promise<unknown> {

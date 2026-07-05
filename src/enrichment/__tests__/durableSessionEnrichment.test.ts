@@ -161,4 +161,58 @@ describe("durable session enrichment", () => {
     expect(merged.sessionTitle.evidenceRefs).toEqual([evidence[0]]);
     expect(merged.sessionDossier.evidenceRefs).toEqual([evidence[0]]);
   });
+
+  test("drops sensitive provider-controlled dossier fields", () => {
+    const fallback = fallbackDurableSessionEnrichment({
+      commands: [],
+      evidence: [],
+      files: [],
+      messages: ["Repair durable field filtering."],
+      project: "Masthead",
+      sessionId: "session-sensitive-dossier",
+      sourceSessionId: "source-sensitive-dossier",
+      title: "Codex session"
+    });
+
+    const merged = mergeDurableProviderOutput(
+      fallback,
+      {
+        sessionDossier: {
+          blockers: ["Contact tyler@example.com for the next step."],
+          continuation: {
+            constraints: ["Do not reveal github_pat_11AAAAAAA0BBBBBBBB1CCCCCCCC2DDDDDDDD3EEEEEEEE4."],
+            nextStep: "Use xoxb-123456789012-abcdefghijklmnop in Slack.",
+            openQuestions: ["Is AKIAIOSFODNN7EXAMPLE still active?"]
+          },
+          decisions: ["Store 0123456789abcdef0123456789abcdef in the dossier."],
+          evidenceRefIds: [],
+          keyWork: ["Filtered sensitive provider dossier fields."],
+          outcome: "Filtered provider dossier fields before persistence.",
+          purpose: "Repair durable field filtering.",
+          verification: {
+            commands: ["vitest"],
+            evidenceRefIds: [],
+            failures: [],
+            status: "passed",
+            summary: "Provider parsing test used tyler@example.com."
+          },
+          warnings: ["Provider mentioned github_pat_11AAAAAAA0BBBBBBBB1CCCCCCCC2DDDDDDDD3EEEEEEEE4."]
+        }
+      },
+      []
+    );
+
+    expect(merged.sessionDossier.keyWork).toEqual(["Filtered sensitive provider dossier fields."]);
+    expect(merged.sessionDossier.outcome).toBe("Filtered provider dossier fields before persistence.");
+    expect(merged.sessionDossier.purpose).toBe("Repair durable field filtering.");
+    expect(merged.sessionDossier.blockers).toEqual([]);
+    expect(merged.sessionDossier.decisions).toEqual([]);
+    expect(merged.sessionDossier.continuation).toEqual({
+      constraints: [],
+      nextStep: undefined,
+      openQuestions: []
+    });
+    expect(merged.sessionDossier.verification.summary).toBe(fallback.sessionDossier.verification.summary);
+    expect(merged.sessionDossier.warnings).toEqual([]);
+  });
 });

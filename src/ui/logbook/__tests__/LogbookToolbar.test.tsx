@@ -60,6 +60,28 @@ describe("LogbookToolbar", () => {
     expect(html).not.toContain("<select");
   });
 
+
+  test("renders bulk enrich actions when rows are selected", () => {
+    const html = renderToStaticMarkup(
+      <LogbookToolbar
+        bulkSelectionCount={1}
+        filterOptions={{ projects: ["Masthead"], models: ["gpt-5"], runtimes: ["codex"] }}
+        filters={{}}
+        query=""
+        sort="recent"
+        onBulkEnrich={() => undefined}
+        onClearBulkSelection={() => undefined}
+        onFilterChange={() => undefined}
+        onQueryChange={() => undefined}
+        onSortChange={() => undefined}
+      />
+    );
+
+    expect(html).toContain("logbook-bulk-actions");
+    expect(html).toContain("1 selected");
+    expect(html).toContain("Enrich selected");
+  });
+
   test("keeps secondary Logbook filters visible without active filters", () => {
     const html = renderToStaticMarkup(
       <LogbookToolbar
