@@ -93,12 +93,17 @@ import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, 
 import { createSettingsBackedEnrichmentProvider, listLlmProviderModels, updateLlmProviderSettings } from "./llmSettings.ts";
 import {
   getCodexHookSettings,
+  getRuntimeHookSettings,
   getSettingsState,
   installCodexHooks,
+  installRuntimeHooks,
   settingsRuntimeIdentity,
   testCodexHooks,
-  uninstallCodexHooks
+  testRuntimeHooks,
+  uninstallCodexHooks,
+  uninstallRuntimeHooks
 } from "./settingsService.ts";
+import { isLiveConnectorRuntime } from "./liveConnectorSettings.ts";
 
 export type MastheadDaemon = {
   server: Server;
@@ -2086,6 +2091,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/settings/hooks") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        hooks: await getCodexHookSettings(database, config),
+        ok: true
+      });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/settings/hooks/codex") {
       sendJson(request, response, config.allowedOrigins, 200, {
         hooks: await getCodexHookSettings(database, config),
@@ -2131,6 +2144,66 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         ok: true
       });
       return;
+    }
+
+    const runtimeHookSettingsMatch = url.pathname.match(/^\/settings\/hooks\/([^/]+)(?:\/(install|uninstall|test))?$/);
+    if (runtimeHookSettingsMatch && runtimeHookSettingsMatch[1] !== "codex") {
+      const runtime = decodeURIComponent(runtimeHookSettingsMatch[1] ?? "");
+      const action = runtimeHookSettingsMatch[2];
+      if (!isLiveConnectorRuntime(runtime)) {
+        sendJson(request, response, config.allowedOrigins, 404, {
+          ok: false,
+          error: "live connector runtime not found"
+        });
+        return;
+      }
+
+      if (!action && request.method === "GET") {
+        sendJson(request, response, config.allowedOrigins, 200, {
+          hooks: await getRuntimeHookSettings(database, config, runtime),
+          ok: true
+        });
+        return;
+      }
+
+      if (request.method === "POST" && action === "install") {
+        try {
+          sendJson(request, response, config.allowedOrigins, 202, {
+            hooks: await installRuntimeHooks(database, config, runtime),
+            ok: true
+          });
+        } catch (error) {
+          sendJson(request, response, config.allowedOrigins, 400, {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      if (request.method === "POST" && action === "uninstall") {
+        try {
+          sendJson(request, response, config.allowedOrigins, 202, {
+            hooks: await uninstallRuntimeHooks(database, config, runtime),
+            ok: true
+          });
+        } catch (error) {
+          sendJson(request, response, config.allowedOrigins, 400, {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        return;
+      }
+
+      if (request.method === "POST" && action === "test") {
+        const hookTestEndpoint = `http://${request.headers.host ?? `${config.host}:${config.port}`}/ingest`;
+        sendJson(request, response, config.allowedOrigins, 202, {
+          hooks: await testRuntimeHooks(database, config, runtime, { endpoint: hookTestEndpoint }),
+          ok: true
+        });
+        return;
+      }
     }
 
     if (request.method === "GET" && url.pathname === "/sessions") {

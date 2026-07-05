@@ -41,6 +41,19 @@ describe("Codex hook admin config", () => {
     expect(twice).toEqual(once);
   });
 
+  test("install repairs stale Masthead hook commands", () => {
+    const stale = installMastheadHookConfig({}, { command: "node /old/scripts/masthead-hook.js" });
+
+    const next = installMastheadHookConfig(stale, { command, timeout: 2 });
+
+    expect(verifyMastheadHookConfig(next, { command, timeout: 2 })).toEqual({
+      installed: true,
+      missingEvents: [],
+      mismatchedEvents: []
+    });
+    expect(next.hooks.SessionStart).toEqual([{ matcher: "*", hooks: [{ type: "command", command, timeout: 2 }] }]);
+  });
+
   test("uninstalls only Masthead hook handlers and preserves non-Masthead groups", () => {
     const installed = installMastheadHookConfig(
       {

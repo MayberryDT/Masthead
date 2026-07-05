@@ -2,7 +2,7 @@ const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
 const DEFAULT_TIMEOUT_SECONDS = 1;
 const REQUIRED_HOOK_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"] as const;
 
-export type HookEventName = (typeof REQUIRED_HOOK_EVENTS)[number];
+export type HookEventName = string;
 
 export type CodexCommandHook = {
   type: "command";
@@ -27,6 +27,7 @@ export type CodexHookConfig = {
 
 export type HookInstallOptions = {
   command: string;
+  events?: readonly string[];
   timeout?: number;
   statusMessage?: string;
 };
@@ -41,9 +42,19 @@ export function installMastheadHookConfig(config: CodexHookConfig, options: Hook
   const next = cloneConfig(config);
   next.hooks ??= {};
 
-  for (const eventName of REQUIRED_HOOK_EVENTS) {
-    const groups = [...(next.hooks[eventName] ?? [])].map(cloneGroup);
-    if (!groups.some((group) => group.hooks?.some(isMastheadHook))) {
+  for (const eventName of requiredEvents(options.events)) {
+    let repairedExistingHook = false;
+    const groups = [...(next.hooks[eventName] ?? [])].map((group) => {
+      const nextGroup = cloneGroup(group);
+      if (!isOfficialGroup(nextGroup)) return nextGroup;
+      nextGroup.hooks = nextGroup.hooks.map((entry) => {
+        if (!isMastheadHook(entry)) return entry;
+        repairedExistingHook = true;
+        return mastheadHook(options);
+      });
+      return nextGroup;
+    });
+    if (!repairedExistingHook) {
       groups.push({
         matcher: "*",
         hooks: [mastheadHook(options)]
@@ -74,7 +85,7 @@ export function verifyMastheadHookConfig(config: CodexHookConfig, expected?: Par
   const missingEvents: HookEventName[] = [];
   const mismatchedEvents: HookEventName[] = [];
 
-  for (const eventName of REQUIRED_HOOK_EVENTS) {
+  for (const eventName of requiredEvents(expected?.events)) {
     const handlers = (hooks[eventName] ?? [])
       .filter(isOfficialGroup)
       .flatMap((group) => group.hooks)
@@ -103,6 +114,10 @@ export function plannedMastheadHookConfig(config: CodexHookConfig, options: Hook
 
 export function requiredHookEvents(): HookEventName[] {
   return [...REQUIRED_HOOK_EVENTS];
+}
+
+function requiredEvents(events: readonly string[] | undefined): readonly string[] {
+  return events?.length ? events : REQUIRED_HOOK_EVENTS;
 }
 
 function mastheadHook(options: HookInstallOptions): CodexCommandHook {

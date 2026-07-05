@@ -1,12 +1,4 @@
-import { chmod, copyFile, lstat, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import {
-  installMastheadHookConfig,
-  uninstallMastheadHookConfig,
-  verifyMastheadHookConfig,
-  type CodexHookConfig,
-  type HookEventName
-} from "../core/hookAdmin.ts";
+import { dirname, resolve } from "node:path";
 import { scanTargetHarnesses, type HarnessCatalogEntry } from "../adapters/harnessCatalog.ts";
 import type { RuntimeKind } from "../adapters/types.ts";
 import { getDataSummary, type DataSummary } from "./db/dataLifecycleRepository.ts";
@@ -18,6 +10,20 @@ import type { MastheadDatabase } from "./db/sqlite.ts";
 import type { DaemonConfig } from "./config.ts";
 import { isWeakSessionTitle } from "../shared/sessionTextQuality.ts";
 import { effectiveLlmProvider, getLlmProviderSettings, type LlmProviderSettingsDto } from "./llmSettings.ts";
+import {
+  baseIngestEndpoint,
+  getLiveConnectorSetting,
+  getLiveConnectorSettings,
+  installLiveConnector,
+  installLiveConnectors,
+  latestLiveConnectorBackupPath,
+  LIVE_CONNECTOR_RUNTIMES,
+  runLiveConnectorRoundTrip,
+  uninstallLiveConnector,
+  uninstallLiveConnectors,
+  type LiveConnectorRuntime,
+  type LiveConnectorSettings
+} from "./liveConnectorSettings.ts";
 
 export type SettingsOptionDto = {
   value: string;
@@ -43,14 +49,15 @@ export type HarnessCaptureIntegrationDto = {
   supportsActions: boolean;
   description: string;
   configPath?: string;
+  endpoint?: string;
 };
 
 export type CodexHookSettingsDto = {
   configPath: string;
   configExists: boolean;
   installed: boolean;
-  missingEvents: HookEventName[];
-  mismatchedEvents: HookEventName[];
+  missingEvents: string[];
+  mismatchedEvents: string[];
   integrations: HarnessCaptureIntegrationDto[];
   command: string;
   endpoint: string;
@@ -117,11 +124,6 @@ export type SettingsStateDto = SettingsRuntimeIdentityDto & {
     runtimes: SettingsOptionDto[];
     hosts: SettingsOptionDto[];
   };
-};
-
-type HooksConfigRead = {
-  config: CodexHookConfig;
-  existed: boolean;
 };
 
 type CodexHookSettingsBaseDto = Omit<CodexHookSettingsDto, "integrations">;
@@ -307,62 +309,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export async function getCodexHookSettings(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {
-  const configPath = codexHooksPath(config);
-  const command = hookCommand(config);
-  const endpoint = ingestEndpoint(config);
-  const latestBackupPath = await latestHookBackupPath(configPath).catch(() => undefined);
+  const connectors = await getLiveConnectorSettings(config);
+  const codexConnector = connectorByRuntime(connectors, "codex");
+  const latestBackupPath = (await latestLiveConnectorBackupPath(config)) ?? codexConnector.latestBackupPath;
   const lastTest = readHookLastTest(db);
   const lastEventAt = latestRawHookEventAt(db);
 
-  try {
-    const { config: hookConfig, existed } = await readHooksConfig(configPath, { allowMissing: true });
-    const verification = verifyMastheadHookConfig(hookConfig, { command });
-    return withHarnessCaptureIntegrations({
-      command,
-      configExists: existed,
-      configPath,
-      endpoint,
-      installed: verification.installed,
+  return withHarnessCaptureIntegrations(
+    {
+      command: codexConnector.command,
+      configExists: connectors.some((connector) => connector.configExists),
+      configPath: codexConnector.configPath,
+      endpoint: baseIngestEndpoint(config),
+      error: connectors.find((connector) => connector.error)?.error,
+      installed: connectors.every((connector) => connector.installed),
       lastEventAt,
       lastTest,
       latestBackupPath,
-      mismatchedEvents: verification.mismatchedEvents,
-      missingEvents: verification.missingEvents
-    });
-  } catch (error) {
-    return withHarnessCaptureIntegrations({
-      command,
-      configExists: false,
-      configPath,
-      endpoint,
-      error: error instanceof Error ? error.message : String(error),
-      installed: false,
-      lastEventAt,
-      lastTest,
-      latestBackupPath,
-      mismatchedEvents: [],
-      missingEvents: []
-    });
-  }
+      mismatchedEvents: connectorEvents(connectors, "mismatchedEvents"),
+      missingEvents: connectorEvents(connectors, "missingEvents")
+    },
+    connectors
+  );
 }
 
-function withHarnessCaptureIntegrations(settings: CodexHookSettingsBaseDto): CodexHookSettingsDto {
+export async function getRuntimeHookSettings(db: MastheadDatabase, config: DaemonConfig, runtime: LiveConnectorRuntime): Promise<CodexHookSettingsDto> {
+  const connectors = await getLiveConnectorSettings(config);
+  const connector = connectorByRuntime(connectors, runtime);
+  return hookSettingsForConnector(db, connector, connectors);
+}
+
+function withHarnessCaptureIntegrations(settings: CodexHookSettingsBaseDto, connectors: LiveConnectorSettings[]): CodexHookSettingsDto {
   return {
     ...settings,
-    integrations: scanTargetHarnesses().map((entry) => harnessCaptureIntegration(entry, settings))
+    integrations: scanTargetHarnesses().map((entry) => harnessCaptureIntegration(entry, connectors))
   };
 }
 
-function harnessCaptureIntegration(entry: HarnessCatalogEntry, codexSettings: CodexHookSettingsBaseDto): HarnessCaptureIntegrationDto {
-  if (entry.runtime === "codex") {
+function harnessCaptureIntegration(entry: HarnessCatalogEntry, connectors: LiveConnectorSettings[]): HarnessCaptureIntegrationDto {
+  const connector = connectors.find((item) => item.runtime === entry.runtime);
+  if (connector) {
     return {
       actionSurface: "settings",
       captureMode: "live_hook",
-      configPath: codexSettings.configPath,
-      description: "Live local hook events are installed, tested, and removed from this Settings card.",
+      configPath: connector.configPath,
+      description: `Live local ${entry.label} events are installed, tested, and removed from this Settings card.`,
+      endpoint: connector.endpoint,
       label: entry.label,
       runtime: entry.runtime,
-      status: codexCaptureStatus(codexSettings),
+      status: connectorCaptureStatus(connector),
       supportsActions: true
     };
   }
@@ -397,7 +392,7 @@ function harnessCaptureDescription(entry: HarnessCatalogEntry, captureMode: Harn
   return `Imported from local ${entry.label} transcript history through Sources.`;
 }
 
-function codexCaptureStatus(settings: CodexHookSettingsBaseDto): HarnessCaptureStatus {
+function connectorCaptureStatus(settings: Pick<LiveConnectorSettings, "configExists" | "error" | "installed" | "mismatchedEvents" | "missingEvents">): HarnessCaptureStatus {
   if (settings.error) return "needs_repair";
   if (settings.installed && settings.missingEvents.length === 0 && settings.mismatchedEvents.length === 0) return "installed";
   if (settings.configExists) return "needs_repair";
@@ -405,19 +400,23 @@ function codexCaptureStatus(settings: CodexHookSettingsBaseDto): HarnessCaptureS
 }
 
 export async function installCodexHooks(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {
-  const configPath = codexHooksPath(config);
-  const { config: hookConfig, existed } = await readHooksConfig(configPath, { allowMissing: true });
-  if (existed) await createHookBackup(configPath, "install");
-  await writeHooksConfig(configPath, installMastheadHookConfig(hookConfig, { command: hookCommand(config), timeout: 1 }));
+  await installLiveConnectors(config);
   return getCodexHookSettings(db, config);
 }
 
+export async function installRuntimeHooks(db: MastheadDatabase, config: DaemonConfig, runtime: LiveConnectorRuntime): Promise<CodexHookSettingsDto> {
+  await installLiveConnector(config, runtime);
+  return getRuntimeHookSettings(db, config, runtime);
+}
+
 export async function uninstallCodexHooks(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {
-  const configPath = codexHooksPath(config);
-  const { config: hookConfig, existed } = await readHooksConfig(configPath, { allowMissing: true });
-  if (existed) await createHookBackup(configPath, "uninstall");
-  await writeHooksConfig(configPath, uninstallMastheadHookConfig(hookConfig));
+  await uninstallLiveConnectors(config);
   return getCodexHookSettings(db, config);
+}
+
+export async function uninstallRuntimeHooks(db: MastheadDatabase, config: DaemonConfig, runtime: LiveConnectorRuntime): Promise<CodexHookSettingsDto> {
+  await uninstallLiveConnector(config, runtime);
+  return getRuntimeHookSettings(db, config, runtime);
 }
 
 export async function testCodexHooks(
@@ -430,16 +429,40 @@ export async function testCodexHooks(
 
   if (!settings.installed) {
     lastTest = {
-      message: "Masthead hook entries are not fully installed, so the round-trip test was not run.",
+      message: "Masthead live connector entries are not fully installed, so the round-trip test was not run.",
       status: "failed",
       testedAt: new Date().toISOString()
     };
   } else {
-    lastTest = await runHookRoundTrip(config, options.endpoint);
+    lastTest = await runLiveConnectorRoundTrip(config, { endpoint: options.endpoint, runtimes: LIVE_CONNECTOR_RUNTIMES });
   }
 
   writeHookLastTest(db, lastTest);
   return getCodexHookSettings(db, config);
+}
+
+export async function testRuntimeHooks(
+  db: MastheadDatabase,
+  config: DaemonConfig,
+  runtime: LiveConnectorRuntime,
+  options: { endpoint?: string } = {}
+): Promise<CodexHookSettingsDto> {
+  const settings = await getRuntimeHookSettings(db, config, runtime);
+  let lastTest: HookLastTestDto;
+
+  if (!settings.installed) {
+    const connector = await getLiveConnectorSetting(config, runtime);
+    lastTest = {
+      message: `${connector.label} live connector entries are not fully installed, so the round-trip test was not run.`,
+      status: "failed",
+      testedAt: new Date().toISOString()
+    };
+  } else {
+    lastTest = await runLiveConnectorRoundTrip(config, { endpoint: options.endpoint, runtimes: [runtime] });
+  }
+
+  writeHookLastTest(db, lastTest);
+  return getRuntimeHookSettings(db, config, runtime);
 }
 
 function deletionTargets(db: MastheadDatabase): SettingsStateDto["deletionTargets"] {
@@ -477,86 +500,6 @@ function uniqueOptions(values: Array<string | null | undefined>): SettingsOption
   return Array.from(new Set(values.filter((value): value is string => Boolean(value)))).map((value) => ({ label: value, value }));
 }
 
-function codexHooksPath(config: DaemonConfig): string {
-  return resolve(process.env.MASTHEAD_CODEX_HOOKS || join(config.codexHomeDir, ".codex", "hooks.json"));
-}
-
-function hookCommand(config: DaemonConfig): string {
-  const scriptPath = resolve(process.env.MASTHEAD_HOOK_SCRIPT || "scripts/masthead-hook.js");
-  return `MASTHEAD_INGEST_URL=${ingestEndpoint(config)} MASTHEAD_HOOK_TIMEOUT_MS=750 ${quoteShell(process.execPath)} ${quoteShell(scriptPath)}`;
-}
-
-function ingestEndpoint(config: DaemonConfig): string {
-  return `http://${config.host}:${config.port}/ingest`;
-}
-
-async function readHooksConfig(configPath: string, options: { allowMissing: boolean }): Promise<HooksConfigRead> {
-  let raw: string;
-  try {
-    raw = await readFile(configPath, "utf8");
-  } catch (error) {
-    if (isErrno(error, "ENOENT") && options.allowMissing) return { config: {}, existed: false };
-    throw error;
-  }
-
-  const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`Hook config must contain a JSON object: ${configPath}`);
-  }
-  return { config: parsed as CodexHookConfig, existed: true };
-}
-
-async function writeHooksConfig(configPath: string, config: CodexHookConfig): Promise<void> {
-  await mkdir(dirname(configPath), { recursive: true });
-  const mode = await targetMode(configPath);
-  const tmpPath = join(dirname(configPath), `.${configPath.split("/").at(-1)}.masthead-tmp-${backupStamp()}.json`);
-  await writeFile(tmpPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-  await chmod(tmpPath, mode);
-  await rename(tmpPath, configPath);
-}
-
-async function createHookBackup(configPath: string, operation: string): Promise<string> {
-  await assertRegularHookFile(configPath);
-  const backupPath = `${configPath}.masthead-backup-${backupStamp()}-${operation}.json`;
-  await copyFile(configPath, backupPath);
-  return backupPath;
-}
-
-async function latestHookBackupPath(configPath: string): Promise<string | undefined> {
-  const dir = dirname(configPath);
-  const prefix = `${configPath.split("/").at(-1)}.masthead-backup-`;
-  const entries = await readdir(dir, { withFileTypes: true });
-  const backups = await Promise.all(
-    entries
-      .filter((entry) => entry.isFile() && entry.name.startsWith(prefix) && entry.name.endsWith(".json"))
-      .map(async (entry) => {
-        const path = join(dir, entry.name);
-        const info = await stat(path);
-        return { path, mtimeMs: info.mtimeMs, name: entry.name };
-      })
-  );
-  backups.sort((left, right) => right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name));
-  return backups[0]?.path;
-}
-
-async function targetMode(configPath: string): Promise<number> {
-  try {
-    const info = await lstat(configPath);
-    if (info.isSymbolicLink()) throw new Error(`Refusing to mutate symlinked hook config: ${configPath}`);
-    if (!info.isFile()) throw new Error(`Hook config path is not a regular file: ${configPath}`);
-    return info.mode & 0o777;
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) return 0o600;
-    throw error;
-  }
-}
-
-async function assertRegularHookFile(configPath: string): Promise<void> {
-  const info = await lstat(configPath);
-  if (info.isSymbolicLink()) throw new Error(`Refusing to mutate symlinked hook config: ${configPath}`);
-  if (!info.isFile()) throw new Error(`Hook config path is not a regular file: ${configPath}`);
-}
-
 function writeHookLastTest(db: MastheadDatabase, input: HookLastTestDto): void {
   db.prepare(
     `INSERT INTO app_settings (setting_key, setting_json, updated_at)
@@ -579,61 +522,42 @@ function readHookLastTest(db: MastheadDatabase): HookLastTestDto | undefined {
   }
 }
 
-async function runHookRoundTrip(config: DaemonConfig, endpoint = ingestEndpoint(config)): Promise<HookLastTestDto> {
-  const testedAt = new Date().toISOString();
-  const sourceEventId = `masthead-settings-hook-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  try {
-    const response = await fetch(endpoint, {
-      body: JSON.stringify({
-        cwd: process.cwd(),
-        event: "session_started",
-        provider_event_id: sourceEventId,
-        session_id: `masthead-hook-test-${sourceEventId}`,
-        source: "masthead-settings",
-        timestamp: testedAt
-      }),
-      headers: { "content-type": "application/json" },
-      method: "POST"
-    });
-    const body = (await response.json().catch(() => undefined)) as { status?: string } | undefined;
-    if (!response.ok) {
-      return {
-        message: `Hook round-trip failed: ingest endpoint returned ${response.status}.`,
-        status: "failed",
-        testedAt
-      };
-    }
-    return {
-      message:
-        body?.status === "accepted"
-          ? "Hook round-trip passed: Masthead accepted a synthetic Codex lifecycle event."
-          : `Hook round-trip reached Masthead, but ingest reported ${body?.status ?? "an unknown status"}.`,
-      status: body?.status === "accepted" ? "passed" : "failed",
-      testedAt
-    };
-  } catch (error) {
-    return {
-      message: `Hook round-trip failed: ${error instanceof Error ? error.message : String(error)}`,
-      status: "failed",
-      testedAt
-    };
-  }
-}
-
 function latestRawHookEventAt(db: MastheadDatabase): string | undefined {
   const row = db.prepare("SELECT MAX(observed_at) AS observedAt FROM raw_events").get() as { observedAt: string | null };
   return row.observedAt ?? undefined;
 }
 
-function backupStamp(): string {
-  return `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}-${process.hrtime.bigint()}`;
+function hookSettingsForConnector(
+  db: MastheadDatabase,
+  connector: LiveConnectorSettings,
+  connectors: LiveConnectorSettings[]
+): CodexHookSettingsDto {
+  const lastTest = readHookLastTest(db);
+  const lastEventAt = latestRawHookEventAt(db);
+  return withHarnessCaptureIntegrations(
+    {
+      command: connector.command,
+      configExists: connector.configExists,
+      configPath: connector.configPath,
+      endpoint: connector.endpoint,
+      error: connector.error,
+      installed: connector.installed,
+      lastEventAt,
+      lastTest,
+      latestBackupPath: connector.latestBackupPath,
+      mismatchedEvents: connector.mismatchedEvents,
+      missingEvents: connector.missingEvents
+    },
+    connectors
+  );
 }
 
-function quoteShell(value: string): string {
-  if (!/[\s"'$`\\]/.test(value)) return value;
-  return `'${value.replace(/'/g, "'\\''")}'`;
+function connectorByRuntime(connectors: LiveConnectorSettings[], runtime: RuntimeKind): LiveConnectorSettings {
+  const connector = connectors.find((item) => item.runtime === runtime);
+  if (!connector) throw new Error(`Missing live connector settings for ${runtime}`);
+  return connector;
 }
 
-function isErrno(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+function connectorEvents(connectors: LiveConnectorSettings[], key: "mismatchedEvents" | "missingEvents"): string[] {
+  return connectors.flatMap((connector) => connector[key].map((eventName) => `${connector.runtime}:${eventName}`));
 }

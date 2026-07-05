@@ -118,18 +118,18 @@ describe("settings API", () => {
           supportsActions: true
         }),
         expect.objectContaining({
-          actionSurface: "sources",
-          captureMode: "transcript_import",
+          actionSurface: "settings",
+          captureMode: "live_hook",
           label: "Claude Code",
           runtime: "claude_code",
-          supportsActions: false
+          supportsActions: true
         }),
         expect.objectContaining({
-          actionSurface: "sources",
-          captureMode: "transcript_import",
+          actionSurface: "settings",
+          captureMode: "live_hook",
           label: "OpenCode",
           runtime: "opencode",
-          supportsActions: false
+          supportsActions: true
         })
       ])
     );
@@ -608,17 +608,36 @@ describe("settings API", () => {
     expect(await confirm.text()).toContain("Masthead database changed");
   });
 
-  test("installs, tests, and uninstalls the real Codex hooks file", async () => {
+  test("installs, tests, and uninstalls the live connector hook files", async () => {
     const { daemon, tempDir } = await createTestHarness();
     const baseUrl = await listen(daemon);
     const hooksPath = join(tempDir, ".codex", "hooks.json");
+    const claudePath = join(tempDir, ".claude", "settings.json");
+    const cursorPath = join(tempDir, ".cursor", "hooks.json");
+    const grokPath = join(tempDir, ".grok", "hooks", "masthead.json");
+    const opencodePath = join(tempDir, ".config", "opencode", "plugins", "masthead-live.js");
 
-    const before = await getJson(baseUrl, "/settings/hooks/codex");
+    const before = await getJson(baseUrl, "/settings/hooks");
     expect(before.hooks).toMatchObject({
       configExists: false,
       configPath: hooksPath,
       installed: false
     });
+    await mkdir(dirname(cursorPath), { recursive: true });
+    await writeFile(
+      cursorPath,
+      `${JSON.stringify(
+        {
+          version: 1,
+          hooks: {
+            beforeSubmitPrompt: [{ command: "node existing-cursor-hook.js" }, { command: "MASTHEAD_INGEST_URL=http://old/ingest node /old/masthead-hook.js" }]
+          }
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
 
     const installed = await postJson(baseUrl, "/settings/hooks/codex/install");
     expect(installed.hooks).toMatchObject({
@@ -626,18 +645,98 @@ describe("settings API", () => {
       installed: true
     });
     expect(await readFile(hooksPath, "utf8")).toContain("masthead-hook.js");
+    expect(await readFile(hooksPath, "utf8")).toContain("/ingest");
+    expect(await readFile(claudePath, "utf8")).toContain("runtime=claude_code");
+    const cursorConfig = JSON.parse(await readFile(cursorPath, "utf8")) as { hooks: Record<string, Array<{ command: string }>> };
+    expect(cursorConfig.hooks.beforeSubmitPrompt).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ command: "node existing-cursor-hook.js" }),
+        expect.objectContaining({ command: expect.stringContaining("runtime=cursor") })
+      ])
+    );
+    const cursorMastheadPromptHooks = cursorConfig.hooks.beforeSubmitPrompt.filter((entry) => entry.command.includes("masthead-hook.js"));
+    expect(cursorMastheadPromptHooks).toHaveLength(1);
+    expect(cursorMastheadPromptHooks[0]?.command).not.toContain("/old/");
+    expect(cursorConfig.hooks.afterFileEdit).toEqual([expect.objectContaining({ command: expect.stringContaining("runtime=cursor") })]);
+    expect(await readFile(grokPath, "utf8")).toContain("runtime=grok");
+    expect(await readFile(opencodePath, "utf8")).toContain("masthead-live-connector");
+    expect(await readFile(opencodePath, "utf8")).toContain("runtime=opencode");
+    expect(installed.hooks.integrations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ configPath: claudePath, runtime: "claude_code", status: "installed" }),
+        expect.objectContaining({ configPath: cursorPath, runtime: "cursor", status: "installed" }),
+        expect.objectContaining({ configPath: grokPath, runtime: "grok", status: "installed" }),
+        expect.objectContaining({ configPath: opencodePath, runtime: "opencode", status: "installed" })
+      ])
+    );
 
     const tested = await postJson(baseUrl, "/settings/hooks/codex/test");
     expect(tested.hooks.lastTest).toMatchObject({
-      message: "Hook round-trip passed: Masthead accepted a synthetic Codex lifecycle event.",
+      message: expect.stringContaining("Masthead accepted synthetic live events"),
       status: "passed"
     });
+    const runtimeRows = daemon.database
+      .prepare(
+        `SELECT runtimes.runtime_kind AS runtime, COUNT(*) AS count
+        FROM sessions
+        JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+        GROUP BY runtimes.runtime_kind
+        ORDER BY runtimes.runtime_kind`
+      )
+      .all() as Array<{ count: number; runtime: string }>;
+    expect(runtimeRows).toEqual(
+      expect.arrayContaining([
+        { count: 1, runtime: "claude_code" },
+        { count: 1, runtime: "codex" },
+        { count: 1, runtime: "cursor" },
+        { count: 1, runtime: "grok" },
+        { count: 1, runtime: "opencode" }
+      ])
+    );
 
     const uninstalled = await postJson(baseUrl, "/settings/hooks/codex/uninstall");
     expect(uninstalled.hooks).toMatchObject({
       installed: false
     });
     expect(uninstalled.hooks.latestBackupPath).toContain("masthead-backup");
+    const uninstalledCursorConfig = JSON.parse(await readFile(cursorPath, "utf8")) as { hooks: Record<string, Array<{ command: string }>> };
+    expect(uninstalledCursorConfig.hooks.beforeSubmitPrompt).toEqual([{ command: "node existing-cursor-hook.js" }]);
+    expect(uninstalledCursorConfig.hooks.afterFileEdit).toEqual([]);
+    await expect(readFile(opencodePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("supports runtime-specific live connector settings actions", async () => {
+    const { daemon, tempDir } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+    const claudePath = join(tempDir, ".claude", "settings.json");
+
+    const before = await getJson(baseUrl, "/settings/hooks/claude_code");
+    expect(before.hooks).toMatchObject({
+      configExists: false,
+      configPath: claudePath,
+      endpoint: expect.stringContaining("runtime=claude_code"),
+      installed: false
+    });
+
+    const installed = await postJson(baseUrl, "/settings/hooks/claude_code/install");
+    expect(installed.hooks).toMatchObject({
+      configExists: true,
+      configPath: claudePath,
+      installed: true
+    });
+    expect(await readFile(claudePath, "utf8")).toContain("runtime=claude_code");
+
+    const tested = await postJson(baseUrl, "/settings/hooks/claude_code/test");
+    expect(tested.hooks.lastTest).toMatchObject({
+      message: expect.stringContaining("Claude Code"),
+      status: "passed"
+    });
+
+    const uninstalled = await postJson(baseUrl, "/settings/hooks/claude_code/uninstall");
+    expect(uninstalled.hooks).toMatchObject({
+      configExists: true,
+      installed: false
+    });
   });
 });
 

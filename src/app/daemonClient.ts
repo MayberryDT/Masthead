@@ -440,6 +440,7 @@ export type HarnessCaptureIntegrationDto = {
   supportsActions: boolean;
   description: string;
   configPath?: string;
+  endpoint?: string;
 };
 
 export type CodexHookSettingsDto = {

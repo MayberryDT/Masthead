@@ -22,27 +22,33 @@ describe("HarnessLiveCaptureSection", () => {
     expect(container.textContent).toContain("http://127.0.0.1:17373/ingest");
 
     await act(async () => {
-      buttonByText(container, "Test hooks").click();
+      buttonByText(container, "Test live connectors").click();
     });
 
     expect(onAction).toHaveBeenCalledWith("test");
     await act(async () => root.unmount());
   });
 
-  test("renders unsupported live capture for non-Codex harnesses without hook actions", async () => {
+  test("renders non-Codex live capture status and shared hook actions", async () => {
+    const onAction = vi.fn();
     const container = document.createElement("div");
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<HarnessLiveCaptureSection hooks={hookSettings()} runtime="cursor" />);
+      root.render(<HarnessLiveCaptureSection hooks={hookSettings()} runtime="cursor" onAction={onAction} />);
     });
 
     expect(container.textContent).toContain("Live capture");
     expect(container.textContent).toContain("Cursor");
-    expect(container.textContent).toContain("Not wired yet");
-    expect(container.textContent).toContain("Live capture for Cursor is not wired yet.");
-    expect(container.textContent).not.toContain("http://127.0.0.1:17373/ingest");
-    expect(container.querySelectorAll("button")).toHaveLength(0);
+    expect(container.textContent).toContain("Installed");
+    expect(container.textContent).toContain("/home/tyler/.cursor/hooks.json");
+    expect(container.textContent).toContain("http://127.0.0.1:17373/ingest?runtime=cursor");
+
+    await act(async () => {
+      buttonByText(container, "Install/repair live connectors").click();
+    });
+
+    expect(onAction).toHaveBeenCalledWith("install");
     await act(async () => root.unmount());
   });
 });
@@ -56,13 +62,15 @@ function hookSettings(): CodexHookSettingsDto {
     installed: true,
     integrations: [
       {
-        actionSurface: "sources",
-        captureMode: "transcript_import",
-        description: "Imported from local Cursor transcript history through Sources.",
+        actionSurface: "settings",
+        captureMode: "live_hook",
+        configPath: "/home/tyler/.cursor/hooks.json",
+        description: "Cursor live hooks",
+        endpoint: "http://127.0.0.1:17373/ingest?runtime=cursor",
         label: "Cursor",
         runtime: "cursor",
-        status: "managed_in_sources",
-        supportsActions: false
+        status: "installed",
+        supportsActions: true
       },
       {
         actionSurface: "sources",
