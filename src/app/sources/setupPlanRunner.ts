@@ -1,3 +1,5 @@
+import { harnessForRuntime } from "../../adapters/harnessCatalog";
+import type { RuntimeKind } from "../../adapters/types";
 import type {
   SourcesSetupLiveCaptureSelection,
   SourcesSetupRunInput
@@ -30,12 +32,23 @@ export async function runSourcesSetupPlan(plan: SourcesSetupPlan, deps: SetupPla
   const steps: SetupRunLogEntry[] = [];
 
   for (const liveCapture of plan.liveCapture) {
-    if (liveCapture.runtime !== "codex" || liveCapture.action === "leave") {
+    if (liveCapture.action === "leave") {
       appendStep(steps, deps, {
         id: `live:${liveCapture.runtime}`,
-        label: `${liveCapture.runtime} live capture`,
+        label: `${runtimeLabel(liveCapture.runtime)} live capture`,
         message: "No writable live hook action requested.",
         status: "skipped",
+        timestamp: new Date().toISOString()
+      });
+      continue;
+    }
+
+    if (liveCapture.runtime !== "codex") {
+      appendStep(steps, deps, {
+        id: `live:${liveCapture.runtime}`,
+        label: `${runtimeLabel(liveCapture.runtime)} live capture`,
+        message: "Live capture is required but this harness does not have a writable adapter yet.",
+        status: "failed",
         timestamp: new Date().toISOString()
       });
       continue;
@@ -52,25 +65,28 @@ export async function runSourcesSetupPlan(plan: SourcesSetupPlan, deps: SetupPla
   }
 
   if (plan.importMetadata || plan.importTranscripts || plan.queueEnrichment) {
-    const setupInput: SourcesSetupRunInput = {
-      enrichmentMode: plan.enrichmentMode,
-      importMetadata: plan.importMetadata,
-      importScope: plan.importScope,
-      importTranscripts: plan.importTranscripts,
-      queueEnrichment: plan.queueEnrichment,
-      runtimeApprovals: plan.runtimeApprovals,
-      runtimes: plan.runtimes,
-      sourceIds: plan.sourceIds,
-      transcriptApproved: plan.transcriptApproved,
-      transcriptApprovals: plan.transcriptApprovals
-    };
-    const label = plan.importMetadata ? "Import selected metadata" : "Run selected source setup";
-    appendStep(steps, deps, runningStep("sources:setup", label));
-    try {
-      await deps.runSetup(setupInput);
-      appendStep(steps, deps, completedStep("sources:setup", label, "succeeded"));
-    } catch (error) {
-      appendStep(steps, deps, completedStep("sources:setup", label, "failed", errorMessage(error)));
+    const targets = setupTargets(plan);
+    for (const target of targets) {
+      const setupInput: SourcesSetupRunInput = {
+        enrichmentMode: plan.enrichmentMode,
+        importMetadata: plan.importMetadata,
+        importScope: plan.importScope,
+        importTranscripts: plan.importTranscripts,
+        queueEnrichment: plan.queueEnrichment,
+        runtimeApprovals: filterRuntimeApprovals(plan.runtimeApprovals, target.runtime),
+        runtimes: target.runtime ? [target.runtime] : plan.runtimes,
+        sourceIds: target.sourceIds ?? plan.sourceIds,
+        transcriptApproved: plan.transcriptApproved,
+        transcriptApprovals: filterTranscriptApprovals(plan.transcriptApprovals, target.runtime)
+      };
+      const label = setupLabel(plan, target.runtime);
+      appendStep(steps, deps, runningStep(`sources:setup:${target.runtime ?? "selected"}`, label));
+      try {
+        await deps.runSetup(setupInput);
+        appendStep(steps, deps, completedStep(`sources:setup:${target.runtime ?? "selected"}`, label, "succeeded"));
+      } catch (error) {
+        appendStep(steps, deps, completedStep(`sources:setup:${target.runtime ?? "selected"}`, label, "failed", errorMessage(error)));
+      }
     }
   }
 
@@ -105,6 +121,48 @@ function completedStep(id: string, label: string, status: "succeeded" | "failed"
   };
 }
 
+function setupTargets(plan: SourcesSetupPlan): Array<{ runtime?: string; sourceIds?: string[] }> {
+  const runtimes = Array.from(new Set(plan.runtimes ?? plan.transcriptApprovals?.map((approval) => approval.runtime) ?? []));
+  if (runtimes.length === 0) return [{ sourceIds: plan.sourceIds }];
+
+  return runtimes.map((runtime) => {
+    const sourceIds = plan.transcriptApprovals
+      ?.filter((approval) => approval.runtime === runtime)
+      .map((approval) => approval.sourceId);
+    return {
+      runtime,
+      sourceIds: sourceIds && sourceIds.length > 0 ? sourceIds : undefined
+    };
+  });
+}
+
+function filterRuntimeApprovals(
+  approvals: SourcesSetupRunInput["runtimeApprovals"],
+  runtime: string | undefined
+): SourcesSetupRunInput["runtimeApprovals"] {
+  if (!approvals || !runtime) return approvals;
+  return approvals.filter((approval) => approval.runtime === runtime);
+}
+
+function filterTranscriptApprovals(
+  approvals: SourcesSetupRunInput["transcriptApprovals"],
+  runtime: string | undefined
+): SourcesSetupRunInput["transcriptApprovals"] {
+  if (!approvals || !runtime) return approvals;
+  return approvals.filter((approval) => approval.runtime === runtime);
+}
+
+function setupLabel(plan: SourcesSetupPlan, runtime: string | undefined): string {
+  if (!runtime) return plan.importMetadata ? "Import selected metadata" : "Run selected source setup";
+  const label = runtimeLabel(runtime);
+  if (plan.importMetadata) return `Import ${label} metadata`;
+  return `Run ${label} source setup`;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function runtimeLabel(runtime: string): string {
+  return harnessForRuntime(runtime as RuntimeKind)?.label ?? runtime.replaceAll("_", " ");
 }

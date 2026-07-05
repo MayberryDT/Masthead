@@ -64,6 +64,42 @@ type ConnectorActionState = ConnectorActionView;
 type LiveProjectionLoadResult = "loaded" | "superseded" | "failed";
 
 const STARTUP_PROJECTION_ERROR_MESSAGE = "Collector started, but live projection did not load.";
+const firstRunSetupStatuses = new Set(["empty", "scan_needed", "scan_available", "detected"]);
+
+type FirstRunSourceCandidate = {
+  enrichedSessions?: number;
+  importedCount?: number;
+  importedRecords?: number;
+  importedSessions?: number;
+  lastSync?: string;
+  lastSyncAt?: string;
+  metadataSessions?: number;
+  queuedCount?: number;
+  queuedRecords?: number;
+  transcriptSessions?: number;
+};
+
+function shouldOpenSourcesOnboardingForSetup(setup: {
+  connectedSources?: FirstRunSourceCandidate[];
+  status?: string;
+} | undefined): boolean {
+  if (!setup) return false;
+  if (setup.status && firstRunSetupStatuses.has(setup.status)) return true;
+  const connectedSources = setup.connectedSources ?? [];
+  return connectedSources.length > 0 && connectedSources.every(isDetectedOnlyFirstRunSource);
+}
+
+function isDetectedOnlyFirstRunSource(source: FirstRunSourceCandidate): boolean {
+  return !(
+    (source.importedSessions ?? 0) > 0 ||
+    (source.importedRecords ?? source.importedCount ?? 0) > 0 ||
+    (source.metadataSessions ?? 0) > 0 ||
+    (source.transcriptSessions ?? 0) > 0 ||
+    (source.enrichedSessions ?? 0) > 0 ||
+    (source.queuedRecords ?? source.queuedCount ?? 0) > 0 ||
+    Boolean(source.lastSyncAt ?? source.lastSync)
+  );
+}
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
@@ -277,7 +313,7 @@ export function App() {
     !onboardingDismissed &&
     effectiveLiveConnection.state === "live" &&
     connection.writable &&
-    (sourcesSetup?.status === "empty" || sourcesSetup?.status === "scan_needed" || sourcesSetup?.status === "scan_available");
+    shouldOpenSourcesOnboardingForSetup(sourcesSetup);
   const onboardingOpen = manualOnboardingOpen || shouldShowFirstRunOnboarding;
   const closeOnboarding = useCallback(() => {
     setManualOnboardingOpen(false);
@@ -621,6 +657,7 @@ export function App() {
           onImportMetadata={handleImportMetadata}
           onImportTranscripts={handleImportTranscripts}
           onLoadAdapterSources={handleLoadAdapterSources}
+          onOpenOnboarding={reopenOnboarding}
           onPollImports={handlePollActiveImports}
           onPreviewImport={sourcesController.previewImport}
           onRepairSources={handleRepairSources}

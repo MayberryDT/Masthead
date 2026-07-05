@@ -163,6 +163,9 @@ describe("SourceAdapterDetailModal", () => {
 
     expect(html).toContain("source-detail-modal");
     expect(html).toContain("source-detail-scroll-frame");
+    expect(html).toContain("Live capture");
+    expect(html).toContain("Not wired yet");
+    expect(html).toContain("Live capture for Claude Code is not wired yet.");
     expect(html).toContain("No supported store detected");
     expect(html).toContain("Checked paths");
     expect(html).toContain("/home/tyler/.claude/projects");

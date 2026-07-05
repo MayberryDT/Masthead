@@ -39,6 +39,7 @@ type Props = {
   onCodexHookAction?: (action: "install" | "test" | "uninstall") => Promise<void> | void;
   onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
+  onOpenOnboarding?: () => void;
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
   onLoadAdapterSources?: (runtime: string, page: { limit: number; offset: number }) => Promise<SourceStatusPage>;
@@ -62,12 +63,14 @@ export function SourcesPanel(props: Props) {
   const adapterRows = (setup?.advanced.adapters.length ? setup.advanced.adapters : adapters ?? adaptersFromSources(sources)) as AdapterStatus[];
   const diagnosticImports = (setup ? setup.advanced.imports : imports) as ImportJob[];
   const connectedAdapters = useMemo(() => adapterRows.filter(isConnectedAdapter), [adapterRows]);
+  const visibleAdapterRows = useMemo(() => adapterRows.filter(isDetectedOrConnectedAdapter), [adapterRows]);
   const connectedSources = setup?.connectedSources ?? [];
+  const connectedSetupSources = useMemo(() => connectedSources.filter(isConnectedSource), [connectedSources]);
   const [localOnboardingOpen, setLocalOnboardingOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const activeImportCount = diagnosticImports.filter((job) => job.status === "queued" || job.status === "running").length;
-  const diagnosticCount = diagnosticCountForAdapters(adapterRows) + diagnosticImports.reduce((total, job) => total + (job.failureCount > 0 || job.failureMessage ? 1 : 0), 0);
+  const diagnosticCount = diagnosticCountForAdapters(visibleAdapterRows) + diagnosticImports.reduce((total, job) => total + (job.failureCount > 0 || job.failureMessage ? 1 : 0), 0);
 
   useEffect(() => {
     if (activeImportCount === 0 || !props.onPollImports) return undefined;
@@ -75,15 +78,20 @@ export function SourcesPanel(props: Props) {
     return () => window.clearInterval(timer);
   }, [activeImportCount, props.onPollImports]);
 
-  const hasConnectedSetup = connectedSources.length > 0;
+  const hasConnectedSetup = connectedSetupSources.length > 0;
   const hasConnectedAdapters = connectedAdapters.length > 0;
-  const showConnectedDashboard = hasConnectedSetup || hasConnectedAdapters;
+  const hasImportActivity = diagnosticImports.length > 0;
+  const showConnectedDashboard = hasConnectedSetup || hasConnectedAdapters || hasImportActivity;
+  const showAdapterInventory = showConnectedDashboard && visibleAdapterRows.length > 0 && !hasConnectedSetup;
   const onboardingOpen = props.onboardingOpen ?? localOnboardingOpen;
   const closeOnboarding = () => {
     props.onCloseOnboarding?.();
     setLocalOnboardingOpen(false);
   };
-  const openOnboarding = () => setLocalOnboardingOpen(true);
+  const openOnboarding = () => {
+    props.onOpenOnboarding?.();
+    setLocalOnboardingOpen(true);
+  };
 
   return (
     <section id="sources" className="sources-panel sources-management surface-panel" aria-label="Session sources">
@@ -98,7 +106,7 @@ export function SourcesPanel(props: Props) {
         <SourcesConnectedDashboard
           adapters={connectedAdapters}
           busy={busy}
-          connectedSources={hasConnectedSetup ? connectedSources : undefined}
+          connectedSources={hasConnectedSetup ? connectedSetupSources : undefined}
           coverage={setup?.coverage}
           diagnosticCount={diagnosticCount}
           imports={diagnosticImports}
@@ -112,9 +120,9 @@ export function SourcesPanel(props: Props) {
         />
       )}
 
-      {showConnectedDashboard ? (
+      {showAdapterInventory ? (
         <AdapterList
-          adapters={adapterRows}
+          adapters={visibleAdapterRows}
           busy={busy || readOnly}
           enrichment={props.enrichment}
           hooks={props.hooks}
@@ -150,7 +158,7 @@ export function SourcesPanel(props: Props) {
               <h2>Adapter and import details</h2>
             </div>
           </div>
-          {adapterRows.map((adapter) => (
+          {visibleAdapterRows.map((adapter) => (
             <SourceDiagnosticPanel
               busy={busy}
               checkedPaths={adapter.checkedPaths}
@@ -194,12 +202,12 @@ export function SourcesPanel(props: Props) {
         onScanSetup={props.onScanSetup}
         onSkip={props.onSkipOnboarding}
         open={onboardingOpen}
-        scan={setup?.latestScan}
+        scan={setup?.latestScan ?? setup?.scan}
         settingsBaseUrl={props.settingsBaseUrl}
         variant={props.onboardingOpen === undefined ? "modal" : "fullWindow"}
       />
       <SourcesImportModal
-        adapters={adapterRows}
+        adapters={visibleAdapterRows}
         busy={busy || readOnly}
         onClose={() => setImportOpen(false)}
         onPreviewImport={props.onPreviewImport}
@@ -232,6 +240,25 @@ function adaptersFromSources(sources: SourceStatus[]): AdapterStatus[] {
 function isConnectedAdapter(adapter: AdapterStatus): boolean {
   if ((adapter.importedSessions ?? 0) > 0 || (adapter.importedCount ?? 0) > 0 || adapter.lastSyncAt) return true;
   return adapter.sourceLocations.some((source) => (source.importedSessions ?? 0) > 0 || (source.importedRecords ?? source.importedCount ?? 0) > 0 || Boolean(source.lastSyncAt ?? source.lastSync));
+}
+
+function isDetectedOrConnectedAdapter(adapter: AdapterStatus): boolean {
+  if (isConnectedAdapter(adapter)) return true;
+  if ((adapter.sourceLocationCount ?? adapter.sourceLocations.length) > 0) return true;
+  if ((adapter.discoveredSessions ?? 0) > 0 || (adapter.discoveredCount ?? 0) > 0) return true;
+  return adapter.state !== "not_detected" && adapter.state !== "planned";
+}
+
+function isConnectedSource(source: { importedSessions?: number; importedRecords?: number; importedCount?: number; lastSync?: string; lastSyncAt?: string; metadataSessions?: number; queuedCount?: number; queuedRecords?: number; transcriptSessions?: number; enrichedSessions?: number }): boolean {
+  return (
+    (source.importedSessions ?? 0) > 0 ||
+    (source.importedRecords ?? source.importedCount ?? 0) > 0 ||
+    (source.metadataSessions ?? 0) > 0 ||
+    (source.transcriptSessions ?? 0) > 0 ||
+    (source.enrichedSessions ?? 0) > 0 ||
+    (source.queuedRecords ?? source.queuedCount ?? 0) > 0 ||
+    Boolean(source.lastSyncAt ?? source.lastSync)
+  );
 }
 
 function diagnosticCountForAdapters(adapters: AdapterStatus[]): number {

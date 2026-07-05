@@ -28,6 +28,23 @@ describe("HarnessLiveCaptureSection", () => {
     expect(onAction).toHaveBeenCalledWith("test");
     await act(async () => root.unmount());
   });
+
+  test("renders unsupported live capture for non-Codex harnesses without hook actions", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<HarnessLiveCaptureSection hooks={hookSettings()} runtime="cursor" />);
+    });
+
+    expect(container.textContent).toContain("Live capture");
+    expect(container.textContent).toContain("Cursor");
+    expect(container.textContent).toContain("Not wired yet");
+    expect(container.textContent).toContain("Live capture for Cursor is not wired yet.");
+    expect(container.textContent).not.toContain("http://127.0.0.1:17373/ingest");
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+    await act(async () => root.unmount());
+  });
 });
 
 function hookSettings(): CodexHookSettingsDto {
@@ -38,6 +55,15 @@ function hookSettings(): CodexHookSettingsDto {
     endpoint: "http://127.0.0.1:17373/ingest",
     installed: true,
     integrations: [
+      {
+        actionSurface: "sources",
+        captureMode: "transcript_import",
+        description: "Imported from local Cursor transcript history through Sources.",
+        label: "Cursor",
+        runtime: "cursor",
+        status: "managed_in_sources",
+        supportsActions: false
+      },
       {
         actionSurface: "sources",
         captureMode: "live_hook",

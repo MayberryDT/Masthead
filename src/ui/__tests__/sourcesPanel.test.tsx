@@ -309,6 +309,46 @@ describe("SourcesPanel", () => {
     expect(css).toMatch(/\.sources-management \.status-badge\s*\{[\s\S]*border-radius: 1px;[\s\S]*clip-path: var\(--folded-control-clip/);
   });
 
+  test("keeps first-run onboarding stages in one responsive row on narrow screens", () => {
+    const css = readFileSync("src/styles/sources.css", "utf8");
+    const narrowRule = css.match(/@media \(max-width: 980px\) \{[\s\S]*?\.sources-onboarding-step-list\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const compactRule = css.match(/@media \(max-width: 620px\) \{[\s\S]*?\.sources-onboarding-step-item small\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+
+    expect(css).toMatch(/@media \(max-width: 980px\) \{[\s\S]*\.sources-onboarding-modal \.sources-onboarding-command-layout\s*\{[\s\S]*grid-template-columns: 1fr;[\s\S]*overflow: auto;/);
+    expect(narrowRule).toContain("grid-template-columns: repeat(5, minmax(0, 1fr));");
+    expect(narrowRule).toContain("gap: clamp(4px, 1.4vw, 10px);");
+    expect(compactRule).toContain("display: none;");
+  });
+
+  test("styles first-run onboarding header as an aligned toolbar band", () => {
+    const css = readFileSync("src/styles/sources.css", "utf8");
+    const headerRule = css.match(/\.session-detail-modal\.sources-onboarding-modal-full \.session-detail-header\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const actionRule = css.match(/\.sources-onboarding-modal-full \.session-detail-header \.surface-actions\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+
+    expect(headerRule).toContain("display: grid;");
+    expect(headerRule).toContain("grid-template-columns: minmax(0, 1fr) auto;");
+    expect(headerRule).toContain("min-height: 72px;");
+    expect(headerRule).toContain("padding: 14px clamp(18px, 3vw, 32px);");
+    expect(headerRule).toContain("border-bottom: 1px solid rgba(194, 221, 241, 0.13);");
+    expect(actionRule).toContain("align-items: center;");
+    expect(actionRule).toContain("justify-self: end;");
+  });
+
+  test("keeps onboarding source paths clipped and shared action rows spaced", () => {
+    const sourcesCss = readFileSync("src/styles/sources.css", "utf8");
+    const primitivesCss = readFileSync("src/styles/primitives.css", "utf8");
+    const pathRule = sourcesCss.match(/\.source-select-card \.source-card-path\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const actionRule = primitivesCss.match(/\.surface-actions\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+
+    expect(pathRule).toContain("max-width: 100%;");
+    expect(pathRule).toContain("overflow: hidden;");
+    expect(pathRule).toContain("text-overflow: ellipsis;");
+    expect(pathRule).toContain("white-space: nowrap;");
+    expect(actionRule).toContain("display: flex;");
+    expect(actionRule).toContain("gap: 8px;");
+    expect(actionRule).toContain("flex-wrap: wrap;");
+  });
+
   test("keeps source actions inline with toolbar facts on the right", () => {
     const css = readFileSync("src/styles/sources.css", "utf8");
     const toolbarRule = css.match(/\.sources-action-bar\.sources-toolbar\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";

@@ -6,6 +6,7 @@ import currentHealth from "../../../fixtures/protocol/current-health.json";
 import { App } from "../App";
 import { MastheadConnectionProvider } from "../connection/MastheadConnectionProvider";
 import { useMastheadConnection } from "../connection/useMastheadConnection";
+import { mastheadOnboardingDismissedStorageKey } from "../onboardingPreference";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -69,6 +70,93 @@ describe("collector autostart", () => {
     await assertSurfaceDoesNotShowOfflineRecovery(container, "Sources");
     await assertSurfaceDoesNotShowOfflineRecovery(container, "Usage");
     await assertSurfaceDoesNotShowOfflineRecovery(container, "Settings");
+
+    root.unmount();
+  });
+
+  test("keeps first-run sources onboarding open after a scan finds sources", async () => {
+    window.localStorage.removeItem(mastheadOnboardingDismissedStorageKey);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        const requestUrl = String(url);
+        const { pathname } = new URL(requestUrl);
+        if (pathname === "/sources/setup") return jsonResponse({ ok: true, setup: detectedSourcesSetup() });
+        return jsonResponse(responseForUrl(requestUrl));
+      })
+    );
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MastheadConnectionProvider initialUrl="http://127.0.0.1:17373/projection">
+          <App />
+        </MastheadConnectionProvider>
+      );
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector(".sources-onboarding-modal") !== null);
+    });
+
+    expect(container.textContent).toContain("Sources setup");
+    expect(container.textContent).toContain("Set up sources");
+    expect(container.textContent).not.toContain("ADAPTERS");
+    expect(container.textContent).not.toContain("Import data");
+
+    root.unmount();
+  });
+
+  test("keeps the sources wizard open after scanning detected-only sources", async () => {
+    window.localStorage.removeItem(mastheadOnboardingDismissedStorageKey);
+    let scanned = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        const requestUrl = String(url);
+        const { pathname } = new URL(requestUrl);
+        if (pathname === "/sources/setup/scan") {
+          scanned = true;
+          const setup = detectedSourcesSetup("needs_attention");
+          return jsonResponse({ ok: true, setup, scan: setup.scan });
+        }
+        if (pathname === "/sources/setup") return jsonResponse({ ok: true, setup: scanned ? detectedSourcesSetup("needs_attention") : emptySourcesSetup() });
+        return jsonResponse(responseForUrl(requestUrl));
+      })
+    );
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MastheadConnectionProvider initialUrl="http://127.0.0.1:17373/projection">
+          <App />
+        </MastheadConnectionProvider>
+      );
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector(".sources-onboarding-modal") !== null);
+    });
+
+    await act(async () => {
+      clickButtonByText(container, "Check local sources");
+      await flushTimers();
+      await flushTimers();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector(".source-select-card") !== null);
+    });
+
+    expect(container.querySelector(".sources-onboarding-modal")).not.toBeNull();
+    expect(container.textContent).toContain("Codex");
+    expect(container.textContent).toContain("Continue");
+    expect(container.textContent).not.toContain("ADAPTERS");
+    expect(container.textContent).not.toContain("Import data");
 
     root.unmount();
   });
@@ -383,6 +471,12 @@ function clickSidebarButton(container: HTMLElement, label: string): void {
   button?.click();
 }
 
+function clickButtonByText(container: HTMLElement, label: string): void {
+  const button = [...container.querySelectorAll("button")].find((candidate) => candidate.textContent === label);
+  expect(button).toBeDefined();
+  button?.click();
+}
+
 async function assertSurfaceDoesNotShowOfflineRecovery(container: HTMLElement, label: string): Promise<void> {
   await act(async () => {
     clickSidebarButton(container, label);
@@ -498,6 +592,45 @@ function emptySourcesSetup() {
       imports: [],
       sources: []
     }
+  };
+}
+
+function detectedSourcesSetup(status = "detected") {
+  return {
+    ...emptySourcesSetup(),
+    connectedSources: [
+      {
+        discoveredSessions: 0,
+        importedSessions: 0,
+        label: "Codex",
+        path: "/home/tyler/.codex/session_index.jsonl",
+        runtime: "codex",
+        sourceId: "codex-sessions",
+        state: "connected"
+      }
+    ],
+    scan: {
+      adapters: [],
+      foundSources: [
+        {
+          discoveredSessions: 0,
+          importable: true,
+          label: "Codex sessions",
+          path: "/home/tyler/.codex/session_index.jsonl",
+          runtime: "codex",
+          sourceId: "codex-sessions"
+        }
+      ],
+      generatedAt: "2026-07-04T00:00:00.000Z",
+      scanId: "scan:detected",
+      status: "completed",
+      summary: {
+        detectedHarnesses: 1,
+        foundSources: 1,
+        scannedHarnesses: 1
+      }
+    },
+    status
   };
 }
 

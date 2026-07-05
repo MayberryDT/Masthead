@@ -61,4 +61,90 @@ describe("runSourcesSetupPlan", () => {
     expect(result.status).toBe("succeeded");
     expect(result.steps.filter((step) => step.status !== "running").every((step) => step.status === "succeeded")).toBe(true);
   });
+
+  test("marks required live capture for unwired harnesses as needing attention and continues", async () => {
+    const runSetup = vi.fn(async () => ({ ok: true, setup: {} }));
+    const runHookAction = vi.fn(async () => undefined);
+
+    const result = await runSourcesSetupPlan(
+      {
+        enrichmentMode: "skip",
+        importMetadata: true,
+        importTranscripts: false,
+        liveCapture: [
+          { action: "install", runtime: "codex" },
+          { action: "install", runtime: "omp" }
+        ],
+        queueEnrichment: false,
+        sourceIds: ["codex-source", "omp-source"]
+      },
+      {
+        onLog: () => undefined,
+        runHookAction,
+        runSetup
+      }
+    );
+
+    expect(runHookAction).toHaveBeenCalledWith("install");
+    expect(runHookAction).toHaveBeenCalledTimes(1);
+    expect(runSetup).toHaveBeenCalledWith(expect.objectContaining({
+      sourceIds: ["codex-source", "omp-source"]
+    }));
+    expect(result.status).toBe("needs_attention");
+    expect(result.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "Oh My Pi live capture",
+        message: "Live capture is required but this harness does not have a writable adapter yet.",
+        status: "failed"
+      })
+    ]));
+  });
+
+  test("runs metadata setup once per selected harness and labels progress rows by harness", async () => {
+    const runSetup = vi.fn(async () => ({ ok: true, setup: {} }));
+
+    const result = await runSourcesSetupPlan(
+      {
+        enrichmentMode: "skip",
+        importMetadata: true,
+        importTranscripts: false,
+        liveCapture: [],
+        queueEnrichment: false,
+        runtimes: ["codex", "opencode", "hermes"],
+        sourceIds: ["codex-source", "opencode-source", "hermes-source"],
+        transcriptApprovals: [
+          { approved: false, runtime: "codex", sourceId: "codex-source" },
+          { approved: false, runtime: "opencode", sourceId: "opencode-source" },
+          { approved: false, runtime: "hermes", sourceId: "hermes-source" }
+        ]
+      },
+      {
+        onLog: () => undefined,
+        runHookAction: async () => undefined,
+        runSetup
+      }
+    );
+
+    expect(runSetup).toHaveBeenCalledTimes(3);
+    expect(runSetup).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      runtimes: ["codex"],
+      sourceIds: ["codex-source"]
+    }));
+    expect(runSetup).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      runtimes: ["opencode"],
+      sourceIds: ["opencode-source"]
+    }));
+    expect(runSetup).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      runtimes: ["hermes"],
+      sourceIds: ["hermes-source"]
+    }));
+    expect(result.steps.map((step) => `${step.status}:${step.label}`)).toEqual([
+      "running:Import Codex metadata",
+      "succeeded:Import Codex metadata",
+      "running:Import OpenCode metadata",
+      "succeeded:Import OpenCode metadata",
+      "running:Import Hermes metadata",
+      "succeeded:Import Hermes metadata"
+    ]);
+  });
 });
