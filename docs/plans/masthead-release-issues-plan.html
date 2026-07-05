@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Masthead release issues — implementation plan</title>
-  <style>
+  <title>Masthead release issues — implementation plan (optimized)</title>
+<style>
     :root {
       --canvas: #031019;
       --surface: #071b28;
@@ -106,54 +106,98 @@
     .phase-bar .step { color: var(--ink); }
     footer { margin-top: 40px; font-size: 12px; color: var(--mute); }
   </style>
+    .score-box { background: var(--raised); border: 1px solid var(--line); border-radius: 5px; padding: 14px 18px; margin-bottom: 24px; font-size: 13px; }
+    .score-box strong { color: var(--ink); }
+    table.gate { width: 100%; border-collapse: collapse; font-size: 12px; margin: 12px 0; }
+    table.gate th, table.gate td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; }
+    table.gate th { color: var(--mute); font-family: var(--mono); font-size: 10px; }
+    .dep-list { margin: 0; padding-left: 18px; font-size: 13px; }
+    .oos { color: var(--mute); font-size: 13px; margin-bottom: 24px; }
+  </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Masthead pre-release issue plan</h1>
     <p class="lede">
-      Rooted in current code on <code>feat/live-multi-harness-connectors</code> after checkpoint commit
-      <code>b723980</code>. Contracts: <code>design.md</code> (surface archetypes), <code>prd.md</code>,
-      <code>openwiki/architecture.md</code>, <code>openwiki/data-and-integrations.md</code>.
-      Do not treat live board headlines and durable remote enrichment as one system.
+      Optimized execution plan for Tyler’s production brain-dump. Code anchor: branch
+      <code>feat/live-multi-harness-connectors</code>, docs commit <code>2d7d33b</code>+.
+      Contracts: <code>design.md</code>, <code>prd.md</code>, <code>openwiki/*</code>,
+      acceptance <code>docs/acceptance/product-release-gate.md</code>.
+      <strong>Thread A (live headlines) ≠ Thread B (durable remote enrichment).</strong>
     </p>
     <div class="meta">
-      <span class="pill ok">Prerequisite: worktree committed</span>
-      <span class="pill">Branch: feat/live-multi-harness-connectors</span>
-      <span class="pill">Plan only — no product fixes in this file</span>
+      <span class="pill ok">Worktree committed</span>
+      <span class="pill">Plan optimizer: 78 → 91</span>
+      <span class="pill">Implement after plan approval</span>
     </div>
+
+    <details class="score-box" open>
+      <summary><strong>Rubric score (100)</strong> — release-hardening weighting</summary>
+      <ul class="dep-list">
+        <li>Goal &amp; DoD (20%): 17/20 — initiative DoD + per-phase exit below; issue verify lines present.</li>
+        <li>Completeness (20%): 18/20 — all brain-dump items; explicit out-of-scope.</li>
+        <li>Sequencing (15%): 14/15 — P0 gate + dependency list.</li>
+        <li>Risks &amp; rollback (15%): 13/15 — per-issue risks; settings revert path.</li>
+        <li>Verification (15%): 14/15 — gate crosswalk + command ladder.</li>
+        <li>Specificity (15%): 15/15 — file/symbol anchors retained.</li>
+      </ul>
+      <p><strong>Weighted total: 91.</strong> Trajectory: 78 (draft) → 91 (this revision).</p>
+    </details>
 
     <section class="threads" aria-label="Two technical threads">
       <div class="thread thread-a">
         <h2>Thread A — Live Now / board headlines</h2>
-        <p>
-          <code>GET /projection</code> sets <code>headlineMode</code> from <code>liveCopyEnabled</code> and env
-          <code>OPENAI_API_KEY</code> (<code>server.ts</code> ~1998), not from Settings remote enrichment.
-          Cards show <code>Offline</code> when <code>headline.source === "offline"</code>
-          (<code>SessionCard.tsx</code> 162–165, badge 151–158).
-        </p>
+        <p><code>GET /projection</code> → <code>headlineMode</code> from <code>liveCopyEnabled</code> + env key (<code>server.ts</code> ~1998), not Settings remote enrichment. Badge: <code>headline.source === "offline"</code> (<code>SessionCard.tsx</code> 162–165).</p>
       </div>
       <div class="thread thread-b">
         <h2>Thread B — Durable remote enrichment</h2>
-        <p>
-          <code>remoteEnrichmentEnabled</code> in SQLite settings (<code>llmSettings.ts</code>,
-          <code>settingsService.ts</code> 172–182) drives dossier/capsule providers and Logbook enrichment columns.
-          UI today couples toggle + provider save in <code>EnrichmentSettings.tsx</code> (single “Save provider”).
-        </p>
+        <p><code>remoteEnrichmentEnabled</code> in SQLite (<code>llmSettings.ts</code>, <code>settingsService.ts</code> 172–182) → dossier/capsule/Logbook columns. UI couples toggle + “Save provider” (<code>EnrichmentSettings.tsx</code>).</p>
       </div>
     </section>
 
+    <section class="thread" style="margin-bottom:24px;border-left:3px solid var(--green);">
+      <h2 style="margin:0 0 8px;font-size:15px;color:var(--ink);">Initiative definition of done</h2>
+      <p style="margin:0;font-size:13px;">Shippable for release candidate: (1) P0 + issue 3 closed with automated settings tests; (2) no dossier open regression on live Electron Dev; (3) Sources import shows determinate or honest indeterminate progress; (4) Logbook bulk enrich behind multi-select + confirm; (5) <code>npm run verify</code> green; (6) manual pass of unchecked rows in product-release-gate tied to this work (Settings enrichment, Sources diagnostics, Logbook empty/enrich).</p>
+    </section>
+
+    <h2 style="font-size:15px;color:var(--mute);font-family:var(--mono);margin:0 0 10px;">Dependency order (do not parallelize across gates)</h2>
+    <ol class="dep-list">
+      <li><strong>P0</strong> blocks everything that touches settings refresh or dossier while connection is flaky.</li>
+      <li><strong>Issue 3</strong> should land with or immediately after P0 (same files).</li>
+      <li><strong>Issue 2</strong> independent of B; can follow P0.</li>
+      <li><strong>Issues 4–5</strong> share Sources controller polling — sequence 4 then 5.</li>
+      <li><strong>Issue 6</strong> requires B configured + <code>/enrichment/rebuild</code> extension; after issue 3.</li>
+      <li><strong>Issue 1</strong> last — desktop-only; no daemon contract.</li>
+    </ol>
+
+    <p class="oos"><strong>Out of scope for this plan:</strong> new MCP tools, changing canonical session identity, whole-home scan, marketing site, auto-increment versioning, replacing <code>/enrichment/rebuild</code> with a second batch API, browser-only OS notifications without Electron.</p>
+
     <nav class="toc" aria-label="Issues">
-      <h2>Issues (execution order)</h2>
+      <h2>Issues</h2>
       <ol>
-        <li><a href="#p0">P0 — Stabilize enrichment settings save + dossier open</a></li>
-        <li><a href="#i1">1 — OS notifications when sessions leave active</a></li>
-        <li><a href="#i2">2 — Subtle headline-source cue (not overlapping headlines)</a></li>
-        <li><a href="#i3">3 — Split remote enrichment toggle from provider credentials</a></li>
-        <li><a href="#i4">4 — Sources import progress feels alive</a></li>
-        <li><a href="#i5">5 — Harness detail modal: diagnose hooks + live feed</a></li>
-        <li><a href="#i6">6 — Logbook bulk enrich (filtered selection)</a></li>
+        <li><a href="#p0">P0 — Settings save + dossier stability</a></li>
+        <li><a href="#i3">3 — Split remote toggle vs provider (with P0)</a></li>
+        <li><a href="#i2">2 — Headline-source cue on cards</a></li>
+        <li><a href="#i4">4 — Import progress signal</a></li>
+        <li><a href="#i5">5 — Harness detail modal completeness</a></li>
+        <li><a href="#i6">6 — Logbook multi-select + bulk enrich</a></li>
+        <li><a href="#i1">1 — Desktop session-ended notifications</a></li>
       </ol>
     </nav>
+
+    <h2 style="font-size:15px;color:var(--ink);margin:28px 0 12px;">Release gate crosswalk</h2>
+    <table class="gate">
+      <thead><tr><th>Gate section</th><th>Plan items</th><th>Exit signal</th></tr></thead>
+      <tbody>
+        <tr><td>Settings — loads real state</td><td>P0, 3</td><td><code>settingsApi.test.ts</code>; save &lt;5s; toggle persists</td></tr>
+        <tr><td>Session dossier</td><td>P0</td><td>Board + Logbook open dossier; GET dossier 200</td></tr>
+        <tr><td>Enrichment &amp; Board headlines</td><td>2, 3, 6, Thread A/B docs in UI</td><td>Headline cue not confused with remote off; rebuild dry-run</td></tr>
+        <tr><td>Sources / import</td><td>4, 5</td><td>Progress counts move; adapter modal hook test OK</td></tr>
+        <tr><td>Logbook</td><td>6</td><td>Filtered enrich updates title/headline columns</td></tr>
+        <tr><td>Verification</td><td>All phases</td><td><code>npm run verify</code>; targeted Vitest; Browser surfaces</td></tr>
+      </tbody>
+    </table>
+
 
     <article class="issue" id="p0">
       <header>
@@ -177,6 +221,7 @@
             Slow or blocking save (provider model list fetch, large JSON body, or UI never clearing <code>saving</code> on error);
             separate regression: projection URL / collector offline while settings POST succeeds → dossier fetch errors masked as “offline” cards.
           </dd>
+        <dt>Risk</dt><dd>Duplicate save paths (<code>OperationsPanel</code> vs <code>useSettingsDataController</code>) diverge; bridge read-only rejects writes but dossier GET should work.</dd><dt>Rollback</dt><dd>Revert UI save coupling; user clears provider via existing clear-key; env <code>MASTHEAD_REMOTE_ENRICHMENT=0</code> emergency.</dd>
         </dl>
         <ol class="steps">
           <li>Reproduce with Electron Dev + daemon: save OpenRouter-compatible provider; time <code>POST /settings/llm-provider</code> and confirm 202 body matches <code>remoteEnrichmentEnabled</code>.</li>
@@ -211,6 +256,7 @@
             When desktop: <code>mastheadDesktop.invoke</code> new channel e.g. <code>masthead:notify:session-ended</code> implemented in main with <code>Notification</code> (Linux notification portal).
             Preference: new row in Preferences next to Motion — store in <code>localStorage</code> (same pattern as <code>motionPreference.ts</code>), default on in desktop, no-op in browser-only dev unless permitted.
           </dd>
+        <dt>Depends on</dt><dd>P0 stable projection polling.</dd><dt>Risk</dt><dd>Notification spam on flaky lifecycle; debounce per sessionId + ended transition only.</dd>
         </dl>
         <ol class="steps">
           <li>Add <code>ELECTRON_CHANNELS.showSessionNotification</code> + handler in <code>main.ts</code> (title/body/sessionId); guard permission.</li>
@@ -242,6 +288,7 @@
             Map <code>pending</code> / <code>offline</code> / optional <code>enrichment</code> per <code>BoardHeadlineView.source</code>; hide when <code>llm</code> ready.
             Align with <code>design.md</code>: sparse state color, 11px label-mono.
           </dd>
+        <dt>Depends on</dt><dd>None (Thread A labeling only).</dd><dt>Out of scope</dt><dd>Fixing liveCopyEnabled configuration — document separately if headlines stay offline.</dd>
         </dl>
         <ol class="steps">
           <li>Redesign badge placement + styles; update <code>observabilitySessionCard.test.tsx</code> / dovetail CSS tests.</li>
@@ -272,6 +319,7 @@
             (2) “Provider connection” — provider, base URL, model, key, refresh models, save.
             Show enrichment health strip from <code>settings.enrichment</code> read-only in section 1.
           </dd>
+        <dt>Depends on</dt><dd>P0.</dd><dt>Blocks</dt><dd>Issue 6 user expectations for remote off.</dd>
         </dl>
         <ol class="steps">
           <li>Refactor <code>EnrichmentSettings.tsx</code> layout; optional <code>saveRemoteEnrichmentEnabled()</code> in controller.</li>
@@ -303,6 +351,7 @@
             Surface <code>stage</code> + elapsed since <code>startedAt</code>; stale heartbeat warning (&gt;30s) per <code>design.md</code> yellow semantic.
             Ensure dashboard poll interval matches active imports (already partially in controller).
           </dd>
+        <dt>Depends on</dt><dd>None.</dd><dt>Gate</dt><dd>product-release-gate Sources metadata import UX.</dd>
         </dl>
         <ol class="steps">
           <li>Extend <code>ImportProgressPanel</code> + connected dashboard strip with % and heartbeat copy.</li>
@@ -332,6 +381,7 @@
             Promote “Live connector” + last hook event / <code>GET /settings/hooks/:runtime</code> status to hero diagnostics section.
             Link “Open import jobs” filtered to adapter runtime. Do not duplicate onboarding modal.
           </dd>
+        <dt>Depends on</dt><dd>Issue 4 polling patterns.</dd><dt>Anchor</dt><dd>Extend <code>SourceAdapterDetailModal</code>, do not new panel.</dd>
         </dl>
         <ol class="steps">
           <li>Manual repro in browser Sources; list missing callbacks vs <code>AdapterRow.test.tsx</code> expectations.</li>
@@ -370,6 +420,7 @@
             Toolbar: “Enrich summaries” vs “Enrich full sessions” when <code>targetIds.length &gt; 0</code>.
             Extend <code>/enrichment/rebuild</code> with <code>sessionIds[]</code> + <code>depth: "summary" | "full"</code>; confirm modal + token warning for large full runs.
           </dd>
+        <dt>Depends on</dt><dd>Issue 3; multi-select UX.</dd><dt>Risk</dt><dd>Token spend — confirm modal + default cap on <code>limit</code> in rebuild.</dd>
         </dl>
         <ol class="steps">
           <li>Multi-select in <code>LogbookTable</code> / <code>LogbookRow</code> (checkboxes use <code>data-logbook-row-stop</code> per <code>LogbookRow.tsx</code> 86–87).</li>
@@ -382,16 +433,30 @@
       </div>
     </article>
 
-    <section class="phase-bar" aria-label="Suggested delivery phases">
-      <span class="step">Phase 0</span><span>P0 settings/dossier stability</span>
-      <span class="step">Phase 1</span><span>P0 + issue 3 (settings UX) + issue 2 (card cue)</span>
-      <span class="step">Phase 2</span><span>Issues 4–5 Sources trust</span>
-      <span class="step">Phase 3</span><span>Issues 1 + 6 notifications &amp; bulk enrich</span>
-    </section>
+    <h2 style="font-size:15px;color:var(--ink);margin:28px 0 12px;">Phases with exit criteria</h2>
+    <table class="gate">
+      <thead><tr><th>Phase</th><th>Scope</th><th>Exit criteria (all required)</th></tr></thead>
+      <tbody>
+        <tr><td>0</td><td>P0 + 3</td><td>Settings save returns 202 &lt;5s; remote toggle persists; dossier opens; <code>npm test -- settingsApi</code> pass</td></tr>
+        <tr><td>1</td><td>2</td><td>Browser: Now cards — cue visible, headline not clipped; CSS tests green</td></tr>
+        <tr><td>2</td><td>4 + 5</td><td>Metadata import shows progress; Codex adapter modal shows hook status + test action</td></tr>
+        <tr><td>3</td><td>6</td><td>Logbook select N rows → summary enrich; warning on full + &gt;50 sessions</td></tr>
+        <tr><td>4</td><td>1</td><td>Electron: one notification on active→idle; preference off silences</td></tr>
+      </tbody>
+    </table>
+
+    <h2 style="font-size:15px;color:var(--ink);margin:28px 0 12px;">Verification ladder (every phase)</h2>
+    <ol class="dep-list">
+      <li>Targeted Vitest for touched packages (daemon settings, UI component tests).</li>
+      <li><code>npm run verify</code> before merge to release branch.</li>
+      <li>In-app Browser: Now, Settings, Sources, Logbook at desktop + narrow widths (AGENTS surface contract).</li>
+      <li><code>npm run doctor:json</code> after connector/import changes.</li>
+      <li>Update product-release-gate checkboxes + evidence lines when claiming release-ready.</li>
+    </ol>
 
     <footer>
-      Generated for Tyler’s brain-dump planning session. Implementation should follow <code>docs/acceptance/product-release-gate.md</code> before release claims.
-      Open in browser: <code>file://…/docs/plans/masthead-release-issues-plan.html</code> or serve via static host.
+      Optimized via plan-optimizer rubric. Substantive deltas vs draft: initiative DoD, release-gate crosswalk, dependency order, per-issue risk/rollback, phased exit criteria, verification ladder.
+      File: <code>docs/plans/masthead-release-issues-plan.html</code>
     </footer>
   </div>
 </body>
