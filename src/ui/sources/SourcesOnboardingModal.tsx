@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AdapterStatus, CodexHookSettingsDto, SettingsStateDto, UpdateLlmProviderSettingsInput } from "../../app/daemonClient";
-import { runSourcesSetupPlan, type SetupRunLogEntry, type SetupRunReport } from "../../app/sources/setupPlanRunner";
+import { runSourcesSetupPlan, type SetupRunLogEntry } from "../../app/sources/setupPlanRunner";
 import { onboardingHarnesses, type HarnessCatalogEntry } from "../../adapters/harnessCatalog";
 import type { ImportScopeDto } from "../../shared/sourceImport";
 import type { FoundSourceDto, SourcesOnboardingScanDto, SourcesSetupRunInput } from "../../shared/sourcesSetup";
@@ -29,7 +29,7 @@ type Props = {
   scan?: SourcesOnboardingScanDto;
 };
 
-type Step = "intro" | "found" | "history" | "enrichment" | "build" | "success";
+type Step = "intro" | "found" | "history" | "enrichment" | "build";
 type EnrichmentMode = SourcesSetupRunInput["enrichmentMode"];
 type HarnessSourceGroup = {
   label: string;
@@ -39,7 +39,7 @@ type HarnessSourceGroup = {
   sourceIds: string[];
 };
 
-const commandSpineSteps: Array<{ id: Exclude<Step, "success">; label: string; description: string }> = [
+const commandSpineSteps: Array<{ id: Step; label: string; description: string }> = [
   { id: "intro", label: "Start", description: "Local setup scope and scan action." },
   { id: "found", label: "Detect", description: "Detected harnesses selected by default." },
   { id: "history", label: "Configure", description: "History source and range." },
@@ -71,7 +71,6 @@ export function SourcesOnboardingModal({
   const [historyImportScope, setHistoryImportScope] = useState<HistoryImportScopeChoice>("recent");
   const [enrichmentMode] = useState<EnrichmentMode>("skip");
   const [setupLogs, setSetupLogs] = useState<SetupRunLogEntry[]>([]);
-  const [setupReport, setSetupReport] = useState<SetupRunReport>();
   const foundAdapters = useMemo(() => adapters.filter(isFoundAdapter), [adapters]);
   const setupScan = localScan ?? scan;
   const importableSources = useMemo(() => (setupScan?.foundSources ?? []).filter(isImportableSource), [setupScan]);
@@ -131,11 +130,11 @@ export function SourcesOnboardingModal({
 
   const handleBuild = async () => {
     setSetupLogs([]);
-    setSetupReport(undefined);
     if (usesSetupScan && onRunSetup) {
       setRunning(true);
+      let setupApplied = false;
       try {
-        const report = await runSourcesSetupPlan({
+        await runSourcesSetupPlan({
           enrichmentMode,
           importMetadata: true,
           importScope: scopeForHistoryChoice(historyImportScope),
@@ -157,20 +156,20 @@ export function SourcesOnboardingModal({
           },
           runSetup: onRunSetup
         });
-        setSetupReport(report);
-        setStep("success");
+        setupApplied = true;
       } finally {
         setRunning(false);
       }
+      if (setupApplied) onClose();
       return;
     }
     onConnectSelected?.(selectedRuntimes);
-    setStep("success");
+    onClose();
   };
 
   const backdropClass = variant === "fullWindow" ? "sources-onboarding-full-window" : "modal-backdrop";
   const modalClass = variant === "fullWindow" ? "session-detail-modal sources-onboarding-modal sources-onboarding-modal-full" : "session-detail-modal sources-onboarding-modal";
-  const activeSpineStep = step === "success" ? "build" : step;
+  const activeSpineStep = step;
   const selectedSourceCount = usesSetupScan ? selectedSources.length : selectedRuntimes.length;
   const selectedSourceLabel = selectedSourceCount > 0 ? `${selectedSourceCount} selected` : "None selected";
   const historyRangeLabel = historyImportScope === "full" ? "Everything" : "Last 30 days";
@@ -296,7 +295,7 @@ export function SourcesOnboardingModal({
       {step === "build" ? (
         <div className="sources-onboarding-step-content">
           <h3>Review setup</h3>
-          <p>Masthead will import selected session history and apply required live capture setup. Work that cannot complete continues into the attention report.</p>
+          <p>Masthead will import selected session history, apply required live capture setup, then continue progress in Sources.</p>
           <div className="sources-onboarding-build-review">
             <p className="mono-label">Review before start</p>
             <dl className="harness-overview-proof">
@@ -318,18 +317,7 @@ export function SourcesOnboardingModal({
               {running ? "Starting setup..." : "Start setup"}
             </AppButton>
           </div>
-          {setupLogs.length > 0 ? <SetupRunProgress logs={setupLogs} report={setupReport} /> : null}
-        </div>
-      ) : null}
-
-      {step === "success" ? (
-        <div className="sources-onboarding-step-content">
-          <h3>{setupReport?.status === "needs_attention" ? "Setup needs attention" : "Session library build started"}</h3>
-          <p>Sources are connected where setup succeeded. Import jobs and any skipped work remain visible in the Sources inventory.</p>
-          <SetupRunProgress logs={setupLogs} report={setupReport} />
-          <div className="surface-actions">
-            <AppButton type="button" variant="primary" onClick={onClose}>Done</AppButton>
-          </div>
+          {setupLogs.length > 0 ? <SetupRunProgress logs={setupLogs} /> : null}
         </div>
       ) : null}
     </>

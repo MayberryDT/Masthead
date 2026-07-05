@@ -580,8 +580,7 @@ describe("SourcesPanel import controls", () => {
         transcriptApprovals: [{ approved: false, runtime: "omp", sourceId: "omp-sessions" }]
       })
     );
-    expect(container.textContent).toContain("Oh My Pi live capture");
-    expect(container.textContent).toContain("Live capture is required but this harness does not have a writable adapter yet.");
+    expect(container.querySelector(".sources-onboarding-modal")).toBeNull();
     await act(async () => root.unmount());
   });
 
@@ -732,6 +731,33 @@ describe("SourcesPanel import controls", () => {
       runtimes: ["codex"],
       sourceIds: ["codex-sessions"]
     }));
+    await act(async () => root.unmount());
+  });
+
+  test("start setup closes onboarding so Sources shows import progress", async () => {
+    const onRunSetup = vi.fn(async () => ({ jobs: [], queued: 0, skipped: [] }));
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await renderOpenScannedOnboarding(root, container, { onRunSetup });
+
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Continue").click();
+    });
+    await act(async () => {
+      buttonByText(container, "Start setup").click();
+    });
+
+    expect(onRunSetup).toHaveBeenCalled();
+    expect(container.querySelector(".sources-onboarding-modal")).toBeNull();
+    expect(container.textContent).not.toContain("Session library build started");
+    expect(container.textContent).not.toContain("Setup needs attention");
     await act(async () => root.unmount());
   });
 });
