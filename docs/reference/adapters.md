@@ -7,6 +7,7 @@ Masthead adapters scan known local agent-history locations and normalize recogni
 - Codex
 - Cursor
 - Claude Code
+- Grok Build
 - OpenCode
 - Aider
 - OpenClaw
@@ -16,6 +17,12 @@ Masthead adapters scan known local agent-history locations and normalize recogni
 
 Gemini CLI is legacy compatibility only for existing imported records. It is not an active scan target.
 
+## Live-Capable Release Targets
+
+Codex, Claude Code, Cursor, Grok Build, and OpenCode are live-capable release targets. Their live connector events enter Masthead through `/ingest`, are normalized with runtime-scoped identity, and feed the same canonical session graph as imported history.
+
+See [live-connectors.md](live-connectors.md).
+
 ## Harness Catalog
 
 Sources also carries a broader catalog so users can see what Masthead knows about without overstating support.
@@ -24,7 +31,7 @@ Sources also carries a broader catalog so users can see what Masthead knows abou
 - Cloud-reference harnesses are listed for product clarity when the agent is cloud-first and has no local source connector in this pass.
 - Legacy hidden entries remain out of default onboarding.
 
-Detector-only examples include OMP, Crush, Cline, Roo Code, Kilo Code, Continue.dev, OpenHands, GitHub Copilot, Windsurf, Zed AI, Amazon Q Developer, Sourcegraph Amp, JetBrains AI, Qodo, Tabnine, and IBM Bob. Cloud-reference examples include Devin and Jules.
+Detector-only examples include Crush, Cline, Roo Code, Kilo Code, Continue.dev, OpenHands, GitHub Copilot, Windsurf, Zed AI, Amazon Q Developer, Sourcegraph Amp, JetBrains AI, Qodo, Tabnine, and IBM Bob. Cloud-reference examples include Devin and Jules.
 
 ## Import States
 

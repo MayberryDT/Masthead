@@ -17,11 +17,20 @@ Local paths remain advanced diagnostics and provenance. The user-facing approval
 The onboarding catalog separates import support from awareness:
 
 - Active import adapters: Codex, Cursor, Claude Code, OpenCode, Aider, OpenClaw, Hermes, Pi, and OMP.
+- Live-capable release targets: Codex, Claude Code, Cursor, Grok Build, and OpenCode.
 - Detector-only local harnesses: Crush, Cline, Roo Code, Kilo Code, Continue.dev, OpenHands, GitHub Copilot, Windsurf, Zed AI, Amazon Q Developer, Sourcegraph Amp, JetBrains AI, Qodo, Tabnine, and IBM Bob.
 - Cloud-reference harnesses: Devin and Jules.
 - Legacy hidden compatibility: Gemini CLI for existing imported records only.
 
 Detector-only and cloud-reference entries can be shown in diagnostics or references, but they do not imply successful local transcript import. They stay diagnostic-only until a local storage schema is verified and mapped.
+
+## Live Capture
+
+Sources shows live connector status for the release targets. The daemon reports whether each hook or plugin is installed, missing, or needs repair, plus the managed config path and endpoint.
+
+The existing Codex compatibility action installs, tests, or uninstalls the full release target connector set. Runtime-specific daemon routes can also operate on one connector at a time. Masthead preserves unrelated user hooks and removes only Masthead-managed entries.
+
+Live capture does not replace transcript approval. A live hook can create session identity and runtime signal records, while full transcript/message import remains opt-in through Sources.
 
 ## Connect Selected
 

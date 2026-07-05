@@ -2,6 +2,12 @@
 
 Board is Masthead's live view over continuously collected session data. It is not the canonical database; it projects the latest canonical and live evidence into cards.
 
+## Multi-Harness Cards
+
+Live cards include runtime, harness label, source session ID, and canonical session ID. The canonical ID is runtime-scoped, so sessions from Codex, Claude Code, Cursor, Grok Build, and OpenCode can share a source session string without colliding.
+
+The release target live connector set is documented in [live-connectors.md](live-connectors.md). Board renders their events through the same projection path rather than a separate monitoring-only store.
+
 ## Headlines
 
 Board cards use `BoardHeadlineView`, backed by the `BoardHeadlineFrame` contract in `docs/reference/board-headline-frame.md`.

@@ -13,6 +13,8 @@ The main idea is simple:
 - the SQLite store becomes the source of truth for Masthead-owned data,
 - read-only consumers read from that canonical store.
 
+Live connector events are part of that flow too: `src/daemon/server.ts` routes ingest by runtime, and `src/core/liveIdentity.ts` scopes canonical live sessions by host plus runtime so Codex, Claude Code, Cursor, Grok Build, and OpenCode can share a source session ID without colliding.
+
 ## Daemon API
 
 The local HTTP daemon is the main integration surface for the app, smoke tests, doctor, and worktree bridge. `src/daemon/server.ts` implements the API; `docs/reference/daemon-api.md` lists the endpoints.
@@ -22,7 +24,10 @@ A few important contracts:
 - `GET /health` is the compatibility oracle,
 - `GET /projection` serves the live Now projection,
 - `GET /sessions`, `GET /projects`, `GET /imports`, and related endpoints expose canonical reads,
+- `GET /settings/hooks` exposes live connector status for Codex, Claude Code, Cursor, Grok Build, and OpenCode,
 - write endpoints like `/ingest`, `/sources/connect`, `/imports`, `/data/delete`, and hook-management routes stay local to the daemon and are not exposed through MCP.
+
+`POST /ingest` defaults to Codex. Other release target hooks use the runtime query parameter or header so live data is stored under the correct runtime-specific source and canonical session identity.
 
 ## MCP
 
