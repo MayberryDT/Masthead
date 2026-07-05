@@ -1,0 +1,7 @@
+{
+  "event": "session_started",
+  "session_id": "codex-session-1",
+  "cwd": "/tmp/masthead-live-fixture",
+  "timestamp": "2026-07-05T12:00:04.000Z",
+  "provider_event_id": "codex-session-1:start"
+}

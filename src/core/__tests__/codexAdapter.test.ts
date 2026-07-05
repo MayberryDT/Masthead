@@ -77,6 +77,26 @@ describe("codex hook adapter", () => {
     }
   });
 
+  test("keeps legacy Codex payload shape for hash-derived event ids", () => {
+    const event = normalizeCodexHookPayload(
+      {
+        event: "command_finished",
+        session_id: "codex-session-hash",
+        timestamp: "2026-06-23T02:10:00.000Z",
+        command: "npm test",
+        category: "test"
+      },
+      { receivedAt: "2026-06-23T02:10:00.100Z" }
+    );
+
+    expect(event.payload).toEqual({
+      command: "npm test",
+      category: "test"
+    });
+    expect(event.payloadHash).toBe("6250473e9486b2aad54ab18eabfcbda2e638ec63a1b8403bcbde55e332f9600e");
+    expect(event.eventId).toBe(`codex:${event.payloadHash}`);
+  });
+
   test("redacts sensitive payload fields before hashing and storage", () => {
     const event = normalizeCodexHookPayload(
       {

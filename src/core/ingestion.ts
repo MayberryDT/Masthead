@@ -4,6 +4,7 @@ import type { NormalizedEvent } from "./types";
 export type IngestionState = {
   events: NormalizedEvent[];
   diagnostics: CodexHookDiagnostic[];
+  seenEventIds: Set<string>;
   seenProviderEventIds: Set<string>;
   seenPayloadHashes: Set<string>;
 };
@@ -28,6 +29,7 @@ export function createIngestionState(
   const state: IngestionState = {
     events: [],
     diagnostics: [],
+    seenEventIds: new Set(),
     seenProviderEventIds: new Set(),
     seenPayloadHashes: new Set()
   };
@@ -71,10 +73,16 @@ export function removeEventFromLiveProjectionState(state: IngestionState, event:
 }
 
 function hasSeen(state: IngestionState, event: NormalizedEvent): boolean {
-  return state.seenProviderEventIds.has(event.source.sourceEventId ?? "") || state.seenPayloadHashes.has(event.payloadHash);
+  return state.seenEventIds.has(event.eventId) || state.seenProviderEventIds.has(sourceEventKey(event) ?? "");
 }
 
 function remember(state: IngestionState, event: NormalizedEvent): void {
-  if (event.source.sourceEventId) state.seenProviderEventIds.add(event.source.sourceEventId);
+  state.seenEventIds.add(event.eventId);
+  const sourceKey = sourceEventKey(event);
+  if (sourceKey) state.seenProviderEventIds.add(sourceKey);
   state.seenPayloadHashes.add(event.payloadHash);
+}
+
+function sourceEventKey(event: NormalizedEvent): string | undefined {
+  return event.source.sourceEventId ? `${event.source.adapter}:${event.source.sourceEventId}` : undefined;
 }

@@ -1,0 +1,7 @@
+{
+  "hookEventName": "beforeSubmitPrompt",
+  "sessionId": "cursor-session-1",
+  "cwd": "/tmp/masthead-live-fixture",
+  "prompt": "Fix the failing tests",
+  "timestamp": "2026-07-05T12:00:01.000Z"
+}

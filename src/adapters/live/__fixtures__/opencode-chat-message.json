@@ -1,0 +1,10 @@
+{
+  "type": "chat.message",
+  "sessionID": "opencode-session-1",
+  "directory": "/tmp/masthead-live-fixture",
+  "message": {
+    "role": "assistant",
+    "parts": [{ "type": "text", "text": "I am checking the live connector." }]
+  },
+  "time": "2026-07-05T12:00:03.000Z"
+}

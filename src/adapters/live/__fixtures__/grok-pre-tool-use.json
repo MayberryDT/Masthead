@@ -1,0 +1,9 @@
+{
+  "hookEventName": "PreToolUse",
+  "sessionId": "grok-session-1",
+  "cwd": "/tmp/masthead-live-fixture",
+  "workspaceRoot": "/tmp/masthead-live-fixture",
+  "toolName": "run_terminal_command",
+  "toolInput": { "command": "npm test" },
+  "timestamp": "2026-07-05T12:00:02.000Z"
+}

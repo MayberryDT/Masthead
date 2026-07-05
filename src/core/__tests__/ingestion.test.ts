@@ -2,7 +2,13 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { afterEach, describe, expect, test } from "vitest";
-import { createIngestionState, ingestCodexHookPayload, removeEventFromLiveProjectionState } from "../ingestion";
+import { parseLiveHookPayload } from "../liveHookAdapter";
+import {
+  createIngestionState,
+  ingestCodexHookPayload,
+  ingestNormalizedEvent,
+  removeEventFromLiveProjectionState
+} from "../ingestion";
 
 const hookScript = new URL("../../../scripts/masthead-hook.js", import.meta.url);
 
@@ -79,6 +85,39 @@ describe("hook ingestion", () => {
 
     expect(state.events).toHaveLength(0);
     expect(duplicate.status).toBe("duplicate");
+  });
+
+  test("accepts distinct redacted live events that share a payload hash", () => {
+    const state = createIngestionState();
+    const first = parseLiveHookPayload(
+      JSON.stringify({
+        hookEventName: "UserPromptSubmit",
+        sessionId: "claude-redacted-collision",
+        timestamp: "2026-07-05T12:02:00.000Z",
+        prompt: "abcd"
+      }),
+      { receivedAt: "2026-07-05T12:02:10.000Z", runtime: "claude_code" }
+    );
+    const second = parseLiveHookPayload(
+      JSON.stringify({
+        hookEventName: "UserPromptSubmit",
+        sessionId: "claude-redacted-collision",
+        timestamp: "2026-07-05T12:02:01.000Z",
+        prompt: "wxyz"
+      }),
+      { receivedAt: "2026-07-05T12:02:11.000Z", runtime: "claude_code" }
+    );
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) throw new Error("expected normalized events");
+    expect(first.event.payloadHash).toBe(second.event.payloadHash);
+    expect(first.event.eventId).not.toBe(second.event.eventId);
+
+    expect(ingestNormalizedEvent(first.event, state).status).toBe("accepted");
+    expect(ingestNormalizedEvent(second.event, state).status).toBe("accepted");
+    expect(ingestNormalizedEvent(first.event, state).status).toBe("duplicate");
+    expect(state.events).toHaveLength(2);
   });
 
   test("records malformed JSON diagnostics instead of accepting an event", () => {
