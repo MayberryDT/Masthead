@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { deleteAllMastheadData } from "../dataLifecycleRepository.ts";
-import { migrateDatabase } from "../schema.ts";
+import { getOrCreateDatabaseIdentity, migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 
 const tempDirs: string[] = [];
@@ -16,6 +16,7 @@ afterEach(async () => {
 describe("data lifecycle repository", () => {
   test("deleteAllMastheadData removes every canonical and derived record", async () => {
     const db = await openTestDatabase();
+    const databaseId = getOrCreateDatabaseIdentity(db);
     seedCanonicalSessionGraph(db);
 
     const result = deleteAllMastheadData(db);
@@ -32,6 +33,7 @@ describe("data lifecycle repository", () => {
     expect(count(db, "ingest_sources")).toBe(0);
     expect(count(db, "hosts")).toBe(0);
     expect(count(db, "runtimes")).toBe(0);
+    expect(getOrCreateDatabaseIdentity(db)).toBe(databaseId);
     db.close();
   });
 });

@@ -94,7 +94,9 @@ describe("codex hook adapter", () => {
       category: "test"
     });
     expect(event.payloadHash).toBe("6250473e9486b2aad54ab18eabfcbda2e638ec63a1b8403bcbde55e332f9600e");
-    expect(event.eventId).toBe(`codex:${event.payloadHash}`);
+    expect(event.source.sourceEventId).toHaveLength(64);
+    expect(event.source.sourceEventId).not.toBe(event.payloadHash);
+    expect(event.eventId).toBe(`codex:${event.source.sourceEventId}`);
   });
 
   test("redacts sensitive payload fields before hashing and storage", () => {

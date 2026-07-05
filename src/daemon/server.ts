@@ -1561,9 +1561,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
   async function clearRawSourceCopies(): Promise<{ removedRecords: number; touchedExternalState: false }> {
     const result = await store.deleteRecords(isRawSourceStoreRecord);
-    pruneLiveRawJournals(rawSourceRetentionPolicy);
-    observerRawJournal.pruneStoreRecords(rawSourceRetentionPolicy);
-    return { removedRecords: result.removedRecords, touchedExternalState: false };
+    const hook = clearLiveRawJournals();
+    const observer = observerRawJournal.clearStoreRecords();
+    return { removedRecords: result.removedRecords + hook.removedRecords + observer.removedRecords, touchedExternalState: false };
   }
 
   async function clearLiveStateForScope(
@@ -2116,7 +2116,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/mcp/test-connection") {
       try {
-        const launchConfig = getMcpLaunchConfig(config.databasePath, config.dataDirectory);
+        const fallback = getMcpLaunchConfig(config.databasePath, config.dataDirectory);
+        const launchConfig = coerceMcpLaunchConfig(await optionalJsonBody(request), fallback);
         sendJson(request, response, config.allowedOrigins, 200, {
           ok: true,
           result: await testMcpConnection(launchConfig, config.databasePath)
@@ -3240,11 +3241,7 @@ function stringInput(value: unknown, name: string): string {
   throw new Error(`missing_${name}`);
 }
 
-const rawSourceRetentionPolicy = {
-  keepLatest: 0,
-  keepUnresolvedAttention: false,
-  recordTypes: ["event", "git_snapshot", "attention_item", "conflict_card"] as Array<StoreRecord["recordType"]>
-};
+const rawSourceRecordTypes: Array<StoreRecord["recordType"]> = ["event", "git_snapshot", "attention_item", "conflict_card"];
 
 const CANONICAL_LIVE_REPLAY_LIMIT = 1_000;
 const LIVE_PROJECTION_SESSION_LIMIT = 24;
@@ -3338,7 +3335,7 @@ function liveSessionCount(events: NormalizedEvent[]): number {
 }
 
 function isRawSourceStoreRecord(record: StoreRecord): boolean {
-  return rawSourceRetentionPolicy.recordTypes.includes(record.recordType);
+  return rawSourceRecordTypes.includes(record.recordType);
 }
 
 function storeRecordMatchesDeleteScope(

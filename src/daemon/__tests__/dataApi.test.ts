@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../config.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
+import { getOrCreateDatabaseIdentity } from "../db/schema.ts";
 
 const tempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
@@ -22,8 +23,9 @@ describe("data lifecycle API", () => {
     const daemon = await createTestDaemon();
     seedCanonicalSessionGraph(daemon.database, { project: "Masthead", sessionId: "session:1" });
     const baseUrl = await listen(daemon);
+    const databaseId = testDatabaseId(daemon);
 
-    const before = await getJson(baseUrl, "/data/summary");
+    const before = await getJson(baseUrl, withDatabaseId("/data/summary", databaseId));
     expect(before.summary).toMatchObject({
       tables: {
         raw_events: 1,
@@ -37,7 +39,7 @@ describe("data lifecycle API", () => {
       }
     });
 
-    const retained = await postJson(baseUrl, "/data/retention/default", {});
+    const retained = await postJson(baseUrl, "/data/retention/default", { databaseId });
     expect(retained.result).toMatchObject({ rawEvents: 1 });
     expect(count(daemon.database, "sessions")).toBe(1);
     expect(count(daemon.database, "session_enrichments")).toBe(1);
@@ -49,8 +51,9 @@ describe("data lifecycle API", () => {
     seedCanonicalSessionGraph(daemon.database, { project: "Masthead", sessionId: "session:1" });
     seedCanonicalSessionGraph(daemon.database, { project: "Pip", sessionId: "session:2" });
     const baseUrl = await listen(daemon);
+    const databaseId = testDatabaseId(daemon);
 
-    expect(await getJson(baseUrl, "/data/summary?kind=project&project=Pip")).toMatchObject({
+    expect(await getJson(baseUrl, withDatabaseId("/data/summary?kind=project&project=Pip", databaseId))).toMatchObject({
       ok: true,
       summary: {
         tables: {
@@ -64,7 +67,7 @@ describe("data lifecycle API", () => {
       }
     });
 
-    const deleted = await postJson(baseUrl, "/data/delete", { scope: { kind: "project", project: "Pip" } });
+    const deleted = await postJson(baseUrl, "/data/delete", { databaseId, scope: { kind: "project", project: "Pip" } });
 
     expect(deleted.preview).toMatchObject({
       tables: {
@@ -86,13 +89,14 @@ describe("data lifecycle API", () => {
   test("default retention removes raw copies without blanking live normalized state", async () => {
     const { daemon, storePath } = await createTestHarness();
     const baseUrl = await listen(daemon);
+    const databaseId = testDatabaseId(daemon);
 
     await postJson(baseUrl, "/ingest", liveApprovalPayload("raw-retention"));
     expect((await getJson(baseUrl, "/events")).events).toHaveLength(1);
     expect(await readTextOrEmpty(storePath)).toBe("");
     expect(count(daemon.database, "raw_events")).toBe(1);
 
-    await postJson(baseUrl, "/data/retention/default", {});
+    await postJson(baseUrl, "/data/retention/default", { databaseId });
 
     expect((await getJson(baseUrl, "/events")).events).toHaveLength(1);
     expect(await readTextOrEmpty(storePath)).toBe("");
@@ -103,11 +107,12 @@ describe("data lifecycle API", () => {
   test("scoped session deletion removes matching live state so projection cannot recreate it", async () => {
     const { daemon, storePath } = await createTestHarness();
     const baseUrl = await listen(daemon);
+    const databaseId = testDatabaseId(daemon);
 
     await postJson(baseUrl, "/ingest", liveApprovalPayload("scoped-live-delete"));
     await getJson(baseUrl, "/projection?expandedSessionId=server-live");
     expect(count(daemon.database, "sessions")).toBe(1);
-    expect(await getJson(baseUrl, "/data/summary?kind=session&sessionId=server-live")).toMatchObject({
+    expect(await getJson(baseUrl, withDatabaseId("/data/summary?kind=session&sessionId=server-live", databaseId))).toMatchObject({
       ok: true,
       summary: {
         tables: {
@@ -120,7 +125,7 @@ describe("data lifecycle API", () => {
       }
     });
 
-    const deleted = await postJson(baseUrl, "/data/delete", { scope: { kind: "session", sessionId: "server-live" } });
+    const deleted = await postJson(baseUrl, "/data/delete", { databaseId, scope: { kind: "session", sessionId: "server-live" } });
     expect(deleted.result).toMatchObject({ sessions: 1 });
     expect((await getJson(baseUrl, "/events")).events).toEqual([]);
     expect(await readTextOrEmpty(storePath)).toBe("");
@@ -134,14 +139,15 @@ describe("data lifecycle API", () => {
   test("invalid structured delete scopes return a client error", async () => {
     const daemon = await createTestDaemon();
     const baseUrl = await listen(daemon);
+    const databaseId = testDatabaseId(daemon);
 
     const missingProject = await fetch(`${baseUrl}/data/delete`, {
-      body: JSON.stringify({ scope: { kind: "project" } }),
+      body: JSON.stringify({ databaseId, scope: { kind: "project" } }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST"
     });
     const bogusKind = await fetch(`${baseUrl}/data/delete`, {
-      body: JSON.stringify({ scope: { kind: "bogus" } }),
+      body: JSON.stringify({ databaseId, scope: { kind: "bogus" } }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST"
     });
@@ -185,6 +191,16 @@ function listen(daemon: MastheadDaemon): Promise<string> {
       resolve(`http://127.0.0.1:${address.port}`);
     });
   });
+}
+
+function testDatabaseId(daemon: MastheadDaemon): string {
+  return getOrCreateDatabaseIdentity(daemon.database);
+}
+
+function withDatabaseId(path: string, databaseId: string): string {
+  const url = new URL(path, "http://masthead.test");
+  url.searchParams.set("databaseId", databaseId);
+  return `${url.pathname}${url.search}`;
 }
 
 async function getJson(baseUrl: string, path: string): Promise<Record<string, any>> {

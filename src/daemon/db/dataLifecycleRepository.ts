@@ -252,7 +252,7 @@ function deleteAllCanonicalData(db: MastheadDatabase): CanonicalDeleteResult {
       DELETE FROM ingest_sources;
       DELETE FROM runtimes;
       DELETE FROM hosts;
-      DELETE FROM app_settings;
+      DELETE FROM app_settings WHERE setting_key <> 'database_identity';
       DELETE FROM legacy_migrations;
     `);
     db.exec("COMMIT;");

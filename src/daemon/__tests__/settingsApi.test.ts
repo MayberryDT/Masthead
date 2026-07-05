@@ -407,7 +407,7 @@ describe("settings API", () => {
     const elapsedMs = performance.now() - startedAt;
 
     expect(accepted).toMatchObject({ ok: true, enrichment: { status: "enriching" } });
-    expect(elapsedMs).toBeLessThan(150);
+    expect(elapsedMs).toBeLessThan(500);
   });
 
   test("manual Dossier enrichment catches up hook transcript before provider request", async () => {

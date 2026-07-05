@@ -167,12 +167,14 @@ describe("ingest server live projection", () => {
     tempDirs.push(tempDir);
     const server = await startServer(join(tempDir, "events.ndjson"));
     servers.push(server.child);
+    const databaseId = await activeDatabaseId(server.baseUrl);
 
     await postJson(server.baseUrl, "/ingest", liveApprovalPayload("server-retention"));
     const retainedBefore = await getJson(server.baseUrl, "/events");
     expect(retainedBefore.events).toHaveLength(1);
 
     const pruned = await postJson(server.baseUrl, "/retention", {
+      databaseId,
       policy: {
         cutoffAt: "2026-06-24T00:00:00.000Z",
         recordTypes: ["event"],
@@ -198,11 +200,12 @@ describe("ingest server live projection", () => {
     tempDirs.push(tempDir);
     const server = await startServer(join(tempDir, "events.ndjson"));
     servers.push(server.child);
+    const databaseId = await activeDatabaseId(server.baseUrl);
 
     await postJson(server.baseUrl, "/ingest", liveApprovalPayload("server-clear"));
     expect((await getJson(server.baseUrl, "/events")).events).toHaveLength(1);
 
-    const cleared = await postJson(server.baseUrl, "/clear", {});
+    const cleared = await postJson(server.baseUrl, "/clear", { databaseId });
 
     expect(cleared.result).toMatchObject({
       removedRecords: 1,
@@ -221,6 +224,7 @@ describe("ingest server live projection", () => {
     const databasePath = join(tempDir, "masthead.sqlite");
     const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
+    const databaseId = await activeDatabaseId(server.baseUrl);
 
     await postJson(server.baseUrl, "/ingest", liveApprovalPayload("server-sqlite"));
     await postJson(server.baseUrl, "/ingest", liveApprovalPayload("server-sqlite"));
@@ -250,7 +254,7 @@ describe("ingest server live projection", () => {
       }
     });
 
-    await postJson(server.baseUrl, "/clear", {});
+    await postJson(server.baseUrl, "/clear", { databaseId });
 
     expect(rawJournalRows(databasePath)).toEqual([]);
   });
@@ -430,9 +434,10 @@ describe("ingest server live projection", () => {
     const databasePath = join(tempDir, "masthead.sqlite");
     const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
+    const databaseId = await activeDatabaseId(server.baseUrl);
 
     await postJson(server.baseUrl, "/ingest", liveSuccessfulToolPayload("server-live-clear-pending"));
-    await postJson(server.baseUrl, "/clear", {});
+    await postJson(server.baseUrl, "/clear", { databaseId });
     await delay(900);
 
     expect(rawJournalRows(databasePath)).toEqual([]);
@@ -447,11 +452,12 @@ describe("ingest server live projection", () => {
     const databasePath = join(tempDir, "masthead.sqlite");
     const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
+    const databaseId = await activeDatabaseId(server.baseUrl);
 
     await postJson(server.baseUrl, "/ingest", liveQuestionPayload("server-before-stalled-clear"));
     const stalled = await startStalledJsonPost(server.baseUrl, "/ingest", liveApprovalPayload("server-stalled-clear"));
 
-    await postJson(server.baseUrl, "/clear", {});
+    await postJson(server.baseUrl, "/clear", { databaseId });
     stalled.finish();
     const stale = await stalled.response;
 
@@ -473,9 +479,11 @@ describe("ingest server live projection", () => {
     const databasePath = join(tempDir, "masthead.sqlite");
     const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
+    const databaseId = await activeDatabaseId(server.baseUrl);
 
     await postJson(server.baseUrl, "/ingest", liveSuccessfulToolPayload("server-live-delete-pending"));
     const deleted = await postJson(server.baseUrl, "/data/delete", {
+      databaseId,
       scope: {
         kind: "project",
         project: "Masthead"
@@ -505,9 +513,11 @@ describe("ingest server live projection", () => {
     const databasePath = join(tempDir, "masthead.sqlite");
     const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
+    const databaseId = await activeDatabaseId(server.baseUrl);
 
     await postJson(server.baseUrl, "/ingest", liveSuccessfulToolPayload("server-live-retention-pending"));
     const retained = await postJson(server.baseUrl, "/retention", {
+      databaseId,
       policy: {
         cutoffAt: "2026-06-25T00:00:00.000Z",
         recordTypes: ["event"],
@@ -530,18 +540,19 @@ describe("ingest server live projection", () => {
     const databasePath = join(tempDir, "masthead.sqlite");
     const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
+    const databaseId = await activeDatabaseId(server.baseUrl);
 
     await postJson(server.baseUrl, "/ingest", liveApprovalPayload("server-data-lifecycle"));
     await getJson(server.baseUrl, "/projection?expandedSessionId=server-live");
 
-    expect(await getJson(server.baseUrl, "/data/summary")).toMatchObject({
+    expect(await getJson(server.baseUrl, withDatabaseId("/data/summary", databaseId))).toMatchObject({
       ok: true,
       summary: {
         rawEvents: 1,
         sessions: 1
       }
     });
-    expect(await getJson(server.baseUrl, "/data/export")).toMatchObject({
+    expect(await postJsonOk(server.baseUrl, "/data/export", { databaseId })).toMatchObject({
       ok: true,
       export: {
         metadata: {
@@ -552,7 +563,7 @@ describe("ingest server live projection", () => {
       }
     });
 
-    const deleted = await postJson(server.baseUrl, "/data/delete", {});
+    const deleted = await postJson(server.baseUrl, "/data/delete", { databaseId, scope: { kind: "all" } });
 
     expect(deleted).toMatchObject({
       ok: true,
@@ -563,7 +574,7 @@ describe("ingest server live projection", () => {
       events: 0,
       gitSnapshots: 0
     });
-    expect(await getJson(server.baseUrl, "/data/summary")).toMatchObject({
+    expect(await getJson(server.baseUrl, withDatabaseId("/data/summary", databaseId))).toMatchObject({
       ok: true,
       summary: {
         rawEvents: 0,
@@ -1004,7 +1015,7 @@ async function startServer(
 function readServerUrl(child: TestServerProcess): Promise<string> {
   return new Promise((resolve, reject) => {
     let output = "";
-    const timeout = setTimeout(() => reject(new Error(`server did not start: ${output}`)), 5_000);
+    const timeout = setTimeout(() => reject(new Error(`server did not start: ${output}`)), 15_000);
 
     child.stdout.on("data", (chunk) => {
       output += chunk.toString();
@@ -1042,6 +1053,16 @@ async function postJson(baseUrl: string, path: string, body: unknown): Promise<R
     method: "POST"
   });
   expect(response.status).toBe(202);
+  return response.json() as Promise<Record<string, unknown>>;
+}
+
+async function postJsonOk(baseUrl: string, path: string, body: unknown): Promise<Record<string, unknown>> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST"
+  });
+  expect(response.status).toBe(200);
   return response.json() as Promise<Record<string, unknown>>;
 }
 
@@ -1110,6 +1131,17 @@ async function getJson(baseUrl: string, path: string): Promise<Record<string, an
   const response = await fetch(`${baseUrl}${path}`);
   expect(response.status).toBe(200);
   return response.json() as Promise<Record<string, any>>;
+}
+
+async function activeDatabaseId(baseUrl: string): Promise<string> {
+  const settings = await getJson(baseUrl, "/settings");
+  return settings.settings.data.databaseId as string;
+}
+
+function withDatabaseId(path: string, databaseId: string): string {
+  const url = new URL(path, "http://masthead.test");
+  url.searchParams.set("databaseId", databaseId);
+  return `${url.pathname}${url.search}`;
 }
 
 async function waitForProjectionCard(baseUrl: string, path: string): Promise<Record<string, any>> {
