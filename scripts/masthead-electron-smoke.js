@@ -47,6 +47,10 @@ if (!parsed.renderer?.hasDesktopBridge) {
   console.error("Electron preload bridge was not exposed.");
   process.exit(1);
 }
+if (!parsed.renderer?.hasTypedNotify) {
+  console.error("Electron preload typed notification bridge was not exposed.");
+  process.exit(1);
+}
 if (!parsed.renderer?.hasCustomChrome) {
   console.error(`Electron custom window chrome was not rendered: ${JSON.stringify(parsed.renderer)}`);
   process.exit(1);

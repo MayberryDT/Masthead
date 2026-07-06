@@ -9,6 +9,8 @@ import { LlmProviderControls } from "../settings/LlmProviderControls";
 import { HarnessSetupControls, type HistoryImportScopeChoice } from "./HarnessSetupControls";
 import { SetupRunProgress } from "./SetupRunProgress";
 
+type HookAction = "install" | "test" | "uninstall";
+
 type Props = {
   adapters: AdapterStatus[];
   busy?: boolean;
@@ -19,7 +21,7 @@ type Props = {
   settingsBaseUrl?: string;
   variant?: "modal" | "fullWindow";
   onClose: () => void;
-  onCodexHookAction?: (action: "install" | "test" | "uninstall") => Promise<void> | void;
+  onRuntimeHookAction?: (runtime: string, action: HookAction) => Promise<void> | void;
   onConnectSelected?: (runtimes: string[]) => void;
   onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
   onScan?: () => void;
@@ -53,7 +55,7 @@ export function SourcesOnboardingModal({
   enrichment,
   llm,
   onClose,
-  onCodexHookAction,
+  onRuntimeHookAction,
   onConnectSelected,
   onRunSetup,
   onSaveLlmProvider,
@@ -160,9 +162,9 @@ export function SourcesOnboardingModal({
           }))
         }, {
           onLog: (entry) => setSetupLogs((current) => [...current, entry]),
-          runHookAction: async (action) => {
-            if (!onCodexHookAction) return;
-            await onCodexHookAction(action);
+          runHookAction: async (runtime, action) => {
+            if (!onRuntimeHookAction) return;
+            await onRuntimeHookAction(runtime, action);
           },
           runSetup: onRunSetup
         });

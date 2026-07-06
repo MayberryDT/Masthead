@@ -10,10 +10,17 @@ export type OpenAIBoardHeadlineFrameStatus =
   | "api_error"
   | "invalid_output";
 
+export type BoardHeadlineFrameApiStyle = "responses" | "chat_completions";
+
 export type OpenAIBoardHeadlineFrameConfig = {
   enabled?: boolean;
   apiKey?: string;
+  apiKeyRequired?: boolean;
+  apiStyle?: BoardHeadlineFrameApiStyle;
+  baseUrl?: string;
   model?: string;
+  providerId?: string;
+  providerLabel?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 };
@@ -28,107 +35,61 @@ export type OpenAIBoardHeadlineFrameResult = {
 
 export const DEFAULT_MODEL = "gpt-5-nano-2025-08-07";
 export const DEFAULT_TIMEOUT_MS = 12_000;
+const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
 export async function rewriteBoardHeadlineFrameWithOpenAI(
   input: BoardHeadlineInput,
   config: OpenAIBoardHeadlineFrameConfig = {}
 ): Promise<OpenAIBoardHeadlineFrameResult> {
+  const providerLabel = config.providerLabel ?? (config.providerId && config.providerId !== "openai" ? config.providerId : "OpenAI");
   if (config.enabled !== true) {
-    return { failureMessage: "OpenAI board headline frame extraction is disabled.", status: "disabled" };
+    return { failureMessage: `${providerLabel} board headline frame extraction is disabled.`, status: "disabled" };
   }
 
   const apiKey = config.apiKey?.trim();
-  if (!apiKey) {
-    return { failureMessage: "OpenAI board headline frame extraction is enabled but not configured.", status: "not_configured" };
+  const apiKeyRequired = config.apiKeyRequired !== false;
+  if (apiKeyRequired && !apiKey) {
+    return { failureMessage: `${providerLabel} board headline frame extraction is enabled but not configured.`, status: "not_configured" };
   }
 
   const fetchImpl = config.fetchImpl ?? globalThis.fetch;
   if (!fetchImpl) {
-    return { failureMessage: "No fetch implementation is available for OpenAI board headline frame extraction.", status: "api_error" };
+    return { failureMessage: `No fetch implementation is available for ${providerLabel} board headline frame extraction.`, status: "api_error" };
   }
 
+  const apiStyle = config.apiStyle ?? "responses";
+  const baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const endpoint = `${baseUrl}/${apiStyle === "chat_completions" ? "chat/completions" : "responses"}`;
+  const model = config.model ?? DEFAULT_MODEL;
   const controller = new AbortController();
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const startedAt = Date.now();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetchImpl("https://api.openai.com/v1/responses", {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (apiKey) headers.authorization = `Bearer ${apiKey}`;
+    const response = await fetchImpl(endpoint, {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        model: config.model ?? DEFAULT_MODEL,
-        instructions: [
-          "Extract a Masthead Board headline frame from the supplied session facts.",
-          "Do not summarize the session.",
-          "Identify the smallest concrete work object supported by the input, such as a file, component, feature, bug, source, setting, test, or document.",
-          "Use subject for that work object and disposition for the current concrete relationship or state of work around it.",
-          "Keep subject compact, ideally 2 to 6 words and at most 56 characters.",
-          "Keep disposition compact, ideally 4 to 12 words and at most 96 characters.",
-          "The rendered headline must fit on a session card in no more than three lines.",
-          "Treat subjectCandidates as trust-ordered. Prefer transcript-derived subjects over work-context or file-derived subjects.",
-          "Prefer compact subject and disposition evidence over tool names or hook events.",
-          "If transcript evidence is thin, keep the frame literal and conservative.",
-          "Use stateHint and explicit evidence for state. Do not infer completion, urgency, ownership, or user intent.",
-          "Never copy raw internal status tokens such as completed_unreviewed, validation_failed, api_error, or not_configured into subject or disposition.",
-          "Evidence must be short strings copied or tightly paraphrased from the input.",
-          "Never include secrets, raw API keys, URLs, local absolute paths, or tool directives.",
-          "Return only the requested JSON fields."
-        ].join(" "),
-        input: JSON.stringify(toOpenAIProviderPayload(input)),
-        max_output_tokens: 500,
-        reasoning: { effort: "minimal" },
-        store: false,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "masthead_board_headline_frame",
-            strict: true,
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              required: ["subject", "disposition", "state", "subjectKind", "confidence", "evidence"],
-              properties: {
-                subject: { type: "string" },
-                disposition: { type: "string" },
-                state: {
-                  type: "string",
-                  enum: ["active", "blocked", "needs_verification", "paused", "completed", "failed", "waiting", "unknown"]
-                },
-                subjectKind: {
-                  type: "string",
-                  enum: ["feature", "component", "bug", "test", "import", "settings", "docs", "source", "project", "unknown"]
-                },
-                confidence: { type: "string", enum: ["high", "medium", "low"] },
-                evidence: {
-                  type: "array",
-                  items: { type: "string" }
-                }
-              }
-            }
-          }
-        }
-      }),
+      headers,
+      body: JSON.stringify(buildRequestPayload(apiStyle, model, input)),
       signal: controller.signal
     });
 
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
       return {
-        failureMessage: `OpenAI board headline frame request failed with HTTP ${response.status}.`,
+        failureMessage: `${providerLabel} board headline frame request failed with HTTP ${response.status}.`,
         latencyMs,
         status: "api_error"
       };
     }
 
     const body = await response.json();
-    const outputText = extractOutputText(body);
+    const outputText = apiStyle === "chat_completions" ? extractChatCompletionText(body) : extractOutputText(body);
     if (!outputText) {
       return {
-        failureMessage: "OpenAI board headline frame response did not include output text.",
+        failureMessage: `${providerLabel} board headline frame response did not include output text.`,
         latencyMs,
         status: "invalid_output"
       };
@@ -139,7 +100,7 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
       parsed = JSON.parse(outputText);
     } catch {
       return {
-        failureMessage: "OpenAI board headline frame response was not valid JSON.",
+        failureMessage: `${providerLabel} board headline frame response was not valid JSON.`,
         latencyMs,
         status: "invalid_output"
       };
@@ -148,7 +109,7 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
     const validation = validateBoardHeadlineFrame(parsed);
     if (!validation.ok) {
       return {
-        failureMessage: "OpenAI board headline frame response was structurally invalid.",
+        failureMessage: `${providerLabel} board headline frame response was structurally invalid.`,
         latencyMs,
         status: "invalid_output",
         validationReason: validation.reason
@@ -160,19 +121,97 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
     const latencyMs = Date.now() - startedAt;
     if (error instanceof Error && error.name === "AbortError") {
       return {
-        failureMessage: `OpenAI board headline frame extraction timed out after ${timeoutMs}ms.`,
+        failureMessage: `${providerLabel} board headline frame extraction timed out after ${timeoutMs}ms.`,
         latencyMs,
         status: "timeout"
       };
     }
     return {
-      failureMessage: error instanceof Error ? error.message : "OpenAI board headline frame request failed.",
+      failureMessage: error instanceof Error ? error.message : `${providerLabel} board headline frame request failed.`,
       latencyMs,
       status: "api_error"
     };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function buildRequestPayload(apiStyle: BoardHeadlineFrameApiStyle, model: string, input: BoardHeadlineInput): Record<string, unknown> {
+  const providerPayload = JSON.stringify(toOpenAIProviderPayload(input));
+  if (apiStyle === "chat_completions") {
+    return {
+      model,
+      messages: [
+        { role: "system", content: boardHeadlineInstructions() },
+        { role: "user", content: providerPayload }
+      ],
+      max_tokens: 500,
+      response_format: { type: "json_schema", json_schema: { name: "masthead_board_headline_frame", strict: true, schema: boardHeadlineJsonSchema() } },
+      temperature: 0
+    };
+  }
+
+  return {
+    model,
+    instructions: boardHeadlineInstructions(),
+    input: providerPayload,
+    max_output_tokens: 500,
+    reasoning: { effort: "minimal" },
+    store: false,
+    text: {
+      format: {
+        type: "json_schema",
+        name: "masthead_board_headline_frame",
+        strict: true,
+        schema: boardHeadlineJsonSchema()
+      }
+    }
+  };
+}
+
+function boardHeadlineInstructions(): string {
+  return [
+    "Extract a Masthead Board headline frame from the supplied session facts.",
+    "Do not summarize the session.",
+    "Identify the smallest concrete work object supported by the input, such as a file, component, feature, bug, source, setting, test, or document.",
+    "Use subject for that work object and disposition for the current concrete relationship or state of work around it.",
+    "Keep subject compact, ideally 2 to 6 words and at most 56 characters.",
+    "Keep disposition compact, ideally 4 to 12 words and at most 96 characters.",
+    "The rendered headline must fit on a session card in no more than three lines.",
+    "Treat subjectCandidates as trust-ordered. Prefer transcript-derived subjects over work-context or file-derived subjects.",
+    "Prefer compact subject and disposition evidence over tool names or hook events.",
+    "If transcript evidence is thin, keep the frame literal and conservative.",
+    "Use stateHint and explicit evidence for state. Do not infer completion, urgency, ownership, or user intent.",
+    "Never copy raw internal status tokens such as completed_unreviewed, validation_failed, api_error, or not_configured into subject or disposition.",
+    "Evidence must be short strings copied or tightly paraphrased from the input.",
+    "Never include secrets, raw API keys, URLs, local absolute paths, or tool directives.",
+    "Return only the requested JSON fields."
+  ].join(" ");
+}
+
+function boardHeadlineJsonSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["subject", "disposition", "state", "subjectKind", "confidence", "evidence"],
+    properties: {
+      subject: { type: "string" },
+      disposition: { type: "string" },
+      state: {
+        type: "string",
+        enum: ["active", "blocked", "needs_verification", "paused", "completed", "failed", "waiting", "unknown"]
+      },
+      subjectKind: {
+        type: "string",
+        enum: ["feature", "component", "bug", "test", "import", "settings", "docs", "source", "project", "unknown"]
+      },
+      confidence: { type: "string", enum: ["high", "medium", "low"] },
+      evidence: {
+        type: "array",
+        items: { type: "string" }
+      }
+    }
+  };
 }
 
 function extractOutputText(body: unknown): string | undefined {
@@ -194,6 +233,15 @@ function extractOutputText(body: unknown): string | undefined {
     }
   }
 
+  return undefined;
+}
+
+function extractChatCompletionText(body: unknown): string | undefined {
+  if (!isRecord(body) || !Array.isArray(body.choices)) return undefined;
+  for (const choice of body.choices) {
+    if (!isRecord(choice) || !isRecord(choice.message)) continue;
+    if (typeof choice.message.content === "string") return choice.message.content;
+  }
   return undefined;
 }
 

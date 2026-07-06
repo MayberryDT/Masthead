@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { liveProjectionEnrichments } from "../enrichmentViewRepository.ts";
+import { currentSessionEnrichmentView, liveProjectionEnrichments } from "../enrichmentViewRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
 import type { MastheadDatabase } from "../sqlite.ts";
@@ -147,6 +147,35 @@ describe("enrichment view repository", () => {
     expect(view?.sessionSummary?.text).toContain("persisted session capsule");
     db.close();
   });
+
+  test("lets summary search projection refresh Logbook fields without replacing the full dossier", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-enrichment-view-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedSession(db, "session-summary", "source-summary");
+    seedCapsule(db, "session-summary", "Older full capsule title", {
+      generatedAt: "2026-06-24T12:00:00.000Z",
+      id: "older-full"
+    });
+    seedSearchProjection(db, "session-summary");
+
+    const view = currentSessionEnrichmentView(db, "session-summary");
+
+    expect(view).toMatchObject({
+      objective: "Refresh summaries locally",
+      outcome: "Summary fields updated",
+      searchSummary: "Summary projection search text",
+      sessionSummary: { text: "Summary projection row should drive Logbook summary." },
+      sessionTitle: { text: "Fresh summary projection title" },
+      technologies: ["TypeScript"],
+      title: "Fresh summary projection title",
+      titleSource: "deterministic",
+      topics: ["logbook"]
+    });
+    expect(view?.sessionDossier?.keyWork).toEqual(["Kept older full dossier."]);
+    db.close();
+  });
 });
 
 function seedSession(db: MastheadDatabase, sessionId: string, sourceSessionId: string): void {
@@ -200,10 +229,53 @@ function seedCapsule(
       candidateDecisions: [],
       liveSummary: title,
       searchPhrases: [title],
+      sessionDossier: { keyWork: ["Kept older full dossier."] },
       technologies: [],
       title,
       topics: [],
       unresolved: []
+    }),
+    "[]"
+  );
+}
+
+function seedSearchProjection(db: MastheadDatabase, sessionId: string): void {
+  db.prepare(
+    `INSERT INTO session_enrichments (
+      enrichment_id, session_id, enrichment_kind, status, content_fingerprint, prompt_version,
+      provider, model, generated_at, content_json, source_refs_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "enrichment:summary-projection",
+    sessionId,
+    "search_projection",
+    "current",
+    "fingerprint:summary-projection",
+    "session-capsule-v4",
+    "deterministic",
+    "local-rules",
+    "2026-06-24T12:10:00.000Z",
+    JSON.stringify({
+      objective: "Refresh summaries locally",
+      outcome: "Summary fields updated",
+      searchSummary: "Summary projection search text",
+      searchText: "Fresh summary projection title Summary projection row should drive Logbook summary.",
+      sessionSummary: {
+        confidence: "high",
+        evidenceRefs: [],
+        state: "completed",
+        text: "Summary projection row should drive Logbook summary."
+      },
+      sessionTitle: {
+        basis: "dominant_work",
+        confidence: "high",
+        evidenceRefs: [],
+        text: "Fresh summary projection title"
+      },
+      technologies: ["TypeScript"],
+      title: "Fresh summary projection title",
+      titleSource: "deterministic",
+      topics: ["logbook"]
     }),
     "[]"
   );

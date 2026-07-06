@@ -46,6 +46,116 @@ describe("data lifecycle API", () => {
     expect(count(daemon.database, "raw_events")).toBe(0);
   });
 
+  test("accepts read-compatible data summaries without a database confirmation token", async () => {
+    const daemon = await createTestDaemon();
+    seedCanonicalSessionGraph(daemon.database, { project: "Masthead", sessionId: "session:1" });
+    const baseUrl = await listen(daemon);
+    const databaseId = testDatabaseId(daemon);
+
+    const bareSummary = await getJson(baseUrl, "/data/summary");
+    expect(bareSummary).toMatchObject({
+      ok: true,
+      summary: {
+        tables: {
+          raw_events: 1,
+          sessions: 1,
+          session_enrichments: 1
+        },
+        storageClasses: {
+          canonical_metadata: { records: 2, retention: "indefinite" },
+          raw_payloads: { records: 1, retention: "configurable" },
+          searchable_messages: { records: 1, retention: "indefinite_configurable" }
+        }
+      }
+    });
+
+    expect(await getJson(baseUrl, withDatabaseId("/data/summary", databaseId))).toMatchObject({
+      ok: true,
+      summary: {
+        tables: {
+          raw_events: 1,
+          sessions: 1,
+          session_enrichments: 1
+        }
+      }
+    });
+  });
+
+  test("rejects stale data summary database confirmations", async () => {
+    const daemon = await createTestDaemon();
+    seedCanonicalSessionGraph(daemon.database, { project: "Masthead", sessionId: "session:1" });
+    const baseUrl = await listen(daemon);
+
+    const response = await fetch(`${baseUrl}/data/summary?databaseId=sqlite%3Astale`, { headers: { accept: "application/json" } });
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("Masthead database changed");
+    expect(count(daemon.database, "sessions")).toBe(1);
+    expect(count(daemon.database, "raw_events")).toBe(1);
+  });
+
+  test("applies project summary scope without requiring a database confirmation token", async () => {
+    const daemon = await createTestDaemon();
+    seedCanonicalSessionGraph(daemon.database, { project: "Masthead", sessionId: "session:1" });
+    seedCanonicalSessionGraph(daemon.database, { project: "Pip", sessionId: "session:2" });
+    const baseUrl = await listen(daemon);
+
+    expect(await getJson(baseUrl, "/data/summary?kind=project&project=Pip")).toMatchObject({
+      ok: true,
+      summary: {
+        tables: {
+          raw_events: 1,
+          sessions: 1
+        },
+        storageClasses: {
+          raw_payloads: { records: 1 },
+          searchable_messages: { records: 1 }
+        }
+      }
+    });
+  });
+
+  test("rejects incomplete project summary scopes", async () => {
+    const daemon = await createTestDaemon();
+    seedCanonicalSessionGraph(daemon.database, { project: "Pip", sessionId: "session:2" });
+    const baseUrl = await listen(daemon);
+
+    const response = await fetch(`${baseUrl}/data/summary?kind=project`, { headers: { accept: "application/json" } });
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("project is required");
+    expect(sessionIds(daemon.database)).toEqual(["session:2"]);
+    expect(count(daemon.database, "raw_events")).toBe(1);
+  });
+
+  test("keeps destructive data actions behind database confirmation and preserves data when missing", async () => {
+    const daemon = await createTestDaemon();
+    seedCanonicalSessionGraph(daemon.database, { project: "Pip", sessionId: "session:2" });
+    const baseUrl = await listen(daemon);
+
+    const deleteResponse = await fetch(`${baseUrl}/data/delete`, {
+      body: JSON.stringify({ scope: { kind: "all" } }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+    expect(deleteResponse.status).toBe(400);
+    expect(await deleteResponse.text()).toContain("databaseId is required");
+    expect(sessionIds(daemon.database)).toEqual(["session:2"]);
+    expect(count(daemon.database, "session_enrichments")).toBe(1);
+    expect(count(daemon.database, "raw_events")).toBe(1);
+
+    const retentionResponse = await fetch(`${baseUrl}/data/retention/default`, {
+      body: JSON.stringify({}),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+    expect(retentionResponse.status).toBe(400);
+    expect(await retentionResponse.text()).toContain("databaseId is required");
+    expect(sessionIds(daemon.database)).toEqual(["session:2"]);
+    expect(count(daemon.database, "session_enrichments")).toBe(1);
+    expect(count(daemon.database, "raw_events")).toBe(1);
+  });
+
   test("scoped deletion previews blast radius and clears FTS for selected projects", async () => {
     const daemon = await createTestDaemon();
     seedCanonicalSessionGraph(daemon.database, { project: "Masthead", sessionId: "session:1" });

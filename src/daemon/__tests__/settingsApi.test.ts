@@ -200,6 +200,29 @@ describe("settings API", () => {
     });
   });
 
+  test("reflects Settings-backed compatible enrichment in board headline health", async () => {
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "openai_compatible",
+      apiKey: "compatible-settings-key",
+      baseUrl: "https://compatible.example.test/v1",
+      model: "llama-3.1",
+      remoteEnrichmentEnabled: true
+    });
+
+    const health = await getJson(baseUrl, "/health");
+
+    expect(health.boardHeadlines).toMatchObject({
+      configured: true,
+      enabled: true,
+      model: "llama-3.1",
+      provider: "openai_compatible"
+    });
+    expect(health.boardHeadlines.provider).not.toBe("openai");
+  });
+
   test("disabling remote enrichment without resubmitting credentials retains provider settings", async () => {
     const { daemon } = await createTestHarness();
     const baseUrl = await listen(daemon);

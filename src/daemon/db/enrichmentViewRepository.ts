@@ -64,6 +64,19 @@ type EnrichmentRow = {
   contentJson: string | null;
 };
 
+type SearchProjectionContent = {
+  searchText?: string;
+  title?: string;
+  titleSource?: string;
+  sessionTitle?: SessionTitleEnrichment;
+  sessionSummary?: SessionSummaryEnrichment;
+  objective?: string;
+  outcome?: string;
+  searchSummary?: string;
+  topics?: string[];
+  technologies?: string[];
+};
+
 export function currentSessionEnrichmentView(db: MastheadDatabase, sessionId: string): SessionEnrichmentView | undefined {
   const rows = db
     .prepare(
@@ -198,9 +211,9 @@ function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichment
   const searchProjectionRow = rowForKind(rows, "search_projection");
   const capsule = contentFromRow<SessionCapsule>(capsuleRow);
   const liveSummary = contentFromRow<{ text?: string }>(liveSummaryRow);
-  const searchProjection = contentFromRow<{ searchText?: string }>(searchProjectionRow);
-  const sessionTitle = capsule?.sessionTitle ?? capsule?.durableEnrichment?.sessionTitle;
-  const sessionSummary = capsule?.sessionSummary ?? capsule?.durableEnrichment?.sessionSummary;
+  const searchProjection = contentFromRow<SearchProjectionContent>(searchProjectionRow);
+  const sessionTitle = searchProjection?.sessionTitle ?? capsule?.sessionTitle ?? capsule?.durableEnrichment?.sessionTitle;
+  const sessionSummary = searchProjection?.sessionSummary ?? capsule?.sessionSummary ?? capsule?.durableEnrichment?.sessionSummary;
   const sessionDossier = capsule?.sessionDossier ?? capsule?.durableEnrichment?.sessionDossier;
   return {
     liveSummary: liveSummary?.text ?? capsule?.liveSummary,
@@ -208,21 +221,21 @@ function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichment
     filesChangedSummary: capsule?.filesChangedSummary,
     model: capsuleRow?.model ?? undefined,
     object: capsule?.object,
-    objective: capsule?.objective,
-    outcome: capsule?.outcome,
+    objective: searchProjection?.objective ?? capsule?.objective,
+    outcome: searchProjection?.outcome ?? capsule?.outcome,
     provider: capsuleRow?.provider ?? undefined,
-    searchSummary: capsule?.searchSummary,
+    searchSummary: searchProjection?.searchSummary ?? capsule?.searchSummary,
     searchText: searchProjection?.searchText,
     sessionDossier,
     sessionId,
     sessionSummary,
     sessionTitle,
     status: "current",
-    title: capsule?.title,
-    titleSource: capsule?.titleSource,
+    title: searchProjection?.title ?? capsule?.title,
+    titleSource: searchProjection?.titleSource ?? capsule?.titleSource,
     subject: capsule?.subject?.label,
-    technologies: capsule?.technologies ?? [],
-    topics: capsule?.topics ?? [],
+    technologies: searchProjection?.technologies ?? capsule?.technologies ?? [],
+    topics: searchProjection?.topics ?? capsule?.topics ?? [],
     verificationSummary: capsule?.verificationSummary,
     unresolved: capsule?.unresolved?.map((claim) => claim.text).filter(Boolean) ?? []
   };

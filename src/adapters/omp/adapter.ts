@@ -16,10 +16,16 @@ export const ompAdapter = {
   backfill: backfillOmpSource
 };
 
+type OmpSessionIdentity = {
+  sessionId: string;
+  parentSourceSessionId?: string;
+  childSessionId?: string;
+};
+
 async function* backfillOmpSource(source: DiscoveredSource): AsyncIterable<AdapterRecord> {
   if (!source.path) return;
-  const sessionId = ompSessionIdFromSourcePath(source.path);
-  if (!sessionId) return;
+  const identity = ompSessionIdentityFromSourcePath(source.path);
+  if (!identity.sessionId) return;
   const text = await readFile(source.path, "utf8");
   let lineNumber = 0;
   for (const line of text.split("\n")) {
@@ -34,19 +40,20 @@ async function* backfillOmpSource(source: DiscoveredSource): AsyncIterable<Adapt
       continue;
     }
     if (!isRecord(payload)) continue;
-    const records = ompRecordsFromPayload(source, sessionId, lineNumber, trimmed, payload);
+    const records = ompRecordsFromPayload(source, identity, lineNumber, trimmed, payload);
     for (const record of records) yield record;
   }
 }
 
-function ompRecordsFromPayload(source: DiscoveredSource, sessionId: string, lineNumber: number, rawLine: string, payload: Record<string, unknown>): AdapterRecord[] {
+function ompRecordsFromPayload(source: DiscoveredSource, identity: OmpSessionIdentity, lineNumber: number, rawLine: string, payload: Record<string, unknown>): AdapterRecord[] {
   if (payload.type === "session") {
     const observedAt = stringValue(payload.timestamp) ?? new Date(0).toISOString();
     return [
       record(source, lineNumber, "session", rawLine, observedAt, payload, "session", {
         cwd: stringValue(payload.cwd),
         observedAt,
-        sessionId,
+        sessionId: identity.sessionId,
+        ...ompChildIdentity(identity),
         title: stringValue(payload.title)
       })
     ];
@@ -66,7 +73,8 @@ function ompRecordsFromPayload(source: DiscoveredSource, sessionId: string, line
         callId: stringValue(message.toolCallId),
         observedAt,
         output: text,
-        sessionId,
+        sessionId: identity.sessionId,
+        ...ompChildIdentity(identity),
         status: message.isError === true ? "failed" : "succeeded",
         toolName: stringValue(message.toolName)
       })
@@ -76,7 +84,8 @@ function ompRecordsFromPayload(source: DiscoveredSource, sessionId: string, line
       record(source, lineNumber, "message", rawLine, observedAt, payload, "message", {
         observedAt,
         role,
-        sessionId,
+        sessionId: identity.sessionId,
+        ...ompChildIdentity(identity),
         text
       })
     );
@@ -89,7 +98,8 @@ function ompRecordsFromPayload(source: DiscoveredSource, sessionId: string, line
         arguments: isRecord(part.arguments) ? part.arguments : {},
         callId: stringValue(part.id),
         observedAt,
-        sessionId,
+        sessionId: identity.sessionId,
+        ...ompChildIdentity(identity),
         toolName: stringValue(part.name) ?? "tool"
       })
     );
@@ -104,7 +114,8 @@ function ompRecordsFromPayload(source: DiscoveredSource, sessionId: string, line
         observedAt,
         outputTokens: usage?.outputTokens,
         provider: stringValue(message.provider),
-        sessionId,
+        sessionId: identity.sessionId,
+        ...ompChildIdentity(identity),
         totalTokens: usage?.totalTokens
       })
     );
@@ -152,12 +163,18 @@ function diagnosticRecord(source: DiscoveredSource, lineNumber: number, line: st
   };
 }
 
-function ompSessionIdFromSourcePath(path: string): string {
+function ompSessionIdentityFromSourcePath(path: string): OmpSessionIdentity {
   const base = basename(path).replace(/\.(jsonl|json)$/i, "");
-  if (/^\d{4}-\d{2}-\d{2}T/.test(base)) return base;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(base)) return { sessionId: base };
   const parent = basename(dirname(path));
-  if (/^\d{4}-\d{2}-\d{2}T/.test(parent)) return `${parent}:${base.replace(/^__/, "")}`;
-  return base;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(parent)) return { sessionId: parent, parentSourceSessionId: parent, childSessionId: base.replace(/^__/, "") };
+  return { sessionId: base };
+}
+
+function ompChildIdentity(identity: OmpSessionIdentity): { parentSourceSessionId?: string; childSessionId?: string } {
+  return identity.parentSourceSessionId && identity.childSessionId
+    ? { parentSourceSessionId: identity.parentSourceSessionId, childSessionId: identity.childSessionId }
+    : {};
 }
 
 function contentParts(value: unknown): Array<Record<string, unknown>> {

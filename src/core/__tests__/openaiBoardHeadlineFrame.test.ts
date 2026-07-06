@@ -52,6 +52,21 @@ function responseWithFrame(frame: unknown) {
   };
 }
 
+function chatCompletionsResponseWithFrame(frame: unknown) {
+  return {
+    ok: true,
+    json: async () => ({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify(frame)
+          }
+        }
+      ]
+    })
+  };
+}
+
 function validFrame(overrides: Partial<BoardHeadlineFrame> = {}): BoardHeadlineFrame {
   return {
     subject: "Board headlines",
@@ -114,6 +129,63 @@ describe("OpenAI board headline frame", () => {
     expect(JSON.parse(body.input).facts).not.toHaveProperty("transcriptExcerpt");
     expect(JSON.parse(body.input).facts).not.toHaveProperty("recentTranscriptMessages");
     expect(body.input).not.toContain("OPENAI_API_KEY");
+  });
+
+  test("posts compatible providers to chat completions with JSON response format", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(chatCompletionsResponseWithFrame(validFrame({ subject: "Compatible headlines" })));
+    const config = {
+      enabled: true,
+      apiKey: "compatible-key",
+      apiStyle: "chat_completions" as const,
+      baseUrl: "http://127.0.0.1:4321/v1",
+      fetchImpl,
+      model: "llama-3.1"
+    };
+
+    const result = await rewriteBoardHeadlineFrameWithOpenAI(input(), config);
+
+    const [url, request] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:4321/v1/chat/completions");
+    const body = JSON.parse(String(request.body));
+    expect(body).toMatchObject({
+      model: "llama-3.1",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "masthead_board_headline_frame",
+          strict: true
+        }
+      }
+    });
+    expect(body.response_format.json_schema.schema.required).toEqual([
+      "subject",
+      "disposition",
+      "state",
+      "subjectKind",
+      "confidence",
+      "evidence"
+    ]);
+    expect(body.messages.map((message: { role: string }) => message.role)).toEqual(["system", "user"]);
+    expect(body.messages[0].content).toContain("smallest concrete work object");
+    expect(body.messages[0].content).toContain("Return only the requested JSON fields.");
+    const providerInput = JSON.parse(body.messages[1].content);
+    expect(providerInput).toMatchObject({
+      lifecycle: input().lifecycle,
+      primaryStatus: input().primaryStatus,
+      stateHint: input().stateHint,
+      facts: {
+        changedFileCount: 1,
+        recentFileBasenames: ["SessionCard.tsx"]
+      }
+    });
+    expect(body.messages[1].content).not.toContain("facts.transcriptExcerpt");
+    expect(result).toMatchObject({
+      status: "llm",
+      frame: {
+        subject: "Compatible headlines",
+        disposition: "structured around subject and disposition"
+      }
+    });
   });
 
   test("sends a sanitized compact provider payload without full facts", async () => {

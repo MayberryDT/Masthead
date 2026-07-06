@@ -21,7 +21,7 @@ import {
   writeStoredMotionDisabled,
   writeStoredSessionEndedNotificationsEnabled
 } from "../ui/motionPreference";
-import { emitSessionEndedNotifications } from "./liveSessionEndedNotifications";
+import { emitSessionTransitionNotifications } from "./liveSessionEndedNotifications";
 import {
   SessionBoard
 } from "../ui/SessionBoard";
@@ -153,7 +153,7 @@ export function App() {
   const [selectedSessionSnapshot, setSelectedSessionSnapshot] = useState<SessionDetailView>();
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
   const liveProjectionRef = useRef<LiveBoardProjection | undefined>(undefined);
-  const notifiedSessionEndedIdsRef = useRef(new Set<string>());
+  const notifiedSessionTransitionKeysRef = useRef(new Set<string>());
   const [liveConnection, setLiveConnection] = useState<ConnectionState>({ state: "connecting" });
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
   const [liveGitSnapshots, setLiveGitSnapshots] = useState<GitSnapshot[]>();
@@ -181,22 +181,25 @@ export function App() {
     adapters,
     busy: sourcesBusy,
     cancel: handleCancelImport,
+    clearImportJobsFilter: handleClearImportJobsFilter,
     connectSelected: handleConnectSelectedSources,
     enableTranscriptImport: handleEnableTranscriptImport,
     excludePath: handleExcludeSourcePath,
     hookActionBusy,
     hooks: sourceHooks,
+    importFilterRuntime,
     importMetadata: handleImportMetadata,
     importPage,
     importTranscripts: handleImportTranscripts,
     imports,
     lastRefreshAt: sourcesLastRefreshAt,
     loadAdapterSources: handleLoadAdapterSources,
+    openImportJobsForRuntime: handleOpenImportJobsForRuntime,
     pollActiveImports: handlePollActiveImports,
     refreshSources: handleRefreshSources,
     repair: handleRepairSources,
     retry: handleRetryImport,
-    runCodexHookAction: handleCodexHookAction,
+    runRuntimeHookAction: handleRuntimeHookAction,
     runSetup: handleRunSourcesSetup,
     scan: handleScanSources,
     scanSetup: handleScanSourcesSetup,
@@ -313,7 +316,7 @@ export function App() {
 
   const handleCanonicalDataDeleted = useCallback(() => {
     liveProjectionRef.current = undefined;
-    notifiedSessionEndedIdsRef.current.clear();
+    notifiedSessionTransitionKeysRef.current.clear();
     setLiveProjection(emptyLiveBoard);
     setLiveEvents([]);
     setLiveGitSnapshots([]);
@@ -394,9 +397,9 @@ export function App() {
       const normalized = normalizeLiveBoardProjection(body.projection, selectedSessionId);
       liveProjectionRef.current = normalized;
       setLiveProjection(normalized);
-      void emitSessionEndedNotifications(previousProjection, normalized, {
+      void emitSessionTransitionNotifications(previousProjection, normalized, {
         enabled: sessionEndedNotificationsEnabled,
-        notifiedSessionIds: notifiedSessionEndedIdsRef.current
+        notifiedTransitionKeys: notifiedSessionTransitionKeysRef.current
       });
       setShowDemoData(false);
       setConnectorAction((current) =>
@@ -423,7 +426,7 @@ export function App() {
     } catch (error) {
       if (isSupersededRequest()) return "superseded";
       liveProjectionRef.current = undefined;
-      notifiedSessionEndedIdsRef.current.clear();
+      notifiedSessionTransitionKeysRef.current.clear();
       setLiveProjection(undefined);
       setLiveEvents(undefined);
       setLiveGitSnapshots(undefined);
@@ -664,6 +667,7 @@ export function App() {
           adapters={adapters}
           imports={imports}
           importTotal={importPage.total}
+          importFilterRuntime={importFilterRuntime}
           lastRefreshAt={sourcesLastRefreshAt}
           setup={sourcesSetup}
           busy={sourcesBusy}
@@ -676,14 +680,16 @@ export function App() {
           settingsBaseUrl={activeProjectionUrl}
           status={sourcesStatus}
           onCancelImport={handleCancelImport}
+          onClearImportJobsFilter={handleClearImportJobsFilter}
           onCloseOnboarding={closeOnboarding}
-          onCodexHookAction={handleCodexHookAction}
+          onRuntimeHookAction={handleRuntimeHookAction}
           onConnectSelected={handleConnectSelectedSources}
           onEnableTranscriptImport={handleEnableTranscriptImport}
           onExcludePath={handleExcludeSourcePath}
           onImportMetadata={handleImportMetadata}
           onImportTranscripts={handleImportTranscripts}
           onLoadAdapterSources={handleLoadAdapterSources}
+          onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
           onOpenOnboarding={reopenOnboarding}
           onPollImports={handlePollActiveImports}
           onPreviewImport={sourcesController.previewImport}
@@ -715,10 +721,21 @@ export function App() {
             query={logbook.query}
             density="compact"
             loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbook.loadState}
+            bulkConfirmMessage={logbook.bulkConfirmMessage}
             bulkEnrichBusy={logbook.bulkEnrichBusy}
             bulkEnrichError={logbook.bulkEnrichError}
-            onBulkEnrich={() => void logbook.bulkEnrichSelected()}
+            bulkStatus={logbook.bulkStatus}
+            bulkTargetCapped={logbook.bulkTargetCapped}
+            bulkTargetCount={logbook.bulkTargetCount}
+            bulkTargetKind={logbook.bulkTargetKind}
+            enrichment={settingsData.settingsState?.enrichment}
+            onBulkEnrichFull={() => void logbook.bulkEnrichFull()}
+            onBulkEnrichSummary={() => void logbook.bulkEnrichSummary()}
+            onCancelBulkEnrichFull={logbook.cancelBulkEnrichFull}
             onClearBulkSelection={logbook.clearBulkSelection}
+            onConfirmBulkEnrichFull={() => void logbook.confirmBulkEnrichFull()}
+            onSelectBulkFiltered={() => void logbook.selectAllMatchingFilter()}
+            onSelectBulkPage={logbook.selectCurrentPage}
             onToggleBulkSelect={logbook.toggleBulkSelection}
             refreshError={logbook.refreshError}
             selectedSessionId={logbook.selectedSessionId}

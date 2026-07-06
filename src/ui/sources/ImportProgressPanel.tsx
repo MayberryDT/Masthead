@@ -18,11 +18,15 @@ export function ImportProgressPanel({
   units = []
 }: Props) {
   const visibility = deriveImportVisibilityState(job, nowMs, stalledAfterMs);
-  const processed = job.processedCount ?? 0;
-  const discovered = job.discoveredCount ?? 0;
-  const progressPct = discovered > 0 ? Math.min(100, Math.round((processed / discovered) * 100)) : undefined;
+  const current = job.progressCurrent ?? job.processedCount ?? job.importedCount ?? 0;
+  const rawTotal = job.progressTotal ?? job.discoveredCount;
+  const active = job.status === "queued" || job.status === "running" || job.status === "cancelling";
+  const determinate = rawTotal > 0 && (!active || rawTotal > current || job.progressTotal !== undefined);
+  const progressPct = determinate ? Math.min(100, job.progressPercent ?? Math.round((current / rawTotal) * 100)) : undefined;
   const stalled = visibility === "stalled";
-
+  const startedAt = (job as ImportJob & { startedAt?: string }).startedAt ?? job.updatedAt;
+  const startedAtMs = startedAt ? new Date(startedAt).getTime() : Number.NaN;
+  const elapsed = Number.isFinite(startedAtMs) ? formatElapsed(Math.max(0, nowMs - startedAtMs)) : "Waiting";
   return (
     <section className={`import-progress-panel${stalled ? " is-stale" : ""}`} aria-label="Import progress">
       <div className="source-detail-section-head">
@@ -32,17 +36,23 @@ export function ImportProgressPanel({
         </div>
         <StatusBadge tone={visibility === "failed" ? "danger" : visibility === "stalled" ? "warning" : visibility === "running" ? "info" : "active"}>{visibility.replaceAll("_", " ")}</StatusBadge>
       </div>
-      {discovered > 0 ? (
-        <div className="import-progress-bar" role="progressbar" aria-valuenow={processed} aria-valuemin={0} aria-valuemax={discovered} aria-label="Records processed">
+      {determinate ? (
+        <div className="import-progress-bar" role="progressbar" aria-valuenow={current} aria-valuemin={0} aria-valuemax={rawTotal} aria-label="Records processed">
           <div className="import-progress-bar-fill" style={{ width: `${progressPct ?? 0}%` }} />
           <span className="import-progress-bar-label">{progressPct}%</span>
         </div>
+      ) : active ? (
+        <div className="import-progress-bar is-indeterminate" role="progressbar" aria-valuemin={0} aria-label="Records processed">
+          <div className="import-progress-bar-fill" />
+          <span className="import-progress-bar-label">Discovering…</span>
+        </div>
       ) : null}
       <dl className="import-progress-grid">
-        <ProgressMetric label="Records" value={`${processed} / ${discovered || "?"}`} />
+        <ProgressMetric label="Records" value={`${current} / ${determinate ? rawTotal : "?"}`} />
         <ProgressMetric label="Units" value={`${job.completedWorkUnits ?? 0} / ${job.totalWorkUnits ?? 0}`} />
         <ProgressMetric label="Failed" value={String(job.failedWorkUnits ?? job.failureCount ?? 0)} />
         <ProgressMetric label="Heartbeat" value={job.heartbeatAt ? formatTime(job.heartbeatAt) : "Waiting"} />
+        <ProgressMetric label="Elapsed" value={elapsed} />
       </dl>
       {stalled ? (
         <p className="surface-status import-progress-stale-warning">
@@ -91,4 +101,11 @@ function basename(path: string): string {
 function formatTime(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatElapsed(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} hr`;
 }

@@ -63,6 +63,88 @@ describe("Oh My Pi adapter", () => {
     );
   });
 
+  test("normalizes OMP message model and provider metadata into record values", async () => {
+    const tempDir = await makeTempDir();
+    const path = join(tempDir, "2026-07-05T12-00-00-000Z_omp-model-provider.jsonl");
+    await writeFile(
+      path,
+      [
+        JSON.stringify({ cwd: "/project", id: "session", timestamp: "2026-07-05T12:00:00.000Z", title: "Model metadata", type: "session" }),
+        JSON.stringify({
+          id: "message-1",
+          message: {
+            content: [{ text: "OMP assistant reply with runtime metadata", type: "text" }],
+            model: "openai-codex/gpt-5.5",
+            provider: "openai-codex",
+            role: "assistant",
+            timestamp: "2026-07-05T12:00:01.000Z"
+          },
+          parentId: "session",
+          timestamp: "2026-07-05T12:00:01.000Z",
+          type: "message"
+        })
+      ].join("\n") + "\n",
+      "utf8"
+    );
+
+    const records = await collect(ompAdapter.backfill(source(path)));
+    const values = records
+      .map((record) => record.normalized.value)
+      .filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null);
+
+    expect(records.flatMap((record) => record.diagnostics)).toEqual([]);
+    expect(values).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          model: "openai-codex/gpt-5.5",
+          provider: "openai-codex",
+          sessionId: "2026-07-05T12-00-00-000Z_omp-model-provider"
+        })
+      ])
+    );
+  });
+
+  test("keeps nested OMP advisor sessions grouped under the parent source session", async () => {
+    const tempDir = await makeTempDir();
+    const parentSessionId = "2026-06-25T20-55-39-024Z_019f0091-2110-7000-a1e2-147639fff216";
+    const sessionDir = join(tempDir, parentSessionId);
+    const path = join(sessionDir, "__advisor.jsonl");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path,
+      [
+        JSON.stringify({ cwd: "/project", id: "advisor-session", timestamp: "2026-06-25T20:55:39.024Z", title: "Advisor", type: "session", version: 1 }),
+        JSON.stringify({
+          id: "advisor-message-1",
+          message: { content: [{ text: "Advisor child guidance", type: "text" }], role: "assistant", timestamp: "2026-06-25T20:55:40.000Z" },
+          parentId: "advisor-session",
+          timestamp: "2026-06-25T20:55:40.000Z",
+          type: "message"
+        })
+      ].join("\n") + "\n",
+      "utf8"
+    );
+
+    const records = await collect(ompAdapter.backfill(source(path)));
+    const values = records.map((record) => record.normalized.value).filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null);
+
+    expect(records.map((record) => record.normalized.kind)).toEqual(["session", "message"]);
+    expect(values).toEqual([
+      expect.objectContaining({
+        sessionId: parentSessionId,
+        parentSourceSessionId: parentSessionId,
+        childSessionId: "advisor",
+        title: "Advisor"
+      }),
+      expect.objectContaining({
+        sessionId: parentSessionId,
+        parentSourceSessionId: parentSessionId,
+        childSessionId: "advisor",
+        role: "assistant",
+        text: "Advisor child guidance"
+      })
+    ]);
+  });
   test("discovers OMP session JSONL files without crawling logs or blobs", async () => {
     const homeDir = await makeTempDir();
     const sessionsDir = join(homeDir, ".omp", "agent", "sessions", "-project");

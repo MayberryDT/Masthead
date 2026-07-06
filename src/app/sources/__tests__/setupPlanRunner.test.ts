@@ -23,7 +23,7 @@ describe("runSourcesSetupPlan", () => {
       runSetup
     });
 
-    expect(runHookAction).toHaveBeenCalledWith("install");
+    expect(runHookAction).toHaveBeenCalledWith("codex", "install");
     expect(runSetup).toHaveBeenCalledWith({
       enrichmentMode: "skip",
       importMetadata: true,
@@ -62,7 +62,7 @@ describe("runSourcesSetupPlan", () => {
     expect(result.steps.filter((step) => step.status !== "running").every((step) => step.status === "succeeded")).toBe(true);
   });
 
-  test("marks required live capture for unwired harnesses as needing attention and continues", async () => {
+  test("runs hook actions for supported non-Codex live-capture runtimes", async () => {
     const runSetup = vi.fn(async () => ({ ok: true, setup: {} }));
     const runHookAction = vi.fn(async () => undefined);
 
@@ -85,17 +85,17 @@ describe("runSourcesSetupPlan", () => {
       }
     );
 
-    expect(runHookAction).toHaveBeenCalledWith("install");
-    expect(runHookAction).toHaveBeenCalledTimes(1);
+    expect(runHookAction).toHaveBeenNthCalledWith(1, "codex", "install");
+    expect(runHookAction).toHaveBeenNthCalledWith(2, "omp", "install");
+    expect(runHookAction).toHaveBeenCalledTimes(2);
     expect(runSetup).toHaveBeenCalledWith(expect.objectContaining({
       sourceIds: ["codex-source", "omp-source"]
     }));
-    expect(result.status).toBe("needs_attention");
+    expect(result.status).toBe("succeeded");
     expect(result.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        label: "Oh My Pi live capture",
-        message: "Live capture is required but this harness does not have a writable adapter yet.",
-        status: "failed"
+        label: "Install Oh My Pi live capture",
+        status: "succeeded"
       })
     ]));
   });

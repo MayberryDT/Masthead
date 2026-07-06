@@ -4,7 +4,7 @@
 - [ ] No daemon running: Masthead starts compatible daemon.
 - [ ] Legacy daemon running: Masthead isolates it and starts current daemon.
 - [ ] Compatible wrong-data daemon running: Masthead rejects it.
-- [ ] Read-only bridge mode is visibly read-only.
+- [x] Read-only bridge mode is visibly read-only. Evidence: `npm run verify` includes `smoke:compatibility`, which forwarded read-only GET/POST endpoints and blocked mutation endpoints without reaching upstream on 2026-07-06.
 
 ## Sources
 - [x] Codex supported adapter visible. Evidence: `npm run verify` import smoke and `npm run doctor:json` on 2026-06-26.
@@ -72,7 +72,7 @@
 - [x] Legacy NDJSON is migration/compatibility only and receives no new product writes. Evidence: canonical ownership tests passed through `npm run verify` on 2026-06-26.
 
 ## Verification
-- [x] npm run verify passes. Evidence: 129 test files / 519 tests plus build, endpoint matrix, and smoke passed on 2026-06-26.
+- [x] npm run verify passes. Evidence: 220 test files / 1195 tests plus build, endpoint matrix, and live/compatibility/import/MCP smokes passed on 2026-07-06.
 - [x] cargo tests pass. Evidence: 23 Rust tests passed on 2026-06-26.
 - [x] npm run doctor passes. Evidence: isolated current-branch daemon doctor passed on 2026-06-26.
 - [ ] GitHub Actions run passes for the final commit.

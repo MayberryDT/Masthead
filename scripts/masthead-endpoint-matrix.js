@@ -144,6 +144,7 @@ async function probeLiveDaemon(baseUrl) {
     const result = await probeEndpoint(normalizedBaseUrl, entry.path);
     if (entry.path === "/health") healthBody = result.body;
     rows.push({
+      entry,
       method: entry.method,
       path: entry.path,
       status: result.status,
@@ -155,9 +156,7 @@ async function probeLiveDaemon(baseUrl) {
   printFingerprint(healthBody);
   printRows(rows);
 
-  const missingRequiredEndpoint = rows.some((row) => row.contract === "missing");
-  const incompatibleHealth = rows.find((row) => row.path === "/health")?.contract !== "current-compatible";
-  return !missingRequiredEndpoint && !incompatibleHealth;
+  return rows.every((row) => endpointProbePasses(row.entry, row.contract));
 }
 
 async function probeEndpoint(baseUrl, path) {
@@ -188,6 +187,13 @@ function classifyEndpoint(entry, result) {
   if (entry.path === "/health") return classifyHealth(result.body);
   if (Number(result.status) >= 200 && Number(result.status) < 300) return "present";
   return "unexpected";
+}
+
+export function endpointProbePasses(entry, contract) {
+  if (entry?.path === "/health") return contract === "current-compatible";
+  if (contract === "present") return true;
+  if (entry?.allowNotFound && contract === "present-empty") return true;
+  return false;
 }
 
 function classifyHealth(body) {

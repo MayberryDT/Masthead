@@ -7,6 +7,7 @@ import type {
   LogbookSearchFilters,
   LogbookSort,
   LogbookSummary,
+  SettingsStateDto,
   SourceStatus
 } from "../app/daemonClient";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
@@ -17,6 +18,7 @@ import { logbookColumns } from "./logbook/logbookColumns";
 import { Icon } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
 import { AppButton } from "./primitives/AppButton";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = {
   records?: StoreRecord[];
@@ -32,9 +34,21 @@ type Props = {
   filters?: LogbookFilterState;
   filterOptions?: LogbookFilterOptions;
   density?: "comfortable" | "compact";
+  bulkConfirmMessage?: string;
   bulkEnrichBusy?: boolean;
   bulkEnrichError?: string;
-  onBulkEnrich?: () => void;
+  bulkStatus?: string;
+  bulkTargetCount?: number;
+  bulkTargetKind?: "explicit" | "page" | "filtered";
+  bulkTargetCapped?: boolean;
+  enrichment?: SettingsStateDto["enrichment"];
+  fullEnrichmentAvailable?: boolean;
+  onBulkEnrichSummary?: () => void;
+  onBulkEnrichFull?: () => void;
+  onConfirmBulkEnrichFull?: () => void;
+  onCancelBulkEnrichFull?: () => void;
+  onSelectBulkPage?: () => void;
+  onSelectBulkFiltered?: () => void;
   onClearBulkSelection?: () => void;
   onToggleBulkSelect?: (sessionId: string) => void;
   selectedSessionId?: string;
@@ -146,10 +160,22 @@ export function HistoryPanel({
   pageSize = 100,
   query,
   records = [],
+  bulkConfirmMessage,
   bulkEnrichBusy,
   bulkEnrichError,
-  onBulkEnrich,
+  bulkStatus,
+  bulkTargetCapped,
+  bulkTargetCount,
+  bulkTargetKind,
+  enrichment,
+  fullEnrichmentAvailable,
+  onBulkEnrichFull,
+  onBulkEnrichSummary,
+  onCancelBulkEnrichFull,
   onClearBulkSelection,
+  onConfirmBulkEnrichFull,
+  onSelectBulkFiltered,
+  onSelectBulkPage,
   onToggleBulkSelect,
   refreshError,
   selectedSessionId,
@@ -244,20 +270,39 @@ export function HistoryPanel({
         bulkEnrichBusy={bulkEnrichBusy}
         bulkEnrichError={bulkEnrichError}
         bulkSelectionCount={selectedSessionIds.length}
+        bulkStatus={bulkStatus}
+        bulkTargetCapped={bulkTargetCapped}
+        bulkTargetCount={bulkTargetCount}
+        bulkTargetKind={bulkTargetKind}
+        enrichment={enrichment}
         filters={filters}
         filterOptions={filterOptions}
+        fullEnrichmentAvailable={fullEnrichmentAvailable ?? enrichment?.remoteModelEnabled === true}
         query={query}
         sort={sort}
-        onBulkEnrich={onBulkEnrich}
+        onBulkEnrichFull={onBulkEnrichFull}
+        onBulkEnrichSummary={onBulkEnrichSummary}
         onClearBulkSelection={onClearBulkSelection}
         onFilterChange={onFilterChange ?? (() => undefined)}
         onQueryChange={onQueryChange}
+        onSelectBulkFiltered={onSelectBulkFiltered}
+        onSelectBulkPage={onSelectBulkPage}
         onSortChange={onSortChange ?? (() => undefined)}
       />
       <LogbookFacets facets={activeFilters} />
       <LogbookSummaryStrip items={summaryItems} />
 
       {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
+      <ConfirmDialog
+        open={Boolean(bulkConfirmMessage)}
+        title="Confirm full enrichment"
+        description={bulkConfirmMessage}
+        confirmLabel="Enrich full sessions"
+        expectedConfirmation="ENRICH"
+        busy={bulkEnrichBusy}
+        onCancel={onCancelBulkEnrichFull}
+        onConfirm={onConfirmBulkEnrichFull}
+      />
 
       {errorState ? (
         <CanonicalErrorPanel message={errorState.message} onRetry={onRetry} />

@@ -1,18 +1,22 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+  getRuntimeHookSettings,
   getSessionTranscript,
   getSourcesAdvanced,
   getSourcesSetup,
   getImportReport,
+  installRuntimeHooks,
   listImports,
   listImportWorkUnits,
   listReviewDispositions,
   previewSourcesImport,
+  rebuildEnrichments,
   repairSources,
   runSourcesSetup,
   saveReviewDisposition,
   searchLogbook,
   scanSourcesSetup,
+  testRuntimeHooks,
   syncSources
 } from "../daemonClient";
 
@@ -372,12 +376,113 @@ describe("daemon client review dispositions", () => {
   });
 });
 
+describe("daemon client enrichment rebuilds", () => {
+  test("posts rebuild depth and strips the transport ok field from the result", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          failed: 0,
+          ok: true,
+          requested: 2,
+          sessions: [
+            { sessionId: "session-1", status: "succeeded" },
+            { sessionId: "session-2", status: "succeeded" }
+          ],
+          succeeded: 2
+        })
+      )
+    );
+
+    await expect(
+      rebuildEnrichments(
+        { depth: "summary", limit: 2, scope: "sessionIds", sessionIds: ["session-1", "session-2"] },
+        "http://127.0.0.1:17373/projection"
+      )
+    ).resolves.toEqual({
+      failed: 0,
+      requested: 2,
+      sessions: [
+        { sessionId: "session-1", status: "succeeded" },
+        { sessionId: "session-2", status: "succeeded" }
+      ],
+      succeeded: 2
+    });
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/enrichment/rebuild", {
+      body: JSON.stringify({ depth: "summary", limit: 2, scope: "sessionIds", sessionIds: ["session-1", "session-2"] }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+  });
+});
+
+describe("daemon client runtime hook helpers", () => {
+  test("loads hook settings from the runtime-scoped settings endpoint", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true, hooks: hookSettings({ runtime: "claude_code" }) })));
+
+    await expect(getRuntimeHookSettings("claude_code", "http://127.0.0.1:17373/projection")).resolves.toMatchObject({
+      integrations: [expect.objectContaining({ runtime: "claude_code" })]
+    });
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/settings/hooks/claude_code", {
+      headers: { accept: "application/json" },
+      signal: undefined
+    });
+  });
+
+  test("posts hook actions to the selected runtime instead of the Codex-only route", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true, hooks: hookSettings({ runtime: "claude_code" }) })));
+
+    await expect(testRuntimeHooks("claude_code", "http://127.0.0.1:17373/projection")).resolves.toMatchObject({
+      integrations: [expect.objectContaining({ runtime: "claude_code" })]
+    });
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/settings/hooks/claude_code/test", {
+      headers: { accept: "application/json" },
+      method: "POST"
+    });
+  });
+
+  test("keeps Codex on the same runtime-scoped hook action path", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true, hooks: hookSettings({ runtime: "codex" }) })));
+
+    await expect(installRuntimeHooks("codex", "http://127.0.0.1:17373/projection")).resolves.toMatchObject({
+      integrations: [expect.objectContaining({ runtime: "codex" })]
+    });
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/settings/hooks/codex/install", {
+      headers: { accept: "application/json" },
+      method: "POST"
+    });
+  });
+});
+
 function response(body: unknown): Response {
   return {
     json: async () => body,
     ok: true,
     status: 200
   } as Response;
+}
+
+function hookSettings({ runtime }: { runtime: string }) {
+  return {
+    command: "masthead hook",
+    configExists: true,
+    configPath: `/home/tyler/.${runtime}/hooks.json`,
+    endpoint: `http://127.0.0.1:17373/ingest?runtime=${runtime}`,
+    installed: true,
+    integrations: [
+      {
+        actionSurface: "sources",
+        captureMode: "live_hook",
+        description: `${runtime} live hooks`,
+        label: runtime,
+        runtime,
+        status: "installed",
+        supportsActions: true
+      }
+    ],
+    missingEvents: [],
+    mismatchedEvents: []
+  };
 }
 
 function failedResponse(status: number): Response {

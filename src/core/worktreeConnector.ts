@@ -77,8 +77,14 @@ const staticReadOnlyBridgePaths = new Set([
   "/logbook/search"
 ]);
 
+const staticReadOnlyBridgePostPaths: Record<string, true> = {
+  "/mcp/launch-config/validate": true,
+  "/mcp/test-connection": true,
+  "/settings/llm-provider/models": true
+};
+
 export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathname: string): boolean {
-  if (method === "POST" && pathname === "/mcp/launch-config/validate") return true;
+  if (method === "POST") return staticReadOnlyBridgePostPaths[pathname] === true;
   if (method !== "GET") return false;
   if (staticReadOnlyBridgePaths.has(pathname)) return true;
   return (

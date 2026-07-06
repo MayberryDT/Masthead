@@ -14,7 +14,7 @@ import { createIngestionState, ingestNormalizedEvent, removeEventFromLiveProject
 import { eventLiveProcessingMode } from "../core/liveSessionFacts.ts";
 import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
 import { projectLiveEvents } from "../core/liveProjection.ts";
-import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent, type BoardHeadlineGenerationFinishedEvent } from "../core/boardHeadlineEnricher.ts";
+import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent, type BoardHeadlineGenerationFinishedEvent, type BoardHeadlineProviderConfig } from "../core/boardHeadlineEnricher.ts";
 import { createFileBackedStore, validateRetentionPolicy, type StoreRecord } from "../core/store.ts";
 import type { ReviewDisposition } from "../core/store.ts";
 import type { LiveHookDiagnostic } from "../core/liveHookAdapter.ts";
@@ -91,7 +91,7 @@ import { buildMastheadHealth } from "./healthService.ts";
 import { recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
 import { createCodexTranscriptLiveScanner } from "./codexTranscriptLive.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
-import { createSettingsBackedEnrichmentProvider, listLlmProviderModels, updateLlmProviderSettings } from "./llmSettings.ts";
+import { createSettingsBackedEnrichmentProvider, effectiveLlmProvider, listLlmProviderModels, updateLlmProviderSettings } from "./llmSettings.ts";
 import {
   getCodexHookSettings,
   getRuntimeHookSettings,
@@ -277,9 +277,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
     };
     const boardHeadlineEnricher = createBoardHeadlineEnricher({
-      enabled: config.liveCopyEnabled ?? config.llmCopyEnabled,
-      apiKey: config.openaiApiKey,
-      model: config.openaiModel,
+      providerConfig: () => boardHeadlineProviderConfig(database, config),
       onGenerationFinished: persistBoardHeadlineGeneration,
       onFrameApplied: persistBoardHeadlineFrame,
       timeoutMs: config.liveCopyTimeoutMs
@@ -420,23 +418,24 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const sessionIds = selectEnrichmentRebuildSessionIds(database, input, limit.value);
     const dryRun = input.dryRun === true;
     const deterministicOnly = input.deterministicOnly === true;
+    const depth = input.depth === "summary" ? "summary" : "full";
     const sessions: Array<{ sessionId: string; status: "dry_run" | "succeeded" | "failed"; failureCode?: string; failureMessage?: string }> = [];
     if (dryRun) {
       return {
         dryRun: true,
         failed: 0,
-        mode: deterministicOnly ? "deterministic" : "configured",
+        mode: depth === "summary" || deterministicOnly ? "deterministic" : "configured",
         requested: sessionIds.length,
         sessions: sessionIds.map((sessionId) => ({ sessionId, status: "dry_run" })),
         succeeded: 0
       };
     }
-    const rebuildCoordinator = deterministicOnly ? createEnrichmentCoordinator(database, createDeterministicEnrichmentProvider()) : enrichment;
+    const rebuildCoordinator = depth === "summary" ? enrichment : deterministicOnly ? createEnrichmentCoordinator(database, createDeterministicEnrichmentProvider()) : enrichment;
     let succeeded = 0;
     let failed = 0;
     for (const sessionId of sessionIds) {
       try {
-        await rebuildCoordinator.enrich(sessionId);
+        await (depth === "summary" ? rebuildCoordinator.enrichSummary(sessionId) : rebuildCoordinator.enrich(sessionId));
         queueSessionSearchIndex(sessionId);
         succeeded += 1;
         sessions.push({ sessionId, status: "succeeded" });
@@ -476,7 +475,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
     return {
       failed,
-      mode: deterministicOnly ? "deterministic" : "configured",
+      mode: depth === "summary" || deterministicOnly ? "deterministic" : "configured",
       requested: sessionIds.length,
       sessions,
       succeeded
@@ -1026,7 +1025,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const adapter = adapterForRuntime(source.runtime);
       if (!adapter) continue;
       controls?.throwIfCancelled();
-      controls?.updateProgress({ currentPath: source.path ?? source.sourceId });
+      controls?.updateProgress({ currentPath: source.path ?? source.sourceId, stage: "metadata" });
       const touchedSessionIds = new Set<string>();
       let recordsSinceYield = 0;
       for await (const record of adapter.backfill(source)) {
@@ -2008,7 +2007,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       await refreshCodexTranscriptLiveState();
       const selectedSessionId = url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined;
       const refreshIntervalMs = parseBoardRefreshIntervalMs(url.searchParams.get("refreshIntervalMs"));
-      const headlineMode = (config.liveCopyEnabled ?? config.llmCopyEnabled) && config.openaiApiKey?.trim() ? "llm" : "offline";
+      const headlineStatus = boardHeadlineEnricher.status();
+      const headlineMode = headlineStatus.enabled && headlineStatus.configured ? "llm" : "offline";
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
@@ -2649,7 +2649,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       let scope: DeleteMastheadDataScope;
       try {
         scope = deleteScopeFromUrl(url);
-        assertDatabaseIdMatches(url.searchParams.get("databaseId"), database, config);
+        const requestedDatabaseId = url.searchParams.get("databaseId");
+        if (requestedDatabaseId) assertDatabaseIdMatches(requestedDatabaseId, database, config);
       } catch (error) {
         sendJson(request, response, config.allowedOrigins, 400, {
           ok: false,
@@ -3334,6 +3335,29 @@ function liveSessionCount(events: NormalizedEvent[]): number {
   return new Set(events.map((event) => event.sessionId).filter((sessionId): sessionId is string => Boolean(sessionId))).size;
 }
 
+function boardHeadlineProviderConfig(database: MastheadDatabase, config: DaemonConfig): BoardHeadlineProviderConfig {
+  const effective = effectiveLlmProvider(database, config);
+  const supportedApiStyle = effective.apiStyle === "responses" || effective.apiStyle === "chat_completions";
+  const enabled = effective.remoteEnrichmentEnabled && effective.configured;
+  const unsupportedReason = enabled && !supportedApiStyle ? `${effective.label} does not support live Board headline rewriting yet.` : undefined;
+  const apiStyle: BoardHeadlineProviderConfig["apiStyle"] = supportedApiStyle
+    ? (effective.apiStyle as BoardHeadlineProviderConfig["apiStyle"])
+    : "responses";
+
+  return {
+    enabled,
+    configured: enabled && supportedApiStyle,
+    provider: effective.id,
+    providerLabel: effective.label,
+    apiKey: effective.apiKey,
+    apiKeyRequired: effective.apiKeyRequired,
+    apiStyle,
+    baseUrl: effective.baseUrl,
+    model: effective.model,
+    unsupportedReason
+  };
+}
+
 function isRawSourceStoreRecord(record: StoreRecord): boolean {
   return rawSourceRecordTypes.includes(record.recordType);
 }
@@ -3522,15 +3546,18 @@ function attachCanonicalCardIds(
   projection: LiveBoardProjection,
   context: { hostId: string; runtimeKind: string; runtimeVersion?: string }
 ): LiveBoardProjection {
-  const runtimeId = runtimeIdFor(context.runtimeKind, context.runtimeVersion);
   const withIdentity = <T extends SessionCardView | undefined>(session: T): T => {
     if (!session) return session;
+    const runtimeKind = session.runtime ?? context.runtimeKind;
+    const runtimeVersion = runtimeKind === context.runtimeKind ? context.runtimeVersion : undefined;
+    const runtimeId = runtimeIdFor(runtimeKind, runtimeVersion);
+    const sourceSessionId = session.sourceSessionId ?? session.sessionId;
     return {
       ...session,
-      canonicalSessionId: session.canonicalSessionId ?? canonicalSessionId(context.hostId, runtimeId, session.sourceSessionId ?? session.sessionId),
+      canonicalSessionId: session.canonicalSessionId ?? canonicalSessionId(context.hostId, runtimeId, sourceSessionId),
       hostId: session.hostId ?? context.hostId,
-      runtime: session.runtime ?? context.runtimeKind,
-      sourceSessionId: session.sourceSessionId ?? session.sessionId
+      runtime: runtimeKind,
+      sourceSessionId
     };
   };
 

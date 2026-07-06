@@ -544,15 +544,52 @@ function summarizeValue(value) {
   return { kind: typeof value };
 }
 
+function pathParts(value) {
+  return typeof value === "string" ? value.split("/").filter(Boolean) : [];
+}
+
+function stripSessionExtension(value) {
+  return typeof value === "string" ? value.replace(/\\.(jsonl|json)$/i, "") : undefined;
+}
+
+function isRootSessionToken(value) {
+  return typeof value === "string" && /^\\d{4}-\\d{2}-\\d{2}T/.test(value);
+}
+
+function rootSessionIdFromFile(value) {
+  const parts = pathParts(value);
+  const file = stripSessionExtension(parts[parts.length - 1]);
+  if (isRootSessionToken(file)) return file;
+  const parent = parts[parts.length - 2];
+  return isRootSessionToken(parent) ? parent : undefined;
+}
+
+function childSessionIdFromFile(value) {
+  const parts = pathParts(value);
+  const file = stripSessionExtension(parts[parts.length - 1]);
+  const parent = parts[parts.length - 2];
+  if (!file || !isRootSessionToken(parent) || isRootSessionToken(file)) return undefined;
+  return file.replace(/^__/, "");
+}
+
+function childSessionInfo(sessionFile) {
+  const parentSourceSessionId = rootSessionIdFromFile(sessionFile);
+  const childSessionId = childSessionIdFromFile(sessionFile);
+  return parentSourceSessionId && childSessionId ? { parentSourceSessionId, childSessionId } : undefined;
+}
+
 function sessionIdFor(event, ctx) {
+  const ctxSessionFile = ctx?.sessionManager?.getSessionFile?.();
+  const eventSessionFile = firstString(event?.session_file, event?.sessionFile);
   return firstString(
     event?.sessionId,
     event?.session_id,
     event?.sessionID,
-    event?.session_file,
-    event?.sessionFile,
     ctx?.sessionManager?.getSessionId?.(),
-    ctx?.sessionManager?.getSessionFile?.(),
+    rootSessionIdFromFile(ctxSessionFile),
+    rootSessionIdFromFile(eventSessionFile),
+    ctxSessionFile,
+    eventSessionFile,
     ctx?.sessionManager?.getSessionName?.()
   );
 }
@@ -570,6 +607,8 @@ function sourceEventIdFor(type, event, sessionId) {
 }
 
 async function postMastheadEvent(type, event, ctx, extra = {}) {
+  const sessionFile = firstString(event?.session_file, event?.sessionFile, ctx?.sessionManager?.getSessionFile?.());
+  const childSession = childSessionInfo(sessionFile);
   const sessionId = sessionIdFor(event, ctx);
   const payload = {
     type,
@@ -577,7 +616,9 @@ async function postMastheadEvent(type, event, ctx, extra = {}) {
     provider_event_id: sourceEventIdFor(type, event, sessionId),
     timestamp: new Date().toISOString(),
     cwd: firstString(ctx?.cwd, ctx?.sessionManager?.getCwd?.(), event?.cwd),
-    sessionFile: firstString(event?.session_file, event?.sessionFile, ctx?.sessionManager?.getSessionFile?.()),
+    sessionFile,
+    parentSourceSessionId: childSession?.parentSourceSessionId,
+    childSessionId: childSession?.childSessionId,
     sessionName: firstString(ctx?.sessionManager?.getSessionName?.()),
     source: "masthead-live-connector",
     ...extra

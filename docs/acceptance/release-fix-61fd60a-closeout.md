@@ -13,10 +13,9 @@
 
 ## Automated verification
 
-- `npm run build` — pass
-- Focused vitest — 75 tests / 15 files (settings API, notifications, ipc security, logbook, settings UI, sources import progress)
-- `npm run check:surface-contract` — pass
-- `openwiki --update` — included in commit
+- `npm run verify` — pass on 2026-07-06; 220 test files / 1195 tests, build, endpoint matrix, and live/compatibility/import/MCP smokes.
+- `npm run smoke:electron` — pass on 2026-07-06; Electron 42.5.0, preload bridge, typed notification bridge, custom chrome, renderer privilege checks, and hover latency.
+- Earlier `npm run build`, focused vitest, `npm run check:surface-contract`, and `openwiki --update` passed in commit `61fd60a`.
 
 ## Partial in-app Browser
 
@@ -25,8 +24,8 @@ Launcher: `MASTHEAD_UI_PORT=5180 npm run dev` (primary `17373`). Early passes fa
 - Board (Now): 1440 / 768 / 390 — no `No live connection` / `No live Codex sessions yet` after load wait
 - Desktop spot: Logbook row checkboxes; Sources import activity copy; Settings session-ended notifications copy; Board `.headline-source` present
 
-**Not exercised:** full AGENTS viewport matrix for Logbook/Sources/Settings; bulk enrich toolbar after selection; import progress bar during active job; Electron notification on real ended transition; full `npm run verify`.
+Not manually observed: native OS notification delivery on a real session transition. Automated coverage now verifies first-projection baselining, running→idle notifications, Electron notification construction, IPC/preload channels, and `smoke:electron`.
 
-## Open for release gate checklist
+## Release gate checklist
 
-Unchanged rows in `docs/acceptance/product-release-gate.md` — no new checkboxes added for this batch.
+Updated `docs/acceptance/product-release-gate.md` on 2026-07-06: read-only bridge mode and `npm run verify` now cite current passing evidence.

@@ -8,18 +8,30 @@ import { boardHeadlineRefreshKey } from "./boardHeadlineRefreshKey.ts";
 import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView, buildWaitingForTranscriptBoardHeadlineView } from "./offlineBoardHeadline.ts";
 import {
   rewriteBoardHeadlineFrameWithOpenAI,
+  type BoardHeadlineFrameApiStyle,
   type OpenAIBoardHeadlineFrameResult
 } from "./openaiBoardHeadlineFrame.ts";
 import type { BoardHeadlineRefreshState, LiveBoardProjection, SessionCardView, SessionDetailView, ExpandedSessionView } from "./types.ts";
 
 export const DEFAULT_MODEL = "gpt-5-nano-2025-08-07";
 
-export type BoardHeadlineEnricherConfig = {
+export type BoardHeadlineProviderConfig = {
   enabled?: boolean;
+  configured?: boolean;
+  provider?: string;
+  providerLabel?: string;
   apiKey?: string;
+  apiKeyRequired?: boolean;
+  apiStyle?: BoardHeadlineFrameApiStyle;
+  baseUrl?: string;
   model?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  unsupportedReason?: string;
+};
+
+export type BoardHeadlineEnricherConfig = BoardHeadlineProviderConfig & {
+  providerConfig?: () => BoardHeadlineProviderConfig;
   now?: () => Date;
   onFrameApplied?: (event: BoardHeadlineAppliedEvent) => void;
   onGenerationFinished?: (event: BoardHeadlineGenerationFinishedEvent) => void;
@@ -53,9 +65,18 @@ export type BoardHeadlineEnrichProjectionOptions = {
   refreshIntervalMs?: number;
 };
 
+export type BoardHeadlineEnricherStatus = {
+  enabled: boolean;
+  configured: boolean;
+  model: string;
+  provider: string;
+  apiStyle: BoardHeadlineFrameApiStyle;
+  unsupportedReason?: string;
+};
+
 export type BoardHeadlineEnricher = {
   enrichProjection(projection: LiveBoardProjection, options?: BoardHeadlineEnrichProjectionOptions): Promise<LiveBoardProjection>;
-  status(): { enabled: boolean; configured: boolean; model: string };
+  status(): BoardHeadlineEnricherStatus;
 };
 
 type CacheKey = string;
@@ -63,11 +84,25 @@ type ReadyLLMBoardHeadlineView = BoardHeadlineView & {
   frame: BoardHeadlineFrame;
   generatedAt: string;
   model: string;
-  provider: "openai";
+  provider: string;
+};
+
+type ResolvedBoardHeadlineProvider = {
+  enabled: boolean;
+  configured: boolean;
+  provider: string;
+  providerLabel: string;
+  apiKey?: string;
+  apiKeyRequired: boolean;
+  apiStyle: BoardHeadlineFrameApiStyle;
+  baseUrl?: string;
+  model: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  unsupportedReason?: string;
 };
 
 export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig = {}): BoardHeadlineEnricher {
-  const model = config.model ?? DEFAULT_MODEL;
   const completed = new Map<CacheKey, ReadyLLMBoardHeadlineView>();
   const failures = new Map<CacheKey, OpenAIBoardHeadlineFrameResult>();
   const inFlight = new Map<CacheKey, Promise<void>>();
@@ -75,11 +110,41 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
   const appliedSessionIds = new Map<CacheKey, Set<string>>();
   const lastRequestedAtBySession = new Map<string, number>();
 
-  function status() {
+  function currentProvider(): ResolvedBoardHeadlineProvider {
+    const providerConfig = config.providerConfig?.() ?? config;
+    const provider = providerConfig.provider ?? config.provider ?? "openai";
+    const providerLabel = providerConfig.providerLabel ?? (provider === "openai" ? "OpenAI" : provider);
+    const apiKey = providerConfig.apiKey ?? config.apiKey;
+    const apiKeyRequired = providerConfig.apiKeyRequired ?? config.apiKeyRequired ?? true;
+    const configured =
+      providerConfig.configured ??
+      (Boolean(providerConfig.model ?? config.model ?? DEFAULT_MODEL) && (!apiKeyRequired || Boolean(apiKey?.trim())));
+    const unsupportedReason = providerConfig.unsupportedReason ?? config.unsupportedReason;
     return {
-      enabled: config.enabled === true,
-      configured: Boolean(config.apiKey?.trim()),
-      model
+      enabled: (providerConfig.enabled ?? config.enabled) === true,
+      configured: configured && !unsupportedReason,
+      provider,
+      providerLabel,
+      apiKey,
+      apiKeyRequired,
+      apiStyle: providerConfig.apiStyle ?? config.apiStyle ?? "responses",
+      baseUrl: providerConfig.baseUrl ?? config.baseUrl,
+      model: providerConfig.model ?? config.model ?? DEFAULT_MODEL,
+      fetchImpl: providerConfig.fetchImpl ?? config.fetchImpl,
+      timeoutMs: providerConfig.timeoutMs ?? config.timeoutMs,
+      unsupportedReason
+    };
+  }
+
+  function status() {
+    const provider = currentProvider();
+    return {
+      enabled: provider.enabled,
+      configured: provider.configured,
+      model: provider.model,
+      provider: provider.provider,
+      apiStyle: provider.apiStyle,
+      ...(provider.unsupportedReason ? { unsupportedReason: provider.unsupportedReason } : {})
     };
   }
 
@@ -87,7 +152,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
     projection: LiveBoardProjection,
     options: BoardHeadlineEnrichProjectionOptions = {}
   ): Promise<LiveBoardProjection> {
-    const currentStatus = status();
+    const provider = currentProvider();
     const projectionNow = config.now?.() ?? new Date();
     const generatedAt = projectionNow.toISOString();
     const nowMs = projectionNow.getTime();
@@ -108,27 +173,29 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       if (!input) continue;
       const retained = retainedReadyHeadline(card.headline);
 
-      if (!currentStatus.enabled || !currentStatus.configured) {
+      if (!provider.enabled || !provider.configured) {
         overlays.set(card.sessionId, retained ?? buildOfflineBoardHeadlineView(input));
-        if (currentStatus.enabled && !currentStatus.configured) {
+        if (provider.enabled && !provider.configured) {
           refreshOverlays.set(card.sessionId, {
-            provider: "openai",
+            provider: provider.provider,
+            model: provider.model,
             requestedAt: generatedAt,
-            status: "not_configured"
+            status: "not_configured",
+            ...(provider.unsupportedReason ? { failureMessage: provider.unsupportedReason } : {})
           });
         }
         continue;
       }
 
-      const key = boardHeadlineRefreshKey(model, input);
+      const key = boardHeadlineRefreshKey(`${provider.provider}:${provider.model}`, input);
       const canRequestHeadline = shouldRequestHeadlineForCard(card);
       const showPendingHeadline = shouldShowPendingHeadlineForCard(card);
       if (!key) {
         if (showPendingHeadline) {
           overlays.set(card.sessionId, retained ?? buildWaitingForTranscriptBoardHeadlineView(input));
           refreshOverlays.set(card.sessionId, {
-            provider: "openai",
-            model,
+            provider: provider.provider,
+            model: provider.model,
             requestedAt: generatedAt,
             status: "pending"
           });
@@ -144,8 +211,8 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       if (cached) {
         overlays.set(card.sessionId, cached);
         refreshOverlays.set(card.sessionId, {
-          provider: "openai",
-          model,
+          provider: cached.provider,
+          model: cached.model,
           requestedAt: cached.generatedAt,
           status: "success"
         });
@@ -163,7 +230,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
 
       const failure = failures.get(key);
       if (failure && showPendingHeadline) {
-        refreshOverlays.set(card.sessionId, refreshFromFailure(failure, model, generatedAt));
+        refreshOverlays.set(card.sessionId, refreshFromFailure(failure, provider, generatedAt));
         if (!countedFailedKeys.has(key)) {
           summary.failed += 1;
           countedFailedKeys.add(key);
@@ -183,8 +250,8 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       }
       if (!failure && showPendingHeadline) {
         refreshOverlays.set(card.sessionId, {
-          provider: "openai",
-          model,
+          provider: provider.provider,
+          model: provider.model,
           requestedAt: generatedAt,
           status: "pending"
         });
@@ -195,7 +262,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       }
       if (!inFlight.has(key)) {
         lastRequestedAtBySession.set(card.sessionId, nowMs);
-        inFlight.set(key, requestHeadline(input, key, card.sessionId));
+        inFlight.set(key, requestHeadline(input, key, card.sessionId, provider));
         summary.requested += 1;
       }
     }
@@ -213,20 +280,30 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
     };
   }
 
-  async function requestHeadline(input: BoardHeadlineInput, key: CacheKey, sessionId: string): Promise<void> {
+  async function requestHeadline(
+    input: BoardHeadlineInput,
+    key: CacheKey,
+    sessionId: string,
+    provider: ResolvedBoardHeadlineProvider
+  ): Promise<void> {
     const requestedAt = nowIso(config.now);
     try {
       const result = await rewriteBoardHeadlineFrameWithOpenAI(input, {
         enabled: true,
-        apiKey: config.apiKey,
-        fetchImpl: config.fetchImpl,
-        model,
-        timeoutMs: config.timeoutMs
+        apiKey: provider.apiKey,
+        apiKeyRequired: provider.apiKeyRequired,
+        apiStyle: provider.apiStyle,
+        baseUrl: provider.baseUrl,
+        fetchImpl: provider.fetchImpl,
+        model: provider.model,
+        providerId: provider.provider,
+        providerLabel: provider.providerLabel,
+        timeoutMs: provider.timeoutMs
       });
 
       const completedAt = nowIso(config.now);
-      const view = viewFromOpenAIResult(result, model, completedAt);
-      emitGenerationFinished(key, sessionId, input, result, view, requestedAt, completedAt);
+      const view = viewFromOpenAIResult(result, provider.provider, provider.model, completedAt);
+      emitGenerationFinished(key, sessionId, input, result, view, requestedAt, completedAt, provider);
       if (view) {
         completed.set(key, view);
         failures.delete(key);
@@ -237,21 +314,20 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
         failures.set(key, result);
       }
     } catch (error) {
-      failures.set(key, {
-        failureMessage: error instanceof Error ? error.message : "OpenAI board headline frame request failed.",
+      const result: OpenAIBoardHeadlineFrameResult = {
+        failureMessage: error instanceof Error ? error.message : `${provider.providerLabel} board headline frame request failed.`,
         status: "api_error"
-      });
+      };
+      failures.set(key, result);
       emitGenerationFinished(
         key,
         sessionId,
         input,
-        {
-          failureMessage: error instanceof Error ? error.message : "OpenAI board headline frame request failed.",
-          status: "api_error"
-        },
+        result,
         undefined,
         requestedAt,
-        nowIso(config.now)
+        nowIso(config.now),
+        provider
       );
       // Keep configured LLM mode pending on failures; do not synthesize offline copy here.
     } finally {
@@ -281,8 +357,8 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       sessionId,
       frame: view.frame,
       headline: view,
-      provider: "openai",
-      model,
+      provider: view.provider,
+      model: view.model,
       generatedAt: view.generatedAt
     });
     sessionIds.add(sessionId);
@@ -295,7 +371,8 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
     result: OpenAIBoardHeadlineFrameResult,
     view: ReadyLLMBoardHeadlineView | undefined,
     requestedAt: string,
-    completedAt: string
+    completedAt: string,
+    provider: ResolvedBoardHeadlineProvider
   ): void {
     const sessionIds = pendingSessionIds.get(key) ?? new Set([sessionId]);
     for (const pendingSessionId of sessionIds) {
@@ -306,8 +383,8 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
         headline: view,
         input,
         latencyMs: result.latencyMs,
-        model,
-        provider: "openai",
+        model: provider.model,
+        provider: provider.provider,
         refreshKey: key,
         requestedAt,
         sessionId: pendingSessionId,
@@ -324,6 +401,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
 
 function viewFromOpenAIResult(
   result: OpenAIBoardHeadlineFrameResult,
+  provider: string,
   model: string,
   generatedAt: string
 ): ReadyLLMBoardHeadlineView | undefined {
@@ -337,7 +415,7 @@ function viewFromOpenAIResult(
     status: "ready",
     generatedAt,
     model,
-    provider: "openai"
+    provider
   };
 }
 
@@ -398,12 +476,12 @@ function overlaySelectedSessionHeadline(
 
 function refreshFromFailure(
   result: OpenAIBoardHeadlineFrameResult,
-  model: string,
+  provider: ResolvedBoardHeadlineProvider,
   requestedAt: string
 ): BoardHeadlineRefreshState {
   return {
-    provider: "openai",
-    model,
+    provider: provider.provider,
+    model: provider.model,
     requestedAt,
     status: refreshStatusFromOpenAI(result.status),
     ...(result.latencyMs !== undefined ? { latencyMs: result.latencyMs } : {}),

@@ -5,11 +5,11 @@ import {
   approveAdapterTranscripts,
   cancelImport,
   connectSources,
-  getCodexHookSettings,
+  getRuntimeHookSettings,
   getSourcesSetup,
   importAdapterMetadata,
   importAdapterTranscripts,
-  installCodexHooks,
+  installRuntimeHooks,
   listAdapters,
   listAdapterSources,
   listImports,
@@ -22,8 +22,8 @@ import {
   scanSourcesSetup,
   syncAdapter,
   syncSources,
-  testCodexHooks,
-  uninstallCodexHooks,
+  testRuntimeHooks,
+  uninstallRuntimeHooks,
   type AdapterStatus,
   type CodexHookSettingsDto,
   type ImportJob,
@@ -36,6 +36,8 @@ import {
 import { shouldRefreshSourceInventory } from "../sourceInventoryRefresh";
 
 type ImportPageState = Pick<ImportJobPage, "limit" | "offset" | "total">;
+type HookAction = "install" | "test" | "uninstall";
+
 
 type UseSourcesControllerInput = {
   activeProjectionUrl: string;
@@ -69,6 +71,7 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
   const [imports, setImports] = useState<ImportJob[]>([]);
   const [setup, setSetup] = useState<SourcesSetupDto>();
   const [importPage, setImportPage] = useState<ImportPageState>({ limit: 50, offset: 0, total: 0 });
+  const [importFilterRuntime, setImportFilterRuntime] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [hookActionBusy, setHookActionBusy] = useState(false);
   const [hooks, setHooks] = useState<CodexHookSettingsDto>();
@@ -78,31 +81,39 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
   const inventoryLoadedForUrlRef = useRef<string | undefined>(undefined);
   const inventoryLoadInFlightRef = useRef(false);
 
+  const loadImportsForRuntime = useCallback(async (runtime?: string) => {
+    const [history, active] = await Promise.all([
+      listImports(activeProjectionUrl, { adapterId: runtime, limit: importPage.limit, offset: 0 }),
+      listImports(activeProjectionUrl, { adapterId: runtime, limit: 50, offset: 0, status: "active" })
+    ]);
+    const mergedImports = mergeImportRows(active.imports, history.imports);
+    setImports(mergedImports);
+    setImportPage({
+      limit: history.limit,
+      offset: history.offset,
+      total: Math.max(history.total, active.imports.length + history.imports.length)
+    });
+    setImportFilterRuntime(runtime);
+    return {
+      imports: mergedImports,
+      page: history
+    };
+  }, [activeProjectionUrl, importPage.limit]);
+
   const loadInventory = useCallback(async (options: { showStatus?: boolean } = {}) => {
     inventoryLoadInFlightRef.current = true;
     try {
-      const importLimit = importPage.limit;
-      const [setupResult, adapterResult, sourceResult, importResult, activeImportResult, hookResult] = await Promise.allSettled([
+      const [setupResult, adapterResult, sourceResult, importResult, hookResult] = await Promise.allSettled([
         getSourcesSetup(activeProjectionUrl),
         listAdapters(activeProjectionUrl, { includeLocations: false }),
         listSources(activeProjectionUrl),
-        listImports(activeProjectionUrl, { limit: importLimit, offset: 0 }),
-        listImports(activeProjectionUrl, { limit: 50, offset: 0, status: "active" }),
-        getCodexHookSettings(activeProjectionUrl)
+        loadImportsForRuntime(importFilterRuntime),
+        getRuntimeHookSettings("codex", activeProjectionUrl)
       ]);
       if (setupResult.status === "fulfilled") setSetup(setupResult.value);
       if (adapterResult.status === "fulfilled") setAdapters(adapterResult.value);
       if (sourceResult.status === "fulfilled") setSources(sourceResult.value);
       if (hookResult.status === "fulfilled") setHooks(hookResult.value);
-      if (importResult.status === "fulfilled") {
-        const activeImports = activeImportResult.status === "fulfilled" ? activeImportResult.value.imports : [];
-        setImports(mergeImportRows(activeImports, importResult.value.imports));
-        setImportPage({
-          limit: importResult.value.limit,
-          offset: importResult.value.offset,
-          total: Math.max(importResult.value.total, activeImports.length + importResult.value.imports.length)
-        });
-      }
       if (setupResult.status === "rejected" && sourceResult.status === "rejected" && adapterResult.status === "rejected" && importResult.status === "rejected") {
         throw sourceResult.reason;
       }
@@ -116,17 +127,14 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
       }
       return {
         adapters: adapterResult.status === "fulfilled" ? adapterResult.value : undefined,
-        imports:
-          importResult.status === "fulfilled"
-            ? mergeImportRows(activeImportResult.status === "fulfilled" ? activeImportResult.value.imports : [], importResult.value.imports)
-            : undefined,
+        imports: importResult.status === "fulfilled" ? importResult.value.imports : undefined,
         setup: setupResult.status === "fulfilled" ? setupResult.value : undefined,
         sources: sourceResult.status === "fulfilled" ? sourceResult.value : undefined
       };
     } finally {
       inventoryLoadInFlightRef.current = false;
     }
-  }, [activeProjectionUrl, importPage.limit]);
+  }, [activeProjectionUrl, importFilterRuntime, loadImportsForRuntime]);
 
   const refreshSources = useCallback(async () => {
     setBusy(true);
@@ -202,11 +210,16 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
 
   const pollActiveImports = useCallback(async () => {
     const activeImportIds = new Set(
-      imports.filter((job) => job.status === "queued" || job.status === "running").map((job) => job.importJobId)
+      imports
+        .filter((job) => job.status === "queued" || job.status === "running" || job.status === "cancelling")
+        .map((job) => job.importJobId)
     );
     try {
       const result = await loadInventory();
-      if (result.imports?.some((job) => activeImportIds.has(job.importJobId) && job.status === "succeeded")) {
+      if (result.imports?.some((job) =>
+        activeImportIds.has(job.importJobId) &&
+        (job.status === "failed" || job.status === "cancelled" || job.status === "succeeded" || job.status === "succeeded_with_issues")
+      )) {
         onLibraryChanged();
       }
     } catch (error) {
@@ -219,33 +232,34 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     onLibraryChanged();
   }, [loadInventory, onLibraryChanged]);
 
-  const runCodexHookAction = useCallback(async (action: "install" | "test" | "uninstall") => {
+  const runRuntimeHookAction = useCallback(async (runtime: string, action: HookAction) => {
+    const label = runtime.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
     setHookActionBusy(true);
     setStatus(
       action === "install"
-        ? "Installing Codex hooks..."
+        ? `Installing ${label} hooks...`
         : action === "test"
-          ? "Testing Codex hooks..."
-          : "Uninstalling Codex hooks..."
+          ? `Testing ${label} hooks...`
+          : `Uninstalling ${label} hooks...`
     );
     try {
       const nextHooks =
         action === "install"
-          ? await installCodexHooks(activeProjectionUrl)
+          ? await installRuntimeHooks(runtime, activeProjectionUrl)
           : action === "test"
-            ? await testCodexHooks(activeProjectionUrl)
-            : await uninstallCodexHooks(activeProjectionUrl);
+            ? await testRuntimeHooks(runtime, activeProjectionUrl)
+            : await uninstallRuntimeHooks(runtime, activeProjectionUrl);
       setHooks(nextHooks);
       setStatus(
         action === "install"
-          ? "Codex hooks installed."
+          ? `${label} hooks installed.`
           : action === "test"
-            ? "Codex hook test complete."
-            : "Codex hooks uninstalled."
+            ? `${label} hook test complete.`
+            : `${label} hooks uninstalled.`
       );
       await loadInventory();
     } catch (error) {
-      setStatus(`Codex hook ${action} failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus(`${label} hook ${action} failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     } finally {
       setHookActionBusy(false);
@@ -433,27 +447,40 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     }
   }, [activeProjectionUrl]);
 
+  const openImportJobsForRuntime = useCallback(async (runtime: string) => {
+    setStatus(`Showing import activity for ${runtime.replaceAll("_", " ")} only.`);
+    await loadImportsForRuntime(runtime);
+  }, [loadImportsForRuntime]);
+
+  const clearImportJobsFilter = useCallback(async () => {
+    setStatus("Showing import activity for all runtimes.");
+    await loadImportsForRuntime(undefined);
+  }, [loadImportsForRuntime]);
+
   return {
     adapters,
     busy,
     cancel,
+    clearImportJobsFilter,
     connectSelected,
     enableTranscriptImport,
     excludePath,
     hookActionBusy,
     hooks,
+    importFilterRuntime,
     importMetadata,
     importPage,
     importTranscripts,
     imports,
     lastRefreshAt,
     loadAdapterSources,
+    openImportJobsForRuntime,
     pollActiveImports,
     previewImport,
     refreshSources,
     repair,
     retry,
-    runCodexHookAction,
+    runRuntimeHookAction,
     runSetup,
     scan,
     scanSetup,

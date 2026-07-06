@@ -31,6 +31,16 @@ import {
 
 const LOGBOOK_PAGE_SIZE = 50;
 
+type LogbookBulkDepth = "summary" | "full";
+type LogbookBulkTargetKind = "explicit" | "page" | "filtered";
+
+type LogbookBulkTarget = {
+  kind: LogbookBulkTargetKind;
+  sessionIds: string[];
+  total: number;
+  capped?: boolean;
+};
+
 type UseLogbookControllerInput = {
   activeProjectionUrl: string;
   activeSurface: AppSurface;
@@ -60,6 +70,9 @@ export function useLogbookController({
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [bulkEnrichBusy, setBulkEnrichBusy] = useState(false);
   const [bulkEnrichError, setBulkEnrichError] = useState<string>();
+  const [bulkTarget, setBulkTarget] = useState<LogbookBulkTarget>({ kind: "explicit", sessionIds: [], total: 0 });
+  const [bulkConfirm, setBulkConfirm] = useState<{ depth: "full"; target: LogbookBulkTarget } | undefined>();
+  const [bulkStatus, setBulkStatus] = useState<string>();
   const [selectedSession, setSelectedSession] = useState<LogbookSessionDetail>();
   const [excerpts, setExcerpts] = useState<LogbookExcerpt[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -341,29 +354,109 @@ export function useLogbookController({
   };
 
   const toggleBulkSelection = (sessionId: string) => {
-    setSelectedSessionIds((current) =>
-      current.includes(sessionId) ? current.filter((id) => id !== sessionId) : [...current, sessionId]
-    );
+    setSelectedSessionIds((current) => {
+      const nextIds = current.includes(sessionId) ? current.filter((id) => id !== sessionId) : [...current, sessionId];
+      setBulkTarget({ kind: "explicit", sessionIds: nextIds, total: nextIds.length });
+      setBulkConfirm(undefined);
+      setBulkStatus(undefined);
+      setBulkEnrichError(undefined);
+      return nextIds;
+    });
   };
 
-  const clearBulkSelection = () => setSelectedSessionIds([]);
-
-  const bulkEnrichSelected = async () => {
-    if (bulkEnrichBusy || selectedSessionIds.length === 0) return;
-    setBulkEnrichBusy(true);
+  const clearBulkSelection = () => {
+    setSelectedSessionIds([]);
+    setBulkTarget({ kind: "explicit", sessionIds: [], total: 0 });
+    setBulkConfirm(undefined);
+    setBulkStatus(undefined);
     setBulkEnrichError(undefined);
+  };
+
+  const selectCurrentPage = () => {
+    const sessionIds = result?.sessions.map((session) => session.sessionId) ?? [];
+    setSelectedSessionIds(sessionIds);
+    setBulkTarget({ kind: "page", sessionIds, total: sessionIds.length });
+    setBulkConfirm(undefined);
+    setBulkStatus(undefined);
+    setBulkEnrichError(undefined);
+  };
+
+  const selectAllMatchingFilter = async () => {
+    const total = result?.total ?? 0;
+    const limit = Math.min(total, 500);
+    if (limit <= 0) {
+      clearBulkSelection();
+      setBulkTarget({ kind: "filtered", sessionIds: [], total: 0 });
+      return;
+    }
+    setBulkEnrichError(undefined);
+    setBulkStatus(undefined);
     try {
-      await rebuildEnrichments(
-        { scope: "sessionIds", sessionIds: selectedSessionIds, limit: selectedSessionIds.length },
+      const matching = await searchLogbook(
+        {
+          ...filters,
+          limit,
+          offset: 0,
+          q: query,
+          sort
+        },
         activeProjectionUrl
       );
-      setRetryKey((current) => current + 1);
+      const sessionIds = matching.sessions.map((session) => session.sessionId);
+      setSelectedSessionIds(sessionIds);
+      setBulkTarget({ capped: matching.total > 500, kind: "filtered", sessionIds, total: sessionIds.length });
+      setBulkConfirm(undefined);
+    } catch (selectionError) {
+      setBulkEnrichError(selectionError instanceof Error ? selectionError.message : String(selectionError));
+    }
+  };
+
+  const enrichBulkTarget = async (depth: LogbookBulkDepth, target: LogbookBulkTarget) => {
+    if (bulkEnrichBusy || target.sessionIds.length === 0) return;
+    setBulkEnrichBusy(true);
+    setBulkEnrichError(undefined);
+    setBulkStatus(undefined);
+    try {
+      const result = await rebuildEnrichments(
+        { depth, limit: target.sessionIds.length, scope: "sessionIds", sessionIds: target.sessionIds },
+        activeProjectionUrl
+      );
+      if (result.failed > 0) {
+        setBulkEnrichError(`${result.failed} of ${result.requested} enrichments failed.`);
+      } else {
+        setBulkStatus(`${depth === "summary" ? "Summary" : "Full enrichment"} refreshed for ${result.succeeded} sessions.`);
+      }
+      if (result.succeeded > 0 || result.failed === 0) setRetryKey((current) => current + 1);
     } catch (enrichmentError) {
       setBulkEnrichError(enrichmentError instanceof Error ? enrichmentError.message : String(enrichmentError));
     } finally {
       setBulkEnrichBusy(false);
     }
   };
+
+  const bulkEnrichSummary = async () => {
+    await enrichBulkTarget("summary", bulkTarget);
+  };
+
+  const bulkEnrichFull = async () => {
+    if (bulkEnrichBusy || bulkTarget.sessionIds.length === 0) return;
+    if (bulkTarget.total > 50) {
+      setBulkEnrichError(undefined);
+      setBulkStatus(undefined);
+      setBulkConfirm({ depth: "full", target: bulkTarget });
+      return;
+    }
+    await enrichBulkTarget("full", bulkTarget);
+  };
+
+  const confirmBulkEnrichFull = async () => {
+    if (!bulkConfirm) return;
+    const target = bulkConfirm.target;
+    setBulkConfirm(undefined);
+    await enrichBulkTarget(bulkConfirm.depth, target);
+  };
+
+  const cancelBulkEnrichFull = () => setBulkConfirm(undefined);
 
   const enrichDossier = async () => {
     if (!selectedSessionId || dossierEnrichmentBusy) return;
@@ -401,10 +494,18 @@ export function useLogbookController({
     dossierEnrichmentError,
     dossierError,
     dossierLoading,
+    bulkConfirmMessage: bulkConfirm ? `Full enrichment can call the configured remote provider for ${bulkConfirm.target.total} sessions. Type ENRICH to continue.` : undefined,
     bulkEnrichBusy,
     bulkEnrichError,
-    bulkEnrichSelected,
+    bulkEnrichFull,
+    bulkEnrichSummary,
+    bulkStatus,
+    bulkTargetCapped: bulkTarget.capped,
+    bulkTargetCount: bulkTarget.total,
+    bulkTargetKind: bulkTarget.kind,
+    cancelBulkEnrichFull,
     clearBulkSelection,
+    confirmBulkEnrichFull,
     enrichDossier,
     excerpts,
     filterOptions,
@@ -422,6 +523,8 @@ export function useLogbookController({
     selectedSession,
     selectedSessionId,
     selectedSessionIds,
+    selectAllMatchingFilter,
+    selectCurrentPage,
     toggleBulkSelection,
     sort,
     summary,

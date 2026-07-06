@@ -61,25 +61,84 @@ describe("LogbookToolbar", () => {
   });
 
 
-  test("renders bulk enrich actions when rows are selected", () => {
-    const html = renderToStaticMarkup(
-      <LogbookToolbar
-        bulkSelectionCount={1}
-        filterOptions={{ projects: ["Masthead"], models: ["gpt-5"], runtimes: ["codex"] }}
-        filters={{}}
-        query=""
-        sort="recent"
-        onBulkEnrich={() => undefined}
-        onClearBulkSelection={() => undefined}
-        onFilterChange={() => undefined}
-        onQueryChange={() => undefined}
-        onSortChange={() => undefined}
-      />
-    );
+  test("routes bulk target actions to summary/full callbacks and renders capped/remote/status state", async () => {
+    const onSelectBulkPage = vi.fn();
+    const onSelectBulkFiltered = vi.fn();
+    const onBulkEnrichSummary = vi.fn();
+    const onBulkEnrichFull = vi.fn();
+    const onClearBulkSelection = vi.fn();
+    renderToolbar({
+      bulkStatus: "Summary refreshed for 500 sessions.",
+      bulkTargetCapped: true,
+      bulkTargetCount: 500,
+      bulkTargetKind: "filtered",
+      fullEnrichmentAvailable: true,
+      onBulkEnrichFull,
+      onBulkEnrichSummary,
+      onClearBulkSelection,
+      onFilterChange: vi.fn(),
+      onSelectBulkFiltered,
+      onSelectBulkPage
+    });
 
-    expect(html).toContain("logbook-bulk-actions");
-    expect(html).toContain("1 selected");
-    expect(html).toContain("Enrich selected");
+    expect(container?.textContent).toContain("500 selected");
+    expect(container?.textContent).toContain("First 500 matching sessions selected.");
+    expect(container?.textContent).toContain("Summary refreshed for 500 sessions.");
+
+    await act(async () => {
+      buttonByText("Select page").click();
+      buttonByText("Select all matching filter").click();
+      buttonByText("Enrich summaries").click();
+      buttonByText("Enrich full sessions").click();
+      buttonByText("Clear").click();
+    });
+
+    expect(onSelectBulkPage).toHaveBeenCalledTimes(1);
+    expect(onSelectBulkFiltered).toHaveBeenCalledTimes(1);
+    expect(onBulkEnrichSummary).toHaveBeenCalledTimes(1);
+    expect(onBulkEnrichFull).toHaveBeenCalledTimes(1);
+    expect(onClearBulkSelection).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps full enrichment disabled when the remote provider is off while summary stays available", async () => {
+    const onBulkEnrichSummary = vi.fn();
+    const onBulkEnrichFull = vi.fn();
+    renderToolbar({
+      bulkSelectionCount: 2,
+      fullEnrichmentAvailable: false,
+      onBulkEnrichFull,
+      onBulkEnrichSummary,
+      onFilterChange: vi.fn()
+    });
+
+    expect(container?.textContent).toContain("Remote provider is off. Summary refresh is still available.");
+    expect(buttonByText("Enrich summaries").disabled).toBe(false);
+    expect(buttonByText("Enrich full sessions").disabled).toBe(true);
+
+    await act(async () => {
+      buttonByText("Enrich summaries").click();
+      buttonByText("Enrich full sessions").click();
+    });
+
+    expect(onBulkEnrichSummary).toHaveBeenCalledTimes(1);
+    expect(onBulkEnrichFull).not.toHaveBeenCalled();
+  });
+
+  test("busy state disables all bulk controls and errors take precedence over success copy", () => {
+    renderToolbar({
+      bulkEnrichBusy: true,
+      bulkEnrichError: "2 of 5 enrichments failed.",
+      bulkSelectionCount: 5,
+      bulkStatus: "Summary refreshed for 5 sessions.",
+      fullEnrichmentAvailable: true,
+      onFilterChange: vi.fn()
+    });
+
+    for (const label of ["Select page", "Select all matching filter", "Enrich summaries", "Enrich full sessions", "Clear"]) {
+      expect(buttonByText(label).disabled).toBe(true);
+    }
+    expect(container?.textContent).toContain("2 of 5 enrichments failed.");
+    expect(container?.textContent).not.toContain("Summary refreshed for 5 sessions.");
   });
 
   test("keeps secondary Logbook filters visible without active filters", () => {
@@ -255,13 +314,39 @@ describe("LogbookToolbar", () => {
 });
 
 function renderToolbar({
+  bulkEnrichBusy,
+  bulkEnrichError,
+  bulkSelectionCount,
+  bulkStatus,
+  bulkTargetCapped,
+  bulkTargetCount,
+  bulkTargetKind,
   filterOptions = { projects: ["Masthead"], models: ["gpt-5"], runtimes: ["codex"] },
   filters = {},
-  onFilterChange
+  fullEnrichmentAvailable,
+  onBulkEnrichFull,
+  onBulkEnrichSummary,
+  onClearBulkSelection,
+  onFilterChange,
+  onSelectBulkFiltered,
+  onSelectBulkPage
 }: {
+  bulkEnrichBusy?: boolean;
+  bulkEnrichError?: string;
+  bulkSelectionCount?: number;
+  bulkStatus?: string;
+  bulkTargetCapped?: boolean;
+  bulkTargetCount?: number;
+  bulkTargetKind?: "explicit" | "page" | "filtered";
   filterOptions?: { projects: string[]; models: string[]; runtimes: string[] };
   filters?: LogbookFilterState;
+  fullEnrichmentAvailable?: boolean;
+  onBulkEnrichFull?: () => void;
+  onBulkEnrichSummary?: () => void;
+  onClearBulkSelection?: () => void;
   onFilterChange: (filters: LogbookFilterState) => void;
+  onSelectBulkFiltered?: () => void;
+  onSelectBulkPage?: () => void;
 }) {
   container = document.createElement("div");
   document.body.append(container);
@@ -269,12 +354,25 @@ function renderToolbar({
   act(() => {
     root?.render(
       <LogbookToolbar
+        bulkEnrichBusy={bulkEnrichBusy}
+        bulkEnrichError={bulkEnrichError}
+        bulkSelectionCount={bulkSelectionCount}
+        bulkStatus={bulkStatus}
+        bulkTargetCapped={bulkTargetCapped}
+        bulkTargetCount={bulkTargetCount}
+        bulkTargetKind={bulkTargetKind}
         filterOptions={filterOptions}
         filters={filters}
+        fullEnrichmentAvailable={fullEnrichmentAvailable}
         query=""
         sort="recent"
+        onBulkEnrichFull={onBulkEnrichFull}
+        onBulkEnrichSummary={onBulkEnrichSummary}
+        onClearBulkSelection={onClearBulkSelection}
         onFilterChange={onFilterChange}
         onQueryChange={() => undefined}
+        onSelectBulkFiltered={onSelectBulkFiltered}
+        onSelectBulkPage={onSelectBulkPage}
         onSortChange={() => undefined}
       />
     );
@@ -320,6 +418,12 @@ function buttonByLabel(label: string): HTMLButtonElement {
 
 function buttonByDocumentLabel(label: string): HTMLButtonElement {
   const button = Array.from(document.body.querySelectorAll("button")).find((candidate) => candidate.getAttribute("aria-label") === label);
+  expect(button).toBeDefined();
+  return button as HTMLButtonElement;
+}
+
+function buttonByText(label: string): HTMLButtonElement {
+  const button = Array.from(container?.querySelectorAll("button") ?? []).find((candidate) => candidate.textContent?.trim() === label);
   expect(button).toBeDefined();
   return button as HTMLButtonElement;
 }

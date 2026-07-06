@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { LogbookSort } from "../../app/daemonClient";
+import type { LogbookSort, SettingsStateDto } from "../../app/daemonClient";
 import type { LogbookFilterOptions, LogbookFilterState } from "../HistoryPanel";
 import { AppButton } from "../primitives/AppButton";
 import { AppSelect } from "../primitives/AppSelect";
@@ -12,8 +12,17 @@ import { prefersReducedMotion } from "../motionPreference";
 type Props = {
   bulkEnrichBusy?: boolean;
   bulkEnrichError?: string;
+  bulkStatus?: string;
   bulkSelectionCount?: number;
-  onBulkEnrich?: () => void;
+  bulkTargetCount?: number;
+  bulkTargetKind?: "explicit" | "page" | "filtered";
+  bulkTargetCapped?: boolean;
+  enrichment?: SettingsStateDto["enrichment"];
+  fullEnrichmentAvailable?: boolean;
+  onBulkEnrichSummary?: () => void;
+  onBulkEnrichFull?: () => void;
+  onSelectBulkPage?: () => void;
+  onSelectBulkFiltered?: () => void;
   onClearBulkSelection?: () => void;
   query: string;
   sort: LogbookSort;
@@ -48,11 +57,14 @@ function dropdownCloseDelayMs(): number {
   return cssDurationMs(window.getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur"), 150);
 }
 
-export function LogbookToolbar({ bulkEnrichBusy = false, bulkEnrichError, bulkSelectionCount = 0, filterOptions, filters = {}, onBulkEnrich, onClearBulkSelection, onFilterChange, onQueryChange, onSortChange, query, sort }: Props) {
+export function LogbookToolbar({ bulkEnrichBusy = false, bulkEnrichError, bulkSelectionCount = 0, bulkStatus, bulkTargetCapped, bulkTargetCount, bulkTargetKind = "explicit", enrichment, filterOptions, filters = {}, fullEnrichmentAvailable, onBulkEnrichFull, onBulkEnrichSummary, onClearBulkSelection, onFilterChange, onQueryChange, onSelectBulkFiltered, onSelectBulkPage, onSortChange, query, sort }: Props) {
   const runtimeOptions = optionRows(filterOptions?.runtimes, filters.runtime);
   const projectOptions = optionRows(filterOptions?.projects, filters.project);
   const modelOptions = optionRows(filterOptions?.models, filters.model);
   const activeDateFilterCount = [filters.dateFrom, filters.dateTo].filter(Boolean).length;
+  const resolvedBulkTargetCount = bulkTargetCount ?? bulkSelectionCount;
+  const showBulkActions = resolvedBulkTargetCount > 0 || bulkTargetKind === "page" || bulkTargetKind === "filtered";
+  const canRunFullEnrichment = fullEnrichmentAvailable ?? enrichment?.remoteModelEnabled === true;
   const [dateState, setDateState] = useState<"closed" | "open" | "closing">("closed");
   const dateCloseTimerRef = useRef<number | undefined>(undefined);
   const dateRootRef = useRef<HTMLDivElement | null>(null);
@@ -206,18 +218,29 @@ export function LogbookToolbar({ bulkEnrichBusy = false, bulkEnrichError, bulkSe
           onChange={(value) => onFilterChange?.({ ...filters, model: filterChangeValues(value) })}
         />
 
-        {bulkSelectionCount > 0 ? (
+        {showBulkActions ? (
           <div className="logbook-bulk-actions" data-logbook-row-stop>
-            <span className="mono-label">{bulkSelectionCount} selected</span>
-            <AppButton disabled={bulkEnrichBusy} onClick={() => onBulkEnrich?.()}>
-              {bulkEnrichBusy ? "Enriching..." : "Enrich selected"}
+            <span className="mono-label">{resolvedBulkTargetCount} selected</span>
+            <AppButton disabled={bulkEnrichBusy} onClick={() => onSelectBulkPage?.()}>
+              Select page
+            </AppButton>
+            <AppButton disabled={bulkEnrichBusy} onClick={() => void onSelectBulkFiltered?.()}>
+              Select all matching filter
+            </AppButton>
+            <AppButton disabled={bulkEnrichBusy || resolvedBulkTargetCount === 0} onClick={() => void onBulkEnrichSummary?.()}>
+              Enrich summaries
+            </AppButton>
+            <AppButton disabled={bulkEnrichBusy || resolvedBulkTargetCount === 0 || !canRunFullEnrichment} onClick={() => void onBulkEnrichFull?.()}>
+              Enrich full sessions
             </AppButton>
             <AppButton disabled={bulkEnrichBusy} onClick={() => onClearBulkSelection?.()}>
               Clear
             </AppButton>
           </div>
         ) : null}
-        {bulkEnrichError ? <p className="surface-status">{bulkEnrichError}</p> : null}
+        {bulkTargetCapped ? <p className="surface-status">First 500 matching sessions selected.</p> : null}
+        {!canRunFullEnrichment && showBulkActions ? <p className="surface-status">Remote provider is off. Summary refresh is still available.</p> : null}
+        {bulkEnrichError ? <p className="surface-status">{bulkEnrichError}</p> : !bulkEnrichError && bulkStatus ? <p className="surface-status">{bulkStatus}</p> : null}
 
         <AppSelect label="Sort sessions" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
       </div>

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { DesktopNotificationResult, DesktopSessionTransitionNotificationInput } from "../app/desktopBridge";
 import { ELECTRON_CHANNELS, LEGACY_COMMAND_TO_CHANNEL } from "./channels";
 
 const runtimeProcess = globalThis.process as { env?: Record<string, string | undefined> } | undefined;
@@ -13,5 +14,7 @@ contextBridge.exposeInMainWorld("mastheadDesktop", {
     }
     return ipcRenderer.invoke(channel, args) as Promise<T>;
   },
+  notifySessionTransition: (input: DesktopSessionTransitionNotificationInput): Promise<DesktopNotificationResult> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.notifySessionTransition, input) as Promise<DesktopNotificationResult>,
   projectionUrl: rendererConfig?.projectionUrl || `http://127.0.0.1:${projectionPort}/projection`
 });

@@ -10,6 +10,8 @@ import type {
 import { AdapterRow } from "./AdapterRow";
 import { SourceAdapterDetailModal } from "./SourceAdapterDetailModal";
 
+type HookAction = "install" | "test" | "uninstall";
+
 type Props = {
   adapters: AdapterStatus[];
   busy: boolean;
@@ -18,12 +20,13 @@ type Props = {
   hookActionBusy?: boolean;
   llm?: SettingsStateDto["llm"];
   settingsBaseUrl?: string;
-  onCodexHookAction?: (action: "install" | "test" | "uninstall") => Promise<void> | void;
+  onRuntimeHookAction?: (runtime: string, action: HookAction) => Promise<void> | void;
   onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
   onLoadAdapterSources?: (runtime: string, page: { limit: number; offset: number }) => Promise<SourceStatusPage>;
+  onOpenImportJobsForRuntime?: (runtime: string) => void;
   onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
   onToggleSelected?: (runtime: string, checked: boolean) => void;
   onSyncAdapter?: (runtime: string) => void;
@@ -38,11 +41,12 @@ export function AdapterList({
   hookActionBusy,
   llm,
   onEnableTranscriptImport,
-  onCodexHookAction,
+  onRuntimeHookAction,
   onExcludePath,
   onImportMetadata,
   onImportTranscripts,
   onLoadAdapterSources,
+  onOpenImportJobsForRuntime,
   onSaveLlmProvider,
   onSyncAdapter,
   onToggleSelected,
@@ -159,12 +163,13 @@ export function AdapterList({
           locationTotal={openAdapterSources?.total ?? openAdapterWithSources.sourceLocationCount}
           settingsBaseUrl={settingsBaseUrl}
           onClose={() => setOpenRuntime(undefined)}
-          onCodexHookAction={onCodexHookAction}
+          onRuntimeHookAction={onRuntimeHookAction}
           onEnableTranscriptImport={onEnableTranscriptImport}
           onExcludePath={onExcludePath}
           onImportMetadata={onImportMetadata}
           onImportTranscripts={onImportTranscripts}
           onLoadMoreLocations={() => handleLoadMoreSources(openAdapterWithSources.runtime)}
+          onOpenImportJobs={onOpenImportJobsForRuntime}
           onSaveLlmProvider={onSaveLlmProvider}
           onSyncAdapter={onSyncAdapter}
           onToggleSelected={onToggleSelected}

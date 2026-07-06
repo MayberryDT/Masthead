@@ -1,8 +1,20 @@
 export type DesktopInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
+export type DesktopSessionTransitionNotificationInput = {
+  sessionId: string;
+  transition: "idle" | "blocked" | "ended";
+  title: string;
+  body?: string;
+};
+
+export type DesktopNotificationResult =
+  | { ok: true; shown: true }
+  | { ok: true; shown: false; reason: "bridge_unavailable" | "unsupported" };
+
 export type DesktopBridge = {
   invoke: DesktopInvoke;
   kind: "electron";
+  notifySessionTransition?: (input: DesktopSessionTransitionNotificationInput) => Promise<DesktopNotificationResult>;
 };
 
 export function getDesktopBridge(): DesktopBridge | undefined {
@@ -10,7 +22,9 @@ export function getDesktopBridge(): DesktopBridge | undefined {
   if (!candidate || typeof candidate.invoke !== "function") return undefined;
   return {
     invoke: candidate.invoke,
-    kind: "electron"
+    kind: "electron",
+    notifySessionTransition:
+      typeof candidate.notifySessionTransition === "function" ? candidate.notifySessionTransition : undefined
   };
 }
 

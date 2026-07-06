@@ -48,6 +48,63 @@ describe("live hook adapter", () => {
     if (parsed.ok) expect(parsed.event.source.adapter).toBe("codex");
   });
 
+  test("keeps OMP session files and turn ids as metadata instead of session keys", () => {
+    const parsed = parseLiveHookPayload(
+      JSON.stringify({
+        type: "session_stop",
+        sessionId: "omp-stable-session",
+        sessionFile: "/home/user/.omp/agent/sessions/project/turn-scoped-child.jsonl",
+        turnId: "turn-7",
+        timestamp: "2026-07-05T12:03:00.000Z"
+      }),
+      { receivedAt: "2026-07-05T12:03:01.000Z", runtime: "omp" }
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.event.sessionId).toBe("omp-stable-session");
+    expect(parsed.event.sessionId).not.toBe(parsed.event.payload.sessionFile);
+    expect(parsed.event.sessionId).not.toBe(parsed.event.payload.turnId);
+    expect(parsed.event.payload).toMatchObject({
+      runtime: "omp",
+      harness: "Oh My Pi",
+      sourceSessionId: "omp-stable-session",
+      sessionFile: "/home/user/.omp/agent/sessions/project/turn-scoped-child.jsonl",
+      turnId: "turn-7"
+    });
+  });
+
+  test("preserves OMP runtime state model and provider fields in normalized payloads", () => {
+    const parsed = parseLiveHookPayload(
+      JSON.stringify({
+        type: "runtime_state",
+        sessionId: "omp-state-session",
+        timestamp: "2026-07-05T12:05:00.000Z",
+        cwd: "/workspace/masthead",
+        status: "active",
+        state: "logged",
+        model: "openai-codex/gpt-5.5",
+        provider: "openai-codex",
+        totalTokens: 42
+      }),
+      { receivedAt: "2026-07-05T12:05:00.100Z", runtime: "omp" }
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.event.source.adapter).toBe("omp");
+    expect(parsed.event.payload).toMatchObject({
+      runtime: "omp",
+      harness: "Oh My Pi",
+      sourceSessionId: "omp-state-session",
+      status: "active",
+      state: "logged",
+      model: "openai-codex/gpt-5.5",
+      provider: "openai-codex",
+      totalTokens: 42
+    });
+  });
+
   test("uses non-Codex identity fields for fallback event ids after redaction", () => {
     const first = parseLiveHookPayload(
       JSON.stringify({

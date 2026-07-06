@@ -9,6 +9,7 @@ import { createEnrichmentAuditLogger, type EnrichmentAuditLogger } from "./enric
 import { fallbackDurableSessionEnrichment } from "./durableSessionEnrichment.ts";
 import { buildSessionFacts } from "./sessionFacts.ts";
 import {
+  deterministicCapsuleFromFacts,
   fingerprintSessionFacts,
   isMeaningfulSessionTitle,
   selectSessionTitle,
@@ -21,6 +22,7 @@ import type { SessionCapsule, SessionEnrichmentKind, SessionEnrichmentRecord } f
 
 export type EnrichmentCoordinator = {
   enrich(sessionId: string): Promise<SessionEnrichmentRecord>;
+  enrichSummary(sessionId: string): Promise<SessionEnrichmentRecord>;
   ensureCurrent(sessionId: string): Promise<SessionEnrichmentRecord>;
 };
 
@@ -216,6 +218,64 @@ export function createEnrichmentCoordinator(
         throw error;
       }
     },
+    async enrichSummary(sessionId) {
+      const facts = buildSessionFacts(db, sessionId);
+      const fingerprint = `${fingerprintSessionFacts(facts)}:summary`;
+      const generatedAt = new Date(now()).toISOString();
+      const capsule = applyTitleQuality(deterministicCapsuleFromFacts(facts), facts);
+      const localProvider = { id: "deterministic", model: "local-rules" };
+      const searchProjectionContent = {
+        objective: capsule.objective,
+        outcome: capsule.outcome,
+        searchSummary: capsule.searchSummary,
+        searchText: searchProjectionText(capsule),
+        sessionSummary: capsule.sessionSummary,
+        sessionTitle: capsule.sessionTitle,
+        technologies: capsule.technologies,
+        title: capsule.title,
+        titleSource: capsule.titleSource,
+        topics: capsule.topics
+      };
+
+      db.exec("BEGIN IMMEDIATE;");
+      try {
+        writeEnrichment(db, {
+          content: { text: capsule.liveSummary ?? capsule.objective ?? capsule.title },
+          enrichmentKind: "live_summary",
+          fingerprint,
+          generatedAt,
+          provider: localProvider,
+          sessionId,
+          sourceRefs: facts.evidence
+        });
+        const searchProjectionId = writeEnrichment(db, {
+          content: searchProjectionContent as SessionEnrichmentRecord["content"],
+          enrichmentKind: "search_projection",
+          fingerprint,
+          generatedAt,
+          provider: localProvider,
+          sessionId,
+          sourceRefs: facts.evidence
+        });
+        db.exec("COMMIT;");
+        return {
+          content: searchProjectionContent as SessionEnrichmentRecord["content"],
+          contentFingerprint: fingerprint,
+          enrichmentId: searchProjectionId,
+          enrichmentKind: "search_projection",
+          generatedAt,
+          model: localProvider.model,
+          promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
+          provider: localProvider.id,
+          sessionId,
+          sourceRefs: facts.evidence,
+          status: "current"
+        };
+      } catch (error) {
+        db.exec("ROLLBACK;");
+        throw error;
+      }
+    },
     async ensureCurrent(sessionId) {
       const facts = buildSessionFacts(db, sessionId);
       const fingerprint = fingerprintSessionFacts(facts);
@@ -313,7 +373,7 @@ function writeEnrichment(
     enrichmentKind: SessionEnrichmentKind;
     fingerprint: string;
     generatedAt: string;
-    provider: SessionEnrichmentProvider;
+    provider: Pick<SessionEnrichmentProvider, "id" | "model">;
     sessionId: string;
     sourceRefs: SessionEnrichmentRecord["sourceRefs"];
   }

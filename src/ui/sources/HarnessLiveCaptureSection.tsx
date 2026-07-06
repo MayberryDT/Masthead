@@ -10,7 +10,7 @@ type HarnessLiveCaptureSectionProps = {
   busy?: boolean;
   hooks?: CodexHookSettingsDto;
   runtime: string;
-  onAction?: (action: HookAction) => Promise<void> | void;
+  onAction?: (runtime: string, action: HookAction) => Promise<void> | void;
 };
 
 export function HarnessLiveCaptureSection({ busy = false, hooks, onAction, runtime }: HarnessLiveCaptureSectionProps) {
@@ -59,13 +59,13 @@ export function HarnessLiveCaptureSection({ busy = false, hooks, onAction, runti
       {status.message ? <p className="surface-status">{status.message}</p> : null}
       {actionable ? (
         <div className="source-detail-action-buttons">
-          <AppButton disabled={busy} onClick={() => void onAction?.("install")}>
+          <AppButton disabled={busy} onClick={() => void onAction?.(runtime, "install")}>
             Install/repair live connectors
           </AppButton>
-          <AppButton variant="quiet" disabled={busy || !hooks?.installed} onClick={() => void onAction?.("test")}>
+          <AppButton variant="quiet" disabled={busy || !hooks?.installed} onClick={() => void onAction?.(runtime, "test")}>
             Test live connectors
           </AppButton>
-          <AppButton variant="quiet" disabled={busy || !hooks?.configExists} onClick={() => void onAction?.("uninstall")}>
+          <AppButton variant="quiet" disabled={busy || !hooks?.configExists} onClick={() => void onAction?.(runtime, "uninstall")}>
             Uninstall live connectors
           </AppButton>
         </div>

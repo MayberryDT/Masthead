@@ -89,6 +89,71 @@ describe("observability session card", () => {
     expect(conflict).not.toContain("tier-action");
   });
 
+  test("orders headline source before runtime and state chips in the top line", () => {
+    const host = document.createElement("div");
+    host.innerHTML = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          headline: headlineView("Local headline fallback.", { source: "offline" }),
+          harness: "Codex",
+          lifecycle: "idle",
+          primaryStatus: "stalled",
+          stateLabel: "Idle"
+        })}
+        onToggle={() => undefined}
+      />
+    );
+
+    const chipText = Array.from(
+      host.querySelectorAll(".card-topline .headline-source, .card-topline .runtime-tag, .card-topline .state-pill")
+    ).map((chip) => chip.textContent);
+
+    expect(chipText).toEqual(["Offline", "Codex", "Idle"]);
+  });
+
+  test("keeps stale attention on idle sessions visually quiet", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          lifecycle: "idle",
+          primaryStatus: "stalled",
+          stateLabel: "Idle",
+          indicators: ["attention"]
+        })}
+        onToggle={() => undefined}
+      />
+    );
+
+    expect(html).toContain("is-idle");
+    expect(html).toContain("tier-quiet");
+    expect(html).not.toContain("tier-action");
+  });
+
+  test("keeps active blockers in the action visual tier", () => {
+    const blockerCases: Array<{ name: string; overrides: Partial<SessionCardView> }> = [
+      {
+        name: "blocked status",
+        overrides: { lifecycle: "running", primaryStatus: "blocked", stateLabel: "Blocked", indicators: ["attention"] }
+      },
+      {
+        name: "approval wait",
+        overrides: { lifecycle: "running", primaryStatus: "waiting_for_approval", stateLabel: "Waiting for approval", indicators: ["attention"] }
+      },
+      {
+        name: "user input wait",
+        overrides: { lifecycle: "running", primaryStatus: "waiting_for_user", stateLabel: "Waiting for user", indicators: ["attention"] }
+      }
+    ];
+
+    for (const { name, overrides } of blockerCases) {
+      const html = renderToStaticMarkup(<SessionCard session={session(overrides)} onToggle={() => undefined} />);
+
+      expect(html, name).toContain("is-blocked");
+      expect(html, name).toContain("tier-action");
+      expect(html, name).not.toContain("tier-quiet");
+    }
+  });
+
   test("uses a project and work-area label in the header without synthetic id chrome", () => {
     const html = renderToStaticMarkup(
       <SessionCard

@@ -115,9 +115,9 @@ export function SessionCard({
         <span className="project" title={sessionName}>
           {sessionName}
         </span>
+        <HeadlineSourceBadge session={session} />
         <span className="runtime-tag">{harness}</span>
         <span className="state-pill">{sessionStatePillLabel(session)}</span>
-        <HeadlineSourceBadge session={session} />
       </header>
 
       <h3 className="headline">
@@ -153,7 +153,7 @@ function HeadlineSourceBadge({ session }: { session: SessionCardView }) {
   if (!label) return null;
 
   return (
-    <span className={`headline-source is-${label.toLowerCase()}`} title={`Headline source: ${label}`}>
+    <span className={`headline-source is-${label.toLowerCase()}`} title={headlineSourceTitle(session, label)}>
       {label}
     </span>
   );
@@ -163,6 +163,13 @@ function headlineSourceLabel(session: SessionCardView): "Pending" | "Offline" | 
   if (session.headline.status === "pending" || session.headline.source === "pending") return "Pending";
   if (session.headline.source === "offline") return "Offline";
   return undefined;
+}
+
+function headlineSourceTitle(session: SessionCardView, label: "Pending" | "Offline"): string {
+  if (label === "Pending") return "Headline source: pending remote Board headline";
+  if (session.headlineRefresh?.failureMessage) return `Local headline: ${session.headlineRefresh.failureMessage}`;
+  if (session.headlineRefresh?.status === "not_configured") return "Local headline: Board headline provider not configured";
+  return "Headline source: offline deterministic Board headline";
 }
 
 function viewTransitionNamePart(value: string): string {
@@ -192,10 +199,10 @@ function sessionStateClassName(session: SessionCardView): "is-active" | "is-idle
 
 function sessionVisualTier(session: SessionCardView): SessionVisualTier {
   if (isBlockedSessionCard(session)) return "action";
-  if (session.lifecycle === "running") return "live";
-  if (session.indicators.includes("attention")) return "action";
-  if (session.indicators.includes("conflict")) return "action";
-  return "quiet";
+  if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") {
+    return session.primaryStatus === "failed" || session.outcomeLabel === "failed" ? "action" : "quiet";
+  }
+  return "live";
 }
 
 function startedLabel(value: string): string {

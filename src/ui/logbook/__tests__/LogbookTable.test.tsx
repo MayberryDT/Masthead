@@ -249,9 +249,68 @@ describe("LogbookTable", () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith("session-1");
   });
+
+  test("marks selected bulk rows and toggles the checkbox without opening the session", async () => {
+    const onSelect = vi.fn();
+    const onToggleBulkSelect = vi.fn();
+    await renderTable(onSelect, { onToggleBulkSelect, selectedSessionIds: ["session-1"] });
+
+    const checkbox = checkboxByLabel("Select Repair OAuth callback for bulk enrich");
+    expect(checkbox.checked).toBe(true);
+
+    await act(async () => {
+      checkbox.click();
+    });
+
+    expect(onToggleBulkSelect).toHaveBeenCalledTimes(1);
+    expect(onToggleBulkSelect).toHaveBeenCalledWith("session-1");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  test("keeps outgoing transition rows from exposing a stale selected bulk checkbox", async () => {
+    vi.useFakeTimers();
+    const onToggleBulkSelect = vi.fn();
+    await renderTable(vi.fn(), { onToggleBulkSelect, selectedSessionIds: ["session-1"] });
+
+    await act(async () => {
+      root?.render(
+        <LogbookTable
+          density="compact"
+          selectedSessionIds={["session-2"]}
+          sessions={[sessionRow("session-2", "New visible session")]}
+          onSelect={() => undefined}
+          onToggleBulkSelect={onToggleBulkSelect}
+        />
+      );
+    });
+
+    const outgoing = currentContainer().querySelector<HTMLTableElement>(".logbook-table-outgoing");
+    const current = currentContainer().querySelector<HTMLTableElement>(".logbook-table-current");
+    expect(outgoing?.getAttribute("aria-hidden")).toBe("true");
+    expect(current?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(true);
+    expect(outgoing?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(false);
+
+    await act(async () => {
+      outgoing?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
+    });
+
+    expect(onToggleBulkSelect).not.toHaveBeenCalled();
+  });
 });
 
-async function renderTable(onSelect: (sessionId: string) => void = () => undefined, options: { animateOnMount?: boolean } = {}) {
+function sessionRow(sessionId: string, title: string) {
+  return {
+    project: "Masthead",
+    runtime: "codex",
+    sessionId,
+    title
+  };
+}
+
+async function renderTable(
+  onSelect: (sessionId: string) => void = () => undefined,
+  options: { animateOnMount?: boolean; onToggleBulkSelect?: (sessionId: string) => void; selectedSessionIds?: string[] } = {}
+) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -261,14 +320,9 @@ async function renderTable(onSelect: (sessionId: string) => void = () => undefin
       <LogbookTable
         animateOnMount={options.animateOnMount}
         density="compact"
-        sessions={[
-          {
-            project: "Masthead",
-            runtime: "codex",
-            sessionId: "session-1",
-            title: "Repair OAuth callback"
-          }
-        ]}
+        sessions={[sessionRow("session-1", "Repair OAuth callback")]}
+        selectedSessionIds={options.selectedSessionIds}
+        onToggleBulkSelect={options.onToggleBulkSelect}
         onSelect={onSelect}
       />
     );
@@ -278,4 +332,12 @@ async function renderTable(onSelect: (sessionId: string) => void = () => undefin
 function currentContainer(): HTMLDivElement {
   expect(container).toBeDefined();
   return container as HTMLDivElement;
+}
+
+function checkboxByLabel(label: string): HTMLInputElement {
+  const checkbox = Array.from(currentContainer().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(
+    (candidate) => candidate.getAttribute("aria-label") === label
+  );
+  expect(checkbox).toBeDefined();
+  return checkbox as HTMLInputElement;
 }

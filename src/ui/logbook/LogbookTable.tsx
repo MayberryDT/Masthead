@@ -83,7 +83,9 @@ export function LogbookTable({ animateOnMount = false, density, onSelect, onTogg
         density={density}
         sessions={displayedSessions}
         selectedSessionId={selectedSessionId}
+        selectedSessionIds={selectedSessionIds}
         onSelect={onSelect}
+        onToggleBulkSelect={onToggleBulkSelect}
       />
     </div>
   );

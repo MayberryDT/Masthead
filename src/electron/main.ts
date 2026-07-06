@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
 import { ELECTRON_CHANNELS, isAllowedIpcSender, registerMastheadIpc } from "./ipc";
+import { showSessionTransitionNotification } from "./notifications";
 import {
   type StartLiveConnectorResult,
   connectorBaseUrl,
@@ -101,12 +102,14 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function trayIconPath(): string {
-  const iconFileName = isElectronDevMode() ? "masthead-logo-sail-dev.svg" : "masthead-logo-sail.png";
-  const sourceIcon = join(app.getAppPath(), "public", "assets", iconFileName);
-  if (existsSync(sourceIcon)) return sourceIcon;
-  const resourceIcon = join(process.resourcesPath, iconFileName);
-  if (existsSync(resourceIcon)) return resourceIcon;
-  return join(process.resourcesPath, "daemon", iconFileName);
+  const iconFileNames = isElectronDevMode() ? ["masthead-logo-sail.png", "masthead-logo-sail-dev.svg"] : ["masthead-logo-sail.png"];
+  for (const iconFileName of iconFileNames) {
+    const sourceIcon = join(app.getAppPath(), "public", "assets", iconFileName);
+    if (existsSync(sourceIcon)) return sourceIcon;
+    const resourceIcon = join(process.resourcesPath, iconFileName);
+    if (existsSync(resourceIcon)) return resourceIcon;
+  }
+  return join(process.resourcesPath, "daemon", "masthead-logo-sail.png");
 }
 
 async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
@@ -145,6 +148,7 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
         return {
           cardCount: cards.length,
           hasDesktopBridge: typeof window.mastheadDesktop?.invoke === 'function',
+          hasTypedNotify: typeof window.mastheadDesktop?.notifySessionTransition === 'function',
           hasCustomChrome: document.querySelector('.masthead-shell.desktop-chrome .masthead-window-bar') !== null,
           hasNodeProcess: typeof window.process !== 'undefined',
           hasRawIpc: typeof window.ipcRenderer !== 'undefined',
@@ -360,13 +364,7 @@ function registerDesktopIpc(): void {
         touchedExternalState: false
       }),
       [ELECTRON_CHANNELS.readStoreRecords]: () => [],
-      [ELECTRON_CHANNELS.notifySessionEnded]: (args) => {
-        const title = stringArg(args, "title") || "Session ended";
-        const body = stringArg(args, "body");
-        const notification = new Notification({ title, body: body || undefined, silent: false });
-        notification.show();
-        return { ok: true };
-      },
+      [ELECTRON_CHANNELS.notifySessionTransition]: (args) => showSessionTransitionNotification(Notification, args),
       [ELECTRON_CHANNELS.appendStoreRecords]: () => undefined
     },
     { allowDevRenderer: isElectronDevMode() }
@@ -405,6 +403,7 @@ async function openDataDirectory(path: string): Promise<void> {
   const error = await shell.openPath(path);
   if (error) throw new Error(`failed to open data directory: ${error}`);
 }
+
 
 function stringArg(args: Record<string, unknown> | undefined, key: string): string {
   const value = args?.[key];

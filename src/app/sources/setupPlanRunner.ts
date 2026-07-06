@@ -4,6 +4,17 @@ import type {
   SourcesSetupLiveCaptureSelection,
   SourcesSetupRunInput
 } from "../../shared/sourcesSetup";
+type HookAction = "install" | "test" | "uninstall";
+
+const SUPPORTED_HOOK_RUNTIMES: Record<string, true> = {
+  claude_code: true,
+  codex: true,
+  cursor: true,
+  grok: true,
+  omp: true,
+  opencode: true
+};
+
 
 export type SourcesSetupPlan = SourcesSetupRunInput & {
   liveCapture: SourcesSetupLiveCaptureSelection[];
@@ -24,7 +35,7 @@ export type SetupRunReport = {
 
 type SetupPlanRunnerDeps = {
   onLog: (entry: SetupRunLogEntry) => void;
-  runHookAction: (action: "install" | "test" | "uninstall") => Promise<unknown> | unknown;
+  runHookAction: (runtime: string, action: HookAction) => Promise<unknown> | unknown;
   runSetup: (input: SourcesSetupRunInput) => Promise<unknown> | unknown;
 };
 
@@ -43,7 +54,7 @@ export async function runSourcesSetupPlan(plan: SourcesSetupPlan, deps: SetupPla
       continue;
     }
 
-    if (liveCapture.runtime !== "codex") {
+    if (!SUPPORTED_HOOK_RUNTIMES[liveCapture.runtime]) {
       appendStep(steps, deps, {
         id: `live:${liveCapture.runtime}`,
         label: `${runtimeLabel(liveCapture.runtime)} live capture`,
@@ -54,10 +65,10 @@ export async function runSourcesSetupPlan(plan: SourcesSetupPlan, deps: SetupPla
       continue;
     }
 
-    const label = liveCapture.action === "install" ? "Install Codex live capture" : `${liveCapture.action} Codex live capture`;
+    const label = liveCapture.action === "install" ? `Install ${runtimeLabel(liveCapture.runtime)} live capture` : `${liveCapture.action} ${runtimeLabel(liveCapture.runtime)} live capture`;
     appendStep(steps, deps, runningStep(`live:${liveCapture.runtime}:${liveCapture.action}`, label));
     try {
-      await deps.runHookAction(liveCapture.action);
+      await deps.runHookAction(liveCapture.runtime, liveCapture.action);
       appendStep(steps, deps, completedStep(`live:${liveCapture.runtime}:${liveCapture.action}`, label, "succeeded"));
     } catch (error) {
       appendStep(steps, deps, completedStep(`live:${liveCapture.runtime}:${liveCapture.action}`, label, "failed", errorMessage(error)));

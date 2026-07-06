@@ -182,9 +182,29 @@ function deriveLifecycle({
 }): SessionLifecycle {
   if (latest?.type === "session.completed") return "ended";
   if (latest?.type === "approval.requested" || latest?.type === "user.question") return "running";
+  const runtimeLifecycle = lifecycleFromRuntimeState(latest);
+  if (runtimeLifecycle) return runtimeLifecycle;
   if (!latest) return "idle";
   if (!latestSignalAt) return "idle";
   return now.getTime() - latestSignalAt.getTime() > idleAfterMs ? "idle" : "running";
+}
+
+function lifecycleFromRuntimeState(event: NormalizedEvent | undefined): SessionLifecycle | undefined {
+  if (event?.source.adapter !== "omp") return undefined;
+  const state = normalizeRuntimeState(stringPayload(event, "state") ?? stringPayload(event, "status") ?? stringPayload(event, "runtimeState"));
+  if (!state) return undefined;
+  if (state === "idle" || state === "logged") return "idle";
+  if (state === "active" || state === "running") return "running";
+  return undefined;
+}
+
+function normalizeRuntimeState(value: string | undefined): string | undefined {
+  return value
+    ?.trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function endReasonForLatestEvent(event: NormalizedEvent | undefined): SessionEndReason | undefined {

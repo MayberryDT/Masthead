@@ -25,7 +25,7 @@ describe("HarnessLiveCaptureSection", () => {
       buttonByText(container, "Test live connectors").click();
     });
 
-    expect(onAction).toHaveBeenCalledWith("test");
+    expect(onAction).toHaveBeenCalledWith("codex", "test");
     await act(async () => root.unmount());
   });
 
@@ -48,7 +48,7 @@ describe("HarnessLiveCaptureSection", () => {
       buttonByText(container, "Install/repair live connectors").click();
     });
 
-    expect(onAction).toHaveBeenCalledWith("install");
+    expect(onAction).toHaveBeenCalledWith("cursor", "install");
     await act(async () => root.unmount());
   });
 });

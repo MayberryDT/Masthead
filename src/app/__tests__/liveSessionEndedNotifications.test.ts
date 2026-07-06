@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveBoardProjection, SessionCardView } from "../../core/types";
 import {
-  detectSessionEndedTransitions,
-  emitSessionEndedNotifications
+  detectSessionNotificationTransitions,
+  emitSessionTransitionNotifications
 } from "../liveSessionEndedNotifications";
 
-const notifyMock = vi.fn().mockResolvedValue(undefined);
+const notifyMock = vi.fn();
 vi.mock("../desktopNotify", () => ({
-  notifySessionEndedDesktop: (...args: unknown[]) => notifyMock(...args)
+  notifySessionTransitionDesktop: (...args: unknown[]) => notifyMock(...args)
 }));
 
 const baseCard = {
@@ -45,6 +45,10 @@ function card(overrides: Partial<SessionCardView> = {}): SessionCardView {
   return { ...baseCard, ...overrides };
 }
 
+function cardHeadline(headline: string): SessionCardView["headline"] {
+  return { ...baseCard.headline, headline };
+}
+
 function projection(cards: SessionCardView[]): LiveBoardProjection {
   return {
     summary: { active: cards.length, needsAttention: 0, conflicts: 0, completed: 0 },
@@ -54,51 +58,144 @@ function projection(cards: SessionCardView[]): LiveBoardProjection {
   };
 }
 
-describe("detectSessionEndedTransitions", () => {
-  it("detects non-ended to ended transitions only once", () => {
+describe("detectSessionNotificationTransitions", () => {
+  it("uses the first successful projection as a baseline without notifying historical terminal states", () => {
+    const next = projection([
+      card({ sessionId: "idle", lifecycle: "idle", stateLabel: "Idle" }),
+      card({ sessionId: "blocked", primaryStatus: "waiting_for_approval", attentionReason: "Approval requested" }),
+      card({ sessionId: "ended", lifecycle: "ended", stateLabel: "Completed", outcomeLabel: "completed" })
+    ]);
+
+    expect(detectSessionNotificationTransitions(undefined, next)).toEqual([]);
+  });
+
+  it("detects running sessions becoming idle, blocked, or ended", () => {
     const previous = projection([
-      card({ sessionId: "a", lifecycle: "running", title: "Alpha", headline: { ...baseCard.headline, headline: "Alpha" } })
+      card({ sessionId: "idle", headline: cardHeadline("Idle candidate") }),
+      card({ sessionId: "blocked", headline: cardHeadline("Approval candidate") }),
+      card({ sessionId: "ended", headline: cardHeadline("Ended candidate") })
     ]);
     const next = projection([
-      card({ sessionId: "a", lifecycle: "ended", title: "Alpha", headline: { ...baseCard.headline, headline: "Alpha" } })
+      card({ sessionId: "idle", lifecycle: "idle", stateLabel: "Idle", headline: cardHeadline("Idle candidate") }),
+      card({
+        sessionId: "blocked",
+        primaryStatus: "waiting_for_approval",
+        stateLabel: "Blocked",
+        attentionReason: "Approval requested",
+        headline: cardHeadline("Approval candidate")
+      }),
+      card({
+        sessionId: "ended",
+        lifecycle: "ended",
+        outcomeLabel: "completed",
+        stateLabel: "Completed",
+        headline: cardHeadline("Ended candidate")
+      })
     ]);
-    expect(detectSessionEndedTransitions(previous, next)).toEqual([
-      { sessionId: "a", title: "Alpha", body: "Working" }
+
+    expect(detectSessionNotificationTransitions(previous, next)).toEqual([
+      { sessionId: "idle", transition: "idle", title: "Idle candidate", body: "Idle" },
+      { sessionId: "blocked", transition: "blocked", title: "Approval candidate", body: "Blocked: Approval requested" },
+      { sessionId: "ended", transition: "ended", title: "Ended candidate", body: "Ended: Completed" }
     ]);
-    expect(detectSessionEndedTransitions(next, next)).toEqual([]);
+  });
+
+  it("does not report attention/conflict state, stable nonactive cards, or idle-to-ended changes as desktop transitions", () => {
+    const previous = projection([
+      card({ sessionId: "conflict", lifecycle: "running" }),
+      card({ sessionId: "stable-idle", lifecycle: "idle", stateLabel: "Idle" }),
+      card({ sessionId: "stable-blocked", primaryStatus: "waiting_for_approval", attentionReason: "Approval requested" }),
+      card({ sessionId: "stable-ended", lifecycle: "ended", outcomeLabel: "completed", stateLabel: "Completed" }),
+      card({ sessionId: "idle-to-ended", lifecycle: "idle", stateLabel: "Idle" })
+    ]);
+    const next = projection([
+      card({ sessionId: "conflict", lifecycle: "running", indicators: ["attention", "conflict"] }),
+      card({ sessionId: "stable-idle", lifecycle: "idle", stateLabel: "Idle" }),
+      card({ sessionId: "stable-blocked", primaryStatus: "waiting_for_approval", attentionReason: "Approval requested" }),
+      card({ sessionId: "stable-ended", lifecycle: "ended", outcomeLabel: "completed", stateLabel: "Completed" }),
+      card({ sessionId: "idle-to-ended", lifecycle: "ended", outcomeLabel: "completed", stateLabel: "Completed" })
+    ]);
+
+    expect(detectSessionNotificationTransitions(previous, next)).toEqual([]);
   });
 });
 
-describe("emitSessionEndedNotifications", () => {
+describe("emitSessionTransitionNotifications", () => {
   beforeEach(() => {
-    notifyMock.mockClear();
+    notifyMock.mockReset();
+    notifyMock.mockResolvedValue({ ok: true, shown: true });
   });
 
-  it("notifies newly ended sessions", async () => {
-    const runHeadline = { ...baseCard.headline, headline: "Run one" };
-    const previous = projection([card({ sessionId: "s1", lifecycle: "running", title: "Run one", headline: runHeadline })]);
-    const next = projection([card({ sessionId: "s1", lifecycle: "ended", title: "Run one", headline: runHeadline })]);
+  it("emits a typed desktop notification and records the transition-specific dedupe key", async () => {
+    const previous = projection([card({ sessionId: "s1", lifecycle: "running", title: "Run one", headline: cardHeadline("Run one") })]);
+    const next = projection([
+      card({
+        sessionId: "s1",
+        lifecycle: "ended",
+        outcomeLabel: "completed",
+        stateLabel: "Completed",
+        title: "Run one",
+        headline: cardHeadline("Run one")
+      })
+    ]);
     const notified = new Set<string>();
-    await emitSessionEndedNotifications(previous, next, { enabled: true, notifiedSessionIds: notified });
+
+    await emitSessionTransitionNotifications(previous, next, { enabled: true, notifiedTransitionKeys: notified });
+
     expect(notifyMock).toHaveBeenCalledTimes(1);
-    expect(notifyMock).toHaveBeenCalledWith({ title: "Run one", body: "Working" });
-    expect(notified.has("s1")).toBe(true);
+    expect(notifyMock).toHaveBeenCalledWith({
+      sessionId: "s1",
+      transition: "ended",
+      title: "Run one",
+      body: "Ended: Completed"
+    });
+    expect(notified.has("s1:ended")).toBe(true);
+    expect(notified.has("s1")).toBe(false);
   });
 
-  it("dedupes via notifiedSessionIds", async () => {
+  it("dedupes by session and transition instead of suppressing every later transition for the session", async () => {
+    const previous = projection([card({ sessionId: "s1", lifecycle: "running", stateLabel: "Working" })]);
+    const next = projection([card({ sessionId: "s1", lifecycle: "idle", stateLabel: "Idle" })]);
+    const notified = new Set<string>(["s1:ended"]);
+
+    await emitSessionTransitionNotifications(previous, next, { enabled: true, notifiedTransitionKeys: notified });
+
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notified.has("s1:idle")).toBe(true);
+  });
+
+  it("skips already recorded transition keys", async () => {
     const previous = projection([card({ sessionId: "s1", lifecycle: "running" })]);
-    const next = projection([card({ sessionId: "s1", lifecycle: "ended" })]);
-    const notified = new Set<string>(["s1"]);
-    await emitSessionEndedNotifications(previous, next, { enabled: true, notifiedSessionIds: notified });
+    const next = projection([card({ sessionId: "s1", lifecycle: "idle", stateLabel: "Idle" })]);
+    const notified = new Set<string>(["s1:idle"]);
+
+    await emitSessionTransitionNotifications(previous, next, { enabled: true, notifiedTransitionKeys: notified });
+
     expect(notifyMock).not.toHaveBeenCalled();
+    expect([...notified]).toEqual(["s1:idle"]);
   });
 
-  it("no-ops when enabled is false", async () => {
+  it("does not mutate dedupe state while the notification preference is off", async () => {
     const previous = projection([card({ sessionId: "s1", lifecycle: "running" })]);
     const next = projection([card({ sessionId: "s1", lifecycle: "ended" })]);
     const notified = new Set<string>();
-    await emitSessionEndedNotifications(previous, next, { enabled: false, notifiedSessionIds: notified });
+
+    await emitSessionTransitionNotifications(previous, next, { enabled: false, notifiedTransitionKeys: notified });
+
     expect(notifyMock).not.toHaveBeenCalled();
     expect(notified.size).toBe(0);
+  });
+
+  it("dedupes unsupported desktop results so browser-only environments do not retry every poll", async () => {
+    notifyMock.mockResolvedValueOnce({ ok: true, shown: false, reason: "unsupported" });
+    const previous = projection([card({ sessionId: "s1", lifecycle: "running" })]);
+    const next = projection([card({ sessionId: "s1", lifecycle: "idle", stateLabel: "Idle" })]);
+    const notified = new Set<string>();
+
+    await emitSessionTransitionNotifications(previous, next, { enabled: true, notifiedTransitionKeys: notified });
+    await emitSessionTransitionNotifications(previous, next, { enabled: true, notifiedTransitionKeys: notified });
+
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notified.has("s1:idle")).toBe(true);
   });
 });

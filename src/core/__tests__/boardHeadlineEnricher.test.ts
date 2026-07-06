@@ -119,6 +119,21 @@ function responseWithFrame(frame: BoardHeadlineFrame): Response {
   );
 }
 
+function responseWithChatFrame(frame: BoardHeadlineFrame): Response {
+  return new Response(
+    JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify(frame)
+          }
+        }
+      ]
+    }),
+    { status: 200 }
+  );
+}
+
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -184,6 +199,123 @@ describe("board headline enricher", () => {
       succeeded: 1,
       failed: 0,
       pending: 0
+    });
+  });
+
+  test("reports compatible provider identity in status, refresh state, and generation events", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+    const onFrameApplied = vi.fn();
+    const onGenerationFinished = vi.fn();
+    const now = vi.fn(() => new Date("2026-07-01T12:34:56.000Z"));
+    const config = {
+      enabled: true,
+      apiKey: "compatible-key",
+      apiKeyRequired: true,
+      apiStyle: "chat_completions" as const,
+      baseUrl: "http://127.0.0.1:11434/v1",
+      fetchImpl,
+      model: "llama-3.1",
+      now,
+      onFrameApplied,
+      onGenerationFinished,
+      provider: "openai_compatible"
+    };
+    const enricher = createBoardHeadlineEnricher(config);
+
+    expect(enricher.status()).toMatchObject({
+      configured: true,
+      enabled: true,
+      model: "llama-3.1",
+      provider: "openai_compatible"
+    });
+
+    const pending = await enricher.enrichProjection(projection([card()]));
+
+    expect(pending.cards[0]?.headlineRefresh).toMatchObject({
+      model: "llama-3.1",
+      provider: "openai_compatible",
+      status: "pending"
+    });
+    expect(pending.cards[0]?.headlineRefresh?.provider).not.toBe("openai");
+
+    const frame = validFrame({ subject: "Compatible headlines" });
+    response.resolve(responseWithChatFrame(frame));
+    await flushMicrotasks();
+
+    expect(onGenerationFinished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "llama-3.1",
+        provider: "openai_compatible",
+        sessionId: "session-1",
+        status: "success"
+      })
+    );
+    expect(onFrameApplied).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headline: expect.objectContaining({
+          model: "llama-3.1",
+          provider: "openai_compatible"
+        }),
+        model: "llama-3.1",
+        provider: "openai_compatible",
+        sessionId: "session-1"
+      })
+    );
+
+    const completed = await enricher.enrichProjection(projection([card()]));
+    expect(completed.cards[0]?.headline).toMatchObject({
+      headline: "Compatible headlines: structured around subject and disposition.",
+      model: "llama-3.1",
+      provider: "openai_compatible",
+      source: "llm",
+      status: "ready"
+    });
+    expect(completed.cards[0]?.headlineRefresh).toMatchObject({
+      model: "llama-3.1",
+      provider: "openai_compatible",
+      status: "success"
+    });
+  });
+
+  test("preserves card lifecycle and primary status while overlaying remote headline state", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+    const sourceCard = card({
+      lifecycle: "running",
+      primaryStatus: "waiting_for_user",
+      stateLabel: "Needs input",
+      headlineInput: input({
+        primaryStatus: "waiting_for_user",
+        stateHint: "waiting",
+        signals: ["user_reply_waiting"],
+        facts: {
+          ...input().facts,
+          primaryStatus: "waiting_for_user"
+        }
+      })
+    });
+
+    const pending = await enricher.enrichProjection(projection([sourceCard]));
+
+    expect(pending.cards[0]).toMatchObject({
+      lifecycle: "running",
+      primaryStatus: "waiting_for_user"
+    });
+
+    response.resolve(responseWithFrame(validFrame({ disposition: "claims active work from model output", state: "active" })));
+    await flushMicrotasks();
+    const completed = await enricher.enrichProjection(projection([sourceCard]));
+
+    expect(completed.cards[0]).toMatchObject({
+      lifecycle: "running",
+      primaryStatus: "waiting_for_user"
+    });
+    expect(completed.cards[0]?.headline).toMatchObject({
+      headline: "Board headlines: claims active work from model output.",
+      source: "llm",
+      status: "ready"
     });
   });
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { getDesktopBridge, invokeDesktopCommand, isDesktopBridgeAvailable } from "../desktopBridge";
+import { notifySessionTransitionDesktop } from "../desktopNotify";
 import { defaultLiveProjectionUrl } from "../liveProjectionClient";
 
 describe("desktop bridge", () => {
@@ -59,11 +60,38 @@ describe("desktop bridge", () => {
     expect(invoke).toHaveBeenNthCalledWith(3, "window_close_command", undefined);
   });
 
-  test("returns undefined in a plain browser", async () => {
+  test("prefers the typed session transition notification bridge when available", async () => {
+    const notifySessionTransition = vi.fn(async () => ({ ok: true, shown: true }) as const);
+    const invoke = vi.fn();
+    const input = { sessionId: "s1", transition: "idle" as const, title: "Session idle", body: "Idle" };
+    vi.stubGlobal("window", {
+      mastheadDesktop: { invoke, notifySessionTransition }
+    });
+
+    await expect(notifySessionTransitionDesktop(input)).resolves.toEqual({ ok: true, shown: true });
+    expect(notifySessionTransition).toHaveBeenCalledWith(input);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  test("falls back to the generic transition command during preload cutover", async () => {
+    const invoke = vi.fn(async <T>() => ({ ok: true, shown: false, reason: "unsupported" }) as T);
+    const input = { sessionId: "s1", transition: "blocked" as const, title: "Approval needed" };
+    vi.stubGlobal("window", {
+      mastheadDesktop: { invoke }
+    });
+
+    await expect(notifySessionTransitionDesktop(input)).resolves.toEqual({ ok: true, shown: false, reason: "unsupported" });
+    expect(invoke).toHaveBeenCalledWith("notify_session_transition_command", input);
+  });
+
+  test("returns bridge-unavailable notification results in a plain browser", async () => {
     vi.stubGlobal("window", {});
 
     expect(isDesktopBridgeAvailable()).toBe(false);
     expect(getDesktopBridge()).toBeUndefined();
     await expect(invokeDesktopCommand("start_live_connector_command")).resolves.toBeUndefined();
+    await expect(
+      notifySessionTransitionDesktop({ sessionId: "s1", transition: "ended", title: "Session ended" })
+    ).resolves.toEqual({ ok: true, shown: false, reason: "bridge_unavailable" });
   });
 });

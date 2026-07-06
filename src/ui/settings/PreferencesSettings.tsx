@@ -31,12 +31,12 @@ export function PreferencesSettings({
         }
       />
       <SettingsRow
-        label="Session ended notifications"
-        description="Desktop only. Notify when a live session moves to ended (Electron)."
+        label="Session transition notifications"
+        description="Desktop only. Notify when a live session becomes idle, blocked, or ended."
         control={
           <SettingsToggle
             checked={sessionEndedNotificationsEnabled}
-            label="Session ended notifications"
+            label="Session transition notifications"
             offLabel="Notifications off"
             onChange={(enabled) => onSessionEndedNotificationsEnabledChange?.(enabled)}
             onLabel="Notifications on"

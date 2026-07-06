@@ -12,7 +12,7 @@ export const ELECTRON_CHANNELS = {
   windowClose: "masthead:window:close",
   windowMaximize: "masthead:window:maximize",
   windowMinimize: "masthead:window:minimize",
-  notifySessionEnded: "masthead:notify:session-ended"
+  notifySessionTransition: "masthead:notify:session-transition"
 } as const;
 
 export const LEGACY_COMMAND_TO_CHANNEL: Record<string, ElectronChannel> = {
@@ -28,7 +28,7 @@ export const LEGACY_COMMAND_TO_CHANNEL: Record<string, ElectronChannel> = {
   window_close_command: ELECTRON_CHANNELS.windowClose,
   window_maximize_command: ELECTRON_CHANNELS.windowMaximize,
   window_minimize_command: ELECTRON_CHANNELS.windowMinimize,
-  notify_session_ended_command: ELECTRON_CHANNELS.notifySessionEnded
+  notify_session_transition_command: ELECTRON_CHANNELS.notifySessionTransition
 };
 
 export type ElectronChannel = (typeof ELECTRON_CHANNELS)[keyof typeof ELECTRON_CHANNELS];

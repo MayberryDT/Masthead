@@ -66,7 +66,37 @@ describe("ImportProgressPanel", () => {
     expect(html).toContain("session.jsonl");
   });
 
-  test("shows record progress bar and stale heartbeat warning", () => {
+
+  test("uses indeterminate progress when an active import only knows processed-so-far records", () => {
+    const html = renderToStaticMarkup(
+      <ImportProgressPanel
+        job={{
+          discoveredCount: 4,
+          failureCount: 0,
+          heartbeatAt: "2026-07-01T00:01:00.000Z",
+          importJobId: "job-indeterminate",
+          importKind: "metadata",
+          importedCount: 4,
+          processedCount: 4,
+          queuedCount: 0,
+          sourceId: "claude-code-sessions",
+          stage: "metadata",
+          startedAt: "2026-07-01T00:00:00.000Z",
+          status: "running",
+          updatedAt: "2026-07-01T00:01:00.000Z"
+        }}
+        nowMs={new Date("2026-07-01T00:01:00.000Z").getTime()}
+      />
+    );
+
+    expect(html).toContain("is-indeterminate");
+    expect(html).toContain("Discovering…");
+    expect(html).toContain("4 / ?");
+    expect(html).toContain("Elapsed");
+    expect(html).toContain("1 min");
+    expect(html).not.toContain("aria-valuenow");
+  });
+  test("shows determinate record progress with elapsed time and stale heartbeat warning", () => {
     const html = renderToStaticMarkup(
       <ImportProgressPanel
         job={{
@@ -79,6 +109,7 @@ describe("ImportProgressPanel", () => {
           processedCount: 5,
           queuedCount: 0,
           sourceId: "codex-sessions",
+          startedAt: "2026-07-01T00:00:00.000Z",
           status: "running",
           updatedAt: "2026-07-01T00:00:00.000Z"
         }}
@@ -87,7 +118,12 @@ describe("ImportProgressPanel", () => {
     );
 
     expect(html).toContain("import-progress-bar");
+    expect(html).toContain("aria-valuenow=\"5\"");
+    expect(html).toContain("aria-valuemin=\"0\"");
+    expect(html).toContain("aria-valuemax=\"10\"");
     expect(html).toContain("50%");
+    expect(html).toContain("Elapsed");
+    expect(html).toContain("2 min");
     expect(html).toContain("is-stale");
     expect(html).toContain("No import heartbeat");
     expect(html).toContain("stalled");

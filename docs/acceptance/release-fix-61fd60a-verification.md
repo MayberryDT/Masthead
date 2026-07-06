@@ -1,6 +1,6 @@
-# Feature verification — release fix `61fd60a`
+# Feature verification — release fix `61fd60a` plus post-audit repair
 
-Per-feature checks for **only** the changes in commit `61fd60a`. Not full-app or full `npm run verify`.
+Per-feature checks for the release-fix batch and the 2026-07-06 repair pass. Current evidence includes full `npm run verify` and Electron smoke.
 
 ## Contamination notice
 
@@ -67,25 +67,22 @@ All **authoritative** toggle/save behavior should be taken from **`src/daemon/__
 
 ---
 
-## 6. Session-ended notifications (issue 1)
+## 6. Session transition notifications (issue 1)
 
 | Layer | Result | Evidence |
 |--------|--------|----------|
-| Transition logic | **Pass** | `liveSessionEndedNotifications.test.ts`: detect ended, dedupe, `enabled: false` |
-| IPC allowlist | **Pass** | `ipcSecurity.test.ts`: `notifySessionEnded` channel |
-| Bridge | **Pass** | `desktopNotify` → `notify_session_ended_command` (no dedicated test for notify command in `desktopBridge.test.ts`) |
-| Preference UI | **Partial (browser)** | Settings shows “Session ended notifications” copy only—not OS notify |
-| **`smoke:electron` / OS notification** | **Not verified** | `masthead-electron-smoke.js` checks preload, chrome, security, hover perf—**does not** call `notifySessionEnded` or simulate ended-session transition. `liveSessionEndedNotifications.test.ts` mocks `desktopNotify` |
-
+| Transition logic | **Pass** | `liveSessionEndedNotifications.test.ts` plus `sessionTransitionNotificationsApp.test.tsx`: first projection is a baseline; running→idle notifies once; disabled preference suppresses notify |
+| IPC allowlist / preload | **Pass** | `ipcSecurity.test.ts`, `desktopBridge.test.ts`, and `smoke:electron`: typed notification bridge is exposed and raw IPC is not exposed |
+| Main-process notification helper | **Pass** | `notifications.test.ts`: supported notification constructs/shows; unsupported environments skip; invalid transition rejected |
+| Electron smoke | **Pass** | `npm run smoke:electron` passed on 2026-07-06 |
+| Native OS delivery | **Manual not observed** | Automated checks cover the Electron path; no manual desktop toast was observed in this pass |
 ---
 
-## Automated batch (this run)
+## Automated batch (2026-07-06)
 
-- **Vitest (feature-targeted):** 10 files, **101 passed** (settings, logbook, sources, notifications, ipc, session card, etc.)
-- **`npm run build`:** pass
-- **`npm run check:surface-contract`:** pass
-- **`npm run smoke:import`:** pass (isolated)
-- **`npm run test:electron`:** 50 passed, **1 failed** — `mcpStatusApi.test.ts` connection result (unrelated to this release batch)
+- `npm run verify`: pass; 220 test files, 1195 tests, build, endpoint matrix, and live/compatibility/import/MCP smokes.
+- `npm run smoke:electron`: pass; Electron 42.5.0, preload bridge, typed notification bridge, custom chrome, renderer privilege checks, and hover latency.
+- Focused checks run during repair: `sourcesPanel.test.tsx`, `worktreeConnector.test.ts`, `check:endpoint-matrix`, and `smoke:compatibility`.
 
 ---
 
@@ -93,11 +90,11 @@ All **authoritative** toggle/save behavior should be taken from **`src/daemon/__
 
 | Feature | Code + unit/smoke | Browser read-only | True E2E |
 |---------|-------------------|-------------------|----------|
-| Settings toggle/save | Yes (vitest) | Partial (copy only) | No (save latency, dossier) |
+| Settings toggle/save | Yes | Partial (copy only) | Automated save-path tests; no manual latency/dossier pass |
 | Headline cue | Yes | Yes | Yes (cue visible live) |
-| Import progress UI | Yes | Partial (section only) | **No** (live job + bar) |
-| Adapter modal | Yes | Partial | No (hook test click) |
-| Logbook bulk | Yes | Partial (checkboxes only) | No (rebuild + refresh) |
-| Notifications | Yes | Yes (preference) | **No** (Electron + ended session) |
+| Import progress UI | Yes | Partial (section only) | Automated import smoke; no manual live-job bar observation |
+| Adapter modal | Yes | Partial | No manual hook test click |
+| Logbook bulk | Yes | Partial (checkboxes only) | Automated scoped rebuild; no manual enrich→refresh pass |
+| Notifications | Yes | Yes (preference and Electron bridge) | Automated transition + Electron smoke; native toast not manually observed |
 
-**Verdict:** Implementation is **well covered by automated tests** for this batch. **End-to-end product verification is incomplete** for import progress during a job, bulk enrich side effects, Electron notifications, and full P0 dossier/save checks. Use isolated temp data / `dev:electron` for any follow-up write or notification tests—**not** the shared `masthead-dev` daemon without disclosure.
+Verdict: the previous failing release ladder is repaired. The remaining gaps are manual product-signoff items, not automated release-ladder failures. Use isolated temp data / `dev:electron` for future write or notification checks—not the shared `masthead-dev` daemon without disclosure.

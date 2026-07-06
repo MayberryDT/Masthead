@@ -30,8 +30,9 @@ export function projectLiveEvents(
 ): LiveProjectionEnvelope {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const selectedSessionId = options.selectedSessionId === null ? null : options.selectedSessionId ?? options.expandedSessionId;
+  const projectionEvents = events.map(parentScopedOmpChildEvent);
   const replay: FixtureReplay = {
-    events,
+    events: projectionEvents,
     gitSnapshots,
     expandedSessionId: options.expandedSessionId
   };
@@ -53,6 +54,27 @@ export function projectLiveEvents(
       now: new Date(generatedAt)
     })
   };
+}
+
+function parentScopedOmpChildEvent(event: NormalizedEvent): NormalizedEvent {
+  if (event.source.adapter !== "omp") return event;
+  const parentSourceSessionId = stringPayload(event, "parentSourceSessionId");
+  const childSessionId = stringPayload(event, "childSessionId");
+  if (!parentSourceSessionId || !childSessionId || event.sessionId === parentSourceSessionId) return event;
+  return {
+    ...event,
+    sessionId: parentSourceSessionId,
+    payload: {
+      ...event.payload,
+      sourceSessionId: parentSourceSessionId,
+      childSourceSessionId: event.sessionId
+    }
+  };
+}
+
+function stringPayload(event: NormalizedEvent, key: string): string | undefined {
+  const value = event.payload[key];
+  return typeof value === "string" ? value : undefined;
 }
 
 function normalizeLiveSessionEnrichments(

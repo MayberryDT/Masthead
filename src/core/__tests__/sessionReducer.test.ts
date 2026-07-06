@@ -237,4 +237,47 @@ describe("session reducer", () => {
       title: "Masthead session"
     });
   });
+
+  test.each([
+    {
+      name: "active",
+      payload: { status: "active", state: "running" },
+      expected: { lifecycle: "running", primaryStatus: "reading" }
+    },
+    {
+      name: "logged",
+      payload: { status: "logged", state: "logged" },
+      expected: { lifecycle: "idle", primaryStatus: "stalled" }
+    },
+    {
+      name: "idle",
+      payload: { status: "idle", state: "idle" },
+      expected: { lifecycle: "idle", primaryStatus: "stalled" }
+    }
+  ] as const)("maps OMP $name runtime state names to Board lifecycle semantics", (testCase) => {
+    const event: NormalizedEvent = {
+      ...baseEvent(`omp-${testCase.name}`, "session.started", {
+        ...testCase.payload,
+        harness: "Oh My Pi",
+        runtime: "omp",
+        sourceSessionId: `omp-${testCase.name}-session`
+      }),
+      eventId: `omp:${testCase.name}`,
+      sessionId: `omp-${testCase.name}-session`,
+      source: { adapter: "omp", surface: "plugin", sourceEventId: testCase.name },
+      evidence: [{ id: `omp:${testCase.name}`, kind: "event", observedAt: "2026-06-23T02:00:00.000Z", source: "omp.extension" }]
+    };
+
+    const sessions = deriveSessions([event], [], {
+      idleAfterMs: 15 * 60_000,
+      now: new Date("2026-06-23T02:00:30.000Z")
+    });
+
+    expect(sessions[0]).toMatchObject({
+      harness: "Oh My Pi",
+      runtime: "omp",
+      sourceSessionId: `omp-${testCase.name}-session`,
+      ...testCase.expected
+    });
+  });
 });

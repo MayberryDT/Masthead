@@ -179,7 +179,7 @@ describe("SourceAdapterDetailModal", () => {
         hooks={codexHookSettings()}
         onClose={noop}
         onExcludePath={noop}
-        onCodexHookAction={noop}
+        onRuntimeHookAction={noop}
       />
     );
 
@@ -239,6 +239,64 @@ describe("SourceAdapterDetailModal", () => {
 
     expect(onEnableTranscriptImport).toHaveBeenCalledWith("codex");
 
+    await act(async () => root.unmount());
+  });
+
+  test("invokes runtime hook and import-history callbacks for non-Codex adapters", async () => {
+    const onRuntimeHookAction = vi.fn();
+    const onOpenImportJobs = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourceAdapterDetailModal
+          adapter={{
+            checkedPaths: ["/home/tyler/.claude/projects"],
+            discoveredSessions: 9,
+            importedSessions: 3,
+            policies: {
+              metadataImport: true,
+              transcriptImport: false,
+              enrichment: false,
+              mcpAccess: false
+            },
+            runtime: "claude_code",
+            sourceLocations: [],
+            state: "connected"
+          } as AdapterStatus}
+          busy={false}
+          hooks={{
+            ...codexHookSettings(),
+            integrations: [
+              {
+                actionSurface: "sources",
+                captureMode: "live_hook",
+                configPath: "/home/tyler/.claude/hooks.json",
+                description: "Claude Code live hooks",
+                endpoint: "http://127.0.0.1:17373/ingest?runtime=claude_code",
+                label: "Claude Code",
+                runtime: "claude_code",
+                status: "installed",
+                supportsActions: true
+              }
+            ]
+          }}
+          onClose={noop}
+          onExcludePath={noop}
+          onOpenImportJobs={onOpenImportJobs}
+          onRuntimeHookAction={onRuntimeHookAction}
+        />
+      );
+    });
+
+    await act(async () => {
+      buttonByText(container, "Test live connectors").click();
+      buttonByText(container, "Open import jobs").click();
+    });
+
+    expect(onRuntimeHookAction).toHaveBeenCalledWith("claude_code", "test");
+    expect(onOpenImportJobs).toHaveBeenCalledWith("claude_code");
     await act(async () => root.unmount());
   });
 });

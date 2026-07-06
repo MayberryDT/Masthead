@@ -50,6 +50,39 @@ describe("dovetail card system", () => {
     expect(active.querySelector(":scope > .footer-line .timestamp")?.textContent).toBe("2m ago");
   });
 
+  test("idle SessionCard mockups never combine idle state with the action tier", () => {
+    const idleMockups = [
+      {
+        name: "plain idle",
+        card: elementFor(
+          <SessionCard session={sessionFixture({ lifecycle: "idle", primaryStatus: "stalled", stateLabel: "Idle" })} onToggle={() => undefined} />,
+          ".session-card"
+        )
+      },
+      {
+        name: "idle with stale attention",
+        card: elementFor(
+          <SessionCard
+            session={sessionFixture({
+              lifecycle: "idle",
+              primaryStatus: "stalled",
+              stateLabel: "Idle",
+              indicators: ["attention"]
+            })}
+            onToggle={() => undefined}
+          />,
+          ".session-card"
+        )
+      }
+    ];
+
+    for (const { name, card } of idleMockups) {
+      expect(card.classList.contains("is-idle"), `${name}: ${card.className}`).toBe(true);
+      expect(card.classList.contains("tier-quiet"), `${name}: ${card.className}`).toBe(true);
+      expect(card.classList.contains("tier-action"), `${name}: ${card.className}`).toBe(false);
+    }
+  });
+
   test("secondary app cards stay outside the session-card dovetail treatment", () => {
     const sidebarHtml = renderToStaticMarkup(<SidebarUsageStats stats={usageStatsFixture()} />);
     const usageHtml = renderToStaticMarkup(

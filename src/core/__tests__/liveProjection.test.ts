@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { normalizeCodexHookPayload } from "../codexAdapter";
+import { parseLiveHookPayload } from "../liveHookAdapter";
 import { projectLiveEvents } from "../liveProjection";
 
 describe("live projection", () => {
@@ -458,6 +459,101 @@ describe("live projection", () => {
     expect(envelope.projection.cards).toHaveLength(1);
     expect(envelope.projection.expandedSession?.sessionId).toBe("board-first-session");
     expect(envelope.projection.selectedSession).toBeUndefined();
+  });
+
+  test("groups OMP child agent events under their parent source session", () => {
+    const parent = parseLiveHookPayload(
+      JSON.stringify({
+        type: "session_start",
+        sessionId: "omp-parent-session",
+        timestamp: "2026-07-05T12:00:00.000Z",
+        cwd: "/workspace/masthead",
+        title: "Parent OMP session"
+      }),
+      { receivedAt: "2026-07-05T12:00:00.010Z", runtime: "omp" }
+    );
+    const child = parseLiveHookPayload(
+      JSON.stringify({
+        type: "agent_start",
+        sessionId: "omp-parent-session:advisor",
+        parentSourceSessionId: "omp-parent-session",
+        childSessionId: "advisor",
+        timestamp: "2026-07-05T12:00:10.000Z",
+        cwd: "/workspace/masthead",
+        title: "Advisor child session"
+      }),
+      { receivedAt: "2026-07-05T12:00:10.010Z", runtime: "omp" }
+    );
+
+    expect(parent.ok).toBe(true);
+    expect(child.ok).toBe(true);
+    if (!parent.ok || !child.ok) return;
+
+    const envelope = projectLiveEvents([parent.event, child.event], [], {
+      generatedAt: "2026-07-05T12:01:00.000Z"
+    });
+
+    expect(envelope.projection.cards).toHaveLength(1);
+    expect(envelope.projection.cards[0]).toMatchObject({
+      sessionId: "omp-parent-session",
+      runtime: "omp",
+      title: "Parent OMP session"
+    });
+  });
+
+  test.each([
+    {
+      sessionId: "omp-active-session",
+      status: "active",
+      state: "running",
+      expected: { lifecycle: "running", primaryStatus: "reading", stateLabel: "Running" },
+      expectedSummary: { running: 1, idle: 0 }
+    },
+    {
+      sessionId: "omp-logged-session",
+      status: "logged",
+      state: "logged",
+      expected: { lifecycle: "idle", primaryStatus: "stalled", stateLabel: "Idle" },
+      expectedSummary: { running: 0, idle: 1 }
+    },
+    {
+      sessionId: "omp-idle-session",
+      status: "idle",
+      state: "idle",
+      expected: { lifecycle: "idle", primaryStatus: "stalled", stateLabel: "Idle" },
+      expectedSummary: { running: 0, idle: 1 }
+    }
+  ] as const)("projects OMP $status state without LLM headline copy", (testCase) => {
+    const parsed = parseLiveHookPayload(
+      JSON.stringify({
+        type: "runtime_state",
+        sessionId: testCase.sessionId,
+        timestamp: "2026-07-05T12:00:00.000Z",
+        cwd: "/workspace/masthead",
+        title: `${testCase.status} OMP state`,
+        status: testCase.status,
+        state: testCase.state,
+        model: "openai-codex/gpt-5.5",
+        provider: "openai-codex"
+      }),
+      { receivedAt: "2026-07-05T12:00:00.100Z", runtime: "omp" }
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error(parsed.diagnostic.message);
+
+    const envelope = projectLiveEvents([parsed.event], [], {
+      generatedAt: "2026-07-05T12:00:30.000Z",
+      headlineMode: "offline"
+    });
+
+    expect(envelope.projection.cards[0]).toMatchObject({
+      harness: "Oh My Pi",
+      model: "openai-codex/gpt-5.5",
+      runtime: "omp",
+      ...testCase.expected,
+      headline: expect.objectContaining({ source: "offline", status: "ready" })
+    });
+    expect(envelope.projection.summary).toMatchObject(testCase.expectedSummary);
   });
 
   test("empty live state remains a valid local projection instead of falling back inside the server", () => {

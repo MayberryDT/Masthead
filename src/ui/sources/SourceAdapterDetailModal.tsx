@@ -18,6 +18,8 @@ import { SourceDiagnosticPanel } from "./SourceDiagnosticPanel";
 import { SourcePathTable } from "./SourcePathTable";
 import { SourcePolicyControls } from "./SourcePolicyControls";
 
+type HookAction = "install" | "test" | "uninstall";
+
 type Props = {
   adapter: AdapterStatus;
   busy: boolean;
@@ -31,12 +33,13 @@ type Props = {
   locationTotal?: number;
   settingsBaseUrl?: string;
   onClose: () => void;
-  onCodexHookAction?: (action: "install" | "test" | "uninstall") => Promise<void> | void;
+  onRuntimeHookAction?: (runtime: string, action: HookAction) => Promise<void> | void;
   onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
   onImportTranscripts?: (runtime: string) => void;
   onLoadMoreLocations?: () => void;
+  onOpenImportJobs?: (runtime: string) => void;
   onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
   onSyncAdapter?: (runtime: string) => void;
   onToggleSelected?: (runtime: string, checked: boolean) => void;
@@ -55,12 +58,13 @@ export function SourceAdapterDetailModal({
   locationTotal,
   settingsBaseUrl,
   onClose,
-  onCodexHookAction,
+  onRuntimeHookAction,
   onEnableTranscriptImport,
   onExcludePath,
   onImportMetadata,
   onImportTranscripts,
   onLoadMoreLocations,
+  onOpenImportJobs,
   onSaveLlmProvider,
   onSyncAdapter,
   onToggleSelected
@@ -244,7 +248,7 @@ export function SourceAdapterDetailModal({
               busy={busy || hookActionBusy}
               hooks={hooks}
               runtime={view.runtime}
-              onAction={onCodexHookAction}
+              onAction={onRuntimeHookAction}
             />
 
             {state !== "planned" ? (
@@ -259,6 +263,11 @@ export function SourceAdapterDetailModal({
                   </StatusBadge>
                 </div>
                 <p className="surface-status">Metadata import keeps Logbook searchable without bulk transcript ingestion.</p>
+                <div className="source-detail-action-buttons">
+                  <AppButton variant="quiet" disabled={busy || !onOpenImportJobs} onClick={() => onOpenImportJobs?.(view.runtime)}>
+                    Open import jobs
+                  </AppButton>
+                </div>
               </section>
             ) : null}
 

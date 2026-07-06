@@ -180,6 +180,83 @@ describe("SourcesPanel import controls", () => {
     await act(async () => root.unmount());
   });
 
+  test("renders active import progress in the production Sources panel", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[codexAdapter()]}
+          busy={false}
+          imports={[importJob({ progressCurrent: 2, progressTotal: 5, stage: "metadata", status: "running" })]}
+          onExcludePath={noop}
+          onRefresh={noop}
+          sources={[]}
+        />
+      );
+    });
+
+    const activeStrip = container.querySelector(".sources-active-imports");
+    expect(activeStrip).not.toBeNull();
+    expect(activeStrip?.textContent).toContain("metadata");
+    expect(activeStrip?.textContent).toContain("40%");
+    expect(activeStrip?.querySelector("[role='progressbar']")?.getAttribute("aria-valuenow")).toBe("2");
+    await act(async () => root.unmount());
+  });
+
+  test("keeps terminal import jobs out of the active progress strip", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[codexAdapter()]}
+          busy={false}
+          imports={[importJob({ processedCount: 10, queuedCount: 0, status: "succeeded" })]}
+          onExcludePath={noop}
+          onRefresh={noop}
+          sources={[]}
+        />
+      );
+    });
+
+    expect(container.querySelector(".sources-active-imports")).toBeNull();
+    expect(container.textContent).toContain("metadata");
+    await act(async () => root.unmount());
+  });
+
+  test("shows runtime import filter copy and clears back to unfiltered imports", async () => {
+    const onClearImportJobsFilter = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[codexAdapter()]}
+          busy={false}
+          importFilterRuntime="claude_code"
+          imports={[importJob({ sourceId: "claude-code-sessions", status: "succeeded" })]}
+          onClearImportJobsFilter={onClearImportJobsFilter}
+          onExcludePath={noop}
+          onRefresh={noop}
+          sources={[]}
+        />
+      );
+    });
+
+    expect(container.textContent).toContain("Import activity — Claude Code only");
+
+    await act(async () => {
+      buttonByText(container, "Clear import filter").click();
+    });
+
+    expect(onClearImportJobsFilter).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+  });
+
   test("view diagnostics reveals raw adapter errors outside the default inventory", async () => {
     const setup = connectedSetup();
     setup.advanced.adapters = [
@@ -690,7 +767,7 @@ describe("SourcesPanel import controls", () => {
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<SourcesPanel adapters={[]} busy={false} imports={[]} onExcludePath={noop} onRefresh={noop} setup={connectedSetup()} sources={[]} />);
+      root.render(<SourcesPanel adapters={[]} busy={false} imports={[importJob({ status: "succeeded" })]} onExcludePath={noop} onRefresh={noop} setup={connectedSetup()} sources={[]} />);
     });
 
     expect(container.textContent).toContain("Import activity");
@@ -703,11 +780,11 @@ describe("SourcesPanel import controls", () => {
 
   test("setup automatically installs required live capture and imports selected history", async () => {
     const onRunSetup = vi.fn(async () => ({ jobs: [], queued: 0, skipped: [] }));
-    const onCodexHookAction = vi.fn(async () => undefined);
+    const onRuntimeHookAction = vi.fn(async () => undefined);
     const container = document.createElement("div");
     const root = createRoot(container);
 
-    await renderOpenScannedOnboarding(root, container, { onCodexHookAction, onRunSetup });
+    await renderOpenScannedOnboarding(root, container, { onRuntimeHookAction, onRunSetup });
 
     await act(async () => {
       buttonByText(container, "Continue").click();
@@ -722,7 +799,7 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Start setup").click();
     });
 
-    expect(onCodexHookAction).toHaveBeenCalledWith("install");
+    expect(onRuntimeHookAction).toHaveBeenCalledWith("codex", "install");
     expect(onRunSetup).toHaveBeenCalledWith(expect.objectContaining({
       importMetadata: true,
       importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },

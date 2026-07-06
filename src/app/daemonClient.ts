@@ -83,6 +83,7 @@ export type ImportJob = {
   queuedCount: number;
   failureCount: number;
   updatedAt: string;
+  startedAt?: string;
   failureMessage?: string;
   currentPath?: string;
   processedCount?: number;
@@ -1127,6 +1128,20 @@ export async function getSettingsState(baseUrl = defaultLiveProjectionUrl(), opt
 }
 
 
+export type EnrichmentRebuildDepth = "summary" | "full";
+
+export type EnrichmentRebuildInput = {
+  scope?: "recent" | "all" | "sessionIds" | "session" | "project" | "runtime";
+  sessionId?: string;
+  sessionIds?: string[];
+  project?: string;
+  runtime?: string;
+  limit?: number;
+  dryRun?: boolean;
+  deterministicOnly?: boolean;
+  depth?: EnrichmentRebuildDepth;
+};
+
 export type EnrichmentRebuildResult = {
   dryRun?: boolean;
   mode?: "configured" | "deterministic";
@@ -1137,7 +1152,7 @@ export type EnrichmentRebuildResult = {
 };
 
 export async function rebuildEnrichments(
-  input: { scope?: string; sessionIds?: string[]; limit?: number; dryRun?: boolean; deterministicOnly?: boolean },
+  input: EnrichmentRebuildInput,
   baseUrl = defaultLiveProjectionUrl()
 ): Promise<EnrichmentRebuildResult> {
   const body = await postJson<{ ok: true } & EnrichmentRebuildResult>(baseUrl, "/enrichment/rebuild", {
@@ -1170,37 +1185,42 @@ export async function listLlmProviderModels(
   return body.models;
 }
 
-export async function getCodexHookSettings(
+export async function getRuntimeHookSettings(
+  runtime: string,
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
 ): Promise<CodexHookSettingsDto> {
   const url = new URL(baseUrl);
-  url.pathname = "/settings/hooks/codex";
+  url.pathname = `/settings/hooks/${encodeURIComponent(runtime)}`;
   url.search = "";
   const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
-  if (!response.ok) throw new Error(`Codex hook settings request failed: ${response.status}`);
+  if (!response.ok) throw new Error(`${runtime} hook settings request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; hooks: CodexHookSettingsDto };
   return body.hooks;
 }
 
-export async function installCodexHooks(baseUrl = defaultLiveProjectionUrl()): Promise<CodexHookSettingsDto> {
-  return postCodexHookAction(baseUrl, "/settings/hooks/codex/install");
+export async function installRuntimeHooks(runtime: string, baseUrl = defaultLiveProjectionUrl()): Promise<CodexHookSettingsDto> {
+  return postRuntimeHookAction(baseUrl, runtime, "install");
 }
 
-export async function uninstallCodexHooks(baseUrl = defaultLiveProjectionUrl()): Promise<CodexHookSettingsDto> {
-  return postCodexHookAction(baseUrl, "/settings/hooks/codex/uninstall");
+export async function uninstallRuntimeHooks(runtime: string, baseUrl = defaultLiveProjectionUrl()): Promise<CodexHookSettingsDto> {
+  return postRuntimeHookAction(baseUrl, runtime, "uninstall");
 }
 
-export async function testCodexHooks(baseUrl = defaultLiveProjectionUrl()): Promise<CodexHookSettingsDto> {
-  return postCodexHookAction(baseUrl, "/settings/hooks/codex/test");
+export async function testRuntimeHooks(runtime: string, baseUrl = defaultLiveProjectionUrl()): Promise<CodexHookSettingsDto> {
+  return postRuntimeHookAction(baseUrl, runtime, "test");
 }
 
-async function postCodexHookAction(baseUrl: string, pathname: string): Promise<CodexHookSettingsDto> {
+async function postRuntimeHookAction(
+  baseUrl: string,
+  runtime: string,
+  action: "install" | "test" | "uninstall"
+): Promise<CodexHookSettingsDto> {
   const url = new URL(baseUrl);
-  url.pathname = pathname;
+  url.pathname = `/settings/hooks/${encodeURIComponent(runtime)}/${action}`;
   url.search = "";
   const response = await fetch(url.toString(), { headers: { accept: "application/json" }, method: "POST" });
-  if (!response.ok) throw new Error(`Codex hook action failed: ${response.status}`);
+  if (!response.ok) throw new Error(`${runtime} hook ${action} failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; hooks: CodexHookSettingsDto };
   return body.hooks;
 }

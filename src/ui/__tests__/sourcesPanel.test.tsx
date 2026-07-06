@@ -204,16 +204,16 @@ describe("SourcesPanel", () => {
 
   test("shows import jobs by default instead of behind advanced diagnostics", () => {
     const setup = connectedSetup();
-    setup.advanced.imports = [
+    const imports = [
       {
         discoveredCount: 12,
         failureCount: 0,
         importJobId: "job-hermes",
         importedCount: 4,
-        importKind: "metadata",
+        importKind: "metadata" as const,
         queuedCount: 8,
         sourceId: "hermes-workspace",
-        status: "running",
+        status: "running" as const,
         updatedAt: "2026-06-27T12:00:00.000Z"
       }
     ];
@@ -222,6 +222,7 @@ describe("SourcesPanel", () => {
       <SourcesPanel
         adapters={[]}
         busy={false}
+        imports={imports}
         onExcludePath={() => undefined}
         onRefresh={() => undefined}
         setup={setup}
