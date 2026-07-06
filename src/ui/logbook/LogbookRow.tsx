@@ -1,4 +1,6 @@
 import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
+import { harnessForRuntime } from "../../adapters/harnessCatalog";
+import type { RuntimeKind } from "../../adapters/types";
 import { cleanSessionText, isUsefulSessionTitle, isWeakLiveSummary } from "../../shared/sessionTextQuality";
 import type { LogbookSession } from "../HistoryPanel";
 
@@ -184,7 +186,7 @@ function durationLabel(startedAt: string | undefined, endedAt: string | undefine
 
 function runtimeLabel(runtime: string | undefined): string {
   if (!runtime) return "Unknown";
-  return runtime === "codex" ? "Codex" : runtime;
+  return harnessForRuntime(runtime as RuntimeKind)?.label ?? runtime;
 }
 
 function statusLabel(value: string): string {

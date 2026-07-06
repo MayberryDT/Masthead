@@ -19,7 +19,7 @@ describe("background import jobs", () => {
     const db = await openTestDatabase();
     seedSource(db);
 
-    const job = queueImportJob(db, { importKind: "metadata", sourceId: "codex-sessions", now: fixedNow }, async () => {
+    const job = queueImportJob(db, { importKind: "metadata", sourceId: "opencode-sessions", now: fixedNow }, async () => {
       throw new Error("metadata file disappeared");
     });
 
@@ -55,7 +55,7 @@ function seedSource(db: MastheadDatabase): void {
     `INSERT INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex-sessions", "codex", "jsonl", "/tmp/.codex/sessions", "authoritative", now, now);
+  ).run("opencode-sessions", "opencode", "jsonl", "/tmp/.opencode/sessions", "authoritative", now, now);
 }
 
 function fixedNow(): string {

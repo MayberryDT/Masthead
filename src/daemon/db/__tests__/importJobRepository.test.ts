@@ -16,21 +16,21 @@ afterEach(async () => {
 describe("import job repository", () => {
   test("lists import jobs by bounded newest-first pages", async () => {
     const db = await openTestDatabase();
-    insertSource(db, "codex-sessions", "codex");
+    insertSource(db, "opencode-sessions", "opencode");
 
     const first = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:00:00.000Z"
     });
     const second = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:01:00.000Z"
     });
     const third = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:02:00.000Z"
     });
 
@@ -44,12 +44,12 @@ describe("import job repository", () => {
 
   test("filters import job pages by adapter, source, and active status", async () => {
     const db = await openTestDatabase();
-    insertSource(db, "codex-sessions", "codex");
+    insertSource(db, "opencode-sessions", "opencode");
     insertSource(db, "hermes-jsonl", "hermes");
 
     const codexRunning = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:00:00.000Z"
     });
     updateImportJob(db, codexRunning.importJobId, {
@@ -58,7 +58,7 @@ describe("import job repository", () => {
     });
     const codexDone = createImportJob(db, {
       importKind: "transcript",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:01:00.000Z"
     });
     updateImportJob(db, codexDone.importJobId, {
@@ -75,7 +75,7 @@ describe("import job repository", () => {
       updatedAt: "2026-06-25T12:02:30.000Z"
     });
 
-    const page = listImportJobPage(db, { adapterId: "codex", limit: 10, offset: 0, status: "active" });
+    const page = listImportJobPage(db, { adapterId: "opencode", limit: 10, offset: 0, status: "active" });
 
     expect(page.total).toBe(1);
     expect(page.jobs.map((job) => job.importJobId)).toEqual([codexRunning.importJobId]);

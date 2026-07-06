@@ -8,8 +8,8 @@ describe("SetupRunProgress", () => {
       <SetupRunProgress
         logs={[
           {
-            id: "live:codex:install",
-            label: "Install Codex live capture",
+            id: "live:opencode:install",
+            label: "Install OpenCode live capture",
             message: "Running...",
             status: "running",
             timestamp: "2026-07-05T01:53:59.571Z"
@@ -27,7 +27,7 @@ describe("SetupRunProgress", () => {
 
     expect(html).toContain("setup-run-spinner");
     expect(html.match(/setup-run-spinner/g)).toHaveLength(1);
-    expect(html).toContain("Install Codex live capture");
+    expect(html).toContain("Install OpenCode live capture");
     expect(html).toContain("Import selected metadata");
   });
 
@@ -37,8 +37,8 @@ describe("SetupRunProgress", () => {
         report={{ status: "needs_attention", steps: [] }}
         logs={[
           {
-            id: "live:codex:install",
-            label: "Install Codex live capture",
+            id: "live:opencode:install",
+            label: "Install OpenCode live capture",
             message: "Running...",
             status: "running",
             timestamp: "2026-07-05T01:53:59.571Z"
@@ -57,15 +57,15 @@ describe("SetupRunProgress", () => {
         report={{ status: "needs_attention", steps: [] }}
         logs={[
           {
-            id: "live:codex:install",
-            label: "Install Codex live capture",
+            id: "live:opencode:install",
+            label: "Install OpenCode live capture",
             message: "Running...",
             status: "running",
             timestamp: "2026-07-05T02:18:07.067Z"
           },
           {
-            id: "live:codex:install",
-            label: "Install Codex live capture",
+            id: "live:opencode:install",
+            label: "Install OpenCode live capture",
             message: "Complete.",
             status: "succeeded",
             timestamp: "2026-07-05T02:18:07.281Z"
@@ -95,7 +95,7 @@ describe("SetupRunProgress", () => {
       />
     );
 
-    expect(html.match(/Install Codex live capture/g)).toHaveLength(1);
+    expect(html.match(/Install OpenCode live capture/g)).toHaveLength(1);
     expect(html.match(/Import selected metadata/g)).toHaveLength(1);
     expect(html).not.toContain("Running...");
     expect(html).toContain("Cursor live capture");

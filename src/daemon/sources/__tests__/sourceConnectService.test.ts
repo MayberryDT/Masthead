@@ -20,7 +20,7 @@ describe("source connect service", () => {
   test("queues one parent metadata job per selected runtime and skips selected runtimes without sources", async () => {
     const { db } = await openSourceConnectTestDatabase("masthead-source-connect-");
     const scan = scanResult([
-      adapterResult("codex", [source("codex", "codex-session-index"), source("codex", "codex-history")]),
+      adapterResult("opencode", [source("opencode", "opencode-session-a"), source("opencode", "opencode-session-b")]),
       adapterResult("cursor", [source("cursor", "cursor-state")]),
       adapterResult("hermes", [])
     ]);
@@ -34,7 +34,7 @@ describe("source connect service", () => {
         importMetadata: true,
         importTranscripts: false,
         queueEnrichment: false,
-        runtimes: ["codex", "hermes"]
+        runtimes: ["opencode", "hermes"]
       },
       async (kind, runtime) => {
         requestedJobs.push({ kind, runtime });
@@ -43,43 +43,18 @@ describe("source connect service", () => {
     );
 
     expect(result.jobs.map((job) => [job.importKind, job.sourceId])).toEqual([
-      ["metadata", "codex-session-index"]
+      ["metadata", "opencode-session-a"]
     ]);
     expect(result.skipped).toEqual([{ runtime: "hermes", reason: "No recognized local history was detected for this coding harness." }]);
     expect(listImportJobs(db).map((job) => [job.importKind, job.sourceId, job.status])).toEqual(
-      expect.arrayContaining([["metadata", "codex-session-index", "queued"]])
+      expect.arrayContaining([["metadata", "opencode-session-a", "queued"]])
     );
 
     await new Promise((resolve) => setImmediate(resolve));
-    expect(requestedJobs).toEqual([{ kind: "metadata", runtime: "codex" }]);
+    expect(requestedJobs).toEqual([{ kind: "metadata", runtime: "opencode" }]);
     db.close();
   });
 
-  test("skips detector-only runtimes even when sources were detected", async () => {
-    const { db } = await openSourceConnectTestDatabase("masthead-source-connect-detector-");
-    const scan = scanResult([
-      adapterResult("cline", [source("cline", "cline:detector:local")])
-    ]);
-    seedSources(db, scan.adapters.flatMap((adapter) => adapter.sources));
-
-    const result = connectSelectedSources(
-      db,
-      scan,
-      {
-        importMetadata: true,
-        importTranscripts: true,
-        queueEnrichment: false,
-        runtimes: ["cline"],
-        transcriptApproved: true
-      },
-      async () => ({ discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 })
-    );
-
-    expect(result.jobs).toEqual([]);
-    expect(result.skipped).toEqual([{ runtime: "cline", reason: "Masthead can detect this harness, but import is not supported yet." }]);
-    expect(listImportJobs(db)).toEqual([]);
-    db.close();
-  });
 });
 
 async function openSourceConnectTestDatabase(prefix: string): Promise<{ db: MastheadDatabase }> {

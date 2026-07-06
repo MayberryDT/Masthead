@@ -33,7 +33,7 @@ export type AdapterIngestionResult = {
   created?: boolean;
 };
 
-type SessionRepository = {
+export type SessionRepository = {
   replaceBoardProjection(projection: LiveBoardProjection, updatedAt: string): void;
   upsertLiveEvent(event: NormalizedEvent): string | undefined;
   upsertMetadataRecord(record: AdapterRecord): string | undefined;

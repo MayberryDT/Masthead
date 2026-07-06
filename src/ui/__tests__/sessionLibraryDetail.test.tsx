@@ -108,12 +108,12 @@ function session(): LogbookSessionDetail {
     outcome: "OAuth route still fails in one edge case.",
     project: "Masthead",
     repoRoot: "/home/tyler/Documents/Masthead",
-    runtime: "codex",
+    runtime: "opencode",
     sessionId: "session-1",
     sourceConfidence: "authoritative",
     sourceProvenance: {
       hostId: "host:test",
-      runtime: "codex",
+      runtime: "opencode",
       sourceConfidence: "authoritative",
       sourceSessionId: "source-session-1"
     },
@@ -181,7 +181,7 @@ function dossier(): SessionDossierDto {
       model: "gpt-5",
       models: ["gpt-5"],
       project: "Masthead",
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "session-1",
       sourceConfidence: "authoritative",
       sourceSessionId: "source-session-1",
@@ -205,7 +205,7 @@ function dossier(): SessionDossierDto {
       copyableContext: "# Masthead Session Context",
       mcpIncluded: true,
       sourceConfidence: "authoritative",
-      sourceRuntime: "codex",
+      sourceRuntime: "opencode",
       sourceSessionId: "source-session-1"
     },
     timeline: [],

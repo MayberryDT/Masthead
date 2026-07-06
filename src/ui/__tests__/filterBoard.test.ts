@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { filterAttentionItemsForCards, filterCards, mainScanCards, summarizeMainScanCards } from "../filterBoard";
+import { HARNESS_OPTIONS } from "../toolbarOptions";
 import type { AttentionItem, SessionCardView } from "../../core/types";
 
 const baseCard: SessionCardView = {
@@ -178,17 +179,30 @@ describe("board card filtering", () => {
     });
   });
 
-  test("filters cards by harness dropdown without inventing non-Codex harnesses", () => {
+  test("filters cards only by valid supported harness options and does not infer missing harnesses", () => {
+    expect(HARNESS_OPTIONS.map((option) => option.value)).toEqual([
+      "all",
+      "cursor",
+      "claude_code",
+      "opencode",
+      "grok",
+      "hermes",
+      "pi",
+      "omp"
+    ]);
+    expect(HARNESS_OPTIONS.some((option) => String(option.value) === "legacy_harness")).toBe(false);
+
     const cards = [
-      { ...baseCard, sessionId: "codex", harness: "Codex" },
-      { ...baseCard, sessionId: "missing-harness", harness: undefined }
+      { ...baseCard, sessionId: "by-runtime", runtime: "opencode", harness: undefined },
+      { ...baseCard, sessionId: "by-label", runtime: undefined, harness: "OpenCode" },
+      { ...baseCard, sessionId: "missing-harness", runtime: undefined, harness: undefined }
     ] satisfies SessionCardView[];
 
     expect(
-      filterCards(cards, { query: "", filter: "all", harness: "codex", lifecycle: "all", sort: "recent_activity" }).map(
+      filterCards(cards, { query: "", filter: "all", harness: "opencode", lifecycle: "all", sort: "recent_activity" }).map(
         (card) => card.sessionId
       )
-    ).toEqual(["codex", "missing-harness"]);
+    ).toEqual(["by-label", "by-runtime"]);
   });
 
   test("sorts cards by recently started when selected", () => {

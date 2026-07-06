@@ -94,7 +94,7 @@ function eventRecord(id: string, observedAt: string): StoreRecord {
       eventId: id,
       sessionId: "session-1",
       source: {
-        adapter: "codex",
+        adapter: "claude_code",
         surface: "hook",
         sourceEventId: id
       },

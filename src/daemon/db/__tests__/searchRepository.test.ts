@@ -23,7 +23,7 @@ describe("logbook FTS search", () => {
     migrateDatabase(db);
 
     indexSessionSearch(db, {
-      capsule: "Import Codex history into canonical SQLite",
+      capsule: "Import OpenCode history into canonical SQLite",
       commands: "npm test",
       filePaths: "src/daemon/main.ts",
       finalResponse: "Plan saved",
@@ -31,7 +31,7 @@ describe("logbook FTS search", () => {
       normalizedText: "daemon logbook mcp",
       projectAliases: "Masthead",
       sessionId: "session-1",
-      tags: "codex sqlite",
+      tags: "opencode sqlite",
       title: "Masthead data layer",
       toolNames: "exec_command"
     });
@@ -51,7 +51,7 @@ describe("logbook FTS search", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex"
+      runtimeKind: "opencode"
     });
     repository.upsertLiveEvent(liveEvent("blank", { project: "Masthead", title: "Blank query session" }));
 
@@ -70,7 +70,7 @@ describe("logbook FTS search", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex"
+      runtimeKind: "opencode"
     });
     const sessionId = repository.upsertLiveEvent(
       liveEvent("canonical", {
@@ -98,10 +98,10 @@ describe("logbook FTS search", () => {
 function liveEvent(eventId: string, payload: Record<string, unknown> = {}): NormalizedEvent {
   return {
     schemaVersion: 1,
-    eventId: `codex:${eventId}`,
+    eventId: `opencode:${eventId}`,
     sessionId: `session-${eventId}`,
     source: {
-      adapter: "codex",
+      adapter: "opencode",
       surface: "hook",
       sourceEventId: eventId
     },
@@ -118,6 +118,6 @@ function liveEvent(eventId: string, payload: Record<string, unknown> = {}): Norm
     payload,
     sensitivity: "metadata",
     payloadHash: `hash-${eventId}`,
-    evidence: [{ id: `codex:${eventId}`, kind: "event", observedAt: "2026-06-24T15:00:00.000Z", source: "codex.hook" }]
+    evidence: [{ id: `opencode:${eventId}`, kind: "event", observedAt: "2026-06-24T15:00:00.000Z", source: "opencode.plugin" }]
   };
 }

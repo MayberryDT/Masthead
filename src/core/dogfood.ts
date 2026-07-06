@@ -679,7 +679,7 @@ function dogfoodEvent(
     schemaVersion: 1,
     eventId,
     sessionId,
-    source: { adapter: "codex", surface: "fixture", sourceEventId: eventId },
+    source: { adapter: "opencode", surface: "fixture", sourceEventId: eventId },
     occurredAt,
     receivedAt: occurredAt,
     type,

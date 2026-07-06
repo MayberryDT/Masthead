@@ -21,7 +21,7 @@ describe("observability demo telemetry", () => {
 
     expect(telemetry.model.source).toBe("demo");
     expect(telemetry.harness.source).toBe("demo");
-    expect(["Codex", "Claude Code", "OpenClaw", "Hermes"]).toContain(telemetry.harness.value);
+    expect(["OpenCode", "Claude Code", "Cursor", "Hermes"]).toContain(telemetry.harness.value);
     expect(telemetry.host.source).toBe("demo");
     expect(telemetry.commands.source).toBe("demo");
     expect(telemetry.filesChanged.source).toBe("demo");

@@ -25,7 +25,7 @@ type ConfigKind = "json" | "codex" | "stdio";
 
 const configTabs: Array<{ kind: ConfigKind; label: string; description: string }> = [
   { kind: "json", label: "MCP JSON", description: "Works for Claude Code, Cursor, and most MCP clients." },
-  { kind: "codex", label: "Codex TOML", description: "Use when a client expects TOML server entries." },
+  { kind: "codex", label: "MCP TOML", description: "Use when a client expects TOML server entries." },
   { kind: "stdio", label: "stdio", description: "Raw command, args, and environment for custom launchers." }
 ];
 

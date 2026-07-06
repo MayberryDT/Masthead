@@ -151,7 +151,7 @@ export function buildBoardHeadlineFacts(input: {
 
 export function isLowValueBoardHeadlineText(value: string): boolean {
   const normalized = value.trim();
-  return /^(codex hook event|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(normalized);
+  return /^(live hook event|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(normalized);
 }
 
 function eventSummary(event: NormalizedEvent): { type: string; summary: string; occurredAt: string } | undefined {
@@ -343,7 +343,7 @@ function hasMeaningfulCanonicalEnrichment(enrichment: BoardCanonicalEnrichmentFa
 
 function isWeakCanonicalEnrichmentText(value: string): boolean {
   const normalized = value.replace(/[.!?]+$/g, "").trim();
-  if (/^codex hook event\b/i.test(normalized)) return true;
+  if (/^live hook event\b/i.test(normalized)) return true;
   if (/^updated\b/i.test(normalized)) return true;
   if (/\b(?:ready for review|needs review|need review|work is focused on)\b/i.test(normalized)) return true;
   if (/\bhas recent (?:[\w .-]+\s+)?activity\b/i.test(normalized)) return true;

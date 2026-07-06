@@ -10,8 +10,8 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { force: true, recursive: true })));
 });
 
-describe("doctor hook transcript capture", () => {
-  test("finds distinct stuck transcript paths behind noisy duplicate hook rows", async () => {
+describe("legacy Codex doctor hook transcript capture", () => {
+  test("finds distinct stuck legacy transcript paths behind noisy duplicate hook rows", async () => {
     // @ts-expect-error The doctor helper is a Node.js script module covered through this Vitest regression.
     const { findHookTranscriptStuckSessions } = await import("../../../scripts/masthead-doctor-hook-capture.js");
     const db = await openTestDatabase();

@@ -195,7 +195,7 @@ function session(sessionId: string, title: string): LogbookSession {
     lifecycle: "ended",
     models: ["gpt-5"],
     project: "Masthead",
-    runtime: "codex",
+    runtime: "opencode",
     sessionId,
     sourceConfidence: "authoritative",
     sourceSessionId: `source:${sessionId}`,

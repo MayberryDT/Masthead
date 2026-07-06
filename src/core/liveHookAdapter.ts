@@ -58,7 +58,17 @@ export type LiveHookNormalizeOptions = {
 
 export function parseLiveHookPayload(raw: string, options: LiveHookNormalizeOptions = {}): LiveHookParseResult {
   const receivedAt = options.receivedAt ?? new Date().toISOString();
-  const runtime = options.runtime ?? "codex";
+  const runtime = options.runtime;
+  if (!runtime) {
+    return {
+      ok: false,
+      diagnostic: {
+        code: "unsupported_runtime",
+        message: "Live hook runtime is required.",
+        receivedAt
+      }
+    };
+  }
   if (Buffer.byteLength(raw, "utf8") > MAX_LIVE_HOOK_BYTES) {
     return {
       ok: false,
@@ -92,10 +102,7 @@ export function parseLiveHookPayload(raw: string, options: LiveHookNormalizeOpti
         ok: false,
         diagnostic: {
           code: "malformed_json",
-          message:
-            runtime === "codex"
-              ? "Unable to parse Codex hook payload as JSON."
-              : `${diagnosticRuntimeLabel(runtime)} hook payload could not be parsed as JSON.`,
+          message: `${diagnosticRuntimeLabel(runtime)} hook payload could not be parsed as JSON.`,
           receivedAt,
           details: error.message
         }
@@ -105,10 +112,7 @@ export function parseLiveHookPayload(raw: string, options: LiveHookNormalizeOpti
       ok: false,
       diagnostic: {
         code: "invalid_payload",
-        message:
-          runtime === "codex"
-            ? "Codex hook payload must be a JSON object."
-            : `${diagnosticRuntimeLabel(runtime)} hook payload must be a JSON object.`,
+        message: `${diagnosticRuntimeLabel(runtime)} hook payload must be a JSON object.`,
         receivedAt,
         details: error instanceof Error ? error.message : String(error)
       }
@@ -189,8 +193,9 @@ function fallbackSourceEventId(
 }
 
 function profileForRuntime(value: string | undefined): LiveRuntimeProfile {
-  const runtime = (value ?? "codex") as RuntimeKind;
-  if (!RUNTIME_KINDS.includes(runtime)) throw new UnsupportedRuntimeError(value ?? "codex");
+  if (!value) throw new UnsupportedRuntimeError("required");
+  const runtime = value as RuntimeKind;
+  if (!RUNTIME_KINDS.includes(runtime)) throw new UnsupportedRuntimeError(value);
   const profile = LIVE_RUNTIME_PROFILES[runtime];
   if (!profile) throw new UnsupportedRuntimeError(runtime);
   return profile;
@@ -315,6 +320,7 @@ function buildPayload(
   profile: LiveRuntimeProfile,
   sourceSessionId: string | undefined
 ): Record<string, unknown> {
+  const eventNameKeys = new Set(profile.eventNameKeys.filter((key) => !(profile.runtimeStateKeys ?? []).includes(key)));
   const excluded = new Set([
     "provider_event_id",
     "providerEventId",
@@ -323,7 +329,7 @@ function buildPayload(
     "hook_event_id",
     "hookEventId",
     "id",
-    ...profile.eventNameKeys,
+    ...eventNameKeys,
     ...profile.timestampKeys,
     ...profile.sessionIdKeys,
     "cwd",
@@ -350,6 +356,9 @@ function buildPayload(
     payload.harness = profile.label;
     payload.sourceSessionId = sourceSessionId;
   }
+  const runtimeLifecycleState = runtimeLifecycleStateFrom(input, profile);
+  if (runtimeLifecycleState) payload.runtimeLifecycleState = runtimeLifecycleState;
+
 
   for (const [key, value] of Object.entries(input)) {
     if (excluded.has(key) || value === undefined) continue;
@@ -369,7 +378,7 @@ function buildPayload(
       addToolInputMetadata(payload, value);
       continue;
     }
-    if (normalizedKey === "message" && (isRecord(value) || profile.runtime !== "codex")) {
+    if (normalizedKey === "message") {
       payload.messageSummary = summarizeSuppressedValue(value);
       continue;
     }
@@ -387,6 +396,28 @@ function buildPayload(
   return payload;
 }
 
+function runtimeLifecycleStateFrom(
+  input: Record<string, unknown>,
+  profile: LiveRuntimeProfile
+): "running" | "idle" | "blocked" | "ended" | undefined {
+  if (!profile.runtimeStateKeys || !profile.runtimeStateMap) return undefined;
+  for (const key of profile.runtimeStateKeys) {
+    const normalized = normalizeRuntimeStateKey(firstString(input, [key]));
+    const mapped = normalized ? profile.runtimeStateMap[normalized] : undefined;
+    if (mapped) return mapped;
+  }
+  return undefined;
+}
+
+function normalizeRuntimeStateKey(value: string | undefined): string | undefined {
+  return value
+    ?.trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 function summaryFrom(
   input: Record<string, unknown>,
   payload: Record<string, unknown>,
@@ -395,7 +426,7 @@ function summaryFrom(
   return (
     firstString(input, ["summary", "title", "objective"]) ??
     firstString(payload, ["summary", "title", "objective", "command", "normalizedCommand"]) ??
-    (profile.runtime === "codex" ? "Codex hook event" : `${profile.label} ${profile.surface} event`)
+    `${profile.label} ${profile.surface} event`
   );
 }
 
@@ -411,7 +442,7 @@ function rawPayloadSuppressed(input: Record<string, unknown>, profile: LiveRunti
     Object.keys(input).some((key) => SUPPRESSED_RAW_PAYLOAD_KEYS.has(toCamelCase(key))) ||
     hasPatchCommand(input.toolInput) ||
     isRecord(input.message) ||
-    (profile.runtime !== "codex" && typeof input.message === "string")
+    typeof input.message === "string"
   );
 }
 

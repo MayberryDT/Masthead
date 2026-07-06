@@ -19,17 +19,17 @@ describe("runtime policy repository", () => {
     const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
     migrateDatabase(db);
 
-    expect(getRuntimePolicy(db, "codex", "transcript_import")).toBe(false);
+    expect(getRuntimePolicy(db, "opencode", "transcript_import")).toBe(false);
 
     setRuntimePolicy(db, {
       decidedAt: "2026-07-01T00:00:00.000Z",
       enabled: true,
       policyKind: "transcript_import",
       reason: "Approved from Sources import modal.",
-      runtime: "codex"
+      runtime: "opencode"
     });
 
-    expect(getRuntimePolicy(db, "codex", "transcript_import")).toBe(true);
+    expect(getRuntimePolicy(db, "opencode", "transcript_import")).toBe(true);
     expect(getRuntimePolicy(db, "cursor", "transcript_import")).toBe(false);
     db.close();
   });

@@ -12,36 +12,24 @@ import {
   scanTargetHarnesses
 } from "../harnessCatalog.ts";
 
+const SUPPORTED_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const;
+
 describe("harness catalog", () => {
-  test("includes the required onboarding harnesses", () => {
-    const runtimes = onboardingHarnesses().map((entry) => entry.runtime);
-    expect(runtimes).toEqual(
-      expect.arrayContaining([
-        "codex",
-        "cursor",
-        "claude_code",
-        "opencode",
-        "aider",
-        "openclaw",
-        "hermes",
-        "pi",
-        "omp",
-        "cline",
-        "roo_code",
-        "kilo_code",
-        "continue_dev",
-        "openhands",
-        "github_copilot",
-        "windsurf",
-        "zed_ai",
-        "amazon_q",
-        "sourcegraph_amp",
-        "jetbrains_ai",
-        "qodo",
-        "tabnine",
-        "ibm_bob"
-      ])
-    );
+  test("onboards exactly the focused supported runtimes in catalog order", () => {
+    expect(onboardingHarnesses().map((entry) => entry.runtime)).toEqual(SUPPORTED_RUNTIMES);
+    expect(advancedHarnesses().map((entry) => entry.runtime)).toEqual(SUPPORTED_RUNTIMES);
+  });
+
+  test("represents Grok as an importable local hook and transcript source", () => {
+    const grok = harnessForRuntime("grok");
+
+    expect(grok?.label).toBe("Grok Build");
+    expect(grok?.supportLevel).toBe("active_transcript");
+    expect(grok?.runtimeStatus).toBe("import_adapter");
+    expect(grok?.sourceKinds).toEqual(["hook", "jsonl"]);
+    expect(grok?.knownCandidatePaths).toEqual(["~/.grok/hooks", "~/.grok/sessions"]);
+    expect(canScanHarness(grok!)).toBe(true);
+    expect(canImportHarness(grok!)).toBe(true);
   });
 
   test("represents OMP as an importable local session source", () => {
@@ -55,28 +43,11 @@ describe("harness catalog", () => {
     expect(omp?.knownCandidatePaths).toEqual(expect.arrayContaining(["~/.omp/agent/sessions", "~/.oh-my-pi/agent/sessions"]));
   });
 
-  test("separates import adapters from detector scan targets", () => {
-    expect(activeImportRuntimes()).toEqual(["codex", "cursor", "claude_code", "opencode", "aider", "openclaw", "hermes", "pi", "omp"]);
-    expect(importAdapterHarnesses().map((entry) => entry.runtime)).toEqual(activeImportRuntimes());
-    expect(scanTargetHarnesses().map((entry) => entry.runtime)).toEqual(
-      expect.arrayContaining(["codex", "cursor", "omp", "cline", "roo_code", "continue_dev", "crush"])
-    );
-    expect(scanTargetHarnesses().map((entry) => entry.runtime)).not.toContain("antigravity");
-    expect(scanTargetHarnesses().map((entry) => entry.runtime)).not.toEqual(activeImportRuntimes());
+  test("uses the focused runtime set for imports, scans, and setup lists", () => {
+    expect(activeImportRuntimes()).toEqual(SUPPORTED_RUNTIMES);
+    expect(importAdapterHarnesses().map((entry) => entry.runtime)).toEqual(SUPPORTED_RUNTIMES);
+    expect(scanTargetHarnesses().map((entry) => entry.runtime)).toEqual(SUPPORTED_RUNTIMES);
     expect(catalogOnlyHarnesses()).toEqual([]);
-  });
-
-  test("keeps cloud-first tools out of onboarding scans", () => {
-    const onboardingRuntimes = onboardingHarnesses().map((entry) => entry.runtime);
-    expect(onboardingRuntimes).not.toContain("devin");
-    expect(onboardingRuntimes).not.toContain("jules");
-    expect(cloudReferenceHarnesses().map((entry) => entry.runtime)).toEqual(expect.arrayContaining(["devin", "jules"]));
-    expect(cloudReferenceHarnesses().every((entry) => entry.runtimeStatus === "cloud_reference")).toBe(true);
-  });
-
-  test("keeps legacy Gemini CLI hidden from default onboarding", () => {
-    expect(onboardingHarnesses().map((entry) => entry.runtime)).not.toContain("gemini_cli");
-    expect(advancedHarnesses().map((entry) => entry.runtime)).not.toContain("gemini_cli");
-    expect(harnessForRuntime("gemini_cli")?.supportLevel).toBe("legacy");
+    expect(cloudReferenceHarnesses()).toEqual([]);
   });
 });

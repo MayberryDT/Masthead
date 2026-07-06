@@ -4,15 +4,16 @@ import { parseLiveHookPayload } from "../liveHookAdapter.ts";
 import { projectLiveEvents } from "../liveProjection.ts";
 import type { LiveBoardProjection, NormalizedEvent } from "../types.ts";
 
-const RELEASE_LIVE_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "omp", "opencode"] as const satisfies readonly RuntimeKind[];
+const RELEASE_LIVE_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const satisfies readonly RuntimeKind[];
 
 const RUNTIME_LABELS: Record<(typeof RELEASE_LIVE_RUNTIMES)[number], string> = {
   claude_code: "Claude Code",
-  codex: "Codex",
   cursor: "Cursor",
   grok: "Grok Build",
+  hermes: "Hermes",
   omp: "Oh My Pi",
-  opencode: "OpenCode"
+  opencode: "OpenCode",
+  pi: "Pi"
 };
 
 describe("release live runtime states", () => {
@@ -96,25 +97,27 @@ function payloadFor(runtime: (typeof RELEASE_LIVE_RUNTIMES)[number], state: "act
   const base = {
     branch: `agent/${runtime}`,
     model: "gpt-5-live",
-    status: state === "blocked" ? "blocked" : "active",
+    status: state === "idle" ? "idle" : state === "blocked" ? "blocked" : "active",
     summary: `${RUNTIME_LABELS[runtime]} ${state} state`,
     timestamp: occurredAt,
     totalTokens: 1200
   };
   const sessionId = `${runtime}-${state}-session`;
   switch (runtime) {
-    case "codex":
-      return { ...base, cwd: `/workspace/${runtime}`, event: state === "blocked" ? "blocked" : "session_started", session_id: sessionId };
     case "claude_code":
       return { ...base, cwd: `/workspace/${runtime}`, hookEventName: state === "blocked" ? "Blocked" : "SessionStart", sessionId };
     case "cursor":
       return { ...base, cwd: `/workspace/${runtime}`, hookEventName: state === "blocked" ? "Blocked" : "SessionStart", sessionId };
     case "grok":
       return { ...base, cwd: `/workspace/${runtime}`, hookEventName: state === "blocked" ? "Blocked" : "SessionStart", sessionId };
+    case "hermes":
+      return { ...base, directory: `/workspace/${runtime}`, sessionId, type: state === "blocked" ? "approval.requested" : "session.start" };
     case "omp":
       return { ...base, cwd: `/workspace/${runtime}`, sessionId, type: state === "blocked" ? "blocked" : "session_start" };
     case "opencode":
       return { ...base, directory: `/workspace/${runtime}`, sessionID: sessionId, type: state === "blocked" ? "blocked" : "session.created" };
+    case "pi":
+      return { ...base, cwd: `/workspace/${runtime}`, sessionId, type: state === "blocked" ? "approval.requested" : "session.start" };
   }
 }
 

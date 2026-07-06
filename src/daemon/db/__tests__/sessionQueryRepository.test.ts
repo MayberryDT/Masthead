@@ -41,7 +41,7 @@ describe("session query repository", () => {
         lifecycle: "ended",
         models: ["gpt-5"],
         project: "Pip",
-        runtime: "codex",
+        runtime: "opencode",
         sessionId: "session-1",
         sourceConfidence: "authoritative",
         sourceSessionId: "source-session-1",
@@ -57,7 +57,7 @@ describe("session query repository", () => {
         fileCount: 1,
         models: ["gpt-5"],
         project: "Pip",
-        runtime: "codex",
+        runtime: "opencode",
         sessionId: "session-1",
         sourceProvenance: expect.objectContaining({ sourceSessionId: "source-session-1" }),
         toolCount: 1
@@ -145,7 +145,7 @@ describe("session query repository", () => {
     expect(querySessions(db, { limit: 25 }).sessions[0]).toEqual(
       expect.objectContaining({
         sourceSessionId: "session narrative",
-        title: "Codex session · 2026-07-01 10:38"
+        title: "OpenCode session · 2026-07-01 10:38"
       })
     );
     db.close();
@@ -159,7 +159,7 @@ describe("session query repository", () => {
       lifecycle: "ended",
       model: "gpt-5",
       project: "Pip",
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "session-match",
       title: "OAuth callback repair"
     });
@@ -179,7 +179,7 @@ describe("session query repository", () => {
       lifecycle: "running",
       model: "gpt-4.1",
       project: "Masthead",
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "session-older",
       title: "OAuth logbook repair"
     });
@@ -189,7 +189,7 @@ describe("session query repository", () => {
       "session-match",
       "session-runtime"
     ]);
-    expect(sessionIds(querySessions(db, { limit: 25, query: "OAuth", runtime: "codex", sort: "oldest" }))).toEqual([
+    expect(sessionIds(querySessions(db, { limit: 25, query: "OAuth", runtime: "opencode", sort: "oldest" }))).toEqual([
       "session-older",
       "session-match"
     ]);
@@ -245,7 +245,7 @@ describe("session query repository", () => {
           model: "gpt-5",
           project: "pip",
           query: "OAuth",
-          runtime: "codex"
+          runtime: "opencode"
         })
       )
     ).toEqual(["session-match"]);

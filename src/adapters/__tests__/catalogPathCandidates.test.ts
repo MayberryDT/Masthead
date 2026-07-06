@@ -8,6 +8,8 @@ const context: DiscoveryContext = {
   now: "2026-06-23T02:04:00.000Z"
 };
 
+const SUPPORTED_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const;
+
 describe("catalog path candidates", () => {
   test("expands home and Windows application data placeholders from catalog paths", () => {
     vi.stubEnv("APPDATA", "/Users/tester/AppData/Roaming");
@@ -23,21 +25,31 @@ describe("catalog path candidates", () => {
     }
   });
 
-  test("omits project candidates until explicit project roots are available", () => {
-    const paths = catalogPathCandidatesForRuntime("aider", context).map((candidate) => candidate.relativePath);
-    expect(paths).toContain("/home/tester/.aider");
-    expect(paths.some((path) => path.startsWith("project:"))).toBe(false);
-    expect(paths.some((path) => path.includes(".aider*"))).toBe(false);
+  test("creates catalog candidates only for the focused supported runtimes", () => {
+    expect(SUPPORTED_RUNTIMES.flatMap((runtime) => catalogPathCandidatesForRuntime(runtime, context))).not.toEqual([]);
+    expect(
+      SUPPORTED_RUNTIMES.every((runtime) =>
+        catalogPathCandidatesForRuntime(runtime, context).every((candidate) => candidate.runtime === runtime)
+      )
+    ).toBe(true);
+  });
+
+  test("uses catalog Grok hook and session roots as bounded candidates", () => {
+    const grokCandidates = catalogPathCandidatesForRuntime("grok", context);
+
+    expect(grokCandidates.map((candidate) => candidate.relativePath)).toEqual([
+      "/home/tester/.grok/hooks",
+      "/home/tester/.grok/sessions"
+    ]);
+    expect(grokCandidates).toEqual([
+      expect.objectContaining({ contentKind: "directory", maxDepth: 4, sourceKind: "inference" }),
+      expect.objectContaining({ contentKind: "jsonl-tree", maxDepth: 4, sourceKind: "jsonl" })
+    ]);
   });
 
   test("uses bounded depth for directory candidates", () => {
     const ompCandidates = catalogPathCandidatesForRuntime("omp", context);
     expect(ompCandidates.map((candidate) => candidate.relativePath)).toContain("/home/tester/.omp/agent/sessions");
-    expect(ompCandidates.every((candidate) => candidate.maxDepth !== undefined && candidate.maxDepth <= 4)).toBe(true);
-  });
-
-  test("does not create candidates for cloud references or legacy runtimes", () => {
-    expect(catalogPathCandidatesForRuntime("devin", context)).toEqual([]);
-    expect(catalogPathCandidatesForRuntime("gemini_cli", context)).toEqual([]);
+    expect(ompCandidates.every((candidate) => candidate.maxDepth !== undefined && candidate.maxDepth <= 5)).toBe(true);
   });
 });

@@ -38,21 +38,17 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /mcp/audit` lists recent MCP audit rows.
 - `GET /settings` returns settings state.
 - `GET /settings/hooks` returns live connector settings for the release target runtimes.
-- `GET /settings/hooks/codex` returns Codex hook settings.
-- `GET /settings/hooks/:runtime` returns one runtime live connector setting for `codex`, `claude_code`, `cursor`, `grok`, `omp`, or `opencode`.
+- `GET /settings/hooks/:runtime` returns one runtime live connector setting for `claude_code`, `cursor`, `grok`, `opencode`, `omp`, `pi`, or `hermes`.
 
 ## Write Endpoints
 
 Write endpoints are local daemon operations. They are not exposed through MCP.
 
-- `POST /ingest` accepts live hook payloads. It defaults to Codex and accepts `?runtime=claude_code|cursor|grok|omp|opencode` or `x-masthead-runtime` for the other release target runtimes. When a Codex hook includes `transcriptPath`, transcript import has been approved, and `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP` is not `0`, the daemon schedules a bounded catch-up import for that transcript file so live sessions receive canonical messages and token usage. The daemon also performs a bounded recovery sweep for recent stored hook events with transcript paths after transcript approval and on startup.
+- `POST /ingest` accepts live hook payloads for focused runtimes via `?runtime=...` or `x-masthead-runtime`, defaulting to Claude Code only for legacy local callers. When a hook includes `transcriptPath`, transcript import has been approved, and `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP` is not `0`, the daemon schedules a bounded catch-up import for that transcript file so live sessions receive canonical messages and token usage. The daemon also performs a bounded recovery sweep for recent stored hook events with transcript paths after transcript approval and on startup.
 - `POST /sources/discover` refreshes source discovery.
 - `POST /sources/scan` scans known local agent-history locations for all active adapters. It is read-only and allowed through the worktree bridge.
 - `POST /sources/connect` connects selected scan results and queues metadata/enrichment jobs. Transcript import requires explicit approval.
-- `POST /sources/codex/import-metadata` queues Codex metadata import.
-- `POST /sources/codex/approve-transcripts` records transcript import approval.
-- `POST /sources/codex/import-transcripts` queues Codex transcript import after approval.
-- `POST /adapters/:runtime/import-metadata`, `/approve-transcripts`, `/import-transcripts`, and `/sync` queue adapter-shaped source work for active runtimes.
+- `POST /adapters/:runtime/import-metadata`, `/approve-transcripts`, `/import-transcripts`, and `/sync` queue adapter-shaped source work for active focused runtimes.
 - `POST /imports` queues an import for `{ "sourceId": "...", "kind": "metadata" | "transcript" }`.
 - `POST /imports/:importJobId/cancel` cancels an import job.
 - `POST /imports/:importJobId/retry` queues a retry.
@@ -63,8 +59,7 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 - `POST /data/retention/default` applies default retention.
 - `POST /retention` prunes legacy compatibility journals.
 - `POST /clear` clears Masthead-owned canonical and compatibility state.
-- `POST /settings/hooks/codex/install`, `/uninstall`, and `/test` preserve compatibility and manage the release target live connector set.
-- `POST /settings/hooks/:runtime/install`, `/uninstall`, and `/test` manage one live connector for `claude_code`, `cursor`, `grok`, `omp`, or `opencode`.
+- `POST /settings/hooks/:runtime/install`, `/uninstall`, and `/test` manage one live connector for `claude_code`, `cursor`, `grok`, `opencode`, `omp`, `pi`, or `hermes`.
 - `POST /mcp/launch-config/validate` validates a candidate MCP launch config.
 - `POST /mcp/test-connection` starts and probes a candidate MCP server.
 
@@ -77,4 +72,4 @@ npm run check:endpoint-matrix
 
 `npm run doctor:json` includes a `sources-pipeline` check with scan freshness, connected source count, transcript coverage, enrichment coverage, import failures, unrecognized-schema count, and repair recommendations. The check is read-only and reports warnings from observed daemon data only.
 
-`npm run doctor` also checks release target live connector status and recent normalized Codex hook events that include transcript paths but still have no useful transcript messages or token rows. That warning usually means transcript import is not approved, the daemon was started with `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP=0`, the recovery sweep has not run yet, or the referenced transcript file cannot be imported.
+`npm run doctor` also checks focused live connector status and recent normalized hook events that include transcript paths but still have no useful transcript messages or token rows. That warning usually means transcript import is not approved, the daemon was started with `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP=0`, the recovery sweep has not run yet, or the referenced transcript file cannot be imported.

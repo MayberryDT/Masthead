@@ -53,9 +53,9 @@ describe("HistoryPanel", () => {
           sessions: [
             {
               project: "Masthead",
-              runtime: "codex",
+              runtime: "opencode",
               sessionId: "session-1",
-              snippet: 'Import <script>alert("x")</script> Codex history into <mark>SQLite</mark>',
+              snippet: 'Import <script>alert("x")</script> OpenCode history into <mark>SQLite</mark>',
               state: "unknown",
               title: "Masthead data layer"
             }
@@ -69,7 +69,7 @@ describe("HistoryPanel", () => {
     );
 
     expect(html).toContain("Masthead data layer");
-    expect(html).toContain("Codex history into");
+    expect(html).toContain("OpenCode history into");
     expect(html).toContain("<mark>SQLite</mark>");
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("logbook-summary-strip");
@@ -91,7 +91,7 @@ describe("HistoryPanel", () => {
           dateFrom: "2026-06-01",
           model: "gpt-5",
           project: "Masthead",
-          runtime: "codex"
+          runtime: "opencode"
         }}
         loadState={{ state: "ready", sessions: [], total: 1 }}
         loading={false}
@@ -106,7 +106,7 @@ describe("HistoryPanel", () => {
     expect(html).toContain("From: 2026-06-01");
     expect(html).toContain("Remove From filter");
     expect(html).not.toContain("Project: Masthead");
-    expect(html).not.toContain("Runtime: codex");
+    expect(html).not.toContain("Runtime: opencode");
     expect(html).not.toContain("Model: gpt-5");
     expect(html).not.toContain("Remove Project filter");
     expect(html).not.toContain("Remove Runtime filter");
@@ -171,7 +171,7 @@ describe("HistoryPanel", () => {
             lifecycle: "ended",
             models: ["gpt-5"],
             project: "Masthead",
-            runtime: "codex",
+            runtime: "opencode",
             sessionId: `session-${index + 1}`,
             sourceConfidence: "authoritative",
             sourceSessionId: `source-session-${index + 1}`,
@@ -202,7 +202,7 @@ describe("HistoryPanel", () => {
           state: "ready",
           sessions: Array.from({ length: 100 }, (_, index) => ({
             project: "Masthead",
-            runtime: "codex",
+            runtime: "opencode",
             sessionId: `session-${index + 1}`,
             title: `Session ${index + 1}`
           })),
@@ -236,7 +236,7 @@ describe("HistoryPanel", () => {
           state: "ready",
           sessions: Array.from({ length: 100 }, (_, index) => ({
             project: "Masthead",
-            runtime: "codex",
+            runtime: "opencode",
             sessionId: `session-${index + 1}`,
             title: `Session ${index + 1}`
           })),
@@ -324,7 +324,7 @@ function records(): StoreRecord[] {
         schemaVersion: 1,
         eventId: "event-1",
         sessionId: "session-1",
-        source: { adapter: "codex", surface: "fixture", sourceEventId: "event-1" },
+        source: { adapter: "opencode", surface: "fixture", sourceEventId: "event-1" },
         occurredAt: "2026-06-23T07:00:00.000Z",
         receivedAt: "2026-06-23T07:00:00.000Z",
         type: "session.started",
@@ -382,7 +382,7 @@ function summary(overrides: Partial<Parameters<typeof HistoryPanel>[0]["summary"
   return {
     sessions: 1,
     projects: 1,
-    runtimes: [{ runtime: "codex", count: 1 }],
+    runtimes: [{ runtime: "opencode", count: 1 }],
     messages: 10,
     toolCalls: 2,
     fileEffects: 0,

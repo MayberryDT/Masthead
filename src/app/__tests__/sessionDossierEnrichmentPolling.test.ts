@@ -61,7 +61,7 @@ function dossier(status: SessionDossierDto["enrichment"]["status"]): SessionDoss
       lastActivityAt: "2026-07-03T18:00:00.000Z",
       lifecycle: "ended",
       models: [],
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "session-1",
       sourceConfidence: "authoritative",
       sourceSessionId: "source-session-1",
@@ -73,7 +73,7 @@ function dossier(status: SessionDossierDto["enrichment"]["status"]): SessionDoss
       copyableContext: "",
       mcpIncluded: true,
       sourceConfidence: "authoritative",
-      sourceRuntime: "codex",
+      sourceRuntime: "opencode",
       sourceSessionId: "source-session-1"
     },
     timeline: [],

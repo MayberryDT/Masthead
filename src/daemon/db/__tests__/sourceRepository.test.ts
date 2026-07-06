@@ -105,8 +105,8 @@ function adapterRecord(value: Record<string, unknown>): AdapterRecord {
     source: {
       confidence: "authoritative",
       path: sourcePath,
-      runtime: "codex",
-      sourceId: "codex-sessions:thread.jsonl",
+      runtime: "opencode",
+      sourceId: "opencode-sessions:thread.jsonl",
       sourceKind: "jsonl"
     },
     sourceRecordKey: `${sourcePath}:1`

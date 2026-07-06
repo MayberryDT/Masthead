@@ -17,6 +17,8 @@ export type DeriveSessionsOptions = {
 };
 
 const DEFAULT_IDLE_AFTER_MS = 15 * 60_000;
+type RuntimeLifecycleState = "running" | "idle" | "blocked" | "ended";
+
 
 export function deriveSessions(
   events: NormalizedEvent[],
@@ -190,11 +192,22 @@ function deriveLifecycle({
 }
 
 function lifecycleFromRuntimeState(event: NormalizedEvent | undefined): SessionLifecycle | undefined {
-  if (event?.source.adapter !== "omp") return undefined;
+  const state = runtimeLifecycleState(event);
+  if (!state) return undefined;
+  if (state === "blocked" || state === "running") return "running";
+  if (state === "idle") return "idle";
+  return "ended";
+}
+
+function runtimeLifecycleState(event: NormalizedEvent | undefined): RuntimeLifecycleState | undefined {
+  const explicitState = normalizeRuntimeState(stringPayload(event, "runtimeLifecycleState"));
+  if (explicitState === "running" || explicitState === "idle" || explicitState === "blocked" || explicitState === "ended") return explicitState;
   const state = normalizeRuntimeState(stringPayload(event, "state") ?? stringPayload(event, "status") ?? stringPayload(event, "runtimeState"));
   if (!state) return undefined;
-  if (state === "idle" || state === "logged") return "idle";
-  if (state === "active" || state === "running") return "running";
+  if (["active", "working", "running", "busy", "thinking", "executing"].includes(state)) return "running";
+  if (["idle", "logged", "ready", "waiting"].includes(state)) return "idle";
+  if (["blocked", "approval_requested", "waiting_for_approval", "waiting_for_user", "permission_requested"].includes(state)) return "blocked";
+  if (["done", "completed", "complete", "stopped", "ended"].includes(state)) return "ended";
   return undefined;
 }
 
@@ -243,15 +256,14 @@ function stringPayload(event: NormalizedEvent | undefined, key: string): string 
 
 function isBlockedEvent(event: NormalizedEvent): boolean {
   if (event.payload.blocked === true) return true;
-  return ["status", "state", "primaryStatus", "disposition", "endReason", "reason"].some(
+  if (stringPayload(event, "runtimeLifecycleState") === "blocked") return true;
+  return ["status", "state", "primaryStatus", "disposition", "endReason", "reason", "runtimeState"].some(
     (key) => stringPayload(event, key)?.toLowerCase() === "blocked"
   );
 }
 
 function harnessLabel(runtime: string | undefined): string | undefined {
   switch (runtime) {
-    case "codex":
-      return "Codex";
     case "claude_code":
       return "Claude Code";
     case "cursor":
@@ -260,6 +272,12 @@ function harnessLabel(runtime: string | undefined): string | undefined {
       return "Grok Build";
     case "opencode":
       return "OpenCode";
+    case "hermes":
+      return "Hermes";
+    case "pi":
+      return "Pi";
+    case "omp":
+      return "Oh My Pi";
     default:
       return undefined;
   }

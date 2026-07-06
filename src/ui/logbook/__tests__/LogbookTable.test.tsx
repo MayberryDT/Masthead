@@ -37,7 +37,7 @@ describe("LogbookTable", () => {
             model: "gpt-5",
             models: ["gpt-5"],
             project: "Pip",
-            runtime: "codex",
+            runtime: "opencode",
             sessionId: "session-1",
             snippet: "Repair <mark>OAuth</mark> callback return path",
             sourceConfidence: "authoritative",
@@ -60,7 +60,7 @@ describe("LogbookTable", () => {
     expect(html).toContain("Repair OAuth callback");
     expect(html).toContain("<mark>OAuth</mark>");
     expect(html).toContain("Pip");
-    expect(html).toContain("Codex");
+    expect(html).toContain("OpenCode");
     expect(html).toContain("Authoritative");
     expect(html).toContain("host:test");
     expect(html).toContain("14");

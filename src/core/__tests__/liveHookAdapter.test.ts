@@ -1,51 +1,124 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import type { RuntimeKind } from "../../adapters/types.ts";
 import { parseLiveHookPayload } from "../liveHookAdapter.ts";
 
 const fixtureDir = join(process.cwd(), "src/adapters/live/__fixtures__");
 
+const liveCases: Array<{
+  fixture?: string;
+  raw?: string;
+  runtime: RuntimeKind;
+  sourceSessionId: string;
+  sourceName: string;
+  surface: "hook" | "plugin";
+  type: string;
+}> = [
+  {
+    runtime: "claude_code",
+    fixture: "claude-user-prompt-submit.json",
+    type: "user.question",
+    sourceSessionId: "claude-session-1",
+    sourceName: "claude_code.hook",
+    surface: "hook"
+  },
+  {
+    runtime: "cursor",
+    fixture: "cursor-before-submit-prompt.json",
+    type: "user.question",
+    sourceSessionId: "cursor-session-1",
+    sourceName: "cursor.hook",
+    surface: "hook"
+  },
+  {
+    runtime: "grok",
+    fixture: "grok-pre-tool-use.json",
+    type: "command.started",
+    sourceSessionId: "grok-session-1",
+    sourceName: "grok.hook",
+    surface: "hook"
+  },
+  {
+    runtime: "opencode",
+    fixture: "opencode-chat-message.json",
+    type: "session.started",
+    sourceSessionId: "opencode-session-1",
+    sourceName: "opencode.plugin",
+    surface: "plugin"
+  },
+  {
+    runtime: "omp",
+    fixture: "omp-session-start.json",
+    type: "session.started",
+    sourceSessionId: "omp-session-1",
+    sourceName: "omp.extension",
+    surface: "plugin"
+  },
+  {
+    runtime: "pi",
+    raw: JSON.stringify({
+      type: "session_start",
+      sessionId: "pi-session-1",
+      timestamp: "2026-07-05T12:00:00.000Z",
+      cwd: "/workspace/masthead"
+    }),
+    type: "session.started",
+    sourceSessionId: "pi-session-1",
+    sourceName: "pi.extension",
+    surface: "plugin"
+  },
+  {
+    runtime: "hermes",
+    raw: JSON.stringify({
+      type: "session_start",
+      sessionId: "hermes-session-1",
+      timestamp: "2026-07-05T12:00:00.000Z",
+      directory: "/workspace/masthead"
+    }),
+    type: "session.started",
+    sourceSessionId: "hermes-session-1",
+    sourceName: "hermes.plugin",
+    surface: "plugin"
+  }
+];
+
 describe("live hook adapter", () => {
-  test.each([
-    ["codex", "codex-session-start.json", "session.started", "codex-session-1"],
-    ["claude_code", "claude-user-prompt-submit.json", "user.question", "claude-session-1"],
-    ["cursor", "cursor-before-submit-prompt.json", "user.question", "cursor-session-1"],
-    ["grok", "grok-pre-tool-use.json", "command.started", "grok-session-1"],
-    ["omp", "omp-session-start.json", "session.started", "omp-session-1"],
-    ["opencode", "opencode-chat-message.json", "session.started", "opencode-session-1"]
-  ])("normalizes %s fixture", (runtime, fixture, type, sourceSessionId) => {
-    const raw = readFileSync(join(fixtureDir, fixture), "utf8");
-    const parsed = parseLiveHookPayload(raw, { receivedAt: "2026-07-05T12:00:10.000Z", runtime });
+  test.each(liveCases)("normalizes $runtime live payloads", ({ runtime, fixture, raw, type, sourceSessionId, sourceName, surface }) => {
+    const parsed = parseLiveHookPayload(raw ?? readFileSync(join(fixtureDir, fixture!), "utf8"), {
+      receivedAt: "2026-07-05T12:00:10.000Z",
+      runtime
+    });
 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.event).toMatchObject({
       sessionId: sourceSessionId,
-      source: { adapter: runtime, surface: runtime === "opencode" || runtime === "omp" ? "plugin" : "hook" },
+      source: { adapter: runtime, surface },
       type
     });
-    if (runtime === "codex") {
-      expect(parsed.event.payload).not.toHaveProperty("runtime");
-      expect(parsed.event.payload).not.toHaveProperty("harness");
-      expect(parsed.event.payload).not.toHaveProperty("sourceSessionId");
-    } else {
-      expect(parsed.event.payload).toMatchObject({
-        runtime,
-        harness: expect.any(String),
-        sourceSessionId
-      });
-    }
-    expect(parsed.event.evidence[0]?.source).toBe(runtime === "omp" ? "omp.extension" : `${runtime}.${runtime === "opencode" ? "plugin" : "hook"}`);
+    expect(parsed.event.payload).toMatchObject({
+      runtime,
+      harness: expect.any(String),
+      sourceSessionId
+    });
+    expect(parsed.event.evidence[0]?.source).toBe(sourceName);
     expect(JSON.stringify(parsed.event.payload)).not.toContain("Inspect Masthead sources");
     expect(JSON.stringify(parsed.event.payload)).not.toContain("Fix the failing tests");
   });
 
-  test("defaults to Codex for compatibility when runtime is omitted", () => {
-    const raw = readFileSync(join(fixtureDir, "codex-session-start.json"), "utf8");
+  test("rejects omitted runtime instead of defaulting to a deleted adapter", () => {
+    const raw = readFileSync(join(fixtureDir, "claude-user-prompt-submit.json"), "utf8");
     const parsed = parseLiveHookPayload(raw, { receivedAt: "2026-07-05T12:00:10.000Z" });
 
-    expect(parsed.ok).toBe(true);
-    if (parsed.ok) expect(parsed.event.source.adapter).toBe("codex");
+    expect(parsed).toEqual({
+      ok: false,
+      diagnostic: {
+        code: "unsupported_runtime",
+        message: "Live hook runtime is required.",
+        receivedAt: "2026-07-05T12:00:10.000Z"
+      }
+    });
   });
 
   test("keeps OMP session files and turn ids as metadata instead of session keys", () => {
@@ -83,8 +156,8 @@ describe("live hook adapter", () => {
         cwd: "/workspace/masthead",
         status: "active",
         state: "logged",
-        model: "openai-codex/gpt-5.5",
-        provider: "openai-codex",
+        model: "gpt-5.5",
+        provider: "openai",
         totalTokens: 42
       }),
       { receivedAt: "2026-07-05T12:05:00.100Z", runtime: "omp" }
@@ -99,13 +172,13 @@ describe("live hook adapter", () => {
       sourceSessionId: "omp-state-session",
       status: "active",
       state: "logged",
-      model: "openai-codex/gpt-5.5",
-      provider: "openai-codex",
+      model: "gpt-5.5",
+      provider: "openai",
       totalTokens: 42
     });
   });
 
-  test("uses non-Codex identity fields for fallback event ids after redaction", () => {
+  test("uses supported runtime identity fields for fallback event ids after redaction", () => {
     const first = parseLiveHookPayload(
       JSON.stringify({
         hookEventName: "UserPromptSubmit",

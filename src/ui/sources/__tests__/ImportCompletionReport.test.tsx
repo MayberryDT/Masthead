@@ -18,7 +18,7 @@ describe("ImportCompletionReport", () => {
           recordsFailed: 1,
           recordsImported: 12,
           recordsSkipped: 2,
-          runtime: "codex",
+          runtime: "opencode",
           sessionsCreated: 2,
           sessionsDiscovered: 6,
           sessionsUpdated: 4,

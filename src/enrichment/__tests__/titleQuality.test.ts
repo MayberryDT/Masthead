@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { normalizeCodexHookPayload } from "../../core/codexAdapter.ts";
+import { normalizeLiveHookPayload, type LiveHookNormalizeOptions } from "../../core/liveHookAdapter.ts";
 import { projectLiveEvents } from "../../core/liveProjection.ts";
 import { querySessions } from "../../daemon/db/sessionQueryRepository.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
@@ -25,7 +25,7 @@ describe("session title quality", () => {
     const capsule = deterministicCapsuleFromFacts(
       facts({
         objective: "Reject low-quality session titles",
-        title: "Masthead Codex session"
+        title: "Masthead session"
       })
     ) as CapsuleWithTitleSource;
 
@@ -52,7 +52,7 @@ describe("session title quality", () => {
     seedSession(db, {
       objective: "Persist title source metadata",
       sessionId: "session-title-source",
-      title: "Codex session"
+      title: "Masthead session"
     });
     const coordinator = createEnrichmentCoordinator(db, {
       id: "fixture-provider",
@@ -64,7 +64,7 @@ describe("session title quality", () => {
             liveSummary: "Useful live summary from provider.",
             searchPhrases: [],
             technologies: [],
-            title: "Codex session",
+            title: "Masthead session",
             topics: [],
             unresolved: []
           },
@@ -88,7 +88,7 @@ describe("session title quality", () => {
   });
 
   test("Now projection keeps liveSummary in headline input when an enrichment title is generic", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "title-quality-start",
         event: "session_started",
@@ -96,11 +96,11 @@ describe("session title quality", () => {
         timestamp: "2026-06-25T12:00:00.000Z",
         cwd: "/workspace/masthead",
         project: "Masthead",
-        title: "Masthead Codex session"
+        title: "Masthead session"
       },
       { receivedAt: "2026-06-25T12:00:00.010Z" }
     );
-    const completed = normalizeCodexHookPayload(
+    const completed = normalizeSupportedHookPayload(
       {
         provider_event_id: "title-quality-complete",
         event: "session_completed",
@@ -116,11 +116,11 @@ describe("session title quality", () => {
     const envelope = projectLiveEvents([started, completed], [], {
       generatedAt: "2026-06-25T12:00:31.000Z",
       sessionEnrichments: new Map([
-        ["title-quality-live", { liveSummary: "Title quality fallback uses the provider summary.", title: "Codex session" }]
+        ["title-quality-live", { liveSummary: "Title quality fallback uses the provider summary.", title: "Masthead session" }]
       ])
     });
 
-    expect(envelope.projection.cards[0]?.title).toBe("Masthead Codex session");
+    expect(envelope.projection.cards[0]?.title).toBe("Masthead session");
     expect(envelope.projection.cards[0]?.headline).toMatchObject({
       source: "offline",
       status: "ready"
@@ -136,7 +136,7 @@ describe("session title quality", () => {
     seedSession(db, {
       objective: undefined,
       sessionId: "session-logbook-title",
-      title: "Codex session"
+      title: "Masthead session"
     });
     db.prepare(
       `INSERT INTO session_enrichments (
@@ -164,7 +164,7 @@ describe("session title quality", () => {
           text: "Captured durable Logbook summary without promoting live summary into the title."
         },
         technologies: [],
-        title: "Codex session",
+        title: "Masthead session",
         topics: [],
         unresolved: []
       }),
@@ -182,7 +182,7 @@ describe("session title quality", () => {
     seedSession(db, {
       objective: undefined,
       sessionId: "session-logbook-durable-title",
-      title: "Codex session"
+      title: "Masthead session"
     });
     db.prepare(
       `INSERT INTO session_enrichments (
@@ -235,7 +235,7 @@ describe("session title quality", () => {
     seedSession(db, {
       objective: undefined,
       sessionId: "session-logbook-review-template",
-      title: "Codex session"
+      title: "Masthead session"
     });
     db.prepare(
       `INSERT INTO session_enrichments (
@@ -257,7 +257,7 @@ describe("session title quality", () => {
         liveSummary: "Title quality work is ready for review.",
         searchPhrases: [],
         technologies: [],
-        title: "Codex session",
+        title: "Masthead session",
         topics: [],
         unresolved: []
       }),
@@ -302,8 +302,8 @@ function seedSession(
   const now = "2026-06-25T12:00:00.000Z";
   db.prepare("INSERT INTO hosts (host_id, first_seen_at, last_seen_at) VALUES (?, ?, ?)").run("host:test", now, now);
   db.prepare("INSERT INTO runtimes (runtime_id, runtime_kind, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
-    "runtime:codex",
-    "codex",
+    "runtime:claude_code",
+    "claude_code",
     now,
     now
   );
@@ -315,7 +315,7 @@ function seedSession(
   ).run(
     options.sessionId,
     "host:test",
-    "runtime:codex",
+    "runtime:claude_code",
     options.sessionId.replace("session", "source-session"),
     "Masthead",
     options.title,
@@ -331,4 +331,8 @@ function seedSession(
       message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(`${options.sessionId}:message`, options.sessionId, "user", "Repair title quality.", `${options.sessionId}:hash`, now, "{}", "authoritative");
+}
+
+function normalizeSupportedHookPayload(input: unknown, options: Omit<LiveHookNormalizeOptions, "runtime">) {
+  return normalizeLiveHookPayload(input, { ...options, runtime: "claude_code" });
 }

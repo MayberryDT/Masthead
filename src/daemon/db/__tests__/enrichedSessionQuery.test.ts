@@ -24,7 +24,7 @@ describe("enriched session query", () => {
       model: "gpt-5",
       project: "Pip",
       sessionId: "session-1",
-      title: "Codex session"
+      title: "OpenCode session"
     });
     upsertSessionEnrichment(db, {
       content: {

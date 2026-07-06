@@ -2,12 +2,20 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { codexHookSource } from "../../adapters/codex/hookAdapter.ts";
 import type { StoreRecord } from "../../core/store.ts";
 import { createRawEventRepository } from "../db/rawEventRepository.ts";
 import { migrateDatabase } from "../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../db/sqlite.ts";
 import { canonicalStoreRecords, LIVE_BOARD_RAW_RECORD_LIMIT } from "../server.ts";
+const CLAUDE_CODE_HOOK_SOURCE = {
+  adapter: "claude_code",
+  confidence: "authoritative",
+  endpoint: "http://127.0.0.1:17373/ingest",
+  runtimeVersion: "hook-v1",
+  schemaVersion: "masthead.normalized-event.v1",
+  sourceId: "claude-code-hook-local",
+  sourceKind: "hook"
+} as const;
 
 describe("live Board raw records", () => {
   const tempDirs: string[] = [];
@@ -27,22 +35,14 @@ describe("live Board raw records", () => {
     databases.push(database);
     migrateDatabase(database);
 
-    const rawEvents = createRawEventRepository(database, {
-      adapter: codexHookSource.runtime,
-      confidence: codexHookSource.confidence,
-      endpoint: codexHookSource.endpoint,
-      runtimeVersion: codexHookSource.runtimeVersion,
-      schemaVersion: codexHookSource.schemaVersion,
-      sourceId: codexHookSource.sourceId,
-      sourceKind: codexHookSource.sourceKind
-    });
+    const rawEvents = createRawEventRepository(database, CLAUDE_CODE_HOOK_SOURCE);
 
     const totalRecords = LIVE_BOARD_RAW_RECORD_LIMIT + 5;
     for (let index = 0; index < totalRecords; index += 1) {
       rawEvents.appendStoreRecord(eventRecord(index));
     }
 
-    const records = canonicalStoreRecords(database, [codexHookSource.sourceId]);
+    const records = canonicalStoreRecords(database, [CLAUDE_CODE_HOOK_SOURCE.sourceId]);
 
     expect(records).toHaveLength(LIVE_BOARD_RAW_RECORD_LIMIT);
     expect(records[0]?.recordId).toBe("event:5");
@@ -60,7 +60,7 @@ function eventRecord(index: number): StoreRecord {
       eventId: `event:${index}`,
       occurredAt: observedAt,
       payloadHash: `hash:${index}`,
-      provider: "codex",
+      provider: "claude_code",
       providerEventId: `provider:${index}`,
       receivedAt: observedAt,
       schemaVersion: "masthead.normalized-event.v1",

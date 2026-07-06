@@ -43,7 +43,7 @@ describe("dovetail card system", () => {
     expect(blocked.className).toBe("session-card bottom-variant-card dovetail-card is-blocked tier-action");
     expect(active.querySelector(":scope > .bottom-signal")).toBeTruthy();
     expect(active.querySelector(":scope > .card-topline .project")?.textContent).toContain("Masthead");
-    expect(active.querySelector(":scope > .card-topline .runtime-tag")?.textContent).toBe("Codex");
+    expect(active.querySelector(":scope > .card-topline .runtime-tag")?.textContent).toBe("OpenCode");
     expect(active.querySelector(":scope > .card-topline .state-pill")?.textContent).toBe("Active");
     expect(active.querySelector(":scope > h3.headline")?.textContent).toBe("Refining the live card hierarchy.");
     expect(active.querySelectorAll(":scope > .fact-grid .fact")).toHaveLength(4);
@@ -95,7 +95,7 @@ describe("dovetail card system", () => {
           sessions: [
             {
               project: "Masthead",
-              runtime: "codex",
+              runtime: "opencode",
               sessionId: "session-1",
               state: "ended",
               title: "Masthead data layer"
@@ -152,7 +152,7 @@ describe("dovetail card system", () => {
             importedCount: 1,
             importKind: "metadata",
             queuedCount: 1,
-            sourceId: "codex-sessions",
+            sourceId: "opencode-sessions",
             status: "running",
             updatedAt: "2026-06-29T20:00:00.000Z"
           }
@@ -483,6 +483,7 @@ function sessionFixture(overrides: Partial<SessionCardView> = {}): SessionCardVi
       source: "llm",
       status: "ready"
     },
+    harness: "OpenCode",
     durationLabel: "24m",
     identityConfidence: "direct",
     indicators: [],
@@ -540,9 +541,9 @@ function usageStatsFixture(overrides: Partial<UsageStatsDto["totals"]> = {}): Us
 
   return {
     activity: [{ bucketStart: "2026-06-29T20:00:00.000Z", fileEffects: 1, messages: 2, sessions: totals.sessions, toolCalls: 3, totalTokens: totals.totalTokens }],
-    byModel: [{ inputTokens: totals.inputTokens, model: "gpt-5-codex", outputTokens: totals.outputTokens, provider: "openai", sessions: totals.sessions, totalTokens: totals.totalTokens }],
+    byModel: [{ inputTokens: totals.inputTokens, model: "gpt-5-opencode", outputTokens: totals.outputTokens, provider: "openai", sessions: totals.sessions, totalTokens: totals.totalTokens }],
     byProject: [{ fileEffects: 1, messages: 2, project: "Masthead", sessions: totals.sessions, toolCalls: 3, totalTokens: totals.totalTokens }],
-    byRuntime: [{ fileEffects: 1, messages: 2, runtime: "codex", sessions: totals.sessions, toolCalls: 3, totalTokens: totals.totalTokens }],
+    byRuntime: [{ fileEffects: 1, messages: 2, runtime: "opencode", sessions: totals.sessions, toolCalls: 3, totalTokens: totals.totalTokens }],
     coverage: {
       currentEnrichments: 1,
       importedSessions: totals.sessions,
@@ -565,9 +566,9 @@ function logbookSummaryFixture() {
     latestActivityAt: "2026-06-29T20:00:00.000Z",
     lifecycles: [{ count: 1, lifecycle: "ended" }],
     messages: 12,
-    models: [{ count: 1, model: "gpt-5-codex" }],
+    models: [{ count: 1, model: "gpt-5-opencode" }],
     projects: 1,
-    runtimes: [{ count: 1, runtime: "codex" }],
+    runtimes: [{ count: 1, runtime: "opencode" }],
     sessions: 1,
     toolCalls: 5
   };
@@ -599,10 +600,10 @@ function dossierFixture(): SessionDossierDto {
       hostId: "host:test",
       lastActivityAt: "2026-06-29T20:24:00.000Z",
       lifecycle: "ended",
-      model: "gpt-5-codex",
-      models: ["gpt-5-codex"],
+      model: "gpt-5-opencode",
+      models: ["gpt-5-opencode"],
       project: "Masthead",
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "canonical-session-1",
       sourceConfidence: "authoritative",
       sourceSessionId: "source-session-1",
@@ -624,7 +625,7 @@ function dossierFixture(): SessionDossierDto {
       copyableContext: "Session context.",
       mcpIncluded: true,
       sourceConfidence: "authoritative",
-      sourceRuntime: "codex",
+      sourceRuntime: "opencode",
       sourceSessionId: "source-session-1"
     },
     timeline: [],
@@ -638,9 +639,9 @@ function sourcesSetupFixture(): SourcesSetupDto {
   const connectedSource = {
     discoveredSessions: 742,
     importedSessions: 120,
-    label: "Codex sessions",
-    runtime: "codex",
-    sourceId: "codex-sessions",
+    label: "OpenCode sessions",
+    runtime: "opencode",
+    sourceId: "opencode-sessions",
     state: "connected" as const
   };
 

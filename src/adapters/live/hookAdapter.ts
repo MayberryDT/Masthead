@@ -4,7 +4,6 @@ import type { AdapterRecord, DiscoveredSource, RuntimeKind } from "../types.ts";
 import { LIVE_RUNTIME_PROFILES } from "./runtimeProfiles.ts";
 
 const LIVE_SOURCE_IDS: Partial<Record<RuntimeKind, string>> = {
-  codex: "codex-hook-local",
   claude_code: "claude-code-hook-local",
   cursor: "cursor-hook-local",
   grok: "grok-hook-local",

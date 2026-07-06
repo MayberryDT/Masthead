@@ -124,7 +124,7 @@ describe("Live Board UI", () => {
           id: "failed-command",
           kind: "event",
           observedAt: "2026-06-23T02:08:00.000Z",
-          source: "codex.fixture"
+          source: "opencode.fixture"
         }
       ],
       support: "deterministic",
@@ -175,7 +175,7 @@ describe("Live Board UI", () => {
           id: "failed-command",
           kind: "event",
           observedAt: "2026-06-23T02:08:00.000Z",
-          source: "codex.fixture"
+          source: "opencode.fixture"
         }
       ],
       support: "deterministic",

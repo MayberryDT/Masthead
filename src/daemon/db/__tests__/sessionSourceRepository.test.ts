@@ -64,5 +64,5 @@ function seedSource(db: MastheadDatabase, sourceId: string, path: string): void 
     `INSERT INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(sourceId, "codex", "jsonl", path, "authoritative", now, now);
+  ).run(sourceId, "opencode", "jsonl", path, "authoritative", now, now);
 }

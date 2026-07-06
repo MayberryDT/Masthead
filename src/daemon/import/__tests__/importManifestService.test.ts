@@ -25,7 +25,7 @@ describe("import manifest service", () => {
       generatedAt: "2026-07-01T00:00:00.000Z",
       importJobId: "preview",
       importKind: "transcript",
-      runtime: "codex",
+      runtime: "opencode",
       scope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
       sources
     });
@@ -54,9 +54,9 @@ describe("import manifest service", () => {
       generatedAt: "2026-07-01T00:00:00.000Z",
       importJobId: "import-1",
       importKind: "transcript",
-      runtime: "codex",
+      runtime: "opencode",
       scope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       sources
     });
 
@@ -92,9 +92,9 @@ async function createTranscriptFixture(): Promise<{ cursors: Map<string, IngestC
   const sources = [recentPath, changedPath, oldPath].map((path) => ({
     confidence: "authoritative" as const,
     path,
-    runtime: "codex" as const,
-    schemaVersion: "codex-transcript-jsonl",
-    sourceId: `codex:${path}`,
+    runtime: "opencode" as const,
+    schemaVersion: "opencode-transcript-jsonl",
+    sourceId: `opencode:${path}`,
     sourceKind: "jsonl" as const
   }));
   const cursors = new Map<string, IngestCursor>();
@@ -103,7 +103,7 @@ async function createTranscriptFixture(): Promise<{ cursors: Map<string, IngestC
     contentFingerprint: "3:1770000000000",
     cursorId: "cursor:old",
     modifiedAt: "2026-05-01T00:00:00.000Z",
-    sourceId: `codex:${oldPath}`,
+    sourceId: `opencode:${oldPath}`,
     sourcePath: oldPath
   });
   cursors.set(changedPath, {
@@ -111,7 +111,7 @@ async function createTranscriptFixture(): Promise<{ cursors: Map<string, IngestC
     contentFingerprint: "changed-before",
     cursorId: "cursor:changed",
     modifiedAt: "2026-05-01T00:00:00.000Z",
-    sourceId: `codex:${changedPath}`,
+    sourceId: `opencode:${changedPath}`,
     sourcePath: changedPath
   });
   return { cursors, sources, tempDir };
@@ -122,10 +122,10 @@ function seedSourceAndImportJob(db: ReturnType<typeof openMastheadDatabase> exte
     `INSERT INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex-sessions", "codex", "jsonl", "/tmp/.codex/sessions", "authoritative", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
+  ).run("opencode-sessions", "opencode", "jsonl", "/tmp/.opencode/sessions", "authoritative", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
   db.prepare(
     `INSERT INTO import_jobs (
       import_job_id, source_id, import_kind, status, updated_at
     ) VALUES (?, ?, ?, ?, ?)`
-  ).run("import-1", "codex-sessions", "transcript", "queued", "2026-07-01T00:00:00.000Z");
+  ).run("import-1", "opencode-sessions", "transcript", "queued", "2026-07-01T00:00:00.000Z");
 }

@@ -93,7 +93,7 @@ describe("usage stats repository", () => {
       {
         fileEffects: 2,
         messages: 2,
-        runtime: "codex",
+        runtime: "opencode",
         sessions: 1,
         toolCalls: 1,
         totalTokens: 150
@@ -191,10 +191,10 @@ describe("usage stats repository", () => {
       "2026-06-25T12:00:00.000Z",
       now.toISOString()
     );
-    insertRuntime(db, "runtime-codex", "codex");
+    insertRuntime(db, "runtime-opencode", "opencode");
     insertSession(db, {
       project: "Masthead",
-      runtimeId: "runtime-codex",
+      runtimeId: "runtime-opencode",
       sessionId: "canonical-session",
       sourceSessionId: "source-session",
       timestamp: "2026-06-26T14:05:00.000Z"
@@ -202,7 +202,7 @@ describe("usage stats repository", () => {
     insertSession(db, {
       deletedAt: "2026-06-26T14:20:00.000Z",
       project: "Masthead",
-      runtimeId: "runtime-codex",
+      runtimeId: "runtime-opencode",
       sessionId: "deleted-session",
       sourceSessionId: "deleted-source",
       timestamp: "2026-06-26T14:10:00.000Z"
@@ -255,15 +255,15 @@ function seedUsageFixture(db: MastheadDatabase): void {
     createdAt,
     now.toISOString()
   );
-  insertRuntime(db, "runtime:codex", "codex");
+  insertRuntime(db, "runtime:opencode", "opencode");
   insertRuntime(db, "runtime:cursor", "cursor");
-  insertSource(db, "source:codex", "codex", null);
+  insertSource(db, "source:opencode", "opencode", null);
   insertSource(db, "source:cursor", "cursor", null);
-  insertSource(db, "source:excluded", "codex", "2026-06-26T12:00:00.000Z");
+  insertSource(db, "source:excluded", "opencode", "2026-06-26T12:00:00.000Z");
 
   insertSession(db, {
     project: "Masthead",
-    runtimeId: "runtime:codex",
+    runtimeId: "runtime:opencode",
     sessionId: "session-today-a",
     timestamp: "2026-06-26T14:00:00.000Z"
   });
@@ -275,7 +275,7 @@ function seedUsageFixture(db: MastheadDatabase): void {
   });
   insertSession(db, {
     project: "Masthead",
-    runtimeId: "runtime:codex",
+    runtimeId: "runtime:opencode",
     sessionId: "session-yesterday",
     timestamp: "2026-06-25T16:30:00.000Z"
   });

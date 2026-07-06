@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { pathCandidatesForRuntime, ADAPTER_PATH_CANDIDATES } from "../pathCandidates.ts";
 import { preflightAdapterPathCandidate, preflightAdapterRuntime } from "../preflight.ts";
+import type { AdapterPathCandidate } from "../pathTypes.ts";
 
 const tempDirs: string[] = [];
+const SUPPORTED_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const;
 
 afterEach(async () => {
   await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
@@ -13,48 +15,52 @@ afterEach(async () => {
 });
 
 describe("adapter path candidates", () => {
-  test("declares only bounded relative paths", () => {
+  test("declares only bounded relative paths for supported runtimes", () => {
     expect(ADAPTER_PATH_CANDIDATES).not.toEqual([]);
     for (const candidate of ADAPTER_PATH_CANDIDATES) {
       expect(candidate.relativePath).not.toBe("");
       expect(candidate.relativePath).not.toBe(".");
       expect(candidate.relativePath.startsWith("/")).toBe(false);
       expect(candidate.relativePath.startsWith("..")).toBe(false);
+      expect(SUPPORTED_RUNTIMES).toContain(candidate.runtime);
+      expect(candidate.maxDepth).toBeGreaterThan(0);
+      expect(candidate.maxDepth).toBeLessThanOrEqual(5);
     }
-    expect(ADAPTER_PATH_CANDIDATES.map((candidate) => candidate.runtime)).not.toContain("crush");
   });
 
-  test("keeps Codex candidates to known local store paths", () => {
-    expect(pathCandidatesForRuntime("codex").map((candidate) => candidate.relativePath)).toEqual([
-      ".codex/session_index.jsonl",
-      ".codex/history.jsonl",
-      ".codex/sessions",
-      ".codex/archived_sessions"
+  test("keeps Grok candidates to known hook and session JSONL trees", () => {
+    expect(pathCandidatesForRuntime("grok").map((candidate) => candidate.relativePath)).toEqual([
+      ".grok/hooks",
+      ".grok/sessions"
+    ]);
+    expect(pathCandidatesForRuntime("grok")).toEqual([
+      expect.objectContaining({ contentKind: "jsonl-tree", sourceKind: "jsonl" }),
+      expect.objectContaining({ contentKind: "jsonl-tree", sourceKind: "jsonl" })
     ]);
   });
 });
 
 describe("adapter preflight utilities", () => {
-  test("preflights a declared JSONL tree without crawling arbitrary home files", async () => {
+  test("preflights a declared Grok JSONL tree without crawling arbitrary home files", async () => {
     const homeDir = await makeHome("masthead-preflight-");
     await writeFile(join(homeDir, "stray.jsonl"), '{"ignored":true}\n', "utf8");
-    await mkdir(join(homeDir, ".codex", "sessions", "2026", "06"), { recursive: true });
-    await writeFile(join(homeDir, ".codex", "sessions", "2026", "06", "one.jsonl"), '{"id":"one"}\n', "utf8");
+    await mkdir(join(homeDir, ".grok", "sessions", "2026", "06"), { recursive: true });
+    await writeFile(join(homeDir, ".grok", "sessions", "2026", "06", "one.jsonl"), '{"id":"one"}\n', "utf8");
 
     const result = await preflightAdapterRuntime(
       { exclusions: [], homeDir, now: "2026-06-27T12:00:00.000Z" },
-      "codex",
-      pathCandidatesForRuntime("codex").filter((candidate) => candidate.relativePath === ".codex/sessions")
+      "grok",
+      pathCandidatesForRuntime("grok").filter((candidate) => candidate.relativePath === ".grok/sessions")
     );
 
     expect(result).toMatchObject({
       discoveredCount: 1,
-      runtime: "codex",
+      runtime: "grok",
       state: "connected"
     });
     expect(result.checkedPaths).toEqual([
       expect.objectContaining({
-        absolutePath: join(homeDir, ".codex", "sessions"),
+        absolutePath: join(homeDir, ".grok", "sessions"),
         candidateFileCount: 1,
         exists: true
       })
@@ -63,7 +69,7 @@ describe("adapter preflight utilities", () => {
 
   test("reports missing candidates without diagnostics", async () => {
     const homeDir = await makeHome("masthead-preflight-missing-");
-    const candidate = pathCandidatesForRuntime("codex")[0]!;
+    const candidate = pathCandidatesForRuntime("grok")[0]!;
 
     const result = await preflightAdapterPathCandidate(
       { exclusions: [], homeDir, now: "2026-06-27T12:00:00.000Z" },
@@ -73,16 +79,23 @@ describe("adapter preflight utilities", () => {
     expect(result).toMatchObject({
       exists: false,
       readable: false,
-      runtime: "codex"
+      runtime: "grok"
     });
     expect(result.diagnostics).toEqual([]);
   });
 
-  test("surfaces malformed JSONL diagnostics for file candidates", async () => {
+  test("surfaces malformed JSONL diagnostics for supported file candidates", async () => {
     const homeDir = await makeHome("masthead-preflight-jsonl-file-");
-    await mkdir(join(homeDir, ".codex"), { recursive: true });
-    await writeFile(join(homeDir, ".codex", "history.jsonl"), "{ bad json\n", "utf8");
-    const candidate = pathCandidatesForRuntime("codex").find((item) => item.relativePath === ".codex/history.jsonl")!;
+    await mkdir(join(homeDir, ".claude"), { recursive: true });
+    await writeFile(join(homeDir, ".claude", "history.jsonl"), "{ bad json\n", "utf8");
+    const candidate: AdapterPathCandidate = {
+      confidence: "heuristic",
+      contentKind: "jsonl-file",
+      purpose: "Claude Code history transcript file",
+      relativePath: ".claude/history.jsonl",
+      runtime: "claude_code",
+      sourceKind: "jsonl"
+    };
 
     const result = await preflightAdapterPathCandidate(
       { exclusions: [], homeDir, now: "2026-06-27T12:00:00.000Z" },
@@ -92,7 +105,8 @@ describe("adapter preflight utilities", () => {
     expect(result).toMatchObject({
       candidateRecordCount: 0,
       exists: true,
-      readable: true
+      readable: true,
+      runtime: "claude_code"
     });
     expect(result.diagnostics).toEqual([
       expect.objectContaining({

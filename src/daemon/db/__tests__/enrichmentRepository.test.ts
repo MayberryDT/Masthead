@@ -26,7 +26,7 @@ describe("enrichment repository", () => {
     db.prepare(
       `INSERT INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at)
       VALUES (?, ?, ?, ?, ?)`
-    ).run("runtime:test", "codex", "test", "2026-06-24T12:00:00.000Z", "2026-06-24T12:00:00.000Z");
+    ).run("runtime:test", "opencode", "test", "2026-06-24T12:00:00.000Z", "2026-06-24T12:00:00.000Z");
     db.prepare(
       `INSERT INTO sessions (
         session_id, host_id, runtime_id, source_session_id, lifecycle, last_activity_at, source_confidence, created_at, updated_at
@@ -59,7 +59,7 @@ describe("enrichment repository", () => {
       promptVersion: "session-capsule-v1",
       provider: "local",
       sessionId: "session-1",
-      sourceRefs: [{ id: "event-1", kind: "event", observedAt: "2026-06-24T12:00:00.000Z", source: "codex.hook" }],
+      sourceRefs: [{ id: "event-1", kind: "event", observedAt: "2026-06-24T12:00:00.000Z", source: "opencode.plugin" }],
       status: "current"
     });
     const sameId = upsertSessionEnrichment(db, {

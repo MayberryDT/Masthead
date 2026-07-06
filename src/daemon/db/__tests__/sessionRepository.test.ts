@@ -22,13 +22,13 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       runtimeVersion: "codex-test"
     });
     const events = [
       liveEvent("start", "session.started", {
         model: "gpt-5.5",
-        objective: "Import Codex history",
+        objective: "Import OpenCode history",
         project: "Masthead",
         title: "Build durable data layer"
       }),
@@ -54,7 +54,7 @@ describe("session repository", () => {
     const sessions = db.prepare("SELECT session_id, source_session_id, title, objective, project_label FROM sessions").all();
     expect(sessions).toEqual([
       expect.objectContaining({
-        objective: "Import Codex history",
+        objective: "Import OpenCode history",
         project_label: "Masthead",
         source_session_id: "live-session",
         title: "Build durable data layer"
@@ -87,7 +87,7 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       runtimeVersion: "codex-test"
     });
 
@@ -108,7 +108,7 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       runtimeVersion: "codex-test"
     });
     const original = liveEvent("start", "session.started", {
@@ -136,7 +136,7 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex"
+      runtimeKind: "opencode"
     });
     const event = liveEvent("start", "session.started", { project: "Masthead", title: "Board materialized state" });
     const sessionId = repository.upsertLiveEvent(event);
@@ -167,7 +167,7 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex"
+      runtimeKind: "opencode"
     });
     const event = liveEvent("start", "session.started", { project: "Masthead", title: "Legacy journal card" });
     const envelope = projectLiveEvents([event], [], { generatedAt: "2026-06-24T15:05:00.000Z" });
@@ -191,7 +191,7 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex"
+      runtimeKind: "opencode"
     });
     const event = liveEvent("start", "session.started", { project: "Masthead", title: "Scoped card" });
     const envelope = projectLiveEvents([event], [], { generatedAt: "2026-06-24T15:05:00.000Z" });
@@ -199,11 +199,11 @@ describe("session repository", () => {
     const projectionSessionId = "codex:raw%2Fsession";
     envelope.projection.cards = envelope.projection.cards.map((card) => ({
       ...card,
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: projectionSessionId,
       sourceSessionId: rawSourceSessionId
     }));
-    const expectedCanonicalSessionId = canonicalSessionId("host:test", runtimeIdFor("codex", undefined), rawSourceSessionId);
+    const expectedCanonicalSessionId = canonicalSessionId("host:test", runtimeIdFor("opencode", undefined), rawSourceSessionId);
 
     repository.replaceBoardProjection(envelope.projection, envelope.generatedAt);
 
@@ -231,7 +231,7 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       runtimeVersion: "local-jsonl"
     });
     const record = transcriptMessageRecord({
@@ -260,7 +260,7 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       runtimeVersion: "local-jsonl"
     });
     const toolRecord = transcriptRecord("tool_call", {
@@ -291,7 +291,7 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       runtimeVersion: "local-jsonl"
     });
     const patchRecord = transcriptRecord("tool_call", {
@@ -341,7 +341,7 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       runtimeVersion: "local-jsonl"
     });
     const sparseUsageRecord = transcriptRecord("usage", {
@@ -371,7 +371,7 @@ describe("session repository", () => {
     const repository = createSessionRepository(db, {
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       runtimeVersion: "local-jsonl"
     });
     const toolRecord = transcriptRecord("tool_call", {
@@ -435,7 +435,7 @@ describe("session repository", () => {
       },
       hostId: "host:test",
       hostname: "masthead-test-host",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       runtimeVersion: "local-jsonl"
     });
 
@@ -466,10 +466,10 @@ function liveEvent(eventId: string, type: NormalizedEvent["type"], payload: Reco
   const occurredAt = `2026-06-24T15:0${eventOrdinal(eventId)}:00.000Z`;
   return {
     schemaVersion: 1,
-    eventId: `codex:${eventId}`,
+    eventId: `opencode:${eventId}`,
     sessionId: "live-session",
     source: {
-      adapter: "codex",
+      adapter: "opencode",
       surface: "hook",
       sourceEventId: eventId
     },
@@ -486,7 +486,7 @@ function liveEvent(eventId: string, type: NormalizedEvent["type"], payload: Reco
     payload,
     sensitivity: "metadata",
     payloadHash: `hash-${eventId}`,
-    evidence: [{ id: `codex:${eventId}`, kind: "event", observedAt: occurredAt, source: "codex.hook" }]
+    evidence: [{ id: `opencode:${eventId}`, kind: "event", observedAt: occurredAt, source: "opencode.plugin" }]
   };
 }
 
@@ -505,7 +505,7 @@ function transcriptRecord(kind: AdapterRecord["normalized"]["kind"], value: Reco
       confidence: "inferred",
       kind,
       sourceRef: {
-        schemaVersion: "codex-transcript-jsonl",
+        schemaVersion: "opencode-transcript-jsonl",
         sourceKind: "jsonl",
         sourcePath: "/tmp/historical-session.jsonl"
       },
@@ -517,9 +517,9 @@ function transcriptRecord(kind: AdapterRecord["normalized"]["kind"], value: Reco
     source: {
       confidence: "authoritative",
       path: "/tmp/historical-session.jsonl",
-      runtime: "codex",
+      runtime: "opencode",
       runtimeVersion: "local-jsonl",
-      schemaVersion: "codex-transcript-jsonl",
+      schemaVersion: "opencode-transcript-jsonl",
       sourceId: "codex-transcript",
       sourceKind: "jsonl"
     },

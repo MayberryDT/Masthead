@@ -1,4 +1,4 @@
-import { parseCodexHookPayload, type CodexHookDiagnostic } from "./codexAdapter.ts";
+import { parseLiveHookPayload } from "./liveHookAdapter.ts";
 import type { LiveHookDiagnostic } from "./liveHookAdapter.ts";
 import type { NormalizedEvent } from "./types";
 
@@ -41,12 +41,13 @@ export function createIngestionState(
   return state;
 }
 
-export function ingestCodexHookPayload(
+
+export function ingestLiveHookPayload(
   raw: string,
   state: IngestionState = createIngestionState(),
-  options: IngestionOptions = {}
+  options: IngestionOptions & { runtime?: string } = {}
 ): IngestionResult {
-  const parsed = parseCodexHookPayload(raw, options);
+  const parsed = parseLiveHookPayload(raw, { ...options, runtime: options.runtime ?? "claude_code" });
   if (!parsed.ok) {
     state.diagnostics.push(parsed.diagnostic);
     return { status: "malformed", diagnostic: parsed.diagnostic };

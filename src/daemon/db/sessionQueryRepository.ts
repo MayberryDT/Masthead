@@ -1,3 +1,5 @@
+import { harnessForRuntime } from "../../adapters/harnessCatalog.ts";
+import type { RuntimeKind } from "../../adapters/types.ts";
 import { firstUsefulSessionTitle } from "../../shared/sessionTextQuality.ts";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../../shared/sessionEnrichment.ts";
 import { currentSessionEnrichmentViews, type SessionEnrichmentView } from "./enrichmentViewRepository.ts";
@@ -508,7 +510,7 @@ function fallbackSessionTitle(row: SessionRow): string {
 }
 
 function runtimeLabel(runtime: string): string {
-  return runtime === "codex" ? "Codex" : runtime;
+  return harnessForRuntime(runtime as RuntimeKind)?.label ?? runtime;
 }
 
 function compactTimestamp(value: string): string {

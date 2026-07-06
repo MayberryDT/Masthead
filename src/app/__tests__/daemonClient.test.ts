@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+  getLiveHookSettings,
   getRuntimeHookSettings,
   getSessionTranscript,
   getSourcesAdvanced,
@@ -43,7 +44,7 @@ describe("daemon client review dispositions", () => {
                   lifecycle: "ended",
                   models: [],
                   project,
-                  runtime: "codex",
+                  runtime: "opencode",
                   sessionId: project === "Project one" ? "session-one" : "session-two",
                   sourceConfidence: "authoritative",
                   sourceSessionId: `${project}:source`,
@@ -126,7 +127,7 @@ describe("daemon client review dispositions", () => {
     );
 
     await scanSourcesSetup("http://127.0.0.1:17373/projection");
-    await runSourcesSetup({ importMetadata: true, runtimes: ["codex"] }, "http://127.0.0.1:17373/projection");
+    await runSourcesSetup({ importMetadata: true, runtimes: ["opencode"] }, "http://127.0.0.1:17373/projection");
     await syncSources("http://127.0.0.1:17373/projection");
     await repairSources("http://127.0.0.1:17373/projection");
 
@@ -136,7 +137,7 @@ describe("daemon client review dispositions", () => {
       method: "POST"
     });
     expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:17373/sources/setup/run", {
-      body: JSON.stringify({ importMetadata: true, runtimes: ["codex"] }),
+      body: JSON.stringify({ importMetadata: true, runtimes: ["opencode"] }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST"
     });
@@ -184,7 +185,7 @@ describe("daemon client review dispositions", () => {
       vi.fn(async () =>
         response({
           ok: true,
-          imports: [{ importJobId: "job-1", sourceId: "codex-sessions" }],
+          imports: [{ importJobId: "job-1", sourceId: "opencode-sessions" }],
           limit: 25,
           offset: 50,
           total: 100
@@ -194,20 +195,20 @@ describe("daemon client review dispositions", () => {
 
     await expect(
       listImports("http://127.0.0.1:17373/projection", {
-        adapterId: "codex",
+        adapterId: "opencode",
         limit: 25,
         offset: 50,
-        sourceId: "codex-sessions",
+        sourceId: "opencode-sessions",
         status: "active"
       })
     ).resolves.toMatchObject({
-      imports: [{ importJobId: "job-1", sourceId: "codex-sessions" }],
+      imports: [{ importJobId: "job-1", sourceId: "opencode-sessions" }],
       limit: 25,
       offset: 50,
       total: 100
     });
     expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:17373/imports?limit=25&offset=50&adapterId=codex&sourceId=codex-sessions&status=active",
+      "http://127.0.0.1:17373/imports?limit=25&offset=50&adapterId=opencode&sourceId=opencode-sessions&status=active",
       { headers: { accept: "application/json" }, signal: undefined }
     );
   });
@@ -220,15 +221,15 @@ describe("daemon client review dispositions", () => {
           ok: true,
           previews: [
             {
-              runtime: "codex",
+              runtime: "opencode",
               summary: {
                 excludedUnits: 1,
                 generatedAt: "2026-07-01T00:00:00.000Z",
-                importJobId: "preview:codex",
+                importJobId: "preview:opencode",
                 importKind: "transcript",
                 includedUnits: 2,
                 manifestId: "",
-                runtime: "codex",
+                runtime: "opencode",
                 scope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
                 totalBytes: 120,
                 totalUnits: 3
@@ -243,14 +244,14 @@ describe("daemon client review dispositions", () => {
       previewSourcesImport("http://127.0.0.1:17373/projection", {
         importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
         importTranscripts: true,
-        runtimes: ["codex"]
+        runtimes: ["opencode"]
       })
     ).resolves.toHaveLength(1);
     expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/sources/import/preview", {
       body: JSON.stringify({
         importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
         importTranscripts: true,
-        runtimes: ["codex"]
+        runtimes: ["opencode"]
       }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST"
@@ -429,7 +430,7 @@ describe("daemon client runtime hook helpers", () => {
     });
   });
 
-  test("posts hook actions to the selected runtime instead of the Codex-only route", async () => {
+  test("posts hook actions to the selected supported runtime route", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true, hooks: hookSettings({ runtime: "claude_code" }) })));
 
     await expect(testRuntimeHooks("claude_code", "http://127.0.0.1:17373/projection")).resolves.toMatchObject({
@@ -441,15 +442,46 @@ describe("daemon client runtime hook helpers", () => {
     });
   });
 
-  test("keeps Codex on the same runtime-scoped hook action path", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true, hooks: hookSettings({ runtime: "codex" }) })));
+  test("keeps OpenCode on the same runtime-scoped hook action path", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true, hooks: hookSettings({ runtime: "opencode" }) })));
 
-    await expect(installRuntimeHooks("codex", "http://127.0.0.1:17373/projection")).resolves.toMatchObject({
-      integrations: [expect.objectContaining({ runtime: "codex" })]
+    await expect(installRuntimeHooks("opencode", "http://127.0.0.1:17373/projection")).resolves.toMatchObject({
+      integrations: [expect.objectContaining({ runtime: "opencode" })]
     });
-    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/settings/hooks/codex/install", {
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/settings/hooks/opencode/install", {
       headers: { accept: "application/json" },
       method: "POST"
+    });
+  });
+
+  test("loads aggregate hook settings without choosing a runtime-specific action route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          hooks: {
+            ...hookSettings({ runtime: "opencode" }),
+            integrations: [
+              hookSettings({ runtime: "claude_code" }).integrations[0],
+              hookSettings({ runtime: "opencode" }).integrations[0],
+              hookSettings({ runtime: "omp" }).integrations[0]
+            ]
+          }
+        })
+      )
+    );
+
+    await expect(getLiveHookSettings("http://127.0.0.1:17373/projection")).resolves.toMatchObject({
+      integrations: [
+        expect.objectContaining({ runtime: "claude_code" }),
+        expect.objectContaining({ runtime: "opencode" }),
+        expect.objectContaining({ runtime: "omp" })
+      ]
+    });
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/settings/hooks", {
+      headers: { accept: "application/json" },
+      signal: undefined
     });
   });
 });

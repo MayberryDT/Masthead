@@ -19,9 +19,9 @@ export function seedSession(
     now
   );
   db.prepare("INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(
-    "runtime:codex",
-    "codex",
-    "1.0.0",
+    "runtime:opencode",
+    "opencode",
+    "opencode-test",
     now,
     now
   );
@@ -34,7 +34,7 @@ export function seedSession(
   ).run(
     options.sessionId,
     "host:test",
-    "runtime:codex",
+    "runtime:opencode",
     options.sessionId.replace("session", "source-session"),
     options.project,
     "/workspace/pip",
@@ -58,7 +58,7 @@ export function seedSession(
     "Fix the OAuth authentication callback.",
     `${options.sessionId}:message-hash`,
     now,
-    JSON.stringify({ source: "codex.history", id: `${options.sessionId}:message` }),
+    JSON.stringify({ source: "opencode.history", id: `${options.sessionId}:message` }),
     "authoritative"
   );
   db.prepare("INSERT INTO model_usage (usage_id, session_id, model, provider, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)").run(

@@ -1,18 +1,26 @@
-import { appendFile, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, test } from "vitest";
-import { codexHookSource } from "../../adapters/codex/hookAdapter.ts";
 import type { DaemonConfig } from "../config.ts";
 import { upsertSessionEnrichment } from "../db/enrichmentRepository.ts";
 import { getSessionDossier } from "../db/sessionDossierRepository.ts";
-import { canonicalSessionId, runtimeIdFor } from "../db/sessionRepository.ts";
-import { recentHookEventsWithTranscriptPathsForSessions } from "../hookTranscriptRecovery.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
+
+const LIVE_CONNECTOR_RUNTIME_EXPECTATIONS = [
+  { label: "Cursor", runtime: "cursor" },
+  { label: "Claude Code", runtime: "claude_code" },
+  { label: "OpenCode", runtime: "opencode" },
+  { label: "Grok Build", runtime: "grok" },
+  { label: "Hermes", runtime: "hermes" },
+  { label: "Pi", runtime: "pi" },
+  { label: "Oh My Pi", runtime: "omp" }
+] as const;
+
 
 const tempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
@@ -32,6 +40,7 @@ describe("settings API", () => {
     const { daemon, databasePath, storePath } = await createTestHarness();
     seedSession(daemon.database, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:settings", title: "Settings API" });
     seedWeakSessionWithoutEffects(daemon.database);
+    seedUnsupportedLegacyRuntime(daemon.database);
     const baseUrl = await listen(daemon);
 
     const state = await getJson(baseUrl, "/settings");
@@ -108,33 +117,22 @@ describe("settings API", () => {
       sessionsWithMessagesButNoEffects: 1,
       weakCurrentTitles: 1
     });
+    expect(settings.hooks.integrations.map((integration: { runtime: string }) => integration.runtime)).toEqual(
+      LIVE_CONNECTOR_RUNTIME_EXPECTATIONS.map((runtime) => runtime.runtime)
+    );
     expect(settings.hooks.integrations).toEqual(
-      expect.arrayContaining([
+      LIVE_CONNECTOR_RUNTIME_EXPECTATIONS.map(({ label, runtime }) =>
         expect.objectContaining({
           actionSurface: "settings",
           captureMode: "live_hook",
-          label: "Codex",
-          runtime: "codex",
-          supportsActions: true
-        }),
-        expect.objectContaining({
-          actionSurface: "settings",
-          captureMode: "live_hook",
-          label: "Claude Code",
-          runtime: "claude_code",
-          supportsActions: true
-        }),
-        expect.objectContaining({
-          actionSurface: "settings",
-          captureMode: "live_hook",
-          label: "OpenCode",
-          runtime: "opencode",
+          label,
+          runtime,
           supportsActions: true
         })
-      ])
+      )
     );
     expect(state.settings.deletionTargets.projects).toEqual([{ label: "Masthead", value: "Masthead" }]);
-    expect(state.settings.deletionTargets.runtimes).toEqual([{ label: "codex", value: "codex" }]);
+    expect(state.settings.deletionTargets.runtimes).toEqual([{ label: "opencode", value: "opencode" }]);
     expect(state.settings.deletionTargets.hosts).toEqual([{ label: "masthead-test-host", value: "masthead-test-host" }]);
   });
 
@@ -433,126 +431,6 @@ describe("settings API", () => {
     expect(elapsedMs).toBeLessThan(500);
   });
 
-  test("manual Dossier enrichment catches up hook transcript before provider request", async () => {
-    let providerCalls = 0;
-    const providerInputs: Array<{ facts?: { userEvidence?: string[]; assistantEvidence?: string[] } }> = [];
-    const providerServer = createServer(async (request, response) => {
-      const body = JSON.parse(await readRequestBody(request)) as { messages?: Array<{ content?: string }> };
-      providerInputs.push(JSON.parse(body.messages?.[1]?.content ?? "{}"));
-      providerCalls += 1;
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify(
-                  durableProviderOutput({
-                    summary: "Dossier enrichment ran after transcript catch-up imported the current transcript evidence.",
-                    title: "Dossier transcript catch-up"
-                  })
-                )
-              }
-            }
-          ]
-        })
-      );
-    });
-    servers.push(providerServer);
-    const providerBaseUrl = await listenHttp(providerServer);
-    const { daemon, tempDir } = await createTestHarness({ hookTranscriptCatchupEnabled: true });
-    const sourceSessionId = "source-session:dossier-catchup";
-    const sessionId = canonicalSessionId("host:127.0.0.1", runtimeIdFor("codex", undefined), sourceSessionId);
-    seedCanonicalDossierSession(daemon.database, { sessionId, sourceSessionId, title: "Cached dossier" });
-    daemon.database.prepare("DELETE FROM session_enrichments WHERE session_id = ?").run(sessionId);
-    const transcriptPath = join(tempDir, ".codex", "sessions", "2026", "07", "03", "dossier-catchup.jsonl");
-    await mkdir(dirname(transcriptPath), { recursive: true });
-    await writeFile(
-      transcriptPath,
-      `${JSON.stringify({
-        content: "Transcript prompt imported after Dossier response.",
-        role: "user",
-        session_id: sourceSessionId,
-        timestamp: "2026-07-03T12:05:00.000Z"
-      })}\n`,
-      "utf8"
-    );
-    seedHookTranscriptRecord(daemon.database, {
-      observedAt: "2026-07-03T12:06:00.000Z",
-      sourceSessionId,
-      transcriptPath
-    });
-    expect(
-      recentHookEventsWithTranscriptPathsForSessions(
-        daemon.database,
-        codexHookSource.sourceId,
-        new Set([sourceSessionId]),
-        1
-      )
-    ).toHaveLength(1);
-    const baseUrl = await listen(daemon);
-    await postJson(baseUrl, "/sources/codex/approve-transcripts", {});
-    await postJson(baseUrl, "/settings/llm-provider", {
-      activeProvider: "ollama",
-      apiKey: "test-compatible-key",
-      baseUrl: `${providerBaseUrl}/v1`,
-      model: "llama-3.1",
-      remoteEnrichmentEnabled: true
-    });
-
-    const request = postJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/dossier/enrich`, {});
-    const race = await Promise.race([request.then(() => "returned"), delay(50).then(() => "blocked")]);
-    await request;
-    const first = await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/dossier`);
-
-    expect(race).toBe("returned");
-    expect(first.dossier.narrative.latestUserPrompt).toBe("Fix the OAuth authentication callback.");
-    await waitFor(() => providerCalls === 1);
-    expect(providerInputs[0]?.facts?.userEvidence ?? []).toContain("Historical untrusted transcript evidence: Transcript prompt imported after Dossier response.");
-    await waitFor(() =>
-      transcriptMessageTexts(daemon.database, sessionId).includes("Transcript prompt imported after Dossier response."),
-      3_000
-    );
-  });
-
-  test("session dossier GET skips hook transcript catch-up when transcript is already current", async () => {
-    const { daemon, tempDir } = await createTestHarness({ hookTranscriptCatchupEnabled: true });
-    const sourceSessionId = "source-session:dossier-catchup-current";
-    const sessionId = canonicalSessionId("host:127.0.0.1", runtimeIdFor("codex", undefined), sourceSessionId);
-    seedCanonicalDossierSession(daemon.database, { sessionId, sourceSessionId, title: "Caught-up dossier" });
-    dbInsertMessage(
-      daemon.database,
-      sessionId,
-      "caught-up-assistant",
-      "assistant",
-      "Assistant transcript already imported after the hook event.",
-      "2026-07-03T12:10:00.000Z"
-    );
-    const transcriptPath = join(tempDir, ".codex", "sessions", "2026", "07", "03", "already-current.jsonl");
-    await mkdir(dirname(transcriptPath), { recursive: true });
-    await writeFile(
-      transcriptPath,
-      `${JSON.stringify({
-        content: "This stale transcript row should not be imported again.",
-        role: "user",
-        session_id: sourceSessionId,
-        timestamp: "2026-07-03T12:04:00.000Z"
-      })}\n`,
-      "utf8"
-    );
-    seedHookTranscriptRecord(daemon.database, {
-      observedAt: "2026-07-03T12:05:00.000Z",
-      sourceSessionId,
-      transcriptPath
-    });
-    const baseUrl = await listen(daemon);
-    await postJson(baseUrl, "/sources/codex/approve-transcripts", {});
-
-    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/dossier`);
-    await delay(250);
-
-    expect(transcriptMessageTexts(daemon.database, sessionId)).not.toContain("This stale transcript row should not be imported again.");
-  });
 
   test("lists models from a local OpenAI-compatible provider", async () => {
     const modelServer = createServer((request, response) => {
@@ -662,92 +540,22 @@ describe("settings API", () => {
     expect(await confirm.text()).toContain("Masthead database changed");
   });
 
-  test("projects a recent Codex desktop transcript as a live session", async () => {
-    const { daemon, tempDir } = await createTestHarness();
-    const baseUrl = await listen(daemon);
-    const cwd = join(tempDir, "worktrees", "masthead-live");
-    const transcriptPath = join(tempDir, ".codex", "sessions", "2026", "07", "05", "rollout.jsonl");
-    const observedAt = new Date();
-    await mkdir(dirname(transcriptPath), { recursive: true });
-    await mkdir(cwd, { recursive: true });
-    await writeFile(
-      transcriptPath,
-      `${JSON.stringify({
-        payload: {
-          cwd,
-          id: "codex-desktop-active",
-          model: "gpt-5-codex"
-        },
-        timestamp: observedAt.toISOString(),
-        type: "session_meta"
-      })}\n${JSON.stringify({
-        payload: {
-          info: {
-            last_token_usage: {
-              input_tokens: 42,
-              output_tokens: 8,
-              total_tokens: 50
-            }
-          },
-          type: "token_count"
-        },
-        timestamp: observedAt.toISOString(),
-        type: "event_msg"
-      })}\n`,
-      "utf8"
-    );
-    await utimes(transcriptPath, observedAt, observedAt);
-
-    const projection = await getJson(baseUrl, "/projection");
-
-    expect(projection.projection.cards).toHaveLength(1);
-    expect(projection.projection.cards[0]).toMatchObject({
-      branchOrWorktree: "masthead-live",
-      harness: "Codex",
-      model: "gpt-5-codex",
-      runtime: "codex",
-      sourceSessionId: "codex-desktop-active",
-      totalTokens: 50
-    });
-
-    const laterObservedAt = new Date(observedAt.getTime() + 2_500);
-    await appendFile(
-      transcriptPath,
-      `${JSON.stringify({
-        payload: {
-          cwd,
-          model: "gpt-5-codex"
-        },
-        timestamp: laterObservedAt.toISOString(),
-        type: "turn_context"
-      })}\n`,
-      "utf8"
-    );
-    await utimes(transcriptPath, laterObservedAt, laterObservedAt);
-    await delay(2_100);
-
-    const updatedProjection = await getJson(baseUrl, "/projection");
-    expect(updatedProjection.projection.cards).toHaveLength(1);
-    expect(updatedProjection.projection.cards[0]).toMatchObject({
-      sourceSessionId: "codex-desktop-active",
-      totalTokens: 50
-    });
-  });
 
   test("installs, tests, and uninstalls the live connector hook files", async () => {
     const { daemon, tempDir } = await createTestHarness();
     const baseUrl = await listen(daemon);
-    const hooksPath = join(tempDir, ".codex", "hooks.json");
     const claudePath = join(tempDir, ".claude", "settings.json");
     const cursorPath = join(tempDir, ".cursor", "hooks.json");
     const grokPath = join(tempDir, ".grok", "hooks", "masthead.json");
     const ompPath = join(tempDir, ".omp", "agent", "extensions", "masthead-live.js");
     const opencodePath = join(tempDir, ".config", "opencode", "plugins", "masthead-live.js");
+    const piPath = join(tempDir, ".pi", "agent", "extensions", "masthead-live.js");
+    const hermesPath = join(tempDir, ".hermes", "plugins", "masthead-live", "index.js");
 
     const before = await getJson(baseUrl, "/settings/hooks");
     expect(before.hooks).toMatchObject({
       configExists: false,
-      configPath: hooksPath,
+      configPath: claudePath,
       installed: false
     });
     await mkdir(dirname(cursorPath), { recursive: true });
@@ -766,13 +574,14 @@ describe("settings API", () => {
       "utf8"
     );
 
-    const installed = await postJson(baseUrl, "/settings/hooks/codex/install");
+    for (const { runtime } of LIVE_CONNECTOR_RUNTIME_EXPECTATIONS) {
+      await postJson(baseUrl, `/settings/hooks/${runtime}/install`);
+    }
+    const installed = await getJson(baseUrl, "/settings/hooks");
     expect(installed.hooks).toMatchObject({
       configExists: true,
       installed: true
     });
-    expect(await readFile(hooksPath, "utf8")).toContain("masthead-hook.js");
-    expect(await readFile(hooksPath, "utf8")).toContain("/ingest");
     expect(await readFile(claudePath, "utf8")).toContain("runtime=claude_code");
     const cursorConfig = JSON.parse(await readFile(cursorPath, "utf8")) as { hooks: Record<string, Array<{ command: string }>> };
     expect(cursorConfig.hooks.beforeSubmitPrompt).toEqual(
@@ -791,17 +600,23 @@ describe("settings API", () => {
     expect(await readFile(ompPath, "utf8")).toContain("session_start");
     expect(await readFile(opencodePath, "utf8")).toContain("masthead-live-connector");
     expect(await readFile(opencodePath, "utf8")).toContain("runtime=opencode");
+    expect(await readFile(piPath, "utf8")).toContain("masthead-live-connector");
+    expect(await readFile(piPath, "utf8")).toContain("runtime=pi");
+    expect(await readFile(hermesPath, "utf8")).toContain("masthead-live-connector");
+    expect(await readFile(hermesPath, "utf8")).toContain("runtime=hermes");
     expect(installed.hooks.integrations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ configPath: claudePath, runtime: "claude_code", status: "installed" }),
         expect.objectContaining({ configPath: cursorPath, runtime: "cursor", status: "installed" }),
         expect.objectContaining({ configPath: grokPath, runtime: "grok", status: "installed" }),
         expect.objectContaining({ configPath: ompPath, runtime: "omp", status: "installed" }),
-        expect.objectContaining({ configPath: opencodePath, runtime: "opencode", status: "installed" })
+        expect.objectContaining({ configPath: opencodePath, runtime: "opencode", status: "installed" }),
+        expect.objectContaining({ configPath: piPath, runtime: "pi", status: "installed" }),
+        expect.objectContaining({ configPath: hermesPath, runtime: "hermes", status: "installed" })
       ])
     );
 
-    const tested = await postJson(baseUrl, "/settings/hooks/codex/test");
+    const tested = await postJson(baseUrl, "/settings/hooks/claude_code/test");
     expect(tested.hooks.lastTest).toMatchObject({
       message: expect.stringContaining("Masthead accepted synthetic live events"),
       status: "passed"
@@ -819,7 +634,10 @@ describe("settings API", () => {
     const projection = await getJson(baseUrl, "/projection");
     expect(projection.projection.cards).toHaveLength(0);
 
-    const uninstalled = await postJson(baseUrl, "/settings/hooks/codex/uninstall");
+    for (const { runtime } of LIVE_CONNECTOR_RUNTIME_EXPECTATIONS) {
+      await postJson(baseUrl, `/settings/hooks/${runtime}/uninstall`);
+    }
+    const uninstalled = await getJson(baseUrl, "/settings/hooks");
     expect(uninstalled.hooks).toMatchObject({
       installed: false
     });
@@ -829,6 +647,8 @@ describe("settings API", () => {
     expect(uninstalledCursorConfig.hooks.afterFileEdit).toEqual([]);
     await expect(readFile(ompPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(opencodePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(piPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(hermesPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("supports runtime-specific live connector settings actions", async () => {
@@ -925,72 +745,6 @@ async function createTestHarness(
   return { daemon, databasePath, storePath, tempDir };
 }
 
-function seedHookTranscriptRecord(
-  db: MastheadDaemon["database"],
-  input: { observedAt: string; sourceSessionId: string; transcriptPath: string }
-): void {
-  db.prepare(
-    `INSERT OR IGNORE INTO ingest_sources (
-      source_id, adapter, source_kind, endpoint, schema_version, runtime_version, confidence, discovered_at, last_seen_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    codexHookSource.sourceId,
-    codexHookSource.runtime,
-    codexHookSource.sourceKind,
-    codexHookSource.endpoint ?? null,
-    codexHookSource.schemaVersion ?? null,
-    codexHookSource.runtimeVersion ?? null,
-    codexHookSource.confidence,
-    input.observedAt,
-    input.observedAt
-  );
-  const record = {
-    capturedAt: input.observedAt,
-    recordId: "raw:hook:dossier-catchup",
-    recordType: "event",
-    value: {
-      eventId: "hook:dossier-catchup",
-      occurredAt: input.observedAt,
-      payload: { transcriptPath: input.transcriptPath },
-      sessionId: input.sourceSessionId,
-      source: { adapter: "codex", surface: "hook" }
-    }
-  };
-  db.prepare(
-    `INSERT INTO raw_events (
-      raw_event_id, source_id, source_record_key, observed_at, received_at, source_kind, payload_hash, payload_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "raw:hook:dossier-catchup",
-    codexHookSource.sourceId,
-    "hook:dossier-catchup",
-    input.observedAt,
-    input.observedAt,
-    "hook",
-    "hash:hook:dossier-catchup",
-    JSON.stringify(record)
-  );
-}
-
-function transcriptMessageTexts(db: MastheadDaemon["database"], sessionId: string): string[] {
-  const rows = db
-    .prepare("SELECT text_redacted AS text FROM messages WHERE session_id = ? ORDER BY observed_at")
-    .all(sessionId) as Array<{ text: string }>;
-  return rows.map((row) => row.text);
-}
-
-function dbInsertMessage(
-  db: MastheadDaemon["database"],
-  sessionId: string,
-  id: string,
-  role: string,
-  text: string,
-  observedAt: string
-): void {
-  db.prepare(
-    "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(`${sessionId}:${id}`, sessionId, role, text, `${sessionId}:${id}:hash`, observedAt, JSON.stringify({ id }), "authoritative");
-}
 
 function seedLargeToolHistory(db: MastheadDaemon["database"], sessionId: string, count: number): void {
   const output = Array.from({ length: 2600 }, (_, index) => `large historical output line ${index}`).join("\n");
@@ -1009,76 +763,6 @@ function seedLargeToolHistory(db: MastheadDaemon["database"], sessionId: string,
   }
 }
 
-function seedCanonicalDossierSession(
-  db: MastheadDaemon["database"],
-  input: { sessionId: string; sourceSessionId: string; title: string }
-): void {
-  const now = "2026-07-03T12:00:00.000Z";
-  db.prepare("INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
-    "host:127.0.0.1",
-    "127.0.0.1",
-    now,
-    now
-  );
-  db.prepare("INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
-    runtimeIdFor("codex", undefined),
-    "codex",
-    now,
-    now
-  );
-  db.prepare(
-    `INSERT INTO sessions (
-      session_id, host_id, runtime_id, source_session_id, project_label, repo_root, worktree_path,
-      branch, title, objective, lifecycle, outcome_label, started_at, last_activity_at, ended_at,
-      source_confidence, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    input.sessionId,
-    "host:127.0.0.1",
-    runtimeIdFor("codex", undefined),
-    input.sourceSessionId,
-    "Masthead",
-    "/workspace/masthead",
-    "/workspace/masthead",
-    "main",
-    input.title,
-    "Open the Dossier without blocking on transcript catch-up",
-    "ended",
-    "completed",
-    now,
-    now,
-    now,
-    "authoritative",
-    now,
-    now
-  );
-  db.prepare("INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
-    `${input.sessionId}:message`,
-    input.sessionId,
-    "user",
-    "Fix the OAuth authentication callback.",
-    `${input.sessionId}:message-hash`,
-    now,
-    JSON.stringify({ source: "fixture", id: `${input.sessionId}:message` }),
-    "authoritative"
-  );
-  db.prepare("INSERT INTO model_usage (usage_id, session_id, model, provider, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)").run(
-    `${input.sessionId}:usage`,
-    input.sessionId,
-    "gpt-5",
-    "openai",
-    now,
-    "{}"
-  );
-  db.prepare("INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)").run(
-    `${input.sessionId}:file`,
-    input.sessionId,
-    "src/daemon/server.ts",
-    "modified",
-    now,
-    "{}"
-  );
-}
 
 function seedWeakSessionWithoutEffects(db: MastheadDaemon["database"]): void {
   const now = "2026-06-25T12:05:00.000Z";
@@ -1087,7 +771,7 @@ function seedWeakSessionWithoutEffects(db: MastheadDaemon["database"]): void {
       session_id, host_id, runtime_id, source_session_id, project_label, title, lifecycle,
       last_activity_at, source_confidence, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("session:weak", "host:test", "runtime:codex", "source-session:weak", "Masthead", "Codex hook event", "ended", now, "authoritative", now, now);
+  ).run("session:weak", "host:test", "runtime:opencode", "source-session:weak", "Masthead", "Codex hook event", "ended", now, "authoritative", now, now);
   db.prepare("INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
     "session:weak:message",
     "session:weak",
@@ -1123,6 +807,34 @@ function seedWeakSessionWithoutEffects(db: MastheadDaemon["database"]): void {
       unresolved: []
     }),
     "[]"
+  );
+}
+
+function seedUnsupportedLegacyRuntime(db: MastheadDaemon["database"]): void {
+  const now = "2026-06-25T12:06:00.000Z";
+  db.prepare("INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
+    "runtime:legacy-codex",
+    "codex",
+    now,
+    now
+  );
+  db.prepare(
+    `INSERT INTO sessions (
+      session_id, host_id, runtime_id, source_session_id, project_label, title, lifecycle,
+      last_activity_at, source_confidence, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "session:legacy-codex",
+    "host:test",
+    "runtime:legacy-codex",
+    "source-session:legacy-codex",
+    "Masthead",
+    "Legacy Codex database row",
+    "ended",
+    now,
+    "authoritative",
+    now,
+    now
   );
 }
 

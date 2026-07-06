@@ -84,10 +84,10 @@ describe("source setup service", () => {
 
   test("reports importing when connected sources have active jobs", async () => {
     const db = await openTestDatabase();
-    seedSource(db, "codex-history", "codex");
+    seedSource(db, "opencode-history", "opencode");
     const job = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-history",
+      sourceId: "opencode-history",
       updatedAt: "2026-06-27T10:00:00.000Z"
     });
     updateImportJob(db, job.importJobId, {
@@ -98,16 +98,16 @@ describe("source setup service", () => {
     const setup = buildSourcesSetupState(db, { now: "2026-06-27T10:01:00.000Z" });
 
     expect(setup.status).toBe("importing");
-    expect(setup.connectedSources[0]).toMatchObject({ sourceId: "codex-history", status: "importing" });
+    expect(setup.connectedSources[0]).toMatchObject({ sourceId: "opencode-history", status: "importing" });
     db.close();
   });
 
   test("reports needs_attention when connected sources still need transcript or enrichment setup", async () => {
     const db = await openTestDatabase();
-    seedSource(db, "codex-history", "codex");
+    seedSource(db, "opencode-history", "opencode");
     const job = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-history",
+      sourceId: "opencode-history",
       updatedAt: "2026-06-27T10:00:00.000Z"
     });
     updateImportJob(db, job.importJobId, {
@@ -129,7 +129,7 @@ describe("source setup service", () => {
 
   test("reports ready when connected sources have no active jobs, failures, or missing setup", async () => {
     const db = await openTestDatabase();
-    seedSource(db, "codex-history", "codex");
+    seedSource(db, "opencode-history", "opencode");
     approveTranscriptImport(db, {
       approvedAt: "2026-06-27T10:00:00.000Z",
       reason: "Approved in setup."
@@ -139,13 +139,13 @@ describe("source setup service", () => {
       enabled: true,
       policyKind: "enrichment",
       reason: "Enabled in setup.",
-      sourceId: "codex-history"
+      sourceId: "opencode-history"
     });
 
     const setup = buildSourcesSetupState(db, { now: "2026-06-27T10:01:00.000Z" });
 
     expect(setup.status).toBe("ready");
-    expect(setup.connectedSources[0]).toMatchObject({ sourceId: "codex-history", status: "ready" });
+    expect(setup.connectedSources[0]).toMatchObject({ sourceId: "opencode-history", status: "ready" });
     db.close();
   });
 
@@ -156,22 +156,12 @@ describe("source setup service", () => {
       expect.arrayContaining([
         expect.objectContaining({
           importable: true,
-          runtime: "codex",
-          sourceId: "codex-sessions",
+          runtime: "opencode",
+          sourceId: "opencode-sessions",
           state: "importable",
           transcriptApproval: expect.objectContaining({
             approved: false,
             required: true
-          })
-        }),
-        expect.objectContaining({
-          importable: false,
-          runtime: "cline",
-          sourceId: "cline:detector:local",
-          state: "detected",
-          transcriptApproval: expect.objectContaining({
-            approved: false,
-            required: false
           })
         })
       ])
@@ -203,40 +193,21 @@ function realisticScanResult(): SourceScanResult {
         checkedPaths: [],
         diagnostics: [],
         discoveredSessions: 7,
-        label: "Codex",
+        label: "OpenCode",
         maturity: "full",
-        runtime: "codex",
+        runtime: "opencode",
         sources: [
           {
             confidence: "authoritative",
-            path: "/home/tyler/.codex/sessions",
-            runtime: "codex",
-            schemaVersion: "codex-local-jsonl",
-            sourceId: "codex-sessions",
+            path: "/home/tyler/.opencode/sessions",
+            runtime: "opencode",
+            schemaVersion: "opencode-jsonl-tree",
+            sourceId: "opencode-sessions",
             sourceKind: "jsonl"
           }
         ],
         state: "connected"
       },
-      {
-        checkedPaths: [],
-        diagnostics: [],
-        discoveredSessions: 1,
-        label: "Cline",
-        maturity: "detector",
-        runtime: "cline",
-        sources: [
-          {
-            confidence: "heuristic",
-            path: "/home/tyler/.local/share/cline",
-            runtime: "cline",
-            schemaVersion: "cline-detector-only",
-            sourceId: "cline:detector:local",
-            sourceKind: "inference"
-          }
-        ],
-        state: "connected"
-      }
     ],
     generatedAt: "2026-06-27T12:00:00.000Z",
     scanId: "scan-realistic"

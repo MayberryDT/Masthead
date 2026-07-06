@@ -5,7 +5,7 @@ import {
   approveAdapterTranscripts,
   cancelImport,
   connectSources,
-  getRuntimeHookSettings,
+  getLiveHookSettings,
   getSourcesSetup,
   importAdapterMetadata,
   importAdapterTranscripts,
@@ -108,7 +108,7 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
         listAdapters(activeProjectionUrl, { includeLocations: false }),
         listSources(activeProjectionUrl),
         loadImportsForRuntime(importFilterRuntime),
-        getRuntimeHookSettings("codex", activeProjectionUrl)
+        getLiveHookSettings(activeProjectionUrl)
       ]);
       if (setupResult.status === "fulfilled") setSetup(setupResult.value);
       if (adapterResult.status === "fulfilled") setAdapters(adapterResult.value);

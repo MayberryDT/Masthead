@@ -25,6 +25,14 @@ export type RawEventPage = {
   nextCursor?: string;
 };
 
+export type RawEventRepository = {
+  appendStoreRecord(record: StoreRecord): void;
+  clearStoreRecords(): ClearLocalDataResult;
+  ensureSource(): void;
+  pageStoreRecords(options?: RawEventPageOptions): RawEventPage;
+  pruneStoreRecords(policy: RetentionPolicy): PruneLocalDataResult;
+};
+
 type RawEventRow = {
   raw_event_id: string;
   observed_at: string;
@@ -36,7 +44,7 @@ type DecodedCursor = {
   rawEventId: string;
 };
 
-export function createRawEventRepository(db: MastheadDatabase, source: RawEventSource) {
+export function createRawEventRepository(db: MastheadDatabase, source: RawEventSource): RawEventRepository {
   const ensureSource = (): void => {
     const now = new Date().toISOString();
     db.prepare(

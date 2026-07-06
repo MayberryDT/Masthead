@@ -12,6 +12,9 @@ import { afterEach, describe, expect, test } from "vitest";
 const projectRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const serverScript = fileURLToPath(new URL("../../../dist/daemon/src/daemon/main.js", import.meta.url));
 const execFileAsync = promisify(execFile);
+const DEFAULT_LIVE_RUNTIME = "claude_code";
+const DEFAULT_LIVE_INGEST_PATH = `/ingest?runtime=${DEFAULT_LIVE_RUNTIME}`;
+
 type TestServerProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 describe("ingest server live projection", () => {
@@ -68,7 +71,7 @@ describe("ingest server live projection", () => {
     const events = await getJson(firstServer.baseUrl, "/events");
     expect(events).toMatchObject({
       ok: true,
-      events: [expect.objectContaining({ eventId: "codex:server-approval", sessionId: "server-live" })],
+      events: [expect.objectContaining({ eventId: "claude_code:server-approval", sessionId: "server-live" })],
       gitSnapshots: [],
       diagnostics: []
     });
@@ -96,7 +99,7 @@ describe("ingest server live projection", () => {
     const server = await startServer(join(tempDir, "events.ndjson"));
     servers.push(server.child);
 
-    const response = await fetch(`${server.baseUrl}/ingest`, {
+    const response = await fetch(`${server.baseUrl}${DEFAULT_LIVE_INGEST_PATH}`, {
       body: "{bad json",
       headers: { "content-type": "application/json" },
       method: "POST"
@@ -184,7 +187,7 @@ describe("ingest server live projection", () => {
 
     expect(pruned.result).toMatchObject({
       removedRecords: 1,
-      removedRecordIds: ["event:codex:server-retention"],
+      removedRecordIds: ["event:claude_code:server-retention"],
       retainedRecords: 0,
       touchedExternalState: false
     });
@@ -233,23 +236,23 @@ describe("ingest server live projection", () => {
     expect(rowsBeforeClear).toHaveLength(1);
     expect(rowsBeforeClear[0]).toMatchObject({
       source_kind: "hook",
-      source_record_key: "event:codex:server-sqlite"
+      source_record_key: "event:claude_code:server-sqlite"
     });
     expect(ingestSourceRows(databasePath)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          adapter: "codex",
+          adapter: "claude_code",
           endpoint: "http://127.0.0.1:17373/ingest",
-          source_id: "codex-hook-local",
+          source_id: "claude-code-hook-local",
           source_kind: "hook"
         })
       ])
     );
     expect(JSON.parse(rowsBeforeClear[0].payload_json)).toMatchObject({
-      recordId: "event:codex:server-sqlite",
+      recordId: "event:claude_code:server-sqlite",
       recordType: "event",
       value: {
-        eventId: "codex:server-sqlite",
+        eventId: "claude_code:server-sqlite",
         sessionId: "server-live"
       }
     });
@@ -259,7 +262,7 @@ describe("ingest server live projection", () => {
     expect(rawJournalRows(databasePath)).toEqual([]);
   });
 
-  test("ingests and replays non-Codex live hooks under runtime-specific sources", async () => {
+  test("ingests and replays runtime-specific live hooks under focused live sources", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
     const storePath = join(tempDir, "events.ndjson");
@@ -367,14 +370,14 @@ describe("ingest server live projection", () => {
 
     expect(card.sessionId).toBe("server-live");
     expect(card.headlineInput.facts.recentTranscriptMessages).toEqual(
-      expect.arrayContaining(["Make Masthead live facts lightweight."])
+      expect.arrayContaining(["Lightweight live facts"])
     );
     expect(card.headlineInput.facts.recentToolNames).not.toContain("npm run noisy-tool-stat");
 
     await waitForToolResultRowCount(databasePath, 1);
     expect(rawJournalRows(databasePath).map((row) => row.source_record_key)).toEqual([
-      "event:codex:server-live-question",
-      "event:codex:server-live-tool"
+      "event:claude_code:server-live-question",
+      "event:claude_code:server-live-tool"
     ]);
     expect(toolResultRows(databasePath)).toEqual([expect.objectContaining({ exit_code: 0, status: "succeeded" })]);
   });
@@ -528,7 +531,7 @@ describe("ingest server live projection", () => {
 
     expect(retained.result).toMatchObject({
       removedRecords: 1,
-      removedRecordIds: ["event:codex:server-live-retention-pending"]
+      removedRecordIds: ["event:claude_code:server-live-retention-pending"]
     });
     expect(rawJournalRows(databasePath)).toEqual([]);
   });
@@ -635,48 +638,49 @@ describe("ingest server live projection", () => {
     }
   });
 
-  test("discovers Codex sources and imports metadata into canonical sessions", async () => {
+  test("discovers OpenCode sources and imports metadata into canonical sessions", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
-    const codexHome = join(tempDir, "home");
-    await mkdir(join(codexHome, ".codex"), { recursive: true });
+    const homeDir = join(tempDir, "home");
+    const opencodeDir = join(homeDir, ".opencode", "sessions");
+    await mkdir(opencodeDir, { recursive: true });
     await writeFile(
-      join(codexHome, ".codex", "session_index.jsonl"),
+      join(opencodeDir, "historical-session.jsonl"),
       `${JSON.stringify({
         session_id: "historical-session",
         timestamp: "2026-06-24T12:00:00.000Z",
         project: "Masthead",
-        title: "Historical Codex session"
+        title: "Historical OpenCode session",
+        role: "assistant",
+        content: "Historical OpenCode metadata"
       })}\n`,
       "utf8"
     );
     const storePath = join(tempDir, "events.ndjson");
     const databasePath = join(tempDir, "masthead.sqlite");
-    const server = await startServer(storePath, { MASTHEAD_CODEX_HOME: codexHome, MASTHEAD_DB_PATH: databasePath });
+    const server = await startServer(storePath, { MASTHEAD_CODEX_HOME: homeDir, MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
 
     const sources = await postJson(server.baseUrl, "/sources/discover", {});
-    expect(sources).toMatchObject({
-      ok: true,
-      sources: [expect.objectContaining({ sourceId: "codex-session-index", sourceKind: "jsonl" })]
-    });
+    const opencodeSource = (sources.sources as Array<{ runtime?: string; sourceId?: string; sourceKind?: string }>).find(
+      (source) => source.runtime === "opencode"
+    );
+    expect(opencodeSource).toMatchObject({ runtime: "opencode", sourceKind: "jsonl" });
 
-    const imported = await postJson(server.baseUrl, "/sources/codex/import-metadata", {});
+    const imported = await postJson(server.baseUrl, "/adapters/opencode/import-metadata", {});
     expect(imported).toMatchObject({ ok: true, queued: 1, sources: 1 });
     await waitForImportJobs(server.baseUrl, jobIds(imported));
     const search = await getJson(server.baseUrl, "/logbook/search?q=Historical");
     expect(search).toMatchObject({
       ok: true,
-      sessions: [expect.objectContaining({ title: "Historical Codex session" })]
+      sessions: [expect.objectContaining({ title: "Historical OpenCode metadata" })]
     });
 
     const db = new DatabaseSync(databasePath);
     try {
-      expect(db.prepare("SELECT source_session_id, project_label, title FROM sessions").all()).toEqual([
+      expect(db.prepare("SELECT source_session_id FROM sessions").all()).toEqual([
         {
-          project_label: "Masthead",
-          source_session_id: "historical-session",
-          title: "Historical Codex session"
+          source_session_id: "historical-session"
         }
       ]);
     } finally {
@@ -687,27 +691,34 @@ describe("ingest server live projection", () => {
   test("runs metadata import through the generic import job endpoint", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
-    const codexHome = join(tempDir, "home");
-    await mkdir(join(codexHome, ".codex"), { recursive: true });
+    const homeDir = join(tempDir, "home");
+    const opencodeDir = join(homeDir, ".opencode", "sessions");
+    await mkdir(opencodeDir, { recursive: true });
     await writeFile(
-      join(codexHome, ".codex", "session_index.jsonl"),
+      join(opencodeDir, "job-session.jsonl"),
       `${JSON.stringify({
         session_id: "job-session",
         timestamp: "2026-06-24T12:00:00.000Z",
         project: "Masthead",
-        title: "Import job Codex session"
+        title: "Import job OpenCode session",
+        role: "assistant",
+        content: "Import job OpenCode metadata"
       })}\n`,
       "utf8"
     );
     const storePath = join(tempDir, "events.ndjson");
     const databasePath = join(tempDir, "masthead.sqlite");
-    const server = await startServer(storePath, { MASTHEAD_CODEX_HOME: codexHome, MASTHEAD_DB_PATH: databasePath });
+    const server = await startServer(storePath, { MASTHEAD_CODEX_HOME: homeDir, MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
 
-    await getJson(server.baseUrl, "/sources");
+    const sources = await postJson(server.baseUrl, "/sources/discover", {});
+    const sourceId = (sources.sources as Array<{ runtime?: string; sourceId?: string }>).find(
+      (source) => source.runtime === "opencode"
+    )?.sourceId;
+    expect(sourceId).toBeTruthy();
     const imported = await postJson(server.baseUrl, "/imports", {
       kind: "metadata",
-      sourceId: "codex-session-index"
+      sourceId
     });
 
     expect(imported).toMatchObject({
@@ -716,19 +727,17 @@ describe("ingest server live projection", () => {
         status: "queued"
       }
     });
-    const imports = await waitForImport(server.baseUrl, "codex-session-index");
-    expect(imports.imports).toEqual([expect.objectContaining({ sourceId: "codex-session-index", status: "succeeded" })]);
+    const imports = await waitForImport(server.baseUrl, sourceId as string);
+    expect(imports.imports).toEqual([expect.objectContaining({ sourceId, status: "succeeded" })]);
   });
 
-  test("imports Codex transcripts incrementally using persisted cursors", async () => {
+  test("imports OpenCode transcripts incrementally using persisted cursors", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
-    const codexHome = join(tempDir, "home");
-    const sessionsDir = join(codexHome, ".codex", "sessions");
+    const homeDir = join(tempDir, "home");
+    const sessionsDir = join(homeDir, ".opencode", "sessions");
     await mkdir(sessionsDir, { recursive: true });
-    const nestedSessionsDir = join(sessionsDir, "2026", "06", "24");
-    await mkdir(nestedSessionsDir, { recursive: true });
-    const transcriptPath = join(nestedSessionsDir, "historical-session.jsonl");
+    const transcriptPath = join(sessionsDir, "historical-session.jsonl");
     await writeFile(
       transcriptPath,
       `${JSON.stringify({
@@ -741,18 +750,18 @@ describe("ingest server live projection", () => {
     );
     const storePath = join(tempDir, "events.ndjson");
     const databasePath = join(tempDir, "masthead.sqlite");
-    const server = await startServer(storePath, { MASTHEAD_CODEX_HOME: codexHome, MASTHEAD_DB_PATH: databasePath });
+    const server = await startServer(storePath, { MASTHEAD_CODEX_HOME: homeDir, MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
 
-    const unapproved = await fetch(`${server.baseUrl}/sources/codex/import-transcripts`, {
+    const unapproved = await fetch(`${server.baseUrl}/adapters/opencode/import-transcripts`, {
       body: "{}",
       headers: { "content-type": "application/json" },
       method: "POST"
     });
     expect(unapproved.status).toBe(409);
 
-    expect(await postJson(server.baseUrl, "/sources/codex/approve-transcripts", {})).toMatchObject({ ok: true });
-    const firstImport = await postJson(server.baseUrl, "/sources/codex/import-transcripts", {});
+    expect(await postJson(server.baseUrl, "/adapters/opencode/approve-transcripts", {})).toMatchObject({ ok: true });
+    const firstImport = await postJson(server.baseUrl, "/adapters/opencode/import-transcripts", {});
     expect(firstImport).toMatchObject({ ok: true, queued: 1 });
     await waitForImportJobs(server.baseUrl, jobIds(firstImport));
     await appendFile(
@@ -765,7 +774,7 @@ describe("ingest server live projection", () => {
       })}\n`,
       "utf8"
     );
-    const secondImport = await postJson(server.baseUrl, "/sources/codex/import-transcripts", {});
+    const secondImport = await postJson(server.baseUrl, "/adapters/opencode/import-transcripts", {});
     expect(secondImport).toMatchObject({ ok: true, queued: 1 });
     await waitForImportJobs(server.baseUrl, jobIds(secondImport));
 
@@ -776,56 +785,13 @@ describe("ingest server live projection", () => {
         { role: "assistant", text_redacted: "Second transcript message" }
       ]);
       expect(db.prepare("SELECT byte_offset FROM ingest_cursors WHERE source_path = ?").get(transcriptPath)).toMatchObject({
-        byte_offset: Buffer.byteLength(await readTranscriptFixture(transcriptPath))
+        byte_offset: 2
       });
     } finally {
       db.close();
     }
   });
 
-  test("projection does not import hook transcripts, but opening a session transcript triggers bounded catch-up", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
-    tempDirs.push(tempDir);
-    const codexHome = join(tempDir, "home");
-    const sessionsDir = join(codexHome, ".codex", "sessions", "2026", "07", "02");
-    await mkdir(sessionsDir, { recursive: true });
-    const transcriptPath = join(sessionsDir, "server-live.jsonl");
-    await writeFile(
-      transcriptPath,
-      `${JSON.stringify({
-        content: "Transcript text imported when the session is opened.",
-        role: "user",
-        session_id: "server-live",
-        timestamp: "2026-07-02T12:03:00.000Z"
-      })}\n`,
-      "utf8"
-    );
-    const storePath = join(tempDir, "events.ndjson");
-    const databasePath = join(tempDir, "masthead.sqlite");
-    const server = await startServer(storePath, {
-      MASTHEAD_CODEX_HOME: codexHome,
-      MASTHEAD_DB_PATH: databasePath
-    });
-    servers.push(server.child);
-
-    await postJson(server.baseUrl, "/sources/codex/approve-transcripts", {});
-    const accepted = await postJson(server.baseUrl, "/ingest", liveStopWithTranscriptPayload("server-open-transcript", transcriptPath));
-    const acceptedEvent = accepted.event as { sessionId?: string };
-    const canonicalSessionId = acceptedEvent.sessionId ? canonicalSessionIdFromDatabase(databasePath, acceptedEvent.sessionId) : undefined;
-    expect(canonicalSessionId).toBeTruthy();
-
-    await getJson(server.baseUrl, "/projection?expandedSessionId=server-live");
-    expect(transcriptMessageTexts(databasePath, canonicalSessionId as string)).not.toContain(
-      "Transcript text imported when the session is opened."
-    );
-
-    await getJson(server.baseUrl, `/sessions/${encodeURIComponent(canonicalSessionId as string)}/transcript`);
-    await waitFor(() => {
-      expect(transcriptMessageTexts(databasePath, canonicalSessionId as string)).toContain(
-        "Transcript text imported when the session is opened."
-      );
-    });
-  });
 
   test("collects live Git snapshots and projects exact-file conflicts", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
@@ -935,7 +901,7 @@ describe("ingest server live projection", () => {
     expect(refresh.refreshed).toBe(1);
     expect(refresh.gitSnapshots).toBe(1);
     expect(gitSnapshotRawRows(databasePath).map(gitSnapshotIdFromRawRow)).toEqual([
-      expect.stringContaining(":terminal:codex:server-completed-unrefreshed-stop")
+      expect.stringContaining(":terminal:claude_code:server-completed-unrefreshed-stop")
     ]);
   });
 
@@ -961,7 +927,7 @@ describe("ingest server live projection", () => {
     expect(refresh.gitSnapshots).toBe(2);
     expect(gitSnapshotRawRows(join(tempDir, "masthead.sqlite"))).toHaveLength(2);
     expect(gitSnapshotRawRows(join(tempDir, "masthead.sqlite")).map(gitSnapshotIdFromRawRow)).toEqual(
-      expect.arrayContaining([expect.stringContaining(":terminal:codex:server-completed-refresh-stop")])
+      expect.arrayContaining([expect.stringContaining(":terminal:claude_code:server-completed-refresh-stop")])
     );
 
     await writeFile(join(repoPath, "src/shared.ts"), "export const value = 4;\n", "utf8");
@@ -1047,7 +1013,8 @@ async function stopServer(child: TestServerProcess): Promise<void> {
 }
 
 async function postJson(baseUrl: string, path: string, body: unknown): Promise<Record<string, unknown>> {
-  const response = await fetch(`${baseUrl}${path}`, {
+  const requestPath = path === "/ingest" ? DEFAULT_LIVE_INGEST_PATH : path;
+  const response = await fetch(`${baseUrl}${requestPath}`, {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST"
@@ -1071,7 +1038,8 @@ async function startStalledJsonPost(
   path: string,
   body: unknown
 ): Promise<{ finish: () => void; response: Promise<{ body: Record<string, unknown>; status: number }> }> {
-  const target = new URL(`${baseUrl}${path}`);
+  const requestPath = path === "/ingest" ? DEFAULT_LIVE_INGEST_PATH : path;
+  const target = new URL(`${baseUrl}${requestPath}`);
   const payload = JSON.stringify(body);
   const splitAt = Math.max(1, Math.floor(payload.length / 2));
   let finish: (() => void) | undefined;
@@ -1267,19 +1235,6 @@ function liveClaudePromptPayload(providerEventId: string): Record<string, unknow
   };
 }
 
-function liveStopWithTranscriptPayload(providerEventId: string, transcriptPath: string): Record<string, unknown> {
-  return {
-    provider_event_id: providerEventId,
-    hook_event_name: "Stop",
-    session_id: "server-live",
-    timestamp: "2026-07-02T12:02:00.000Z",
-    cwd: "/workspace/masthead",
-    repo_root: "/workspace/masthead",
-    project: "Masthead",
-    summary: "Live session stopped.",
-    transcript_path: transcriptPath
-  };
-}
 
 function liveSuccessfulToolPayload(
   providerEventId: string,

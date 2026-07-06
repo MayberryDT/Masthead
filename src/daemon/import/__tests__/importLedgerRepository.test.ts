@@ -39,9 +39,9 @@ describe("import ledger repository", () => {
       importJobId: "import-1",
       importKind: "transcript",
       includedUnits: 1,
-      runtime: "codex",
+      runtime: "opencode",
       scope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       totalBytes: 120,
       totalUnits: 1
     });
@@ -52,11 +52,11 @@ describe("import ledger repository", () => {
       importJobId: "import-1",
       manifestId: manifest.manifestId,
       modifiedAt: "2026-07-01T00:00:30.000Z",
-      runtime: "codex",
+      runtime: "opencode",
       confidence: "authoritative",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       sourceKind: "jsonl",
-      sourcePath: "/tmp/.codex/sessions/thread.jsonl",
+      sourcePath: "/tmp/.opencode/sessions/thread.jsonl",
       status: "queued",
       unitKind: "transcript_file"
     });
@@ -65,7 +65,7 @@ describe("import ledger repository", () => {
     expect(units).toHaveLength(1);
     expect(units[0]).toMatchObject({
       processedRecords: 0,
-      sourcePath: "/tmp/.codex/sessions/thread.jsonl",
+      sourcePath: "/tmp/.opencode/sessions/thread.jsonl",
       status: "queued"
     });
 
@@ -93,28 +93,28 @@ describe("import ledger repository", () => {
       code: "malformed_json",
       failureKind: "malformed",
       importJobId: "import-1",
-      message: "Codex transcript contained malformed JSON.",
+      message: "OpenCode transcript contained malformed JSON.",
       observedAt: "2026-07-01T00:02:00.000Z",
       retryable: false,
-      runtime: "codex",
-      samplePath: "/tmp/.codex/sessions/bad.jsonl"
+      runtime: "opencode",
+      samplePath: "/tmp/.opencode/sessions/bad.jsonl"
     });
 
     const updated = recordImportFailureGroup(db, {
       code: "malformed_json",
       failureKind: "malformed",
       importJobId: "import-1",
-      message: "Codex transcript contained malformed JSON.",
+      message: "OpenCode transcript contained malformed JSON.",
       observedAt: "2026-07-01T00:03:00.000Z",
       retryable: false,
-      runtime: "codex",
-      samplePath: "/tmp/.codex/sessions/also-bad.jsonl"
+      runtime: "opencode",
+      samplePath: "/tmp/.opencode/sessions/also-bad.jsonl"
     });
 
     expect(updated.failureGroupId).toBe(group.failureGroupId);
     expect(updated.count).toBe(2);
-    expect(updated.samplePaths).toContain("/tmp/.codex/sessions/bad.jsonl");
-    expect(updated.samplePaths).toContain("/tmp/.codex/sessions/also-bad.jsonl");
+    expect(updated.samplePaths).toContain("/tmp/.opencode/sessions/bad.jsonl");
+    expect(updated.samplePaths).toContain("/tmp/.opencode/sessions/also-bad.jsonl");
     expect(listImportFailureGroups(db, "import-1")).toEqual([
       expect.objectContaining({
         code: "malformed_json",
@@ -130,10 +130,10 @@ function seedSourceAndImportJob(db: MastheadDatabase): void {
     `INSERT INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex-sessions", "codex", "jsonl", "/tmp/.codex/sessions", "authoritative", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
+  ).run("opencode-sessions", "opencode", "jsonl", "/tmp/.opencode/sessions", "authoritative", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
   db.prepare(
     `INSERT INTO import_jobs (
       import_job_id, source_id, import_kind, status, updated_at
     ) VALUES (?, ?, ?, ?, ?)`
-  ).run("import-1", "codex-sessions", "transcript", "queued", "2026-07-01T00:00:00.000Z");
+  ).run("import-1", "opencode-sessions", "transcript", "queued", "2026-07-01T00:00:00.000Z");
 }

@@ -207,7 +207,7 @@ function event(id: string): NormalizedEvent {
     eventId: `event:${id}`,
     sessionId: "session-1",
     source: {
-      adapter: "codex",
+      adapter: "opencode",
       surface: "hook",
       sourceEventId: id
     },

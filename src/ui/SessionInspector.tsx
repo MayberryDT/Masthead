@@ -62,7 +62,7 @@ function SessionBrief({ session }: { session: SessionDetailView }) {
   const worktree = session.workspace?.branch ?? session.branchOrWorktree ?? "None";
   const model = session.model ?? "Not captured";
   const thinkingLevel = session.thinkingLevel ?? "Not captured";
-  const harness = session.harness ?? "Codex";
+  const harness = session.harness ?? "Unknown";
   const observed = session.evidence.observed.length;
   const inferred = session.evidence.inferred.length;
   const missing = session.evidence.missing.length;
@@ -289,7 +289,7 @@ function reviewSummary(session: SessionDetailView): string {
 
 function actionLabel(action: SafeAction): string {
   const labels: Record<SafeAction, string> = {
-    open_source_session: "Open Codex",
+    open_source_session: "Open source session",
     open_repo: "Open repo",
     open_file: "Open file",
     open_readonly_diff: "Open diff",

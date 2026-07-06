@@ -3,40 +3,6 @@ import type { AdapterPathCandidate } from "./pathTypes.ts";
 
 export const ADAPTER_PATH_CANDIDATES = [
   {
-    confidence: "authoritative",
-    contentKind: "jsonl-file",
-    purpose: "Codex session metadata index",
-    relativePath: ".codex/session_index.jsonl",
-    runtime: "codex",
-    sourceKind: "jsonl"
-  },
-  {
-    confidence: "authoritative",
-    contentKind: "jsonl-file",
-    purpose: "Codex prompt history",
-    relativePath: ".codex/history.jsonl",
-    runtime: "codex",
-    sourceKind: "jsonl"
-  },
-  {
-    confidence: "authoritative",
-    contentKind: "jsonl-tree",
-    maxDepth: 6,
-    purpose: "Codex rollout transcript tree",
-    relativePath: ".codex/sessions",
-    runtime: "codex",
-    sourceKind: "jsonl"
-  },
-  {
-    confidence: "authoritative",
-    contentKind: "jsonl-tree",
-    maxDepth: 6,
-    purpose: "Archived Codex rollout transcript tree",
-    relativePath: ".codex/archived_sessions",
-    runtime: "codex",
-    sourceKind: "jsonl"
-  },
-  {
     confidence: "heuristic",
     contentKind: "directory",
     maxDepth: 4,
@@ -65,21 +31,21 @@ export const ADAPTER_PATH_CANDIDATES = [
   },
   {
     confidence: "heuristic",
-    contentKind: "jsonl-file",
-    legacy: true,
-    purpose: "Aider chat history",
-    relativePath: ".aider.chat.history.md",
-    runtime: "aider",
+    contentKind: "jsonl-tree",
+    maxDepth: 5,
+    purpose: "Grok hook and transcript events",
+    relativePath: ".grok/hooks",
+    runtime: "grok",
     sourceKind: "jsonl"
   },
   {
     confidence: "heuristic",
-    contentKind: "directory",
-    maxDepth: 4,
-    purpose: "OpenClaw local state",
-    relativePath: ".openclaw",
-    runtime: "openclaw",
-    sourceKind: "inference"
+    contentKind: "jsonl-tree",
+    maxDepth: 5,
+    purpose: "Grok session transcript storage",
+    relativePath: ".grok/sessions",
+    runtime: "grok",
+    sourceKind: "jsonl"
   },
   {
     confidence: "heuristic",
@@ -101,13 +67,21 @@ export const ADAPTER_PATH_CANDIDATES = [
   },
   {
     confidence: "heuristic",
-    contentKind: "directory",
-    legacy: true,
-    maxDepth: 4,
-    purpose: "Legacy Gemini CLI local state",
-    relativePath: ".gemini",
-    runtime: "gemini_cli",
-    sourceKind: "inference"
+    contentKind: "jsonl-tree",
+    maxDepth: 5,
+    purpose: "Oh My Pi session transcript storage",
+    relativePath: ".omp/agent/sessions",
+    runtime: "omp",
+    sourceKind: "jsonl"
+  },
+  {
+    confidence: "heuristic",
+    contentKind: "jsonl-tree",
+    maxDepth: 5,
+    purpose: "Oh My Pi alternate session transcript storage",
+    relativePath: ".oh-my-pi/agent/sessions",
+    runtime: "omp",
+    sourceKind: "jsonl"
   }
 ] as const satisfies AdapterPathCandidate[];
 

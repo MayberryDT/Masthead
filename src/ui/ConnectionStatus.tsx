@@ -33,7 +33,7 @@ export function ConnectionStatus({ connection, projectionUrl, showDemoData, onTo
       </div>
 
       <div className="connection-detail">
-        <p>{showDemoData ? "Fixture sessions are isolated from live Codex capture." : connectionDetail(connection)}</p>
+        <p>{showDemoData ? "Fixture sessions are isolated from live capture." : connectionDetail(connection)}</p>
         <span>{projectionUrl}</span>
       </div>
 
@@ -76,7 +76,7 @@ function connectionEyebrow(connection: ConnectionState): string {
 }
 
 function connectionTitle(connection: ConnectionState): string {
-  if (connection.state === "live") return "Real Codex sessions";
+  if (connection.state === "live") return "Real local sessions";
   if (connection.state === "offline") return "No live connection";
   return "Connecting to local collector";
 }

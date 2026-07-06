@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { parseLiveHookPayload } from "../liveHookAdapter";
 import {
   createIngestionState,
-  ingestCodexHookPayload,
+  ingestLiveHookPayload,
   ingestNormalizedEvent,
   removeEventFromLiveProjectionState
 } from "../ingestion";
@@ -13,9 +13,9 @@ import {
 const hookScript = new URL("../../../scripts/masthead-hook.js", import.meta.url);
 
 const hookPayload = {
-  provider_event_id: "codex-provider-duplicate",
-  event: "session_started",
-  session_id: "codex-session-duplicate",
+  provider_event_id: "claude-provider-duplicate",
+  hookEventName: "SessionStart",
+  session_id: "claude-session-duplicate",
   timestamp: "2026-06-23T02:12:00.000Z",
   cwd: "/workspace/masthead",
   project: "Masthead",
@@ -39,11 +39,13 @@ describe("hook ingestion", () => {
 
   test("dedupes duplicate provider events", () => {
     const state = createIngestionState();
-    const first = ingestCodexHookPayload(JSON.stringify(hookPayload), state, {
-      receivedAt: "2026-06-23T02:12:00.100Z"
+    const first = ingestLiveHookPayload(JSON.stringify(hookPayload), state, {
+      receivedAt: "2026-06-23T02:12:00.100Z",
+      runtime: "claude_code"
     });
-    const second = ingestCodexHookPayload(JSON.stringify(hookPayload), state, {
-      receivedAt: "2026-06-23T02:12:00.200Z"
+    const second = ingestLiveHookPayload(JSON.stringify(hookPayload), state, {
+      receivedAt: "2026-06-23T02:12:00.200Z",
+      runtime: "claude_code"
     });
 
     expect(first.status).toBe("accepted");
@@ -54,15 +56,17 @@ describe("hook ingestion", () => {
 
   test("can remove an accepted event from live projection state while preserving dedupe memory", () => {
     const state = createIngestionState();
-    const first = ingestCodexHookPayload(JSON.stringify(hookPayload), state, {
-      receivedAt: "2026-06-23T02:12:00.100Z"
+    const first = ingestLiveHookPayload(JSON.stringify(hookPayload), state, {
+      receivedAt: "2026-06-23T02:12:00.100Z",
+      runtime: "claude_code"
     });
     expect(first.status).toBe("accepted");
     if (first.status !== "accepted") throw new Error("expected accepted event");
 
     removeEventFromLiveProjectionState(state, first.event);
-    const duplicate = ingestCodexHookPayload(JSON.stringify(hookPayload), state, {
-      receivedAt: "2026-06-23T02:12:00.200Z"
+    const duplicate = ingestLiveHookPayload(JSON.stringify(hookPayload), state, {
+      receivedAt: "2026-06-23T02:12:00.200Z",
+      runtime: "claude_code"
     });
 
     expect(state.events).toHaveLength(0);
@@ -70,8 +74,9 @@ describe("hook ingestion", () => {
   });
 
   test("hydrates dedupe memory without hydrating deferred events into live projection state", () => {
-    const accepted = ingestCodexHookPayload(JSON.stringify(hookPayload), createIngestionState(), {
-      receivedAt: "2026-06-23T02:12:00.100Z"
+    const accepted = ingestLiveHookPayload(JSON.stringify(hookPayload), createIngestionState(), {
+      receivedAt: "2026-06-23T02:12:00.100Z",
+      runtime: "claude_code"
     });
     expect(accepted.status).toBe("accepted");
     if (accepted.status !== "accepted") throw new Error("expected accepted event");
@@ -79,8 +84,9 @@ describe("hook ingestion", () => {
     const state = createIngestionState([accepted.event], {
       includeInLiveProjection: () => false
     });
-    const duplicate = ingestCodexHookPayload(JSON.stringify(hookPayload), state, {
-      receivedAt: "2026-06-23T02:12:00.200Z"
+    const duplicate = ingestLiveHookPayload(JSON.stringify(hookPayload), state, {
+      receivedAt: "2026-06-23T02:12:00.200Z",
+      runtime: "claude_code"
     });
 
     expect(state.events).toHaveLength(0);
@@ -122,8 +128,9 @@ describe("hook ingestion", () => {
 
   test("records malformed JSON diagnostics instead of accepting an event", () => {
     const state = createIngestionState();
-    const result = ingestCodexHookPayload("{ bad json", state, {
-      receivedAt: "2026-06-23T02:13:00.000Z"
+    const result = ingestLiveHookPayload("{ bad json", state, {
+      receivedAt: "2026-06-23T02:13:00.000Z",
+      runtime: "claude_code"
     });
 
     expect(result.status).toBe("malformed");

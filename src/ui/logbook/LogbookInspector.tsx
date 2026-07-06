@@ -1,4 +1,6 @@
 import type { LogbookExcerpt, LogbookSessionDetail } from "../../app/daemonClient";
+import { harnessForRuntime } from "../../adapters/harnessCatalog";
+import type { RuntimeKind } from "../../adapters/types";
 import type { ReactNode } from "react";
 import { Icon } from "../icons/Icon";
 import { iconWeights } from "../icons/icon-tokens";
@@ -129,7 +131,7 @@ function confidenceTone(confidence: LogbookSessionDetail["sourceConfidence"]): "
 }
 
 function runtimeLabel(runtime: string): string {
-  return runtime === "codex" ? "Codex" : runtime;
+  return harnessForRuntime(runtime as RuntimeKind)?.label ?? runtime;
 }
 
 function labelize(value: string): string {

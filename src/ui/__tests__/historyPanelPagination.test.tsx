@@ -118,7 +118,7 @@ async function renderPanel(onPageChange: (pageIndex: number) => void, options: {
           state: "ready",
           sessions: Array.from({ length: visibleSessions }, (_, index) => ({
             project: "Masthead",
-            runtime: "codex",
+            runtime: "opencode",
             sessionId: `session-${index + 1}`,
             title: `Session ${index + 1}`
           })),

@@ -7,9 +7,9 @@ describe("runSourcesSetupPlan", () => {
       enrichmentMode: "skip",
       importMetadata: true,
       importTranscripts: false,
-      liveCapture: [{ action: "install", runtime: "codex" }],
+      liveCapture: [{ action: "install", runtime: "opencode" }],
       queueEnrichment: false,
-      sourceIds: ["codex-source"]
+      sourceIds: ["opencode-source"]
     };
     const logs: string[] = [];
     const runSetup = vi.fn(async () => ({ ok: true, setup: {} }));
@@ -23,7 +23,7 @@ describe("runSourcesSetupPlan", () => {
       runSetup
     });
 
-    expect(runHookAction).toHaveBeenCalledWith("codex", "install");
+    expect(runHookAction).toHaveBeenCalledWith("opencode", "install");
     expect(runSetup).toHaveBeenCalledWith({
       enrichmentMode: "skip",
       importMetadata: true,
@@ -32,13 +32,13 @@ describe("runSourcesSetupPlan", () => {
       queueEnrichment: false,
       runtimeApprovals: undefined,
       runtimes: undefined,
-      sourceIds: ["codex-source"],
+      sourceIds: ["opencode-source"],
       transcriptApproved: undefined,
       transcriptApprovals: undefined
     });
     expect(result.status).toBe("needs_attention");
     expect(result.steps.map((step) => step.status)).toEqual(["running", "failed", "running", "succeeded"]);
-    expect(logs).toEqual(expect.arrayContaining(["failed:Install Codex live capture", "succeeded:Import selected metadata"]));
+    expect(logs).toEqual(expect.arrayContaining(["failed:Install OpenCode live capture", "succeeded:Import selected metadata"]));
   });
 
   test("returns succeeded when all requested steps complete", async () => {
@@ -47,9 +47,9 @@ describe("runSourcesSetupPlan", () => {
         enrichmentMode: "skip",
         importMetadata: true,
         importTranscripts: false,
-        liveCapture: [{ action: "install", runtime: "codex" }],
+        liveCapture: [{ action: "install", runtime: "opencode" }],
         queueEnrichment: false,
-        sourceIds: ["codex-source"]
+        sourceIds: ["opencode-source"]
       },
       {
         onLog: () => undefined,
@@ -62,7 +62,7 @@ describe("runSourcesSetupPlan", () => {
     expect(result.steps.filter((step) => step.status !== "running").every((step) => step.status === "succeeded")).toBe(true);
   });
 
-  test("runs hook actions for supported non-Codex live-capture runtimes", async () => {
+  test("runs hook actions for supported non-OpenCode live-capture runtimes", async () => {
     const runSetup = vi.fn(async () => ({ ok: true, setup: {} }));
     const runHookAction = vi.fn(async () => undefined);
 
@@ -72,11 +72,11 @@ describe("runSourcesSetupPlan", () => {
         importMetadata: true,
         importTranscripts: false,
         liveCapture: [
-          { action: "install", runtime: "codex" },
+          { action: "install", runtime: "opencode" },
           { action: "install", runtime: "omp" }
         ],
         queueEnrichment: false,
-        sourceIds: ["codex-source", "omp-source"]
+        sourceIds: ["opencode-source", "omp-source"]
       },
       {
         onLog: () => undefined,
@@ -85,11 +85,11 @@ describe("runSourcesSetupPlan", () => {
       }
     );
 
-    expect(runHookAction).toHaveBeenNthCalledWith(1, "codex", "install");
+    expect(runHookAction).toHaveBeenNthCalledWith(1, "opencode", "install");
     expect(runHookAction).toHaveBeenNthCalledWith(2, "omp", "install");
     expect(runHookAction).toHaveBeenCalledTimes(2);
     expect(runSetup).toHaveBeenCalledWith(expect.objectContaining({
-      sourceIds: ["codex-source", "omp-source"]
+      sourceIds: ["opencode-source", "omp-source"]
     }));
     expect(result.status).toBe("succeeded");
     expect(result.steps).toEqual(expect.arrayContaining([
@@ -110,10 +110,10 @@ describe("runSourcesSetupPlan", () => {
         importTranscripts: false,
         liveCapture: [],
         queueEnrichment: false,
-        runtimes: ["codex", "opencode", "hermes"],
-        sourceIds: ["codex-source", "opencode-source", "hermes-source"],
+        runtimes: ["cursor", "opencode", "hermes"],
+        sourceIds: ["cursor-source", "opencode-source", "hermes-source"],
         transcriptApprovals: [
-          { approved: false, runtime: "codex", sourceId: "codex-source" },
+          { approved: false, runtime: "cursor", sourceId: "cursor-source" },
           { approved: false, runtime: "opencode", sourceId: "opencode-source" },
           { approved: false, runtime: "hermes", sourceId: "hermes-source" }
         ]
@@ -127,8 +127,8 @@ describe("runSourcesSetupPlan", () => {
 
     expect(runSetup).toHaveBeenCalledTimes(3);
     expect(runSetup).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      runtimes: ["codex"],
-      sourceIds: ["codex-source"]
+      runtimes: ["cursor"],
+      sourceIds: ["cursor-source"]
     }));
     expect(runSetup).toHaveBeenNthCalledWith(2, expect.objectContaining({
       runtimes: ["opencode"],
@@ -139,8 +139,8 @@ describe("runSourcesSetupPlan", () => {
       sourceIds: ["hermes-source"]
     }));
     expect(result.steps.map((step) => `${step.status}:${step.label}`)).toEqual([
-      "running:Import Codex metadata",
-      "succeeded:Import Codex metadata",
+      "running:Import Cursor metadata",
+      "succeeded:Import Cursor metadata",
       "running:Import OpenCode metadata",
       "succeeded:Import OpenCode metadata",
       "running:Import Hermes metadata",

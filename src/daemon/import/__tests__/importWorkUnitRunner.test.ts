@@ -61,7 +61,7 @@ describe("import work unit runner", () => {
       hostId: "host:test",
       hostname: "test",
       now: () => "2026-07-01T00:00:05.000Z",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       workUnitId: unitId
     });
 
@@ -104,7 +104,7 @@ describe("import work unit runner", () => {
       hostId: "host:test",
       hostname: "test",
       now: () => "2026-07-01T00:00:05.000Z",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       workUnitId: unitId
     });
 
@@ -144,7 +144,7 @@ describe("import work unit runner", () => {
       hostname: "test",
       indexSession: (sessionId) => indexedSessionIds.push(sessionId),
       now: () => "2026-07-01T00:00:05.000Z",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       workUnitId: unitId
     });
 
@@ -177,7 +177,7 @@ describe("import work unit runner", () => {
       hostId: "host:test",
       hostname: "test",
       now: () => "2026-07-01T00:00:05.000Z",
-      runtimeKind: "codex",
+      runtimeKind: "opencode",
       workUnitId: unitId
     });
 
@@ -231,18 +231,18 @@ function seedSourceAndImportJob(db: MastheadDatabase, sourcePath: string): void 
     `INSERT INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex-sessions:thread.jsonl", "codex", "jsonl", sourcePath, "authoritative", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
+  ).run("opencode-sessions:thread.jsonl", "opencode", "jsonl", sourcePath, "authoritative", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
   db.prepare(
     `INSERT INTO import_jobs (
       import_job_id, source_id, import_kind, status, updated_at
     ) VALUES (?, ?, ?, ?, ?)`
-  ).run("import-1", "codex-sessions:thread.jsonl", "transcript", "running", "2026-07-01T00:00:00.000Z");
+  ).run("import-1", "opencode-sessions:thread.jsonl", "transcript", "running", "2026-07-01T00:00:00.000Z");
 }
 
 function seedWorkUnit(
   db: MastheadDatabase,
   sourcePath: string,
-  overrides: { confidence?: "authoritative" | "inferred" | "heuristic"; runtime?: "codex" | "cursor"; sourceKind?: "jsonl" | "sqlite" } = {}
+  overrides: { confidence?: "authoritative" | "inferred" | "heuristic"; runtime?: "opencode" | "cursor"; sourceKind?: "jsonl" | "sqlite" } = {}
 ): string {
   const manifest = createImportManifest(db, {
     excludedUnits: 0,
@@ -250,9 +250,9 @@ function seedWorkUnit(
     importJobId: "import-1",
     importKind: "transcript",
     includedUnits: 1,
-    runtime: overrides.runtime ?? "codex",
+    runtime: overrides.runtime ?? "opencode",
     scope: { includeChangedSinceCursor: true, mode: "transcript_recent", days: 30 },
-    sourceId: "codex-sessions:thread.jsonl",
+    sourceId: "opencode-sessions:thread.jsonl",
     totalBytes: 1,
     totalUnits: 1
   });
@@ -260,8 +260,8 @@ function seedWorkUnit(
     confidence: overrides.confidence ?? "authoritative",
     importJobId: "import-1",
     manifestId: manifest.manifestId,
-    runtime: overrides.runtime ?? "codex",
-    sourceId: "codex-sessions:thread.jsonl",
+    runtime: overrides.runtime ?? "opencode",
+    sourceId: "opencode-sessions:thread.jsonl",
     sourceKind: overrides.sourceKind ?? "jsonl",
     sourcePath,
     status: "queued",
@@ -273,9 +273,9 @@ function sourceForPath(path: string): DiscoveredSource {
   return {
     confidence: "authoritative",
     path,
-    runtime: "codex",
-    schemaVersion: "codex-transcript-jsonl",
-    sourceId: "codex-sessions:thread.jsonl",
+    runtime: "opencode",
+    schemaVersion: "opencode-transcript-jsonl",
+    sourceId: "opencode-sessions:thread.jsonl",
     sourceKind: "jsonl"
   };
 }

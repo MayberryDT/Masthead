@@ -58,5 +58,5 @@ function clean(value: string): string {
 
 function isLowValueHeadlineEvidence(value: string): boolean {
   const normalized = clean(value);
-  return /^(codex hook event|runtime signal|unknown|shell)$/i.test(normalized);
+  return /^(live hook event|runtime signal|unknown|shell)$/i.test(normalized);
 }

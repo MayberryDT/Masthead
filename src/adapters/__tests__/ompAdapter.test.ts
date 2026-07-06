@@ -74,8 +74,8 @@ describe("Oh My Pi adapter", () => {
           id: "message-1",
           message: {
             content: [{ text: "OMP assistant reply with runtime metadata", type: "text" }],
-            model: "openai-codex/gpt-5.5",
-            provider: "openai-codex",
+            model: "gpt-5.5",
+            provider: "openai",
             role: "assistant",
             timestamp: "2026-07-05T12:00:01.000Z"
           },
@@ -96,8 +96,8 @@ describe("Oh My Pi adapter", () => {
     expect(values).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          model: "openai-codex/gpt-5.5",
-          provider: "openai-codex",
+          model: "gpt-5.5",
+          provider: "openai",
           sessionId: "2026-07-05T12-00-00-000Z_omp-model-provider"
         })
       ])

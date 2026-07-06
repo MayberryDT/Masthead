@@ -26,17 +26,17 @@ describe("ingest cursors", () => {
       cwd: "/work/masthead",
       modifiedAt: "2026-06-24T12:30:00.000Z",
       model: "gpt-5",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       sourcePath: "/tmp/session.jsonl",
       sourceSessionId: "session-1"
     });
 
-    expect(readCursor(db, "codex-sessions", "/tmp/session.jsonl")).toMatchObject({
+    expect(readCursor(db, "opencode-sessions", "/tmp/session.jsonl")).toMatchObject({
       byteOffset: 120,
       contentFingerprint: "fingerprint-1",
       cwd: "/work/masthead",
       model: "gpt-5",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       sourcePath: "/tmp/session.jsonl",
       sourceSessionId: "session-1"
     });

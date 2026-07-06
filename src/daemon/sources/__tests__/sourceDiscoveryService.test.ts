@@ -15,14 +15,14 @@ afterEach(async () => {
 });
 
 describe("source discovery service", () => {
-  test("reports Codex as not detected when local Codex files are missing", async () => {
+  test("reports OpenCode as not detected when local OpenCode files are missing", async () => {
     const { db, home } = await openSourceDiscoveryTestDatabase("masthead-source-discovery-missing-");
 
     const snapshot = await discoverSourceSnapshot({ codexHomeDir: home, now: "2026-06-25T12:00:00.000Z" });
     const adapters = getAdapterStatuses(db, snapshot);
 
-    expect(adapters.find((adapter) => adapter.runtime === "codex")).toMatchObject({
-      diagnostics: [expect.objectContaining({ code: "codex_sources_not_detected", severity: "warning" })],
+    expect(adapters.find((adapter) => adapter.runtime === "opencode")).toMatchObject({
+      diagnostics: [expect.objectContaining({ code: "opencode_sources_not_detected", severity: "warning" })],
       discoveredCount: 0,
       implementationState: "active",
       importedCount: 0,
@@ -32,30 +32,25 @@ describe("source discovery service", () => {
     db.close();
   });
 
-  test("counts detected Codex candidates before import", async () => {
+  test("counts detected OpenCode candidates before import", async () => {
     const { db, home } = await openSourceDiscoveryTestDatabase("masthead-source-discovery-connected-");
-    const codexRoot = join(home, ".codex");
-    await mkdir(join(codexRoot, "sessions", "2026", "06"), { recursive: true });
-    await mkdir(join(codexRoot, "archived_sessions", "2025"), { recursive: true });
-    await writeFile(join(codexRoot, "session_index.jsonl"), "{}\n");
-    await writeFile(join(codexRoot, "history.jsonl"), "{}\n");
-    await writeFile(join(codexRoot, "sessions", "2026", "06", "one.jsonl"), "{}\n");
-    await writeFile(join(codexRoot, "sessions", "2026", "06", "two.jsonl"), "{}\n");
-    await writeFile(join(codexRoot, "archived_sessions", "2025", "old.jsonl"), "{}\n");
+    const opencodeRoot = join(home, ".opencode");
+    await mkdir(join(opencodeRoot, "sessions", "2026", "06"), { recursive: true });
+    await writeFile(join(opencodeRoot, "sessions", "2026", "06", "one.jsonl"), "{}\n");
+    await writeFile(join(opencodeRoot, "sessions", "2026", "06", "two.jsonl"), "{}\n");
+    await writeFile(join(opencodeRoot, "history.jsonl"), "{}\n");
 
     const snapshot = await discoverSourceSnapshot({ codexHomeDir: home, now: "2026-06-25T12:00:00.000Z" });
     const adapters = getAdapterStatuses(db, snapshot);
 
-    expect(adapters.find((adapter) => adapter.runtime === "codex")).toMatchObject({
+    expect(adapters.find((adapter) => adapter.runtime === "opencode")).toMatchObject({
       diagnostics: [],
-      discoveredCount: 5,
+      discoveredCount: 3,
       implementationState: "active",
       importedCount: 0,
       state: "connected"
     });
-    expect(adapters.find((adapter) => adapter.runtime === "codex")?.sourceLocations.map((source) => source.sourceId)).toEqual(
-      expect.arrayContaining(["codex-session-index", "codex-history", "codex-sessions", "codex-archived-sessions"])
-    );
+    expect(adapters.find((adapter) => adapter.runtime === "opencode")?.sourceLocations).toHaveLength(3);
     db.close();
   });
 

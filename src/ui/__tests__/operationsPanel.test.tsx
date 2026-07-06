@@ -33,7 +33,7 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Delete all Masthead data");
     expect(html).toContain("Keeps normalized session metadata, summaries, and search records.");
     expect(html).toContain("Original harness files are untouched.");
-    expect(html).not.toContain("Codex integration");
+    expect(html).not.toContain("OpenCode integration");
     expect(html).not.toContain("ops-card");
     expect(html).not.toContain("ghost-pill");
     expect(html).not.toContain("Manual 30-day prune");
@@ -578,7 +578,7 @@ const settings: SettingsStateDto = {
   hooks: {
     command: "node scripts/masthead-hook.js",
     configExists: true,
-    configPath: "/tmp/.codex/hooks.json",
+    configPath: "/tmp/.opencode/hooks.json",
     endpoint: "http://127.0.0.1:17373/ingest",
     installed: false,
     integrations: [
@@ -586,8 +586,8 @@ const settings: SettingsStateDto = {
         actionSurface: "settings",
         captureMode: "live_hook",
         description: "Live local hook events are managed from this Settings card.",
-        label: "Codex",
-        runtime: "codex",
+        label: "OpenCode",
+        runtime: "opencode",
         status: "not_installed",
         supportsActions: true
       }

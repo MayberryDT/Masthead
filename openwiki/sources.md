@@ -1,6 +1,6 @@
 # Sources and onboarding
 
-Masthead’s Sources area is the product surface for discovering local harness history, connecting selected sources, approving transcript import, and tracking setup/import health. It is also the first-run path for getting data into the canonical store, including the setup flow that can scan local sources, select harness history, and install or repair live connectors for Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode.
+Masthead’s Sources area is the product surface for discovering local harness history, connecting selected sources, approving transcript import, and tracking setup/import health. It is also the first-run path for getting data into the canonical store, including the setup flow that can scan local sources, select harness history, and install or repair live connectors for Cursor, Claude Code, OpenCode, Grok Build, Hermes, Pi, and OMP.
 
 ## The setup model
 
@@ -53,9 +53,9 @@ The setup code marks transcript import as requiring approval when the adapter ca
 
 ## Live connector state
 
-Live connector state comes from `/settings/hooks`. The daemon exposes the release target set—Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode—as a runtime list, with status, managed config path, endpoint, and whether Settings/Sources can run install, test, or uninstall actions.
+Live connector state comes from `/settings/hooks`. The daemon exposes the focused runtime set—Cursor, Claude Code, OpenCode, Grok Build, Hermes, Pi, and OMP—as a runtime list, with status, managed config path, endpoint, and whether Settings/Sources can run install, test, or uninstall actions.
 
-The settings test path now uses a validation-only ingest endpoint, so hook checks can confirm the connector path without creating live rows. The Codex compatibility actions still manage the full release target set, while runtime-specific daemon routes can operate on one connector at a time for the non-Codex runtimes. Live capture can create canonical session identity and runtime-signal rows before transcript import is approved; transcript import remains a separate Sources decision. The most recently updated Codex desktop transcript can also appear in the live projection before approval because `/projection` refreshes the transcript scanner first, but that live surface remains metadata-only and distinct from import. Import progress now surfaces a stalled state based on shared visibility logic from `src/shared/sourceImport.ts`, so the UI can warn when a running job has not emitted a heartbeat recently without treating the import as failed.
+The settings test path uses a validation-only ingest endpoint, so hook checks can confirm the connector path without creating live rows. Runtime-specific daemon routes operate on one connector at a time for the focused runtimes. Live capture can create canonical session identity and runtime-signal rows before transcript import is approved; transcript import remains a separate Sources decision. Import progress surfaces stalled status, heartbeat, current path, progress counts, and grouped failures without requiring transcript approval.
 
 ## What the Sources page is for
 

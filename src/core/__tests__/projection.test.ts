@@ -13,7 +13,7 @@ const event = (
   schemaVersion: 1,
   eventId,
   sessionId,
-  source: { adapter: "codex", surface: "fixture", sourceEventId: eventId },
+  source: { adapter: "claude_code", surface: "fixture", sourceEventId: eventId },
   occurredAt,
   receivedAt: occurredAt,
   type,
@@ -32,7 +32,7 @@ const event = (
   },
   sensitivity: "metadata",
   payloadHash: `hash-${eventId}`,
-  evidence: [{ id: eventId, kind: "event", observedAt: occurredAt, source: "codex.fixture" }]
+  evidence: [{ id: eventId, kind: "event", observedAt: occurredAt, source: "claude_code.fixture" }]
 });
 
 const snapshot = (snapshotId: string, sessionId: string, path: string): GitSnapshot => ({
@@ -292,8 +292,8 @@ describe("Live Board projection", () => {
           [
             "updated-for-session",
             {
-              liveSummary: "Codex hook event is being updated for Masthead.",
-              title: "Codex hook event"
+              liveSummary: "Live hook event is being updated for Masthead.",
+              title: "Live hook event"
             }
           ]
         ])
@@ -326,8 +326,8 @@ describe("Live Board projection", () => {
           [
             "hook-active-session",
             {
-              liveSummary: "Codex hook event is active in sources.",
-              title: "Codex hook event"
+              liveSummary: "Live hook event is active in sources.",
+              title: "Live hook event"
             }
           ]
         ])
@@ -341,7 +341,7 @@ describe("Live Board projection", () => {
         status: "pending"
       }
     });
-    expect(board.cards[0]?.headline.headline).not.toMatch(/codex hook event/i);
+    expect(board.cards[0]?.headline.headline).not.toMatch(/live hook event/i);
   });
 
   test("ignores generic is-being-fixed enrichment for card headlines", () => {
@@ -361,8 +361,8 @@ describe("Live Board projection", () => {
           [
             "fixed-for-session",
             {
-              liveSummary: "Codex hook event is being fixed for Masthead.",
-              title: "Codex hook event"
+              liveSummary: "Live hook event is being fixed for Masthead.",
+              title: "Live hook event"
             }
           ]
         ])
@@ -738,11 +738,11 @@ describe("Live Board projection", () => {
 
     expect(board.cards.find((card) => card.sessionId === "session-a")).toMatchObject({
       startedAt: "2026-06-23T02:00:00.000Z",
-      harness: "Codex"
+      harness: "Claude Code"
     });
     expect(board.cards.find((card) => card.sessionId === "session-b")).toMatchObject({
       startedAt: "2026-06-23T02:05:00.000Z",
-      harness: "Codex"
+      harness: "Claude Code"
     });
   });
 

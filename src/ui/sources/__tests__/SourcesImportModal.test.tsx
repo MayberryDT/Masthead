@@ -15,9 +15,9 @@ describe("SourcesImportModal", () => {
           {
             discoveredSessions: 7,
             importedSessions: 0,
-            name: "Codex",
+            name: "OpenCode",
             policies: { enrichment: false, mcpAccess: true, metadataImport: true, transcriptImport: false },
-            runtime: "codex",
+            runtime: "opencode",
             sourceLocationCount: 2,
             sourceLocations: [],
             state: "connected"
@@ -29,15 +29,15 @@ describe("SourcesImportModal", () => {
         open
         previews={[
           {
-            runtime: "codex",
+            runtime: "opencode",
             summary: {
               excludedUnits: 1,
               generatedAt: "2026-07-01T00:00:00.000Z",
-              importJobId: "preview:codex",
+              importJobId: "preview:opencode",
               importKind: "transcript",
               includedUnits: 2,
               manifestId: "",
-              runtime: "codex",
+              runtime: "opencode",
               scope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
               estimatedRecords: 7,
               totalBytes: 120,
@@ -50,7 +50,7 @@ describe("SourcesImportModal", () => {
 
     expect(html).toContain("Import history");
     expect(html).toContain("Harnesses");
-    expect(html).toContain("Codex");
+    expect(html).toContain("OpenCode");
     expect(html).toContain("Recent");
     expect(html).toContain("Last 30 days");
     expect(html).toContain("Full archive");
@@ -58,11 +58,11 @@ describe("SourcesImportModal", () => {
     expect(html).toContain("Sessions to import");
     expect(html).toContain("<dd>7</dd>");
     expect(html).not.toContain("Coding harness");
-    expect(html).not.toContain("Codex local hook");
+    expect(html).not.toContain("OpenCode local hook");
     expect(html).not.toContain("Preview");
     expect(html).not.toContain("Includes changed transcripts");
     expect(html).not.toContain("Every file remains visible");
-    expect(html).not.toContain(".codex/sessions");
+    expect(html).not.toContain(".opencode/sessions");
   });
 
   test("uses preview runtimes as selectable harnesses when adapter rows are unavailable", () => {
@@ -74,7 +74,7 @@ describe("SourcesImportModal", () => {
         onRunSetup={() => undefined}
         open
         previews={[
-          previewForRuntime("codex", 500, 912, 5_614_987_264, 742),
+          previewForRuntime("opencode", 500, 912, 5_614_987_264, 742),
           previewForRuntime("cursor", 2, 0, 1_153_433, 28)
         ]}
       />
@@ -82,7 +82,7 @@ describe("SourcesImportModal", () => {
 
     expect(html).toContain("2 harnesses");
     expect(html).toContain("2 selected");
-    expect(html).toContain("Codex");
+    expect(html).toContain("OpenCode");
     expect(html).toContain("Cursor");
     expect(html).toContain("Sessions to import");
     expect(html).toContain("<dd>742</dd>");
@@ -110,9 +110,9 @@ describe("SourcesImportModal", () => {
             {
               discoveredSessions: 0,
               importedSessions: 0,
-              name: "Codex",
+              name: "OpenCode",
               policies: { enrichment: false, mcpAccess: true, metadataImport: true, transcriptImport: true },
-              runtime: "codex",
+              runtime: "opencode",
               sourceLocationCount: 2,
               sourceLocations: [],
               state: "connected"
@@ -126,41 +126,42 @@ describe("SourcesImportModal", () => {
       );
     });
 
-    expect(onPreviewImport).toHaveBeenCalledWith(expect.objectContaining({ runtimes: ["codex"] }));
+    expect(onPreviewImport).toHaveBeenCalledWith(expect.objectContaining({ runtimes: ["opencode"] }));
     expect(container.textContent).toContain("Loading sessions");
     expect(container.textContent).not.toContain("Estimate unavailable");
 
     await act(async () => {
-      resolvePreview([previewForRuntime("codex", 3, 0, 120, 12)]);
+      resolvePreview([previewForRuntime("opencode", 3, 0, 120, 12)]);
     });
 
     expect(container.textContent).toContain("12");
     await act(async () => root.unmount());
   });
 
-  test("does not offer detector-only harnesses for import", () => {
+  test("does not offer unsupported runtime previews for import", () => {
+    const unsupportedRuntime = "legacy_harness" as SourcesImportPreview["summary"]["runtime"];
     const html = renderToStaticMarkup(
       <SourcesImportModal
         adapters={[
           {
             discoveredSessions: 38,
             importedSessions: 0,
-            name: "Cline",
-            policies: { enrichment: false, mcpAccess: true, metadataImport: false, transcriptImport: false },
-            runtime: "cline",
+            name: "Legacy Harness",
+            policies: { enrichment: false, mcpAccess: true, metadataImport: true, transcriptImport: true },
+            runtime: unsupportedRuntime,
             sourceLocationCount: 1,
             sourceLocations: [],
             state: "connected"
           }
         ]}
         onClose={() => undefined}
-        onPreviewImport={() => Promise.resolve([previewForRuntime("cline", 38, 0, 120, 38)])}
+        onPreviewImport={() => Promise.resolve([previewForRuntime(unsupportedRuntime, 38, 0, 120, 38)])}
         onRunSetup={() => undefined}
         open
       />
     );
 
-    expect(html).not.toContain("Cline");
+    expect(html).not.toContain("Legacy Harness");
     expect(html).not.toContain("38</dd>");
     expect(html).toContain("No importable harnesses found.");
   });

@@ -10,8 +10,8 @@ describe("SourcesPanel", () => {
       <SourcesPanel
         adapters={[
           {
-            runtime: "codex",
-            name: "Codex",
+            runtime: "opencode",
+            name: "OpenCode",
             state: "connected",
             discoveredSessions: 742,
             importedSessions: 120,
@@ -22,11 +22,11 @@ describe("SourcesPanel", () => {
                 failures: 0,
                 importedCount: 120,
                 lastSync: "2026-06-24T12:00:00.000Z",
-                path: "/home/tyler/.codex/sessions",
+                path: "/home/tyler/.opencode/sessions",
                 queuedCount: 622,
-                runtime: "codex",
+                runtime: "opencode",
                 sessionCount: 742,
-                sourceId: "codex-sessions",
+                sourceId: "opencode-sessions",
                 sourceKind: "jsonl"
               }
             ],
@@ -46,7 +46,7 @@ describe("SourcesPanel", () => {
             importedCount: 120,
             importKind: "metadata",
             queuedCount: 622,
-            sourceId: "codex-sessions",
+            sourceId: "opencode-sessions",
             status: "running",
             updatedAt: "2026-06-24T12:00:00.000Z"
           }
@@ -72,7 +72,7 @@ describe("SourcesPanel", () => {
     expect(html).toContain("Enrichment");
     expect(html).toContain("Last activity");
     expect(html).toContain("Needs enrichment");
-    expect(html).toContain("Codex");
+    expect(html).toContain("OpenCode");
     expect(html).toContain("120");
     expect(html).not.toContain("Advanced diagnostics");
     expect(html).not.toContain("Metadata import ready");
@@ -80,7 +80,7 @@ describe("SourcesPanel", () => {
     expect(html).toContain("Last refresh");
     expect(html).toContain("Active import");
     expect(html).not.toContain("Open Logbook");
-    expect(html).not.toContain("/home/tyler/.codex/sessions");
+    expect(html).not.toContain("/home/tyler/.opencode/sessions");
     expect(html).not.toContain("hello from transcript");
   });
 
@@ -110,7 +110,7 @@ describe("SourcesPanel", () => {
     expect(html).not.toContain("Source health");
     expect(html).toContain("Import data");
     expect(html).toContain("Refresh detection");
-    expect(html).toContain("Codex sessions");
+    expect(html).toContain("OpenCode sessions");
     expect(html).toContain("742 sessions");
     expect(html).toContain("<dt>Enriched</dt>");
     expect(html).toContain("<dd>320</dd>");
@@ -157,7 +157,7 @@ describe("SourcesPanel", () => {
     );
 
     expect(html.match(/connected-source-row/g)).toHaveLength(1);
-    expect(html).toContain("Codex sessions");
+    expect(html).toContain("OpenCode sessions");
     expect(html).not.toContain("masthead-git-observer");
   });
 
@@ -242,8 +242,8 @@ describe("SourcesPanel", () => {
       <SourcesPanel
         adapters={[
           {
-            runtime: "gemini_cli",
-            name: "Gemini CLI",
+            runtime: "pi",
+            name: "Pi",
             state: "not_detected",
             discoveredSessions: 0,
             importedSessions: 0,
@@ -269,7 +269,7 @@ describe("SourcesPanel", () => {
     expect(html).toContain("Capture new sessions now, or optionally import past sessions from local harness history.");
     expect(html).not.toContain("Advanced diagnostics");
     expect(html).not.toContain("Connect sources");
-    expect(html).not.toContain("Gemini CLI");
+    expect(html).not.toContain("Pi");
     expect(html).not.toContain("Harnesses Masthead knows how to check");
   });
 
@@ -279,7 +279,7 @@ describe("SourcesPanel", () => {
       discoveredSessions: 1,
       importedSessions: 1,
       label: `Source ${index + 1}`,
-      runtime: "codex",
+      runtime: "opencode",
       sourceId: `source-${index + 1}`,
       state: "connected",
       transcriptSessions: 1
@@ -431,12 +431,12 @@ function connectedSetup(): SourcesSetupDto {
         failureCount: 0,
         importedSessions: 742,
         enrichmentEnabled: false,
-        label: "Codex sessions",
+        label: "OpenCode sessions",
         lastSyncAt: "2026-06-27T12:00:00.000Z",
         needsAttention: ["transcript_import", "enrichment"],
         queuedRecords: 14,
-        runtime: "codex",
-        sourceId: "codex-sessions",
+        runtime: "opencode",
+        sourceId: "opencode-sessions",
         state: "connected",
         transcriptImportEnabled: false,
         transcriptSessions: 510

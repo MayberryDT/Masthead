@@ -128,7 +128,7 @@ describe("daemon database schema", () => {
       `INSERT INTO ingest_sources (
         source_id, adapter, source_kind, confidence, discovered_at, last_seen_at
       ) VALUES (?, ?, ?, ?, ?, ?)`
-    ).run("source:nullable", "codex", "jsonl", "authoritative", "2026-06-24T00:00:00.000Z", "2026-06-24T00:00:00.000Z");
+    ).run("source:nullable", "opencode", "jsonl", "authoritative", "2026-06-24T00:00:00.000Z", "2026-06-24T00:00:00.000Z");
     db.prepare(
       `INSERT INTO hosts (host_id, first_seen_at, last_seen_at)
       VALUES (?, ?, ?)`
@@ -136,7 +136,7 @@ describe("daemon database schema", () => {
     db.prepare(
       `INSERT INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at)
       VALUES (?, ?, ?, ?, ?)`
-    ).run("runtime:nullable", "codex", null, "2026-06-24T00:00:00.000Z", "2026-06-24T00:00:00.000Z");
+    ).run("runtime:nullable", "opencode", null, "2026-06-24T00:00:00.000Z", "2026-06-24T00:00:00.000Z");
     db.prepare(
       `INSERT INTO sessions (
         session_id, host_id, runtime_id, source_session_id, lifecycle, last_activity_at, source_confidence, created_at, updated_at
@@ -175,7 +175,7 @@ describe("daemon database schema", () => {
           `INSERT INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at)
           VALUES (?, ?, ?, ?, ?)`
         )
-        .run("runtime:duplicate-null", "codex", null, "2026-06-24T00:00:01.000Z", "2026-06-24T00:00:01.000Z")
+        .run("runtime:duplicate-null", "opencode", null, "2026-06-24T00:00:01.000Z", "2026-06-24T00:00:01.000Z")
     ).toThrow();
     expect(() =>
       db

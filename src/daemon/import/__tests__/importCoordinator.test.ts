@@ -31,7 +31,7 @@ describe("import coordinator", () => {
     });
     let controls: ImportJobControls | undefined;
 
-    const job = queueImportJob(db, { importKind: "metadata", sourceId: "codex-sessions", now: fixedNow }, (workerControls) => {
+    const job = queueImportJob(db, { importKind: "metadata", sourceId: "opencode-sessions", now: fixedNow }, (workerControls) => {
       controls = workerControls;
       return worker;
     });
@@ -43,7 +43,7 @@ describe("import coordinator", () => {
     expect(getImportJob(db, job.importJobId)?.status).toBe("running");
     expect(controls).toBeDefined();
     controls?.updateProgress({
-      currentPath: "/tmp/.codex/sessions/2026/06/25/import.jsonl",
+      currentPath: "/tmp/.opencode/sessions/2026/06/25/import.jsonl",
       discoveredCount: 4,
       failureCount: 0,
       importedCount: 1,
@@ -51,7 +51,7 @@ describe("import coordinator", () => {
       queuedCount: 0
     });
     expect(getImportJob(db, job.importJobId)).toMatchObject({
-      currentPath: "/tmp/.codex/sessions/2026/06/25/import.jsonl",
+      currentPath: "/tmp/.opencode/sessions/2026/06/25/import.jsonl",
       discoveredCount: 4,
       processedCount: 1,
       progressCurrent: 1,
@@ -75,15 +75,15 @@ describe("import coordinator", () => {
   test("runs queued imports one at a time", async () => {
     const db = await openTestDatabase();
     seedSource(db);
-    seedSource(db, "codex-archive");
+    seedSource(db, "opencode-archive");
     let resolveFirst: (value: ImportWorkResult) => void = () => undefined;
     let secondStarted = false;
 
     const firstWorker = new Promise<ImportWorkResult>((resolve) => {
       resolveFirst = resolve;
     });
-    const first = queueImportJob(db, { importKind: "metadata", sourceId: "codex-sessions", now: fixedNow }, () => firstWorker);
-    const second = queueImportJob(db, { importKind: "metadata", sourceId: "codex-archive", now: fixedNow }, () => {
+    const first = queueImportJob(db, { importKind: "metadata", sourceId: "opencode-sessions", now: fixedNow }, () => firstWorker);
+    const second = queueImportJob(db, { importKind: "metadata", sourceId: "opencode-archive", now: fixedNow }, () => {
       secondStarted = true;
       return Promise.resolve({ discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 });
     });
@@ -103,15 +103,15 @@ describe("import coordinator", () => {
   test("cancels queued imports immediately without waiting for the active job", async () => {
     const db = await openTestDatabase();
     seedSource(db);
-    seedSource(db, "codex-archive");
+    seedSource(db, "opencode-archive");
     let resolveFirst: (value: ImportWorkResult) => void = () => undefined;
     const firstWorker = new Promise<ImportWorkResult>((resolve) => {
       resolveFirst = resolve;
     });
     let secondStarted = false;
 
-    const first = queueImportJob(db, { importKind: "metadata", sourceId: "codex-sessions", now: fixedNow }, () => firstWorker);
-    const second = queueImportJob(db, { importKind: "metadata", sourceId: "codex-archive", now: fixedNow }, () => {
+    const first = queueImportJob(db, { importKind: "metadata", sourceId: "opencode-sessions", now: fixedNow }, () => firstWorker);
+    const second = queueImportJob(db, { importKind: "metadata", sourceId: "opencode-archive", now: fixedNow }, () => {
       secondStarted = true;
       return Promise.resolve({ discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 });
     });
@@ -153,7 +153,7 @@ describe("import coordinator", () => {
         current_path,
         updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run("import_job:interrupted", "codex-sessions", "metadata", "running", 10, 10, 10, 0, 0, "/tmp/import.jsonl", fixedNow());
+    ).run("import_job:interrupted", "opencode-sessions", "metadata", "running", 10, 10, 10, 0, 0, "/tmp/import.jsonl", fixedNow());
 
     const interrupted = markInterruptedImportJobs(db, fixedNow);
     expect(interrupted).toBe(1);
@@ -174,7 +174,7 @@ describe("import coordinator", () => {
       resolveWorker = resolve;
     });
 
-    const job = queueImportJob(db, { importKind: "metadata", sourceId: "codex-sessions", now: fixedNow }, (controls) => {
+    const job = queueImportJob(db, { importKind: "metadata", sourceId: "opencode-sessions", now: fixedNow }, (controls) => {
       controls.updateProgress({
         currentPath: "/tmp/session_index.jsonl",
         heartbeatAt: "2026-07-01T00:00:05.000Z",
@@ -211,7 +211,7 @@ describe("import coordinator", () => {
     const db = await openTestDatabase();
     seedSource(db);
 
-    const job = queueImportJob(db, { importKind: "transcript", sourceId: "codex-sessions", now: fixedNow }, async () => ({
+    const job = queueImportJob(db, { importKind: "transcript", sourceId: "opencode-sessions", now: fixedNow }, async () => ({
       discoveredCount: 10,
       failureCount: 2,
       importedCount: 8,
@@ -243,13 +243,13 @@ async function openTestDatabase(): Promise<MastheadDatabase> {
   return db;
 }
 
-function seedSource(db: MastheadDatabase, sourceId = "codex-sessions"): void {
+function seedSource(db: MastheadDatabase, sourceId = "opencode-sessions"): void {
   const now = fixedNow();
   db.prepare(
     `INSERT INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(sourceId, "codex", "jsonl", `/tmp/.codex/${sourceId}`, "authoritative", now, now);
+  ).run(sourceId, "opencode", "jsonl", `/tmp/.opencode/${sourceId}`, "authoritative", now, now);
 }
 
 function fixedNow(): string {

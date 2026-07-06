@@ -20,11 +20,11 @@ describe("httpJsonClient", () => {
     await expect(
       getJson<{ ok: true; value: number }>("http://127.0.0.1:17373/projection?selectedSessionId=old", "/imports", {
         label: "imports",
-        query: { adapterId: "codex", empty: "", limit: 25, offset: 0, skipped: undefined }
+        query: { adapterId: "opencode", empty: "", limit: 25, offset: 0, skipped: undefined }
       })
     ).resolves.toEqual({ ok: true, value: 42 });
 
-    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/imports?adapterId=codex&limit=25&offset=0", {
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/imports?adapterId=opencode&limit=25&offset=0", {
       headers: { accept: "application/json" },
       signal: undefined
     });
@@ -43,10 +43,10 @@ describe("httpJsonClient", () => {
 
     await getJson<{ ok: true }>("http://127.0.0.1:17373/projection", "/sessions", {
       label: "logbook search",
-      query: { model: ["gpt-5", "gpt-4.1"], project: [], runtime: ["codex"] }
+      query: { model: ["gpt-5", "gpt-4.1"], project: [], runtime: ["opencode"] }
     });
 
-    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/sessions?model=gpt-5&model=gpt-4.1&runtime=codex", {
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/sessions?model=gpt-5&model=gpt-4.1&runtime=opencode", {
       headers: { accept: "application/json" },
       signal: undefined
     });
@@ -57,13 +57,13 @@ describe("httpJsonClient", () => {
 
     await expect(
       postJson("http://127.0.0.1:17373/projection", "/sources/connect", {
-        body: { runtimes: ["codex"] },
+        body: { runtimes: ["opencode"] },
         label: "source connect"
       })
     ).rejects.toThrow("source connect failed: 503");
 
     expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/sources/connect", {
-      body: JSON.stringify({ runtimes: ["codex"] }),
+      body: JSON.stringify({ runtimes: ["opencode"] }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined

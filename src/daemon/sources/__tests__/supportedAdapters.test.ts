@@ -10,12 +10,6 @@ describe("supportedAdapters", () => {
     expect(runtimes).toEqual([...RUNTIME_KINDS]);
   });
 
-  test("keeps gemini_cli only as legacy compatibility", () => {
-    const gemini = supportedAdapters.find((adapter) => adapter.runtime === "gemini_cli");
-    expect(gemini?.maturity).toBe("planned");
-    expect(gemini?.supportsMetadataImport).toBe(false);
-    expect(canImportMetadata(gemini!)).toBe(false);
-  });
 
   test("marks import adapters separately from detector scan targets", () => {
     const importAdapters = supportedAdapters.filter((adapter) => adapter.implementationState === "active");

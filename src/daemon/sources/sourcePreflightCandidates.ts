@@ -2,12 +2,10 @@ import type { DiscoveryContext, RuntimeKind } from "../../adapters/types.ts";
 import type { AdapterPathCandidate } from "../../adapters/pathTypes.ts";
 import { preflightAdapterPathCandidate } from "../../adapters/preflight.ts";
 import type { SourcePreflightDto } from "./sourcePreflight.ts";
-import { codexCandidatePaths } from "../../adapters/codex/discovery.ts";
 import { cursorCandidatePaths } from "../../adapters/cursor/discovery.ts";
 import { claudeCodeCandidatePaths } from "../../adapters/claudeCode/discovery.ts";
 import { opencodeCandidatePaths } from "../../adapters/opencode/discovery.ts";
-import { aiderCandidatePaths } from "../../adapters/aider/discovery.ts";
-import { openclawCandidatePaths } from "../../adapters/openclaw/discovery.ts";
+import { grokCandidatePaths } from "../../adapters/grok/discovery.ts";
 import { hermesCandidatePaths } from "../../adapters/hermes/discovery.ts";
 import { piCandidatePaths } from "../../adapters/pi/discovery.ts";
 import { catalogPathCandidatesForRuntime } from "../../adapters/catalogPathCandidates.ts";
@@ -32,12 +30,10 @@ export async function preflightAdapterCandidates(runtime: RuntimeKind, context: 
 export function candidatePathsForRuntime(runtime: RuntimeKind, context: DiscoveryContext): AdapterPathCandidate[] {
   const harness = harnessForRuntime(runtime);
   if (harness && !canImportHarness(harness)) return catalogPathCandidatesForRuntime(runtime, context);
-  if (runtime === "codex") return codexCandidatePaths(context);
   if (runtime === "cursor") return cursorCandidatePaths(context);
   if (runtime === "claude_code") return claudeCodeCandidatePaths(context);
   if (runtime === "opencode") return opencodeCandidatePaths(context);
-  if (runtime === "aider") return aiderCandidatePaths(context);
-  if (runtime === "openclaw") return openclawCandidatePaths(context);
+  if (runtime === "grok") return grokCandidatePaths(context);
   if (runtime === "hermes") return hermesCandidatePaths(context);
   if (runtime === "pi") return piCandidatePaths(context);
   return catalogPathCandidatesForRuntime(runtime, context);

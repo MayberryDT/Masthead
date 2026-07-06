@@ -1,4 +1,6 @@
 import type { AdapterStatus, SourceStatus } from "../../app/daemonClient";
+import { harnessForRuntime } from "../../adapters/harnessCatalog";
+import type { RuntimeKind } from "../../adapters/types";
 import { AppButton } from "../primitives/AppButton";
 import { StatusBadge, type StatusBadgeTone } from "../primitives/StatusBadge";
 import type { SourceDiagnostic } from "./SourceDiagnosticPanel";
@@ -139,18 +141,7 @@ export function stateTone(state: AdapterVisualState): StatusBadgeTone {
 }
 
 export function runtimeLabel(runtime: string): string {
-  const labels: Record<string, string> = {
-    aider: "Aider",
-    claude_code: "Claude Code",
-    codex: "Codex",
-    cursor: "Cursor",
-    gemini_cli: "Gemini CLI",
-    hermes: "Hermes",
-    openclaw: "OpenClaw",
-    opencode: "OpenCode",
-    pi: "Pi"
-  };
-  return labels[runtime] ?? runtime;
+  return harnessForRuntime(runtime as RuntimeKind)?.label ?? runtime;
 }
 
 export function formatLastSync(value: string | undefined): string {

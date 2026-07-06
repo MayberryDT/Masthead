@@ -1,3 +1,5 @@
+import { harnessForRuntime } from "../adapters/harnessCatalog";
+import type { RuntimeKind } from "../adapters/types";
 import type { AttentionItem, LiveBoardProjection, SessionCardView } from "../core/types";
 import { isBlockedSessionCard } from "./format";
 import type { HarnessFilter, LifecycleFilter, SortMode } from "./toolbarOptions";
@@ -29,7 +31,7 @@ export function filterCards(cards: SessionCardView[], options: BoardFilterOption
     .filter((card) => {
       if (options.filter === "needs_attention" && !card.indicators.includes("attention")) return false;
       if (options.filter === "conflicts" && !card.indicators.includes("conflict")) return false;
-      if (harness === "codex" && normalizedHarness(card) !== "codex") return false;
+      if (!matchesHarness(card, harness)) return false;
       if (!matchesLifecycle(card, lifecycle)) return false;
       if (!query) return true;
 
@@ -96,8 +98,14 @@ function searchableText(card: SessionCardView): string {
   );
 }
 
-function normalizedHarness(card: SessionCardView): string {
-  return normalize(card.harness ?? "Codex");
+function matchesHarness(card: SessionCardView, harness: HarnessFilter): boolean {
+  if (harness === "all") return true;
+  const expectedRuntime = normalize(harness);
+  const catalogEntry = harnessForRuntime(harness as RuntimeKind);
+  const acceptedLabels = [harness, catalogEntry?.label, ...(catalogEntry?.aliases ?? [])]
+    .filter((value): value is string => Boolean(value))
+    .map(normalize);
+  return normalize(card.runtime ?? "") === expectedRuntime || acceptedLabels.includes(normalize(card.harness ?? ""));
 }
 
 function matchesLifecycle(card: SessionCardView, lifecycle: LifecycleFilter): boolean {

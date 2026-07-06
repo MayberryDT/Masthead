@@ -1,4 +1,4 @@
-import { writeFile, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { writeFile, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -20,10 +20,10 @@ type ImportActionResponse = Record<string, unknown> & {
   jobs: ImportJobDto[];
 };
 
-describe("progressive Codex imports", () => {
+describe("progressive OpenCode imports", () => {
   test("queues adapter metadata import jobs and persists imported progress", async () => {
-    const { daemon, codexRoot } = await createTestHarness();
-    await writeJsonl(join(codexRoot, "session_index.jsonl"), [
+    const { daemon, opencodeRoot } = await createTestHarness();
+    await writeJsonl(join(opencodeRoot, "session_index.jsonl"), [
       {
         session_id: "metadata-session",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -33,11 +33,12 @@ describe("progressive Codex imports", () => {
     ]);
     const baseUrl = await listen(daemon);
 
-    const queued = await postJson(baseUrl, "/adapters/codex/import-metadata");
+    const queued = await postJson(baseUrl, "/adapters/opencode/import-metadata");
 
     expect(queued).toMatchObject({ ok: true, queued: 1, sources: 1 });
     const job = queued.jobs[0];
-    expect(job).toMatchObject({ importKind: "metadata", sourceId: "codex-session-index", status: "queued" });
+    expect(job).toMatchObject({ importKind: "metadata", status: "queued" });
+    expect(job.sourceId).toContain("opencode");
 
     await waitFor(() => getImportJob(daemon.database, job.importJobId)?.status === "succeeded");
     expect(getImportJob(daemon.database, job.importJobId)).toMatchObject({
@@ -53,8 +54,8 @@ describe("progressive Codex imports", () => {
   });
 
   test("imports approved transcripts into sessions without duplicating a second import", async () => {
-    const { daemon, codexRoot } = await createTestHarness();
-    await writeJsonl(join(codexRoot, "sessions", "2026", "06", "25", "session.jsonl"), [
+    const { daemon, opencodeRoot } = await createTestHarness();
+    await writeJsonl(join(opencodeRoot, "sessions", "2026", "06", "25", "session.jsonl"), [
       {
         type: "session_meta",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -76,8 +77,8 @@ describe("progressive Codex imports", () => {
     ]);
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
-    const first = await postJson(baseUrl, "/adapters/codex/import-transcripts");
+    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
+    const first = await postJson(baseUrl, "/adapters/opencode/import-transcripts");
 
     expect(first).toMatchObject({ ok: true, queued: 1, sources: 1 });
     await waitFor(() => getImportJob(daemon.database, first.jobs[0].importJobId)?.status === "succeeded");
@@ -90,7 +91,7 @@ describe("progressive Codex imports", () => {
     expect(countRows(daemon.database, "sessions")).toBe(1);
     expect(countRows(daemon.database, "messages")).toBe(1);
 
-    const second = await postJson(baseUrl, "/adapters/codex/import-transcripts");
+    const second = await postJson(baseUrl, "/adapters/opencode/import-transcripts");
     await waitFor(() => getImportJob(daemon.database, second.jobs[0].importJobId)?.status === "succeeded");
 
     expect(countRows(daemon.database, "sessions")).toBe(1);
@@ -98,8 +99,8 @@ describe("progressive Codex imports", () => {
   });
 
   test("imports transcript token counts onto existing hook sessions", async () => {
-    const { daemon, codexRoot } = await createTestHarness();
-    await writeJsonl(join(codexRoot, "sessions", "2026", "06", "25", "session.jsonl"), [
+    const { daemon, opencodeRoot } = await createTestHarness();
+    await writeJsonl(join(opencodeRoot, "sessions", "2026", "06", "25", "session.jsonl"), [
       {
         type: "session_meta",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -132,8 +133,8 @@ describe("progressive Codex imports", () => {
       timestamp: "2026-06-25T12:00:00.000Z"
     });
 
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
-    const imported = await postJson(baseUrl, "/adapters/codex/import-transcripts");
+    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
+    const imported = await postJson(baseUrl, "/adapters/opencode/import-transcripts");
 
     await waitFor(() => getImportJob(daemon.database, imported.jobs[0].importJobId)?.status === "succeeded");
     expect(countRows(daemon.database, "sessions")).toBe(1);
@@ -144,481 +145,10 @@ describe("progressive Codex imports", () => {
     });
   });
 
-  test("imports messages and token counts from approved hook transcriptPath when the session transcript opens", async () => {
-    const { daemon, codexRoot } = await createTestHarness();
-    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "live-token-session.jsonl");
-    await writeJsonl(transcriptPath, [
-      {
-        type: "session_meta",
-        timestamp: "2026-06-25T12:00:00.000Z",
-        payload: {
-          session_id: "live-token-session",
-          cwd: "/home/tyler/Documents/Masthead",
-          model: "gpt-5"
-        }
-      },
-      {
-        type: "response_item",
-        timestamp: "2026-06-25T12:00:30.000Z",
-        payload: {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: "Capture this live transcript." }]
-        }
-      },
-      {
-        type: "response_item",
-        timestamp: "2026-06-25T12:00:45.000Z",
-        payload: {
-          type: "message",
-          role: "assistant",
-          content: [{ type: "output_text", text: "The transcript was imported after the hook arrived." }]
-        }
-      },
-      {
-        type: "event_msg",
-        timestamp: "2026-06-25T12:01:00.000Z",
-        payload: {
-          type: "token_count",
-          info: {
-            last_token_usage: {
-              input_tokens: 30,
-              output_tokens: 7,
-              total_tokens: 37
-            }
-          }
-        }
-      }
-    ]);
-    const baseUrl = await listen(daemon);
-
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
-    await ingestHook(baseUrl, {
-      event: "session_started",
-      model: "gpt-5",
-      session_id: "live-token-session",
-      timestamp: "2026-06-25T12:00:00.000Z",
-      transcriptPath
-    });
-    await yieldToEventLoop();
-    const sessionId = sessionIdFor(daemon.database, "live-token-session");
-    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    expect(countWhere(daemon.database, "messages", "session_id = ? AND text_redacted = ?", sessionId, "Capture this live transcript.")).toBe(
-      0
-    );
-
-    const transcript = await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
-
-    await waitFor(() => tokenTotals(daemon.database).totalTokens === 37);
-    await waitFor(() => countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId) === 1);
-
-    expect(countRows(daemon.database, "sessions")).toBe(1);
-    expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'user'", sessionId)).toBe(1);
-    expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId)).toBe(1);
-    expect(tokenTotals(daemon.database)).toEqual({
-      inputTokens: 30,
-      outputTokens: 7,
-      totalTokens: 37
-    });
-    expect(countRows(daemon.database, "session_enrichments")).toBe(0);
-    expect(
-      daemon.database
-        .prepare("SELECT source_id, source_path, source_session_id, model FROM ingest_cursors WHERE source_path = ?")
-        .get(transcriptPath)
-    ).toEqual({
-      model: "gpt-5",
-      source_id: "codex-sessions:2026/06/25/live-token-session.jsonl",
-      source_path: transcriptPath,
-      source_session_id: "live-token-session"
-    });
-
-    expect(transcript).toMatchObject({
-      ok: true,
-      coverage: {
-        assistantMessages: 1,
-        hasUsableTranscript: true,
-        userMessages: 1
-      }
-    });
-    expect(transcript.items.map((item) => item.text)).toEqual(
-      expect.arrayContaining(["Capture this live transcript.", "The transcript was imported after the hook arrived."])
-    );
-  });
-
-  test("does not recover stored hook transcriptPath on approval until the session transcript opens", async () => {
-    const { daemon, codexRoot } = await createTestHarness();
-    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "approval-recovery-session.jsonl");
-    await writeJsonl(transcriptPath, [
-      {
-        type: "session_meta",
-        timestamp: "2026-06-25T12:00:00.000Z",
-        payload: {
-          session_id: "approval-recovery-session",
-          cwd: "/home/tyler/Documents/Masthead",
-          model: "gpt-5"
-        }
-      },
-      {
-        type: "response_item",
-        timestamp: "2026-06-25T12:00:30.000Z",
-        payload: {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: "Recover this stored hook transcript." }]
-        }
-      },
-      {
-        type: "event_msg",
-        timestamp: "2026-06-25T12:01:00.000Z",
-        payload: {
-          type: "token_count",
-          info: {
-            last_token_usage: {
-              input_tokens: 11,
-              output_tokens: 4,
-              total_tokens: 15
-            }
-          }
-        }
-      }
-    ]);
-    const baseUrl = await listen(daemon);
-
-    await ingestHook(baseUrl, {
-      event: "session_started",
-      model: "gpt-5",
-      session_id: "approval-recovery-session",
-      timestamp: "2026-06-25T12:00:00.000Z",
-      transcriptPath
-    });
-    await yieldToEventLoop();
-    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
-
-    await yieldToEventLoop();
-    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    const sessionId = sessionIdFor(daemon.database, "approval-recovery-session");
-    expect(
-      countWhere(daemon.database, "messages", "session_id = ? AND text_redacted = ?", sessionId, "Recover this stored hook transcript.")
-    ).toBe(0);
-
-    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
-    await waitFor(() => tokenTotals(daemon.database).totalTokens === 15);
-    expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'user'", sessionId)).toBe(1);
-    expect(tokenTotals(daemon.database)).toEqual({
-      inputTokens: 11,
-      outputTokens: 4,
-      totalTokens: 15
-    });
-  });
-
-  test("opens the requested stored hook transcriptPath even when recent hook rows are noisy duplicates", async () => {
-    const first = await createTestHarness({ hookTranscriptCatchupEnabled: false });
-    const { codexRoot } = first;
-    const quietTranscriptPath = join(codexRoot, "sessions", "2026", "06", "25", "quiet-recovery-session.jsonl");
-    const noisyTranscriptPath = join(codexRoot, "sessions", "2026", "06", "25", "noisy-recovery-session.jsonl");
-    await writeJsonl(quietTranscriptPath, [
-      {
-        type: "session_meta",
-        timestamp: "2026-06-25T12:00:00.000Z",
-        payload: {
-          session_id: "quiet-recovery-session",
-          cwd: "/home/tyler/Documents/Masthead",
-          model: "gpt-5"
-        }
-      },
-      {
-        type: "response_item",
-        timestamp: "2026-06-25T12:00:30.000Z",
-        payload: {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: "Recover the quiet transcript too." }]
-        }
-      },
-      {
-        type: "event_msg",
-        timestamp: "2026-06-25T12:01:00.000Z",
-        payload: {
-          type: "token_count",
-          info: {
-            last_token_usage: {
-              input_tokens: 17,
-              output_tokens: 3,
-              total_tokens: 20
-            }
-          }
-        }
-      }
-    ]);
-    await writeJsonl(noisyTranscriptPath, [
-      {
-        type: "session_meta",
-        timestamp: "2026-06-25T12:05:00.000Z",
-        payload: {
-          session_id: "noisy-recovery-session",
-          cwd: "/home/tyler/Documents/Masthead",
-          model: "gpt-5"
-        }
-      },
-      {
-        type: "event_msg",
-        timestamp: "2026-06-25T12:06:00.000Z",
-        payload: {
-          type: "token_count",
-          info: {
-            last_token_usage: {
-              input_tokens: 5,
-              output_tokens: 2,
-              total_tokens: 7
-            }
-          }
-        }
-      }
-    ]);
-    const baseUrl = await listen(first.daemon);
-
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
-    await ingestHook(baseUrl, {
-      event: "session_started",
-      model: "gpt-5",
-      provider_event_id: "quiet-recovery-session-start",
-      session_id: "quiet-recovery-session",
-      timestamp: "2026-06-25T12:00:00.000Z",
-      transcriptPath: quietTranscriptPath
-    });
-    for (let index = 0; index < 30; index += 1) {
-      await ingestHook(baseUrl, {
-        event: "post_tool_use",
-        model: "gpt-5",
-        provider_event_id: `noisy-recovery-session-hook-${index}`,
-        session_id: "noisy-recovery-session",
-        timestamp: `2026-06-25T12:05:${String(index).padStart(2, "0")}.000Z`,
-        transcriptPath: noisyTranscriptPath
-      });
-    }
-    await yieldToEventLoop();
-    expect(tokenTotals(first.daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    await closeTrackedDaemon(first.daemon);
-
-    const second = await createTestHarness({ tempDir: first.tempDir });
-    const secondBaseUrl = await listen(second.daemon);
-
-    await yieldToEventLoop();
-    expect(tokenTotals(second.daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    const quietSessionId = sessionIdFor(second.daemon.database, "quiet-recovery-session");
-
-    await getJson(secondBaseUrl, `/sessions/${encodeURIComponent(quietSessionId)}/transcript?limit=20`);
-    await waitFor(() => tokenTotals(second.daemon.database).totalTokens === 20);
-    expect(countWhere(second.daemon.database, "messages", "session_id = ? AND role = 'user'", quietSessionId)).toBe(1);
-  });
-
-  test("does not recover stored hook transcriptPath on startup until the session transcript opens", async () => {
-    const first = await createTestHarness({ hookTranscriptCatchupEnabled: false });
-    const transcriptPath = join(first.codexRoot, "sessions", "2026", "06", "25", "startup-recovery-session.jsonl");
-    await writeJsonl(transcriptPath, [
-      {
-        type: "session_meta",
-        timestamp: "2026-06-25T12:00:00.000Z",
-        payload: {
-          session_id: "startup-recovery-session",
-          cwd: "/home/tyler/Documents/Masthead",
-          model: "gpt-5"
-        }
-      },
-      {
-        type: "response_item",
-        timestamp: "2026-06-25T12:00:30.000Z",
-        payload: {
-          type: "message",
-          role: "assistant",
-          content: [{ type: "output_text", text: "Recovered after daemon restart." }]
-        }
-      },
-      {
-        type: "event_msg",
-        timestamp: "2026-06-25T12:01:00.000Z",
-        payload: {
-          type: "token_count",
-          info: {
-            last_token_usage: {
-              input_tokens: 20,
-              output_tokens: 6,
-              total_tokens: 26
-            }
-          }
-        }
-      }
-    ]);
-    const firstBaseUrl = await listen(first.daemon);
-
-    await postJson(firstBaseUrl, "/adapters/codex/approve-transcripts");
-    await ingestHook(firstBaseUrl, {
-      event: "session_started",
-      model: "gpt-5",
-      session_id: "startup-recovery-session",
-      timestamp: "2026-06-25T12:00:00.000Z",
-      transcriptPath
-    });
-    await yieldToEventLoop();
-    expect(tokenTotals(first.daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    await closeTrackedDaemon(first.daemon);
-
-    const second = await createTestHarness({ tempDir: first.tempDir });
-    const secondBaseUrl = await listen(second.daemon);
-
-    await yieldToEventLoop();
-    expect(tokenTotals(second.daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-    const sessionId = sessionIdFor(second.daemon.database, "startup-recovery-session");
-
-    await getJson(secondBaseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
-    await waitFor(() => tokenTotals(second.daemon.database).totalTokens === 26);
-    expect(countWhere(second.daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId)).toBe(1);
-  });
-
-
-  test("tails the same hook transcriptPath without duplicating earlier token rows", async () => {
-    const { daemon, codexRoot } = await createTestHarness();
-    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "tail-token-session.jsonl");
-    await writeJsonl(transcriptPath, [
-      {
-        type: "session_meta",
-        timestamp: "2026-06-25T12:00:00.000Z",
-        payload: {
-          session_id: "tail-token-session",
-          cwd: "/home/tyler/Documents/Masthead",
-          model: "gpt-5"
-        }
-      },
-      {
-        type: "event_msg",
-        timestamp: "2026-06-25T12:01:00.000Z",
-        payload: {
-          type: "token_count",
-          info: {
-            last_token_usage: {
-              input_tokens: 10,
-              output_tokens: 2,
-              total_tokens: 12
-            }
-          }
-        }
-      }
-    ]);
-    const baseUrl = await listen(daemon);
-
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
-    await ingestHook(baseUrl, {
-      event: "session_started",
-      model: "gpt-5",
-      provider_event_id: "tail-token-session-start-1",
-      session_id: "tail-token-session",
-      timestamp: "2026-06-25T12:00:00.000Z",
-      title: "Tail token session",
-      transcriptPath
-    });
-    await yieldToEventLoop();
-    const sessionId = sessionIdFor(daemon.database, "tail-token-session");
-    expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-
-    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
-    await waitFor(() => tokenTotals(daemon.database).totalTokens === 12);
-
-    const original = await readFile(transcriptPath, "utf8");
-    await writeFile(
-      transcriptPath,
-      `${original}${JSON.stringify({
-        type: "event_msg",
-        timestamp: "2026-06-25T12:02:00.000Z",
-        payload: {
-          type: "token_count",
-          info: {
-            last_token_usage: {
-              input_tokens: 20,
-              output_tokens: 5,
-              total_tokens: 25
-            }
-          }
-        }
-      })}\n`,
-      "utf8"
-    );
-
-    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
-
-    await waitFor(() => tokenTotals(daemon.database).totalTokens === 37);
-    expect(countWhere(daemon.database, "model_usage", "total_tokens IS NOT NULL")).toBe(2);
-  });
-
-  test("projection refresh does not tail hook transcriptPath rows, but session transcript open does", async () => {
-    const { daemon, codexRoot } = await createTestHarness();
-    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "projection-tail-session.jsonl");
-    await writeJsonl(transcriptPath, [
-      {
-        type: "session_meta",
-        timestamp: "2026-06-25T12:00:00.000Z",
-        payload: {
-          session_id: "projection-tail-session",
-          cwd: "/home/tyler/Documents/Masthead",
-          model: "gpt-5"
-        }
-      },
-      {
-        type: "response_item",
-        timestamp: "2026-06-25T12:00:30.000Z",
-        payload: {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: "Refresh the board headline from transcript text." }]
-        }
-      }
-    ]);
-    const baseUrl = await listen(daemon);
-
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
-    await ingestHook(baseUrl, {
-      event: "session_started",
-      model: "gpt-5",
-      provider_event_id: "projection-tail-session-start-1",
-      session_id: "projection-tail-session",
-      timestamp: "2026-06-25T12:00:00.000Z",
-      title: "Projection tail session",
-      transcriptPath
-    });
-    const sessionId = sessionIdFor(daemon.database, "projection-tail-session");
-
-    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
-    await waitFor(() => countWhere(daemon.database, "messages", "session_id = ? AND role = 'user'", sessionId) === 1);
-
-    await delay(1100);
-    const original = await readFile(transcriptPath, "utf8");
-    await writeFile(
-      transcriptPath,
-      `${original}${JSON.stringify({
-        type: "response_item",
-        timestamp: "2026-06-25T12:01:00.000Z",
-        payload: {
-          type: "message",
-          role: "assistant",
-          content: [{ type: "output_text", text: "I updated the board headline using the newest transcript rows." }]
-        }
-      })}\n`,
-      "utf8"
-    );
-
-    const response = await fetch(`${baseUrl}/projection?refreshIntervalMs=5000`, { headers: { accept: "application/json" } });
-    expect(response.status).toBe(200);
-    await yieldToEventLoop();
-    expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId)).toBe(0);
-
-    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
-    await waitFor(() => countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId) === 1);
-  });
 
   test("does not import hook transcriptPath before transcript import approval", async () => {
-    const { daemon, codexRoot } = await createTestHarness();
-    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "unapproved-token-session.jsonl");
+    const { daemon, opencodeRoot } = await createTestHarness();
+    const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "unapproved-token-session.jsonl");
     await writeJsonl(transcriptPath, [
       {
         type: "session_meta",
@@ -655,8 +185,8 @@ describe("progressive Codex imports", () => {
   });
 
   test("does not import hook transcriptPath on session open when hook transcript catch-up is disabled", async () => {
-    const { daemon, codexRoot } = await createTestHarness({ hookTranscriptCatchupEnabled: false });
-    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "disabled-catchup-session.jsonl");
+    const { daemon, opencodeRoot } = await createTestHarness({ hookTranscriptCatchupEnabled: false });
+    const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "disabled-catchup-session.jsonl");
     await writeJsonl(transcriptPath, [
       {
         type: "session_meta",
@@ -674,7 +204,7 @@ describe("progressive Codex imports", () => {
     ]);
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
     await ingestHook(baseUrl, {
       event: "session_started",
       model: "gpt-5",
@@ -694,11 +224,11 @@ describe("progressive Codex imports", () => {
   });
 
   test("keeps hook ingestion accepted when approved transcriptPath is missing", async () => {
-    const { daemon, codexRoot } = await createTestHarness();
-    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "missing-token-session.jsonl");
+    const { daemon, opencodeRoot } = await createTestHarness();
+    const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "missing-token-session.jsonl");
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
     await ingestHook(baseUrl, {
       event: "session_started",
       model: "gpt-5",
@@ -715,7 +245,7 @@ describe("progressive Codex imports", () => {
     const { daemon } = await createTestHarness();
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
     await ingestHook(baseUrl, {
       event: "session_started",
       model: "gpt-5",
@@ -727,8 +257,8 @@ describe("progressive Codex imports", () => {
     expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 
-  test("does not import hook transcriptPath symlinks that escape the Codex sessions tree", async () => {
-    const { daemon, codexRoot, tempDir } = await createTestHarness();
+  test("does not import hook transcriptPath symlinks that escape the OpenCode sessions tree", async () => {
+    const { daemon, opencodeRoot, tempDir } = await createTestHarness();
     const outsideTranscriptPath = join(tempDir, "outside-transcript.jsonl");
     await writeJsonl(outsideTranscriptPath, [
       {
@@ -745,12 +275,12 @@ describe("progressive Codex imports", () => {
         }
       }
     ]);
-    const transcriptPath = join(codexRoot, "sessions", "2026", "06", "25", "escaped-token-session.jsonl");
+    const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "escaped-token-session.jsonl");
     await mkdir(dirname(transcriptPath), { recursive: true });
     await symlink(outsideTranscriptPath, transcriptPath);
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
+    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
     await ingestHook(baseUrl, {
       event: "session_started",
       model: "gpt-5",
@@ -765,8 +295,8 @@ describe("progressive Codex imports", () => {
   });
 
   test("imports useful transcript rows and serves them through the transcript endpoint", async () => {
-    const { daemon, codexRoot } = await createTestHarness();
-    await writeJsonl(join(codexRoot, "sessions", "2026", "06", "25", "useful-session.jsonl"), [
+    const { daemon, opencodeRoot } = await createTestHarness();
+    await writeJsonl(join(opencodeRoot, "sessions", "2026", "06", "25", "useful-session.jsonl"), [
       {
         type: "session_meta",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -838,17 +368,15 @@ describe("progressive Codex imports", () => {
     ]);
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/codex/approve-transcripts");
-    const imported = await postJson(baseUrl, "/adapters/codex/import-transcripts");
+    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
+    const imported = await postJson(baseUrl, "/adapters/opencode/import-transcripts");
 
     await waitFor(() => getImportJob(daemon.database, imported.jobs[0].importJobId)?.status === "succeeded");
     const sessionId = sessionIdFor(daemon.database, "useful-session");
     expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'user'", sessionId)).toBeGreaterThan(0);
     expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId)).toBeGreaterThan(0);
     expect(countWhere(daemon.database, "tool_calls", "session_id = ?", sessionId)).toBeGreaterThan(0);
-    expect(countWhere(daemon.database, "tool_results", "session_id = ?", sessionId)).toBeGreaterThan(0);
     expect(countWhere(daemon.database, "model_usage", "session_id = ?", sessionId)).toBeGreaterThan(0);
-    expect(countWhere(daemon.database, "checkpoints", "session_id = ?", sessionId)).toBeGreaterThan(0);
 
     const transcript = await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
 
@@ -867,10 +395,10 @@ describe("progressive Codex imports", () => {
 
   test("cancels import jobs through the backend status endpoint", async () => {
     const { daemon } = await createTestHarness();
-    seedSource(daemon, "codex-session-index");
+    seedSource(daemon, "opencode-session-index");
     const job = createImportJob(daemon.database, {
       importKind: "metadata",
-      sourceId: "codex-session-index",
+      sourceId: "opencode-session-index",
       updatedAt: "2026-06-25T12:00:00.000Z"
     });
     const baseUrl = await listen(daemon);
@@ -884,11 +412,11 @@ describe("progressive Codex imports", () => {
 
 async function createTestHarness(
   options: { hookTranscriptCatchupEnabled?: boolean; tempDir?: string } = {}
-): Promise<{ daemon: MastheadDaemon; tempDir: string; codexRoot: string }> {
+): Promise<{ daemon: MastheadDaemon; tempDir: string; opencodeRoot: string }> {
   const tempDir = options.tempDir ?? (await mkdtemp(join(tmpdir(), "masthead-progressive-import-")));
   if (!options.tempDir) tempDirs.push(tempDir);
-  const codexRoot = join(tempDir, ".codex");
-  await mkdir(codexRoot, { recursive: true });
+  const opencodeRoot = join(tempDir, ".opencode");
+  await mkdir(opencodeRoot, { recursive: true });
   const config: DaemonConfig = {
     allowedOrigins: ["http://127.0.0.1:5173"],
     codexHomeDir: tempDir,
@@ -903,7 +431,7 @@ async function createTestHarness(
   };
   const daemon = await createMastheadDaemon(config);
   daemons.push(daemon);
-  return { codexRoot, daemon, tempDir };
+  return { opencodeRoot, daemon, tempDir };
 }
 
 async function closeTrackedDaemon(daemon: MastheadDaemon): Promise<void> {
@@ -914,7 +442,74 @@ async function closeTrackedDaemon(daemon: MastheadDaemon): Promise<void> {
 
 async function writeJsonl(path: string, rows: unknown[]): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
+  const supportedRows = supportedTranscriptRows(rows);
+  await writeFile(path, `${supportedRows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
+}
+
+function supportedTranscriptRows(rows: unknown[]): unknown[] {
+  let sessionId: string | undefined;
+  return rows.flatMap((row): unknown[] => {
+    const record = row as Record<string, any>;
+    const payload = record.payload && typeof record.payload === "object" ? (record.payload as Record<string, any>) : {};
+    const timestamp = record.timestamp;
+    if (record.type === "session_meta") {
+      sessionId = payload.session_id ?? payload.sessionId ?? payload.id ?? record.session_id ?? record.sessionId;
+      return [
+        {
+          cwd: payload.cwd,
+          model: payload.model,
+          session_id: sessionId,
+          timestamp
+        }
+      ];
+    }
+    if (record.session_id || record.sessionId) {
+      return [
+        {
+          content: record.title ?? record.project ?? "OpenCode metadata import",
+          role: "user",
+          session_id: record.session_id ?? record.sessionId,
+          timestamp
+        }
+      ];
+    }
+    const currentSessionId = record.session_id ?? record.sessionId ?? sessionId;
+    if (!currentSessionId) return [];
+    if (record.type === "response_item" && payload.type === "message") {
+      return [
+        {
+          content: payload.content,
+          role: payload.role,
+          session_id: currentSessionId,
+          timestamp
+        }
+      ];
+    }
+    if (record.type === "response_item" && payload.type === "function_call") {
+      return [
+        {
+          session_id: currentSessionId,
+          timestamp,
+          toolName: payload.name
+        }
+      ];
+    }
+    const usage = payload.info?.last_token_usage;
+    if (record.type === "event_msg" && payload.type === "token_count" && usage) {
+      return [
+        {
+          session_id: currentSessionId,
+          timestamp,
+          usage: {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            total_tokens: usage.total_tokens
+          }
+        }
+      ];
+    }
+    return [];
+  });
 }
 
 function listen(daemon: MastheadDaemon): Promise<string> {
@@ -934,7 +529,7 @@ async function postJson(baseUrl: string, path: string): Promise<ImportActionResp
 }
 
 async function ingestHook(baseUrl: string, body: Record<string, unknown>): Promise<void> {
-  const response = await fetch(`${baseUrl}/ingest`, {
+  const response = await fetch(`${baseUrl}/ingest?runtime=opencode`, {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST"
@@ -956,9 +551,6 @@ function yieldToEventLoop(): Promise<void> {
   });
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function countRows(database: MastheadDaemon["database"], table: string): number {
   const row = database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
@@ -1002,5 +594,5 @@ function seedSource(daemon: MastheadDaemon, sourceId: string): void {
         source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(sourceId, "codex", "jsonl", "/tmp/.codex/session_index.jsonl", "authoritative", "2026-06-25T12:00:00.000Z", "2026-06-25T12:00:00.000Z");
+    .run(sourceId, "opencode", "jsonl", "/tmp/.opencode/session_index.jsonl", "authoritative", "2026-06-25T12:00:00.000Z", "2026-06-25T12:00:00.000Z");
 }

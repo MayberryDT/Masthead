@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import type { AdapterStatus, CodexHookSettingsDto } from "../../../app/daemonClient";
+import type { AdapterStatus, SettingsStateDto } from "../../../app/daemonClient";
 import { AdapterRow } from "../AdapterRow";
 import { SourceAdapterDetailModal } from "../SourceAdapterDetailModal";
 
@@ -23,9 +23,9 @@ function renderAdapter(adapter: AdapterStatus) {
 }
 
 describe("AdapterRow", () => {
-  test("renders connected Codex as a compact source card", () => {
+  test("renders connected OpenCode as a compact source card", () => {
     const html = renderAdapter({
-      runtime: "codex",
+      runtime: "opencode",
       state: "connected",
       discoveredSessions: 742,
       importedSessions: 120,
@@ -42,25 +42,25 @@ describe("AdapterRow", () => {
           failures: 0,
           importedCount: 120,
           lastSync: "2026-06-24T12:00:00.000Z",
-          path: "/home/tyler/.codex/sessions",
+          path: "/home/tyler/.opencode/sessions",
           queuedCount: 622,
-          runtime: "codex",
+          runtime: "opencode",
           sessionCount: 742,
-          sourceId: "codex-sessions",
+          sourceId: "opencode-sessions",
           sourceKind: "jsonl"
         }
       ]
     });
 
     expect(html).toContain("adapter-card adapter-card-connected");
-    expect(html).toContain("Codex");
+    expect(html).toContain("OpenCode");
     expect(html).toContain("Connected");
     expect(html).toContain("Discovered");
     expect(html).toContain("742");
     expect(html).toContain("Locations");
     expect(html).toContain("Details");
     expect(html).not.toContain("Import metadata");
-    expect(html).not.toContain("/home/tyler/.codex/sessions");
+    expect(html).not.toContain("/home/tyler/.opencode/sessions");
   });
 
   test("opens details from click and keyboard callbacks", async () => {
@@ -71,7 +71,7 @@ describe("AdapterRow", () => {
     await act(async () => {
       root.render(
         <AdapterRow
-          adapter={codexAdapter({ transcriptImport: true })}
+          adapter={opencodeAdapter({ transcriptImport: true })}
           busy={false}
           onOpenDetails={onOpenDetails}
           onToggleSelected={noop}
@@ -84,7 +84,7 @@ describe("AdapterRow", () => {
       container.querySelector<HTMLElement>(".adapter-card")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
 
-    expect(onOpenDetails).toHaveBeenCalledWith("codex");
+    expect(onOpenDetails).toHaveBeenCalledWith("opencode");
     expect(onOpenDetails).toHaveBeenCalledTimes(2);
 
     await act(async () => root.unmount());
@@ -115,7 +115,7 @@ describe("AdapterRow", () => {
 
   test("renders planned adapters as selectable-disabled cards", () => {
     const html = renderAdapter({
-      runtime: "gemini_cli",
+      runtime: "pi",
       state: "planned",
       implementationState: "planned",
       discoveredCount: 0,
@@ -131,9 +131,9 @@ describe("AdapterRow", () => {
       sourceLocations: []
     } as unknown as AdapterStatus);
 
-    expect(html).toContain("Gemini CLI");
+    expect(html).toContain("Pi");
     expect(html).toContain("Adapter planned");
-    expect(html).toMatch(/<input[^>]*disabled[^>]*aria-label="Select Gemini CLI"/);
+    expect(html).toMatch(/<input[^>]*disabled[^>]*aria-label="Select Pi"/);
   });
 });
 
@@ -174,9 +174,9 @@ describe("SourceAdapterDetailModal", () => {
   test("renders live connector status in harness detail header", () => {
     const html = renderToStaticMarkup(
       <SourceAdapterDetailModal
-        adapter={codexAdapter({ transcriptImport: true })}
+        adapter={opencodeAdapter({ transcriptImport: true })}
         busy={false}
-        hooks={codexHookSettings()}
+        hooks={opencodeHookSettings()}
         onClose={noop}
         onExcludePath={noop}
         onRuntimeHookAction={noop}
@@ -188,7 +188,7 @@ describe("SourceAdapterDetailModal", () => {
     expect(html).toContain("Test live connectors");
   });
 
-  test("invokes Codex metadata, transcript, approval, and sync callbacks", async () => {
+  test("invokes OpenCode metadata, transcript, approval, and sync callbacks", async () => {
     const onImportMetadata = vi.fn();
     const onImportTranscripts = vi.fn();
     const onEnableTranscriptImport = vi.fn();
@@ -199,7 +199,7 @@ describe("SourceAdapterDetailModal", () => {
     await act(async () => {
       root.render(
         <SourceAdapterDetailModal
-          adapter={codexAdapter({ transcriptImport: true })}
+          adapter={opencodeAdapter({ transcriptImport: true })}
           busy={false}
           onClose={noop}
           onEnableTranscriptImport={onEnableTranscriptImport}
@@ -217,14 +217,14 @@ describe("SourceAdapterDetailModal", () => {
       buttonByText(container, "Sync").click();
     });
 
-    expect(onImportMetadata).toHaveBeenCalledWith("codex");
-    expect(onImportTranscripts).toHaveBeenCalledWith("codex");
-    expect(onSyncAdapter).toHaveBeenCalledWith("codex");
+    expect(onImportMetadata).toHaveBeenCalledWith("opencode");
+    expect(onImportTranscripts).toHaveBeenCalledWith("opencode");
+    expect(onSyncAdapter).toHaveBeenCalledWith("opencode");
 
     await act(async () => {
       root.render(
         <SourceAdapterDetailModal
-          adapter={codexAdapter({ transcriptImport: false })}
+          adapter={opencodeAdapter({ transcriptImport: false })}
           busy={false}
           onClose={noop}
           onEnableTranscriptImport={onEnableTranscriptImport}
@@ -237,12 +237,12 @@ describe("SourceAdapterDetailModal", () => {
       buttonByText(container, "Enable transcript import").click();
     });
 
-    expect(onEnableTranscriptImport).toHaveBeenCalledWith("codex");
+    expect(onEnableTranscriptImport).toHaveBeenCalledWith("opencode");
 
     await act(async () => root.unmount());
   });
 
-  test("invokes runtime hook and import-history callbacks for non-Codex adapters", async () => {
+  test("invokes runtime hook and import-history callbacks for non-OpenCode adapters", async () => {
     const onRuntimeHookAction = vi.fn();
     const onOpenImportJobs = vi.fn();
     const container = document.createElement("div");
@@ -267,7 +267,7 @@ describe("SourceAdapterDetailModal", () => {
           } as AdapterStatus}
           busy={false}
           hooks={{
-            ...codexHookSettings(),
+            ...opencodeHookSettings(),
             integrations: [
               {
                 actionSurface: "sources",
@@ -301,9 +301,9 @@ describe("SourceAdapterDetailModal", () => {
   });
 });
 
-function codexAdapter({ transcriptImport }: { transcriptImport: boolean }): AdapterStatus {
+function opencodeAdapter({ transcriptImport }: { transcriptImport: boolean }): AdapterStatus {
   return {
-    runtime: "codex",
+    runtime: "opencode",
     state: "connected",
     discoveredSessions: 742,
     importedSessions: 120,
@@ -318,31 +318,31 @@ function codexAdapter({ transcriptImport }: { transcriptImport: boolean }): Adap
         confidence: "authoritative",
         failures: 0,
         importedCount: 120,
-        path: "/home/tyler/.codex/sessions",
+        path: "/home/tyler/.opencode/sessions",
         queuedCount: 622,
-        runtime: "codex",
+        runtime: "opencode",
         sessionCount: 742,
-        sourceId: "codex-sessions",
+        sourceId: "opencode-sessions",
         sourceKind: "jsonl"
       }
     ]
   };
 }
 
-function codexHookSettings(): CodexHookSettingsDto {
+function opencodeHookSettings(): SettingsStateDto["hooks"] {
   return {
     command: "masthead hook",
     configExists: true,
-    configPath: "/home/tyler/.codex/config.toml",
+    configPath: "/home/tyler/.opencode/config.toml",
     endpoint: "http://127.0.0.1:17373/ingest",
     installed: true,
     integrations: [
       {
         actionSurface: "sources",
         captureMode: "live_hook",
-        description: "Codex live hooks",
-        label: "Codex",
-        runtime: "codex",
+        description: "OpenCode live hooks",
+        label: "OpenCode",
+        runtime: "opencode",
         status: "installed",
         supportsActions: true
       }

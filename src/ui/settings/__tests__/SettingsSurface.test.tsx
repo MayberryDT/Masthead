@@ -51,7 +51,7 @@ describe("Settings surface", () => {
     expect(html).toContain("MCP access");
     expect(html).toContain("MCP server");
     expect(html).toContain("Refresh MCP");
-    expect(html).toContain("Codex TOML");
+    expect(html).toContain("MCP TOML");
     expect(html).toContain("MCP JSON");
     expect(html).toContain("stdio");
     expect(html).toContain("Test MCP launch");

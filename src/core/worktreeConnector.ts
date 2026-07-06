@@ -72,7 +72,6 @@ const staticReadOnlyBridgePaths = new Set([
   "/mcp/audit",
   "/settings",
   "/settings/hooks",
-  "/settings/hooks/codex",
   "/logbook/summary",
   "/logbook/search"
 ]);

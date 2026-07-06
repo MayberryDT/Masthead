@@ -23,8 +23,8 @@ describe("enrichment search", () => {
     const now = "2026-06-25T12:00:00.000Z";
     db.prepare("INSERT INTO hosts (host_id, first_seen_at, last_seen_at) VALUES (?, ?, ?)").run("host:test", now, now);
     db.prepare("INSERT INTO runtimes (runtime_id, runtime_kind, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
-      "runtime:codex",
-      "codex",
+      "runtime:opencode",
+      "opencode",
       now,
       now
     );
@@ -33,7 +33,7 @@ describe("enrichment search", () => {
         session_id, host_id, runtime_id, source_session_id, project_label, title, lifecycle,
         last_activity_at, source_confidence, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run("session-1", "host:test", "runtime:codex", "source-session-1", "Pip", "Callback work", "ended", now, "authoritative", now, now);
+    ).run("session-1", "host:test", "runtime:opencode", "source-session-1", "Pip", "Callback work", "ended", now, "authoritative", now, now);
     upsertSessionEnrichment(db, {
       content: {
         candidateDecisions: [],

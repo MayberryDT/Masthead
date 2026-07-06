@@ -26,7 +26,7 @@ describe("SessionInspector", () => {
     expect(html).toContain("Latest agent feedback");
     expect(html).toContain("Implementation is complete, but auth tests are still failing.");
     expect(html).toContain("1 timeline events");
-    expect(html).toContain("Open Codex");
+    expect(html).toContain("Open source session");
   });
 
   test("does not render conflict-only running attention as a blocked token", () => {
@@ -87,7 +87,7 @@ function session(overrides: Partial<SessionDetailView> = {}): SessionDetailView 
     durationLabel: "4m",
     model: "gpt-5.5",
     thinkingLevel: "High",
-    harness: "Codex",
+    harness: "OpenCode",
     startedAt: "2026-06-23T02:00:00.000Z",
     branchOrWorktree: "agent/test",
     lastActivity: "2026-06-23T02:04:00.000Z",
@@ -110,7 +110,7 @@ function session(overrides: Partial<SessionDetailView> = {}): SessionDetailView 
     inspectorSections: ["state", "latest_feedback", "attention_conflicts", "evidence", "timeline", "actions"],
     reviewAnnotations: [],
     evidence: {
-      observed: [{ id: "event-1", kind: "event", observedAt: "2026-06-23T02:04:00.000Z", source: "codex.fixture" }],
+      observed: [{ id: "event-1", kind: "event", observedAt: "2026-06-23T02:04:00.000Z", source: "opencode.fixture" }],
       inferred: [],
       missing: []
     },

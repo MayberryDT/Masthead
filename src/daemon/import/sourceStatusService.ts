@@ -1,4 +1,4 @@
-import type { AdapterDiagnostic, DiscoveredSource, RuntimeKind } from "../../adapters/types.ts";
+import { RUNTIME_KINDS, type AdapterDiagnostic, type DiscoveredSource, type RuntimeKind } from "../../adapters/types.ts";
 import { countDistinctSessionsForSource } from "../db/sessionSourceRepository.ts";
 import { supportedAdapters, type AdapterImplementationState } from "../sources/supportedAdapters.ts";
 import type { SourcePreflightResult } from "../sources/sourcePreflight.ts";
@@ -111,6 +111,7 @@ export function getSourceStatuses(db: MastheadDatabase, discoveredSources: Disco
 }
 
 function isVisibleSourceRow(row: SourceRow): boolean {
+  if (!(RUNTIME_KINDS as readonly string[]).includes(row.adapter)) return false;
   const path = row.source_path;
   if (!path) return true;
   const lower = path.toLowerCase();

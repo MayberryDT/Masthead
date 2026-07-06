@@ -609,7 +609,7 @@ function emptyStateFor(
   return {
     reason,
     title: "No sessions imported yet.",
-    message: "Discover local Codex, Claude, or other agent sources, then import metadata to populate the canonical Logbook.",
+    message: "Discover local OpenCode, OMP, Claude Code, Pi, Cursor, Grok, or Hermes sources, then import metadata to populate the canonical Logbook.",
     actions: [{ label: "Open Sources", onClick: options.onOpenSources, variant: "primary" }]
   };
 }
@@ -688,7 +688,7 @@ function legacyToLogbookSession(session: HistorySession): LogbookSession {
     lastActivityAt: session.records.at(-1)?.observedAt,
     lifecycle: session.status,
     project: session.project,
-    runtime: "codex",
+    runtime: "claude_code",
     sessionId: session.sessionId,
     sourceSessionId: session.sessionId,
     title: historyHeadline(session),

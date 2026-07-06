@@ -153,7 +153,7 @@ describe("collector autostart", () => {
     });
 
     expect(container.querySelector(".sources-onboarding-modal")).not.toBeNull();
-    expect(container.textContent).toContain("Codex");
+    expect(container.textContent).toContain("OpenCode");
     expect(container.textContent).toContain("Continue");
     expect(container.textContent).not.toContain("ADAPTERS");
     expect(container.textContent).not.toContain("Import data");
@@ -602,10 +602,10 @@ function detectedSourcesSetup(status = "detected") {
       {
         discoveredSessions: 0,
         importedSessions: 0,
-        label: "Codex",
-        path: "/home/tyler/.codex/session_index.jsonl",
-        runtime: "codex",
-        sourceId: "codex-sessions",
+        label: "OpenCode",
+        path: "/home/tyler/.opencode/session_index.jsonl",
+        runtime: "opencode",
+        sourceId: "opencode-sessions",
         state: "connected"
       }
     ],
@@ -615,10 +615,10 @@ function detectedSourcesSetup(status = "detected") {
         {
           discoveredSessions: 0,
           importable: true,
-          label: "Codex sessions",
-          path: "/home/tyler/.codex/session_index.jsonl",
-          runtime: "codex",
-          sourceId: "codex-sessions"
+          label: "OpenCode sessions",
+          path: "/home/tyler/.opencode/session_index.jsonl",
+          runtime: "opencode",
+          sourceId: "opencode-sessions"
         }
       ],
       generatedAt: "2026-07-04T00:00:00.000Z",

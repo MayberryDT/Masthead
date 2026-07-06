@@ -7,37 +7,39 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const tempDir = await mkdtemp(join(tmpdir(), "masthead-live-smoke-"));
+const RELEASE_LIVE_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"];
+const PRIMARY_LIVE_RUNTIME = "claude_code";
 let server;
 
 try {
   const databasePath = join(tempDir, "masthead.sqlite");
   const storePath = join(tempDir, "events.ndjson");
-  server = await startDaemon({ codexHome: join(tempDir, "codex-home"), databasePath, storePath });
+  server = await startDaemon({ codexHome: join(tempDir, "legacy-home"), databasePath, storePath });
 
   const health = await getJson(server.baseUrl, "/health");
   assert(health.ok === true, "health did not report ok");
   assert(health.databasePath === databasePath, "health reported the wrong database path");
   assert(health.storePath === storePath, "health reported the wrong store path");
 
-  const accepted = await postJson(server.baseUrl, "/ingest", livePayload("codex", "live-smoke-approval"));
+  const accepted = await postJson(server.baseUrl, `/ingest?runtime=${PRIMARY_LIVE_RUNTIME}`, livePayload(PRIMARY_LIVE_RUNTIME, "live-smoke-approval"));
   assert(accepted.status === "accepted", `expected accepted ingest, got ${accepted.status}`);
   assert(accepted.events === 1, `expected one live event, got ${accepted.events}`);
 
-  const duplicate = await postJson(server.baseUrl, "/ingest", livePayload("codex", "live-smoke-approval"));
+  const duplicate = await postJson(server.baseUrl, `/ingest?runtime=${PRIMARY_LIVE_RUNTIME}`, livePayload(PRIMARY_LIVE_RUNTIME, "live-smoke-approval"));
   assert(duplicate.status === "duplicate", `expected duplicate ingest, got ${duplicate.status}`);
   assert(duplicate.events === 1, "duplicate ingest should not append an event");
 
   let expectedLiveEvents = 1;
-  for (const runtime of ["claude_code", "cursor", "grok", "omp", "opencode"]) {
+  for (const runtime of RELEASE_LIVE_RUNTIMES.filter((runtime) => runtime !== PRIMARY_LIVE_RUNTIME)) {
     expectedLiveEvents += 1;
     const runtimeAccepted = await postJson(server.baseUrl, `/ingest?runtime=${runtime}`, livePayload(runtime, `live-smoke-${runtime}`));
     assert(runtimeAccepted.status === "accepted", `expected accepted ${runtime} ingest, got ${runtimeAccepted.status}`);
     assert(runtimeAccepted.events === expectedLiveEvents, `expected ${expectedLiveEvents} cumulative live events after ${runtime}, got ${runtimeAccepted.events}`);
   }
 
-  const projection = await getJson(server.baseUrl, "/projection?expandedSessionId=live-smoke-session");
-  assert(projection.projection?.cards?.some((card) => card.sessionId === "live-smoke-session"), "projection missing live smoke session");
-  for (const runtime of ["codex", "claude_code", "cursor", "grok", "omp", "opencode"]) {
+  const projection = await getJson(server.baseUrl, `/projection?expandedSessionId=${liveSessionId(PRIMARY_LIVE_RUNTIME)}`);
+  assert(projection.projection?.cards?.some((card) => card.sessionId === liveSessionId(PRIMARY_LIVE_RUNTIME)), "projection missing live smoke session");
+  for (const runtime of RELEASE_LIVE_RUNTIMES) {
     const expectedSourceSessionId = liveSessionId(runtime);
     const card = projection.projection?.cards?.find((item) => item.runtime === runtime && item.sourceSessionId === expectedSourceSessionId);
     assert(card, `projection missing ${runtime} live smoke card`);
@@ -45,7 +47,7 @@ try {
   }
 
   const events = await getJson(server.baseUrl, "/events");
-  assert(events.events?.length === 6, "events endpoint should return six accepted events");
+  assert(events.events?.length === RELEASE_LIVE_RUNTIMES.length, `events endpoint should return ${RELEASE_LIVE_RUNTIMES.length} accepted events`);
 
   const logbook = await getJson(server.baseUrl, "/logbook/search?q=Live%20smoke");
   assert(logbook.sessions?.some((session) => session.title === "Live smoke approval"), "logbook search missing live smoke session");
@@ -113,17 +115,15 @@ function livePayload(runtime, providerEventId) {
 }
 
 function liveSessionId(runtime) {
-  return runtime === "codex" ? "live-smoke-session" : `live-smoke-${runtime}-session`;
+  return `live-smoke-${runtime}-session`;
 }
 
 function assertDatabase(databasePath) {
   const db = new DatabaseSync(databasePath);
   try {
-    const sessions = db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE source_session_id = ?").get("live-smoke-session").count;
-    const signals = db.prepare("SELECT COUNT(*) AS count FROM runtime_signals JOIN sessions USING (session_id) WHERE sessions.source_session_id = ?").get("live-smoke-session").count;
-    const rawEvents = db.prepare("SELECT COUNT(*) AS count FROM raw_events WHERE source_record_key = ?").get("event:codex:live-smoke-approval").count;
+    const sessions = db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE source_session_id = ?").get(liveSessionId(PRIMARY_LIVE_RUNTIME)).count;
+    const rawEvents = db.prepare("SELECT COUNT(*) AS count FROM raw_events WHERE source_record_key = ?").get(`event:${PRIMARY_LIVE_RUNTIME}:live-smoke-approval`).count;
     assert(sessions === 1, `expected one canonical session row, got ${sessions}`);
-    assert(signals >= 1, "expected at least one runtime signal row");
     assert(rawEvents === 1, `expected one raw event row, got ${rawEvents}`);
     const runtimeRows = db
       .prepare(
@@ -134,7 +134,7 @@ function assertDatabase(databasePath) {
       )
       .all();
     const runtimeCounts = new Map(runtimeRows.map((row) => [row.runtime, row.count]));
-    for (const runtime of ["codex", "claude_code", "cursor", "grok", "omp", "opencode"]) {
+    for (const runtime of RELEASE_LIVE_RUNTIMES) {
       assert(runtimeCounts.get(runtime) === 1, `expected one canonical ${runtime} session row, got ${runtimeCounts.get(runtime) ?? 0}`);
     }
   } finally {

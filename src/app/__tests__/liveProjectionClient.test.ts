@@ -152,11 +152,11 @@ describe("live projection client helpers", () => {
     expect(projection.lanes?.map((lane) => lane.laneId)).toEqual(["running", "idle", "needs_action", "history"]);
     expect(projection.summary.running).toBe(1);
     expect(projection.summary.needsAction).toBe(1);
-    expect(projection.cards[0].headline.headline).toBe("Masthead Codex session: waiting for the next required input.");
+    expect(projection.cards[0].headline.headline).toBe("Masthead OpenCode session: waiting for the next required input.");
     expect(projection.cards[0].headline.source).toBe("offline");
     expect("copy" in projection.cards[0]).toBe(false);
-    expect(projection.cards[1].headline.headline).toBe("Masthead Codex session: latest outcome is ready for review.");
-    expect(projection.selectedSession?.headline.headline).toBe("Masthead Codex session: latest outcome is ready for review.");
+    expect(projection.cards[1].headline.headline).toBe("Masthead OpenCode session: latest outcome is ready for review.");
+    expect(projection.selectedSession?.headline.headline).toBe("Masthead OpenCode session: latest outcome is ready for review.");
     expect(projection.selectedSession && "copy" in projection.selectedSession).toBe(false);
     expect(projection.brief).toMatchObject({
       text: "Approval is pending in one active session. One session is running overall.",
@@ -188,7 +188,7 @@ describe("live projection client helpers", () => {
       sessionId: "running-session",
       currentActivity: "waiting for LLM headline access",
       headline: {
-        headline: "Masthead Codex session: waiting for LLM headline access.",
+        headline: "Masthead OpenCode session: waiting for LLM headline access.",
         source: "offline",
         status: "ready"
       }
@@ -224,7 +224,7 @@ describe("live projection client helpers", () => {
       conflicts: []
     } as unknown as LiveBoardProjection);
 
-    expect(projection.cards[0].headline.headline).toBe("Masthead Codex session: waiting for LLM headline access.");
+    expect(projection.cards[0].headline.headline).toBe("Masthead OpenCode session: waiting for LLM headline access.");
     expect(projection.cards[0].headline.source).toBe("offline");
     expect("copy" in projection.cards[0]).toBe(false);
   });
@@ -295,7 +295,7 @@ function legacyCard(overrides: Partial<SessionCardView>): Omit<SessionCardView, 
   const card: Omit<SessionCardView, "headline"> = {
     sessionId: "session-1",
     project: "Masthead",
-    title: "Masthead Codex session",
+    title: "Masthead OpenCode session",
     stateLabel: "Working",
     primaryStatus: "editing",
     lifecycle: "running",

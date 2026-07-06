@@ -11,8 +11,8 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { force: true, recursive: true })));
 });
 
-describe("hook transcript recovery", () => {
-  test("selects transcript paths for requested source sessions only", async () => {
+describe("legacy Codex hook transcript recovery", () => {
+  test("selects legacy transcript paths for requested source sessions only", async () => {
     const db = await openTestDatabase();
     seedHookRecord(db, {
       eventId: "visible",

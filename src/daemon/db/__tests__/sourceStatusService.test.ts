@@ -27,35 +27,35 @@ describe("source status service", () => {
       `INSERT INTO ingest_sources (
         source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run("codex-sessions", "codex", "jsonl", "/tmp/.codex/sessions", "authoritative", now, now);
+    ).run("opencode-sessions", "opencode", "jsonl", "/tmp/.opencode/sessions", "authoritative", now, now);
     db.prepare(
       `INSERT INTO ingest_sources (
         source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run("codex-archive", "codex", "jsonl", "/tmp/.codex/archived_sessions", "authoritative", now, now);
+    ).run("opencode-archive", "opencode", "jsonl", "/tmp/.opencode/archived_sessions", "authoritative", now, now);
     db.prepare("INSERT INTO hosts (host_id, first_seen_at, last_seen_at) VALUES (?, ?, ?)").run("host:test", now, now);
     db.prepare(
       `INSERT INTO runtimes (runtime_id, runtime_kind, first_seen_at, last_seen_at)
       VALUES (?, ?, ?, ?)`
-    ).run("runtime:codex", "codex", now, now);
+    ).run("runtime:opencode", "opencode", now, now);
     db.prepare(
       `INSERT INTO sessions (
         session_id, host_id, runtime_id, source_session_id, lifecycle, last_activity_at, source_confidence, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run("session:1", "host:test", "runtime:codex", "session-1", "ended", now, "authoritative", now, now);
+    ).run("session:1", "host:test", "runtime:opencode", "session-1", "ended", now, "authoritative", now, now);
     db.prepare(
       `INSERT INTO sessions (
         session_id, host_id, runtime_id, source_session_id, lifecycle, last_activity_at, source_confidence, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run("session:2", "host:test", "runtime:codex", "session-2", "ended", now, "authoritative", now, now);
+    ).run("session:2", "host:test", "runtime:opencode", "session-2", "ended", now, "authoritative", now, now);
     db.prepare(
       `INSERT INTO session_sources (
         session_id, source_id, first_seen_at, last_seen_at, imported_record_count
       ) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`
-    ).run("session:1", "codex-sessions", now, now, 40, "session:2", "codex-archive", now, now, 5);
+    ).run("session:1", "opencode-sessions", now, now, 40, "session:2", "opencode-archive", now, now, 5);
     const job = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: now
     });
     updateImportJob(db, job.importJobId, {
@@ -66,12 +66,12 @@ describe("source status service", () => {
     });
 
     const statuses = getSourceStatuses(db);
-    expect(statuses.find((status) => status.sourceId === "codex-sessions")).toMatchObject({
+    expect(statuses.find((status) => status.sourceId === "opencode-sessions")).toMatchObject({
       importedSessions: 1,
       importedRecords: 40,
       queuedRecords: 3
     });
-    expect(statuses.find((status) => status.sourceId === "codex-archive")).toMatchObject({
+    expect(statuses.find((status) => status.sourceId === "opencode-archive")).toMatchObject({
       importedSessions: 1,
       importedRecords: 0
     });
@@ -89,11 +89,11 @@ describe("source status service", () => {
       `INSERT INTO ingest_sources (
         source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run("codex-sessions", "codex", "jsonl", "/tmp/.codex/sessions", "authoritative", now, now);
+    ).run("opencode-sessions", "opencode", "jsonl", "/tmp/.opencode/sessions", "authoritative", now, now);
 
     const staleFailure = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:00:00.000Z"
     });
     updateImportJob(db, staleFailure.importJobId, {
@@ -104,7 +104,7 @@ describe("source status service", () => {
     });
     const latestSuccess = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:01:00.000Z"
     });
     updateImportJob(db, latestSuccess.importJobId, {
@@ -113,7 +113,7 @@ describe("source status service", () => {
       updatedAt: "2026-06-25T12:01:30.000Z"
     });
 
-    const status = getSourceStatuses(db).find((candidate) => candidate.sourceId === "codex-sessions");
+    const status = getSourceStatuses(db).find((candidate) => candidate.sourceId === "opencode-sessions");
 
     expect(status).toMatchObject({
       failureCount: 0,
@@ -133,11 +133,11 @@ describe("source status service", () => {
       `INSERT INTO ingest_sources (
         source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run("codex-sessions", "codex", "jsonl", "/tmp/.codex/sessions", "authoritative", now, now);
+    ).run("opencode-sessions", "opencode", "jsonl", "/tmp/.opencode/sessions", "authoritative", now, now);
 
     const olderSuccess = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:00:00.000Z"
     });
     updateImportJob(db, olderSuccess.importJobId, {
@@ -147,7 +147,7 @@ describe("source status service", () => {
     });
     const latestFailure = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:01:00.000Z"
     });
     updateImportJob(db, latestFailure.importJobId, {
@@ -156,7 +156,7 @@ describe("source status service", () => {
       updatedAt: "2026-06-25T12:01:30.000Z"
     });
 
-    const status = getSourceStatuses(db).find((candidate) => candidate.sourceId === "codex-sessions");
+    const status = getSourceStatuses(db).find((candidate) => candidate.sourceId === "opencode-sessions");
 
     expect(status).toMatchObject({
       failureCount: 2,
@@ -176,11 +176,11 @@ describe("source status service", () => {
       `INSERT INTO ingest_sources (
         source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run("codex-sessions", "codex", "jsonl", "/tmp/.codex/sessions", "authoritative", now, now);
+    ).run("opencode-sessions", "opencode", "jsonl", "/tmp/.opencode/sessions", "authoritative", now, now);
 
     const metadataSuccess = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:00:00.000Z"
     });
     updateImportJob(db, metadataSuccess.importJobId, {
@@ -190,7 +190,7 @@ describe("source status service", () => {
     });
     const transcriptFailure = createImportJob(db, {
       importKind: "transcript",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:01:00.000Z"
     });
     updateImportJob(db, transcriptFailure.importJobId, {
@@ -199,7 +199,7 @@ describe("source status service", () => {
       updatedAt: "2026-06-25T12:01:30.000Z"
     });
 
-    const status = getSourceStatuses(db).find((candidate) => candidate.sourceId === "codex-sessions");
+    const status = getSourceStatuses(db).find((candidate) => candidate.sourceId === "opencode-sessions");
 
     expect(status).toMatchObject({
       failureCount: 3,
@@ -219,11 +219,11 @@ describe("source status service", () => {
       `INSERT INTO ingest_sources (
         source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run("codex-sessions", "codex", "jsonl", "/tmp/.codex/sessions", "authoritative", now, now);
+    ).run("opencode-sessions", "opencode", "jsonl", "/tmp/.opencode/sessions", "authoritative", now, now);
 
     const staleFailure = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:00:00.000Z"
     });
     updateImportJob(db, staleFailure.importJobId, {
@@ -233,7 +233,7 @@ describe("source status service", () => {
     });
     const latestSuccess = createImportJob(db, {
       importKind: "metadata",
-      sourceId: "codex-sessions",
+      sourceId: "opencode-sessions",
       updatedAt: "2026-06-25T12:01:00.000Z"
     });
     updateImportJob(db, latestSuccess.importJobId, {
@@ -242,7 +242,7 @@ describe("source status service", () => {
       updatedAt: "2026-06-25T12:01:30.000Z"
     });
 
-    const codex = getAdapterStatuses(db).find((adapter) => adapter.runtime === "codex");
+    const codex = getAdapterStatuses(db).find((adapter) => adapter.runtime === "opencode");
 
     expect(codex?.state).not.toBe("degraded");
     expect(codex?.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("adapter_import_failures");

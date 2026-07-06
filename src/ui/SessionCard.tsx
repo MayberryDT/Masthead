@@ -32,7 +32,7 @@ export function SessionCard({
   const stateClass = sessionStateClassName(session);
   const tierClass = `tier-${sessionVisualTier(session)}`;
   const model = demoTelemetry?.model.value ?? session.model ?? "Not captured";
-  const harness = demoTelemetry?.harness.value ?? session.harness ?? "Codex";
+  const harness = demoTelemetry?.harness.value ?? session.harness ?? "Unknown";
   const worktree = session.branchOrWorktree ?? "None";
   const headline = sessionHeadline(session);
   const [visibleHeadline, setVisibleHeadline] = useState(headline);

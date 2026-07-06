@@ -35,7 +35,7 @@ export type DemoSourcedValue<T> = {
 
 export type DemoSessionTelemetry = {
   model: DemoSourcedValue<string>;
-  harness: DemoSourcedValue<"Codex" | "Claude Code" | "OpenClaw" | "Hermes">;
+  harness: DemoSourcedValue<"Claude Code" | "Cursor" | "OpenCode" | "Hermes">;
   host: DemoSourcedValue<string>;
   commands: DemoSourcedValue<{ passed: number; total: number }>;
   filesChanged: DemoSourcedValue<{
@@ -90,7 +90,7 @@ export const observabilityDemoTelemetry = {
 } as const;
 
 const models = ["gpt-5.5", "gpt-5.4"] as const;
-const harnesses = ["Codex", "Claude Code", "OpenClaw", "Hermes"] as const;
+const harnesses = ["Claude Code", "Cursor", "OpenCode", "Hermes"] as const;
 const hosts = [
   "devbox-01",
   "devbox-03",
@@ -108,7 +108,7 @@ const platforms = ["Docker", "Linux", "Kubernetes"] as const;
 const telemetryOverrides: Record<string, DemoSessionTelemetry> = {
   "session-9f3a1c7e": sessionTelemetry({
     model: "gpt-5.5",
-    harness: "Codex",
+    harness: "OpenCode",
     host: "devbox-07",
     commands: { passed: 12, total: 12 },
     filesChanged: { added: 18, removed: 4 },
@@ -126,7 +126,7 @@ const telemetryOverrides: Record<string, DemoSessionTelemetry> = {
   }),
   "session-3c6a8f91": sessionTelemetry({
     model: "gpt-5.4",
-    harness: "OpenClaw",
+    harness: "Cursor",
     host: "devbox-12",
     commands: { passed: 8, total: 8 },
     filesChanged: { added: 6, removed: 2 },
@@ -135,7 +135,7 @@ const telemetryOverrides: Record<string, DemoSessionTelemetry> = {
   }),
   "session-1a2b3c4d": sessionTelemetry({
     model: "gpt-5.4",
-    harness: "Codex",
+    harness: "Hermes",
     host: "devbox-09",
     commands: { passed: 10, total: 25 },
     filesChanged: { added: 12, removed: 3 },
@@ -162,7 +162,7 @@ const telemetryOverrides: Record<string, DemoSessionTelemetry> = {
   }),
   "session-0f9c2e6d": sessionTelemetry({
     model: "gpt-5.5",
-    harness: "Codex",
+    harness: "OpenCode",
     host: "devbox-11",
     commands: { passed: 0, total: 4 },
     filesChanged: { added: 5, removed: 8 },
@@ -171,7 +171,7 @@ const telemetryOverrides: Record<string, DemoSessionTelemetry> = {
   }),
   "session-9c1d2e33": sessionTelemetry({
     model: "gpt-5.5",
-    harness: "OpenClaw",
+    harness: "Cursor",
     host: "ci-runner-04",
     commands: { passed: 0, total: 6 },
     filesChanged: { added: 4, removed: 12 },

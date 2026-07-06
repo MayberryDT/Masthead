@@ -65,7 +65,7 @@ function liveSessionEvent(repoPath: string): NormalizedEvent {
     eventId: "event-git-snapshot",
     sessionId: "session-git-snapshot",
     source: {
-      adapter: "codex",
+      adapter: "opencode",
       surface: "hook"
     },
     occurredAt: "2026-06-28T16:00:00.000Z",

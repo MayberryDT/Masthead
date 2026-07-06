@@ -355,7 +355,7 @@ function sanitizeLiveCardTitle(title: string, evidenceTexts: string[], fallbackT
 }
 
 function isLowValueLiveTitle(value: string): boolean {
-  return /^(?:codex hook event|codex desktop transcript activity|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(value.trim());
+  return /^(?:live hook event|desktop transcript activity|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(value.trim());
 }
 
 function isSafeFallbackTitle(value: string): boolean {

@@ -1,4 +1,4 @@
-import { harnessForRuntime } from "../../adapters/harnessCatalog";
+import { HARNESS_CATALOG, harnessForRuntime } from "../../adapters/harnessCatalog";
 import type { RuntimeKind } from "../../adapters/types";
 import type {
   SourcesSetupLiveCaptureSelection,
@@ -6,14 +6,7 @@ import type {
 } from "../../shared/sourcesSetup";
 type HookAction = "install" | "test" | "uninstall";
 
-const SUPPORTED_HOOK_RUNTIMES: Record<string, true> = {
-  claude_code: true,
-  codex: true,
-  cursor: true,
-  grok: true,
-  omp: true,
-  opencode: true
-};
+const SUPPORTED_HOOK_RUNTIMES = new Set(HARNESS_CATALOG.filter((entry) => entry.supportsLiveWatch).map((entry) => entry.runtime));
 
 
 export type SourcesSetupPlan = SourcesSetupRunInput & {
@@ -54,7 +47,7 @@ export async function runSourcesSetupPlan(plan: SourcesSetupPlan, deps: SetupPla
       continue;
     }
 
-    if (!SUPPORTED_HOOK_RUNTIMES[liveCapture.runtime]) {
+    if (!SUPPORTED_HOOK_RUNTIMES.has(liveCapture.runtime as RuntimeKind)) {
       appendStep(steps, deps, {
         id: `live:${liveCapture.runtime}`,
         label: `${runtimeLabel(liveCapture.runtime)} live capture`,

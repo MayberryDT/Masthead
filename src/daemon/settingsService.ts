@@ -1,6 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { scanTargetHarnesses, type HarnessCatalogEntry } from "../adapters/harnessCatalog.ts";
-import type { RuntimeKind } from "../adapters/types.ts";
+import { RUNTIME_KINDS, type RuntimeKind } from "../adapters/types.ts";
 import { getDataSummary, type DataSummary } from "./db/dataLifecycleRepository.ts";
 import { globalMcpAccessEnabled } from "./db/mcpQueryRepository.ts";
 import { CURRENT_SCHEMA_VERSION, getOrCreateDatabaseIdentity } from "./db/schema.ts";
@@ -128,7 +128,7 @@ export type SettingsStateDto = SettingsRuntimeIdentityDto & {
 
 type CodexHookSettingsBaseDto = Omit<CodexHookSettingsDto, "integrations">;
 
-const hookLastTestKey = "codex_hook_last_test";
+const hookLastTestKey = "live_hook_last_test";
 
 export function settingsRuntimeIdentity(config: DaemonConfig, db: MastheadDatabase): SettingsRuntimeIdentityDto {
   const databasePath = resolve(config.databasePath);
@@ -182,7 +182,7 @@ export async function getSettingsState(db: MastheadDatabase, config: DaemonConfi
       remoteModelEnabled,
       sessionCount: dataSummary.sessions
     },
-    hooks: await getCodexHookSettings(db, config),
+    hooks: await getLiveHookSettings(db, config),
     llm,
     privacy: {
       mcpAccessEnabled: globalMcpAccessEnabled(db),
@@ -308,18 +308,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-export async function getCodexHookSettings(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {
+export async function getLiveHookSettings(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {
   const connectors = await getLiveConnectorSettings(config);
-  const codexConnector = connectorByRuntime(connectors, "codex");
-  const latestBackupPath = (await latestLiveConnectorBackupPath(config)) ?? codexConnector.latestBackupPath;
+  const primaryConnector = connectors[0];
+  if (!primaryConnector) throw new Error("No live connector settings are configured.");
+  const latestBackupPath = (await latestLiveConnectorBackupPath(config)) ?? primaryConnector.latestBackupPath;
   const lastTest = readHookLastTest(db);
   const lastEventAt = latestRawHookEventAt(db);
 
   return withHarnessCaptureIntegrations(
     {
-      command: codexConnector.command,
+      command: primaryConnector.command,
       configExists: connectors.some((connector) => connector.configExists),
-      configPath: codexConnector.configPath,
+      configPath: primaryConnector.configPath,
       endpoint: baseIngestEndpoint(config),
       error: connectors.find((connector) => connector.error)?.error,
       installed: connectors.every((connector) => connector.installed),
@@ -399,9 +400,9 @@ function connectorCaptureStatus(settings: Pick<LiveConnectorSettings, "configExi
   return "not_installed";
 }
 
-export async function installCodexHooks(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {
+export async function installLiveHooks(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {
   await installLiveConnectors(config);
-  return getCodexHookSettings(db, config);
+  return getLiveHookSettings(db, config);
 }
 
 export async function installRuntimeHooks(db: MastheadDatabase, config: DaemonConfig, runtime: LiveConnectorRuntime): Promise<CodexHookSettingsDto> {
@@ -409,9 +410,9 @@ export async function installRuntimeHooks(db: MastheadDatabase, config: DaemonCo
   return getRuntimeHookSettings(db, config, runtime);
 }
 
-export async function uninstallCodexHooks(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {
+export async function uninstallLiveHooks(db: MastheadDatabase, config: DaemonConfig): Promise<CodexHookSettingsDto> {
   await uninstallLiveConnectors(config);
-  return getCodexHookSettings(db, config);
+  return getLiveHookSettings(db, config);
 }
 
 export async function uninstallRuntimeHooks(db: MastheadDatabase, config: DaemonConfig, runtime: LiveConnectorRuntime): Promise<CodexHookSettingsDto> {
@@ -419,11 +420,11 @@ export async function uninstallRuntimeHooks(db: MastheadDatabase, config: Daemon
   return getRuntimeHookSettings(db, config, runtime);
 }
 
-export async function testCodexHooks(
+export async function testLiveHooks(
   db: MastheadDatabase,
   config: DaemonConfig
 ): Promise<CodexHookSettingsDto> {
-  const settings = await getCodexHookSettings(db, config);
+  const settings = await getLiveHookSettings(db, config);
   let lastTest: HookLastTestDto;
 
   if (!settings.installed) {
@@ -437,7 +438,7 @@ export async function testCodexHooks(
   }
 
   writeHookLastTest(db, lastTest);
-  return getCodexHookSettings(db, config);
+  return getLiveHookSettings(db, config);
 }
 
 export async function testRuntimeHooks(
@@ -489,7 +490,7 @@ function deletionTargets(db: MastheadDatabase): SettingsStateDto["deletionTarget
             ORDER BY runtime_kind`
           )
           .all() as Array<{ value: string | null }>
-      ).map((row) => row.value)
+      ).map((row) => row.value).filter((value): value is RuntimeKind => (RUNTIME_KINDS as readonly string[]).includes(value ?? ""))
     )
   };
 }
@@ -550,7 +551,7 @@ function hookSettingsForConnector(
   );
 }
 
-function connectorByRuntime(connectors: LiveConnectorSettings[], runtime: RuntimeKind): LiveConnectorSettings {
+function connectorByRuntime(connectors: LiveConnectorSettings[], runtime: LiveConnectorRuntime): LiveConnectorSettings {
   const connector = connectors.find((item) => item.runtime === runtime);
   if (!connector) throw new Error(`Missing live connector settings for ${runtime}`);
   return connector;

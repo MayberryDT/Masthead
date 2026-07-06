@@ -28,12 +28,12 @@ Only one writable daemon may own a data directory. The owner writes `<data-dir>/
 
 `masthead.sqlite` is the canonical Masthead store. It owns imported session records, aliases, source status, import jobs, search indexes, enrichments, settings, data-lifecycle summaries, and MCP audit rows.
 
-Source harness files remain owned by their source harnesses. Codex history under `MASTHEAD_CODEX_HOME` is input to discovery and import, not Masthead-owned runtime state. Legacy NDJSON journals are compatibility and migration inputs only.
+Source harness files remain owned by their source harnesses. Focused source histories are inputs to discovery and import, not Masthead-owned runtime state. Legacy NDJSON journals are compatibility and migration inputs only.
 
 ## Runtime Flow
 
 ```text
-Codex files/hooks
+Supported source files/hooks
   -> source discovery and import
   -> canonical SQLite session graph
   -> Logbook/search, Now projection, Sources, Settings

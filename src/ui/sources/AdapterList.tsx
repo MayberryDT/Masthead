@@ -126,7 +126,7 @@ export function AdapterList({
       <div className="empty-session-state surface-empty-state">
         <p className="mono-label">Sources</p>
         <h2>{busy ? "Scanning sources" : "No runtimes detected"}</h2>
-        <p>{busy ? "Masthead is checking the local source index." : "Discover sources or import Codex metadata to populate this intake view."}</p>
+        <p>{busy ? "Masthead is checking the local source index." : "Discover supported local sources or import metadata to populate this intake view."}</p>
       </div>
     );
   }

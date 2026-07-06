@@ -29,26 +29,26 @@ describe("import session impact repository", () => {
       importJobId: "import-1",
       impactKind: "created",
       observedAt: "2026-07-01T00:01:00.000Z",
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "session:1",
-      sourceId: "codex-sessions"
+      sourceId: "opencode-sessions"
     });
     recordImportSessionImpact(db, {
       importJobId: "import-1",
       impactKind: "transcript_added",
       observedAt: "2026-07-01T00:02:00.000Z",
       recordCount: 4,
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "session:1",
-      sourceId: "codex-sessions"
+      sourceId: "opencode-sessions"
     });
     recordImportSessionImpact(db, {
       importJobId: "import-1",
       impactKind: "enriched",
       observedAt: "2026-07-01T00:03:00.000Z",
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "session:1",
-      sourceId: "codex-sessions"
+      sourceId: "opencode-sessions"
     });
 
     expect(summarizeImportSessionImpacts(db, "import-1")).toEqual({
@@ -65,20 +65,20 @@ function seedSourceJobAndSession(db: MastheadDatabase): void {
     `INSERT INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex-sessions", "codex", "jsonl", "/tmp/.codex/sessions", "authoritative", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
+  ).run("opencode-sessions", "opencode", "jsonl", "/tmp/.opencode/sessions", "authoritative", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
   db.prepare(
     `INSERT INTO import_jobs (
       import_job_id, source_id, import_kind, status, updated_at
     ) VALUES (?, ?, ?, ?, ?)`
-  ).run("import-1", "codex-sessions", "transcript", "queued", "2026-07-01T00:00:00.000Z");
+  ).run("import-1", "opencode-sessions", "transcript", "queued", "2026-07-01T00:00:00.000Z");
   db.prepare("INSERT INTO hosts (host_id, first_seen_at, last_seen_at) VALUES (?, ?, ?)").run(
     "host:test",
     "2026-07-01T00:00:00.000Z",
     "2026-07-01T00:00:00.000Z"
   );
   db.prepare("INSERT INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(
-    "runtime:codex:test",
-    "codex",
+    "runtime:opencode:test",
+    "opencode",
     "test",
     "2026-07-01T00:00:00.000Z",
     "2026-07-01T00:00:00.000Z"
@@ -90,7 +90,7 @@ function seedSourceJobAndSession(db: MastheadDatabase): void {
   ).run(
     "session:1",
     "host:test",
-    "runtime:codex:test",
+    "runtime:opencode:test",
     "s1",
     "unknown",
     "2026-07-01T00:00:00.000Z",

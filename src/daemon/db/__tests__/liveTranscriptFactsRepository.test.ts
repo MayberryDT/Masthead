@@ -110,7 +110,7 @@ function seedSession(db: MastheadDatabase, sessionId: string, sourceSessionId: s
   db.prepare(
     `INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at)
     VALUES (?, ?, ?, ?, ?)`
-  ).run("runtime:test", "codex", "test", "2026-06-24T12:00:00.000Z", "2026-06-24T12:00:00.000Z");
+  ).run("runtime:test", "opencode", "test", "2026-06-24T12:00:00.000Z", "2026-06-24T12:00:00.000Z");
   db.prepare(
     `INSERT INTO sessions (
       session_id, host_id, runtime_id, source_session_id, lifecycle, last_activity_at, source_confidence, created_at, updated_at

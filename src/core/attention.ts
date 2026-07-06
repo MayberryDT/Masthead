@@ -26,7 +26,7 @@ export function deriveAttentionItems(
         affectedCommandIds: commandIds(approval),
         evidence: approval.evidence,
         support: "deterministic",
-        suggestedNextAction: "Open the source Codex session and review the request."
+        suggestedNextAction: "Open the source session and review the request."
       });
     }
 
@@ -44,7 +44,7 @@ export function deriveAttentionItems(
         affectedCommandIds: [],
         evidence: question.evidence,
         support: "deterministic",
-        suggestedNextAction: "Open the source Codex session and answer the question."
+        suggestedNextAction: "Open the source session and answer the question."
       });
     }
 

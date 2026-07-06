@@ -47,14 +47,14 @@ function seedSessionWithRawEvent(
     `INSERT OR IGNORE INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("source:codex", "codex", "jsonl", "/tmp/sessions", "authoritative", now, now);
+  ).run("source:opencode", "opencode", "jsonl", "/tmp/sessions", "authoritative", now, now);
   db.prepare(
     `INSERT INTO raw_events (
       raw_event_id, source_id, source_record_key, observed_at, received_at, source_kind, source_path, payload_hash, payload_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.rawId,
-    "source:codex",
+    "source:opencode",
     `${input.sourceSessionId}:1`,
     now,
     now,
@@ -72,13 +72,13 @@ function seedSessionWithRawEvent(
   db.prepare(
     `INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at)
     VALUES (?, ?, ?, ?, ?)`
-  ).run("runtime:codex", "codex", "test", now, now);
+  ).run("runtime:opencode", "opencode", "test", now, now);
   db.prepare(
     `INSERT INTO sessions (
       session_id, host_id, runtime_id, source_session_id, project_label, lifecycle, last_activity_at,
       source_confidence, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(input.sessionId, "host:test", "runtime:codex", input.sourceSessionId, input.project, "ended", now, "authoritative", now, now);
+  ).run(input.sessionId, "host:test", "runtime:opencode", input.sourceSessionId, input.project, "ended", now, "authoritative", now, now);
 }
 
 function rows(db: MastheadDatabase, table: "raw_events" | "sessions"): string[] {

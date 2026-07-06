@@ -13,7 +13,7 @@ describe("ImportJobsTable", () => {
       <ImportJobsTable
         imports={[
           importJob({
-            currentPath: "/home/tyler/.codex/sessions/2026/06/25/session.jsonl",
+            currentPath: "/home/tyler/.opencode/sessions/2026/06/25/session.jsonl",
             processedCount: 3,
             progressCurrent: 3,
             progressPercent: 30,
@@ -26,7 +26,7 @@ describe("ImportJobsTable", () => {
     );
 
     expect(html).toContain("3 / 10 (30%)");
-    expect(html).not.toContain("/home/tyler/.codex/sessions/2026/06/25/session.jsonl");
+    expect(html).not.toContain("/home/tyler/.opencode/sessions/2026/06/25/session.jsonl");
     expect(html).toContain("session.jsonl");
     expect(html).toContain("running");
     expect(html).toContain("Cancel");
@@ -63,24 +63,24 @@ describe("ImportJobsTable", () => {
             completedWorkUnits: 6,
             failedWorkUnits: 1,
             heartbeatAt: "2026-06-25T11:52:00.000Z",
-            importJobId: "codex-parent",
+            importJobId: "opencode-parent",
             importedCount: 12,
             processedCount: 18,
             skippedWorkUnits: 2,
-            sourceId: "codex-sessions",
+            sourceId: "opencode-sessions",
             status: "running",
             totalWorkUnits: 20,
             updatedAt: "2026-06-25T12:00:00.000Z"
           }),
           importJob({
-            importJobId: "codex-child-1",
-            sourceId: "codex-sessions",
+            importJobId: "opencode-child-1",
+            sourceId: "opencode-sessions",
             status: "succeeded",
             updatedAt: "2026-06-25T11:58:00.000Z"
           }),
           importJob({
-            importJobId: "codex-child-2",
-            sourceId: "codex-sessions",
+            importJobId: "opencode-child-2",
+            sourceId: "opencode-sessions",
             status: "failed",
             updatedAt: "2026-06-25T11:59:00.000Z"
           })
@@ -91,14 +91,14 @@ describe("ImportJobsTable", () => {
     );
 
     expect(html.match(/import-job-group-row/g)).toHaveLength(1);
-    expect(html).toContain("Codex");
+    expect(html).toContain("OpenCode");
     expect(html).toContain("3 jobs");
     expect(html).toContain("12 imported");
     expect(html).toContain("2 skipped");
     expect(html).toContain("1 failed");
     expect(html).toContain("No heartbeat for 8 min");
-    expect(html).not.toContain("codex-child-1");
-    expect(html).not.toContain("codex-child-2");
+    expect(html).not.toContain("opencode-child-1");
+    expect(html).not.toContain("opencode-child-2");
   });
 
   test("renders retry affordance for failed and cancelled imports", () => {
@@ -178,7 +178,7 @@ function importJob(overrides: Partial<ImportJob> = {}): ImportJob {
     importedCount: 3,
     importKind: "metadata",
     queuedCount: 7,
-    sourceId: "codex-sessions",
+    sourceId: "opencode-sessions",
     status: "running",
     updatedAt: "2026-06-25T12:00:00.000Z",
     ...overrides

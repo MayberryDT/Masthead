@@ -17,7 +17,7 @@ describe("ImportProgressPanel", () => {
             lastSeenAt: "2026-07-01T00:01:00.000Z",
             message: "Malformed JSON.",
             retryable: false,
-            runtime: "codex",
+            runtime: "opencode",
             samplePaths: ["/tmp/bad.jsonl"]
           }
         ]}
@@ -33,7 +33,7 @@ describe("ImportProgressPanel", () => {
           processedCount: 9,
           queuedCount: 0,
           skippedWorkUnits: 2,
-          sourceId: "codex-sessions",
+          sourceId: "opencode-sessions",
           stage: "transcript",
           status: "running",
           totalWorkUnits: 7,
@@ -46,10 +46,10 @@ describe("ImportProgressPanel", () => {
             importJobId: "job-1",
             manifestId: "manifest-1",
             processedRecords: 6,
-            runtime: "codex",
+            runtime: "opencode",
             confidence: "authoritative",
             skippedRecords: 0,
-            sourceId: "codex-sessions",
+            sourceId: "opencode-sessions",
             sourceKind: "jsonl",
             sourcePath: "/tmp/session.jsonl",
             status: "succeeded",
@@ -108,7 +108,7 @@ describe("ImportProgressPanel", () => {
           importedCount: 0,
           processedCount: 5,
           queuedCount: 0,
-          sourceId: "codex-sessions",
+          sourceId: "opencode-sessions",
           startedAt: "2026-07-01T00:00:00.000Z",
           status: "running",
           updatedAt: "2026-07-01T00:00:00.000Z"

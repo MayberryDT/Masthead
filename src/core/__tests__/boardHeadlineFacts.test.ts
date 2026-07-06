@@ -24,7 +24,7 @@ describe("board headline facts", () => {
       card: card(),
       conflicts: [],
       events: [
-        event("event-hook", "session.started", "Codex hook event"),
+        event("event-hook", "session.started", "Live hook event"),
         event("event-p3", "command.finished", "P3", { exitCode: 0, normalizedCommand: "shell" }),
         event("event-failed", "command.finished", "npm test failed", { exitCode: 1, normalizedCommand: "npm test" }),
         event("event-file", "file.changed", "Updated session dossier", { path: "src/ui/session-dossier/SessionDossier.tsx" })

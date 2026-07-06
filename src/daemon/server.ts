@@ -3,12 +3,11 @@ import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { AdapterMaturity } from "../adapters/capabilities.ts";
-import { codexHookSource } from "../adapters/codex/hookAdapter.ts";
 import { adapterRecordFromLiveHook, liveHookSourceForRuntime } from "../adapters/live/hookAdapter.ts";
 import { adapterForRuntime } from "../adapters/registry.ts";
 import { createDeterministicEnrichmentProvider } from "../enrichment/deterministicProvider.ts";
 import { createEnrichmentCoordinator, EnrichmentFailedError } from "../enrichment/enrichmentCoordinator.ts";
-import { RUNTIME_KINDS, type AdapterDiagnostic, type RuntimeKind } from "../adapters/types.ts";
+import { RUNTIME_KINDS, type AdapterDiagnostic, type IngestCursor, type RuntimeKind } from "../adapters/types.ts";
 import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent, removeEventFromLiveProjectionState } from "../core/ingestion.ts";
 import { eventLiveProcessingMode } from "../core/liveSessionFacts.ts";
@@ -17,6 +16,7 @@ import { projectLiveEvents } from "../core/liveProjection.ts";
 import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent, type BoardHeadlineGenerationFinishedEvent, type BoardHeadlineProviderConfig } from "../core/boardHeadlineEnricher.ts";
 import { createFileBackedStore, validateRetentionPolicy, type StoreRecord } from "../core/store.ts";
 import type { ReviewDisposition } from "../core/store.ts";
+import type { PruneLocalDataResult, RetentionPolicy } from "../core/retention.ts";
 import type { LiveHookDiagnostic } from "../core/liveHookAdapter.ts";
 import type { GitSnapshot, LiveBoardProjection, NormalizedEvent, SessionCardView } from "../core/types.ts";
 import type { DaemonConfig } from "./config.ts";
@@ -33,6 +33,7 @@ import {
   listImportJobPage,
   listImportJobs,
   updateImportJob,
+  type ImportJobDto,
   type ImportJobKind,
   type ImportJobListStatus
 } from "./db/importJobRepository.ts";
@@ -41,7 +42,7 @@ import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
 import { liveProjectionTranscriptFacts } from "./db/liveTranscriptFactsRepository.ts";
 import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsRepository.ts";
-import { createRawEventRepository, type RawEventSource } from "./db/rawEventRepository.ts";
+import { createRawEventRepository, type RawEventRepository, type RawEventSource } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import { currentBoardHeadlineFrames, insertBoardHeadlineGeneration, upsertBoardHeadlineFrame } from "./db/boardHeadlineFrameRepository.ts";
@@ -51,7 +52,7 @@ import { indexCanonicalSessionSearch, searchSessions } from "./db/searchReposito
 import { getLogbookSummary } from "./db/logbookSummaryRepository.ts";
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
 import { getOrCreateDatabaseIdentity, hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
-import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor } from "./db/sessionRepository.ts";
+import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor, type SessionRepository } from "./db/sessionRepository.ts";
 import { saveSourceScanRun, saveSourceSetupState } from "./db/sourceSetupRepository.ts";
 import { getSessionTokenTotals, getUsageStats, type UsageWindow } from "./db/usageStatsRepository.ts";
 import {
@@ -89,19 +90,15 @@ import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { createLiveIngestQueue } from "./liveIngestQueue.ts";
 import { buildMastheadHealth } from "./healthService.ts";
 import { recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
-import { createCodexTranscriptLiveScanner } from "./codexTranscriptLive.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
 import { createSettingsBackedEnrichmentProvider, effectiveLlmProvider, listLlmProviderModels, updateLlmProviderSettings } from "./llmSettings.ts";
 import {
-  getCodexHookSettings,
+  getLiveHookSettings,
   getRuntimeHookSettings,
   getSettingsState,
-  installCodexHooks,
   installRuntimeHooks,
   settingsRuntimeIdentity,
-  testCodexHooks,
   testRuntimeHooks,
-  uninstallCodexHooks,
   uninstallRuntimeHooks
 } from "./settingsService.ts";
 import { isLiveConnectorRuntime } from "./liveConnectorSettings.ts";
@@ -121,7 +118,7 @@ const VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS = 750;
 const RESPONSE_BACKGROUND_GRACE_MS = 50;
 const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
 const INGEST_BODY_LIMIT_BYTES = 262_144;
-const LIVE_INGEST_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "omp", "opencode"] as const satisfies readonly RuntimeKind[];
+const LIVE_INGEST_RUNTIMES = ["claude_code", "cursor", "grok", "opencode", "omp", "pi", "hermes"] as const satisfies readonly RuntimeKind[];
 
 type TranscriptImportOptions = {
   maxRecordsPerSource?: number;
@@ -163,13 +160,15 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
       markInterruptedImportJobs(database);
 
+    const defaultLiveRuntime: RuntimeKind = "claude_code";
+    const defaultLiveSource = liveHookSourceForRuntime(defaultLiveRuntime);
     const liveHookSources = new Map<RuntimeKind, DiscoveredSource>(
       LIVE_INGEST_RUNTIMES.map((runtime) => [runtime, liveHookSourceForRuntime(runtime)])
     );
     const liveRawJournals = new Map(
       [...liveHookSources.values()].map((source) => [source.sourceId, createRawEventRepository(database, rawEventSourceFromDiscoveredSource(source))])
     );
-    const hookRawJournal = liveRawJournalForSource(codexHookSource);
+    const hookRawJournal = liveRawJournalForSource(defaultLiveSource);
     const observerRawJournal = createRawEventRepository(database, {
       adapter: "masthead",
       confidence: "authoritative",
@@ -180,20 +179,21 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const sessions = createSessionRepository(database, {
       hostId: `host:${config.host}`,
       hostname: config.host,
-      runtimeKind: "codex"
+      runtimeKind: defaultLiveRuntime
     });
-    const liveSessionRepositories = new Map<RuntimeKind, ReturnType<typeof createSessionRepository>>([
-      ["codex", sessions],
-      ...LIVE_INGEST_RUNTIMES.filter((runtime) => runtime !== "codex").map((runtime) => [
+    const liveSessionRepositories = new Map<RuntimeKind, SessionRepository>(
+      LIVE_INGEST_RUNTIMES.map((runtime) => [
         runtime,
-        createSessionRepository(database, {
-          hostId: `host:${config.host}`,
-          hostname: config.host,
-          runtimeKind: runtime
-        })
+        runtime === defaultLiveRuntime
+          ? sessions
+          : createSessionRepository(database, {
+              hostId: `host:${config.host}`,
+              hostname: config.host,
+              runtimeKind: runtime
+            })
       ] as const)
-    ]);
-    const canonicalSessionIdForSource = (sourceSessionId: string, runtime: RuntimeKind = "codex"): string =>
+    );
+    const canonicalSessionIdForSource = (sourceSessionId: string, runtime: RuntimeKind = defaultLiveRuntime): string =>
       canonicalSessionId(`host:${config.host}`, runtimeIdFor(runtime, undefined), sourceSessionId);
     const state = createIngestionState(canonicalLiveEvents(database), {
       includeInLiveProjection: (event) => eventLiveProcessingMode(event) === "immediate"
@@ -206,7 +206,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const terminalGitSnapshotSessionIds = new Set(gitSnapshots.filter(isTerminalGitSnapshot).map((snapshot) => snapshot.sessionId));
     const completedLiveSessionIds = new Set<string>();
     for (const event of state.events) rememberCompletedLiveSession(event);
-    const codexTranscriptLiveScanner = createCodexTranscriptLiveScanner({ homeDir: config.codexHomeDir });
     const persistBoardHeadlineFrame = (event: BoardHeadlineAppliedEvent): void => {
       try {
         const sessionId = canonicalSessionIdForSource(event.sessionId, liveRuntimeForSourceSessionId(event.sessionId));
@@ -490,31 +489,31 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     observerRawJournal.appendStoreRecord(record);
   }
 
-  function liveRawJournalForEvent(event: NormalizedEvent): ReturnType<typeof createRawEventRepository> {
+  function liveRawJournalForEvent(event: NormalizedEvent): RawEventRepository {
     return liveRawJournalForSource(liveSourceForRuntime(liveRuntimeForEvent(event)));
   }
 
-  function liveRawJournalForSource(source: DiscoveredSource): ReturnType<typeof createRawEventRepository> {
+  function liveRawJournalForSource(source: DiscoveredSource): RawEventRepository {
     const journal = liveRawJournals.get(source.sourceId);
     if (!journal) throw new Error(`Unsupported live source: ${source.sourceId}`);
     return journal;
   }
 
-  function liveSessionRepositoryForEvent(event: NormalizedEvent): ReturnType<typeof createSessionRepository> {
+  function liveSessionRepositoryForEvent(event: NormalizedEvent): SessionRepository {
     return liveSessionRepositories.get(liveRuntimeForEvent(event)) ?? sessions;
   }
 
   function liveSourceForRuntime(runtime: RuntimeKind): DiscoveredSource {
-    return liveHookSources.get(runtime) ?? codexHookSource;
+    return liveHookSources.get(runtime) ?? defaultLiveSource;
   }
 
   function liveRuntimeForEvent(event: NormalizedEvent): RuntimeKind {
-    return isRuntimeKind(event.source.adapter) ? event.source.adapter : "codex";
+    return isRuntimeKind(event.source.adapter) ? event.source.adapter : defaultLiveRuntime;
   }
 
   function liveRuntimeForSourceSessionId(sourceSessionId: string): RuntimeKind {
     const event = state.events.find((candidate) => candidate.sessionId === sourceSessionId && isRuntimeKind(candidate.source.adapter));
-    return event && isRuntimeKind(event.source.adapter) ? event.source.adapter : "codex";
+    return event && isRuntimeKind(event.source.adapter) ? event.source.adapter : defaultLiveRuntime;
   }
 
   function liveRawJournalRecords(limit = 500): StoreRecord[] {
@@ -529,7 +528,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     };
   }
 
-  function pruneLiveRawJournals(policy: Parameters<typeof hookRawJournal.pruneStoreRecords>[0]): ReturnType<typeof hookRawJournal.pruneStoreRecords> {
+  function pruneLiveRawJournals(policy: RetentionPolicy): PruneLocalDataResult {
     const results = [...liveRawJournals.values()].map((journal) => journal.pruneStoreRecords(policy));
     return {
       removedRecords: results.reduce((total, result) => total + result.removedRecords, 0),
@@ -546,10 +545,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     };
   }
 
-  function sumRemovedByType(
-    results: Array<ReturnType<typeof hookRawJournal.pruneStoreRecords>>,
-    key: keyof ReturnType<typeof hookRawJournal.pruneStoreRecords>["removedByType"]
-  ): number {
+  function sumRemovedByType(results: PruneLocalDataResult[], key: keyof PruneLocalDataResult["removedByType"]): number {
     return results.reduce((total, result) => total + (result.removedByType[key] ?? 0), 0);
   }
 
@@ -616,61 +612,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   let hydrationStarted = false;
   let hydrationPromise: Promise<void> = Promise.resolve();
 
-  async function refreshCodexTranscriptLiveState(): Promise<void> {
-    const refresh = await codexTranscriptLiveScanner.refresh();
-    if (refresh.events.length === 0) return;
-
-    const acceptedEvents: NormalizedEvent[] = [];
-    const touchedSessionIds = new Set<string>();
-    database.exec("BEGIN IMMEDIATE;");
-    try {
-      for (const event of refresh.events) {
-        const result = ingestNormalizedEvent(event, state);
-        if (result.status !== "accepted") continue;
-        if (eventLiveProcessingMode(result.event) === "deferred") {
-          removeEventFromLiveProjectionState(state, result.event);
-          deferredLiveIngestQueue.enqueue(result.event);
-          continue;
-        }
-        const sessionId = liveSessionRepositoryForEvent(result.event).upsertLiveEvent(result.event);
-        if (sessionId) touchedSessionIds.add(sessionId);
-        appendStoreRecordToRawJournal({
-          recordId: `event:${result.event.eventId}`,
-          recordType: "event",
-          observedAt: result.event.occurredAt,
-          value: result.event
-        });
-        acceptedEvents.push(result.event);
-        rememberCompletedLiveSession(result.event);
-      }
-      database.exec("COMMIT;");
-    } catch (error) {
-      database.exec("ROLLBACK;");
-      throw error;
-    }
-
-    for (const sessionId of touchedSessionIds) {
-      queueSessionSearchIndex(sessionId);
-    }
-    for (const event of acceptedEvents) {
-      try {
-        if (event.sessionId && isTerminalProtectedSession(event.sessionId)) continue;
-        const gitSnapshot = await collectGitSnapshot(event);
-        if (gitSnapshot) await appendGitSnapshotIfChanged(gitSnapshot);
-      } catch (error) {
-        recordRuntimeDiagnostic({
-          details: {
-            error,
-            eventId: event.eventId,
-            sourceSessionId: event.sessionId
-          },
-          kind: "codex_transcript_live_git_snapshot_failed",
-          message: `Codex transcript live Git snapshot failed for ${event.sessionId ?? event.eventId}.`,
-          severity: "warning"
-        });
-      }
-    }
-  }
 
   function startBackgroundHydration(): void {
     if (hydrationStarted) return;
@@ -992,7 +933,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const generatedAt = latestScan?.generatedAt ?? new Date().toISOString();
     return {
       adapters: getAdapterStatuses(database)
-        .filter((adapter) => adapter.runtime !== "gemini_cli")
         .map((adapter) => ({
           checkedPaths: [],
           diagnostics: adapter.diagnostics,
@@ -1166,7 +1106,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     scope: ImportScopeDto = defaultTranscriptImportScope()
   ): Promise<ImportWorkResult> {
     const result = emptyImportResult();
-    const runtime = sources[0]?.runtime ?? "codex";
+    const runtime = sources[0]?.runtime ?? defaultLiveRuntime;
     const transcriptFiles = (
       await Promise.all(sources.map((source) => transcriptSources(source)))
     ).flat().filter((source) => !source.path || !sourceIsExcluded(database, { sourceId: source.sourceId, sourcePath: source.path }));
@@ -1292,7 +1232,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return Promise.resolve(emptyImportResult());
   }
 
-  async function queueAdapterMetadataImports(runtime?: string): Promise<{ jobs: ReturnType<typeof queueImportJob>[]; sources: number }> {
+  async function queueAdapterMetadataImports(runtime?: string): Promise<{ jobs: ImportJobDto[]; sources: number }> {
     const sources = (await discoverAllSourcesAndPersist()).filter((source) => !runtime || source.runtime === runtime);
     const jobs = sources.map((source) =>
       queueImportJob(database, { importKind: "metadata", sourceId: source.sourceId }, (controls) => importMetadataSources([source], controls))
@@ -1300,7 +1240,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return { jobs, sources: sources.length };
   }
 
-  async function queueAdapterTranscriptImports(runtime?: string): Promise<{ jobs: ReturnType<typeof queueImportJob>[]; sources: number }> {
+  async function queueAdapterTranscriptImports(runtime?: string): Promise<{ jobs: ImportJobDto[]; sources: number }> {
     if (runtime && isRuntimeKind(runtime) ? !transcriptImportApprovedForRuntime(runtime) : !transcriptImportApproved(database)) {
       throw clientError("Transcript import requires persisted source review approval.");
     }
@@ -1325,7 +1265,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             transcriptPath
           },
           kind: "hook_transcript_catchup_disabled",
-          message: "Codex hook included a transcriptPath, but hook transcript catch-up is disabled.",
+          message: "Live hook included a transcriptPath, but hook transcript catch-up is disabled.",
           severity: "warning"
         });
       }
@@ -1371,7 +1311,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       state.diagnostics.push({
         code: "invalid_payload",
         details: error instanceof Error ? error.message : String(error),
-        message: "Codex hook transcript catch-up failed; live hook ingestion was kept.",
+        message: "Live hook transcript catch-up failed; live hook ingestion was kept.",
         receivedAt: new Date().toISOString()
       });
     }
@@ -1477,8 +1417,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       .get(canonicalSessionIdValue) as { sourceSessionId: string } | undefined;
     const sourceSessionId = row?.sourceSessionId?.trim();
     if (!sourceSessionId) return [];
-    return recentHookEventsWithTranscriptPathsForSessions(database, codexHookSource.sourceId, new Set([sourceSessionId]), 1).filter((event) =>
-      needsHookTranscriptCatchup(canonicalSessionIdValue, event)
+    return [...liveHookSources.values()].flatMap((source) =>
+      recentHookEventsWithTranscriptPathsForSessions(database, source.sourceId, new Set([sourceSessionId]), 1).filter((event) =>
+        needsHookTranscriptCatchup(canonicalSessionIdValue, event)
+      )
     );
   }
 
@@ -1535,8 +1477,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     };
   }
 
-  function readCursorsForSources(sources: DiscoveredSource[]): Map<string, NonNullable<ReturnType<typeof readCursor>>> {
-    const cursors = new Map<string, NonNullable<ReturnType<typeof readCursor>>>();
+  function readCursorsForSources(sources: DiscoveredSource[]): Map<string, IngestCursor> {
+    const cursors = new Map<string, IngestCursor>();
     for (const source of sources) {
       const cursor = source.path ? readCursor(database, source.sourceId, source.path) : readCursor(database, source.sourceId);
       if (!cursor) continue;
@@ -2004,7 +1946,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/projection") {
-      await refreshCodexTranscriptLiveState();
       const selectedSessionId = url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined;
       const refreshIntervalMs = parseBoardRefreshIntervalMs(url.searchParams.get("refreshIntervalMs"));
       const headlineStatus = boardHeadlineEnricher.status();
@@ -2032,7 +1973,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       liveEnvelope.projection = await boardHeadlineEnricher.enrichProjection(liveEnvelope.projection, { refreshIntervalMs });
       liveEnvelope.projection = attachCanonicalCardIds(liveEnvelope.projection, {
         hostId: `host:${config.host}`,
-        runtimeKind: "codex"
+        runtimeKind: defaultLiveRuntime
       });
       liveEnvelope.projection = withSessionTokenTotals(database, liveEnvelope.projection);
       sendJson(request, response, config.allowedOrigins, 200, liveEnvelope);
@@ -2190,60 +2131,15 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "GET" && url.pathname === "/settings/hooks") {
       sendJson(request, response, config.allowedOrigins, 200, {
-        hooks: await getCodexHookSettings(database, config),
+        hooks: await getLiveHookSettings(database, config),
         ok: true
       });
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/settings/hooks/codex") {
-      sendJson(request, response, config.allowedOrigins, 200, {
-        hooks: await getCodexHookSettings(database, config),
-        ok: true
-      });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/settings/hooks/codex/install") {
-      try {
-        sendJson(request, response, config.allowedOrigins, 202, {
-          hooks: await installCodexHooks(database, config),
-          ok: true
-        });
-      } catch (error) {
-        sendJson(request, response, config.allowedOrigins, 400, {
-          ok: false,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/settings/hooks/codex/uninstall") {
-      try {
-        sendJson(request, response, config.allowedOrigins, 202, {
-          hooks: await uninstallCodexHooks(database, config),
-          ok: true
-        });
-      } catch (error) {
-        sendJson(request, response, config.allowedOrigins, 400, {
-          ok: false,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/settings/hooks/codex/test") {
-      sendJson(request, response, config.allowedOrigins, 202, {
-        hooks: await testCodexHooks(database, config),
-        ok: true
-      });
-      return;
-    }
 
     const runtimeHookSettingsMatch = url.pathname.match(/^\/settings\/hooks\/([^/]+)(?:\/(install|uninstall|test))?$/);
-    if (runtimeHookSettingsMatch && runtimeHookSettingsMatch[1] !== "codex") {
+    if (runtimeHookSettingsMatch) {
       const runtime = decodeURIComponent(runtimeHookSettingsMatch[1] ?? "");
       const action = runtimeHookSettingsMatch[2];
       if (!isLiveConnectorRuntime(runtime)) {
@@ -2876,17 +2772,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/sources/codex/import-metadata") {
-      const queued = await queueAdapterMetadataImports("codex");
-      sendJson(request, response, config.allowedOrigins, 202, {
-        ok: true,
-        imported: 0,
-        jobs: queued.jobs,
-        queued: queued.jobs.length,
-        sources: queued.sources
-      });
-      return;
-    }
 
     if (request.method === "POST" && url.pathname === "/sources/exclusions") {
       try {
@@ -2912,31 +2797,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/sources/codex/approve-transcripts") {
-      approveTranscriptImports("codex");
-      sendJson(request, response, config.allowedOrigins, 202, { ok: true });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/sources/codex/import-transcripts") {
-      if (!transcriptImportApprovedForRuntime("codex")) {
-        sendJson(request, response, config.allowedOrigins, 409, {
-          ok: false,
-          error: "Transcript import requires persisted source review approval."
-        });
-        return;
-      }
-      const queued = await queueAdapterTranscriptImports("codex");
-      sendJson(request, response, config.allowedOrigins, 202, {
-        ok: true,
-        imported: 0,
-        jobs: queued.jobs,
-        queued: queued.jobs.length,
-        skipped: 0,
-        sources: queued.sources
-      });
-      return;
-    }
 
     if (request.method === "POST" && url.pathname === "/ingest") {
       const requestDestructiveMutationEpoch = destructiveMutationEpoch;
@@ -3418,7 +3278,7 @@ async function transcriptSources(source: DiscoveredSource): Promise<DiscoveredSo
     ...source,
     path: file,
     runtimeVersion: "file",
-    schemaVersion: source.runtime === "codex" ? "codex-transcript-jsonl" : source.schemaVersion,
+    schemaVersion: source.schemaVersion,
     sourceId: `${source.sourceId}:${relative(sourcePath, file).replaceAll("\\", "/")}`
   }));
 }
@@ -3426,32 +3286,22 @@ async function transcriptSources(source: DiscoveredSource): Promise<DiscoveredSo
 async function transcriptSourceFromHookEvent(event: NormalizedEvent, homeDir: string): Promise<DiscoveredSource | undefined> {
   const transcriptPath = hookTranscriptPath(event);
   if (!transcriptPath || !transcriptPath.endsWith(".jsonl") || !isAbsolute(transcriptPath)) return undefined;
+  if (!isRuntimeKind(event.source.adapter)) return undefined;
 
-  const codexRoot = join(homeDir, ".codex");
-  const roots = [
-    { id: "sessions", path: join(codexRoot, "sessions") },
-    { id: "archived-sessions", path: join(codexRoot, "archived_sessions") }
-  ];
-
-  for (const root of roots) {
-    const relativePath = relative(root.path, transcriptPath).replaceAll("\\", "/");
-    if (!relativePath || relativePath.startsWith("../") || relativePath === ".." || isAbsolute(relativePath)) continue;
-    const rootRealPath = await realpath(root.path);
-    const transcriptRealPath = await realpath(transcriptPath);
-    const realRelativePath = relative(rootRealPath, transcriptRealPath).replaceAll("\\", "/");
-    if (!realRelativePath || realRelativePath.startsWith("../") || realRelativePath === ".." || isAbsolute(realRelativePath)) continue;
-    return {
-      confidence: "authoritative",
-      path: transcriptPath,
-      runtime: "codex",
-      runtimeVersion: "file",
-      schemaVersion: "codex-transcript-jsonl",
-      sourceId: `codex-${root.id}:${relativePath}`,
-      sourceKind: "jsonl"
-    };
-  }
-
-  return undefined;
+  const runtime = event.source.adapter;
+  const relativePath = relative(homeDir, transcriptPath).replaceAll("\\", "/");
+  const sourcePathId = relativePath && !relativePath.startsWith("../") && relativePath !== ".." && !isAbsolute(relativePath)
+    ? relativePath
+    : transcriptPath.replaceAll("\\", "/");
+  return {
+    confidence: "authoritative",
+    path: transcriptPath,
+    runtime,
+    runtimeVersion: "file",
+    schemaVersion: `${runtime}-transcript-jsonl`,
+    sourceId: `${runtime}-hook-transcript:${sourcePathId}`,
+    sourceKind: "jsonl"
+  };
 }
 
 function hookTranscriptPath(event: NormalizedEvent): string | undefined {
@@ -3495,7 +3345,7 @@ type TranscriptCursorContext = {
   model?: string;
 };
 
-function cursorContextFromCursor(cursor: ReturnType<typeof readCursor>): TranscriptCursorContext {
+function cursorContextFromCursor(cursor: IngestCursor | undefined): TranscriptCursorContext {
   return {
     cwd: cursor?.cwd,
     model: cursor?.model,
@@ -3778,7 +3628,7 @@ function isRuntimeKind(value: unknown): value is RuntimeKind {
 function liveRuntimeFromIngestRequest(url: URL, request: IncomingMessage): RuntimeKind | undefined {
   const header = request.headers["x-masthead-runtime"];
   const headerValue = Array.isArray(header) ? header[0] : header;
-  const requested = url.searchParams.get("runtime") ?? headerValue ?? "codex";
+  const requested = url.searchParams.get("runtime") ?? headerValue;
   if (!isRuntimeKind(requested)) return undefined;
   return (LIVE_INGEST_RUNTIMES as readonly string[]).includes(requested) ? requested : undefined;
 }

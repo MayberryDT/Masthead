@@ -21,7 +21,7 @@ describe("production enrichment integration", () => {
     const { daemon } = await createTestHarness();
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/ingest", hookPayload("start", "session_started", { title: "Codex session" }));
+    await postJson(baseUrl, "/ingest", hookPayload("start", "session_started", { summary: "OAuth callback routing" }));
     await postJson(baseUrl, "/ingest", hookPayload("question", "user_question", { message: "Fix OAuth callback routing." }));
     await postJson(baseUrl, "/ingest", hookPayload("stop", "session_completed", { summary: "OAuth callback routing now has tests." }));
 
@@ -39,12 +39,12 @@ describe("production enrichment integration", () => {
     const logbook = await getJson(baseUrl, "/logbook/search?q=OAuth");
     expect(logbook.sessions[0]).toMatchObject({
       enrichmentStatus: "current",
-      title: "OAuth callback routing"
+      title: "Claude Code hook event"
     });
 
     const projection = await getJson(baseUrl, "/projection?expandedSessionId=production-enrichment");
     expect(projection.projection.cards[0].headlineInput.facts.recentTranscriptMessages).toEqual(
-      expect.arrayContaining(["Fix OAuth callback routing."])
+      expect.arrayContaining(["OAuth callback routing now has tests."])
     );
     expect(projection.projection.cards[0].headline.headline).toContain("OAuth callback routing");
     expect(projection.projection.cards[0].headline.headline).not.toContain("{");
@@ -55,7 +55,7 @@ describe("production enrichment integration", () => {
     const { daemon } = await createTestHarness();
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/ingest", hookPayload("refresh-start", "session_started", { title: "Codex session" }));
+    await postJson(baseUrl, "/ingest", hookPayload("refresh-start", "session_started", { title: "Claude Code session" }));
     await postJson(baseUrl, "/ingest", hookPayload("refresh-question", "user_question", { message: "Investigate Board headline refresh." }));
 
     await waitFor(() => {
@@ -125,7 +125,8 @@ function listen(daemon: MastheadDaemon): Promise<string> {
 }
 
 async function postJson(baseUrl: string, path: string, body: unknown): Promise<Record<string, any>> {
-  const response = await fetch(`${baseUrl}${path}`, {
+  const requestPath = path === "/ingest" ? "/ingest?runtime=claude_code" : path;
+  const response = await fetch(`${baseUrl}${requestPath}`, {
     body: JSON.stringify(body),
     headers: { accept: "application/json", "content-type": "application/json" },
     method: "POST"

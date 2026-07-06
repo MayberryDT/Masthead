@@ -22,7 +22,7 @@ describe("canonical session search filters", () => {
       lifecycle: "ended",
       model: "gpt-5",
       project: "Pip",
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "session-match",
       title: "OAuth callback repair"
     });
@@ -31,7 +31,7 @@ describe("canonical session search filters", () => {
       lifecycle: "ended",
       model: "gpt-4.1",
       project: "Pip",
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "session-other",
       title: "OAuth billing repair"
     });
@@ -44,7 +44,7 @@ describe("canonical session search filters", () => {
       model: "gpt-5",
       project: "pip",
       query: "OAuth",
-      runtime: "codex",
+      runtime: "opencode",
       state: "ended"
     });
 
@@ -60,7 +60,7 @@ describe("canonical session search filters", () => {
       lifecycle: "ended",
       model: "gpt-5",
       project: "Pip",
-      runtime: "codex",
+      runtime: "opencode",
       sessionId: "session-codex",
       title: "OAuth callback repair"
     });
@@ -87,7 +87,7 @@ describe("canonical session search filters", () => {
       limit: 25,
       model: ["gpt-5", "claude-sonnet-4"],
       project: ["pip", "masthead"],
-      runtime: ["codex", "claude"]
+      runtime: ["opencode", "claude"]
     });
 
     expect(result.sessions.map((session) => session.sessionId).toSorted()).toEqual(["session-claude", "session-codex"]);

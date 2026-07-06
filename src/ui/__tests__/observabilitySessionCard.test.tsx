@@ -95,7 +95,7 @@ describe("observability session card", () => {
       <SessionCard
         session={session({
           headline: headlineView("Local headline fallback.", { source: "offline" }),
-          harness: "Codex",
+          harness: "OpenCode",
           lifecycle: "idle",
           primaryStatus: "stalled",
           stateLabel: "Idle"
@@ -108,7 +108,7 @@ describe("observability session card", () => {
       host.querySelectorAll(".card-topline .headline-source, .card-topline .runtime-tag, .card-topline .state-pill")
     ).map((chip) => chip.textContent);
 
-    expect(chipText).toEqual(["Offline", "Codex", "Idle"]);
+    expect(chipText).toEqual(["Offline", "OpenCode", "Idle"]);
   });
 
   test("keeps stale attention on idle sessions visually quiet", () => {
@@ -177,12 +177,12 @@ describe("observability session card", () => {
     expect(html).not.toContain("☆");
   });
 
-  test("does not surface boilerplate Codex session titles or category labels as the header label", () => {
+  test("does not surface boilerplate OpenCode session titles or category labels as the header label", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
           project: "Halla",
-          title: "Halla Codex session",
+          title: "Halla OpenCode session",
           workContext: {
             label: "SEO system work",
             confidence: "event_summary",
@@ -196,7 +196,7 @@ describe("observability session card", () => {
 
     expect(html).toContain("Halla · SEO system work");
     expect(html).toContain("Board headlines: structured around subject and disposition.");
-    expect(html).not.toContain("Halla Codex session");
+    expect(html).not.toContain("Halla OpenCode session");
   });
 
   test("uses context in the header when the stored card title is a hook-event label", () => {
@@ -204,7 +204,7 @@ describe("observability session card", () => {
       <SessionCard
         session={session({
           headline: headlineView("Updated section auto-rotation stops.", { source: "enrichment" }),
-          title: "Codex hook event",
+          title: "OpenCode hook event",
           workContext: {
             label: "UI polish",
             confidence: "path_cluster",
@@ -218,7 +218,7 @@ describe("observability session card", () => {
 
     expect(html).toContain("Masthead · UI polish");
     expect(html).toContain("Updated section auto-rotation stops.");
-    expect(html).not.toContain("Codex hook event");
+    expect(html).not.toContain("OpenCode hook event");
   });
 
   test("uses work context as headline fallback when copy and title are weak", () => {
@@ -226,7 +226,7 @@ describe("observability session card", () => {
       <SessionCard
         session={session({
           headline: headlineView("Recent activity.", { source: "offline" }),
-          title: "Codex hook event",
+          title: "OpenCode hook event",
           workContext: {
             label: "Headline enrichment reliability",
             confidence: "event_summary",
@@ -1279,11 +1279,11 @@ describe("observability session card", () => {
       <SessionBoard cards={[boardSession({ thinkingLevel: undefined })]} variant="observability" onOpenSession={() => undefined} />
     );
 
-    expect(html).toContain("Codex");
+    expect(html).toContain("OpenCode");
     expect(html).toContain("Not captured");
     expect(html).not.toContain("High");
     expect(html).not.toContain("Claude Code");
-    expect(html).not.toContain("OpenClaw");
+    expect(html).not.toContain("Cursor");
     expect(html).not.toContain("Hermes");
     expect(html).not.toContain("gpt-5.5");
     expect(html).not.toContain("gpt-5.4");
@@ -1303,7 +1303,7 @@ describe("observability session card", () => {
     );
 
     expect(html).toContain("gpt-5.5");
-    expect(html).not.toContain("OpenClaw");
+    expect(html).not.toContain("Cursor");
     expect(html).not.toContain("Hermes");
   });
 
@@ -1388,6 +1388,7 @@ function session(overrides: Partial<SessionCardView> = {}): SessionCardView {
     project: "Masthead",
     title: "Raw title",
     headline: headlineView("Board headlines: structured around subject and disposition."),
+    harness: "OpenCode",
     stateLabel: "Running",
     primaryStatus: "editing",
     lifecycle: "running",

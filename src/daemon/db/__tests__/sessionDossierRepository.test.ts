@@ -28,7 +28,7 @@ describe("session dossier repository", () => {
         model: "gpt-5.5",
         models: ["gpt-5.5"],
         project: "Masthead",
-        runtime: "codex",
+        runtime: "opencode",
         sessionId: "session-1",
         sourceConfidence: "authoritative",
         sourceSessionId: "source-session-1",
@@ -48,7 +48,7 @@ describe("session dossier repository", () => {
         canonicalSessionId: "session-1",
         mcpIncluded: true,
         sourceConfidence: "authoritative",
-        sourceRuntime: "codex",
+        sourceRuntime: "opencode",
         sourceSessionId: "source-session-1"
       },
       usage: {

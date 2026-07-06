@@ -14,7 +14,7 @@ Masthead is configured with environment variables. Defaults are local and develo
 | `MASTHEAD_STORE_PATH` | `<data-dir>/legacy/events.ndjson` | Legacy compatibility journal path |
 | `MASTHEAD_LEGACY_DATA_DIR` | unset | Optional legacy migration input directory |
 | `MASTHEAD_GIT_REFRESH_MS` | `60000` | Known-session Git refresh interval |
-| `MASTHEAD_CODEX_HOME` | user home | Home directory used for Codex source discovery |
+| `MASTHEAD_CODEX_HOME` | user home | Legacy-named home directory fallback used for local source discovery |
 | `MASTHEAD_BUILD_VERSION` | package version | Health build version override |
 | `MASTHEAD_BUILD_SHA` | `development` | Health build SHA override |
 
@@ -40,14 +40,14 @@ Masthead is configured with environment variables. Defaults are local and develo
 | `MASTHEAD_MCP_ENTRY` | MCP server entry path |
 | `MASTHEAD_DB_PATH` | Required database path for the MCP server |
 
-## Codex Hook
+## Live Hook
 
 | Variable | Purpose |
 | --- | --- |
 | `MASTHEAD_INGEST_URL` | Hook target, usually `http://127.0.0.1:17373/ingest` |
 | `MASTHEAD_HOOK_TIMEOUT_MS` | Hook forwarding timeout |
 | `MASTHEAD_HOOK_MAX_BYTES` | Hook stdin byte limit |
-| `MASTHEAD_CODEX_HOOKS` | Codex hooks file override for settings/doctor |
+| `MASTHEAD_CODEX_HOOKS` | Legacy-named hook-file override used by settings/doctor compatibility checks |
 | `MASTHEAD_HOOK_SCRIPT` | Hook script path used by settings |
 | `MASTHEAD_DOCTOR_STRICT_HOOKS` | Treat missing hook readiness as a strict doctor failure |
 

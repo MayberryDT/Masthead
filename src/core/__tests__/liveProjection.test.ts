@@ -1,11 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { normalizeCodexHookPayload } from "../codexAdapter";
-import { parseLiveHookPayload } from "../liveHookAdapter";
+import { normalizeLiveHookPayload, parseLiveHookPayload, type LiveHookNormalizeOptions } from "../liveHookAdapter";
 import { projectLiveEvents } from "../liveProjection";
 
 describe("live projection", () => {
   test("projects pending Board headlines by default and in LLM mode", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "llm-headline-start",
         event: "session_started",
@@ -42,7 +41,7 @@ describe("live projection", () => {
   });
 
   test("projects explicit offline Board headlines in offline mode", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "offline-headline-start",
         event: "session_started",
@@ -67,7 +66,7 @@ describe("live projection", () => {
   });
 
   test("applies supplied last successful LLM headline frames while keeping current headline input", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "stored-headline-start",
         event: "session_started",
@@ -75,7 +74,7 @@ describe("live projection", () => {
         timestamp: "2026-06-23T03:00:00.000Z",
         cwd: "/workspace/masthead",
         project: "Masthead",
-        title: "Codex session"
+        title: "Claude Code session"
       },
       { receivedAt: "2026-06-23T03:00:00.010Z" }
     );
@@ -125,7 +124,7 @@ describe("live projection", () => {
   });
 
   test("projects normalized hook events into a live board envelope", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "live-session-start",
         event: "session_started",
@@ -140,7 +139,7 @@ describe("live projection", () => {
       },
       { receivedAt: "2026-06-23T03:00:00.040Z" }
     );
-    const approval = normalizeCodexHookPayload(
+    const approval = normalizeSupportedHookPayload(
       {
         provider_event_id: "live-approval",
         event: "approval_requested",
@@ -153,7 +152,7 @@ describe("live projection", () => {
         project: "Masthead",
         command_id: "cmd-install-hook",
         blast_radius: "production",
-        summary: "Codex requested hook installation"
+        summary: "Claude Code requested hook installation"
       },
       { receivedAt: "2026-06-23T03:01:00.030Z" }
     );
@@ -188,7 +187,7 @@ describe("live projection", () => {
   });
 
   test("uses recent canonical transcript messages as live board headline evidence", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "transcript-backed-start",
         event: "session_started",
@@ -196,8 +195,8 @@ describe("live projection", () => {
         timestamp: "2026-06-23T03:00:00.000Z",
         cwd: "/workspace/masthead",
         project: "Masthead",
-        title: "Codex session",
-        summary: "Codex hook event"
+        title: "Claude Code session",
+        summary: "Claude Code hook event"
       },
       { receivedAt: "2026-06-23T03:00:00.010Z" }
     );
@@ -228,7 +227,7 @@ describe("live projection", () => {
   });
 
   test("uses recent tool commands as live board headline evidence", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "tool-backed-start",
         event: "session_started",
@@ -240,7 +239,7 @@ describe("live projection", () => {
       },
       { receivedAt: "2026-06-23T03:00:00.010Z" }
     );
-    const command = normalizeCodexHookPayload(
+    const command = normalizeSupportedHookPayload(
       {
         provider_event_id: "tool-backed-typecheck",
         event: "PostToolUse",
@@ -268,7 +267,7 @@ describe("live projection", () => {
   });
 
   test("does not replace pending Board headlines with stale stored enrichment in LLM mode", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "stale-enrichment-start",
         event: "session_started",
@@ -276,7 +275,7 @@ describe("live projection", () => {
         timestamp: "2026-06-23T03:00:00.000Z",
         cwd: "/workspace/masthead",
         project: "Masthead",
-        title: "Codex session"
+        title: "Claude Code session"
       },
       { receivedAt: "2026-06-23T03:00:00.010Z" }
     );
@@ -318,7 +317,7 @@ describe("live projection", () => {
   });
 
   test("uses payload project and title when a live session starts with an approval event", () => {
-    const approval = normalizeCodexHookPayload(
+    const approval = normalizeSupportedHookPayload(
       {
         provider_event_id: "live-approval-first",
         event: "approval_requested",
@@ -332,7 +331,7 @@ describe("live projection", () => {
         title: "Review hook install",
         command_id: "cmd-review-hook",
         blast_radius: "production",
-        summary: "Codex requested hook installation"
+        summary: "Claude Code requested hook installation"
       },
       { receivedAt: "2026-06-23T03:03:00.020Z" }
     );
@@ -351,7 +350,7 @@ describe("live projection", () => {
   });
 
   test("live projection ages quiet non-terminal sessions into idle", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "quiet-start",
         event: "session_started",
@@ -387,7 +386,7 @@ describe("live projection", () => {
   });
 
   test("live projection keeps terminal sessions visible in lifecycle lanes", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "old-start",
         event: "session_started",
@@ -399,7 +398,7 @@ describe("live projection", () => {
       },
       { receivedAt: "2026-06-23T03:00:00.010Z" }
     );
-    const completed = normalizeCodexHookPayload(
+    const completed = normalizeSupportedHookPayload(
       {
         provider_event_id: "old-stop",
         event: "session_completed",
@@ -437,7 +436,7 @@ describe("live projection", () => {
   });
 
   test("null selected session keeps live projection board-first even when expanded session exists", () => {
-    const started = normalizeCodexHookPayload(
+    const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "board-first-start",
         event: "session_started",
@@ -533,8 +532,8 @@ describe("live projection", () => {
         title: `${testCase.status} OMP state`,
         status: testCase.status,
         state: testCase.state,
-        model: "openai-codex/gpt-5.5",
-        provider: "openai-codex"
+        model: "gpt-5.5",
+        provider: "openai"
       }),
       { receivedAt: "2026-07-05T12:00:00.100Z", runtime: "omp" }
     );
@@ -548,7 +547,7 @@ describe("live projection", () => {
 
     expect(envelope.projection.cards[0]).toMatchObject({
       harness: "Oh My Pi",
-      model: "openai-codex/gpt-5.5",
+      model: "gpt-5.5",
       runtime: "omp",
       ...testCase.expected,
       headline: expect.objectContaining({ source: "offline", status: "ready" })
@@ -573,3 +572,7 @@ describe("live projection", () => {
     expect(envelope.projection.cards).toEqual([]);
   });
 });
+
+function normalizeSupportedHookPayload(input: unknown, options: Omit<LiveHookNormalizeOptions, "runtime">) {
+  return normalizeLiveHookPayload(input, { ...options, runtime: "claude_code" });
+}

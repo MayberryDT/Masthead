@@ -9,7 +9,7 @@ import {
 } from "../core/hookAdmin.ts";
 import type { DaemonConfig } from "./config.ts";
 
-export const LIVE_CONNECTOR_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "omp", "opencode"] as const satisfies readonly RuntimeKind[];
+export const LIVE_CONNECTOR_RUNTIMES = ["claude_code", "cursor", "grok", "opencode", "omp", "pi", "hermes"] as const satisfies readonly RuntimeKind[];
 
 export type LiveConnectorRuntime = (typeof LIVE_CONNECTOR_RUNTIMES)[number];
 
@@ -52,17 +52,19 @@ type CursorHookConfig = {
 const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
 const OPENCODE_PLUGIN_MARKER = "masthead-live-connector";
 const OMP_EXTENSION_MARKER = "masthead-live-connector";
-const CODEX_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"] as const;
+const PI_EXTENSION_MARKER = "masthead-live-connector";
+const HERMES_PLUGIN_MARKER = "masthead-live-connector";
 const CLAUDE_STYLE_EVENTS = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "PostToolUse", "Stop"] as const;
 const CURSOR_EVENTS = ["sessionStart", "beforeSubmitPrompt", "beforeShellExecution", "afterShellExecution", "afterFileEdit", "postToolUse", "stop"] as const;
 
 const LABELS: Record<LiveConnectorRuntime, string> = {
   claude_code: "Claude Code",
-  codex: "Codex",
   cursor: "Cursor",
   grok: "Grok Build",
+  opencode: "OpenCode",
   omp: "Oh My Pi",
-  opencode: "OpenCode"
+  pi: "Pi",
+  hermes: "Hermes"
 };
 
 export async function getLiveConnectorSettings(config: DaemonConfig): Promise<LiveConnectorSettings[]> {
@@ -82,24 +84,9 @@ export async function getLiveConnectorSetting(config: DaemonConfig, runtime: Liv
       return stateFromVerification(runtime, { command, configPath, endpoint, existed, latestBackupPath, verification });
     }
 
-    if (runtime === "opencode") {
-      const verification = await verifyMarkedPluginFile(configPath, endpoint, OPENCODE_PLUGIN_MARKER);
-      return {
-        command,
-        configExists: verification.configExists,
-        configPath,
-        endpoint,
-        installed: verification.installed,
-        label: LABELS[runtime],
-        latestBackupPath,
-        mismatchedEvents: verification.mismatchedEvents,
-        missingEvents: verification.missingEvents,
-        runtime
-      };
-    }
-
-    if (runtime === "omp") {
-      const verification = await verifyMarkedPluginFile(configPath, endpoint, OMP_EXTENSION_MARKER);
+    const marker = markedConnectorMarker(runtime);
+    if (marker) {
+      const verification = await verifyMarkedPluginFile(configPath, endpoint, marker);
       return {
         command,
         configExists: verification.configExists,
@@ -115,8 +102,7 @@ export async function getLiveConnectorSetting(config: DaemonConfig, runtime: Liv
     }
 
     const { config: hookConfig, existed } = await readJsonConfig<CodexHookConfig>(configPath, { allowMissing: true });
-    const events = runtime === "codex" ? CODEX_EVENTS : CLAUDE_STYLE_EVENTS;
-    const verification = verifyMastheadHookConfig(hookConfig, { command, events });
+    const verification = verifyMastheadHookConfig(hookConfig, { command, events: CLAUDE_STYLE_EVENTS });
     return stateFromVerification(runtime, { command, configPath, endpoint, existed, latestBackupPath, verification });
   } catch (error) {
     return {
@@ -195,18 +181,20 @@ export async function runLiveConnectorRoundTrip(
 export function liveConnectorConfigPath(config: DaemonConfig, runtime: LiveConnectorRuntime): string {
   const homeDir = resolve(config.codexHomeDir);
   switch (runtime) {
-    case "codex":
-      return resolve(process.env.MASTHEAD_CODEX_HOOKS || join(homeDir, ".codex", "hooks.json"));
     case "claude_code":
       return resolve(process.env.MASTHEAD_CLAUDE_SETTINGS || join(homeDir, ".claude", "settings.json"));
     case "cursor":
       return resolve(process.env.MASTHEAD_CURSOR_HOOKS || join(homeDir, ".cursor", "hooks.json"));
     case "grok":
       return resolve(process.env.MASTHEAD_GROK_HOOKS || join(homeDir, ".grok", "hooks", "masthead.json"));
-    case "omp":
-      return resolve(process.env.MASTHEAD_OMP_EXTENSION || join(homeDir, ".omp", "agent", "extensions", "masthead-live.js"));
     case "opencode":
       return resolve(process.env.MASTHEAD_OPENCODE_PLUGIN || join(homeDir, ".config", "opencode", "plugins", "masthead-live.js"));
+    case "omp":
+      return resolve(process.env.MASTHEAD_OMP_EXTENSION || join(homeDir, ".omp", "agent", "extensions", "masthead-live.js"));
+    case "pi":
+      return resolve(process.env.MASTHEAD_PI_EXTENSION || join(homeDir, ".pi", "agent", "extensions", "masthead-live.js"));
+    case "hermes":
+      return resolve(process.env.MASTHEAD_HERMES_PLUGIN || join(homeDir, ".hermes", "plugins", "masthead-live", "index.js"));
   }
 }
 
@@ -216,7 +204,6 @@ export function liveConnectorCommand(config: DaemonConfig, runtime: LiveConnecto
 }
 
 export function liveConnectorEndpoint(config: DaemonConfig, runtime: LiveConnectorRuntime, endpoint = baseIngestEndpoint(config)): string {
-  if (runtime === "codex") return endpoint;
   const url = new URL(endpoint);
   url.searchParams.set("runtime", runtime);
   return url.toString();
@@ -255,15 +242,10 @@ export async function installLiveConnector(config: DaemonConfig, runtime: LiveCo
     return;
   }
 
-  if (runtime === "opencode") {
+  const markedSource = markedConnectorSource(runtime, liveConnectorEndpoint(config, runtime));
+  if (markedSource) {
     if (await pathExists(configPath)) await createHookBackup(configPath, "install");
-    await writeTextConfig(configPath, openCodePluginSource(liveConnectorEndpoint(config, runtime)));
-    return;
-  }
-
-  if (runtime === "omp") {
-    if (await pathExists(configPath)) await createHookBackup(configPath, "install");
-    await writeTextConfig(configPath, ompExtensionSource(liveConnectorEndpoint(config, runtime)));
+    await writeTextConfig(configPath, markedSource);
     return;
   }
 
@@ -273,7 +255,7 @@ export async function installLiveConnector(config: DaemonConfig, runtime: LiveCo
     configPath,
     installMastheadHookConfig(hookConfig, {
       command,
-      events: runtime === "codex" ? CODEX_EVENTS : CLAUDE_STYLE_EVENTS,
+      events: CLAUDE_STYLE_EVENTS,
       timeout: 1
     })
   );
@@ -290,21 +272,12 @@ export async function uninstallLiveConnector(config: DaemonConfig, runtime: Live
     return;
   }
 
-  if (runtime === "opencode") {
+  const marker = markedConnectorMarker(runtime);
+  if (marker) {
     if (!(await pathExists(configPath))) return;
     await assertRegularHookFile(configPath);
     const raw = await readFile(configPath, "utf8");
-    if (!raw.includes(OPENCODE_PLUGIN_MARKER)) throw new Error(`Refusing to uninstall non-Masthead OpenCode plugin: ${configPath}`);
-    await createHookBackup(configPath, "uninstall");
-    await rm(configPath, { force: true });
-    return;
-  }
-
-  if (runtime === "omp") {
-    if (!(await pathExists(configPath))) return;
-    await assertRegularHookFile(configPath);
-    const raw = await readFile(configPath, "utf8");
-    if (!raw.includes(OMP_EXTENSION_MARKER)) throw new Error(`Refusing to uninstall non-Masthead OMP extension: ${configPath}`);
+    if (!raw.includes(marker)) throw new Error(`Refusing to uninstall non-Masthead ${LABELS[runtime]} connector: ${configPath}`);
     await createHookBackup(configPath, "uninstall");
     await rm(configPath, { force: true });
     return;
@@ -339,6 +312,36 @@ function stateFromVerification(
     missingEvents: input.verification.missingEvents,
     runtime
   };
+}
+
+function markedConnectorMarker(runtime: LiveConnectorRuntime): string | undefined {
+  switch (runtime) {
+    case "opencode":
+      return OPENCODE_PLUGIN_MARKER;
+    case "omp":
+      return OMP_EXTENSION_MARKER;
+    case "pi":
+      return PI_EXTENSION_MARKER;
+    case "hermes":
+      return HERMES_PLUGIN_MARKER;
+    default:
+      return undefined;
+  }
+}
+
+function markedConnectorSource(runtime: LiveConnectorRuntime, endpoint: string): string | undefined {
+  switch (runtime) {
+    case "opencode":
+      return openCodePluginSource(endpoint);
+    case "omp":
+      return ompExtensionSource(endpoint);
+    case "pi":
+      return runtimePluginSource(PI_EXTENSION_MARKER, endpoint, "pi.extension");
+    case "hermes":
+      return runtimePluginSource(HERMES_PLUGIN_MARKER, endpoint, "hermes.plugin");
+    default:
+      return undefined;
+  }
 }
 
 function installCursorHookConfig(config: CursorHookConfig, options: { command: string; events: readonly string[] }): CursorHookConfig {
@@ -431,6 +434,7 @@ function syntheticPayload(runtime: LiveConnectorRuntime, sourceEventId: string, 
       directory: process.cwd(),
       provider_event_id: sourceEventId,
       sessionID: sessionId,
+      status: "running",
       time: testedAt,
       type: "session.created"
     };
@@ -441,33 +445,36 @@ function syntheticPayload(runtime: LiveConnectorRuntime, sourceEventId: string, 
       hookEventName: "sessionStart",
       provider_event_id: sourceEventId,
       sessionId,
+      status: "running",
       timestamp: testedAt
     };
   }
-  if (runtime === "omp") {
+  if (runtime === "omp" || runtime === "pi") {
     return {
       cwd: process.cwd(),
       provider_event_id: sourceEventId,
       sessionId,
+      status: "running",
       timestamp: testedAt,
       type: "session_start"
     };
   }
-  if (runtime === "claude_code" || runtime === "grok") {
+  if (runtime === "hermes") {
     return {
-      cwd: process.cwd(),
-      hookEventName: "SessionStart",
+      directory: process.cwd(),
       provider_event_id: sourceEventId,
       sessionId,
-      timestamp: testedAt
+      status: "running",
+      timestamp: testedAt,
+      type: "session_start"
     };
   }
   return {
     cwd: process.cwd(),
-    event: "session_started",
+    hookEventName: "SessionStart",
     provider_event_id: sourceEventId,
-    session_id: sessionId,
-    source: "masthead-settings",
+    sessionId,
+    status: "running",
     timestamp: testedAt
   };
 }
@@ -516,6 +523,122 @@ export const MastheadLiveConnector = async () => ({
 });
 
 export default MastheadLiveConnector;
+`;
+}
+
+
+function runtimePluginSource(marker: string, endpoint: string, source: string): string {
+  return `// ${marker}: installed by Masthead.
+const MASTHEAD_ENDPOINT = ${JSON.stringify(endpoint)};
+const MASTHEAD_SOURCE = ${JSON.stringify(source)};
+let mastheadSequence = 0;
+
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+function objectFor(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function sourceEventId(type, event, sessionId) {
+  return firstString(
+    event?.provider_event_id,
+    event?.providerEventId,
+    event?.event_id,
+    event?.eventId,
+    event?.id,
+    event?.toolCallId,
+    event?.toolUseId
+  ) || (sessionId ? sessionId + ":" + type + ":" + (++mastheadSequence) : type + ":" + Date.now() + ":" + (++mastheadSequence));
+}
+
+function payloadFor(type, event = {}, ctx = {}) {
+  const session = objectFor(event.session);
+  const workspace = objectFor(event.workspace);
+  const tool = objectFor(event.tool);
+  const cwd = firstString(event.cwd, event.directory, workspace.cwd, workspace.directory, ctx.cwd, ctx.directory, process.cwd?.());
+  const state = firstString(event.state, event.status, ctx.state, ctx.status);
+  const sessionId = firstString(
+    event.sessionId,
+    event.session_id,
+    event.sessionID,
+    event.conversationId,
+    event.conversation_id,
+    session.id,
+    session.sessionId,
+    ctx.sessionId,
+    ctx.session_id,
+    ctx.sessionID
+  );
+  return {
+    type: firstString(type, event.type, event.event, event.name),
+    sessionId,
+    provider_event_id: sourceEventId(type, event, sessionId),
+    timestamp: firstString(event.timestamp, event.time, event.createdAt) || new Date().toISOString(),
+    cwd,
+    directory: firstString(event.directory, workspace.directory, cwd),
+    branch: firstString(event.branch, event.gitBranch, workspace.branch, ctx.branch),
+    toolName: firstString(event.toolName, event.tool_name, tool.name),
+    toolUseId: firstString(event.toolUseId, event.tool_use_id, event.toolCallId, tool.id),
+    approvalName: firstString(event.approvalName, event.permissionName),
+    state,
+    status: firstString(event.status, event.state, ctx.status, ctx.state),
+    source: MASTHEAD_SOURCE
+  };
+}
+
+async function postMastheadEvent(type, event, ctx) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 750);
+  try {
+    await fetch(MASTHEAD_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payloadFor(type, objectFor(event), objectFor(ctx))),
+      signal: controller.signal
+    });
+  } catch {
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function register(host, eventName) {
+  const on = typeof host?.on === "function" ? host.on.bind(host) : typeof host?.events?.on === "function" ? host.events.on.bind(host.events) : undefined;
+  if (typeof on === "function") on(eventName, (event, ctx) => postMastheadEvent(eventName, event, ctx));
+}
+
+export default function MastheadLiveConnector(host = {}) {
+  for (const eventName of [
+    "session_start",
+    "session_created",
+    "agent_start",
+    "input",
+    "user_input",
+    "before_agent_start",
+    "approval_requested",
+    "approval_resolved",
+    "permission_requested",
+    "tool_approval_requested",
+    "tool_approval_resolved",
+    "tool_call",
+    "tool_start",
+    "tool_result",
+    "tool_finish",
+    "session_stop",
+    "session_completed",
+    "session_end",
+    "session_shutdown"
+  ]) {
+    register(host, eventName);
+  }
+}
+
+export const mastheadLiveConnector = MastheadLiveConnector;
 `;
 }
 

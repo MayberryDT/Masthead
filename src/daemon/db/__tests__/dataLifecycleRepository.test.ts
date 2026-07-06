@@ -52,12 +52,12 @@ function seedCanonicalSessionGraph(db: MastheadDatabase): void {
     `INSERT INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("source:codex", "codex", "jsonl", "/tmp/rollout.jsonl", "authoritative", now, now);
+  ).run("source:opencode", "opencode", "jsonl", "/tmp/rollout.jsonl", "authoritative", now, now);
   db.prepare(
     `INSERT INTO raw_events (
       raw_event_id, source_id, source_record_key, observed_at, received_at, source_kind, source_path, payload_hash, payload_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("raw:1", "source:codex", "rollout.jsonl:1", now, now, "jsonl", "/tmp/rollout.jsonl", "hash", "{}");
+  ).run("raw:1", "source:opencode", "rollout.jsonl:1", now, now, "jsonl", "/tmp/rollout.jsonl", "hash", "{}");
   db.prepare("INSERT INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
     "host:test",
     "test-host",
@@ -67,13 +67,13 @@ function seedCanonicalSessionGraph(db: MastheadDatabase): void {
   db.prepare(
     `INSERT INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at)
     VALUES (?, ?, ?, ?, ?)`
-  ).run("runtime:codex", "codex", "test", now, now);
+  ).run("runtime:opencode", "opencode", "test", now, now);
   db.prepare(
     `INSERT INTO sessions (
       session_id, host_id, runtime_id, source_session_id, title, lifecycle, last_activity_at,
       source_confidence, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("session:1", "host:test", "runtime:codex", "session-1", "Import Logbook", "ended", now, "authoritative", now, now);
+  ).run("session:1", "host:test", "runtime:opencode", "session-1", "Import Logbook", "ended", now, "authoritative", now, now);
   db.prepare(
     `INSERT INTO messages (
       message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence

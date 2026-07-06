@@ -48,12 +48,12 @@ describe("multi-adapter import", () => {
 
     expect(rows).toEqual(
       expect.arrayContaining(
-        ["codex", "cursor", "claude_code", "opencode", "aider", "openclaw", "hermes", "pi", "omp"].map((runtime) =>
+        ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"].map((runtime) =>
           expect.objectContaining({ messages: 2, runtime, sessions: 1 })
         )
       )
     );
-    expect(searchSessions(db, { limit: 20, query: "assistant reply" }).total).toBeGreaterThanOrEqual(9);
+    expect(searchSessions(db, { limit: 20, query: "assistant reply" }).total).toBeGreaterThanOrEqual(7);
     db.close();
   });
 
@@ -94,12 +94,10 @@ async function openImportTestDatabase(prefix: string): Promise<{ db: MastheadDat
 
 async function fixtureSources(tempDir: string): Promise<DiscoveredSource[]> {
   const sources: DiscoveredSource[] = [];
-  sources.push(await jsonlSource(tempDir, "codex", "codex-transcript-jsonl"));
   sources.push(await sqliteJsonSource(tempDir, "cursor", "cursor.vscdb"));
   sources.push(await jsonlSource(tempDir, "claude_code"));
   sources.push(await jsonlSource(tempDir, "opencode"));
-  sources.push(await markdownSource(tempDir));
-  sources.push(await jsonlSource(tempDir, "openclaw"));
+  sources.push(await jsonlSource(tempDir, "grok"));
   sources.push(await sqliteRowsSource(tempDir, "hermes", "hermes.db"));
   sources.push(await jsonlSource(tempDir, "pi"));
   sources.push(await ompJsonlSource(tempDir));
@@ -120,11 +118,6 @@ async function jsonlSource(tempDir: string, runtime: RuntimeKind, schemaVersion?
   return makeSource(runtime, path, "jsonl", schemaVersion);
 }
 
-async function markdownSource(tempDir: string): Promise<DiscoveredSource> {
-  const path = join(tempDir, "aider.chat.history.md");
-  await writeFile(path, "# User\n\naider user prompt\n\n# Assistant\n\naider assistant reply\n", "utf8");
-  return makeSource("aider", path, "ui_signal", "aider-markdown");
-}
 
 async function ompJsonlSource(tempDir: string): Promise<DiscoveredSource> {
   const path = join(tempDir, "2026-06-27T10-00-00-000Z_omp-session.jsonl");

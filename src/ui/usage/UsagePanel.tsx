@@ -62,7 +62,7 @@ export function UsagePanel({ stats, window, loading = false, error, onWindowChan
       {empty ? (
         <section className="usage-state">
           <h2>No usage records yet.</h2>
-          <p>Import Codex metadata and transcripts from Sources to populate usage.</p>
+          <p>Import supported local metadata and transcripts from Sources to populate usage.</p>
         </section>
       ) : null}
 

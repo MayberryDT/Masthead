@@ -1,4 +1,7 @@
-export type HarnessFilter = "all" | "codex";
+import { HARNESS_CATALOG } from "../adapters/harnessCatalog";
+import type { RuntimeKind } from "../adapters/types";
+
+export type HarnessFilter = "all" | RuntimeKind;
 export type LifecycleFilter = "all" | "running" | "idle" | "blocked";
 export type SortMode = "operational_priority" | "recent_activity" | "recently_started";
 export type ActivityWindow = "1h" | "12h" | "24h" | "48h" | "3d" | "7d";
@@ -11,7 +14,7 @@ export type SelectOption<T extends string | number> = {
 
 export const HARNESS_OPTIONS = [
   { value: "all", label: "All Harnesses" },
-  { value: "codex", label: "Codex" }
+  ...HARNESS_CATALOG.map((entry) => ({ value: entry.runtime, label: entry.label }))
 ] satisfies SelectOption<HarnessFilter>[];
 
 export const LIFECYCLE_OPTIONS = [

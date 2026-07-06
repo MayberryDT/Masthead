@@ -2,36 +2,27 @@
 
 Masthead adapters scan known local agent-history locations and normalize recognized records into the canonical SQLite session graph. They do not control source tools.
 
-## Active Import Adapters
+## Focused Import Adapters
 
-- Codex
 - Cursor
 - Claude Code
-- Grok Build
 - OpenCode
-- Aider
-- OpenClaw
+- Grok Build
 - Hermes
 - Pi
 - OMP
 
-Gemini CLI is legacy compatibility only for existing imported records. It is not an active scan target.
+The focused support set is intentionally limited to these seven runtimes. Other local, detector-only, cloud-reference, and legacy harnesses are not exposed as supported adapters in product surfaces.
 
 ## Live-Capable Release Targets
 
-Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode are live-capable release targets. Their live connector events enter Masthead through `/ingest`, are normalized with runtime-scoped identity, and feed the same canonical session graph as imported history.
+Cursor, Claude Code, OpenCode, Grok Build, Hermes, Pi, and OMP are live-capable release targets. Their live connector events enter Masthead through `/ingest`, are normalized with runtime-scoped identity, and feed the same canonical session graph as imported history.
 
 See [live-connectors.md](live-connectors.md).
 
 ## Harness Catalog
 
-Sources also carries a broader catalog so users can see what Masthead knows about without overstating support.
-
-- Detector-only local harnesses can be checked at conservative known paths and reported in Advanced diagnostics, but they do not import canonical sessions until schema support exists.
-- Cloud-reference harnesses are listed for product clarity when the agent is cloud-first and has no local source connector in this pass.
-- Legacy hidden entries remain out of default onboarding.
-
-Detector-only examples include Crush, Cline, Roo Code, Kilo Code, Continue.dev, OpenHands, GitHub Copilot, Windsurf, Zed AI, Amazon Q Developer, Sourcegraph Amp, JetBrains AI, Qodo, Tabnine, and IBM Bob. Cloud-reference examples include Devin and Jules.
+The harness catalog is the product support contract, not a broad awareness list. Sources and Settings should expose only the focused seven-runtime set until another runtime is deliberately promoted.
 
 ## Import States
 

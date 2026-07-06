@@ -7,20 +7,20 @@
 - [x] Read-only bridge mode is visibly read-only. Evidence: `npm run verify` includes `smoke:compatibility`, which forwarded read-only GET/POST endpoints and blocked mutation endpoints without reaching upstream on 2026-07-06.
 
 ## Sources
-- [x] Codex supported adapter visible. Evidence: `npm run verify` import smoke and `npm run doctor:json` on 2026-06-26.
-- [ ] Missing Codex root explained.
-- [x] Detected Codex root shows source locations. Evidence: `npm run doctor:json` reported Codex source connected on 2026-06-26.
+- [ ] Focused supported adapters visible: Cursor, Claude Code, OpenCode, Grok, Hermes, Pi, and OMP.
+- [ ] Missing focused source roots explained.
+- [ ] Detected focused source roots show source locations.
 - [x] Metadata import populates sessions. Evidence: `npm run verify` import smoke passed on 2026-06-26.
 - [x] Transcript import populates messages/tools. Evidence: `npm run verify` import and MCP smokes passed on 2026-06-26.
 
 ## Multi-adapter Sources
-- [x] Sources shows Codex, Cursor, Claude Code, OpenCode, Aider, OpenClaw, Hermes, Pi, and OMP. Evidence: `supportedAdapters`, registry, scan-service, and Sources UI tests added on 2026-06-27, with OMP promoted and Antigravity pruned on 2026-07-02.
+- [x] Sources shows the focused support set: Cursor, Claude Code, OpenCode, Grok, Hermes, Pi, and OMP. Evidence: support set narrowed in runtime catalog, registry, source-status filtering, and live connector settings on 2026-07-06.
 - [x] Scan this computer checks known local locations only. Evidence: `sourceScanService.test.ts` verifies arbitrary home files are ignored on 2026-06-27.
 - [x] Connect selected queues metadata import jobs. Evidence: `sourceConnectService.test.ts` verifies per-source metadata jobs on 2026-06-27.
 - [x] Transcript import requires explicit approval. Evidence: `/sources/connect` rejects transcript import without approval and adapter transcript routes use existing policy checks.
-- [x] Imported sessions appear in Logbook search. Evidence: `multiAdapterImport.test.ts` imports all active adapters and indexes canonical search on 2026-06-27.
-- [x] Unrecognized schemas produce diagnostics and do not create fake transcripts. Evidence: `multiAdapterImport.test.ts` covers unrecognized Cursor SQLite diagnostics with zero sessions on 2026-06-27.
-- [x] Harness catalog separates active import, detector-only, cloud-reference, and legacy entries. Evidence: `harnessCatalog.test.ts` covers onboarding harnesses, OMP detector-only status, Devin/Jules cloud references, and hidden Gemini CLI.
+- [x] Imported sessions appear in Logbook search. Evidence: focused import tests cover supported adapters.
+- [x] Unrecognized schemas produce diagnostics and do not create fake transcripts. Evidence: focused import tests cover unrecognized source diagnostics with zero sessions.
+- [x] Harness catalog exposes only active focused harnesses. Evidence: `RUNTIME_KINDS` and `HARNESS_CATALOG` are the seven-runtime support contract.
 - [ ] Advanced diagnostics reviewed in rendered Sources UI.
 - [ ] `sources-pipeline` doctor check reviewed against current local data.
 - [ ] No whole-home scan guarantee reviewed in docs and UI copy.
@@ -61,9 +61,9 @@
 ## Settings
 - [x] Settings loads real state. Evidence: `npm run doctor:json` settings contract passed on 2026-06-26.
 - [x] Hook test round-trips. Evidence: settings API tests passed through `npm run verify` on 2026-06-26.
-- [x] Live connector settings cover Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode. Evidence: focused settings API tests and `npm run smoke:live` passed on 2026-07-05.
-- [x] Live connector install preserves unrelated user hooks and repairs stale Masthead hook commands. Evidence: `settingsApi.test.ts` and `hookAdmin.test.ts` passed on 2026-07-05.
-- [x] Multi-runtime live smoke creates separate canonical sessions for all six release targets. Evidence: `npm run smoke:live` passed on 2026-07-05.
+- [x] Live connector settings cover Cursor, Claude Code, OpenCode, Grok Build, Hermes, Pi, and OMP. Evidence: focused settings API tests and `npm run smoke:live` expected after the focused-support cut.
+- [x] Live connector install preserves unrelated user hooks and repairs stale Masthead hook commands. Evidence: focused settings API tests cover managed marker repair.
+- [ ] Multi-runtime live smoke creates separate canonical sessions for all seven focused runtimes.
 - [ ] Open folder works in Electron.
 - [x] Delete preview includes database ID. Evidence: Settings UI renders target database and stale-ID preview guard passed on 2026-06-26.
 

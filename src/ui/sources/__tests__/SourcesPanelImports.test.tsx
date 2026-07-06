@@ -20,7 +20,7 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       root.render(
         <SourcesPanel
-          adapters={[codexAdapter()]}
+          adapters={[opencodeAdapter()]}
           busy={false}
           imports={[]}
           onExcludePath={noop}
@@ -39,14 +39,14 @@ describe("SourcesPanel import controls", () => {
     expect(container.textContent).toContain("Last 30 days");
 
     expect(Array.from(container.querySelectorAll("button")).some((button) => button.textContent === "Preview")).toBe(false);
-    expect(onPreviewImport).toHaveBeenCalledWith(expect.objectContaining({ runtimes: ["codex"] }));
+    expect(onPreviewImport).toHaveBeenCalledWith(expect.objectContaining({ runtimes: ["opencode"] }));
     await act(async () => root.unmount());
   });
 
   test("loads preview-backed harness choices as soon as the import modal opens", async () => {
     const setup = connectedSetup();
     setup.advanced.adapters = [];
-    const onPreviewImport = vi.fn(async () => [previewForRuntime("codex", 500, 912, 5_614_987_264, 742), previewForRuntime("cursor", 2, 0, 1_153_433, 28)]);
+    const onPreviewImport = vi.fn(async () => [previewForRuntime("opencode", 500, 912, 5_614_987_264, 742), previewForRuntime("cursor", 2, 0, 1_153_433, 28)]);
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -73,13 +73,13 @@ describe("SourcesPanel import controls", () => {
     expect(onPreviewImport).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain("2 harnesses");
     expect(container.textContent).toContain("2 selected");
-    expect(container.textContent).toContain("Codex");
+    expect(container.textContent).toContain("OpenCode");
     expect(container.textContent).toContain("Cursor");
     expect(container.textContent).toContain("Sessions to import");
     expect(container.textContent).toContain("742");
     expect(container.textContent).toContain("28");
     expect(container.textContent).not.toContain("Coding harness");
-    expect(container.textContent).not.toContain("Codex local hook");
+    expect(container.textContent).not.toContain("OpenCode local hook");
     expect(container.textContent).not.toContain("No importable harnesses found.");
     expect(buttonByText(container, "Import data").disabled).toBe(false);
     await act(async () => root.unmount());
@@ -95,7 +95,7 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       root.render(
         <SourcesPanel
-          adapters={[codexAdapter()]}
+          adapters={[opencodeAdapter()]}
           busy={false}
           imports={[]}
           onExcludePath={noop}
@@ -127,7 +127,7 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       root.render(
         <SourcesPanel
-          adapters={[codexAdapter()]}
+          adapters={[opencodeAdapter()]}
           busy={false}
           imports={[]}
           onExcludePath={noop}
@@ -157,7 +157,7 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       root.render(
         <SourcesPanel
-          adapters={[codexAdapter()]}
+          adapters={[opencodeAdapter()]}
           busy={false}
           imports={[importJob({ heartbeatAt: "2026-06-25T12:00:00.000Z", stage: "transcript", status: "running" })]}
           lastRefreshAt="2026-06-25T12:01:00.000Z"
@@ -187,7 +187,7 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       root.render(
         <SourcesPanel
-          adapters={[codexAdapter()]}
+          adapters={[opencodeAdapter()]}
           busy={false}
           imports={[importJob({ progressCurrent: 2, progressTotal: 5, stage: "metadata", status: "running" })]}
           onExcludePath={noop}
@@ -212,7 +212,7 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       root.render(
         <SourcesPanel
-          adapters={[codexAdapter()]}
+          adapters={[opencodeAdapter()]}
           busy={false}
           imports={[importJob({ processedCount: 10, queuedCount: 0, status: "succeeded" })]}
           onExcludePath={noop}
@@ -235,7 +235,7 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       root.render(
         <SourcesPanel
-          adapters={[codexAdapter()]}
+          adapters={[opencodeAdapter()]}
           busy={false}
           importFilterRuntime="claude_code"
           imports={[importJob({ sourceId: "claude-code-sessions", status: "succeeded" })]}
@@ -261,7 +261,7 @@ describe("SourcesPanel import controls", () => {
     const setup = connectedSetup();
     setup.advanced.adapters = [
       {
-        ...codexAdapter(),
+        ...opencodeAdapter(),
         diagnostics: [
           {
             code: "sqlite_locked",
@@ -299,7 +299,7 @@ describe("SourcesPanel import controls", () => {
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<SourcesPanel adapters={[codexAdapter()]} busy={false} imports={[importJob({ status: "running" })]} onExcludePath={noop} onPollImports={onPollImports} onRefresh={noop} sources={[]} />);
+      root.render(<SourcesPanel adapters={[opencodeAdapter()]} busy={false} imports={[importJob({ status: "running" })]} onExcludePath={noop} onPollImports={onPollImports} onRefresh={noop} sources={[]} />);
     });
 
     await act(async () => {
@@ -308,7 +308,7 @@ describe("SourcesPanel import controls", () => {
     expect(onPollImports).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      root.render(<SourcesPanel adapters={[codexAdapter()]} busy={false} imports={[importJob({ status: "succeeded" })]} onExcludePath={noop} onPollImports={onPollImports} onRefresh={noop} sources={[]} />);
+      root.render(<SourcesPanel adapters={[opencodeAdapter()]} busy={false} imports={[importJob({ status: "succeeded" })]} onExcludePath={noop} onPollImports={onPollImports} onRefresh={noop} sources={[]} />);
     });
 
     await act(async () => {
@@ -335,7 +335,14 @@ describe("SourcesPanel import controls", () => {
     expect(container.textContent).toContain("Set up sources");
     expect(container.textContent).toContain("Check local sources");
     expect(container.textContent).toContain("Live capture can start without importing old sessions.");
-    expect(container.textContent).not.toContain("Gemini CLI");
+    expect(container.textContent).toContain("Cursor");
+    expect(container.textContent).toContain("Claude Code");
+    expect(container.textContent).toContain("OpenCode");
+    expect(container.textContent).toContain("Grok Build");
+    expect(container.textContent).toContain("Hermes");
+    expect(container.textContent).toContain("Pi");
+    expect(container.textContent).toContain("Oh My Pi");
+    expect(container.textContent).not.toContain("Legacy history");
     await act(async () => root.unmount());
   });
 
@@ -347,7 +354,7 @@ describe("SourcesPanel import controls", () => {
     await act(async () => {
       root.render(
         <SourcesPanel
-          adapters={[detectedCodexAdapter(), notDetectedGeminiAdapter()]}
+          adapters={[detectedOpenCodeAdapter(), notDetectedHermesAdapter()]}
           busy={false}
           imports={[]}
           onboardingOpen={false}
@@ -393,7 +400,7 @@ describe("SourcesPanel import controls", () => {
     expect(container.textContent).not.toContain("ADAPTERS");
     expect(container.querySelector(".adapter-list")).toBeNull();
     expect(container.querySelector(".connected-source-list")).toBeNull();
-    expect(container.textContent).not.toContain("Gemini CLI");
+    expect(container.textContent).not.toContain("Hermes");
 
     await act(async () => {
       buttonByText(container, "Set up sources").click();
@@ -402,9 +409,9 @@ describe("SourcesPanel import controls", () => {
 
     expect(container.querySelector(".sources-onboarding-modal")).not.toBeNull();
     expect(container.textContent).toContain("Sources setup");
-    expect(container.textContent).toContain("Codex");
+    expect(container.textContent).toContain("OpenCode");
     expect(container.textContent).toContain("742 sessions");
-    expect(container.textContent).not.toContain("Gemini CLI history");
+    expect(container.textContent).not.toContain("Legacy history");
     await act(async () => root.unmount());
   });
 
@@ -503,10 +510,10 @@ describe("SourcesPanel import controls", () => {
     });
 
     expect(onScanSetup).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("Codex");
+    expect(container.textContent).toContain("OpenCode");
     expect(container.textContent).toContain("742 sessions");
     expect(container.textContent).toContain("1 location");
-    expect(container.textContent).not.toContain("Gemini CLI history");
+    expect(container.textContent).not.toContain("Legacy history");
     await act(async () => root.unmount());
   });
 
@@ -541,19 +548,19 @@ describe("SourcesPanel import controls", () => {
 
     expect(container.querySelectorAll(".source-select-card")).toHaveLength(2);
     expect(container.querySelectorAll(".source-select-card .mono-label")).toHaveLength(0);
-    expect(container.textContent).toContain("Codex");
+    expect(container.textContent).toContain("OpenCode");
     expect(container.textContent).toContain("Cursor");
-    expect(container.textContent).not.toContain("codexCodex");
+    expect(container.textContent).not.toContain("opencodeOpenCode");
     expect(container.textContent).not.toContain("cursorCursor");
     expect(container.textContent).toContain("2 locations");
     expect(container.textContent).toContain("1 location");
-    expect(container.textContent).toContain("/home/tyler/.codex");
+    expect(container.textContent).toContain("/home/tyler/.opencode");
     expect(container.textContent).toContain("/home/tyler/.config/Cursor");
     expect(container.textContent).not.toContain("session_index.jsonl");
     expect(container.textContent).not.toContain("2026-07-04.jsonl");
     expect(container.textContent).not.toContain("state.vscdb");
     expect(container.textContent).not.toContain("globalStorage");
-    expect(container.textContent).not.toContain("Codex archived sessions");
+    expect(container.textContent).not.toContain("OpenCode archived sessions");
 
     await act(async () => {
       buttonByText(container, "Continue").click();
@@ -571,8 +578,8 @@ describe("SourcesPanel import controls", () => {
     expect(onRunSetup).toHaveBeenCalledTimes(2);
     expect(onRunSetup).toHaveBeenNthCalledWith(1, expect.objectContaining({
       importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
-      runtimes: ["codex"],
-      sourceIds: ["codex-sessions", "codex-archive"]
+      runtimes: ["opencode"],
+      sourceIds: ["opencode-sessions", "opencode-archive"]
     }));
     expect(onRunSetup).toHaveBeenNthCalledWith(2, expect.objectContaining({
       importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
@@ -582,7 +589,7 @@ describe("SourcesPanel import controls", () => {
     await act(async () => root.unmount());
   });
 
-  test("real setup scan mapping makes discovered Codex sources selectable", async () => {
+  test("real setup scan mapping makes discovered OpenCode sources selectable", async () => {
     const onRunSetup = vi.fn(async () => ({ jobs: [], queued: 0, skipped: [] }));
     const onScanSetup = vi.fn(async () => scanResultToOnboardingScan(realisticScanResult()));
     const container = document.createElement("div");
@@ -611,9 +618,9 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Check local sources").click();
     });
 
-    expect(container.textContent).toContain("Codex");
-    expect(container.textContent).toContain("/home/tyler/.codex");
-    expect(container.textContent).not.toContain("/home/tyler/.codex/sessions");
+    expect(container.textContent).toContain("OpenCode");
+    expect(container.textContent).toContain("/home/tyler/.opencode");
+    expect(container.textContent).not.toContain("/home/tyler/.opencode/sessions");
     expect(container.textContent).toContain("Oh My Pi");
     expect(container.textContent).toContain("/home/tyler/.omp");
     expect(container.textContent).not.toContain("/home/tyler/.omp/agent/sessions");
@@ -640,9 +647,9 @@ describe("SourcesPanel import controls", () => {
         importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
         importTranscripts: false,
         queueEnrichment: false,
-        runtimes: ["codex"],
-        sourceIds: ["codex-sessions"],
-        transcriptApprovals: [{ approved: false, runtime: "codex", sourceId: "codex-sessions" }]
+        runtimes: ["opencode"],
+        sourceIds: ["opencode-sessions"],
+        transcriptApprovals: [{ approved: false, runtime: "opencode", sourceId: "opencode-sessions" }]
       })
     );
     expect(onRunSetup).toHaveBeenNthCalledWith(2,
@@ -695,14 +702,14 @@ describe("SourcesPanel import controls", () => {
     expect(activeStep.textContent).toContain("Which harnesses' session history do you want to import?");
     expect(activeStep.textContent).toContain("Last 30 days");
     expect(activeStep.textContent).toContain("Everything");
-    expect(activeStep.textContent).toContain("Codex");
+    expect(activeStep.textContent).toContain("OpenCode");
     expect(activeStep.textContent).toContain("Oh My Pi");
     expect(activeStep.querySelectorAll(".sources-history-harness-card")).toHaveLength(2);
     expect(activeStep.textContent).not.toContain("Metadata only");
     expect(activeStep.textContent).not.toContain("Live capture");
     expect(activeStep.textContent).not.toContain("Transcripts hydrate when a Dossier opens");
     expect(activeStep.textContent).not.toContain("Enrich Dossiers when opened");
-    expect(activeStep.textContent).not.toContain("Include Codex live capture setup");
+    expect(activeStep.textContent).not.toContain("Include OpenCode live capture setup");
     expect(activeStep.textContent).not.toContain("Not wired yet");
     expect(activeStep.querySelectorAll(".harness-live-capture")).toHaveLength(0);
     expect(activeStep.textContent).not.toContain("Transcript approval");
@@ -755,9 +762,9 @@ describe("SourcesPanel import controls", () => {
       importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
       importTranscripts: false,
       queueEnrichment: false,
-      runtimes: ["codex"],
-      sourceIds: ["codex-sessions"],
-      transcriptApprovals: [{ approved: false, runtime: "codex", sourceId: "codex-sessions" }]
+      runtimes: ["opencode"],
+      sourceIds: ["opencode-sessions"],
+      transcriptApprovals: [{ approved: false, runtime: "opencode", sourceId: "opencode-sessions" }]
     }));
     await act(async () => root.unmount());
   });
@@ -799,14 +806,14 @@ describe("SourcesPanel import controls", () => {
       buttonByText(container, "Start setup").click();
     });
 
-    expect(onRuntimeHookAction).toHaveBeenCalledWith("codex", "install");
+    expect(onRuntimeHookAction).toHaveBeenCalledWith("opencode", "install");
     expect(onRunSetup).toHaveBeenCalledWith(expect.objectContaining({
       importMetadata: true,
       importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
       importTranscripts: false,
       queueEnrichment: false,
-      runtimes: ["codex"],
-      sourceIds: ["codex-sessions"]
+      runtimes: ["opencode"],
+      sourceIds: ["opencode-sessions"]
     }));
     await act(async () => root.unmount());
   });
@@ -839,10 +846,10 @@ describe("SourcesPanel import controls", () => {
   });
 });
 
-function codexAdapter(): AdapterStatus {
+function opencodeAdapter(): AdapterStatus {
   return {
-    runtime: "codex",
-    name: "Codex",
+    runtime: "opencode",
+    name: "OpenCode",
     state: "connected",
     discoveredSessions: 742,
     importedSessions: 120,
@@ -857,11 +864,11 @@ function codexAdapter(): AdapterStatus {
         confidence: "authoritative",
         failures: 0,
         importedCount: 120,
-        path: "/home/tyler/.codex/session_index.jsonl",
+        path: "/home/tyler/.opencode/session_index.jsonl",
         queuedCount: 0,
-        runtime: "codex",
+        runtime: "opencode",
         sessionCount: 742,
-        sourceId: "codex-sessions",
+        sourceId: "opencode-sessions",
         sourceKind: "jsonl"
       }
     ]
@@ -876,7 +883,7 @@ function importJob(overrides: Partial<ImportJob> = {}): ImportJob {
     importedCount: 3,
     importKind: "metadata",
     queuedCount: 7,
-    sourceId: "codex-sessions",
+    sourceId: "opencode-sessions",
     status: "running",
     updatedAt: "2026-06-25T12:00:00.000Z",
     ...overrides
@@ -923,10 +930,10 @@ function detectedOnlySetup(): SourcesSetupDto {
       {
         discoveredSessions: 0,
         importedSessions: 0,
-        label: "Codex",
-        path: "/home/tyler/.codex/session_index.jsonl",
-        runtime: "codex",
-        sourceId: "codex-sessions",
+        label: "OpenCode",
+        path: "/home/tyler/.opencode/session_index.jsonl",
+        runtime: "opencode",
+        sourceId: "opencode-sessions",
         state: "connected"
       }
     ],
@@ -935,7 +942,7 @@ function detectedOnlySetup(): SourcesSetupDto {
   };
 }
 
-function detectedCodexAdapter(): AdapterStatus {
+function detectedOpenCodeAdapter(): AdapterStatus {
   return {
     discoveredSessions: 0,
     importedSessions: 0,
@@ -945,18 +952,18 @@ function detectedCodexAdapter(): AdapterStatus {
       metadataImport: true,
       transcriptImport: false
     },
-    runtime: "codex",
+    runtime: "opencode",
     sourceLocationCount: 4,
     sourceLocations: [
       {
         confidence: "authoritative",
         failures: 0,
         importedCount: 0,
-        path: "/home/tyler/.codex/session_index.jsonl",
+        path: "/home/tyler/.opencode/session_index.jsonl",
         queuedCount: 0,
-        runtime: "codex",
+        runtime: "opencode",
         sessionCount: 0,
-        sourceId: "codex-sessions",
+        sourceId: "opencode-sessions",
         sourceKind: "jsonl"
       }
     ],
@@ -964,7 +971,7 @@ function detectedCodexAdapter(): AdapterStatus {
   };
 }
 
-function notDetectedGeminiAdapter(): AdapterStatus {
+function notDetectedHermesAdapter(): AdapterStatus {
   return {
     discoveredSessions: 0,
     importedSessions: 0,
@@ -974,7 +981,7 @@ function notDetectedGeminiAdapter(): AdapterStatus {
       metadataImport: false,
       transcriptImport: false
     },
-    runtime: "gemini_cli",
+    runtime: "hermes",
     sourceLocations: [],
     state: "not_detected"
   };
@@ -984,7 +991,7 @@ function diagnosticSetup(): SourcesSetupDto {
   return {
     ...emptySetup(),
     advanced: {
-      adapters: [codexAdapter()],
+      adapters: [opencodeAdapter()],
       imports: [importJob({ status: "succeeded" })],
       sources: []
     }
@@ -998,10 +1005,10 @@ function connectedSetup(): SourcesSetupDto {
       {
         discoveredSessions: 742,
         importedSessions: 742,
-        label: "Codex sessions",
+        label: "OpenCode sessions",
         lastSyncAt: "2026-06-27T12:00:00.000Z",
-        runtime: "codex",
-        sourceId: "codex-sessions",
+        runtime: "opencode",
+        sourceId: "opencode-sessions",
         state: "connected",
         transcriptSessions: 510
       }
@@ -1024,10 +1031,10 @@ function scanDto(): SourcesOnboardingScanDto {
       {
         discoveredSessions: 742,
         importable: true,
-        label: "Codex sessions",
-        path: "/home/tyler/.codex/sessions",
-        runtime: "codex",
-        sourceId: "codex-sessions",
+        label: "OpenCode sessions",
+        path: "/home/tyler/.opencode/sessions",
+        runtime: "opencode",
+        sourceId: "opencode-sessions",
         transcriptApproval: {
           approved: false,
           required: true,
@@ -1037,10 +1044,10 @@ function scanDto(): SourcesOnboardingScanDto {
       {
         discoveredSessions: 0,
         importable: false,
-        label: "Gemini CLI history",
-        path: "/home/tyler/.gemini/history",
-        runtime: "gemini_cli",
-        sourceId: "gemini-history",
+        label: "Legacy history",
+        path: "/home/tyler/.legacy/history",
+        runtime: "legacy_harness",
+        sourceId: "legacy-history",
         transcriptApproval: {
           approved: false,
           required: false
@@ -1065,18 +1072,18 @@ function multiSourceScanDto(): SourcesOnboardingScanDto {
       {
         discoveredSessions: 742,
         importable: true,
-        label: "Codex sessions",
-        path: "/home/tyler/.codex/sessions",
-        runtime: "codex",
-        sourceId: "codex-sessions"
+        label: "OpenCode sessions",
+        path: "/home/tyler/.opencode/sessions",
+        runtime: "opencode",
+        sourceId: "opencode-sessions"
       },
       {
         discoveredSessions: 31,
         importable: true,
-        label: "Codex archived sessions",
-        path: "/home/tyler/.codex/archive/2026-07-04.jsonl",
-        runtime: "codex",
-        sourceId: "codex-archive"
+        label: "OpenCode archived sessions",
+        path: "/home/tyler/.opencode/archive/2026-07-04.jsonl",
+        runtime: "opencode",
+        sourceId: "opencode-archive"
       },
       {
         discoveredSessions: 28,
@@ -1089,10 +1096,10 @@ function multiSourceScanDto(): SourcesOnboardingScanDto {
       {
         discoveredSessions: 9,
         importable: false,
-        label: "Gemini CLI history",
-        path: "/home/tyler/.gemini/history",
-        runtime: "gemini_cli",
-        sourceId: "gemini-history"
+        label: "Legacy history",
+        path: "/home/tyler/.legacy/history",
+        runtime: "legacy_harness",
+        sourceId: "legacy-history"
       }
     ],
     generatedAt: "2026-06-27T12:00:00.000Z",
@@ -1113,16 +1120,16 @@ function realisticScanResult(): SourceScanResult {
         checkedPaths: [],
         diagnostics: [],
         discoveredSessions: 7,
-        label: "Codex",
+        label: "OpenCode",
         maturity: "full",
-        runtime: "codex",
+        runtime: "opencode",
         sources: [
           {
             confidence: "authoritative",
-            path: "/home/tyler/.codex/sessions",
-            runtime: "codex",
-            schemaVersion: "codex-local-jsonl",
-            sourceId: "codex-sessions",
+            path: "/home/tyler/.opencode/sessions",
+            runtime: "opencode",
+            schemaVersion: "opencode-local-jsonl",
+            sourceId: "opencode-sessions",
             sourceKind: "jsonl"
           }
         ],

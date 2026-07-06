@@ -4,7 +4,7 @@ Board is Masthead's live view over continuously collected session data. It is no
 
 ## Multi-Harness Cards
 
-Live cards include runtime, harness label, source session ID, and canonical session ID. The canonical ID is runtime-scoped, so sessions from Codex, Claude Code, Cursor, Grok Build, OMP, and OpenCode can share a source session string without colliding.
+Live cards include runtime, harness label, source session ID, and canonical session ID. The canonical ID is runtime-scoped, so sessions from Cursor, Claude Code, OpenCode, Grok Build, Hermes, Pi, and OMP can share a source session string without colliding.
 
 The release target live connector set is documented in [live-connectors.md](live-connectors.md). Board renders their events through the same projection path rather than a separate monitoring-only store.
 

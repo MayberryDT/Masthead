@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { StoreRecord } from "../../core/store.ts";
-import { codexHookSource } from "../../adapters/codex/hookAdapter.ts";
 import type { DaemonConfig } from "../config.ts";
 import { createRawEventRepository } from "../db/rawEventRepository.ts";
 import { migrateDatabase } from "../db/schema.ts";
@@ -13,6 +12,15 @@ import { openMastheadDatabase } from "../db/sqlite.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 
+const CLAUDE_CODE_HOOK_SOURCE = {
+  adapter: "claude_code",
+  confidence: "authoritative",
+  endpoint: "http://127.0.0.1:17373/ingest",
+  runtimeVersion: "hook-v1",
+  schemaVersion: "masthead.normalized-event.v1",
+  sourceId: "claude-code-hook-local",
+  sourceKind: "hook"
+} as const;
 const tempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
 
@@ -26,7 +34,7 @@ describe("canonical store ownership", () => {
     const { daemon, storePath } = await createTestHarness("masthead-canonical-live-");
     const baseUrl = await listen(daemon);
 
-    const result = await postJson(baseUrl, "/ingest", liveApprovalPayload("canonical-live"));
+    const result = await postJson(baseUrl, "/ingest?runtime=claude_code", liveApprovalPayload("canonical-live"));
 
     expect(result).toMatchObject({ ok: true, status: "accepted" });
     expect(countRows(daemon.database, "sessions")).toBe(1);
@@ -132,15 +140,7 @@ async function seedCanonicalRawEvents(databasePath: string, count: number): Prom
   const db = await openMastheadDatabase(databasePath);
   try {
     migrateDatabase(db);
-    const repository = createRawEventRepository(db, {
-      adapter: codexHookSource.runtime,
-      confidence: codexHookSource.confidence,
-      endpoint: codexHookSource.endpoint,
-      runtimeVersion: codexHookSource.runtimeVersion,
-      schemaVersion: codexHookSource.schemaVersion,
-      sourceId: codexHookSource.sourceId,
-      sourceKind: codexHookSource.sourceKind
-    });
+    const repository = createRawEventRepository(db, CLAUDE_CODE_HOOK_SOURCE);
     db.exec("BEGIN IMMEDIATE;");
     try {
       for (let index = 0; index < count; index += 1) {
@@ -188,7 +188,7 @@ function eventRecord(id: string, observedAt = "2026-06-25T12:00:00.000Z"): Store
       eventId: id,
       sessionId: `session:${id}`,
       source: {
-        adapter: "codex",
+        adapter: "claude_code",
         surface: "hook",
         sourceEventId: id
       },

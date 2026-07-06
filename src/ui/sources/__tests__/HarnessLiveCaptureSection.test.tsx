@@ -3,33 +3,33 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, test, vi } from "vitest";
-import type { CodexHookSettingsDto } from "../../../app/daemonClient";
+import type { SettingsStateDto } from "../../../app/daemonClient";
 import { HarnessLiveCaptureSection } from "../HarnessLiveCaptureSection";
 
 describe("HarnessLiveCaptureSection", () => {
-  test("renders Codex hook state and invokes hook actions from Sources", async () => {
+  test("renders OpenCode hook state and invokes hook actions from Sources", async () => {
     const onAction = vi.fn();
     const container = document.createElement("div");
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<HarnessLiveCaptureSection hooks={hookSettings()} runtime="codex" onAction={onAction} />);
+      root.render(<HarnessLiveCaptureSection hooks={hookSettings()} runtime="opencode" onAction={onAction} />);
     });
 
     expect(container.textContent).toContain("Live capture");
     expect(container.textContent).toContain("Installed");
-    expect(container.textContent).toContain("/home/tyler/.codex/config.toml");
+    expect(container.textContent).toContain("/home/tyler/.opencode/config.toml");
     expect(container.textContent).toContain("http://127.0.0.1:17373/ingest");
 
     await act(async () => {
       buttonByText(container, "Test live connectors").click();
     });
 
-    expect(onAction).toHaveBeenCalledWith("codex", "test");
+    expect(onAction).toHaveBeenCalledWith("opencode", "test");
     await act(async () => root.unmount());
   });
 
-  test("renders non-Codex live capture status and shared hook actions", async () => {
+  test("renders non-OpenCode live capture status and shared hook actions", async () => {
     const onAction = vi.fn();
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -53,11 +53,11 @@ describe("HarnessLiveCaptureSection", () => {
   });
 });
 
-function hookSettings(): CodexHookSettingsDto {
+function hookSettings(): SettingsStateDto["hooks"] {
   return {
     command: "masthead hook",
     configExists: true,
-    configPath: "/home/tyler/.codex/config.toml",
+    configPath: "/home/tyler/.opencode/config.toml",
     endpoint: "http://127.0.0.1:17373/ingest",
     installed: true,
     integrations: [
@@ -75,9 +75,9 @@ function hookSettings(): CodexHookSettingsDto {
       {
         actionSurface: "sources",
         captureMode: "live_hook",
-        description: "Codex live hooks",
-        label: "Codex",
-        runtime: "codex",
+        description: "OpenCode live hooks",
+        label: "OpenCode",
+        runtime: "opencode",
         status: "installed",
         supportsActions: true
       }

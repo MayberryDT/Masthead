@@ -9,12 +9,12 @@ import type { NormalizedEvent } from "../types.ts";
 
 describe("live identity", () => {
   test("keeps identical source session ids separate across runtimes", () => {
-    const codex = event("codex", "shared-session");
+    const opencode = event("opencode", "shared-session");
     const claude = event("claude_code", "shared-session");
 
-    expect(liveSessionKeyId(liveSessionKeyFromEvent(codex)!)).toBe("codex:shared-session");
+    expect(liveSessionKeyId(liveSessionKeyFromEvent(opencode)!)).toBe("opencode:shared-session");
     expect(liveSessionKeyId(liveSessionKeyFromEvent(claude)!)).toBe("claude_code:shared-session");
-    expect(projectionScopeForKey("host:dev", liveSessionKeyFromEvent(codex)!).canonicalSessionId).not.toBe(
+    expect(projectionScopeForKey("host:dev", liveSessionKeyFromEvent(opencode)!).canonicalSessionId).not.toBe(
       projectionScopeForKey("host:dev", liveSessionKeyFromEvent(claude)!).canonicalSessionId
     );
   });
@@ -38,7 +38,7 @@ function event(adapter: string, sessionId: string): NormalizedEvent {
     receivedAt: "2026-07-05T12:00:00.000Z",
     type: "session.started",
     summary: "Started",
-    payload: { title: "Started" },
+    payload: { runtime: adapter, title: "Started" },
     sensitivity: "metadata",
     payloadHash: `${adapter}:${sessionId}:hash`,
     evidence: [

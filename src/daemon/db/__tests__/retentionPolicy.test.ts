@@ -87,12 +87,12 @@ function seedCanonicalSessionGraph(
     `INSERT OR IGNORE INTO ingest_sources (
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("source:codex", "codex", "jsonl", "/tmp/rollout.jsonl", "authoritative", now, now);
+  ).run("source:opencode", "opencode", "jsonl", "/tmp/rollout.jsonl", "authoritative", now, now);
   db.prepare(
     `INSERT INTO raw_events (
       raw_event_id, source_id, source_record_key, observed_at, received_at, source_kind, source_path, payload_hash, payload_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(`raw:${suffix}`, "source:codex", `${suffix}:1`, now, now, "jsonl", "/tmp/rollout.jsonl", `hash:${suffix}`, "{}");
+  ).run(`raw:${suffix}`, "source:opencode", `${suffix}:1`, now, now, "jsonl", "/tmp/rollout.jsonl", `hash:${suffix}`, "{}");
   db.prepare("INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
     "host:test",
     "test-host",
@@ -102,7 +102,7 @@ function seedCanonicalSessionGraph(
   db.prepare(
     `INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at)
     VALUES (?, ?, ?, ?, ?)`
-  ).run("runtime:codex", "codex", "test", now, now);
+  ).run("runtime:opencode", "opencode", "test", now, now);
   db.prepare(
     `INSERT INTO sessions (
       session_id, host_id, runtime_id, source_session_id, project_label, title, lifecycle, last_activity_at,
@@ -111,7 +111,7 @@ function seedCanonicalSessionGraph(
   ).run(
     options.sessionId,
     "host:test",
-    "runtime:codex",
+    "runtime:opencode",
     `source-${suffix}`,
     options.project,
     `${options.project} import`,

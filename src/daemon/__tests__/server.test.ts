@@ -170,14 +170,14 @@ describe("Masthead daemon startup", () => {
 
     await postJson(
       baseUrl,
-      "/ingest",
+      "/ingest?runtime=opencode",
       liveStartedPayload({
-        providerEventId: "codex-shared-source",
-        runtime: "codex",
-        sessionId: "codex-projection-card",
+        providerEventId: "opencode-shared-source",
+        runtime: "opencode",
+        sessionId: "opencode-projection-card",
         sourceSessionId: sharedSourceSessionId,
         timestamp: "2026-07-06T12:00:00.000Z",
-        title: "Codex shared source"
+        title: "OpenCode shared source"
       })
     );
     await postJson(
@@ -195,24 +195,24 @@ describe("Masthead daemon startup", () => {
 
     const response = await getJson(baseUrl, "/projection");
     const cards = response.projection.cards as ProjectionCard[];
-    const codexCard = cards.find((card) => card.sessionId === "codex-projection-card");
+    const opencodeCard = cards.find((card) => card.sessionId === "opencode-projection-card");
     const ompCard = cards.find((card) => card.sessionId === "omp-projection-card");
 
-    expect(codexCard).toMatchObject({
-      runtime: "codex",
+    expect(opencodeCard).toMatchObject({
+      runtime: "opencode",
       sourceSessionId: sharedSourceSessionId
     });
     expect(ompCard).toMatchObject({
       runtime: "omp",
       sourceSessionId: sharedSourceSessionId
     });
-    expect(codexCard?.canonicalSessionId).toBe(
-      canonicalSessionId("host:127.0.0.1", runtimeIdFor("codex", undefined), sharedSourceSessionId)
+    expect(opencodeCard?.canonicalSessionId).toBe(
+      canonicalSessionId("host:127.0.0.1", runtimeIdFor("opencode", undefined), sharedSourceSessionId)
     );
     expect(ompCard?.canonicalSessionId).toBe(
       canonicalSessionId("host:127.0.0.1", runtimeIdFor("omp", undefined), sharedSourceSessionId)
     );
-    expect(codexCard?.canonicalSessionId).not.toBe(ompCard?.canonicalSessionId);
+    expect(opencodeCard?.canonicalSessionId).not.toBe(ompCard?.canonicalSessionId);
   });
 });
 
@@ -225,7 +225,7 @@ type ProjectionCard = {
 
 type LiveStartedPayloadInput = {
   providerEventId: string;
-  runtime: "codex" | "omp";
+  runtime: "opencode" | "omp";
   sessionId: string;
   sourceSessionId: string;
   timestamp: string;

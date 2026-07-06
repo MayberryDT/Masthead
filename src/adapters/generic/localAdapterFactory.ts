@@ -16,7 +16,7 @@ import {
 import { quoteIdentifier, sqliteTables, tableColumns, withReadonlySqliteCopy } from "./sqliteAdapterKit.ts";
 
 export type LocalAdapterOptions = {
-  runtime: Exclude<RuntimeKind, "codex" | "gemini_cli">;
+  runtime: RuntimeKind;
   candidatePaths: (context: DiscoveryContext) => AdapterPathCandidate[];
   jsonlProfile?: JsonlShapeProfile;
   markdown?: boolean;

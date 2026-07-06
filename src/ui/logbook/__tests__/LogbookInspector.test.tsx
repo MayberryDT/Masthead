@@ -12,7 +12,7 @@ describe("LogbookInspector", () => {
     expect(html).toContain("Session detail");
     expect(html).toContain("Repair OAuth callback");
     expect(html).toContain("Masthead");
-    expect(html).toContain("Codex");
+    expect(html).toContain("opencode");
     expect(html).toContain("Lifecycle");
     expect(html).toContain("Needs Attention");
     expect(html).toContain("Source provenance");
@@ -56,12 +56,12 @@ function session(): LogbookSessionDetail {
     outcome: "OAuth route still fails in one edge case.",
     project: "Masthead",
     repoRoot: "/home/tyler/Documents/Masthead",
-    runtime: "codex",
+    runtime: "opencode",
     sessionId: "session-1",
     sourceConfidence: "authoritative",
     sourceProvenance: {
       hostId: "host:test",
-      runtime: "codex",
+      runtime: "opencode",
       sourceConfidence: "authoritative",
       sourceSessionId: "source-session-1"
     },

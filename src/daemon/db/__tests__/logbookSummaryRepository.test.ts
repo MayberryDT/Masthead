@@ -46,7 +46,7 @@ describe("logbook summary repository", () => {
         { model: "gpt-5", count: 1 },
         { model: "gpt-5.5", count: 1 }
       ],
-      runtimes: [{ runtime: "codex", count: 2 }]
+      runtimes: [{ runtime: "opencode", count: 2 }]
     });
     db.close();
   });

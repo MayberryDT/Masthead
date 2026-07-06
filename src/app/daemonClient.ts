@@ -742,9 +742,6 @@ export async function importAdapterMetadata(
   return postAdapterImportAction(runtime, "import-metadata", "metadata import", baseUrl);
 }
 
-export async function importCodexMetadata(baseUrl = defaultLiveProjectionUrl()): Promise<AdapterImportActionResult> {
-  return importAdapterMetadata("codex", baseUrl);
-}
 
 export async function approveAdapterTranscripts(runtime: string, baseUrl = defaultLiveProjectionUrl()): Promise<void> {
   await postAdapterImportAction(runtime, "approve-transcripts", "transcript approval", baseUrl);
@@ -1183,6 +1180,19 @@ export async function listLlmProviderModels(
     label: "LLM provider models"
   });
   return body.models;
+}
+
+export async function getLiveHookSettings(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<CodexHookSettingsDto> {
+  const url = new URL(baseUrl);
+  url.pathname = "/settings/hooks";
+  url.search = "";
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: options.signal });
+  if (!response.ok) throw new Error(`hook settings request failed: ${response.status}`);
+  const body = (await response.json()) as { ok: true; hooks: CodexHookSettingsDto };
+  return body.hooks;
 }
 
 export async function getRuntimeHookSettings(

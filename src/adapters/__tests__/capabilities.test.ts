@@ -3,57 +3,38 @@ import { adapterCapabilityProfile, ADAPTER_CAPABILITY_PROFILES, canImportMetadat
 import { activeImportRuntimes } from "../harnessCatalog.ts";
 import { RUNTIME_KINDS } from "../types.ts";
 
+const SUPPORTED_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const;
+
 describe("adapter capabilities", () => {
-  test("defines the full catalog runtime set", () => {
-    expect(RUNTIME_KINDS).toEqual([
-      "codex",
-      "cursor",
-      "claude_code",
-      "opencode",
-      "grok",
-      "aider",
-      "openclaw",
-      "hermes",
-      "pi",
-      "omp",
-      "cline",
-      "roo_code",
-      "kilo_code",
-      "continue_dev",
-      "openhands",
-      "github_copilot",
-      "windsurf",
-      "zed_ai",
-      "amazon_q",
-      "sourcegraph_amp",
-      "jetbrains_ai",
-      "qodo",
-      "tabnine",
-      "ibm_bob",
-      "devin",
-      "jules",
-      "gemini_cli",
-      "crush"
-    ]);
+  test("defines the focused supported runtime set in product order", () => {
+    expect(RUNTIME_KINDS).toEqual(SUPPORTED_RUNTIMES);
   });
 
-  test("marks all required scan adapters as active capability profiles", () => {
-    expect(adapterCapabilityProfile("codex")).toMatchObject({
-      label: "Codex",
+  test("exposes one active capability profile for each supported import runtime", () => {
+    expect(ADAPTER_CAPABILITY_PROFILES.map((profile) => profile.runtime)).toEqual(SUPPORTED_RUNTIMES);
+    expect(ADAPTER_CAPABILITY_PROFILES.map((profile) => profile.runtime)).toEqual(activeImportRuntimes());
+    expect(ADAPTER_CAPABILITY_PROFILES.every((profile) => profile.lifecycle === "active")).toBe(true);
+    expect(ADAPTER_CAPABILITY_PROFILES.every((profile) => profile.runtimeStatus === "import_adapter")).toBe(true);
+  });
+
+  test("marks Grok as a transcript-capable live import adapter", () => {
+    expect(adapterCapabilityProfile("grok")).toMatchObject({
+      label: "Grok Build",
       lifecycle: "active",
-      maturity: "full",
-      runtime: "codex",
+      maturity: "transcript",
+      runtime: "grok",
+      runtimeStatus: "import_adapter",
       sourceKinds: ["hook", "jsonl"],
+      supportsLiveWatch: true,
       supportsMetadataImport: true,
       supportsTranscriptImport: true
     });
-
-    const activeProfiles = ADAPTER_CAPABILITY_PROFILES.filter((profile) => profile.lifecycle === "active");
-    expect(activeProfiles.map((profile) => profile.runtime)).toEqual(activeImportRuntimes());
   });
 
-  test("marks OMP as importable after schema verification", () => {
-    expect(adapterCapabilityProfile("omp")).toMatchObject({
+  test("keeps OMP importable after schema verification", () => {
+    const profile = adapterCapabilityProfile("omp");
+
+    expect(profile).toMatchObject({
       lifecycle: "active",
       maturity: "transcript",
       runtime: "omp",
@@ -61,23 +42,7 @@ describe("adapter capabilities", () => {
       supportsMetadataImport: true,
       supportsTranscriptImport: true
     });
-    expect(canImportMetadata(adapterCapabilityProfile("omp"))).toBe(true);
-    expect(canImportTranscripts(adapterCapabilityProfile("omp"))).toBe(true);
-    expect(adapterCapabilityProfile("devin")).toMatchObject({
-      lifecycle: "cloud_reference",
-      maturity: "planned",
-      runtimeStatus: "cloud_reference",
-      supportsMcpExposure: false
-    });
-  });
-
-  test("keeps Gemini CLI as legacy planned only", () => {
-    expect(adapterCapabilityProfile("gemini_cli")).toMatchObject({
-      lifecycle: "legacy_planned",
-      maturity: "planned",
-      runtime: "gemini_cli",
-      supportsMetadataImport: false,
-      supportsTranscriptImport: false
-    });
+    expect(canImportMetadata(profile)).toBe(true);
+    expect(canImportTranscripts(profile)).toBe(true);
   });
 });

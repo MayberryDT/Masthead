@@ -463,17 +463,17 @@ describe("board headline enricher", () => {
         card({
           headlineInput: input({
             subjectCandidates: ["Settings UI", "SettingsPanel.tsx"],
-            evidence: ["SettingsPanel.tsx", "Codex hook event"],
+            evidence: ["SettingsPanel.tsx", "Live hook event"],
             facts: {
               ...input().facts,
               transcriptExcerpt: [
                 {
                   observedAt: "2026-07-01T12:00:00.000Z",
                   role: "assistant",
-                  text: "Codex hook event"
+                  text: "Live hook event"
                 }
               ],
-              recentTranscriptMessages: ["Codex hook event"],
+              recentTranscriptMessages: ["Live hook event"],
               recentFileBasenames: ["SettingsPanel.tsx"]
             }
           })
