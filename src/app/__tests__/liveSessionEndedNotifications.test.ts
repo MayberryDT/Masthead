@@ -69,28 +69,33 @@ describe("detectSessionNotificationTransitions", () => {
     expect(detectSessionNotificationTransitions(undefined, next)).toEqual([]);
   });
 
-  it("detects running sessions becoming idle, truly blocked, or ended without treating approval waiting as blocked", () => {
+  it("detects running sessions becoming idle, permission-blocked, or ended without treating user input as blocked", () => {
     const previous = projection([
       card({ sessionId: "idle", headline: cardHeadline("Idle candidate") }),
-      card({ sessionId: "blocked", headline: cardHeadline("Blocked candidate") }),
       card({ sessionId: "approval", headline: cardHeadline("Approval candidate") }),
+      card({ sessionId: "input", headline: cardHeadline("Input candidate") }),
       card({ sessionId: "ended", headline: cardHeadline("Ended candidate") })
     ]);
     const next = projection([
       card({ sessionId: "idle", lifecycle: "idle", stateLabel: "Idle", headline: cardHeadline("Idle candidate") }),
       card({
-        sessionId: "blocked",
-        primaryStatus: "blocked",
-        stateLabel: "Blocked",
-        attentionReason: "Process blocked",
-        headline: cardHeadline("Blocked candidate")
-      }),
-      card({
         sessionId: "approval",
-        primaryStatus: "waiting_for_approval",
-        stateLabel: "Needs approval",
+        primaryStatus: "blocked",
+        displayState: "blocked",
+        runtimeState: "blocked",
+        stateLabel: "Blocked",
         attentionReason: "Approval requested",
         headline: cardHeadline("Approval candidate")
+      }),
+      card({
+        sessionId: "input",
+        primaryStatus: "stalled",
+        lifecycle: "idle",
+        displayState: "idle",
+        runtimeState: "idle",
+        stateLabel: "Idle",
+        attentionReason: "User input requested",
+        headline: cardHeadline("Input candidate")
       }),
       card({
         sessionId: "ended",
@@ -103,7 +108,8 @@ describe("detectSessionNotificationTransitions", () => {
 
     expect(detectSessionNotificationTransitions(previous, next)).toEqual([
       { sessionId: "idle", transition: "idle", title: "Idle candidate", body: "Idle" },
-      { sessionId: "blocked", transition: "blocked", title: "Blocked candidate", body: "Blocked: Process blocked" },
+      { sessionId: "approval", transition: "blocked", title: "Approval candidate", body: "Blocked: Approval requested" },
+      { sessionId: "input", transition: "idle", title: "Input candidate", body: "Idle: User input requested" },
       { sessionId: "ended", transition: "ended", title: "Ended candidate", body: "Ended: Completed" }
     ]);
   });
@@ -112,14 +118,14 @@ describe("detectSessionNotificationTransitions", () => {
     const previous = projection([
       card({ sessionId: "conflict", lifecycle: "running" }),
       card({ sessionId: "stable-idle", lifecycle: "idle", stateLabel: "Idle" }),
-      card({ sessionId: "stable-approval", primaryStatus: "waiting_for_approval", stateLabel: "Needs approval", attentionReason: "Approval requested" }),
+      card({ sessionId: "stable-approval", primaryStatus: "blocked", displayState: "blocked", runtimeState: "blocked", stateLabel: "Blocked", attentionReason: "Approval requested" }),
       card({ sessionId: "stable-ended", lifecycle: "ended", outcomeLabel: "completed", stateLabel: "Completed" }),
       card({ sessionId: "idle-to-ended", lifecycle: "idle", stateLabel: "Idle" })
     ]);
     const next = projection([
       card({ sessionId: "conflict", lifecycle: "running", indicators: ["attention", "conflict"] }),
       card({ sessionId: "stable-idle", lifecycle: "idle", stateLabel: "Idle" }),
-      card({ sessionId: "stable-approval", primaryStatus: "waiting_for_approval", stateLabel: "Needs approval", attentionReason: "Approval requested" }),
+      card({ sessionId: "stable-approval", primaryStatus: "blocked", displayState: "blocked", runtimeState: "blocked", stateLabel: "Blocked", attentionReason: "Approval requested" }),
       card({ sessionId: "stable-ended", lifecycle: "ended", outcomeLabel: "completed", stateLabel: "Completed" }),
       card({ sessionId: "idle-to-ended", lifecycle: "ended", outcomeLabel: "completed", stateLabel: "Completed" })
     ]);

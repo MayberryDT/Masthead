@@ -30,7 +30,8 @@ const PRODUCT_ENDPOINTS = [
   "/mcp/status",
   "/mcp/tools",
   "/settings",
-  "/data/summary"
+  "/data/summary",
+  "/live/state"
 ];
 const EXPECTED_MCP_TOOLS = [
   "get_masthead_coverage",
@@ -69,6 +70,7 @@ checks.push(await checkHookTranscriptCapture());
 checks.push(await checkSettings());
 checks.push(await checkDestructivePreviewSafety());
 checks.push(await checkLiveConnectors());
+checks.push(await checkLiveState());
 checks.push(await checkHooks());
 
 const report = {
@@ -808,6 +810,59 @@ async function checkLiveConnectors() {
       status: strictHooks ? "fail" : "warn",
       message: errorMessage(error),
       details: { baseUrl, strict: strictHooks }
+    };
+  }
+}
+
+async function checkLiveState() {
+  try {
+    const [stateBody, hooksBody] = await Promise.all([getJson("/live/state"), getJson("/settings/hooks").catch(() => undefined)]);
+    const reports = Array.isArray(stateBody.reports) ? stateBody.reports.filter(isRecord) : [];
+    const hooks = isRecord(hooksBody?.hooks) ? hooksBody.hooks : {};
+    const integrations = Array.isArray(hooks.integrations) ? hooks.integrations.filter(isRecord) : [];
+    const integrationStates = integrations
+      .map((integration) => ({
+        runtime: stringValue(integration.runtime),
+        latestState: stringValue(integration.latestState),
+        latestStateReportAt: stringValue(integration.latestStateReportAt),
+        stateEndpoint: stringValue(integration.stateEndpoint)
+      }))
+      .filter((integration) => integration.latestStateReportAt || integration.latestState);
+    const killSwitches = Object.fromEntries(
+      Object.entries(process.env)
+        .filter(([key]) => key === "MASTHEAD_LIVE_CAPTURE" || key.startsWith("MASTHEAD_LIVE_CAPTURE_"))
+        .map(([key, value]) => [key, value])
+    );
+    const disabled = Object.values(killSwitches).some((value) => value === "0");
+    const latestReportAt =
+      reports
+        .map((report) => stringValue(report.observedAt))
+        .filter(Boolean)
+        .sort()
+        .at(-1) ?? integrationStates.map((state) => state.latestStateReportAt).filter(Boolean).sort().at(-1);
+    return {
+      id: "live-state",
+      label: "live state",
+      status: disabled ? "warn" : stateBody.ok === true ? "ok" : "fail",
+      message: disabled
+        ? "Live capture has an environment kill switch enabled."
+        : latestReportAt
+          ? `Live state endpoint responded; latest state report at ${latestReportAt}.`
+          : "Live state endpoint responded; no state reports are stored yet.",
+      details: {
+        reportCount: reports.length,
+        latestReportAt,
+        integrationStates,
+        killSwitches
+      }
+    };
+  } catch (error) {
+    return {
+      id: "live-state",
+      label: "live state",
+      status: "fail",
+      message: errorMessage(error),
+      details: { baseUrl }
     };
   }
 }

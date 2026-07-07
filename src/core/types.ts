@@ -1,4 +1,5 @@
 import type { BoardHeadlineView } from "./boardHeadlineFrame";
+import type { LiveRuntimeDisplayState, LiveRuntimeSemanticState } from "./liveState";
 
 export type EvidenceKind = "event" | "command" | "git_snapshot" | "file_change" | "conflict" | "redaction";
 
@@ -11,11 +12,17 @@ export type EvidenceRef = {
 
 export type EventType =
   | "session.started"
+  | "turn.started"
+  | "turn.completed"
+  | "runtime.state"
   | "approval.requested"
+  | "approval.resolved"
   | "user.question"
+  | "user.response"
   | "command.started"
   | "command.finished"
   | "file.changed"
+  | "session.closed"
   | "session.completed";
 
 export type WorkspaceRef = {
@@ -312,6 +319,12 @@ export type SessionCardView = {
   latestFeedbackSignal?: LatestFeedbackSignal;
   headlineInput?: unknown;
   headlineRefresh?: BoardHeadlineRefreshState;
+  runtimeState?: LiveRuntimeSemanticState;
+  displayState?: LiveRuntimeDisplayState;
+  stateAuthority?: "live_state" | "blocker" | "event" | "timeout" | "unknown";
+  stateObservedAt?: string;
+  stateMessage?: string;
+  stateStale?: boolean;
 };
 
 export type SessionDetailView = SessionCardView & {

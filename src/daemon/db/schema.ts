@@ -70,6 +70,11 @@ const migrations = [
     version: 13,
     name: "013_dossier_enrichment_indexes",
     path: resolve(currentDir, "migrations/013_dossier_enrichment_indexes.sql")
+  },
+  {
+    version: 14,
+    name: "014_live_state_reports",
+    path: resolve(currentDir, "migrations/014_live_state_reports.sql")
   }
 ];
 
@@ -99,7 +104,8 @@ const criticalTables = [
   "import_session_impacts",
   "legacy_migrations",
   "board_headline_frames",
-  "board_headline_generations"
+  "board_headline_generations",
+  "live_state_reports"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {

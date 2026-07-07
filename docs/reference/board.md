@@ -8,11 +8,19 @@ Live cards include runtime, harness label, source session ID, and canonical sess
 
 The release target live connector set is documented in [live-connectors.md](live-connectors.md). Board renders their events through the same projection path rather than a separate monitoring-only store.
 
+## Live State
+
+Board overlays fresh explicit runtime-state reports from `/live/state` on top of canonical event history. The current card fields can include `runtimeState`, `displayState`, `stateAuthority`, `stateObservedAt`, `stateMessage`, and `stateStale`.
+
+State selection is intentionally layered: fresh blocked reports win, unresolved approval/question blockers can hold a card in needs-action, fresh working/idle reports override older event inference, and stale working reports expire instead of sticking forever. `turn.completed` and hook Stop events display as idle/done runtime state, not permanent session closure.
+
+Use `GET /sessions/:sessionId/live-explain` when a card status looks surprising. It reports the selected authority, latest state report, latest event fallback, unresolved blockers, and headline-fact freshness for that session.
+
 ## Headlines
 
 Board cards use `BoardHeadlineView`, backed by the `BoardHeadlineFrame` contract in `docs/reference/board-headline-frame.md`.
 
-When live LLM headlines are enabled and configured, each `GET /projection` can schedule fresh frame extraction for visible running cards on the configured refresh interval. The daemon returns the projection immediately with either the last successful LLM headline or an explicit pending headline state. It does not render local deterministic prose as a fallback while the model is configured.
+When live LLM headlines are enabled and configured, each `GET /projection` can schedule fresh frame extraction for visible running, recently done/idle, selected, or expanded cards when bounded recent facts have changed and the configured refresh interval has elapsed. The daemon returns the projection immediately with either the last successful LLM headline or an explicit pending headline state. It does not render local deterministic prose as a fallback while the model is configured.
 
 Offline local headlines are used only when live LLM headline access is unavailable or explicitly disabled. Those headlines are marked `source: "offline"`.
 

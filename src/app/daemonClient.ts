@@ -442,6 +442,11 @@ export type HarnessCaptureIntegrationDto = {
   description: string;
   configPath?: string;
   endpoint?: string;
+  stateEndpoint?: string;
+  latestState?: string;
+  latestStateReportAt?: string;
+  stateEndpointHealthy?: boolean;
+  degradedReason?: string;
 };
 
 export type CodexHookSettingsDto = {
@@ -455,6 +460,10 @@ export type CodexHookSettingsDto = {
   endpoint: string;
   latestBackupPath?: string;
   lastEventAt?: string;
+  latestState?: string;
+  latestStateReportAt?: string;
+  stateEndpoint?: string;
+  stateEndpointHealthy?: boolean;
   lastTest?: {
     testedAt: string;
     status: "passed" | "failed";

@@ -591,6 +591,7 @@ describe("settings API", () => {
     expect(Object.keys(codexConfig.hooks)).toEqual(CLAUDE_STYLE_HOOK_EVENTS);
     for (const eventName of CLAUDE_STYLE_HOOK_EVENTS) {
       expect(codexConfig.hooks[eventName]?.[0]?.hooks[0]?.command).toContain("runtime=codex");
+      expect(codexConfig.hooks[eventName]?.[0]?.hooks[0]?.command).toContain("/live/state");
     }
     expect(await readFile(claudePath, "utf8")).toContain("runtime=claude_code");
     const cursorConfig = JSON.parse(await readFile(cursorPath, "utf8")) as { hooks: Record<string, Array<{ command: string }>> };
@@ -607,13 +608,17 @@ describe("settings API", () => {
     expect(await readFile(grokPath, "utf8")).toContain("runtime=grok");
     expect(await readFile(ompPath, "utf8")).toContain("masthead-live-connector");
     expect(await readFile(ompPath, "utf8")).toContain("runtime=omp");
+    expect(await readFile(ompPath, "utf8")).toContain("/live/state");
     expect(await readFile(ompPath, "utf8")).toContain("session_start");
     expect(await readFile(opencodePath, "utf8")).toContain("masthead-live-connector");
     expect(await readFile(opencodePath, "utf8")).toContain("runtime=opencode");
+    expect(await readFile(opencodePath, "utf8")).toContain("/live/state");
     expect(await readFile(piPath, "utf8")).toContain("masthead-live-connector");
     expect(await readFile(piPath, "utf8")).toContain("runtime=pi");
+    expect(await readFile(piPath, "utf8")).toContain("/live/state");
     expect(await readFile(hermesPath, "utf8")).toContain("masthead-live-connector");
     expect(await readFile(hermesPath, "utf8")).toContain("runtime=hermes");
+    expect(await readFile(hermesPath, "utf8")).toContain("/live/state");
     expect(installed.hooks.integrations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ configPath: codexPath, runtime: "codex", status: "installed" }),
@@ -629,7 +634,7 @@ describe("settings API", () => {
 
     const tested = await postJson(baseUrl, "/settings/hooks/claude_code/test");
     expect(tested.hooks.lastTest).toMatchObject({
-      message: expect.stringContaining("Masthead accepted synthetic live events"),
+      message: expect.stringContaining("Masthead accepted synthetic live events and state reports"),
       status: "passed"
     });
     const syntheticRows = daemon.database
@@ -642,6 +647,10 @@ describe("settings API", () => {
       )
       .all() as Array<{ runtime: string; sourceSessionId: string }>;
     expect(syntheticRows).toEqual([]);
+    const stateRows = daemon.database
+      .prepare("SELECT runtime, state FROM live_state_reports WHERE source LIKE 'masthead:%:settings-test' ORDER BY runtime")
+      .all() as Array<{ runtime: string; state: string }>;
+    expect(stateRows).toEqual([expect.objectContaining({ runtime: "claude_code", state: "working" })]);
     const projection = await getJson(baseUrl, "/projection");
     expect(projection.projection.cards).toHaveLength(0);
 
@@ -716,6 +725,7 @@ describe("settings API", () => {
       installed: true
     });
     expect(await readFile(ompPath, "utf8")).toContain("runtime=omp");
+    expect(await readFile(ompPath, "utf8")).toContain("/live/state");
 
     const tested = await postJson(baseUrl, "/settings/hooks/omp/test");
     expect(tested.hooks.lastTest).toMatchObject({

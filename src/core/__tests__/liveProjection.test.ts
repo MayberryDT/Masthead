@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { normalizeLiveHookPayload, parseLiveHookPayload, type LiveHookNormalizeOptions } from "../liveHookAdapter";
+import { normalizeLiveStateReport } from "../liveState";
 import { projectLiveEvents } from "../liveProjection";
 
 describe("live projection", () => {
@@ -18,11 +19,35 @@ describe("live projection", () => {
     );
 
     const defaultEnvelope = projectLiveEvents([started], [], {
-      generatedAt: "2026-06-23T03:01:00.000Z"
+      generatedAt: "2026-06-23T03:01:00.000Z",
+      liveStateReports: new Map([
+        [
+          "llm-headline-session",
+          normalizeLiveStateReport({
+            runtime: "claude_code",
+            source: "test",
+            sourceSessionId: "llm-headline-session",
+            state: "working",
+            observedAt: "2026-06-23T03:00:50.000Z"
+          })
+        ]
+      ])
     });
     const envelope = projectLiveEvents([started], [], {
       generatedAt: "2026-06-23T03:01:00.000Z",
-      headlineMode: "llm"
+      headlineMode: "llm",
+      liveStateReports: new Map([
+        [
+          "llm-headline-session",
+          normalizeLiveStateReport({
+            runtime: "claude_code",
+            source: "test",
+            sourceSessionId: "llm-headline-session",
+            state: "working",
+            observedAt: "2026-06-23T03:00:50.000Z"
+          })
+        ]
+      ])
     });
 
     const card = envelope.projection.cards[0];
@@ -176,7 +201,8 @@ describe("live projection", () => {
       sessionId: "live-session",
       project: "Masthead",
       title: "Wire live ingestion",
-      primaryStatus: "waiting_for_approval",
+      primaryStatus: "blocked",
+      stateLabel: "Blocked",
       isExpanded: true
     });
     expect(envelope.projection.attentionQueue[0]).toMatchObject({
@@ -283,6 +309,18 @@ describe("live projection", () => {
     const envelope = projectLiveEvents([started], [], {
       generatedAt: "2026-06-23T03:02:00.000Z",
       headlineMode: "llm",
+      liveStateReports: new Map([
+        [
+          "stale-enrichment-session",
+          normalizeLiveStateReport({
+            runtime: "claude_code",
+            source: "test",
+            sourceSessionId: "stale-enrichment-session",
+            state: "working",
+            observedAt: "2026-06-23T03:01:50.000Z"
+          })
+        ]
+      ]),
       sessionEnrichments: new Map([
         [
           "stale-enrichment-session",
@@ -345,7 +383,8 @@ describe("live projection", () => {
       sessionId: "approval-first-session",
       project: "Masthead",
       title: "Review hook install",
-      primaryStatus: "waiting_for_approval"
+      primaryStatus: "blocked",
+      stateLabel: "Blocked"
     });
   });
 
@@ -385,7 +424,7 @@ describe("live projection", () => {
     );
   });
 
-  test("live projection keeps terminal sessions visible in lifecycle lanes", () => {
+  test("live projection treats hook completion as an idle turn completion", () => {
     const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "old-start",
@@ -415,12 +454,12 @@ describe("live projection", () => {
       generatedAt: "2026-06-23T03:02:00.000Z"
     });
 
-    expect(envelope.projection.summary).toMatchObject({ active: 0, completed: 1 });
+    expect(envelope.projection.summary).toMatchObject({ active: 0, completed: 0, idle: 1 });
     expect(envelope.projection.cards).toHaveLength(1);
     expect(envelope.projection.cards[0]).toMatchObject({
       sessionId: "old-live-session",
-      lifecycle: "ended",
-      outcomeLabel: "completed"
+      lifecycle: "idle",
+      primaryStatus: "completed_unreviewed"
     });
     expect(envelope.projection.cards[0]?.headline).toMatchObject({
       source: "offline",
@@ -429,6 +468,12 @@ describe("live projection", () => {
     expect(envelope.projection.lanes).toContainEqual(
       expect.objectContaining({
         laneId: "history",
+        sessionIds: []
+      })
+    );
+    expect(envelope.projection.lanes).toContainEqual(
+      expect.objectContaining({
+        laneId: "idle",
         sessionIds: ["old-live-session"]
       })
     );
@@ -540,9 +585,26 @@ describe("live projection", () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) throw new Error(parsed.diagnostic.message);
 
+    const liveStateReports =
+      testCase.status === "active"
+        ? new Map([
+            [
+              testCase.sessionId,
+              normalizeLiveStateReport({
+                runtime: "omp",
+                source: "test",
+                sourceSessionId: testCase.sessionId,
+                state: "working",
+                observedAt: "2026-07-05T12:00:20.000Z"
+              })
+            ]
+          ])
+        : undefined;
+
     const envelope = projectLiveEvents([parsed.event], [], {
       generatedAt: "2026-07-05T12:00:30.000Z",
-      headlineMode: "offline"
+      headlineMode: "offline",
+      liveStateReports
     });
 
     expect(envelope.projection.cards[0]).toMatchObject({
@@ -553,6 +615,78 @@ describe("live projection", () => {
       headline: expect.objectContaining({ source: "offline", status: "ready" })
     });
     expect(envelope.projection.summary).toMatchObject(testCase.expectedSummary);
+  });
+
+  test("refresh interval expires stale event-derived active sessions", () => {
+    const started = normalizeSupportedHookPayload(
+      {
+        provider_event_id: "stale-start",
+        event: "session_started",
+        session_id: "stale-live-session",
+        timestamp: "2026-07-07T12:00:00.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        title: "Stale live session"
+      },
+      { receivedAt: "2026-07-07T12:00:00.010Z" }
+    );
+    const command = normalizeSupportedHookPayload(
+      {
+        provider_event_id: "stale-command",
+        event: "command_started",
+        session_id: "stale-live-session",
+        timestamp: "2026-07-07T12:00:01.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        command_id: "cmd-1",
+        command: "npm test"
+      },
+      { receivedAt: "2026-07-07T12:00:01.010Z" }
+    );
+
+    const envelope = projectLiveEvents([started, command], [], {
+      generatedAt: "2026-07-07T12:00:25.000Z",
+      refreshIntervalMs: 10_000,
+      headlineMode: "offline"
+    });
+
+    expect(envelope.projection.cards[0]).toMatchObject({
+      sessionId: "stale-live-session",
+      lifecycle: "idle",
+      primaryStatus: "stalled",
+      displayState: "idle",
+      stateAuthority: "timeout",
+      stateStale: true
+    });
+    expect(envelope.projection.summary.active).toBe(0);
+  });
+
+  test("bypass approval does not create a blocked board card", () => {
+    const approval = normalizeSupportedHookPayload(
+      {
+        provider_event_id: "bypass-approval",
+        event: "approval_requested",
+        session_id: "bypass-session",
+        timestamp: "2026-07-07T12:00:00.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        permissionMode: "bypassPermissions"
+      },
+      { receivedAt: "2026-07-07T12:00:00.010Z" }
+    );
+
+    const envelope = projectLiveEvents([approval], [], {
+      generatedAt: "2026-07-07T12:00:05.000Z",
+      refreshIntervalMs: 10_000,
+      headlineMode: "offline"
+    });
+
+    expect(envelope.projection.cards[0]).toMatchObject({
+      sessionId: "bypass-session",
+      displayState: "working"
+    });
+    expect(envelope.projection.cards[0]?.stateLabel).not.toBe("Blocked");
+    expect(envelope.projection.summary.needsAction).toBe(0);
   });
 
   test("empty live state remains a valid local projection instead of falling back inside the server", () => {

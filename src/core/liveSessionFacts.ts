@@ -74,8 +74,8 @@ export function liveTranscriptPointerFromEvent(event: NormalizedEvent): LiveTran
 
 function factKindForEvent(event: NormalizedEvent): LiveSessionFactKind {
   if (event.type === "session.started") return "session_started";
-  if (event.type === "session.completed") return "session_completed";
-  if (event.type === "user.question") return "user_turn";
+  if (event.type === "session.completed" || event.type === "turn.completed") return "session_completed";
+  if (event.type === "user.question" || event.type === "user.response") return "user_turn";
   if (event.type === "approval.requested") return "attention";
   if (event.type === "command.finished" && commandFailed(event)) return "attention";
   if (event.type === "command.started" || event.type === "command.finished" || event.type === "file.changed") {
@@ -85,8 +85,9 @@ function factKindForEvent(event: NormalizedEvent): LiveSessionFactKind {
 }
 
 function statusForEvent(event: NormalizedEvent): LiveSessionFact["status"] {
-  if (event.type === "session.completed") return "completed";
+  if (event.type === "session.completed" || event.type === "turn.completed") return "completed";
   if (event.type === "approval.requested" || event.type === "user.question") return "waiting";
+  if (event.type === "user.response") return "active";
   if (event.type === "command.finished" && commandFailed(event)) return "failed";
   if (event.type === "session.started") return "active";
   return undefined;

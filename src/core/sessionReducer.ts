@@ -17,7 +17,7 @@ export type DeriveSessionsOptions = {
 };
 
 const DEFAULT_IDLE_AFTER_MS = 15 * 60_000;
-type RuntimeLifecycleState = "running" | "idle" | "blocked" | "ended";
+type RuntimeLifecycleState = "running" | "idle" | "blocked";
 
 
 export function deriveSessions(
@@ -53,7 +53,7 @@ export function deriveSessions(
       start ??
       latest;
     const successfulVerification = ordered.some(isSuccessfulVerificationCommandEvent);
-    const completed = latest?.type === "session.completed";
+    const completed = latest?.type === "session.completed" || latest?.type === "turn.completed";
     const blocked = latest ? isBlockedEvent(latest) : false;
     const pendingApproval = latest?.type === "approval.requested";
     const pendingQuestion = latest?.type === "user.question";
@@ -62,7 +62,7 @@ export function deriveSessions(
     const flags: SessionFlag[] = [];
     let primaryStatus: SessionStatus = "unknown";
     const latestSignalAt = latestInstant(latest?.occurredAt);
-    const terminal = latest?.type === "session.completed";
+    const terminal = eventIsTerminalSessionClose(latest);
     const lifecycle = deriveLifecycle({
       latest,
       latestSignalAt,
@@ -186,7 +186,8 @@ function deriveLifecycle({
   now: Date;
   idleAfterMs: number;
 }): SessionLifecycle {
-  if (latest?.type === "session.completed") return "ended";
+  if (eventIsTerminalSessionClose(latest)) return "ended";
+  if (latest?.type === "turn.completed") return "idle";
   if (latest?.type === "approval.requested" || latest?.type === "user.question") return "running";
   if (runtimeWaitingStatus(latest)) return "running";
   const runtimeLifecycle = freshRuntimeLifecycle(latest, latestSignalAt, now, idleAfterMs);
@@ -206,20 +207,19 @@ function freshRuntimeLifecycle(
   if (!state) return undefined;
   if (state === "blocked") return "running";
   if (state === "idle") return "idle";
-  if (state === "ended") return "ended";
   if (!latestSignalAt) return "idle";
   return now.getTime() - latestSignalAt.getTime() > idleAfterMs ? "idle" : "running";
 }
 
 function runtimeLifecycleState(event: NormalizedEvent | undefined): RuntimeLifecycleState | undefined {
   const explicitState = normalizeRuntimeState(stringPayload(event, "runtimeLifecycleState"));
-  if (explicitState === "running" || explicitState === "idle" || explicitState === "blocked" || explicitState === "ended") return explicitState;
+  if (explicitState === "running" || explicitState === "idle" || explicitState === "blocked") return explicitState;
   const state = firstNormalizedStringPayload(event, ["state", "status", "runtimeState", "lifecycleState"]);
   if (!state) return undefined;
   if (["active", "working", "running", "busy", "thinking", "executing"].includes(state)) return "running";
   if (["idle", "logged", "ready", "waiting"].includes(state)) return "idle";
   if (state === "blocked") return "blocked";
-  if (["done", "completed", "complete", "stopped", "ended"].includes(state)) return "ended";
+  if (["done", "completed", "complete", "stopped", "ended"].includes(state)) return "idle";
   return undefined;
 }
 
@@ -255,8 +255,12 @@ function normalizeRuntimeState(value: string | undefined): string | undefined {
 }
 
 function endReasonForLatestEvent(event: NormalizedEvent | undefined): SessionEndReason | undefined {
-  if (event?.type === "session.completed") return "completed";
+  if (eventIsTerminalSessionClose(event)) return "completed";
   return undefined;
+}
+
+function eventIsTerminalSessionClose(event: NormalizedEvent | undefined): boolean {
+  return event?.type === "session.closed" || event?.type === "session.completed";
 }
 
 function latestInstant(...timestamps: Array<string | undefined>): Date | undefined {

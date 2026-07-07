@@ -75,8 +75,8 @@ describe("observability session card", () => {
   test("adds visual tier classes by operational state", () => {
     const active = renderToStaticMarkup(<SessionCard session={session({ lifecycle: "running", primaryStatus: "editing" })} />);
     const idle = renderToStaticMarkup(<SessionCard session={session({ lifecycle: "idle", primaryStatus: "stalled" })} />);
-    const waiting = renderToStaticMarkup(
-      <SessionCard session={session({ lifecycle: "running", primaryStatus: "waiting_for_approval", indicators: ["attention"] })} />
+    const blocked = renderToStaticMarkup(
+      <SessionCard session={session({ lifecycle: "running", primaryStatus: "blocked", displayState: "blocked", indicators: ["attention"] })} />
     );
     const conflict = renderToStaticMarkup(
       <SessionCard session={session({ lifecycle: "running", primaryStatus: "editing", indicators: ["attention", "conflict"] })} />
@@ -84,7 +84,7 @@ describe("observability session card", () => {
 
     expect(active).toContain("tier-live");
     expect(idle).toContain("tier-quiet");
-    expect(waiting).toContain("is-waiting tier-action");
+    expect(blocked).toContain("is-blocked tier-action");
     expect(conflict).toContain("is-active tier-live");
     expect(conflict).not.toContain("tier-action");
   });
@@ -142,21 +142,46 @@ describe("observability session card", () => {
     expect(html).not.toContain("tier-quiet");
   });
 
-  test.each([
-    ["approval wait", "waiting_for_approval", "Needs approval"],
-    ["user input wait", "waiting_for_user", "Needs input"]
-  ] as const)("renders %s as waiting copy without blocked classes", (_name, primaryStatus, label) => {
-    const html = renderToStaticMarkup(
-      <SessionCard session={session({ lifecycle: "running", primaryStatus, stateLabel: label, indicators: ["attention"] })} onToggle={() => undefined} />
+  test("renders projected permission blockers as blocked and user waits as nonblocked idle", () => {
+    const approval = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          lifecycle: "running",
+          primaryStatus: "blocked",
+          displayState: "blocked",
+          runtimeState: "blocked",
+          stateLabel: "Blocked",
+          indicators: ["attention"]
+        })}
+        onToggle={() => undefined}
+      />
+    );
+    const input = renderToStaticMarkup(
+      <SessionCard
+        session={{
+          ...session({
+            lifecycle: "idle",
+            primaryStatus: "stalled",
+            displayState: "idle",
+            runtimeState: "idle",
+            stateLabel: "Idle",
+            indicators: ["attention"]
+          }),
+          attentionReason: "User input requested"
+        }}
+        onToggle={() => undefined}
+      />
     );
 
-    expect(html).toContain(`>${label}<`);
-    expect(html).toContain("is-waiting");
-    expect(html).toContain("tier-action");
-    expect(html).not.toContain("is-active");
-    expect(html).not.toContain("is-blocked");
-    expect(html).not.toContain(">Blocked<");
-    expect(html).not.toContain("tier-quiet");
+    expect(approval).toContain(">Blocked<");
+    expect(approval).toContain("is-blocked");
+    expect(approval).not.toContain("Needs approval");
+    expect(approval).not.toContain("is-waiting");
+
+    expect(input).toContain(">Idle<");
+    expect(input).not.toContain("Needs input");
+    expect(input).not.toContain("is-blocked");
+    expect(input).not.toContain("is-waiting");
   });
 
   test("uses a project and work-area label in the header without synthetic id chrome", () => {
@@ -349,9 +374,9 @@ describe("observability session card", () => {
   test("maps only real blockers to the blocked color class", () => {
     expect(stateClassName(session({ lifecycle: "running", primaryStatus: "editing", indicators: [] }))).toBe("running");
     expect(stateClassName(session({ lifecycle: "idle", primaryStatus: "stalled", indicators: [] }))).toBe("stalled");
-    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "blocked", indicators: ["attention"] }))).toBe("needs-attention");
-    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "waiting_for_user", indicators: ["attention"] }))).toBe("running");
-    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "waiting_for_approval", indicators: ["attention"] }))).toBe("running");
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "blocked", displayState: "blocked", indicators: ["attention"] }))).toBe("needs-attention");
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "waiting_for_approval", displayState: "working", indicators: ["attention"] }))).toBe("running");
+    expect(stateClassName(session({ lifecycle: "idle", primaryStatus: "waiting_for_user", displayState: "idle", indicators: ["attention"] }))).toBe("stalled");
     expect(stateClassName(session({ lifecycle: "running", primaryStatus: "editing", indicators: ["attention", "conflict"] }))).toBe(
       "running"
     );
@@ -1257,25 +1282,27 @@ describe("observability session card", () => {
     expect(html).not.toContain("npm test");
   });
 
-  test("renders approval-pending sessions as needs-approval waiting copy", () => {
+  test("does not render raw approval-waiting metadata as blocked copy", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
           lifecycle: "running",
           primaryStatus: "waiting_for_approval",
-          stateLabel: "Needs approval",
+          displayState: "working",
+          stateLabel: "Running",
           indicators: ["attention"]
         })}
         onToggle={() => undefined}
       />
     );
 
-    expect(html).toContain(">Needs approval<");
-    expect(html).toContain("is-waiting");
-    expect(html).toContain("tier-action");
-    expect(html).not.toContain("is-active");
+    expect(html).toContain(">Active<");
+    expect(html).toContain("is-active");
+    expect(html).toContain("tier-live");
+    expect(html).not.toContain(">Needs approval<");
     expect(html).not.toContain(">Blocked<");
     expect(html).not.toContain("is-blocked");
+    expect(html).not.toContain("is-waiting");
   });
 
   test("does not apply demo harness or model values to live observability cards", () => {

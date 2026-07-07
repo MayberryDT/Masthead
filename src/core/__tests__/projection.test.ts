@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import fixture from "../../../fixtures/v0/replay-three-sessions-board.json";
+import { normalizeLiveStateReport, type LiveRuntimeSemanticState } from "../liveState";
 import { projectFixture } from "../replay";
 import type { FixtureReplay, GitSnapshot, NormalizedEvent } from "../types";
 
@@ -55,6 +56,24 @@ const snapshot = (snapshotId: string, sessionId: string, path: string): GitSnaps
   ],
   observedAt: "2026-06-23T02:04:00.000Z"
 });
+
+const liveReports = (
+  sessionIds: string[],
+  observedAt = "2026-06-23T02:04:30.000Z",
+  state: LiveRuntimeSemanticState = "working"
+) =>
+  new Map(
+    sessionIds.map((sessionId) => [
+      sessionId,
+      normalizeLiveStateReport({
+        runtime: "claude_code",
+        source: "test",
+        sourceSessionId: sessionId,
+        state,
+        observedAt
+      })
+    ])
+  );
 
 describe("Live Board projection", () => {
   test("projects model and token metadata from live events", () => {
@@ -151,7 +170,11 @@ describe("Live Board projection", () => {
           }
         ]
       },
-      { now: new Date("2026-06-23T02:10:00.000Z"), idleAfterMs: 5 * 60_000 }
+      {
+        now: new Date("2026-06-23T02:10:00.000Z"),
+        idleAfterMs: 5 * 60_000,
+        liveStateReports: liveReports(["running-session"], "2026-06-23T02:09:55.000Z")
+      }
     );
 
     expect(board.summary).toMatchObject({
@@ -184,12 +207,12 @@ describe("Live Board projection", () => {
       gitSnapshots: []
     });
 
-    expect(board.cards[0]).toMatchObject({ lifecycle: "running", primaryStatus: "waiting_for_approval" });
-    expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual(["session-running"]);
-    expect(board.lanes?.find((lane) => lane.laneId === "needs_action")?.sessionIds).toEqual([]);
+    expect(board.cards[0]).toMatchObject({ lifecycle: "running", primaryStatus: "blocked", stateLabel: "Blocked" });
+    expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual([]);
+    expect(board.lanes?.find((lane) => lane.laneId === "needs_action")?.sessionIds).toEqual(["session-running"]);
   });
 
-  test("keeps waiting labels consistent when waiting sessions remain in Running", () => {
+  test("uses a single Blocked label when permission requests remain unresolved", () => {
     const board = projectFixture({
       events: [
         event("start", "session-waiting", "session.started", "2026-06-23T02:00:00.000Z"),
@@ -200,26 +223,29 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]).toMatchObject({
       lifecycle: "running",
-      primaryStatus: "waiting_for_approval",
-      stateLabel: "Needs approval"
+      primaryStatus: "blocked",
+      stateLabel: "Blocked"
     });
-    expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual(["session-waiting"]);
-    expect(board.summary).toMatchObject({ running: 1, needsAction: 0 });
+    expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual([]);
+    expect(board.summary).toMatchObject({ running: 0, needsAction: 1 });
   });
 
   test("keeps running sessions in Running even when a command failed", () => {
-    const board = projectFixture({
-      events: [
-        event("start", "session-running-failed-command", "session.started", "2026-06-23T02:00:00.000Z"),
-        event("failed-command", "session-running-failed-command", "command.finished", "2026-06-23T02:01:00.000Z", {
-          commandId: "cmd-test",
-          category: "test",
-          exitCode: 1,
-          normalizedCommand: "npm test"
-        })
-      ],
-      gitSnapshots: []
-    });
+    const board = projectFixture(
+      {
+        events: [
+          event("start", "session-running-failed-command", "session.started", "2026-06-23T02:00:00.000Z"),
+          event("failed-command", "session-running-failed-command", "command.finished", "2026-06-23T02:01:00.000Z", {
+            commandId: "cmd-test",
+            category: "test",
+            exitCode: 1,
+            normalizedCommand: "npm test"
+          })
+        ],
+        gitSnapshots: []
+      },
+      { liveStateReports: liveReports(["session-running-failed-command"], "2026-06-23T02:01:00.000Z") }
+    );
 
     expect(board.attentionQueue.some((item) => item.type === "command_failed")).toBe(true);
     expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual(["session-running-failed-command"]);
@@ -227,13 +253,16 @@ describe("Live Board projection", () => {
   });
 
   test("keeps active conflict sessions in Running instead of Needs action", () => {
-    const board = projectFixture({
-      events: [
-        event("a-start", "session-a", "session.started", "2026-06-23T02:00:00.000Z"),
-        event("b-start", "session-b", "session.started", "2026-06-23T02:00:01.000Z")
-      ],
-      gitSnapshots: [snapshot("snapshot-a", "session-a", "src/shared.ts"), snapshot("snapshot-b", "session-b", "src/shared.ts")]
-    });
+    const board = projectFixture(
+      {
+        events: [
+          event("a-start", "session-a", "session.started", "2026-06-23T02:00:00.000Z"),
+          event("b-start", "session-b", "session.started", "2026-06-23T02:00:01.000Z")
+        ],
+        gitSnapshots: [snapshot("snapshot-a", "session-a", "src/shared.ts"), snapshot("snapshot-b", "session-b", "src/shared.ts")]
+      },
+      { liveStateReports: liveReports(["session-a", "session-b"]) }
+    );
 
     expect(board.conflicts).toHaveLength(1);
     expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds.toSorted()).toEqual(["session-a", "session-b"]);
@@ -339,6 +368,7 @@ describe("Live Board projection", () => {
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
+        liveStateReports: liveReports(["live-ui-session"], "2026-06-23T02:04:25.000Z"),
         sessionEnrichments: new Map([
           [
             "live-ui-session",
@@ -376,6 +406,7 @@ describe("Live Board projection", () => {
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
+        liveStateReports: liveReports(["updated-for-session"], "2026-06-23T02:04:25.000Z"),
         sessionEnrichments: new Map([
           [
             "updated-for-session",
@@ -410,6 +441,7 @@ describe("Live Board projection", () => {
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
+        liveStateReports: liveReports(["hook-active-session"], "2026-06-23T02:04:25.000Z"),
         sessionEnrichments: new Map([
           [
             "hook-active-session",
@@ -445,6 +477,7 @@ describe("Live Board projection", () => {
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
+        liveStateReports: liveReports(["fixed-for-session"], "2026-06-23T02:04:25.000Z"),
         sessionEnrichments: new Map([
           [
             "fixed-for-session",
@@ -482,6 +515,7 @@ describe("Live Board projection", () => {
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
+        liveStateReports: liveReports(["review-template-session"], "2026-06-23T02:04:25.000Z"),
         sessionEnrichments: new Map([
           [
             "review-template-session",
@@ -518,6 +552,7 @@ describe("Live Board projection", () => {
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
+        liveStateReports: liveReports(["patched-title-session"], "2026-06-23T02:04:25.000Z"),
         sessionEnrichments: new Map([
           [
             "patched-title-session",
@@ -551,6 +586,7 @@ describe("Live Board projection", () => {
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
+        liveStateReports: liveReports(["stale-topic-session"], "2026-06-23T02:04:25.000Z"),
         sessionEnrichments: new Map([
           [
             "stale-topic-session",
@@ -589,6 +625,7 @@ describe("Live Board projection", () => {
       },
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
+        liveStateReports: liveReports(["title-only-topic-session"], "2026-06-23T02:04:25.000Z"),
         sessionEnrichments: new Map([
           [
             "title-only-topic-session",
@@ -628,6 +665,7 @@ describe("Live Board projection", () => {
       {
         now: new Date("2026-06-23T02:04:30.000Z"),
         headlineMode: "llm",
+        liveStateReports: liveReports(["running-enriched-session"], "2026-06-23T02:04:25.000Z"),
         sessionEnrichments: new Map([
           [
             "running-enriched-session",
@@ -654,54 +692,57 @@ describe("Live Board projection", () => {
   });
 
   test("does not mark same-worktree duplicate snapshots as conflict attention", () => {
-    const board = projectFixture({
-      events: [
-        event("a-start", "session-a", "session.started", "2026-06-23T02:00:00.000Z"),
-        event("b-start", "session-b", "session.started", "2026-06-23T02:00:01.000Z")
-      ],
-      gitSnapshots: [
-        {
-          snapshotId: "snapshot-a",
-          sessionId: "session-a",
-          repoRoot: "/workspace/app",
-          worktreePath: "/workspace/app",
-          gitCommonDir: "/workspace/app/.git",
-          branch: "agent/session-a",
-          headSha: "abc123",
-          changedPaths: [
-            {
-              path: "src/shared.ts",
-              status: "modified",
-              staged: false,
-              additions: 1,
-              deletions: 0,
-              sensitivity: "metadata"
-            }
-          ],
-          observedAt: "2026-06-23T02:04:00.000Z"
-        },
-        {
-          snapshotId: "snapshot-b",
-          sessionId: "session-b",
-          repoRoot: "/workspace/app",
-          worktreePath: "/workspace/app",
-          gitCommonDir: "/workspace/app/.git",
-          branch: "agent/session-b",
-          headSha: "abc123",
-          changedPaths: [
-            {
-              path: "src/shared.ts",
-              status: "modified",
-              staged: false,
-              additions: 1,
-              deletions: 0,
-              sensitivity: "metadata"
-            }
-          ],
-          observedAt: "2026-06-23T02:04:01.000Z"
-        }
-      ]
-    });
+    const board = projectFixture(
+      {
+        events: [
+          event("a-start", "session-a", "session.started", "2026-06-23T02:00:00.000Z"),
+          event("b-start", "session-b", "session.started", "2026-06-23T02:00:01.000Z")
+        ],
+        gitSnapshots: [
+          {
+            snapshotId: "snapshot-a",
+            sessionId: "session-a",
+            repoRoot: "/workspace/app",
+            worktreePath: "/workspace/app",
+            gitCommonDir: "/workspace/app/.git",
+            branch: "agent/session-a",
+            headSha: "abc123",
+            changedPaths: [
+              {
+                path: "src/shared.ts",
+                status: "modified",
+                staged: false,
+                additions: 1,
+                deletions: 0,
+                sensitivity: "metadata"
+              }
+            ],
+            observedAt: "2026-06-23T02:04:00.000Z"
+          },
+          {
+            snapshotId: "snapshot-b",
+            sessionId: "session-b",
+            repoRoot: "/workspace/app",
+            worktreePath: "/workspace/app",
+            gitCommonDir: "/workspace/app/.git",
+            branch: "agent/session-b",
+            headSha: "abc123",
+            changedPaths: [
+              {
+                path: "src/shared.ts",
+                status: "modified",
+                staged: false,
+                additions: 1,
+                deletions: 0,
+                sensitivity: "metadata"
+              }
+            ],
+            observedAt: "2026-06-23T02:04:01.000Z"
+          }
+        ]
+      },
+      { liveStateReports: liveReports(["session-a", "session-b"], "2026-06-23T02:04:01.000Z") }
+    );
 
     expect(board.conflicts).toEqual([]);
     expect(board.attentionQueue.some((item) => item.type === "conflict")).toBe(false);
@@ -711,13 +752,16 @@ describe("Live Board projection", () => {
   });
 
   test("keeps different-worktree exact file overlap as conflict attention", () => {
-    const board = projectFixture({
-      events: [
-        event("a-start", "session-a", "session.started", "2026-06-23T02:00:00.000Z"),
-        event("b-start", "session-b", "session.started", "2026-06-23T02:00:01.000Z")
-      ],
-      gitSnapshots: [snapshot("snapshot-a", "session-a", "src/shared.ts"), snapshot("snapshot-b", "session-b", "src/shared.ts")]
-    });
+    const board = projectFixture(
+      {
+        events: [
+          event("a-start", "session-a", "session.started", "2026-06-23T02:00:00.000Z"),
+          event("b-start", "session-b", "session.started", "2026-06-23T02:00:01.000Z")
+        ],
+        gitSnapshots: [snapshot("snapshot-a", "session-a", "src/shared.ts"), snapshot("snapshot-b", "session-b", "src/shared.ts")]
+      },
+      { liveStateReports: liveReports(["session-a", "session-b"]) }
+    );
 
     expect(board.conflicts).toHaveLength(1);
     expect(board.attentionQueue.filter((item) => item.type === "conflict")).toHaveLength(2);
@@ -891,16 +935,19 @@ describe("Live Board projection", () => {
   });
 
   test("does not project missing exit status as command failure attention", () => {
-    const board = projectFixture({
-      events: [
-        event("start", "session-1", "session.started", "2026-06-23T02:00:00.000Z"),
-        event("command-without-status", "session-1", "command.finished", "2026-06-23T02:08:00.000Z", {
-          commandId: "cmd-test-1",
-          category: "test"
-        })
-      ],
-      gitSnapshots: []
-    });
+    const board = projectFixture(
+      {
+        events: [
+          event("start", "session-1", "session.started", "2026-06-23T02:00:00.000Z"),
+          event("command-without-status", "session-1", "command.finished", "2026-06-23T02:08:00.000Z", {
+            commandId: "cmd-test-1",
+            category: "test"
+          })
+        ],
+        gitSnapshots: []
+      },
+      { liveStateReports: liveReports(["session-1"], "2026-06-23T02:08:00.000Z") }
+    );
 
     expect(board.cards[0]?.primaryStatus).toBe("reading");
     expect(board.attentionQueue.some((candidate) => candidate.type === "command_failed")).toBe(false);
@@ -917,7 +964,7 @@ describe("Live Board projection", () => {
         ],
         gitSnapshots: []
       },
-      { includeTerminalSessions: false }
+      { includeTerminalSessions: false, liveStateReports: liveReports(["new-session"], "2026-06-23T02:02:00.000Z") }
     );
 
     expect(board.summary).toMatchObject({ active: 1, completed: 1 });
@@ -926,17 +973,20 @@ describe("Live Board projection", () => {
   });
 
   test("completed session snapshots do not create active exact-file conflicts", () => {
-    const board = projectFixture({
-      events: [
-        event("old-start", "old-session", "session.started", "2026-06-23T02:00:00.000Z"),
-        event("old-done", "old-session", "session.completed", "2026-06-23T02:01:00.000Z"),
-        event("new-start", "new-session", "session.started", "2026-06-23T02:02:00.000Z")
-      ],
-      gitSnapshots: [
-        snapshot("old-snapshot", "old-session", "src/shared.ts"),
-        snapshot("new-snapshot", "new-session", "src/shared.ts")
-      ]
-    });
+    const board = projectFixture(
+      {
+        events: [
+          event("old-start", "old-session", "session.started", "2026-06-23T02:00:00.000Z"),
+          event("old-done", "old-session", "session.completed", "2026-06-23T02:01:00.000Z"),
+          event("new-start", "new-session", "session.started", "2026-06-23T02:02:00.000Z")
+        ],
+        gitSnapshots: [
+          snapshot("old-snapshot", "old-session", "src/shared.ts"),
+          snapshot("new-snapshot", "new-session", "src/shared.ts")
+        ]
+      },
+      { liveStateReports: liveReports(["new-session"]) }
+    );
 
     expect(board.conflicts).toEqual([]);
     expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual(["new-session"]);

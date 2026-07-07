@@ -7,6 +7,10 @@ import { isFailedCommandEvent } from "./commandStatus.ts";
 import { detectConflicts, detectSharedResourceConflicts } from "./conflicts.ts";
 import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView } from "./offlineBoardHeadline.ts";
 import { deriveOutcome } from "./outcomes.ts";
+import type { LiveBlocker } from "./liveBlockers.ts";
+import { liveStateImpliedByEvent } from "./livePermission.ts";
+import { selectEffectiveLiveState } from "./liveProjectionState.ts";
+import type { LiveStateReport } from "./liveState.ts";
 import { deriveSessions } from "./sessionReducer.ts";
 import { deriveWorkContext } from "./workContext.ts";
 import type {
@@ -43,9 +47,12 @@ type ProjectFixtureOptions = {
   sessionEnrichments?: Map<string, LiveSessionEnrichment>;
   sessionHeadlineViews?: Map<string, BoardHeadlineView>;
   sessionTranscriptFacts?: Map<string, LiveSessionTranscriptFacts>;
+  liveStateReports?: Map<string, LiveStateReport>;
+  blockers?: Map<string, LiveBlocker[]>;
   headlineMode?: "llm" | "offline";
   now?: Date;
   idleAfterMs?: number;
+  eventWorkingGraceMs?: number;
 };
 
 export type LiveSessionEnrichment = {
@@ -75,8 +82,9 @@ export type LiveSessionTranscriptFacts = {
 };
 
 export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOptions = {}): LiveBoardProjection {
+  const projectionNow = options.now ?? latestReplayInstant(fixture.events, fixture.gitSnapshots) ?? new Date();
   const sessions = deriveSessions(fixture.events, fixture.gitSnapshots, {
-    now: options.now,
+    now: projectionNow,
     idleAfterMs: options.idleAfterMs
   });
   const eventsBySession = groupEventsBySession(fixture.events);
@@ -123,6 +131,10 @@ export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOp
         expandedSessionId,
         options.sessionEnrichments?.get(session.sessionId),
         options.sessionTranscriptFacts?.get(session.sessionId),
+        liveStateForSession(session, options.liveStateReports),
+        blockersForSession(session, options.blockers),
+        projectionNow,
+        options.eventWorkingGraceMs,
         options.headlineMode ?? "llm",
         options.sessionHeadlineViews?.get(session.sessionId)
       );
@@ -182,6 +194,15 @@ function isActiveSession(session: ReturnType<typeof deriveSessions>[number]): bo
   return session.lifecycle !== "ended" && session.primaryStatus !== "abandoned";
 }
 
+function latestReplayInstant(events: NormalizedEvent[], snapshots: GitSnapshot[]): Date | undefined {
+  const latestTimestamp = [...events.map((event) => event.occurredAt), ...snapshots.map((snapshot) => snapshot.observedAt)]
+    .map((timestamp) => Date.parse(timestamp))
+    .filter((value) => !Number.isNaN(value))
+    .toSorted((a, b) => a - b)
+    .at(-1);
+  return latestTimestamp === undefined ? undefined : new Date(latestTimestamp);
+}
+
 function toCard(
   session: ReturnType<typeof deriveSessions>[number],
   sessionAttention: ReturnType<typeof deriveAttentionItems>,
@@ -192,6 +213,10 @@ function toCard(
   expandedSessionId?: string,
   enrichment?: LiveSessionEnrichment,
   transcriptFacts?: LiveSessionTranscriptFacts,
+  liveState?: LiveStateReport,
+  blockers: LiveBlocker[] = [],
+  now: Date = new Date(),
+  eventWorkingGraceMs?: number,
   headlineMode: "llm" | "offline" = "llm",
   storedHeadline?: BoardHeadlineView
 ): SessionCardView {
@@ -233,14 +258,27 @@ function toCard(
     latestFeedbackSignal: feedbackSignal,
     recentTranscriptMessages: transcriptFacts?.recentMessages.map((message) => message.text)
   });
+  const latestEvent = sessionEvents.toSorted((a, b) => a.occurredAt.localeCompare(b.occurredAt)).at(-1);
+  const latestStateBearingEvent = latestStateEvent(sessionEvents);
+  const effectiveState = selectEffectiveLiveState({
+    session,
+    latestLiveState: liveState,
+    unresolvedBlockers: blockers,
+    latestEvent,
+    latestStateEvent: latestStateBearingEvent,
+    eventWorkingGraceMs,
+    now
+  });
+  const overlaidStatus = statusForEffectiveState(session.primaryStatus, effectiveState.displayState, blockers);
+  const overlaidLifecycle = lifecycleForEffectiveState(session.lifecycle, effectiveState.displayState);
 
-  const card = {
+  const card: Omit<SessionCardView, "headline"> & { headline?: BoardHeadlineView } = {
     sessionId: session.sessionId,
     project: session.project,
     title,
-    stateLabel: labelForSession(session),
-    primaryStatus: session.primaryStatus,
-    lifecycle: session.lifecycle,
+    stateLabel: labelForEffectiveState(effectiveState.displayState, overlaidStatus, session),
+    primaryStatus: overlaidStatus,
+    lifecycle: overlaidLifecycle,
     outcomeLabel: session.outcomeLabel,
     endReason: session.endReason,
     priorityRank: sessionAttention[0] ? attentionPriority(sessionAttention[0]) : 50,
@@ -262,7 +300,13 @@ function toCard(
     safeActions: SAFE_ACTIONS,
     isExpanded: expandedSessionId ? session.sessionId === expandedSessionId : sessionAttention.length > 0,
     workContext,
-    latestFeedbackSignal: feedbackSignal
+    latestFeedbackSignal: feedbackSignal,
+    runtimeState: effectiveState.semanticState,
+    displayState: effectiveState.displayState,
+    stateAuthority: effectiveState.authority,
+    stateObservedAt: effectiveState.stateObservedAt,
+    stateMessage: effectiveState.stateMessage,
+    stateStale: effectiveState.stale
   };
 
   const facts = buildBoardHeadlineFacts({
@@ -580,10 +624,76 @@ function laneForCard(
   attentionQueue: AttentionItem[],
   conflicts: ConflictCard[]
 ): NonNullable<LiveBoardProjection["lanes"]>[number]["laneId"] {
+  if (card.displayState === "blocked") return "needs_action";
+  if (card.lifecycle === "ended") return endedSessionNeedsAction(card, attentionQueue, conflicts) ? "needs_action" : "history";
+  if (card.displayState === "working") return "running";
+  if (card.displayState === "done" || card.displayState === "idle") return "idle";
   if (card.lifecycle === "running") return "running";
   if (card.lifecycle === "idle") return "idle";
-  if (endedSessionNeedsAction(card, attentionQueue, conflicts)) return "needs_action";
   return "history";
+}
+
+function liveStateForSession(
+  session: ReturnType<typeof deriveSessions>[number],
+  reports: Map<string, LiveStateReport> | undefined
+): LiveStateReport | undefined {
+  if (!reports) return undefined;
+  return reports.get(session.sessionId) ?? (session.sourceSessionId ? reports.get(session.sourceSessionId) : undefined);
+}
+
+function blockersForSession(
+  session: ReturnType<typeof deriveSessions>[number],
+  blockers: Map<string, LiveBlocker[]> | undefined
+): LiveBlocker[] {
+  if (!blockers) return [];
+  return blockers.get(session.sessionId) ?? (session.sourceSessionId ? blockers.get(session.sourceSessionId) : undefined) ?? [];
+}
+
+function latestStateEvent(events: NormalizedEvent[]): NormalizedEvent | undefined {
+  return events
+    .filter((event) => liveStateImpliedByEvent(event) !== undefined)
+    .toSorted((a, b) => a.occurredAt.localeCompare(b.occurredAt))
+    .at(-1);
+}
+
+function statusForEffectiveState(
+  status: SessionStatus,
+  displayState: NonNullable<SessionCardView["displayState"]>,
+  _blockers: LiveBlocker[]
+): SessionStatus {
+  if (displayState === "blocked") {
+    return "blocked";
+  }
+  if (displayState === "working") {
+    return status === "stalled" || status === "completed_unreviewed" ? "reading" : status;
+  }
+  if (displayState === "done") return "completed_unreviewed";
+  if (displayState === "idle" && status !== "completed_unreviewed") return "stalled";
+  return status;
+}
+
+function lifecycleForEffectiveState(
+  lifecycle: SessionCardView["lifecycle"],
+  displayState: NonNullable<SessionCardView["displayState"]>
+): SessionCardView["lifecycle"] {
+  if (lifecycle === "ended") return lifecycle;
+  if (displayState === "blocked" || displayState === "working") return "running";
+  if (displayState === "done" || displayState === "idle") return "idle";
+  return lifecycle;
+}
+
+function labelForEffectiveState(
+  displayState: NonNullable<SessionCardView["displayState"]>,
+  status: SessionStatus,
+  session: ReturnType<typeof deriveSessions>[number]
+): string {
+  if (displayState === "blocked") {
+    return "Blocked";
+  }
+  if (displayState === "working") return "Running";
+  if (displayState === "done") return "Done";
+  if (displayState === "idle") return "Idle";
+  return labelForSession(session);
 }
 
 function endedSessionNeedsAction(card: SessionCardView, attentionQueue: AttentionItem[], conflicts: ConflictCard[]): boolean {
@@ -638,8 +748,6 @@ function labelForStatus(status: SessionStatus): string {
 function labelForSession(session: ReturnType<typeof deriveSessions>[number]): string {
   if (session.lifecycle === "running") {
     if (session.primaryStatus === "blocked") return "Blocked";
-    if (session.primaryStatus === "waiting_for_approval") return "Needs approval";
-    if (session.primaryStatus === "waiting_for_user") return "Needs input";
     return "Running";
   }
   if (session.lifecycle === "idle") return "Idle";

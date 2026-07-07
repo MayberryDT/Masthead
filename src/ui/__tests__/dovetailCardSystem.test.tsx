@@ -50,13 +50,15 @@ describe("dovetail card system", () => {
     expect(active.querySelector(":scope > .footer-line .timestamp")?.textContent).toBe("2m ago");
   });
 
-  test("waiting SessionCard mockups use waiting copy without blocked classes", () => {
+  test("permission waiting mockups use blocked copy while user waiting does not create a blocked card", () => {
     const approval = elementFor(
       <SessionCard
         session={sessionFixture({
           indicators: ["attention"],
-          primaryStatus: "waiting_for_approval",
-          stateLabel: "Needs approval"
+          primaryStatus: "blocked",
+          displayState: "blocked",
+          runtimeState: "blocked",
+          stateLabel: "Blocked"
         })}
         onToggle={() => undefined}
       />,
@@ -66,18 +68,21 @@ describe("dovetail card system", () => {
       <SessionCard
         session={sessionFixture({
           indicators: ["attention"],
-          primaryStatus: "waiting_for_user",
-          stateLabel: "Needs input"
+          primaryStatus: "stalled",
+          lifecycle: "idle",
+          displayState: "idle",
+          runtimeState: "idle",
+          stateLabel: "Idle"
         })}
         onToggle={() => undefined}
       />,
       ".session-card"
     );
 
-    expect(approval.className).toBe("session-card bottom-variant-card dovetail-card is-waiting tier-action");
-    expect(input.className).toBe("session-card bottom-variant-card dovetail-card is-waiting tier-action");
-    expect(approval.querySelector(":scope > .card-topline .state-pill")?.textContent).toBe("Needs approval");
-    expect(input.querySelector(":scope > .card-topline .state-pill")?.textContent).toBe("Needs input");
+    expect(approval.className).toBe("session-card bottom-variant-card dovetail-card is-blocked tier-action");
+    expect(input.className).toBe("session-card bottom-variant-card dovetail-card is-idle tier-quiet");
+    expect(approval.querySelector(":scope > .card-topline .state-pill")?.textContent).toBe("Blocked");
+    expect(input.querySelector(":scope > .card-topline .state-pill")?.textContent).toBe("Idle");
   });
 
   test("idle SessionCard mockups never combine idle state with the action tier", () => {

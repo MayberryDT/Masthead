@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import type { RuntimeKind } from "../../adapters/types.ts";
-import { parseLiveHookPayload } from "../liveHookAdapter.ts";
+import { liveStateReportFromHookPayload, parseLiveHookPayload } from "../liveHookAdapter.ts";
 
 const fixtureDir = join(process.cwd(), "src/adapters/live/__fixtures__");
 
@@ -26,7 +26,7 @@ const liveCases: Array<{
   {
     runtime: "claude_code",
     fixture: "claude-user-prompt-submit.json",
-    type: "user.question",
+    type: "user.response",
     sourceSessionId: "claude-session-1",
     sourceName: "claude_code.hook",
     surface: "hook"
@@ -34,7 +34,7 @@ const liveCases: Array<{
   {
     runtime: "cursor",
     fixture: "cursor-before-submit-prompt.json",
-    type: "user.question",
+    type: "user.response",
     sourceSessionId: "cursor-session-1",
     sourceName: "cursor.hook",
     surface: "hook"
@@ -298,6 +298,83 @@ describe("live hook adapter", () => {
     expect(first.event.eventId).not.toBe(second.event.eventId);
     expect(first.event.source.sourceEventId).not.toBe(second.event.source.sourceEventId);
     expect(first.event.eventId).toMatch(/^claude_code:/);
+  });
+
+  test("derives live state reports from explicit hook state and implied turn events", () => {
+    expect(
+      liveStateReportFromHookPayload(
+        {
+          hookEventName: "PermissionRequest",
+          session_id: "codex-state-session",
+          timestamp: "2026-07-07T12:00:00.000Z",
+          cwd: "/workspace/masthead"
+        },
+        { runtime: "codex", receivedAt: "2026-07-07T12:00:00.100Z" }
+      )
+    ).toMatchObject({
+      runtime: "codex",
+      sourceSessionId: "codex-state-session",
+      state: "blocked",
+      authority: "hook",
+      observedAt: "2026-07-07T12:00:00.000Z",
+      cwd: "/workspace/masthead"
+    });
+
+    expect(
+      liveStateReportFromHookPayload(
+        {
+          hookEventName: "Stop",
+          session_id: "codex-state-session",
+          timestamp: "2026-07-07T12:01:00.000Z"
+        },
+        { runtime: "codex", receivedAt: "2026-07-07T12:01:00.100Z" }
+      )
+    ).toMatchObject({
+      state: "idle",
+      sourceSessionId: "codex-state-session"
+    });
+
+    expect(
+      liveStateReportFromHookPayload(
+        {
+          hookEventName: "SessionStart",
+          session_id: "codex-state-session",
+          timestamp: "2026-07-07T12:02:00.000Z"
+        },
+        { runtime: "codex", receivedAt: "2026-07-07T12:02:00.100Z" }
+      )
+    ).toBeUndefined();
+  });
+
+  test("does not derive blocked live state from user questions", () => {
+    expect(
+      liveStateReportFromHookPayload(
+        {
+          type: "user_question",
+          sessionId: "question-session",
+          timestamp: "2026-07-07T12:00:00.000Z",
+          status: "needs_input"
+        },
+        { runtime: "omp", receivedAt: "2026-07-07T12:00:00.100Z" }
+      )
+    ).toBeUndefined();
+  });
+
+  test("does not derive blocked live state from bypass approval events", () => {
+    expect(
+      liveStateReportFromHookPayload(
+        {
+          hookEventName: "PermissionRequest",
+          session_id: "codex-bypass-session",
+          timestamp: "2026-07-07T12:00:00.000Z",
+          permissionMode: "bypassPermissions"
+        },
+        { runtime: "codex", receivedAt: "2026-07-07T12:00:00.100Z" }
+      )
+    ).toMatchObject({
+      sourceSessionId: "codex-bypass-session",
+      state: "working"
+    });
   });
 
   test.each([
