@@ -28,7 +28,7 @@ describe("live state API", () => {
       sourceSessionId: "source-live-1",
       state: "running",
       seq: 1,
-      observedAt: "2026-07-07T12:00:00.000Z"
+      observedAt: freshTimestamp()
     });
     const latest = await getJson(baseUrl, "/live/state?runtime=opencode&sourceSessionId=source-live-1");
 
@@ -54,7 +54,7 @@ describe("live state API", () => {
       sourceSessionId: "source-stale",
       state: "working",
       seq: 2,
-      observedAt: "2026-07-07T12:00:00.000Z"
+      observedAt: freshTimestamp()
     });
     const stale = await postJson(baseUrl, "/live/state", {
       runtime: "codex",
@@ -62,7 +62,7 @@ describe("live state API", () => {
       sourceSessionId: "source-stale",
       state: "idle",
       seq: 2,
-      observedAt: "2026-07-07T12:00:01.000Z"
+      observedAt: freshTimestamp(1_000)
     });
 
     expect(stale).toMatchObject({ ok: true, status: "ignored_stale" });
@@ -98,7 +98,7 @@ describe("live state API", () => {
       event: "session_start",
       session_id: "explain-session",
       sourceSessionId: "explain-session",
-      timestamp: "2026-07-07T12:00:00.000Z",
+      timestamp: freshTimestamp(),
       cwd: "/workspace/masthead",
       title: "Explain state"
     });
@@ -107,7 +107,7 @@ describe("live state API", () => {
       source: "masthead:opencode-plugin",
       sourceSessionId: "explain-session",
       state: "blocked",
-      observedAt: "2026-07-07T12:00:01.000Z"
+      observedAt: freshTimestamp(1_000)
     });
 
     const explain = await getJson(baseUrl, "/sessions/explain-session/live-explain");
@@ -130,7 +130,7 @@ describe("live state API", () => {
       event: "session_start",
       session_id: "projection-live-session",
       sourceSessionId: "projection-live-session",
-      timestamp: "2026-07-07T12:00:00.000Z",
+      timestamp: freshTimestamp(),
       cwd: "/workspace/masthead",
       title: "Projection live state"
     });
@@ -139,7 +139,7 @@ describe("live state API", () => {
       source: "masthead:opencode-plugin",
       sourceSessionId: "projection-live-session",
       state: "blocked",
-      observedAt: "2026-07-07T12:00:01.000Z"
+      observedAt: freshTimestamp(1_000)
     });
 
     const projection = await getJson(baseUrl, "/projection");
@@ -164,7 +164,7 @@ describe("live state API", () => {
     await postJson(baseUrl, "/ingest?runtime=codex", {
       hookEventName: "PermissionRequest",
       session_id: "ingest-derived-state",
-      timestamp: "2026-07-07T12:00:00.000Z",
+      timestamp: freshTimestamp(),
       cwd: "/workspace/masthead"
     });
 
@@ -180,7 +180,7 @@ describe("live state API", () => {
     await postJson(baseUrl, "/ingest?runtime=codex", {
       event: "SessionStart",
       session_id: "multi-source-session",
-      timestamp: "2026-07-07T12:00:00.000Z",
+      timestamp: freshTimestamp(),
       cwd: "/workspace/masthead"
     });
     await postJson(baseUrl, "/live/state", {
@@ -188,14 +188,14 @@ describe("live state API", () => {
       source: "older-hook",
       sourceSessionId: "multi-source-session",
       state: "idle",
-      observedAt: "2026-07-07T12:00:01.000Z"
+      observedAt: freshTimestamp(1_000)
     });
     await postJson(baseUrl, "/live/state", {
       runtime: "codex",
       source: "newer-plugin",
       sourceSessionId: "multi-source-session",
       state: "blocked",
-      observedAt: "2026-07-07T12:00:02.000Z"
+      observedAt: freshTimestamp(2_000)
     });
 
     const projection = await getJson(baseUrl, "/projection?expandedSessionId=multi-source-session");
@@ -205,6 +205,10 @@ describe("live state API", () => {
     });
   });
 });
+
+function freshTimestamp(offsetMs = 0): string {
+  return new Date(Date.now() + offsetMs).toISOString();
+}
 
 async function createTestDaemon(): Promise<MastheadDaemon> {
   const tempDir = await mkdtemp(join(tmpdir(), "masthead-live-state-api-"));
