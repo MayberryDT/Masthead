@@ -50,6 +50,11 @@ export type HarnessCaptureIntegrationDto = {
   description: string;
   configPath?: string;
   endpoint?: string;
+  stateEndpoint?: string;
+  latestState?: string;
+  latestStateReportAt?: string;
+  stateEndpointHealthy?: boolean;
+  degradedReason?: string;
 };
 
 export type CodexHookSettingsDto = {
@@ -63,6 +68,10 @@ export type CodexHookSettingsDto = {
   endpoint: string;
   latestBackupPath?: string;
   lastEventAt?: string;
+  latestState?: string;
+  latestStateReportAt?: string;
+  stateEndpoint?: string;
+  stateEndpointHealthy?: boolean;
   lastTest?: HookLastTestDto;
   error?: string;
 };
@@ -127,6 +136,7 @@ export type SettingsStateDto = SettingsRuntimeIdentityDto & {
 };
 
 type CodexHookSettingsBaseDto = Omit<CodexHookSettingsDto, "integrations">;
+type LatestRuntimeState = { observedAt: string; state: string };
 
 const hookLastTestKey = "live_hook_last_test";
 
@@ -315,6 +325,8 @@ export async function getLiveHookSettings(db: MastheadDatabase, config: DaemonCo
   const latestBackupPath = (await latestLiveConnectorBackupPath(config)) ?? primaryConnector.latestBackupPath;
   const lastTest = readHookLastTest(db);
   const lastEventAt = latestRawHookEventAt(db);
+  const latestStates = latestLiveStateByRuntime(db);
+  const primaryState = latestStates.get(primaryConnector.runtime);
 
   return withHarnessCaptureIntegrations(
     {
@@ -326,11 +338,16 @@ export async function getLiveHookSettings(db: MastheadDatabase, config: DaemonCo
       installed: connectors.every((connector) => connector.installed),
       lastEventAt,
       lastTest,
+      latestState: primaryState?.state,
+      latestStateReportAt: primaryState?.observedAt,
       latestBackupPath,
       mismatchedEvents: connectorEvents(connectors, "mismatchedEvents"),
-      missingEvents: connectorEvents(connectors, "missingEvents")
+      missingEvents: connectorEvents(connectors, "missingEvents"),
+      stateEndpoint: primaryConnector.stateEndpoint,
+      stateEndpointHealthy: true
     },
-    connectors
+    connectors,
+    latestStates
   );
 }
 
@@ -340,43 +357,61 @@ export async function getRuntimeHookSettings(db: MastheadDatabase, config: Daemo
   return hookSettingsForConnector(db, connector, connectors);
 }
 
-function withHarnessCaptureIntegrations(settings: CodexHookSettingsBaseDto, connectors: LiveConnectorSettings[]): CodexHookSettingsDto {
+function withHarnessCaptureIntegrations(
+  settings: CodexHookSettingsBaseDto,
+  connectors: LiveConnectorSettings[],
+  latestStates: Map<RuntimeKind, LatestRuntimeState>
+): CodexHookSettingsDto {
   const catalogEntries = scanTargetHarnesses();
   const catalogRuntimes = new Set(catalogEntries.map((entry) => entry.runtime));
   const connectorOnlyIntegrations = connectors
     .filter((connector) => !catalogRuntimes.has(connector.runtime))
-    .map(liveConnectorIntegration);
+    .map((connector) => liveConnectorIntegration(connector, latestStates));
   return {
     ...settings,
-    integrations: [...connectorOnlyIntegrations, ...catalogEntries.map((entry) => harnessCaptureIntegration(entry, connectors))]
+    integrations: [...connectorOnlyIntegrations, ...catalogEntries.map((entry) => harnessCaptureIntegration(entry, connectors, latestStates))]
   };
 }
 
-function liveConnectorIntegration(connector: LiveConnectorSettings): HarnessCaptureIntegrationDto {
+function liveConnectorIntegration(connector: LiveConnectorSettings, latestStates: Map<RuntimeKind, LatestRuntimeState>): HarnessCaptureIntegrationDto {
+  const latestState = latestStates.get(connector.runtime);
   return {
     actionSurface: "settings",
     captureMode: "live_hook",
     configPath: connector.configPath,
     description: `Live local ${connector.label} events are installed, tested, and removed from this Settings card.`,
     endpoint: connector.endpoint,
+    latestState: latestState?.state,
+    latestStateReportAt: latestState?.observedAt,
     label: connector.label,
     runtime: connector.runtime,
+    stateEndpoint: connector.stateEndpoint,
+    stateEndpointHealthy: true,
     status: connectorCaptureStatus(connector),
     supportsActions: true
   };
 }
 
-function harnessCaptureIntegration(entry: HarnessCatalogEntry, connectors: LiveConnectorSettings[]): HarnessCaptureIntegrationDto {
+function harnessCaptureIntegration(
+  entry: HarnessCatalogEntry,
+  connectors: LiveConnectorSettings[],
+  latestStates: Map<RuntimeKind, LatestRuntimeState>
+): HarnessCaptureIntegrationDto {
   const connector = connectors.find((item) => item.runtime === entry.runtime);
   if (connector) {
+    const latestState = latestStates.get(connector.runtime);
     return {
       actionSurface: "settings",
       captureMode: "live_hook",
       configPath: connector.configPath,
       description: `Live local ${entry.label} events are installed, tested, and removed from this Settings card.`,
       endpoint: connector.endpoint,
+      latestState: latestState?.state,
+      latestStateReportAt: latestState?.observedAt,
       label: entry.label,
       runtime: entry.runtime,
+      stateEndpoint: connector.stateEndpoint,
+      stateEndpointHealthy: true,
       status: connectorCaptureStatus(connector),
       supportsActions: true
     };
@@ -545,6 +580,30 @@ function latestRawHookEventAt(db: MastheadDatabase): string | undefined {
   return row.observedAt ?? undefined;
 }
 
+function latestLiveStateByRuntime(db: MastheadDatabase): Map<RuntimeKind, LatestRuntimeState> {
+  const rows = db
+    .prepare(
+      `SELECT live_state_reports.runtime AS runtime,
+        live_state_reports.state AS state,
+        live_state_reports.observed_at AS observedAt
+      FROM live_state_reports
+      JOIN (
+        SELECT runtime, MAX(observed_at) AS observed_at
+        FROM live_state_reports
+        GROUP BY runtime
+      ) latest
+        ON latest.runtime = live_state_reports.runtime
+       AND latest.observed_at = live_state_reports.observed_at`
+    )
+    .all() as Array<{ observedAt: string; runtime: string; state: string }>;
+  const byRuntime = new Map<RuntimeKind, LatestRuntimeState>();
+  for (const row of rows) {
+    if (!(RUNTIME_KINDS as readonly string[]).includes(row.runtime)) continue;
+    byRuntime.set(row.runtime as RuntimeKind, { observedAt: row.observedAt, state: row.state });
+  }
+  return byRuntime;
+}
+
 function hookSettingsForConnector(
   db: MastheadDatabase,
   connector: LiveConnectorSettings,
@@ -552,6 +611,8 @@ function hookSettingsForConnector(
 ): CodexHookSettingsDto {
   const lastTest = readHookLastTest(db);
   const lastEventAt = latestRawHookEventAt(db);
+  const latestStates = latestLiveStateByRuntime(db);
+  const latestState = latestStates.get(connector.runtime);
   return withHarnessCaptureIntegrations(
     {
       command: connector.command,
@@ -562,11 +623,16 @@ function hookSettingsForConnector(
       installed: connector.installed,
       lastEventAt,
       lastTest,
+      latestState: latestState?.state,
+      latestStateReportAt: latestState?.observedAt,
       latestBackupPath: connector.latestBackupPath,
       mismatchedEvents: connector.mismatchedEvents,
-      missingEvents: connector.missingEvents
+      missingEvents: connector.missingEvents,
+      stateEndpoint: connector.stateEndpoint,
+      stateEndpointHealthy: true
     },
-    connectors
+    connectors,
+    latestStates
   );
 }
 

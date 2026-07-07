@@ -4,6 +4,7 @@ import {
   applyReviewDispositions,
   createReviewDisposition
 } from "./reviewDispositions.ts";
+import { normalizeLiveStateReport } from "./liveState.ts";
 import { validateLlmOutcomeCandidate } from "./outcomeClassifier.ts";
 import type { StoreRecord } from "./store";
 import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent } from "./types";
@@ -416,15 +417,33 @@ function evaluateLifecycleLanes(projection: LiveBoardProjection): { ok: boolean;
 }
 
 function evaluateStaleDispositionFreshness(): { ok: boolean; details: Record<string, unknown> } {
-  const board = projectFixture({
-    events: [
-      dogfoodEvent("stale-start", "stale-session", "session.started", "2026-06-23T05:00:00.000Z"),
-      dogfoodEvent("stale-command", "stale-session", "command.finished", "2026-06-23T05:05:00.000Z", {
-        commandId: "cmd-continue"
-      })
-    ],
-    gitSnapshots: []
-  }, { expandedSessionId: "stale-session" });
+  const board = projectFixture(
+    {
+      events: [
+        dogfoodEvent("stale-start", "stale-session", "session.started", "2026-06-23T05:00:00.000Z"),
+        dogfoodEvent("stale-command", "stale-session", "command.finished", "2026-06-23T05:05:00.000Z", {
+          commandId: "cmd-continue"
+        })
+      ],
+      gitSnapshots: []
+    },
+    {
+      expandedSessionId: "stale-session",
+      liveStateReports: new Map([
+        [
+          "stale-session",
+          normalizeLiveStateReport({
+            runtime: "claude_code",
+            source: "dogfood",
+            sourceSessionId: "stale-session",
+            state: "working",
+            observedAt: "2026-06-23T05:05:55.000Z"
+          })
+        ]
+      ]),
+      now: new Date("2026-06-23T05:06:00.000Z")
+    }
+  );
   const disposition = createReviewDisposition({
     action: "dismiss",
     subject: { subjectId: "stale-session", subjectType: "session" },

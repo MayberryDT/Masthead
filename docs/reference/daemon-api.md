@@ -25,7 +25,9 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /sessions/:sessionId` returns one session detail.
 - `GET /sessions/:sessionId/excerpts` returns bounded excerpts, with optional `q` and `limit`.
 - `GET /sessions/:sessionId/dossier` returns the canonical session dossier used by Board and Logbook detail views.
+- `GET /sessions/:sessionId/live-explain` explains the current Board live-state decision for one session, including the selected authority, latest live report, latest event fallback, unresolved blockers, and headline fact freshness.
 - `GET /sessions/:sessionId/transcript` returns paginated canonical transcript items from messages, tools, checkpoints, runtime signals, and file effects. Query params include `cursor`, `limit`, `kind=all|user|assistant|tools|checkpoints|files|signals`, and `q`.
+- `GET /live/state` returns latest live runtime-state reports. Optional query params include `runtime`, `sourceSessionId`, `canonicalSessionId`, and `freshOnly=0|1`.
 - `GET /projects` lists known projects.
 - `GET /imports` lists import jobs.
 - `GET /imports/:importJobId` returns one import job.
@@ -38,13 +40,14 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /mcp/audit` lists recent MCP audit rows.
 - `GET /settings` returns settings state.
 - `GET /settings/hooks` returns live connector settings for the release target runtimes.
-- `GET /settings/hooks/:runtime` returns one runtime live connector setting for `claude_code`, `cursor`, `grok`, `opencode`, `omp`, `pi`, or `hermes`.
+- `GET /settings/hooks/:runtime` returns one runtime live connector setting for `codex`, `claude_code`, `cursor`, `grok`, `opencode`, `omp`, `pi`, or `hermes`.
 
 ## Write Endpoints
 
 Write endpoints are local daemon operations. They are not exposed through MCP.
 
 - `POST /ingest` accepts live hook payloads for focused runtimes via `?runtime=...` or `x-masthead-runtime`, defaulting to Claude Code only for legacy local callers. When a hook includes `transcriptPath`, transcript import has been approved, and `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP` is not `0`, the daemon schedules a bounded catch-up import for that transcript file so live sessions receive canonical messages and token usage. The daemon also performs a bounded recovery sweep for recent stored hook events with transcript paths after transcript approval and on startup.
+- `POST /live/state` accepts explicit current runtime-state reports from trusted local hooks/plugins. It records `working`, `blocked`, `idle`, or `unknown` state beside event ingestion and returns `accepted`, `ignored_stale`, `ignored_expired`, `disabled`, or `malformed`. `MASTHEAD_LIVE_CAPTURE=0` disables all state capture, and `MASTHEAD_LIVE_CAPTURE_<RUNTIME>=0` disables one runtime.
 - `POST /sources/discover` refreshes source discovery.
 - `POST /sources/scan` scans known local agent-history locations for all active adapters. It is read-only and allowed through the worktree bridge.
 - `POST /sources/connect` connects selected scan results and queues metadata/enrichment jobs. Transcript import requires explicit approval.
@@ -59,7 +62,7 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 - `POST /data/retention/default` applies default retention.
 - `POST /retention` prunes legacy compatibility journals.
 - `POST /clear` clears Masthead-owned canonical and compatibility state.
-- `POST /settings/hooks/:runtime/install`, `/uninstall`, and `/test` manage one live connector for `claude_code`, `cursor`, `grok`, `opencode`, `omp`, `pi`, or `hermes`.
+- `POST /settings/hooks/:runtime/install`, `/uninstall`, and `/test` manage one live connector for `codex`, `claude_code`, `cursor`, `grok`, `opencode`, `omp`, `pi`, or `hermes`. Connector tests validate both `/ingest` and `/live/state`.
 - `POST /mcp/launch-config/validate` validates a candidate MCP launch config.
 - `POST /mcp/test-connection` starts and probes a candidate MCP server.
 
@@ -72,4 +75,4 @@ npm run check:endpoint-matrix
 
 `npm run doctor:json` includes a `sources-pipeline` check with scan freshness, connected source count, transcript coverage, enrichment coverage, import failures, unrecognized-schema count, and repair recommendations. The check is read-only and reports warnings from observed daemon data only.
 
-`npm run doctor` also checks focused live connector status and recent normalized hook events that include transcript paths but still have no useful transcript messages or token rows. That warning usually means transcript import is not approved, the daemon was started with `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP=0`, the recovery sweep has not run yet, or the referenced transcript file cannot be imported.
+`npm run doctor` also checks focused live connector status, live-state endpoint health, live capture kill-switch environment variables, and recent normalized hook events that include transcript paths but still have no useful transcript messages or token rows. That warning usually means transcript import is not approved, the daemon was started with `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP=0`, the recovery sweep has not run yet, or the referenced transcript file cannot be imported.

@@ -62,7 +62,8 @@ describe("daemon database schema", () => {
         "import_session_impacts",
         "legacy_migrations",
         "board_headline_frames",
-        "board_headline_generations"
+        "board_headline_generations",
+        "live_state_reports"
       ])
     );
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
@@ -79,7 +80,8 @@ describe("daemon database schema", () => {
       { version: 10, name: "010_board_headline_frames" },
       { version: 11, name: "011_board_headline_generations" },
       { version: 12, name: "012_board_headline_frame_refresh_keys" },
-      { version: 13, name: "013_dossier_enrichment_indexes" }
+      { version: 13, name: "013_dossier_enrichment_indexes" },
+      { version: 14, name: "014_live_state_reports" }
     ]);
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
     expect(indexes.map((row) => row.name)).toEqual(
@@ -87,7 +89,8 @@ describe("daemon database schema", () => {
         "tool_results_tool_call_completed_idx",
         "tool_results_session_status_idx",
         "runtime_signals_session_observed_idx",
-        "checkpoints_session_observed_idx"
+        "checkpoints_session_observed_idx",
+        "idx_live_state_reports_session"
       ])
     );
     const frameColumns = db.prepare("PRAGMA table_info(board_headline_frames)").all() as Array<{ name: string }>;

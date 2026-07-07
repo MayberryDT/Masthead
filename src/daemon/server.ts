@@ -11,14 +11,18 @@ import { ALL_RUNTIME_KINDS, RUNTIME_KINDS, type AdapterDiagnostic, type IngestCu
 import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent, removeEventFromLiveProjectionState } from "../core/ingestion.ts";
 import { eventLiveProcessingMode } from "../core/liveSessionFacts.ts";
+import { deriveLiveBlockers } from "../core/liveBlockers.ts";
 import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
-import { projectLiveEvents } from "../core/liveProjection.ts";
+import { approvalBlockerTtlMsForRefresh, projectLiveEvents } from "../core/liveProjection.ts";
+import { selectEffectiveLiveState } from "../core/liveProjectionState.ts";
+import { normalizeLiveStateReport, type LiveStateReport } from "../core/liveState.ts";
+import { deriveSessions } from "../core/sessionReducer.ts";
 import { buildBoardBrief } from "../core/boardBrief.ts";
 import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent, type BoardHeadlineGenerationFinishedEvent, type BoardHeadlineProviderConfig } from "../core/boardHeadlineEnricher.ts";
 import { createFileBackedStore, validateRetentionPolicy, type StoreRecord } from "../core/store.ts";
 import type { ReviewDisposition } from "../core/store.ts";
 import type { PruneLocalDataResult, RetentionPolicy } from "../core/retention.ts";
-import type { LiveHookDiagnostic } from "../core/liveHookAdapter.ts";
+import { liveStateReportFromHookPayload, type LiveHookDiagnostic } from "../core/liveHookAdapter.ts";
 import type { GitSnapshot, LiveBoardProjection, NormalizedEvent, SessionCardView } from "../core/types.ts";
 import type { DaemonConfig } from "./config.ts";
 import {
@@ -42,6 +46,7 @@ import { listImportFailureGroups, listImportWorkUnits } from "./db/importLedgerR
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
 import { liveProjectionTranscriptFacts } from "./db/liveTranscriptFactsRepository.ts";
+import { latestLiveStateForSession, latestLiveStateReports, upsertLiveStateReport } from "./db/liveStateRepository.ts";
 import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsRepository.ts";
 import { createRawEventRepository, type RawEventRepository, type RawEventSource } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
@@ -118,6 +123,7 @@ const HOOK_TRANSCRIPT_CATCHUP_REQUEUE_MS = 250;
 const VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS = 750;
 const RESPONSE_BACKGROUND_GRACE_MS = 50;
 const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
+const LIVE_STATE_BODY_LIMIT_BYTES = 65_536;
 const INGEST_BODY_LIMIT_BYTES = 262_144;
 const LIVE_INGEST_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "opencode", "omp", "pi", "hermes"] as const satisfies readonly RuntimeKind[];
 
@@ -1957,6 +1963,46 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/live/state") {
+      try {
+        const body = objectRecord(await optionalJsonBody(request, LIVE_STATE_BODY_LIMIT_BYTES));
+        const runtime = typeof body.runtime === "string" && isRuntimeKind(body.runtime) ? body.runtime : undefined;
+        if (liveStateCaptureDisabled(runtime)) {
+          sendJson(request, response, config.allowedOrigins, 202, { ok: true, status: "disabled" });
+          return;
+        }
+        const report = normalizeLiveStateReport(body);
+        const result = upsertLiveStateReport(database, report);
+        sendJson(request, response, config.allowedOrigins, 202, {
+          ok: true,
+          status: result.status,
+          report: result.report,
+          ...(result.status === "ignored_stale" ? { previous: result.previous } : {})
+        });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          status: "malformed",
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/live/state") {
+      const runtime = runtimeFromQuery(url.searchParams.get("runtime"));
+      const sourceSessionId = url.searchParams.get("sourceSessionId") ?? undefined;
+      const reports = latestLiveStateReports(database, {
+        runtime,
+        sourceSessionIds: sourceSessionId ? new Set([sourceSessionId]) : undefined,
+        canonicalSessionIds: url.searchParams.get("canonicalSessionId") ? new Set([url.searchParams.get("canonicalSessionId") as string]) : undefined,
+        freshOnly: url.searchParams.get("freshOnly") === "1" || url.searchParams.get("freshOnly") === "true",
+        limit: boundedLiveStateLimit(url.searchParams.get("limit"))
+      });
+      sendJson(request, response, config.allowedOrigins, 200, { ok: true, reports });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/projection") {
       const selectedSessionId = url.searchParams.get("selectedSessionId") || url.searchParams.get("expandedSessionId") || undefined;
       const refreshIntervalMs = parseBoardRefreshIntervalMs(url.searchParams.get("refreshIntervalMs"));
@@ -1965,6 +2011,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const projectionSessionIds = latestProjectionSessionIds(state.events, selectedSessionId);
       const projectionEvents = state.events.filter((event) => event.sessionId && projectionSessionIds.has(event.sessionId));
       const projectionGitSnapshots = gitSnapshots.filter((snapshot) => projectionSessionIds.has(snapshot.sessionId));
+      const liveStateReports = liveStateReportsByProjectionSession(database, projectionSessionIds);
+      const projectionNow = new Date();
+      const blockers = deriveLiveBlockers(projectionEvents, {
+        now: projectionNow,
+        maxAgeMs: approvalBlockerTtlMsForRefresh(refreshIntervalMs)
+      });
       const sessionHeadlineViews = currentBoardHeadlineFrames(
         database,
         [...projectionSessionIds].map((sourceSessionId) => ({
@@ -1977,8 +2029,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         sessionEnrichments: liveProjectionEnrichments(database, projectionSessionIds),
         sessionHeadlineViews,
         sessionTranscriptFacts: liveProjectionTranscriptFacts(database, projectionSessionIds),
+        liveStateReports,
+        blockers,
         headlineMode,
-        diagnostics: state.diagnostics.length
+        diagnostics: state.diagnostics.length,
+        refreshIntervalMs,
+        generatedAt: projectionNow.toISOString()
       });
       liveEnvelope.events = state.events.length;
       liveEnvelope.gitSnapshots = gitSnapshots.length;
@@ -2285,6 +2341,20 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    const sessionLiveExplainMatch = url.pathname.match(/^\/sessions\/([^/]+)\/live-explain$/);
+    if (request.method === "GET" && sessionLiveExplainMatch?.[1]) {
+      const sessionId = decodeURIComponent(sessionLiveExplainMatch[1]);
+      const explain = liveExplainForSession(database, state.events, sessionId);
+      sendJson(
+        request,
+        response,
+        config.allowedOrigins,
+        explain ? 200 : 404,
+        explain ?? { ok: false, error: "session not found" }
+      );
+      return;
+    }
+
     const sessionDetailMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
     if (request.method === "GET" && sessionDetailMatch?.[1]) {
       const session = getSessionDetail(database, decodeURIComponent(sessionDetailMatch[1]));
@@ -2307,6 +2377,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if ((request.method === "POST" || request.method === "GET") && url.pathname === "/refresh") {
+      refreshVolatileStateFromRawRecords();
       const refreshed = await refreshKnownGitSnapshotsSingleFlight();
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
@@ -2832,6 +2903,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
       const adapterRecord = adapterRecordFromLiveHook(body, receivedAt, runtime);
       const event = adapterRecord.normalized.value as NormalizedEvent | undefined;
+      const liveStateReportInput = liveStateInputFromRawHook(body, { receivedAt, runtime });
 
       if (requestDestructiveMutationEpoch !== destructiveMutationEpoch) {
         sendJson(request, response, config.allowedOrigins, 202, {
@@ -2880,6 +2952,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const result = ingestNormalizedEvent(event, state);
 
       if (result.status === "accepted") {
+        persistHookLiveStateReport(database, liveStateReportInput);
         if (eventLiveProcessingMode(result.event) === "deferred") {
           removeEventFromLiveProjectionState(state, result.event);
           deferredLiveIngestQueue.enqueue(result.event);
@@ -3182,6 +3255,133 @@ function latestProjectionSessionIds(events: NormalizedEvent[], selectedSessionId
     if (sessionId) sessionIds.add(sessionId);
   }
   return sessionIds;
+}
+
+function liveStateReportsByProjectionSession(db: MastheadDatabase, projectionSessionIds: Set<string>): Map<string, LiveStateReport> {
+  const reports = latestLiveStateReports(db, {
+    sourceSessionIds: projectionSessionIds,
+    canonicalSessionIds: projectionSessionIds,
+    freshOnly: true,
+    limit: projectionSessionIds.size || 100
+  });
+  const bySession = new Map<string, LiveStateReport>();
+  for (const report of reports) {
+    if (report.sourceSessionId && !bySession.has(report.sourceSessionId)) bySession.set(report.sourceSessionId, report);
+    if (report.canonicalSessionId && !bySession.has(report.canonicalSessionId)) bySession.set(report.canonicalSessionId, report);
+  }
+  return bySession;
+}
+
+function liveStateInputFromRawHook(
+  rawBody: string,
+  options: { receivedAt: string; runtime: RuntimeKind }
+): ReturnType<typeof liveStateReportFromHookPayload> {
+  try {
+    return liveStateReportFromHookPayload(JSON.parse(rawBody), options);
+  } catch {
+    return undefined;
+  }
+}
+
+function persistHookLiveStateReport(db: MastheadDatabase, input: ReturnType<typeof liveStateReportFromHookPayload>): void {
+  if (!input || liveStateCaptureDisabled(input.runtime)) return;
+  try {
+    upsertLiveStateReport(db, normalizeLiveStateReport(input));
+  } catch {
+    // Live state is an opportunistic companion to event ingest; hook capture must fail open.
+  }
+}
+
+function liveExplainForSession(db: MastheadDatabase, events: NormalizedEvent[], requestedSessionId: string): Record<string, unknown> | undefined {
+  const dbSession = db
+    .prepare(
+      `SELECT sessions.session_id AS sessionId, sessions.source_session_id AS sourceSessionId, runtimes.runtime_kind AS runtime
+      FROM sessions
+      JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+      WHERE sessions.session_id = ? OR sessions.source_session_id = ?
+      LIMIT 1`
+    )
+    .get(requestedSessionId, requestedSessionId) as { runtime: RuntimeKind; sessionId: string; sourceSessionId: string } | undefined;
+  const sourceSessionId = dbSession?.sourceSessionId ?? requestedSessionId;
+  const runtime = dbSession?.runtime ?? liveRuntimeForEvents(events, sourceSessionId);
+  const sessionEvents = events.filter((event) => event.sessionId === sourceSessionId || event.sessionId === dbSession?.sessionId);
+  if (!runtime && sessionEvents.length === 0) return undefined;
+
+  const latestLiveState = latestLiveStateForSession(db, {
+    runtime,
+    sourceSessionId,
+    canonicalSessionId: dbSession?.sessionId,
+    freshOnly: true
+  });
+  const blockers = deriveLiveBlockers(sessionEvents).get(sourceSessionId) ?? [];
+  const derived = deriveSessions(sessionEvents);
+  const session =
+    derived.find((candidate) => candidate.sessionId === sourceSessionId || candidate.sessionId === dbSession?.sessionId) ??
+    derived[0];
+  if (!session) {
+    if (!latestLiveState) return undefined;
+    return {
+      ok: true,
+      sessionId: requestedSessionId,
+      sourceSessionId,
+      runtime,
+      displayState: latestLiveState.state,
+      semanticState: latestLiveState.state,
+      selectedAuthority: "live_state",
+      latestLiveState,
+      unresolvedBlockers: blockers
+    };
+  }
+  const latestEvent = sessionEvents.toSorted((a, b) => a.occurredAt.localeCompare(b.occurredAt)).at(-1);
+  const effective = selectEffectiveLiveState({
+    session,
+    latestLiveState,
+    unresolvedBlockers: blockers,
+    latestEvent,
+    now: new Date()
+  });
+
+  return {
+    ok: true,
+    sessionId: requestedSessionId,
+    sourceSessionId,
+    runtime,
+    displayState: effective.displayState,
+    semanticState: effective.semanticState,
+    selectedAuthority: effective.authority === "blocker" ? "unresolved_blocker" : effective.authority,
+    latestLiveState,
+    latestEvent,
+    unresolvedBlockers: blockers,
+    fallbackReason: effective.reason,
+    stalenessMs: latestLiveState ? Math.max(0, Date.now() - Date.parse(latestLiveState.observedAt)) : undefined
+  };
+}
+
+function liveRuntimeForEvents(events: NormalizedEvent[], sourceSessionId: string): RuntimeKind | undefined {
+  const event = events
+    .filter((candidate) => candidate.sessionId === sourceSessionId)
+    .toSorted((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+    .find((candidate) => isRuntimeKind(candidate.payload.runtime) || isRuntimeKind(candidate.source.adapter));
+  if (!event) return undefined;
+  if (isRuntimeKind(event.payload.runtime)) return event.payload.runtime;
+  return isRuntimeKind(event.source.adapter) ? event.source.adapter : undefined;
+}
+
+function runtimeFromQuery(value: string | null): RuntimeKind | undefined {
+  return isRuntimeKind(value) ? value : undefined;
+}
+
+function liveStateCaptureDisabled(runtime: RuntimeKind | undefined): boolean {
+  if (process.env.MASTHEAD_LIVE_CAPTURE === "0") return true;
+  if (!runtime) return false;
+  const runtimeKey = runtime.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  return process.env[`MASTHEAD_LIVE_CAPTURE_${runtimeKey}`] === "0";
+}
+
+function boundedLiveStateLimit(value: string | null): number {
+  const parsed = Number.parseInt(value || "100", 10);
+  if (!Number.isFinite(parsed)) return 100;
+  return Math.max(1, Math.min(parsed, 500));
 }
 
 function parseBoardRefreshIntervalMs(value: string | null): number {

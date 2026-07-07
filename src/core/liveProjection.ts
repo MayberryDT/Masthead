@@ -1,5 +1,7 @@
 import { projectFixture, type LiveSessionEnrichment, type LiveSessionTranscriptFacts } from "./replay.ts";
 import type { BoardHeadlineView } from "./boardHeadlineFrame.ts";
+import type { LiveBlocker } from "./liveBlockers.ts";
+import type { LiveStateReport } from "./liveState.ts";
 import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent } from "./types";
 
 export type LiveProjectionEnvelope = {
@@ -18,10 +20,24 @@ type LiveProjectionOptions = {
   sessionEnrichments?: Map<string, LiveSessionEnrichment>;
   sessionHeadlineViews?: Map<string, BoardHeadlineView>;
   sessionTranscriptFacts?: Map<string, LiveSessionTranscriptFacts>;
+  liveStateReports?: Map<string, LiveStateReport>;
+  blockers?: Map<string, LiveBlocker[]>;
   headlineMode?: "llm" | "offline";
   generatedAt?: string;
   diagnostics?: number;
+  refreshIntervalMs?: number;
+  eventWorkingGraceMs?: number;
 };
+
+export function eventWorkingGraceMsForRefresh(refreshIntervalMs: number | undefined): number {
+  if (!Number.isFinite(refreshIntervalMs)) return 30_000;
+  return Math.max(15_000, Math.min(60_000, Number(refreshIntervalMs) * 2));
+}
+
+export function approvalBlockerTtlMsForRefresh(refreshIntervalMs: number | undefined): number {
+  if (!Number.isFinite(refreshIntervalMs)) return 10 * 60_000;
+  return Math.max(60_000, Math.min(10 * 60_000, Number(refreshIntervalMs) * 12));
+}
 
 export function projectLiveEvents(
   events: NormalizedEvent[],
@@ -49,9 +65,12 @@ export function projectLiveEvents(
       sessionEnrichments: normalizeLiveSessionEnrichments(options.sessionEnrichments),
       sessionHeadlineViews: options.sessionHeadlineViews,
       sessionTranscriptFacts: options.sessionTranscriptFacts,
+      liveStateReports: options.liveStateReports,
+      blockers: options.blockers,
       headlineMode: options.headlineMode ?? "llm",
       selectedSessionId,
-      now: new Date(generatedAt)
+      now: new Date(generatedAt),
+      eventWorkingGraceMs: options.eventWorkingGraceMs ?? eventWorkingGraceMsForRefresh(options.refreshIntervalMs)
     })
   };
 }

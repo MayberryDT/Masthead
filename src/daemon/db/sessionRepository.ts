@@ -649,7 +649,7 @@ function sessionExists(db: MastheadDatabase, sessionId: string): boolean {
   return Boolean(db.prepare("SELECT 1 FROM sessions WHERE session_id = ?").get(sessionId));
 }
 
-const terminalEventTypes = new Set<NormalizedEvent["type"]>(["command.finished", "file.changed", "session.completed"]);
+const terminalEventTypes = new Set<NormalizedEvent["type"]>(["command.finished", "file.changed", "session.completed", "turn.completed"]);
 
 function turnId(sessionId: string, eventId: string): string {
   return `turn:${hash(`${sessionId}\0${eventId}`)}`;
@@ -684,23 +684,23 @@ function turnIndex(event: NormalizedEvent): number {
 }
 
 function roleForEvent(event: NormalizedEvent): string {
-  if (event.type === "user.question") return "user";
+  if (event.type === "user.question" || event.type === "user.response") return "user";
   if (event.type === "session.started") return "system";
-  if (event.type === "session.completed") return "assistant";
+  if (event.type === "session.completed" || event.type === "turn.completed") return "assistant";
   return "tool";
 }
 
 function messageRoleForEvent(event: NormalizedEvent): string | undefined {
-  if (event.type === "user.question") return "user";
+  if (event.type === "user.question" || event.type === "user.response") return "user";
   if (event.type === "session.started") return "system";
-  if (event.type === "session.completed") return "assistant";
+  if (event.type === "session.completed" || event.type === "turn.completed") return "assistant";
   return undefined;
 }
 
 function messageTextForEvent(event: NormalizedEvent): string | undefined {
-  if (event.type === "user.question") return stringPayload(event, ["message", "question", "summary"]) ?? event.summary;
+  if (event.type === "user.question" || event.type === "user.response") return stringPayload(event, ["message", "question", "summary"]) ?? event.summary;
   if (event.type === "session.started") return stringPayload(event, ["title", "objective"]) ?? event.summary;
-  if (event.type === "session.completed") return stringPayload(event, ["outcome", "summary"]) ?? event.summary;
+  if (event.type === "session.completed" || event.type === "turn.completed") return stringPayload(event, ["outcome", "summary"]) ?? event.summary;
   return undefined;
 }
 

@@ -18,12 +18,21 @@ async function main() {
   }
   const body = redactText(raw);
   const url = process.env.MASTHEAD_INGEST_URL || DEFAULT_URL;
+  const stateUrl = process.env.MASTHEAD_STATE_URL || stateUrlFromIngestUrl(url);
   const timeoutMs = Number.parseInt(process.env.MASTHEAD_HOOK_TIMEOUT_MS || "", 10) || DEFAULT_TIMEOUT_MS;
 
   try {
     await post(url, body, timeoutMs);
   } catch {
     // Fail open: Codex hook execution must never block or fail the source session.
+  }
+  const stateBody = stateReportBody(raw, url);
+  if (stateUrl && stateBody) {
+    try {
+      await post(stateUrl, JSON.stringify(stateBody), timeoutMs);
+    } catch {
+      // Fail open: live state is opportunistic and must not affect hook execution.
+    }
   }
   process.exit(0);
 }
@@ -81,6 +90,99 @@ function post(target, body, timeoutMs) {
     request.on("error", reject);
     request.end(body);
   });
+}
+
+function stateUrlFromIngestUrl(ingestUrl) {
+  try {
+    const parsed = new URL(ingestUrl);
+    parsed.pathname = "/live/state";
+    parsed.search = "";
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function stateReportBody(raw, ingestUrl) {
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const runtime = runtimeFromIngestUrl(ingestUrl) || stringValue(payload.runtime) || stringValue(payload.adapter);
+  const state = explicitOrImpliedState(payload);
+  if (!runtime || !state) return undefined;
+  return {
+    runtime,
+    source: `masthead:${runtime}-hook`,
+    sourceSessionId: firstString(payload, ["session_id", "sessionId", "conversation_id", "conversationId", "thread_id", "threadId"]),
+    sourceEventId: firstString(payload, ["provider_event_id", "providerEventId", "event_id", "eventId", "hook_event_id", "hookEventId", "id"]),
+    state,
+    authority: "hook",
+    observedAt: firstString(payload, ["timestamp", "occurred_at", "occurredAt", "time", "created_at", "createdAt"]),
+    cwd: firstString(payload, ["cwd", "working_directory", "workingDirectory"]),
+    repoRoot: firstString(payload, ["workspaceRoot", "repoRoot", "repo_root"]),
+    branch: firstString(payload, ["gitBranch", "branch"])
+  };
+}
+
+function runtimeFromIngestUrl(ingestUrl) {
+  try {
+    return new URL(ingestUrl).searchParams.get("runtime") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function explicitOrImpliedState(payload) {
+  const explicit = normalizeState(firstString(payload, ["state", "status", "runtimeState", "lifecycleState"]));
+  if (explicit) return explicit;
+  const eventName = normalizeEventName(firstString(payload, ["event", "type", "hook_event_name", "hookEventName", "event_name", "eventName"]));
+  if (["permissionrequest", "permissiondenied", "approvalrequested", "toolapprovalrequested"].includes(eventName)) return "blocked";
+  if (["userpromptsubmit", "beforesubmitprompt", "input", "userinput", "pretooluse", "beforeshellexecution"].includes(eventName)) return "working";
+  if (["stop", "sessionstop", "agentend", "sessioncomplete", "sessioncompleted", "sessionstopped"].includes(eventName)) return "idle";
+  return undefined;
+}
+
+function normalizeState(value) {
+  const normalized = normalizeToken(value);
+  if (!normalized) return undefined;
+  if (["working", "running", "active", "busy", "thinking", "executing"].includes(normalized)) return "working";
+  if (["blocked", "waiting_for_approval", "approval_requested", "requires_approval", "permission_requested", "waiting_for_user", "needs_input", "needs_user", "question_requested"].includes(normalized)) return "blocked";
+  if (["idle", "ready", "waiting", "done", "complete", "completed", "stopped", "ended"].includes(normalized)) return "idle";
+  if (normalized === "unknown") return "unknown";
+  return undefined;
+}
+
+function normalizeEventName(value) {
+  return (value || "")
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeToken(value) {
+  return (value || "")
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function firstString(input, keys) {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function stringValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function redactText(input) {

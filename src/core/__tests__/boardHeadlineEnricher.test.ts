@@ -285,7 +285,7 @@ describe("board headline enricher", () => {
     const sourceCard = card({
       lifecycle: "running",
       primaryStatus: "waiting_for_user",
-      stateLabel: "Needs input",
+      stateLabel: "Running",
       headlineInput: input({
         primaryStatus: "waiting_for_user",
         stateHint: "waiting",
@@ -678,6 +678,50 @@ describe("board headline enricher", () => {
     });
 
     second.resolve(responseWithFrame(validFrame({ subject: "New transcript evidence" })));
+    await flushMicrotasks();
+  });
+
+  test("requests a replacement headline for done cards when recent facts change", async () => {
+    const response = deferred<Response>();
+    const fetchImpl = vi.fn<typeof fetch>(() => response.promise);
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
+    const staleHeadline: BoardHeadlineView = {
+      headline: "Board headlines: summarizes earlier work.",
+      frame: validFrame({ disposition: "summarizes earlier work" }),
+      source: "llm",
+      status: "ready",
+      generatedAt: "2026-07-01T12:00:00.000Z",
+      model: "gpt-5-nano-2025-08-07",
+      provider: "openai"
+    };
+
+    const result = await enricher.enrichProjection(
+      projection([
+        card({
+          displayState: "done",
+          lifecycle: "idle",
+          primaryStatus: "completed_unreviewed",
+          headline: staleHeadline,
+          headlineInput: input({
+            lifecycle: "idle",
+            primaryStatus: "completed_unreviewed",
+            stateHint: "completed",
+            facts: {
+              ...input().facts,
+              lifecycle: "idle",
+              primaryStatus: "completed_unreviewed",
+              recentTranscriptMessages: ["The agent just completed the live state API wiring."]
+            }
+          })
+        })
+      ]),
+      { refreshIntervalMs: 5_000 }
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.cards[0]?.headline).toBe(staleHeadline);
+    expect(result.cards[0]?.headlineRefresh).toMatchObject({ status: "pending" });
+    response.resolve(responseWithFrame(validFrame({ subject: "Live state API" })));
     await flushMicrotasks();
   });
 

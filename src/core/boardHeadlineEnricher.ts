@@ -537,11 +537,17 @@ function requestAllowedForSession(lastRequestedAtBySession: Map<string, number>,
 }
 
 function shouldRequestHeadlineForCard(card: SessionCardView): boolean {
-  return card.lifecycle === "running" || card.headline.source !== "llm";
+  return (
+    card.lifecycle === "running" ||
+    card.displayState === "done" ||
+    card.displayState === "idle" ||
+    card.isExpanded ||
+    card.headline.source !== "llm"
+  );
 }
 
 function shouldShowPendingHeadlineForCard(card: SessionCardView): boolean {
-  return card.lifecycle === "running";
+  return card.lifecycle === "running" || card.displayState === "done" || card.displayState === "idle" || card.isExpanded;
 }
 
 function isBoardHeadlineInput(value: unknown): value is BoardHeadlineInput {

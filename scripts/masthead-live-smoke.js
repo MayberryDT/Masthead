@@ -9,6 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 const tempDir = await mkdtemp(join(tmpdir(), "masthead-live-smoke-"));
 const RELEASE_LIVE_RUNTIMES = ["codex", "cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"];
 const PRIMARY_LIVE_RUNTIME = "claude_code";
+const SHARED_LIVE_SESSION_ID = "live-smoke-shared-source-session";
 let server;
 
 try {
@@ -36,6 +37,16 @@ try {
     assert(runtimeAccepted.status === "accepted", `expected accepted ${runtime} ingest, got ${runtimeAccepted.status}`);
     assert(runtimeAccepted.events === expectedLiveEvents, `expected ${expectedLiveEvents} cumulative live events after ${runtime}, got ${runtimeAccepted.events}`);
   }
+  for (const runtime of RELEASE_LIVE_RUNTIMES) {
+    const stateAccepted = await postJson(server.baseUrl, "/live/state", liveStatePayload(runtime, "working", `live-smoke-${runtime}-working`, 1));
+    assert(stateAccepted.status === "accepted", `expected accepted ${runtime} working state, got ${stateAccepted.status}`);
+  }
+
+  const primaryState = await getJson(server.baseUrl, `/live/state?runtime=${PRIMARY_LIVE_RUNTIME}&sourceSessionId=${liveSessionId(PRIMARY_LIVE_RUNTIME)}`);
+  assert(primaryState.reports?.[0]?.state === "working", "live state endpoint missing primary working report");
+
+  await postJson(server.baseUrl, "/ingest?runtime=codex", livePayload("codex", "live-smoke-shared-codex", SHARED_LIVE_SESSION_ID));
+  await postJson(server.baseUrl, "/ingest?runtime=opencode", livePayload("opencode", "live-smoke-shared-opencode", SHARED_LIVE_SESSION_ID));
 
   const projection = await getJson(server.baseUrl, `/projection?expandedSessionId=${liveSessionId(PRIMARY_LIVE_RUNTIME)}`);
   assert(projection.projection?.cards?.some((card) => card.sessionId === liveSessionId(PRIMARY_LIVE_RUNTIME)), "projection missing live smoke session");
@@ -44,10 +55,21 @@ try {
     const card = projection.projection?.cards?.find((item) => item.runtime === runtime && item.sourceSessionId === expectedSourceSessionId);
     assert(card, `projection missing ${runtime} live smoke card`);
     assert(card.canonicalSessionId && card.canonicalSessionId !== expectedSourceSessionId, `${runtime} card missing canonical session id`);
+    assert(card.displayState === "working", `${runtime} card display state should be working, got ${card.displayState}`);
+    assert(card.runtimeState === "working", `${runtime} card runtime state should be working, got ${card.runtimeState}`);
   }
+  await postJson(server.baseUrl, "/live/state", liveStatePayload(PRIMARY_LIVE_RUNTIME, "blocked", "live-smoke-primary-blocked", 2));
+  let stateProjection = await getJson(server.baseUrl, `/projection?expandedSessionId=${liveSessionId(PRIMARY_LIVE_RUNTIME)}`);
+  let primaryCard = stateProjection.projection?.cards?.find((card) => card.sessionId === liveSessionId(PRIMARY_LIVE_RUNTIME));
+  assert(primaryCard?.displayState === "blocked", `primary card should become blocked, got ${primaryCard?.displayState}`);
+  assert(primaryCard?.lifecycle === "running", `blocked primary card should stay in live lifecycle, got ${primaryCard?.lifecycle}`);
+  await postJson(server.baseUrl, "/live/state", liveStatePayload(PRIMARY_LIVE_RUNTIME, "idle", "live-smoke-primary-idle", 3));
+  stateProjection = await getJson(server.baseUrl, `/projection?expandedSessionId=${liveSessionId(PRIMARY_LIVE_RUNTIME)}`);
+  primaryCard = stateProjection.projection?.cards?.find((card) => card.sessionId === liveSessionId(PRIMARY_LIVE_RUNTIME));
+  assert(["idle", "done"].includes(primaryCard?.displayState), `primary card should become idle/done, got ${primaryCard?.displayState}`);
 
   const events = await getJson(server.baseUrl, "/events");
-  assert(events.events?.length === RELEASE_LIVE_RUNTIMES.length, `events endpoint should return ${RELEASE_LIVE_RUNTIMES.length} accepted events`);
+  assert(events.events?.length === RELEASE_LIVE_RUNTIMES.length + 2, `events endpoint should return ${RELEASE_LIVE_RUNTIMES.length + 2} accepted events`);
 
   const logbook = await getJson(server.baseUrl, "/logbook/search?q=Live%20smoke");
   assert(logbook.sessions?.some((session) => session.title === "Live smoke approval"), "logbook search missing live smoke session");
@@ -62,8 +84,8 @@ try {
   if (process.env.MASTHEAD_KEEP_SMOKE_DIR !== "1") await rm(tempDir, { force: true, recursive: true });
 }
 
-function livePayload(runtime, providerEventId) {
-  const sessionId = liveSessionId(runtime);
+function livePayload(runtime, providerEventId, sourceSessionId = liveSessionId(runtime)) {
+  const sessionId = sourceSessionId;
   const shared = {
     provider_event_id: providerEventId,
     timestamp: "2026-06-25T00:00:00.000Z",
@@ -98,6 +120,13 @@ function livePayload(runtime, providerEventId) {
       type: "session_start"
     };
   }
+  if (runtime === "pi" || runtime === "hermes") {
+    return {
+      ...shared,
+      event: "session_start",
+      session_id: sessionId
+    };
+  }
   if (runtime === "opencode") {
     return {
       ...shared,
@@ -118,6 +147,20 @@ function liveSessionId(runtime) {
   return `live-smoke-${runtime}-session`;
 }
 
+function liveStatePayload(runtime, state, sourceEventId, seq) {
+  return {
+    runtime,
+    source: `masthead:${runtime}:live-smoke`,
+    sourceEventId,
+    sourceSessionId: liveSessionId(runtime),
+    state,
+    authority: "plugin",
+    observedAt: new Date(Date.now() + seq * 1000).toISOString(),
+    cwd: "/workspace/masthead-smoke",
+    seq
+  };
+}
+
 function assertDatabase(databasePath) {
   const db = new DatabaseSync(databasePath);
   try {
@@ -135,8 +178,16 @@ function assertDatabase(databasePath) {
       .all();
     const runtimeCounts = new Map(runtimeRows.map((row) => [row.runtime, row.count]));
     for (const runtime of RELEASE_LIVE_RUNTIMES) {
-      assert(runtimeCounts.get(runtime) === 1, `expected one canonical ${runtime} session row, got ${runtimeCounts.get(runtime) ?? 0}`);
+      const expected = runtime === "codex" || runtime === "opencode" ? 2 : 1;
+      assert(runtimeCounts.get(runtime) === expected, `expected ${expected} canonical ${runtime} session rows, got ${runtimeCounts.get(runtime) ?? 0}`);
     }
+    const sharedRows = db
+      .prepare("SELECT session_id AS sessionId, source_session_id AS sourceSessionId FROM sessions WHERE source_session_id = ?")
+      .all(SHARED_LIVE_SESSION_ID);
+    assert(sharedRows.length === 2, `expected two canonical rows for shared source session, got ${sharedRows.length}`);
+    assert(new Set(sharedRows.map((row) => row.sessionId)).size === 2, "shared source session canonical ids should remain runtime-scoped");
+    const stateReports = db.prepare("SELECT COUNT(*) AS count FROM live_state_reports").get().count;
+    assert(stateReports >= RELEASE_LIVE_RUNTIMES.length + 2, `expected live state reports, got ${stateReports}`);
   } finally {
     db.close();
   }

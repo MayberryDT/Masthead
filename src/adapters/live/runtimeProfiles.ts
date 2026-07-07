@@ -17,7 +17,7 @@ export type LiveRuntimeProfile = {
   };
   eventMap: Record<string, EventType>;
   runtimeStateKeys?: string[];
-  runtimeStateMap?: Record<string, "running" | "idle" | "blocked" | "ended">;
+  runtimeStateMap?: Record<string, "running" | "idle" | "blocked">;
 };
 
 const DEFAULT_RUNTIME_STATE_KEYS = ["state", "status", "runtimeState", "lifecycleState"];
@@ -33,11 +33,11 @@ const DEFAULT_RUNTIME_STATE_MAP = {
   ready: "idle",
   waiting: "idle",
   blocked: "blocked",
-  done: "ended",
-  completed: "ended",
-  complete: "ended",
-  stopped: "ended",
-  ended: "ended"
+  done: "idle",
+  completed: "idle",
+  complete: "idle",
+  stopped: "idle",
+  ended: "idle"
 } satisfies NonNullable<LiveRuntimeProfile["runtimeStateMap"]>;
 
 export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfile>> = {
@@ -57,14 +57,14 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
     },
     eventMap: {
       sessionstart: "session.started",
-      userpromptsubmit: "user.question",
+      userpromptsubmit: "user.response",
       pretooluse: "command.started",
       posttooluse: "command.finished",
       posttoolusefailure: "command.finished",
       permissionrequest: "approval.requested",
       permissiondenied: "approval.requested",
-      stop: "session.completed",
-      sessionend: "session.completed"
+      stop: "turn.completed",
+      sessionend: "session.closed"
     },
     runtimeStateKeys: DEFAULT_RUNTIME_STATE_KEYS,
     runtimeStateMap: DEFAULT_RUNTIME_STATE_MAP
@@ -85,13 +85,13 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
     },
     eventMap: {
       sessionstart: "session.started",
-      beforesubmitprompt: "user.question",
+      beforesubmitprompt: "user.response",
       beforeshellexecution: "command.started",
       aftershellexecution: "command.finished",
       afterfileedit: "file.changed",
       afteragentresponse: "session.started",
-      stop: "session.completed",
-      sessionend: "session.completed"
+      stop: "turn.completed",
+      sessionend: "session.closed"
     },
     runtimeStateKeys: DEFAULT_RUNTIME_STATE_KEYS,
     runtimeStateMap: DEFAULT_RUNTIME_STATE_MAP
@@ -112,13 +112,13 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
     },
     eventMap: {
       sessionstart: "session.started",
-      userpromptsubmit: "user.question",
+      userpromptsubmit: "user.response",
       pretooluse: "command.started",
       posttooluse: "command.finished",
       posttoolusefailure: "command.finished",
       permissiondenied: "approval.requested",
-      stop: "session.completed",
-      sessionend: "session.completed"
+      stop: "turn.completed",
+      sessionend: "session.closed"
     },
     runtimeStateKeys: DEFAULT_RUNTIME_STATE_KEYS,
     runtimeStateMap: DEFAULT_RUNTIME_STATE_MAP
@@ -147,10 +147,10 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
       permissionasked: "approval.requested",
       toolexecutebefore: "command.started",
       toolexecuteafter: "command.finished",
-      sessioncomplete: "session.completed",
-      sessioncompleted: "session.completed",
-      sessionstopped: "session.completed",
-      sessionended: "session.completed"
+      sessioncomplete: "turn.completed",
+      sessioncompleted: "turn.completed",
+      sessionstopped: "turn.completed",
+      sessionended: "session.closed"
     },
     runtimeStateKeys: DEFAULT_RUNTIME_STATE_KEYS,
     runtimeStateMap: DEFAULT_RUNTIME_STATE_MAP
@@ -171,14 +171,14 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
     },
     eventMap: {
       sessionstart: "session.started",
-      userpromptsubmit: "user.question",
+      userpromptsubmit: "user.response",
       pretooluse: "command.started",
       posttooluse: "command.finished",
       posttoolusefailure: "command.finished",
       permissiondenied: "approval.requested",
-      stop: "session.completed",
-      stopfailure: "session.completed",
-      sessionend: "session.completed"
+      stop: "turn.completed",
+      stopfailure: "turn.completed",
+      sessionend: "session.closed"
     },
     runtimeStateKeys: DEFAULT_RUNTIME_STATE_KEYS,
     runtimeStateMap: DEFAULT_RUNTIME_STATE_MAP
@@ -201,11 +201,11 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
       sessionstart: "session.started",
       sessioncreated: "session.started",
       agentstart: "session.started",
-      input: "user.question",
-      userinput: "user.question",
-      message: "user.question",
+      input: "user.response",
+      userinput: "user.response",
+      message: "user.response",
       approvalrequested: "approval.requested",
-      approvalresolved: "approval.requested",
+      approvalresolved: "approval.resolved",
       permissionrequested: "approval.requested",
       toolstart: "command.started",
       toolstarted: "command.started",
@@ -213,9 +213,9 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
       toolfinish: "command.finished",
       toolfinished: "command.finished",
       toolexecutionend: "command.finished",
-      sessionstop: "session.completed",
-      sessioncompleted: "session.completed",
-      sessionend: "session.completed"
+      sessionstop: "turn.completed",
+      sessioncompleted: "turn.completed",
+      sessionend: "session.closed"
     },
     runtimeStateKeys: DEFAULT_RUNTIME_STATE_KEYS,
     runtimeStateMap: DEFAULT_RUNTIME_STATE_MAP
@@ -237,19 +237,19 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
     eventMap: {
       sessionstart: "session.started",
       agentstart: "session.started",
-      input: "user.question",
-      beforeagentstart: "user.question",
+      input: "user.response",
+      beforeagentstart: "turn.started",
       toolapprovalrequested: "approval.requested",
-      toolapprovalresolved: "approval.requested",
+      toolapprovalresolved: "approval.resolved",
       approvalrequested: "approval.requested",
-      approvalresolved: "approval.requested",
+      approvalresolved: "approval.resolved",
       toolcall: "command.started",
       toolexecutionstart: "command.started",
       toolresult: "command.finished",
       toolexecutionend: "command.finished",
-      sessionstop: "session.completed",
-      agentend: "session.completed",
-      sessionshutdown: "session.completed"
+      sessionstop: "turn.completed",
+      agentend: "turn.completed",
+      sessionshutdown: "session.closed"
     },
     runtimeStateKeys: DEFAULT_RUNTIME_STATE_KEYS,
     runtimeStateMap: DEFAULT_RUNTIME_STATE_MAP
@@ -271,17 +271,17 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
     eventMap: {
       sessionstart: "session.started",
       agentstart: "session.started",
-      input: "user.question",
-      beforeagentstart: "user.question",
+      input: "user.response",
+      beforeagentstart: "turn.started",
       toolapprovalrequested: "approval.requested",
-      toolapprovalresolved: "approval.requested",
+      toolapprovalresolved: "approval.resolved",
       toolcall: "command.started",
       toolexecutionstart: "command.started",
       toolresult: "command.finished",
       toolexecutionend: "command.finished",
-      sessionstop: "session.completed",
-      agentend: "session.completed",
-      sessionshutdown: "session.completed"
+      sessionstop: "turn.completed",
+      agentend: "turn.completed",
+      sessionshutdown: "session.closed"
     },
     runtimeStateKeys: DEFAULT_RUNTIME_STATE_KEYS,
     runtimeStateMap: DEFAULT_RUNTIME_STATE_MAP

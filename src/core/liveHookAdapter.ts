@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { LIVE_RUNTIME_PROFILES, type LiveRuntimeProfile } from "../adapters/live/runtimeProfiles.ts";
 import { ALL_RUNTIME_KINDS, type RuntimeKind } from "../adapters/types.ts";
 import { buildLatestFeedbackSnapshot } from "./feedbackSnapshot.ts";
+import { liveStateImpliedByEvent } from "./livePermission.ts";
+import { normalizeLiveState, type LiveStateAuthority, type LiveStateReportInput } from "./liveState.ts";
 import { redactPath, redactText } from "./redaction.ts";
 import type { EventType, NormalizedEvent, WorkspaceRef } from "./types";
 
@@ -183,6 +185,31 @@ export function normalizeLiveHookPayload(input: unknown, options: LiveHookNormal
   };
 }
 
+export function liveStateReportFromHookPayload(input: unknown, options: LiveHookNormalizeOptions = {}): LiveStateReportInput | undefined {
+  const event = normalizeLiveHookPayload(input, options);
+  const explicitState =
+    event.type === "user.question"
+      ? undefined
+      : normalizeLiveState(event.payload.runtimeLifecycleState) ??
+        normalizeLiveState(firstPayloadString(event, ["state", "status", "runtimeState", "lifecycleState"]));
+  const impliedState = liveStateImpliedByEvent(event);
+  const state = explicitState ?? impliedState;
+  if (!state) return undefined;
+
+  return {
+    runtime: event.source.adapter as RuntimeKind,
+    source: event.evidence[0]?.source ?? `${event.source.adapter}.${event.source.surface}`,
+    sourceSessionId: firstPayloadString(event, ["sourceSessionId"]) ?? event.sessionId,
+    sourceEventId: event.source.sourceEventId,
+    state,
+    authority: authorityForSurface(event.source.surface),
+    observedAt: event.occurredAt,
+    cwd: event.workspace?.cwd,
+    repoRoot: event.workspace?.repoRoot,
+    branch: event.workspace?.branch
+  };
+}
+
 function fallbackSourceEventId(
   profile: LiveRuntimeProfile,
   sessionId: string | undefined,
@@ -197,6 +224,18 @@ function fallbackSourceEventId(
     occurredAt,
     payloadHash
   });
+}
+
+function firstPayloadString(event: NormalizedEvent, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = event.payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function authorityForSurface(surface: NormalizedEvent["source"]["surface"]): LiveStateAuthority {
+  return surface === "plugin" ? "plugin" : surface === "tailer" ? "tailer" : "hook";
 }
 
 function profileForRuntime(value: string | undefined): LiveRuntimeProfile {
@@ -233,10 +272,18 @@ function mapEventType(value: string | undefined, input: Record<string, unknown>,
     case "requires_approval":
     case "permission_request":
       return "approval.requested";
+    case "approval_resolved":
+    case "permission_resolved":
+      return "approval.resolved";
     case "question":
     case "user_question":
     case "user_input_requested":
       return "user.question";
+    case "input":
+    case "user_input":
+    case "user_response":
+    case "user_prompt_submit":
+      return "user.response";
     case "command_start":
     case "command_started":
     case "command_running":
@@ -253,11 +300,18 @@ function mapEventType(value: string | undefined, input: Record<string, unknown>,
       return isFileMutationTool(input) ? "file.changed" : "command.finished";
     case "pre_tool_use":
       return "command.started";
+    case "agent_end":
+    case "session_stop":
+    case "stop":
+      return "turn.completed";
+    case "session_shutdown":
+    case "session_closed":
+    case "session_end":
+      return "session.closed";
     case "session_complete":
     case "session_completed":
     case "completed":
-    case "stop":
-      return "session.completed";
+      return "turn.completed";
     case "session_start":
     case "session_started":
     case "start":
@@ -470,7 +524,7 @@ function runtimeHintFromPath(value: string): RuntimeKind | undefined {
 function runtimeLifecycleStateFrom(
   input: Record<string, unknown>,
   profile: LiveRuntimeProfile
-): "running" | "idle" | "blocked" | "ended" | undefined {
+): "running" | "idle" | "blocked" | undefined {
   if (!profile.runtimeStateKeys || !profile.runtimeStateMap) return undefined;
   for (const key of profile.runtimeStateKeys) {
     const normalized = normalizeRuntimeStateKey(firstString(input, [key]));

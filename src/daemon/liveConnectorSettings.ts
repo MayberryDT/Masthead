@@ -26,6 +26,7 @@ export type LiveConnectorSettings = {
   mismatchedEvents: string[];
   command: string;
   endpoint: string;
+  stateEndpoint: string;
   latestBackupPath?: string;
   error?: string;
 };
@@ -79,18 +80,19 @@ export async function getLiveConnectorSetting(config: DaemonConfig, runtime: Liv
   const configPath = liveConnectorConfigPath(config, runtime);
   const command = liveConnectorCommand(config, runtime);
   const endpoint = liveConnectorEndpoint(config, runtime);
+  const stateEndpoint = liveStateEndpoint(config);
   const latestBackupPath = await latestHookBackupPath(configPath).catch(() => undefined);
 
   try {
     if (runtime === "cursor") {
       const { config: hookConfig, existed } = await readJsonConfig<CursorHookConfig>(configPath, { allowMissing: true });
       const verification = verifyCursorHookConfig(hookConfig, { command, events: CURSOR_EVENTS });
-      return stateFromVerification(runtime, { command, configPath, endpoint, existed, latestBackupPath, verification });
+      return stateFromVerification(runtime, { command, configPath, endpoint, existed, latestBackupPath, stateEndpoint, verification });
     }
 
     const marker = markedConnectorMarker(runtime);
     if (marker) {
-      const verification = await verifyMarkedPluginFile(configPath, endpoint, marker);
+      const verification = await verifyMarkedPluginFile(configPath, { endpoint, marker, stateEndpoint });
       return {
         command,
         configExists: verification.configExists,
@@ -101,13 +103,14 @@ export async function getLiveConnectorSetting(config: DaemonConfig, runtime: Liv
         latestBackupPath,
         mismatchedEvents: verification.mismatchedEvents,
         missingEvents: verification.missingEvents,
-        runtime
+        runtime,
+        stateEndpoint
       };
     }
 
     const { config: hookConfig, existed } = await readJsonConfig<CodexHookConfig>(configPath, { allowMissing: true });
     const verification = verifyMastheadHookConfig(hookConfig, { command, events: CLAUDE_STYLE_EVENTS });
-    return stateFromVerification(runtime, { command, configPath, endpoint, existed, latestBackupPath, verification });
+    return stateFromVerification(runtime, { command, configPath, endpoint, existed, latestBackupPath, stateEndpoint, verification });
   } catch (error) {
     return {
       command,
@@ -120,7 +123,8 @@ export async function getLiveConnectorSetting(config: DaemonConfig, runtime: Liv
       latestBackupPath,
       mismatchedEvents: [],
       missingEvents: [],
-      runtime
+      runtime,
+      stateEndpoint
     };
   }
 }
@@ -151,6 +155,7 @@ export async function runLiveConnectorRoundTrip(
 
   for (const runtime of runtimes) {
     const endpoint = liveConnectorValidationEndpoint(config, runtime, options.endpoint);
+    const stateEndpoint = liveStateEndpoint(config, options.endpoint);
     const sourceEventId = `masthead-settings-${runtime}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try {
       const response = await fetch(endpoint, {
@@ -160,7 +165,18 @@ export async function runLiveConnectorRoundTrip(
       });
       const body = (await response.json().catch(() => undefined)) as { status?: string } | undefined;
       if (!response.ok || body?.status !== "accepted") {
-        failures.push(`${LABELS[runtime]} returned ${response.ok ? body?.status ?? "unknown status" : response.status}`);
+        failures.push(`${LABELS[runtime]} ingest returned ${response.ok ? body?.status ?? "unknown status" : response.status}`);
+        continue;
+      }
+
+      const stateResponse = await fetch(stateEndpoint, {
+        body: JSON.stringify(syntheticStatePayload(runtime, sourceEventId, testedAt)),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      const stateBody = (await stateResponse.json().catch(() => undefined)) as { status?: string } | undefined;
+      if (!stateResponse.ok || (stateBody?.status !== "accepted" && stateBody?.status !== "ignored_stale")) {
+        failures.push(`${LABELS[runtime]} live state returned ${stateResponse.ok ? stateBody?.status ?? "unknown status" : stateResponse.status}`);
       }
     } catch (error) {
       failures.push(`${LABELS[runtime]} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -176,7 +192,7 @@ export async function runLiveConnectorRoundTrip(
   }
 
   return {
-    message: `Hook round-trip passed: Masthead accepted synthetic live events for ${runtimes.map((runtime) => LABELS[runtime]).join(", ")}.`,
+    message: `Hook round-trip passed: Masthead accepted synthetic live events and state reports for ${runtimes.map((runtime) => LABELS[runtime]).join(", ")}.`,
     status: "passed",
     testedAt
   };
@@ -206,7 +222,7 @@ export function liveConnectorConfigPath(config: DaemonConfig, runtime: LiveConne
 
 export function liveConnectorCommand(config: DaemonConfig, runtime: LiveConnectorRuntime, endpoint?: string): string {
   const { nodePath, scriptPath } = resolveLiveConnectorCommandPaths();
-  return `MASTHEAD_INGEST_URL=${quoteShell(liveConnectorEndpoint(config, runtime, endpoint))} MASTHEAD_HOOK_TIMEOUT_MS=750 ${quoteShell(nodePath)} ${quoteShell(scriptPath)}`;
+  return `MASTHEAD_INGEST_URL=${quoteShell(liveConnectorEndpoint(config, runtime, endpoint))} MASTHEAD_STATE_URL=${quoteShell(liveStateEndpoint(config, endpoint))} MASTHEAD_HOOK_TIMEOUT_MS=750 ${quoteShell(nodePath)} ${quoteShell(scriptPath)}`;
 }
 
 export function resolveLiveConnectorCommandPaths(
@@ -279,6 +295,13 @@ export function baseIngestEndpoint(config: DaemonConfig): string {
   return `http://${config.host}:${config.port}/ingest`;
 }
 
+export function liveStateEndpoint(config: DaemonConfig, endpoint = baseIngestEndpoint(config)): string {
+  const url = new URL(endpoint);
+  url.pathname = "/live/state";
+  url.search = "";
+  return url.toString();
+}
+
 export async function latestLiveConnectorBackupPath(config: DaemonConfig): Promise<string | undefined> {
   const backups = await Promise.all(
     LIVE_CONNECTOR_RUNTIMES.map(async (runtime) => {
@@ -302,7 +325,7 @@ export async function installLiveConnector(config: DaemonConfig, runtime: LiveCo
     return;
   }
 
-  const markedSource = markedConnectorSource(runtime, liveConnectorEndpoint(config, runtime));
+  const markedSource = markedConnectorSource(runtime, liveConnectorEndpoint(config, runtime), liveStateEndpoint(config));
   if (markedSource) {
     if (await pathExists(configPath)) await createHookBackup(configPath, "install");
     await writeTextConfig(configPath, markedSource);
@@ -357,6 +380,7 @@ function stateFromVerification(
     endpoint: string;
     existed: boolean;
     latestBackupPath?: string;
+    stateEndpoint: string;
     verification: { installed: boolean; missingEvents: string[]; mismatchedEvents: string[] };
   }
 ): LiveConnectorSettings {
@@ -370,7 +394,8 @@ function stateFromVerification(
     latestBackupPath: input.latestBackupPath,
     mismatchedEvents: input.verification.mismatchedEvents,
     missingEvents: input.verification.missingEvents,
-    runtime
+    runtime,
+    stateEndpoint: input.stateEndpoint
   };
 }
 
@@ -389,16 +414,16 @@ function markedConnectorMarker(runtime: LiveConnectorRuntime): string | undefine
   }
 }
 
-function markedConnectorSource(runtime: LiveConnectorRuntime, endpoint: string): string | undefined {
+function markedConnectorSource(runtime: LiveConnectorRuntime, endpoint: string, stateEndpoint: string): string | undefined {
   switch (runtime) {
     case "opencode":
-      return openCodePluginSource(endpoint);
+      return openCodePluginSource(endpoint, stateEndpoint);
     case "omp":
-      return ompExtensionSource(endpoint);
+      return ompExtensionSource(endpoint, stateEndpoint);
     case "pi":
-      return runtimePluginSource(PI_EXTENSION_MARKER, endpoint, "pi.extension");
+      return runtimePluginSource(PI_EXTENSION_MARKER, endpoint, stateEndpoint, "pi.extension", "pi");
     case "hermes":
-      return runtimePluginSource(HERMES_PLUGIN_MARKER, endpoint, "hermes.plugin");
+      return runtimePluginSource(HERMES_PLUGIN_MARKER, endpoint, stateEndpoint, "hermes.plugin", "hermes");
     default:
       return undefined;
   }
@@ -457,7 +482,7 @@ function verifyCursorHookConfig(config: CursorHookConfig, expected: { command: s
   };
 }
 
-async function verifyMarkedPluginFile(configPath: string, endpoint: string, marker: string): Promise<{
+async function verifyMarkedPluginFile(configPath: string, input: { endpoint: string; marker: string; stateEndpoint: string }): Promise<{
   configExists: boolean;
   installed: boolean;
   missingEvents: string[];
@@ -468,18 +493,19 @@ async function verifyMarkedPluginFile(configPath: string, endpoint: string, mark
     raw = await readFile(configPath, "utf8");
   } catch (error) {
     if (isErrno(error, "ENOENT")) {
-      return { configExists: false, installed: false, mismatchedEvents: [], missingEvents: ["event"] };
+      return { configExists: false, installed: false, mismatchedEvents: [], missingEvents: ["event", "state"] };
     }
     throw error;
   }
 
-  const hasMarker = raw.includes(marker);
-  const hasEndpoint = raw.includes(endpoint);
+  const hasMarker = raw.includes(input.marker);
+  const hasEndpoint = raw.includes(input.endpoint);
+  const hasStateEndpoint = raw.includes(input.stateEndpoint);
   return {
     configExists: true,
-    installed: hasMarker && hasEndpoint,
-    mismatchedEvents: hasMarker && !hasEndpoint ? ["event"] : [],
-    missingEvents: hasMarker ? [] : ["event"]
+    installed: hasMarker && hasEndpoint && hasStateEndpoint,
+    mismatchedEvents: hasMarker ? [!hasEndpoint ? "event" : undefined, !hasStateEndpoint ? "state" : undefined].filter((value): value is string => Boolean(value)) : [],
+    missingEvents: hasMarker ? [] : ["event", "state"]
   };
 }
 
@@ -539,9 +565,25 @@ function syntheticPayload(runtime: LiveConnectorRuntime, sourceEventId: string, 
   };
 }
 
-function openCodePluginSource(endpoint: string): string {
+function syntheticStatePayload(runtime: LiveConnectorRuntime, sourceEventId: string, testedAt: string): Record<string, unknown> {
+  return {
+    runtime,
+    source: `masthead:${runtime}:settings-test`,
+    sourceEventId: `${sourceEventId}:state`,
+    sourceSessionId: `masthead-hook-test-${runtime}-${sourceEventId}`,
+    state: "working",
+    authority: "hook",
+    observedAt: testedAt,
+    cwd: process.cwd(),
+    seq: Date.now()
+  };
+}
+
+function openCodePluginSource(endpoint: string, stateEndpoint: string): string {
   return `// ${OPENCODE_PLUGIN_MARKER}: installed by Masthead.
 const MASTHEAD_ENDPOINT = ${JSON.stringify(endpoint)};
+const MASTHEAD_STATE_ENDPOINT = ${JSON.stringify(stateEndpoint)};
+let mastheadSequence = 0;
 
 function firstString(...values) {
   for (const value of values) {
@@ -560,17 +602,50 @@ async function postMastheadEvent(event) {
   const tool = properties.tool && typeof properties.tool === "object" ? properties.tool : {};
   const payload = {
     type: firstString(event?.type, event?.name, properties.type),
+    provider_event_id: firstString(event?.id, event?.eventId, properties.eventId, properties.id),
     sessionID: firstString(properties.sessionID, properties.sessionId, properties.session_id, session.id, event?.sessionID, event?.sessionId),
     time: firstString(event?.time, event?.timestamp, properties.time, properties.timestamp) || new Date().toISOString(),
     directory: firstString(properties.directory, properties.cwd, process.cwd?.()),
     toolName: firstString(properties.toolName, properties.tool_name, tool.name),
     toolUseId: firstString(properties.toolUseId, properties.tool_use_id, tool.id),
+    status: firstString(properties.status, properties.state, event?.status, event?.state),
     message: properties.message,
   };
+  const state = stateForEvent(payload);
   await fetch(MASTHEAD_ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
+  });
+  if (state) await postMastheadState(payload, state);
+}
+
+function stateForEvent(payload) {
+  const type = String(payload.type || "").toLowerCase();
+  const status = String(payload.status || "").toLowerCase();
+  if (/permission|approval/.test(type) || /blocked|approval/.test(status)) return "blocked";
+  if (/stop|complete|completed|idle|session\\.end|sessionend/.test(type) || /idle|complete|completed|stopped|done/.test(status)) return "idle";
+  if (/session|tool|message|input|run|start|created/.test(type) || /running|working|active|busy/.test(status)) return "working";
+  return undefined;
+}
+
+async function postMastheadState(payload, state) {
+  const body = {
+    runtime: "opencode",
+    source: "masthead:opencode-plugin",
+    sourceSessionId: payload.sessionID,
+    sourceEventId: payload.provider_event_id || payload.type,
+    state,
+    authority: "plugin",
+    observedAt: payload.time || new Date().toISOString(),
+    cwd: payload.directory,
+    message: payload.type,
+    seq: Date.now() * 1000 + (++mastheadSequence)
+  };
+  await fetch(MASTHEAD_STATE_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 
@@ -587,11 +662,15 @@ export default MastheadLiveConnector;
 }
 
 
-function runtimePluginSource(marker: string, endpoint: string, source: string): string {
+function runtimePluginSource(marker: string, endpoint: string, stateEndpoint: string, source: string, runtime: LiveConnectorRuntime): string {
   return `// ${marker}: installed by Masthead.
 const MASTHEAD_ENDPOINT = ${JSON.stringify(endpoint)};
+const MASTHEAD_STATE_ENDPOINT = ${JSON.stringify(stateEndpoint)};
 const MASTHEAD_SOURCE = ${JSON.stringify(source)};
+const MASTHEAD_RUNTIME = ${JSON.stringify(runtime)};
 let mastheadSequence = 0;
+let active = false;
+let blocked = 0;
 
 function firstString(...values) {
   for (const value of values) {
@@ -652,19 +731,57 @@ function payloadFor(type, event = {}, ctx = {}) {
 }
 
 async function postMastheadEvent(type, event, ctx) {
+  updateStateMachine(type);
+  const payload = payloadFor(type, objectFor(event), objectFor(ctx));
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 750);
   try {
     await fetch(MASTHEAD_ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(payloadFor(type, objectFor(event), objectFor(ctx))),
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    await fetch(MASTHEAD_STATE_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(statePayload(payload, desiredState())),
       signal: controller.signal
     });
   } catch {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function updateStateMachine(type) {
+  const normalized = String(type || "").toLowerCase();
+  if (/approval|permission/.test(normalized) && /resolved/.test(normalized)) blocked = Math.max(0, blocked - 1);
+  else if (/approval|permission/.test(normalized) && /requested/.test(normalized)) blocked += 1;
+  else if (/session_(stop|completed|end|shutdown)|sessionstop|sessioncompleted|sessionend/.test(normalized)) active = false;
+  else if (/agent_start|input|user_input|before_agent_start|tool_call|tool_start/.test(normalized)) active = true;
+}
+
+function desiredState() {
+  if (blocked > 0) return "blocked";
+  if (active) return "working";
+  return "idle";
+}
+
+function statePayload(payload, state) {
+  return {
+    runtime: MASTHEAD_RUNTIME,
+    source: "masthead:" + MASTHEAD_SOURCE,
+    sourceSessionId: payload.sessionId,
+    sourceEventId: payload.provider_event_id,
+    state,
+    authority: "plugin",
+    observedAt: payload.timestamp,
+    cwd: payload.cwd,
+    branch: payload.branch,
+    message: payload.type,
+    seq: Date.now() * 1000 + (++mastheadSequence)
+  };
 }
 
 function register(host, eventName) {
@@ -702,10 +819,14 @@ export const mastheadLiveConnector = MastheadLiveConnector;
 `;
 }
 
-function ompExtensionSource(endpoint: string): string {
+function ompExtensionSource(endpoint: string, stateEndpoint: string): string {
   return `// ${OMP_EXTENSION_MARKER}: installed by Masthead.
 const MASTHEAD_ENDPOINT = ${JSON.stringify(endpoint)};
+const MASTHEAD_STATE_ENDPOINT = ${JSON.stringify(stateEndpoint)};
 let mastheadSequence = 0;
+let agentActive = false;
+let blockedCount = 0;
+let blockedMessage;
 
 function firstString(...values) {
   for (const value of values) {
@@ -790,6 +911,7 @@ function sourceEventIdFor(type, event, sessionId) {
 }
 
 async function postMastheadEvent(type, event, ctx, extra = {}) {
+  updateStateMachine(type, event);
   const sessionFile = firstString(event?.session_file, event?.sessionFile, ctx?.sessionManager?.getSessionFile?.());
   const childSession = childSessionInfo(sessionFile);
   const sessionId = sessionIdFor(event, ctx);
@@ -815,10 +937,66 @@ async function postMastheadEvent(type, event, ctx, extra = {}) {
       body: JSON.stringify(payload),
       signal: controller.signal
     });
+    await fetch(MASTHEAD_STATE_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(statePayload(payload)),
+      signal: controller.signal
+    });
   } catch {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function updateStateMachine(type, event) {
+  const normalized = String(type || "").toLowerCase();
+  if (normalized === "tool_approval_requested") {
+    if (!approvalRequiresPermission(event)) return;
+    blockedCount += 1;
+    blockedMessage = firstString(event?.toolName, event?.approvalMode, "Approval requested");
+    return;
+  }
+  if (normalized === "tool_approval_resolved") {
+    blockedCount = Math.max(0, blockedCount - 1);
+    if (blockedCount === 0) blockedMessage = undefined;
+    return;
+  }
+  if (normalized === "input" || normalized === "tool_call") agentActive = true;
+  if (normalized === "session_stop" || normalized === "session_shutdown") agentActive = false;
+}
+
+function approvalRequiresPermission(event) {
+  const mode = String(firstString(event?.permissionMode, event?.permission_mode, event?.approvalMode, event?.approval_mode) || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (["bypasspermissions", "bypass_permissions", "full_access", "danger_full_access", "none", "disabled", "off"].includes(mode)) return false;
+  if (event?.requiresApproval === false || event?.requiresPermission === false || event?.pending === false || event?.autoApproved === true) return false;
+  return true;
+}
+
+function desiredState() {
+  if (blockedCount > 0) return "blocked";
+  if (agentActive) return "working";
+  return "idle";
+}
+
+function statePayload(payload) {
+  return {
+    runtime: "omp",
+    source: "masthead:omp-extension",
+    sourceSessionId: payload.sessionId,
+    sourceEventId: payload.provider_event_id,
+    state: desiredState(),
+    authority: "plugin",
+    observedAt: payload.timestamp,
+    cwd: payload.cwd,
+    sessionRef: payload.sessionFile ? { kind: "path", value: payload.sessionFile } : undefined,
+    message: blockedMessage || payload.type,
+    seq: Date.now() * 1000 + (++mastheadSequence)
+  };
 }
 
 export default function MastheadLiveConnector(pi) {
@@ -832,6 +1010,13 @@ export default function MastheadLiveConnector(pi) {
   );
   pi.on("tool_approval_requested", (event, ctx) =>
     postMastheadEvent("tool_approval_requested", event, ctx, {
+      toolCallId: event?.toolCallId,
+      toolName: event?.toolName,
+      approvalMode: event?.approvalMode
+    })
+  );
+  pi.on("tool_approval_resolved", (event, ctx) =>
+    postMastheadEvent("tool_approval_resolved", event, ctx, {
       toolCallId: event?.toolCallId,
       toolName: event?.toolName,
       approvalMode: event?.approvalMode
