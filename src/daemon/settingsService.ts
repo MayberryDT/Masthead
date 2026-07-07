@@ -341,9 +341,28 @@ export async function getRuntimeHookSettings(db: MastheadDatabase, config: Daemo
 }
 
 function withHarnessCaptureIntegrations(settings: CodexHookSettingsBaseDto, connectors: LiveConnectorSettings[]): CodexHookSettingsDto {
+  const catalogEntries = scanTargetHarnesses();
+  const catalogRuntimes = new Set(catalogEntries.map((entry) => entry.runtime));
+  const connectorOnlyIntegrations = connectors
+    .filter((connector) => !catalogRuntimes.has(connector.runtime))
+    .map(liveConnectorIntegration);
   return {
     ...settings,
-    integrations: scanTargetHarnesses().map((entry) => harnessCaptureIntegration(entry, connectors))
+    integrations: [...connectorOnlyIntegrations, ...catalogEntries.map((entry) => harnessCaptureIntegration(entry, connectors))]
+  };
+}
+
+function liveConnectorIntegration(connector: LiveConnectorSettings): HarnessCaptureIntegrationDto {
+  return {
+    actionSurface: "settings",
+    captureMode: "live_hook",
+    configPath: connector.configPath,
+    description: `Live local ${connector.label} events are installed, tested, and removed from this Settings card.`,
+    endpoint: connector.endpoint,
+    label: connector.label,
+    runtime: connector.runtime,
+    status: connectorCaptureStatus(connector),
+    supportsActions: true
   };
 }
 

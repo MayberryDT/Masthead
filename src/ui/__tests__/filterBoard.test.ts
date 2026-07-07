@@ -149,7 +149,7 @@ describe("board card filtering", () => {
     ).toEqual(["blocked"]);
   });
 
-  test("does not count conflict-only or failed cards as blocked", () => {
+  test("does not count conflict-only, failed, or approval-waiting cards as blocked", () => {
     const cards = [
       { ...baseCard, sessionId: "active", lifecycle: "running", primaryStatus: "editing", indicators: [] },
       {
@@ -169,13 +169,13 @@ describe("board card filtering", () => {
       filterCards(cards, { query: "", filter: "all", harness: "all", lifecycle: "blocked", sort: "recent_activity" }).map(
         (card) => card.sessionId
       )
-    ).toEqual(["approval", "blocked"]);
+    ).toEqual(["blocked"]);
 
     expect(summarizeMainScanCards(cards)).toMatchObject({
-      running: 3,
-      active: 3,
-      needsAction: 2,
-      needsAttention: 2
+      running: 4,
+      active: 4,
+      needsAction: 1,
+      needsAttention: 1
     });
   });
 
@@ -424,11 +424,11 @@ describe("board card filtering", () => {
     ] satisfies SessionCardView[];
 
     expect(summarizeMainScanCards(cards)).toMatchObject({
-      running: 1,
-      active: 1,
+      running: 2,
+      active: 2,
       idle: 1,
-      needsAction: 2,
-      needsAttention: 2
+      needsAction: 1,
+      needsAttention: 1
     });
   });
 });

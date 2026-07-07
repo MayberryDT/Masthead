@@ -149,3 +149,36 @@ When doing visual/UI polish work, temporarily wrap the affected JSX with the cen
 5. Hooks for enforcement are installed automatically when you run `npm install` (via the `prepare` script). Before any commit, push, merge, or PR the pre-commit/pre-push hooks + `npm run verify:no-citations` will block if the flag is on or if `data-ui-cite=` markers remain in source (the helper module itself is excluded from the check).
 
 The mechanism is purely runtime + dev-only. No build-time stripping or permanent source changes are required. The hooks simply enforce that you cleaned up before leaving the branch.
+
+## Local Disk Hygiene
+
+Masthead install artifacts and Codex worktrees accumulate quickly on disk. Follow these rules on
+every production install, database migration, and worktree merge.
+
+### Production builds
+
+When installing a new versioned production bundle under `~/.local/share/masthead-production/`:
+
+1. Copy the new bundle and update the `current` symlink as documented in the release plan.
+2. Immediately delete every other install artifact in that directory except the build `current`
+   points at. Remove old `Masthead-linux-x64-*` directories, `previous*`, `backup-*`, and any
+   stale `app-menu-icons` or helper folders left from earlier installs.
+3. Never keep more than one production build on disk. Do not leave prior builds "just in case."
+
+### Database snapshots
+
+When Masthead migrates or backs up the local SQLite database in `~/.local/share/masthead-dev/`:
+
+1. Keep exactly one `masthead.sqlite` as the active database.
+2. Keep at most one `masthead.sqlite.backup-*` snapshot beside it.
+3. Before creating a new backup snapshot, delete all older `masthead.sqlite.backup-*` files.
+4. Do not accumulate multiple database snapshots across releases or migration runs.
+
+### Worktree cleanup
+
+When a Git or Codex worktree branch is merged into its target branch:
+
+1. Remove the merged worktree with `git worktree remove` (or the equivalent Codex cleanup flow).
+2. Delete the corresponding directory under `~/.codex/worktrees/` if Codex created one there.
+3. Do not leave merged or abandoned worktrees on disk. A finished worktree should not remain after
+   merge closeout.

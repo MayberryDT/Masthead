@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { getSessionTokenTotals, getUsageStats, usageRangeForWindow } from "../usageStatsRepository.ts";
+import { getSessionTokenTotals, getSessionUsageSummaries, getUsageStats, usageRangeForWindow } from "../usageStatsRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 
@@ -213,6 +213,58 @@ describe("usage stats repository", () => {
     insertUsage(db, "usage-deleted", "deleted-session", "gpt-5", "openai", 900, 90, 990, "2026-06-26T14:11:00.000Z");
 
     expect([...getSessionTokenTotals(db, ["source-session", "deleted-source", "missing-session"])]).toEqual([["source-session", 180]]);
+    db.close();
+  });
+
+  test("returns runtime-scoped session usage summaries from model_usage", async () => {
+    const db = await openTestDatabase();
+    db.prepare("INSERT INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
+      "host:test",
+      "masthead-test-host",
+      "2026-06-25T12:00:00.000Z",
+      now.toISOString()
+    );
+    insertRuntime(db, "runtime-opencode", "opencode");
+    insertRuntime(db, "runtime-omp", "omp");
+    insertSession(db, {
+      project: "Masthead",
+      runtimeId: "runtime-opencode",
+      sessionId: "canonical-opencode-session",
+      sourceSessionId: "shared-source-session",
+      timestamp: "2026-06-26T14:05:00.000Z"
+    });
+    insertSession(db, {
+      project: "Masthead",
+      runtimeId: "runtime-omp",
+      sessionId: "canonical-omp-session",
+      sourceSessionId: "shared-source-session",
+      timestamp: "2026-06-26T14:06:00.000Z"
+    });
+    insertUsage(db, "usage-opencode-total", "canonical-opencode-session", "stale-model", "stale-provider", 100, 50, 150, "2026-06-26T14:07:00.000Z");
+    insertUsage(db, "usage-opencode-delta", "canonical-opencode-session", "stale-model", "stale-provider", 20, 10, null, "2026-06-26T14:08:00.000Z");
+    insertUsage(db, "usage-opencode-latest", "canonical-opencode-session", "gpt-5.5", "openai-compatible", null, null, null, "2026-06-26T14:09:00.000Z");
+    insertUsage(db, "usage-omp", "canonical-omp-session", "qwen3-coder", "ollama", 11, 22, null, "2026-06-26T14:10:00.000Z");
+
+    expect([...getSessionUsageSummaries(db, ["canonical-opencode-session", "canonical-omp-session"])]).toEqual([
+      [
+        "canonical-opencode-session",
+        {
+          model: "gpt-5.5",
+          observedAt: "2026-06-26T14:09:00.000Z",
+          provider: "openai-compatible",
+          totalTokens: 180
+        }
+      ],
+      [
+        "canonical-omp-session",
+        {
+          model: "qwen3-coder",
+          observedAt: "2026-06-26T14:10:00.000Z",
+          provider: "ollama",
+          totalTokens: 33
+        }
+      ]
+    ]);
     db.close();
   });
 

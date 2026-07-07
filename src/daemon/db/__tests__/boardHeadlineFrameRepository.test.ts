@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import type { BoardHeadlineFrame } from "../../../core/boardHeadlineFrame.ts";
+import type { BoardHeadlineFrame, BoardHeadlineView } from "../../../core/boardHeadlineFrame.ts";
 import { currentBoardHeadlineFrames, insertBoardHeadlineGeneration, recentBoardHeadlineGenerations, upsertBoardHeadlineFrame } from "../boardHeadlineFrameRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
@@ -76,6 +77,43 @@ describe("board headline frame repository", () => {
       status: "ready"
     });
     expect(views.has("missing-session")).toBe(false);
+    db.close();
+  });
+
+  test("associates loaded frames with the transcript refresh-key hash that produced them", async () => {
+    const db = await openTestDatabase();
+    seedSession(db, {
+      lifecycle: "running",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session-1",
+      title: "Board headline refresh key"
+    });
+    const refreshKey = JSON.stringify({
+      model: "openai:gpt-5",
+      transcriptMessages: ["user: Keep the visible stored headline until the refreshed frame is ready."]
+    });
+    const expectedHash = createHash("sha256").update(refreshKey).digest("hex");
+
+    upsertBoardHeadlineFrame(db, {
+      frame: frame({
+        disposition: "was generated from a specific transcript refresh key",
+        subject: "Board headline freshness"
+      }),
+      generatedAt: "2026-07-01T12:00:00.000Z",
+      model: "gpt-5",
+      provider: "openai",
+      refreshKey,
+      sessionId: "session-1",
+      sourceSessionId: "source-session-1"
+    });
+
+    const stored = currentBoardHeadlineFrames(db, [{ sessionId: "session-1", sourceSessionId: "source-session-1" }]).get(
+      "source-session-1"
+    ) as (BoardHeadlineView & { refreshKey?: string; refreshKeyHash?: string }) | undefined;
+
+    expect(stored?.refreshKeyHash).toBe(expectedHash);
+    expect(stored).not.toHaveProperty("refreshKey");
     db.close();
   });
 

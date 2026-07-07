@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -163,6 +163,83 @@ describe("Masthead daemon startup", () => {
     expect(countRows(daemon, "session_enrichments")).toBe(before);
   });
 
+  test("keeps Herdr observer evidence out of public projection cards and running counts", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-daemon-herdr-"));
+    tempDirs.push(tempDir);
+    await writeTestHerdrFiles(tempDir, [
+      "2026-07-07T12:00:00.000Z INFO workspace=\"w3\" pane=\"3\" focused cwd=\"/workspace/masthead\"",
+      "2026-07-07T12:00:01.000Z INFO herdr::pane: agent changed pane=\"3\" previous_agent=None agent=Some(Codex) process=codex pgid=Some(3000)",
+      "2026-07-07T12:00:02.000Z INFO workspace=\"w5\" pane=\"5\" focused cwd=\"/workspace/grok-project\"",
+      "2026-07-07T12:00:03.000Z INFO herdr::pane: agent changed pane=\"5\" previous_agent=None agent=Some(Grok) process=grok pgid=Some(5000)"
+    ]);
+    const daemon = await createTestDaemon(tempDir);
+    const baseUrl = await listen(daemon);
+    const sessionRowsBeforeProjection = countRows(daemon, "sessions");
+
+    const response = await getJson(baseUrl, "/projection");
+    const cards = projectionCards(response);
+
+    expect(cards.map((card) => card.sessionId)).not.toEqual(expect.arrayContaining(["observer:herdr:pane:3", "observer:herdr:pane:5"]));
+    expect(cards.some((card) => card.sessionId.startsWith("observer:herdr:"))).toBe(false);
+    expect(response.projection.summary).toMatchObject({ active: 0, running: 0 });
+    expect(response.projection.lanes.find((lane: { laneId: string }) => lane.laneId === "running")).toMatchObject({
+      count: 0,
+      sessionIds: []
+    });
+    expect(countRows(daemon, "sessions")).toBe(sessionRowsBeforeProjection);
+  });
+
+  test("overlays DB usage on projection cards and lets DB totals override stale hook totals", async () => {
+    const daemon = await createTestDaemon();
+    const baseUrl = await listen(daemon);
+    const sourceSessionId = "source:usage-overlay";
+    const sessionId = canonicalSessionId("host:127.0.0.1", runtimeIdFor("opencode", undefined), sourceSessionId);
+
+    await postJson(
+      baseUrl,
+      "/ingest?runtime=opencode",
+      liveStartedPayload({
+        payload: {
+          model: "stale-hook-model",
+          provider: "stale-hook-provider",
+          totalTokens: 12
+        },
+        providerEventId: "usage-overlay-start",
+        runtime: "opencode",
+        sessionId: "usage-overlay-card",
+        sourceSessionId,
+        timestamp: "2026-07-06T11:00:00.000Z",
+        title: "Usage overlay source"
+      })
+    );
+    insertProjectionSession(daemon, {
+      runtime: "opencode",
+      sessionId,
+      sourceSessionId,
+      timestamp: "2026-07-06T11:00:00.000Z",
+      title: "Usage overlay source"
+    });
+    insertProjectionUsage(daemon, {
+      model: "db-authoritative-model",
+      observedAt: "2026-07-06T11:03:00.000Z",
+      provider: "db-authoritative-provider",
+      sessionId,
+      totalTokens: 3210,
+      usageId: "usage-overlay-db"
+    });
+
+    const response = await getJson(baseUrl, "/projection");
+    const cards = projectionCards(response);
+    const card = cards.find((candidate) => candidate.sessionId === "usage-overlay-card");
+
+    expect(card).toMatchObject({
+      canonicalSessionId: sessionId,
+      model: "db-authoritative-model",
+      provider: "db-authoritative-provider",
+      totalTokens: 3210
+    });
+  });
+
   test("keeps canonical projection identity distinct for mixed runtimes sharing a source session", async () => {
     const daemon = await createTestDaemon();
     const baseUrl = await listen(daemon);
@@ -192,9 +269,42 @@ describe("Masthead daemon startup", () => {
         title: "OMP shared source"
       })
     );
+    const opencodeCanonicalSessionId = canonicalSessionId("host:127.0.0.1", runtimeIdFor("opencode", undefined), sharedSourceSessionId);
+    const ompCanonicalSessionId = canonicalSessionId("host:127.0.0.1", runtimeIdFor("omp", undefined), sharedSourceSessionId);
+    insertProjectionSession(daemon, {
+      runtime: "opencode",
+      sessionId: opencodeCanonicalSessionId,
+      sourceSessionId: sharedSourceSessionId,
+      timestamp: "2026-07-06T12:00:00.000Z",
+      title: "OpenCode shared source"
+    });
+    insertProjectionSession(daemon, {
+      runtime: "omp",
+      sessionId: ompCanonicalSessionId,
+      sourceSessionId: sharedSourceSessionId,
+      timestamp: "2026-07-06T12:01:00.000Z",
+      title: "OMP shared source"
+    });
+    insertProjectionUsage(daemon, {
+      model: "opencode-db-model",
+      observedAt: "2026-07-06T12:02:00.000Z",
+      provider: "openai",
+      sessionId: opencodeCanonicalSessionId,
+      totalTokens: 111,
+      usageId: "opencode-shared-source-usage"
+    });
+    insertProjectionUsage(daemon, {
+      model: "omp-db-model",
+      observedAt: "2026-07-06T12:03:00.000Z",
+      provider: "ollama",
+      sessionId: ompCanonicalSessionId,
+      totalTokens: 222,
+      usageId: "omp-shared-source-usage"
+    });
+
 
     const response = await getJson(baseUrl, "/projection");
-    const cards = response.projection.cards as ProjectionCard[];
+    const cards = projectionCards(response);
     const opencodeCard = cards.find((card) => card.sessionId === "opencode-projection-card");
     const ompCard = cards.find((card) => card.sessionId === "omp-projection-card");
 
@@ -213,17 +323,31 @@ describe("Masthead daemon startup", () => {
       canonicalSessionId("host:127.0.0.1", runtimeIdFor("omp", undefined), sharedSourceSessionId)
     );
     expect(opencodeCard?.canonicalSessionId).not.toBe(ompCard?.canonicalSessionId);
+    expect(opencodeCard).toMatchObject({
+      model: "opencode-db-model",
+      provider: "openai",
+      totalTokens: 111
+    });
+    expect(ompCard).toMatchObject({
+      model: "omp-db-model",
+      provider: "ollama",
+      totalTokens: 222
+    });
   });
 });
 
 type ProjectionCard = {
   canonicalSessionId?: string;
+  model?: string;
+  provider?: string;
   runtime?: string;
   sessionId: string;
   sourceSessionId?: string;
+  totalTokens?: number;
 };
 
 type LiveStartedPayloadInput = {
+  payload?: Record<string, unknown>;
   providerEventId: string;
   runtime: "opencode" | "omp";
   sessionId: string;
@@ -244,13 +368,14 @@ function liveStartedPayload(input: LiveStartedPayloadInput): Record<string, unkn
     project: "Masthead",
     title: input.title,
     runtime: input.runtime,
-    sourceSessionId: input.sourceSessionId
+    sourceSessionId: input.sourceSessionId,
+    ...input.payload
   };
 }
 
-async function createTestDaemon(): Promise<MastheadDaemon> {
-  const tempDir = await mkdtemp(join(tmpdir(), "masthead-daemon-server-"));
-  tempDirs.push(tempDir);
+async function createTestDaemon(existingHomeDir?: string): Promise<MastheadDaemon> {
+  const tempDir = existingHomeDir ?? (await mkdtemp(join(tmpdir(), "masthead-daemon-server-")));
+  if (!existingHomeDir) tempDirs.push(tempDir);
   const daemon = await createMastheadDaemon({
     allowedOrigins: ["http://127.0.0.1:5173"],
     codexHomeDir: tempDir,
@@ -265,6 +390,12 @@ async function createTestDaemon(): Promise<MastheadDaemon> {
   } satisfies DaemonConfig);
   daemons.push(daemon);
   return daemon;
+}
+
+async function writeTestHerdrFiles(homeDir: string, lines: string[]): Promise<void> {
+  await mkdir(join(homeDir, ".config/herdr"), { recursive: true });
+  await writeFile(join(homeDir, ".config/herdr/herdr-server.log"), `${lines.join("\n")}\n`);
+  await writeFile(join(homeDir, ".config/herdr/session.json"), "{\"workspaces\":[]}\n");
 }
 
 function listen(daemon: MastheadDaemon): Promise<string> {
@@ -309,6 +440,81 @@ async function expectPostError(baseUrl: string, path: string, body: Record<strin
   });
   expect(response.status).toBe(400);
   await expect(response.json()).resolves.toMatchObject({ error, ok: false });
+}
+
+function projectionCards(payload: Record<string, unknown>): ProjectionCard[] {
+  const projection = payload.projection;
+  if (!projection || typeof projection !== "object" || !("cards" in projection) || !Array.isArray(projection.cards)) {
+    throw new Error("Projection response did not include cards.");
+  }
+  const cards: ProjectionCard[] = [];
+  for (const card of projection.cards) {
+    if (!isProjectionCard(card)) {
+      throw new Error("Projection response included a malformed card.");
+    }
+    cards.push(card);
+  }
+  return cards;
+}
+
+function isProjectionCard(value: unknown): value is ProjectionCard {
+  return Boolean(value && typeof value === "object" && "sessionId" in value && typeof value.sessionId === "string");
+}
+
+type ProjectionRuntime = "opencode" | "omp";
+
+function insertProjectionSession(
+  daemon: MastheadDaemon,
+  input: { runtime: ProjectionRuntime; sessionId: string; sourceSessionId: string; timestamp: string; title: string }
+): void {
+  const runtimeId = runtimeIdFor(input.runtime, undefined);
+  daemon.database
+    .prepare("INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)")
+    .run("host:127.0.0.1", "127.0.0.1", input.timestamp, input.timestamp);
+  daemon.database
+    .prepare("INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)")
+    .run(runtimeId, input.runtime, null, input.timestamp, input.timestamp);
+  daemon.database
+    .prepare(
+      `INSERT OR REPLACE INTO sessions (
+        session_id, host_id, runtime_id, source_session_id, project_label, repo_root, worktree_path,
+        branch, title, objective, lifecycle, outcome_label, started_at, last_activity_at, ended_at,
+        source_confidence, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.sessionId,
+      "host:127.0.0.1",
+      runtimeId,
+      input.sourceSessionId,
+      "Masthead",
+      "/workspace/masthead",
+      "/workspace/masthead",
+      "agent/canonical-identity",
+      input.title,
+      "Project usage overlay metadata",
+      "running",
+      null,
+      input.timestamp,
+      input.timestamp,
+      null,
+      "authoritative",
+      input.timestamp,
+      input.timestamp
+    );
+}
+
+function insertProjectionUsage(
+  daemon: MastheadDaemon,
+  input: { model: string; observedAt: string; provider: string; sessionId: string; totalTokens: number; usageId: string }
+): void {
+  daemon.database
+    .prepare(
+      `INSERT INTO model_usage (
+        usage_id, session_id, model, provider, input_tokens, output_tokens, total_tokens, observed_at, source_ref_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(input.usageId, input.sessionId, input.model, input.provider, null, null, input.totalTokens, input.observedAt, "{}");
 }
 
 function countRows(daemon: MastheadDaemon, table: string): number {

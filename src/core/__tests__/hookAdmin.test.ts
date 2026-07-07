@@ -5,10 +5,11 @@ import {
   verifyMastheadHookConfig
 } from "../hookAdmin";
 
-const command = "MASTHEAD_INGEST_URL=http://127.0.0.1:17373/ingest node /app/scripts/masthead-hook.js";
+const command = "MASTHEAD_INGEST_URL=http://127.0.0.1:17373/ingest?runtime=codex node /app/scripts/masthead-hook.js";
+const claudeStyleEvents = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "PostToolUse", "Stop"] as const;
 
 describe("Codex hook admin config", () => {
-  test("installs official matcher-group hook entries without removing existing groups", () => {
+  test("installs official matcher-group hook entries for the Claude-style Codex event set without removing existing groups", () => {
     const existing = {
       hooks: {
         SessionStart: [
@@ -22,6 +23,7 @@ describe("Codex hook admin config", () => {
 
     const next = installMastheadHookConfig(existing, { command, timeout: 2 });
 
+    expect(Object.keys(next.hooks)).toEqual(claudeStyleEvents);
     expect(next.hooks.SessionStart).toEqual([
       {
         matcher: "startup|resume",
@@ -29,7 +31,9 @@ describe("Codex hook admin config", () => {
       },
       { matcher: "*", hooks: [{ type: "command", command, timeout: 2 }] }
     ]);
+    expect(next.hooks.UserPromptSubmit).toEqual([{ matcher: "*", hooks: [{ type: "command", command, timeout: 2 }] }]);
     expect(next.hooks.PermissionRequest).toEqual([{ matcher: "*", hooks: [{ type: "command", command, timeout: 2 }] }]);
+    expect(next.hooks.PreToolUse).toEqual([{ matcher: "*", hooks: [{ type: "command", command, timeout: 2 }] }]);
     expect(next.hooks.PostToolUse).toEqual([{ matcher: "*", hooks: [{ type: "command", command, timeout: 2 }] }]);
     expect(next.hooks.Stop).toEqual([{ matcher: "*", hooks: [{ type: "command", command, timeout: 2 }] }]);
   });
@@ -98,13 +102,25 @@ describe("Codex hook admin config", () => {
     });
   });
 
+  test("verification treats UserPromptSubmit and PreToolUse as required Codex hook events", () => {
+    const partial = installMastheadHookConfig({}, { command });
+    partial.hooks.UserPromptSubmit = [];
+    partial.hooks.PreToolUse = [];
+
+    expect(verifyMastheadHookConfig(partial)).toEqual({
+      installed: false,
+      missingEvents: ["UserPromptSubmit", "PreToolUse"],
+      mismatchedEvents: []
+    });
+  });
+
   test("verification reports hook command mismatches", () => {
     const installed = installMastheadHookConfig({}, { command: "node /app/scripts/masthead-hook.js" });
 
     expect(verifyMastheadHookConfig(installed, { command })).toEqual({
       installed: false,
       missingEvents: [],
-      mismatchedEvents: ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"]
+      mismatchedEvents: ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "PostToolUse", "Stop"]
     });
   });
 });

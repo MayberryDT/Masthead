@@ -349,7 +349,7 @@ describe("live projection", () => {
     });
   });
 
-  test("live projection ages quiet non-terminal sessions into idle", () => {
+  test("live projection ages quiet non-terminal sessions into idle without counting them active", () => {
     const started = normalizeSupportedHookPayload(
       {
         provider_event_id: "quiet-start",
@@ -373,7 +373,7 @@ describe("live projection", () => {
       stateLabel: "Idle"
     });
     expect(envelope.projection.summary).toMatchObject({
-      active: 1,
+      active: 0,
       running: 0,
       idle: 1
     });

@@ -366,7 +366,7 @@ function normalizeExistingHeadline(value: unknown): BoardHeadlineView | undefine
   if (!isRecord(value)) return undefined;
   if (typeof value.headline !== "string" || !isHeadlineSource(value.source) || !isHeadlineStatus(value.status)) return undefined;
 
-  if (value.status === "pending" || value.source === "pending") {
+  if (value.source === "pending") {
     return {
       headline: value.headline,
       source: "pending",
@@ -385,6 +385,8 @@ function normalizeExistingHeadline(value: unknown): BoardHeadlineView | undefine
     generatedAt: typeof value.generatedAt === "string" ? value.generatedAt : undefined,
     model: typeof value.model === "string" ? value.model : undefined,
     provider: typeof value.provider === "string" ? value.provider : undefined,
+    refreshKeyHash: typeof value.refreshKeyHash === "string" ? value.refreshKeyHash : undefined,
+    freshness: value.freshness === "fresh" || value.freshness === "stale" ? value.freshness : undefined,
     failureReason: typeof value.failureReason === "string" ? value.failureReason : undefined
   };
 }

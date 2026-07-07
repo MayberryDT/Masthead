@@ -7,12 +7,13 @@ import { adapterRecordFromLiveHook, liveHookSourceForRuntime } from "../adapters
 import { adapterForRuntime } from "../adapters/registry.ts";
 import { createDeterministicEnrichmentProvider } from "../enrichment/deterministicProvider.ts";
 import { createEnrichmentCoordinator, EnrichmentFailedError } from "../enrichment/enrichmentCoordinator.ts";
-import { RUNTIME_KINDS, type AdapterDiagnostic, type IngestCursor, type RuntimeKind } from "../adapters/types.ts";
+import { ALL_RUNTIME_KINDS, RUNTIME_KINDS, type AdapterDiagnostic, type IngestCursor, type RuntimeKind } from "../adapters/types.ts";
 import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent, removeEventFromLiveProjectionState } from "../core/ingestion.ts";
 import { eventLiveProcessingMode } from "../core/liveSessionFacts.ts";
 import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
 import { projectLiveEvents } from "../core/liveProjection.ts";
+import { buildBoardBrief } from "../core/boardBrief.ts";
 import { createBoardHeadlineEnricher, type BoardHeadlineAppliedEvent, type BoardHeadlineGenerationFinishedEvent, type BoardHeadlineProviderConfig } from "../core/boardHeadlineEnricher.ts";
 import { createFileBackedStore, validateRetentionPolicy, type StoreRecord } from "../core/store.ts";
 import type { ReviewDisposition } from "../core/store.ts";
@@ -54,7 +55,7 @@ import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type
 import { getOrCreateDatabaseIdentity, hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor, type SessionRepository } from "./db/sessionRepository.ts";
 import { saveSourceScanRun, saveSourceSetupState } from "./db/sourceSetupRepository.ts";
-import { getSessionTokenTotals, getUsageStats, type UsageWindow } from "./db/usageStatsRepository.ts";
+import { getSessionUsageSummaries, getUsageStats, type UsageWindow } from "./db/usageStatsRepository.ts";
 import {
   checkpointMastheadDatabase,
   openMastheadDatabase,
@@ -118,7 +119,7 @@ const VISIBLE_TRANSCRIPT_CATCHUP_BUDGET_MS = 750;
 const RESPONSE_BACKGROUND_GRACE_MS = 50;
 const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
 const INGEST_BODY_LIMIT_BYTES = 262_144;
-const LIVE_INGEST_RUNTIMES = ["claude_code", "cursor", "grok", "opencode", "omp", "pi", "hermes"] as const satisfies readonly RuntimeKind[];
+const LIVE_INGEST_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "opencode", "omp", "pi", "hermes"] as const satisfies readonly RuntimeKind[];
 
 type TranscriptImportOptions = {
   maxRecordsPerSource?: number;
@@ -259,6 +260,17 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           status: event.status,
           transcriptExcerpt: event.input.facts.transcriptExcerpt ?? []
         });
+        if (event.frame) {
+          upsertBoardHeadlineFrame(database, {
+            sessionId: row.sessionId,
+            sourceSessionId: row.sourceSessionId,
+            provider: event.provider,
+            model: event.model,
+            generatedAt: event.completedAt,
+            frame: event.frame,
+            refreshKey: event.refreshKey
+          });
+        }
       } catch (error) {
         recordRuntimeDiagnostic({
           details: {
@@ -1975,7 +1987,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         hostId: `host:${config.host}`,
         runtimeKind: defaultLiveRuntime
       });
-      liveEnvelope.projection = withSessionTokenTotals(database, liveEnvelope.projection);
+      liveEnvelope.projection = withSessionUsageSummaries(database, liveEnvelope.projection);
       sendJson(request, response, config.allowedOrigins, 200, liveEnvelope);
       return;
     }
@@ -2318,7 +2330,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_offset" });
         return;
       }
-      if (adapterId && !RUNTIME_KINDS.includes(adapterId as RuntimeKind)) {
+      if (adapterId && !(RUNTIME_KINDS as readonly string[]).includes(adapterId)) {
         sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_adapter" });
         return;
       }
@@ -2842,6 +2854,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         });
         return;
       }
+      recordLiveHookRuntimeDiagnostics(event);
       if (isLiveIngestValidationRequest(url)) {
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
@@ -3268,6 +3281,24 @@ function toLiveHookDiagnostic(diagnostic: AdapterDiagnostic | undefined, receive
   };
 }
 
+function recordLiveHookRuntimeDiagnostics(event: NormalizedEvent): void {
+  const diagnostics = Array.isArray(event.payload.runtimeDiagnostics) ? event.payload.runtimeDiagnostics.filter(isRecord) : [];
+  for (const diagnostic of diagnostics) {
+    const code = typeof diagnostic.code === "string" ? diagnostic.code : "runtime_mismatch";
+    recordRuntimeDiagnostic({
+      details: {
+        diagnostic,
+        eventId: event.eventId,
+        sessionId: event.sessionId,
+        sourceRuntime: event.source.adapter
+      },
+      kind: "live_hook_runtime_mismatch",
+      message: `Live hook reported ${code} for ${event.source.adapter}.`,
+      severity: "warning"
+    });
+  }
+}
+
 async function transcriptSources(source: DiscoveredSource): Promise<DiscoveredSource[]> {
   if (!source.path) return [];
   const sourcePath = source.path;
@@ -3367,29 +3398,46 @@ function cursorContextFromRecord(record: { normalized: { value: unknown } }, fal
   };
 }
 
-function withSessionTokenTotals(db: MastheadDatabase, projection: LiveBoardProjection): LiveBoardProjection {
+function withSessionUsageSummaries(db: MastheadDatabase, projection: LiveBoardProjection): LiveBoardProjection {
   const sessionIds = [
-    ...projection.cards.map((card) => card.sessionId),
-    projection.expandedSession?.sessionId,
-    projection.selectedSession?.sessionId
-  ].filter((sessionId): sessionId is string => Boolean(sessionId));
-  const tokenTotals = getSessionTokenTotals(db, sessionIds);
-  if (tokenTotals.size === 0) return projection;
+    ...projection.cards.flatMap(usageSummaryLookupIds),
+    ...usageSummaryLookupIds(projection.expandedSession),
+    ...usageSummaryLookupIds(projection.selectedSession)
+  ];
+  const usageSummaries = getSessionUsageSummaries(db, sessionIds);
+  if (usageSummaries.size === 0) return projection;
 
-  const withTokens = <T extends SessionCardView | undefined>(session: T): T => {
+  const withUsage = <T extends SessionCardView | undefined>(session: T): T => {
     if (!session) return session;
-    if (session.totalTokens !== undefined) return session;
-    const totalTokens = tokenTotals.get(session.sessionId);
-    if (totalTokens === undefined) return session;
-    return { ...session, totalTokens };
+    const summary =
+      (session.canonicalSessionId ? usageSummaries.get(session.canonicalSessionId) : undefined) ??
+      usageSummaries.get(session.sessionId) ??
+      (session.sourceSessionId ? usageSummaries.get(session.sourceSessionId) : undefined);
+    if (!summary) return session;
+
+    return {
+      ...session,
+      ...(summary.totalTokens !== undefined ? { totalTokens: summary.totalTokens } : {}),
+      // DB model/provider rows are the same canonical source that powers usage/logbook views, so they override stale hook metadata.
+      ...(summary.model ? { model: summary.model } : {}),
+      ...(summary.provider ? { provider: summary.provider } : {})
+    };
   };
 
   return {
     ...projection,
-    cards: projection.cards.map((card) => withTokens(card)),
-    expandedSession: withTokens(projection.expandedSession),
-    selectedSession: withTokens(projection.selectedSession)
+    cards: projection.cards.map((card) => withUsage(card)),
+    expandedSession: withUsage(projection.expandedSession),
+    selectedSession: withUsage(projection.selectedSession)
   };
+}
+
+
+function usageSummaryLookupIds(session: Pick<SessionCardView, "canonicalSessionId" | "sessionId" | "sourceSessionId"> | undefined): string[] {
+  if (!session) return [];
+  return [session.canonicalSessionId, session.sessionId, session.sourceSessionId].filter((sessionId): sessionId is string =>
+    Boolean(sessionId)
+  );
 }
 
 function attachCanonicalCardIds(
@@ -3622,7 +3670,7 @@ function parseBoundedInteger(
 }
 
 function isRuntimeKind(value: unknown): value is RuntimeKind {
-  return typeof value === "string" && (RUNTIME_KINDS as readonly string[]).includes(value);
+  return typeof value === "string" && (ALL_RUNTIME_KINDS as readonly string[]).includes(value);
 }
 
 function liveRuntimeFromIngestRequest(url: URL, request: IncomingMessage): RuntimeKind | undefined {

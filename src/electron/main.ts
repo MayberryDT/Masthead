@@ -5,6 +5,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
+import { resolveMastheadAppIconPath } from "./icon";
 import { ELECTRON_CHANNELS, isAllowedIpcSender, registerMastheadIpc } from "./ipc";
 import { showSessionTransitionNotification } from "./notifications";
 import {
@@ -64,9 +65,10 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(null);
     registerRendererProtocol();
     registerDesktopIpc();
-    mainWindow = await createMainWindow();
+    const appIconPath = mastheadAppIconPath();
+    mainWindow = await createMainWindow(appIconPath);
     tray = await createMastheadTray(
-      trayIconPath(),
+      appIconPath,
       {
         onOpenDataDirectory: () => {
           void openDataDirectory(electronDataDirectory());
@@ -101,15 +103,13 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
-function trayIconPath(): string {
-  const iconFileNames = isElectronDevMode() ? ["masthead-logo-sail.png", "masthead-logo-sail-dev.svg"] : ["masthead-logo-sail.png"];
-  for (const iconFileName of iconFileNames) {
-    const sourceIcon = join(app.getAppPath(), "public", "assets", iconFileName);
-    if (existsSync(sourceIcon)) return sourceIcon;
-    const resourceIcon = join(process.resourcesPath, iconFileName);
-    if (existsSync(resourceIcon)) return resourceIcon;
-  }
-  return join(process.resourcesPath, "daemon", "masthead-logo-sail.png");
+function mastheadAppIconPath(): string {
+  return resolveMastheadAppIconPath({
+    appPath: app.getAppPath(),
+    exists: existsSync,
+    isDev: isElectronDevMode(),
+    resourcesPath: process.resourcesPath
+  });
 }
 
 async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
@@ -180,10 +180,11 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
   }
 }
 
-async function createMainWindow(): Promise<BrowserWindow> {
+async function createMainWindow(iconPath = mastheadAppIconPath()): Promise<BrowserWindow> {
   const window = new BrowserWindow({
     ...mastheadWindowChromeOptions(),
     height: 900,
+    icon: iconPath,
     minHeight: 720,
     minWidth: 1024,
     title: "Masthead",

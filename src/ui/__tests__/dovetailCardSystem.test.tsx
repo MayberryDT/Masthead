@@ -50,6 +50,36 @@ describe("dovetail card system", () => {
     expect(active.querySelector(":scope > .footer-line .timestamp")?.textContent).toBe("2m ago");
   });
 
+  test("waiting SessionCard mockups use waiting copy without blocked classes", () => {
+    const approval = elementFor(
+      <SessionCard
+        session={sessionFixture({
+          indicators: ["attention"],
+          primaryStatus: "waiting_for_approval",
+          stateLabel: "Needs approval"
+        })}
+        onToggle={() => undefined}
+      />,
+      ".session-card"
+    );
+    const input = elementFor(
+      <SessionCard
+        session={sessionFixture({
+          indicators: ["attention"],
+          primaryStatus: "waiting_for_user",
+          stateLabel: "Needs input"
+        })}
+        onToggle={() => undefined}
+      />,
+      ".session-card"
+    );
+
+    expect(approval.className).toBe("session-card bottom-variant-card dovetail-card is-waiting tier-action");
+    expect(input.className).toBe("session-card bottom-variant-card dovetail-card is-waiting tier-action");
+    expect(approval.querySelector(":scope > .card-topline .state-pill")?.textContent).toBe("Needs approval");
+    expect(input.querySelector(":scope > .card-topline .state-pill")?.textContent).toBe("Needs input");
+  });
+
   test("idle SessionCard mockups never combine idle state with the action tier", () => {
     const idleMockups = [
       {
@@ -194,9 +224,10 @@ describe("dovetail card system", () => {
     const signalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .bottom-signal");
     const signalBeforeRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card .bottom-signal::before");
     const bottomSignalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card .bottom-signal");
-    const activeSignalBeforeRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-active .bottom-signal::before");
+    const activeSignalBeforeRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-active.tier-live .bottom-signal::before");
     const idleSignalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-idle .bottom-signal");
     const blockedSignalRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-blocked .bottom-signal");
+    const blockedSignalBeforeRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-blocked .bottom-signal::before");
     const reducedMotionRule = cssRuleBodyContaining(
       mastheadCss,
       "@media (prefers-reduced-motion: reduce)",
@@ -255,16 +286,26 @@ describe("dovetail card system", () => {
     expect(bottomSignalRule).toContain("left: 0;");
     expect(bottomSignalRule).toContain("height: 10px;");
     expect(bottomSignalRule).toContain("clip-path: polygon(0 0, 28% 0, 33% 60%, 67% 60%, 72% 0, 100% 0, 100% 100%, 0 100%);");
+    expect(() => cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-active .bottom-signal::before")).toThrow(
+      /Expected CSS to contain rule/
+    );
+    expect(() => cssRuleBody(mastheadCss, ".masthead-shell .session-card.dovetail-card.is-waiting .bottom-signal::before")).toThrow(
+      /Expected CSS to contain rule/
+    );
     expect(activeSignalBeforeRule).toContain("animation: calm-lock-active 1300ms linear infinite;");
     expect(activeSignalBeforeRule).toContain("rgba(246, 251, 255, 0.42)");
     expect(activeSignalBeforeRule).toContain("68px 100% repeat-x");
     expect(idleSignalRule).toContain("animation: calm-lock-idle 6400ms ease-in-out infinite;");
-    expect(blockedSignalRule).toContain("animation: calm-lock-blocked 1400ms ease-in-out infinite;");
-    expect(blockedSignalRule).toContain("filter: drop-shadow(0 0 8px rgba(255, 72, 62, 0.52));");
-    expect(reducedMotionRule).toContain("animation: none !important;");
+    expect(blockedSignalRule).toContain("animation: calm-lock-blocked 2400ms ease-in-out infinite;");
+    expect(blockedSignalRule).toContain("filter: drop-shadow(0 0 8px rgba(255, 72, 62, 0.48));");
+    expect(blockedSignalRule).toContain("linear-gradient(180deg, rgba(255, 72, 62, 0.22), transparent 34%)");
+    expect(blockedSignalBeforeRule).toContain("animation: calm-lock-blocked-warning 2400ms ease-in-out infinite;");
+    expect(blockedSignalBeforeRule).toContain("rgba(255, 72, 62, 0.48)");
+    expect(blockedSignalBeforeRule).not.toContain("rgba(246, 251, 255, 0.42)");
     expect(mastheadCss).toContain("@keyframes calm-lock-active");
     expect(mastheadCss).toContain("@keyframes calm-lock-idle");
     expect(mastheadCss).toContain("@keyframes calm-lock-blocked");
+    expect(mastheadCss).toContain("@keyframes calm-lock-blocked-warning");
     expect(mastheadCss).not.toContain("@keyframes blocked-enter-pulse");
     expect(mastheadCss).not.toContain("dovetail-active-run");
     expect(mastheadCss).not.toContain("dovetail-blocked-pulse");

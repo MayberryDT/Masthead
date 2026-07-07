@@ -1,7 +1,10 @@
+import { existsSync } from "node:fs";
 import { chmod, copyFile, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import type { RuntimeKind } from "../adapters/types.ts";
 import {
+  CLAUDE_STYLE_HOOK_EVENTS,
   installMastheadHookConfig,
   uninstallMastheadHookConfig,
   verifyMastheadHookConfig,
@@ -9,7 +12,7 @@ import {
 } from "../core/hookAdmin.ts";
 import type { DaemonConfig } from "./config.ts";
 
-export const LIVE_CONNECTOR_RUNTIMES = ["claude_code", "cursor", "grok", "opencode", "omp", "pi", "hermes"] as const satisfies readonly RuntimeKind[];
+export const LIVE_CONNECTOR_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "opencode", "omp", "pi", "hermes"] as const satisfies readonly RuntimeKind[];
 
 export type LiveConnectorRuntime = (typeof LIVE_CONNECTOR_RUNTIMES)[number];
 
@@ -54,10 +57,11 @@ const OPENCODE_PLUGIN_MARKER = "masthead-live-connector";
 const OMP_EXTENSION_MARKER = "masthead-live-connector";
 const PI_EXTENSION_MARKER = "masthead-live-connector";
 const HERMES_PLUGIN_MARKER = "masthead-live-connector";
-const CLAUDE_STYLE_EVENTS = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "PostToolUse", "Stop"] as const;
+const CLAUDE_STYLE_EVENTS = CLAUDE_STYLE_HOOK_EVENTS;
 const CURSOR_EVENTS = ["sessionStart", "beforeSubmitPrompt", "beforeShellExecution", "afterShellExecution", "afterFileEdit", "postToolUse", "stop"] as const;
 
 const LABELS: Record<LiveConnectorRuntime, string> = {
+  codex: "Codex",
   claude_code: "Claude Code",
   cursor: "Cursor",
   grok: "Grok Build",
@@ -181,6 +185,8 @@ export async function runLiveConnectorRoundTrip(
 export function liveConnectorConfigPath(config: DaemonConfig, runtime: LiveConnectorRuntime): string {
   const homeDir = resolve(config.codexHomeDir);
   switch (runtime) {
+    case "codex":
+      return resolve(process.env.MASTHEAD_CODEX_HOOKS || join(homeDir, ".codex", "hooks.json"));
     case "claude_code":
       return resolve(process.env.MASTHEAD_CLAUDE_SETTINGS || join(homeDir, ".claude", "settings.json"));
     case "cursor":
@@ -199,8 +205,62 @@ export function liveConnectorConfigPath(config: DaemonConfig, runtime: LiveConne
 }
 
 export function liveConnectorCommand(config: DaemonConfig, runtime: LiveConnectorRuntime, endpoint?: string): string {
-  const scriptPath = resolve(process.env.MASTHEAD_HOOK_SCRIPT || "scripts/masthead-hook.js");
-  return `MASTHEAD_INGEST_URL=${quoteShell(liveConnectorEndpoint(config, runtime, endpoint))} MASTHEAD_HOOK_TIMEOUT_MS=750 ${quoteShell(process.execPath)} ${quoteShell(scriptPath)}`;
+  const { nodePath, scriptPath } = resolveLiveConnectorCommandPaths();
+  return `MASTHEAD_INGEST_URL=${quoteShell(liveConnectorEndpoint(config, runtime, endpoint))} MASTHEAD_HOOK_TIMEOUT_MS=750 ${quoteShell(nodePath)} ${quoteShell(scriptPath)}`;
+}
+
+export function resolveLiveConnectorCommandPaths(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    execPath?: string;
+    exists?: (path: string) => boolean;
+    homeDir?: string;
+  } = {}
+): { nodePath: string; scriptPath: string } {
+  const env = options.env ?? process.env;
+  const execPath = options.execPath ?? process.execPath;
+  if (env.MASTHEAD_HOOK_SCRIPT) {
+    const scriptPath = resolve(env.MASTHEAD_HOOK_SCRIPT);
+    const stable = looksLikePackagedHookScript(scriptPath) ? stablePackagedCommandPaths(execPath, options) : undefined;
+    if (stable) return stable;
+    return {
+      nodePath: execPath,
+      scriptPath
+    };
+  }
+
+  const stable = stablePackagedCommandPaths(execPath, options);
+  if (stable) return stable;
+
+  return {
+    nodePath: execPath,
+    scriptPath: resolve("scripts/masthead-hook.js")
+  };
+}
+
+function stablePackagedCommandPaths(
+  execPath: string,
+  options: { exists?: (path: string) => boolean; homeDir?: string }
+): { nodePath: string; scriptPath: string } | undefined {
+  const nodeName = process.platform === "win32" ? "node.exe" : "node";
+  if (!looksLikePackagedDaemonNode(execPath, nodeName)) return undefined;
+
+  const currentRoot = join(options.homeDir ?? homedir(), ".local", "share", "masthead-production", "current");
+  const nodePath = join(currentRoot, "resources", "daemon", nodeName);
+  const scriptPath = join(currentRoot, "resources", "daemon", "scripts", "masthead-hook.js");
+  const exists = options.exists ?? existsSync;
+  if (!exists(nodePath) || !exists(scriptPath)) return undefined;
+  return { nodePath, scriptPath };
+}
+
+function looksLikePackagedDaemonNode(execPath: string, nodeName: string): boolean {
+  const normalized = execPath.replace(/\\/g, "/");
+  return normalized.includes("/.local/share/masthead-production/") && normalized.endsWith(`/resources/daemon/${nodeName}`);
+}
+
+function looksLikePackagedHookScript(scriptPath: string): boolean {
+  const normalized = scriptPath.replace(/\\/g, "/");
+  return normalized.includes("/.local/share/masthead-production/") && normalized.endsWith("/resources/daemon/scripts/masthead-hook.js");
 }
 
 export function liveConnectorEndpoint(config: DaemonConfig, runtime: LiveConnectorRuntime, endpoint = baseIngestEndpoint(config)): string {

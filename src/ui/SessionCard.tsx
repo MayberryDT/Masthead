@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { SessionCardView } from "../core/types";
 import { firstUsefulSessionTitle, isWeakLiveSummary } from "../shared/sessionTextQuality.ts";
-import { isBlockedSessionCard } from "./format";
+import { isBlockedSessionCard, waitingSessionLabel } from "./format";
 import { prefersReducedMotion } from "./motionPreference";
 import type { DemoSessionTelemetry } from "./observabilityDemo";
 
@@ -187,18 +187,21 @@ function Fact({ label, value }: { label: string; value: string }) {
 
 function sessionStatePillLabel(session: SessionCardView): string {
   if (isBlockedSessionCard(session)) return "Blocked";
+  const waitingLabel = waitingSessionLabel(session);
+  if (waitingLabel) return waitingLabel;
   if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") return "Idle";
   return "Active";
 }
 
-function sessionStateClassName(session: SessionCardView): "is-active" | "is-idle" | "is-blocked" {
+function sessionStateClassName(session: SessionCardView): "is-active" | "is-idle" | "is-blocked" | "is-waiting" {
   if (isBlockedSessionCard(session)) return "is-blocked";
+  if (waitingSessionLabel(session)) return "is-waiting";
   if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") return "is-idle";
   return "is-active";
 }
 
 function sessionVisualTier(session: SessionCardView): SessionVisualTier {
-  if (isBlockedSessionCard(session)) return "action";
+  if (isBlockedSessionCard(session) || waitingSessionLabel(session)) return "action";
   if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") {
     return session.primaryStatus === "failed" || session.outcomeLabel === "failed" ? "action" : "quiet";
   }

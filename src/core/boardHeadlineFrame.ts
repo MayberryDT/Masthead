@@ -43,6 +43,8 @@ export type BoardHeadlineView = {
   generatedAt?: string;
   model?: string;
   provider?: string;
+  refreshKeyHash?: string;
+  freshness?: "fresh" | "stale";
   failureReason?: string;
 };
 

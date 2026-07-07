@@ -1,6 +1,7 @@
 const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
 const DEFAULT_TIMEOUT_SECONDS = 1;
-const REQUIRED_HOOK_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"] as const;
+export const CLAUDE_STYLE_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "PostToolUse", "Stop"] as const;
+const REQUIRED_HOOK_EVENTS = CLAUDE_STYLE_HOOK_EVENTS;
 
 export type HookEventName = string;
 

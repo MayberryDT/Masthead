@@ -229,6 +229,75 @@ describe("live projection client helpers", () => {
     expect("copy" in projection.cards[0]).toBe(false);
   });
 
+  test("preserves daemon-provided headline freshness, refresh state, model, and token metadata", () => {
+    const frame = {
+      subject: "Board headlines",
+      disposition: "retained while a newer transcript refresh is pending",
+      state: "active" as const,
+      subjectKind: "component" as const,
+      confidence: "high" as const,
+      evidence: ["A prior sanitized transcript produced this visible frame."]
+    };
+    const projection = normalizeLiveBoardProjection({
+      summary: { active: 1, needsAttention: 0, conflicts: 0, completed: 0 },
+      cards: [
+        {
+          ...legacyCard({
+            sessionId: "freshness-session",
+            lifecycle: "running",
+            primaryStatus: "editing",
+            indicators: [],
+            model: "gpt-5.5",
+            totalTokens: 4096
+          }),
+          headline: {
+            headline: "Board headlines: retained while a newer transcript refresh is pending.",
+            frame,
+            source: "llm",
+            status: "pending",
+            generatedAt: "2026-07-01T12:00:00.000Z",
+            model: "gpt-5.5",
+            provider: "openai",
+            freshness: "stale"
+          },
+          headlineRefresh: {
+            requestedAt: "2026-07-01T12:05:00.000Z",
+            status: "pending",
+            provider: "openai",
+            model: "gpt-5.5",
+            freshness: "stale"
+          }
+        }
+      ],
+      attentionQueue: [],
+      conflicts: []
+    } as unknown as LiveBoardProjection);
+
+    const headline = projection.cards[0].headline as SessionCardView["headline"] & { freshness?: string };
+    const headlineRefresh = projection.cards[0].headlineRefresh as NonNullable<SessionCardView["headlineRefresh"]> & {
+      freshness?: string;
+    };
+
+    expect(projection.cards[0]).toMatchObject({
+      model: "gpt-5.5",
+      totalTokens: 4096
+    });
+    expect(headline).toMatchObject({
+      headline: "Board headlines: retained while a newer transcript refresh is pending.",
+      model: "gpt-5.5",
+      provider: "openai",
+      source: "llm",
+      status: "pending",
+      freshness: "stale"
+    });
+    expect(headlineRefresh).toMatchObject({
+      model: "gpt-5.5",
+      provider: "openai",
+      status: "pending",
+      freshness: "stale"
+    });
+  });
+
   test("keeps null selection distinct from legacy selected-session fallback", () => {
     const projection = {
       summary: { active: 1, needsAttention: 0, conflicts: 0, completed: 0 },

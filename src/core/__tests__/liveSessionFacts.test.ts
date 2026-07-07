@@ -26,7 +26,7 @@ describe("live session facts", () => {
     ]);
   });
 
-  test("defers successful tool and file events out of the live board hot path", () => {
+  test("applies command starts immediately while deferring successful tool results and file events", () => {
     const started = event("started", "command.started", {
       category: "shell",
       commandId: "call-started",
@@ -44,17 +44,17 @@ describe("live session facts", () => {
       path: "src/core/liveSessionFacts.ts"
     });
 
-    expect(eventLiveProcessingMode(started)).toBe("deferred");
+    expect(eventLiveProcessingMode(started)).toBe("immediate");
     expect(eventLiveProcessingMode(shell)).toBe("deferred");
     expect(eventLiveProcessingMode(file)).toBe("deferred");
-    expect(shouldApplyLiveEventImmediately(started)).toBe(false);
+    expect(shouldApplyLiveEventImmediately(started)).toBe(true);
     expect(shouldApplyLiveEventImmediately(shell)).toBe(false);
     expect(shouldApplyLiveEventImmediately(file)).toBe(false);
     expect(liveSessionFactFromEvent(started)).toMatchObject({
-      deferredReason: "tool_stat",
       kind: "tool_stat",
-      priority: "deferred"
+      priority: "immediate"
     });
+    expect(liveSessionFactFromEvent(started)).not.toHaveProperty("deferredReason");
     expect(liveSessionFactFromEvent(shell)).toMatchObject({
       deferredReason: "tool_stat",
       kind: "tool_stat",

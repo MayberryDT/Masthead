@@ -10,8 +10,10 @@ import { upsertSessionEnrichment } from "../db/enrichmentRepository.ts";
 import { getSessionDossier } from "../db/sessionDossierRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
+import { resolveLiveConnectorCommandPaths } from "../liveConnectorSettings.ts";
 
 const LIVE_CONNECTOR_RUNTIME_EXPECTATIONS = [
+  { label: "Codex", runtime: "codex" },
   { label: "Cursor", runtime: "cursor" },
   { label: "Claude Code", runtime: "claude_code" },
   { label: "OpenCode", runtime: "opencode" },
@@ -20,6 +22,8 @@ const LIVE_CONNECTOR_RUNTIME_EXPECTATIONS = [
   { label: "Pi", runtime: "pi" },
   { label: "Oh My Pi", runtime: "omp" }
 ] as const;
+
+const CLAUDE_STYLE_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "PostToolUse", "Stop"] as const;
 
 
 const tempDirs: string[] = [];
@@ -545,6 +549,7 @@ describe("settings API", () => {
     const { daemon, tempDir } = await createTestHarness();
     const baseUrl = await listen(daemon);
     const claudePath = join(tempDir, ".claude", "settings.json");
+    const codexPath = join(tempDir, ".codex", "hooks.json");
     const cursorPath = join(tempDir, ".cursor", "hooks.json");
     const grokPath = join(tempDir, ".grok", "hooks", "masthead.json");
     const ompPath = join(tempDir, ".omp", "agent", "extensions", "masthead-live.js");
@@ -555,7 +560,7 @@ describe("settings API", () => {
     const before = await getJson(baseUrl, "/settings/hooks");
     expect(before.hooks).toMatchObject({
       configExists: false,
-      configPath: claudePath,
+      configPath: codexPath,
       installed: false
     });
     await mkdir(dirname(cursorPath), { recursive: true });
@@ -582,6 +587,11 @@ describe("settings API", () => {
       configExists: true,
       installed: true
     });
+    const codexConfig = JSON.parse(await readFile(codexPath, "utf8")) as { hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>> };
+    expect(Object.keys(codexConfig.hooks)).toEqual(CLAUDE_STYLE_HOOK_EVENTS);
+    for (const eventName of CLAUDE_STYLE_HOOK_EVENTS) {
+      expect(codexConfig.hooks[eventName]?.[0]?.hooks[0]?.command).toContain("runtime=codex");
+    }
     expect(await readFile(claudePath, "utf8")).toContain("runtime=claude_code");
     const cursorConfig = JSON.parse(await readFile(cursorPath, "utf8")) as { hooks: Record<string, Array<{ command: string }>> };
     expect(cursorConfig.hooks.beforeSubmitPrompt).toEqual(
@@ -606,6 +616,7 @@ describe("settings API", () => {
     expect(await readFile(hermesPath, "utf8")).toContain("runtime=hermes");
     expect(installed.hooks.integrations).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ configPath: codexPath, runtime: "codex", status: "installed" }),
         expect.objectContaining({ configPath: claudePath, runtime: "claude_code", status: "installed" }),
         expect.objectContaining({ configPath: cursorPath, runtime: "cursor", status: "installed" }),
         expect.objectContaining({ configPath: grokPath, runtime: "grok", status: "installed" }),
@@ -718,6 +729,95 @@ describe("settings API", () => {
       installed: false
     });
     await expect(readFile(ompPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("prefers stable current symlink paths for packaged hook commands", () => {
+    const homeDir = "/tmp/masthead-home";
+    const nodeName = process.platform === "win32" ? "node.exe" : "node";
+    const execPath = join(homeDir, ".local", "share", "masthead-production", "Masthead-linux-x64-0.1.0", "resources", "daemon", nodeName);
+    const stableNode = join(homeDir, ".local", "share", "masthead-production", "current", "resources", "daemon", nodeName);
+    const stableScript = join(homeDir, ".local", "share", "masthead-production", "current", "resources", "daemon", "scripts", "masthead-hook.js");
+
+    expect(
+      resolveLiveConnectorCommandPaths({
+        env: {},
+        execPath,
+        exists: (path) => path === stableNode || path === stableScript,
+        homeDir
+      })
+    ).toEqual({
+      nodePath: stableNode,
+      scriptPath: stableScript
+    });
+
+    const exactPackageScript = join(homeDir, ".local", "share", "masthead-production", "Masthead-linux-x64-0.1.0", "resources", "daemon", "scripts", "masthead-hook.js");
+    expect(
+      resolveLiveConnectorCommandPaths({
+        env: { MASTHEAD_HOOK_SCRIPT: exactPackageScript },
+        execPath,
+        exists: (path) => path === stableNode || path === stableScript,
+        homeDir
+      })
+    ).toEqual({
+      nodePath: stableNode,
+      scriptPath: stableScript
+    });
+  });
+
+  test("uses the packaged hook script override when generating runtime hook commands", async () => {
+    const { daemon, tempDir } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+    const codexPath = join(tempDir, ".codex", "hooks.json");
+    const packagedHookScript = join(tempDir, "resources", "daemon", "scripts", "masthead-hook.js");
+    const originalHookScript = process.env.MASTHEAD_HOOK_SCRIPT;
+
+    try {
+      process.env.MASTHEAD_HOOK_SCRIPT = packagedHookScript;
+
+      const before = await getJson(baseUrl, "/settings/hooks/codex");
+      expect(before.hooks.command).toContain(packagedHookScript);
+      expect(before.hooks.command).toContain("runtime=codex");
+
+      const installed = await postJson(baseUrl, "/settings/hooks/codex/install");
+      expect(installed.hooks.command).toContain(packagedHookScript);
+      expect(await readFile(codexPath, "utf8")).toContain(packagedHookScript);
+    } finally {
+      if (originalHookScript === undefined) delete process.env.MASTHEAD_HOOK_SCRIPT;
+      else process.env.MASTHEAD_HOOK_SCRIPT = originalHookScript;
+    }
+  });
+
+  test("keeps aggregate live hook status separate from runtime-specific hook status", async () => {
+    const { daemon, tempDir } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+    const codexPath = join(tempDir, ".codex", "hooks.json");
+
+    await postJson(baseUrl, "/settings/hooks/codex/install");
+
+    const codex = await getJson(baseUrl, "/settings/hooks/codex");
+    expect(codex.hooks).toMatchObject({
+      configExists: true,
+      configPath: codexPath,
+      endpoint: expect.stringContaining("runtime=codex"),
+      installed: true,
+      mismatchedEvents: [],
+      missingEvents: []
+    });
+
+    const aggregate = await getJson(baseUrl, "/settings/hooks");
+    expect(aggregate.hooks).toMatchObject({
+      configExists: true,
+      configPath: codexPath,
+      installed: false
+    });
+    expect(aggregate.hooks.missingEvents).toEqual(expect.arrayContaining(["claude_code:SessionStart", "omp:event"]));
+
+    const statuses = new Map(
+      aggregate.hooks.integrations.map((integration: { runtime: string; status: string }) => [integration.runtime, integration.status])
+    );
+    expect(statuses.get("codex")).toBe("installed");
+    expect(statuses.get("claude_code")).toBe("not_installed");
+    expect(statuses.get("omp")).toBe("not_installed");
   });
 });
 

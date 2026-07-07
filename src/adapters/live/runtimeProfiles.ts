@@ -33,10 +33,6 @@ const DEFAULT_RUNTIME_STATE_MAP = {
   ready: "idle",
   waiting: "idle",
   blocked: "blocked",
-  approval_requested: "blocked",
-  waiting_for_approval: "blocked",
-  waiting_for_user: "blocked",
-  permission_requested: "blocked",
   done: "ended",
   completed: "ended",
   complete: "ended",
@@ -45,6 +41,34 @@ const DEFAULT_RUNTIME_STATE_MAP = {
 } satisfies NonNullable<LiveRuntimeProfile["runtimeStateMap"]>;
 
 export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfile>> = {
+  codex: {
+    runtime: "codex",
+    label: "Codex",
+    surface: "hook",
+    sourceName: "codex.hook",
+    includeRuntimePayloadMetadata: true,
+    sessionIdKeys: ["session_id", "sessionId", "conversation_id", "conversationId", "thread_id", "threadId"],
+    eventNameKeys: ["event", "type", "hook_event_name", "hookEventName", "event_name", "eventName"],
+    timestampKeys: ["timestamp", "occurred_at", "occurredAt", "time", "created_at", "createdAt"],
+    workspaceKeys: {
+      cwd: ["cwd", "working_directory", "workingDirectory"],
+      repoRoot: ["workspaceRoot", "repoRoot"],
+      branch: ["gitBranch", "branch"]
+    },
+    eventMap: {
+      sessionstart: "session.started",
+      userpromptsubmit: "user.question",
+      pretooluse: "command.started",
+      posttooluse: "command.finished",
+      posttoolusefailure: "command.finished",
+      permissionrequest: "approval.requested",
+      permissiondenied: "approval.requested",
+      stop: "session.completed",
+      sessionend: "session.completed"
+    },
+    runtimeStateKeys: DEFAULT_RUNTIME_STATE_KEYS,
+    runtimeStateMap: DEFAULT_RUNTIME_STATE_MAP
+  },
   cursor: {
     runtime: "cursor",
     label: "Cursor",

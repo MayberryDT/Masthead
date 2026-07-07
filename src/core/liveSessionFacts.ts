@@ -38,7 +38,7 @@ export function eventLiveProcessingMode(event: NormalizedEvent): LiveEventProces
 
 export function shouldApplyLiveEventImmediately(event: NormalizedEvent): boolean {
   if (!event.sessionId) return false;
-  if (event.type === "command.started" || event.type === "file.changed") return false;
+  if (event.type === "file.changed") return false;
   if (event.type === "command.finished") return commandFailed(event);
   return true;
 }
@@ -94,7 +94,7 @@ function statusForEvent(event: NormalizedEvent): LiveSessionFact["status"] {
 
 function deferredReasonForEvent(event: NormalizedEvent): DeferredLiveReason | undefined {
   if (event.type === "file.changed") return "file_stat";
-  if (event.type === "command.started") return "tool_stat";
+  if (event.type === "command.started" && eventLiveProcessingMode(event) === "deferred") return "tool_stat";
   if (event.type === "command.finished" && !commandFailed(event)) return "tool_stat";
   return undefined;
 }

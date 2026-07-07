@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { LIVE_RUNTIME_PROFILES, type LiveRuntimeProfile } from "../adapters/live/runtimeProfiles.ts";
-import { RUNTIME_KINDS, type RuntimeKind } from "../adapters/types.ts";
+import { ALL_RUNTIME_KINDS, type RuntimeKind } from "../adapters/types.ts";
 import { buildLatestFeedbackSnapshot } from "./feedbackSnapshot.ts";
 import { redactPath, redactText } from "./redaction.ts";
 import type { EventType, NormalizedEvent, WorkspaceRef } from "./types";
@@ -45,6 +45,13 @@ export type LiveHookDiagnostic = {
   message: string;
   receivedAt: string;
   details?: string;
+};
+
+export type LiveHookRuntimeDiagnostic = {
+  code: "runtime_mismatch" | "source_path_mismatch";
+  normalizedRuntime: RuntimeKind;
+  reportedRuntime?: string;
+  payloadKey?: string;
 };
 
 export type LiveHookParseResult =
@@ -195,7 +202,7 @@ function fallbackSourceEventId(
 function profileForRuntime(value: string | undefined): LiveRuntimeProfile {
   if (!value) throw new UnsupportedRuntimeError("required");
   const runtime = value as RuntimeKind;
-  if (!RUNTIME_KINDS.includes(runtime)) throw new UnsupportedRuntimeError(value);
+  if (!(ALL_RUNTIME_KINDS as readonly string[]).includes(runtime)) throw new UnsupportedRuntimeError(value);
   const profile = LIVE_RUNTIME_PROFILES[runtime];
   if (!profile) throw new UnsupportedRuntimeError(runtime);
   return profile;
@@ -348,7 +355,9 @@ function buildPayload(
     "head_sha",
     "headSha",
     "workspace",
-    "git"
+    "git",
+    "runtime",
+    "harness"
   ]);
   const payload: Record<string, unknown> = {};
   if (profile.includeRuntimePayloadMetadata) {
@@ -358,7 +367,8 @@ function buildPayload(
   }
   const runtimeLifecycleState = runtimeLifecycleStateFrom(input, profile);
   if (runtimeLifecycleState) payload.runtimeLifecycleState = runtimeLifecycleState;
-
+  const runtimeDiagnostics = runtimeDiagnosticsFrom(input, profile);
+  if (runtimeDiagnostics.length > 0) payload.runtimeDiagnostics = runtimeDiagnostics;
 
   for (const [key, value] of Object.entries(input)) {
     if (excluded.has(key) || value === undefined) continue;
@@ -394,6 +404,67 @@ function buildPayload(
   if (eventType === "command.finished" && exitCode !== undefined) payload.exitCode = exitCode;
 
   return payload;
+}
+
+function runtimeDiagnosticsFrom(input: Record<string, unknown>, profile: LiveRuntimeProfile): LiveHookRuntimeDiagnostic[] {
+  const diagnostics: LiveHookRuntimeDiagnostic[] = [];
+  const reportedRuntime = firstString(input, ["runtime", "adapter", "harnessRuntime", "sourceRuntime"]);
+  if (reportedRuntime && reportedRuntime !== profile.runtime) {
+    diagnostics.push({
+      code: "runtime_mismatch",
+      normalizedRuntime: profile.runtime,
+      reportedRuntime
+    });
+  }
+
+  const pathMismatches = sourcePathMismatches(input, profile.runtime);
+  for (const mismatch of pathMismatches) {
+    diagnostics.push({
+      code: "source_path_mismatch",
+      normalizedRuntime: profile.runtime,
+      payloadKey: mismatch.key,
+      reportedRuntime: mismatch.runtime
+    });
+  }
+  return diagnostics;
+}
+
+function sourcePathMismatches(input: Record<string, unknown>, normalizedRuntime: RuntimeKind): Array<{ key: string; runtime: string }> {
+  const mismatches: Array<{ key: string; runtime: string }> = [];
+  const stack: Array<{ key: string; value: unknown }> = Object.entries(input).map(([key, value]) => ({ key, value }));
+  const seen = new Set<string>();
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    if (typeof current.value === "string") {
+      const runtime = runtimeHintFromPath(current.value);
+      if (runtime && runtime !== normalizedRuntime && !seen.has(`${current.key}:${runtime}`)) {
+        seen.add(`${current.key}:${runtime}`);
+        mismatches.push({ key: current.key, runtime });
+      }
+      continue;
+    }
+    if (Array.isArray(current.value)) {
+      current.value.forEach((value, index) => stack.push({ key: `${current.key}[${index}]`, value }));
+      continue;
+    }
+    if (isRecord(current.value)) {
+      for (const [key, value] of Object.entries(current.value)) stack.push({ key: current.key ? `${current.key}.${key}` : key, value });
+    }
+  }
+
+  return mismatches;
+}
+
+function runtimeHintFromPath(value: string): RuntimeKind | undefined {
+  if (/(^|[/\\])\.grok([/\\]|$)/i.test(value)) return "grok";
+  if (/(^|[/\\])\.claude([/\\]|$)/i.test(value)) return "claude_code";
+  if (/(^|[/\\])\.codex([/\\]|$)/i.test(value)) return "codex";
+  if (/(^|[/\\])\.omp([/\\]|$)/i.test(value)) return "omp";
+  if (/(^|[/\\])\.pi([/\\]|$)/i.test(value)) return "pi";
+  if (/(^|[/\\])\.hermes([/\\]|$)/i.test(value)) return "hermes";
+  return undefined;
 }
 
 function runtimeLifecycleStateFrom(

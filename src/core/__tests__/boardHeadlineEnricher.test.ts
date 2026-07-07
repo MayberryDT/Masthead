@@ -452,6 +452,11 @@ describe("board headline enricher", () => {
       source: "pending",
       status: "pending"
     });
+    expect(result.cards[0]?.headlineRefresh).toMatchObject({
+      provider: "openai",
+      status: "pending"
+    });
+    expect(result.cards[0]?.headlineRefresh?.failureMessage).toMatch(/waiting for transcript/i);
   });
 
   test("does not call OpenAI when transcript excerpt contains only hook placeholders", async () => {
@@ -674,6 +679,61 @@ describe("board headline enricher", () => {
 
     second.resolve(responseWithFrame(validFrame({ subject: "New transcript evidence" })));
     await flushMicrotasks();
+  });
+
+  test("keeps a mismatched stored LLM frame visible while marking the current refresh pending or failed", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 500 }));
+    const now = vi.fn(() => new Date("2026-07-01T12:10:00.000Z"));
+    const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl, now });
+    const staleFrame = validFrame({
+      disposition: "summarizes the previous transcript evidence",
+      evidence: ["The earlier transcript asked for stored copy."]
+    });
+    const staleHeadline: BoardHeadlineView = {
+      headline: "Board headlines: summarizes the previous transcript evidence.",
+      frame: staleFrame,
+      source: "llm",
+      status: "ready",
+      generatedAt: "2026-07-01T12:00:00.000Z",
+      model: "gpt-5-nano-2025-08-07",
+      provider: "openai"
+    };
+    const currentCard = card({
+      headline: staleHeadline,
+      headlineInput: input({
+        facts: {
+          ...input().facts,
+          recentTranscriptMessages: ["The current transcript now asks for stale headline freshness to be visible."]
+        }
+      })
+    });
+
+    const pending = await enricher.enrichProjection(projection([currentCard]), { refreshIntervalMs: 0 });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(pending.cards[0]?.headline).toBe(staleHeadline);
+    expect(pending.cards[0]?.headlineRefresh).toMatchObject({
+      model: "gpt-5-nano-2025-08-07",
+      provider: "openai",
+      status: "pending"
+    });
+    expect(pending.cards[0]?.headlineRefresh?.status).not.toBe("success");
+
+    await flushMicrotasks();
+
+    const failed = await enricher.enrichProjection(projection([currentCard]), { refreshIntervalMs: 0 });
+
+    expect(failed.cards[0]?.headline).toBe(staleHeadline);
+    expect(failed.cards[0]?.headlineRefresh).toMatchObject({
+      failureMessage: "OpenAI board headline frame request failed with HTTP 500.",
+      model: "gpt-5-nano-2025-08-07",
+      provider: "openai",
+      status: "api_error"
+    });
+    expect(failed.headlineRefreshSummary).toMatchObject({
+      failed: 1,
+      pending: 1
+    });
   });
 
   test("uses the Board refresh interval as the active-session request cooldown", async () => {

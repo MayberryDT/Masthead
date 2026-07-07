@@ -75,7 +75,7 @@ describe("observability session card", () => {
   test("adds visual tier classes by operational state", () => {
     const active = renderToStaticMarkup(<SessionCard session={session({ lifecycle: "running", primaryStatus: "editing" })} />);
     const idle = renderToStaticMarkup(<SessionCard session={session({ lifecycle: "idle", primaryStatus: "stalled" })} />);
-    const blocked = renderToStaticMarkup(
+    const waiting = renderToStaticMarkup(
       <SessionCard session={session({ lifecycle: "running", primaryStatus: "waiting_for_approval", indicators: ["attention"] })} />
     );
     const conflict = renderToStaticMarkup(
@@ -84,7 +84,7 @@ describe("observability session card", () => {
 
     expect(active).toContain("tier-live");
     expect(idle).toContain("tier-quiet");
-    expect(blocked).toContain("tier-action");
+    expect(waiting).toContain("is-waiting tier-action");
     expect(conflict).toContain("is-active tier-live");
     expect(conflict).not.toContain("tier-action");
   });
@@ -129,29 +129,34 @@ describe("observability session card", () => {
     expect(html).not.toContain("tier-action");
   });
 
-  test("keeps active blockers in the action visual tier", () => {
-    const blockerCases: Array<{ name: string; overrides: Partial<SessionCardView> }> = [
-      {
-        name: "blocked status",
-        overrides: { lifecycle: "running", primaryStatus: "blocked", stateLabel: "Blocked", indicators: ["attention"] }
-      },
-      {
-        name: "approval wait",
-        overrides: { lifecycle: "running", primaryStatus: "waiting_for_approval", stateLabel: "Waiting for approval", indicators: ["attention"] }
-      },
-      {
-        name: "user input wait",
-        overrides: { lifecycle: "running", primaryStatus: "waiting_for_user", stateLabel: "Waiting for user", indicators: ["attention"] }
-      }
-    ];
+  test("keeps true blockers in the blocked action visual tier", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({ lifecycle: "running", primaryStatus: "blocked", stateLabel: "Blocked", indicators: ["attention"] })}
+        onToggle={() => undefined}
+      />
+    );
 
-    for (const { name, overrides } of blockerCases) {
-      const html = renderToStaticMarkup(<SessionCard session={session(overrides)} onToggle={() => undefined} />);
+    expect(html).toContain("is-blocked");
+    expect(html).toContain("tier-action");
+    expect(html).not.toContain("tier-quiet");
+  });
 
-      expect(html, name).toContain("is-blocked");
-      expect(html, name).toContain("tier-action");
-      expect(html, name).not.toContain("tier-quiet");
-    }
+  test.each([
+    ["approval wait", "waiting_for_approval", "Needs approval"],
+    ["user input wait", "waiting_for_user", "Needs input"]
+  ] as const)("renders %s as waiting copy without blocked classes", (_name, primaryStatus, label) => {
+    const html = renderToStaticMarkup(
+      <SessionCard session={session({ lifecycle: "running", primaryStatus, stateLabel: label, indicators: ["attention"] })} onToggle={() => undefined} />
+    );
+
+    expect(html).toContain(`>${label}<`);
+    expect(html).toContain("is-waiting");
+    expect(html).toContain("tier-action");
+    expect(html).not.toContain("is-active");
+    expect(html).not.toContain("is-blocked");
+    expect(html).not.toContain(">Blocked<");
+    expect(html).not.toContain("tier-quiet");
   });
 
   test("uses a project and work-area label in the header without synthetic id chrome", () => {
@@ -345,12 +350,8 @@ describe("observability session card", () => {
     expect(stateClassName(session({ lifecycle: "running", primaryStatus: "editing", indicators: [] }))).toBe("running");
     expect(stateClassName(session({ lifecycle: "idle", primaryStatus: "stalled", indicators: [] }))).toBe("stalled");
     expect(stateClassName(session({ lifecycle: "running", primaryStatus: "blocked", indicators: ["attention"] }))).toBe("needs-attention");
-    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "waiting_for_user", indicators: ["attention"] }))).toBe(
-      "needs-attention"
-    );
-    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "waiting_for_approval", indicators: ["attention"] }))).toBe(
-      "needs-attention"
-    );
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "waiting_for_user", indicators: ["attention"] }))).toBe("running");
+    expect(stateClassName(session({ lifecycle: "running", primaryStatus: "waiting_for_approval", indicators: ["attention"] }))).toBe("running");
     expect(stateClassName(session({ lifecycle: "running", primaryStatus: "editing", indicators: ["attention", "conflict"] }))).toBe(
       "running"
     );
@@ -1256,7 +1257,7 @@ describe("observability session card", () => {
     expect(html).not.toContain("npm test");
   });
 
-  test("renders approval-pending sessions as blocked", () => {
+  test("renders approval-pending sessions as needs-approval waiting copy", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
@@ -1269,9 +1270,12 @@ describe("observability session card", () => {
       />
     );
 
-    expect(html).toContain(">Blocked<");
-    expect(html).toContain("is-blocked");
-    expect(html).not.toContain(">Active<");
+    expect(html).toContain(">Needs approval<");
+    expect(html).toContain("is-waiting");
+    expect(html).toContain("tier-action");
+    expect(html).not.toContain("is-active");
+    expect(html).not.toContain(">Blocked<");
+    expect(html).not.toContain("is-blocked");
   });
 
   test("does not apply demo harness or model values to live observability cards", () => {

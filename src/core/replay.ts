@@ -145,7 +145,7 @@ export function projectFixture(fixture: FixtureReplay, options: ProjectFixtureOp
 
   const projection: LiveBoardProjection = {
     summary: {
-      active: sessionsWithOutcomes.filter(isActiveSession).length,
+      active: laneCounts.running,
       needsAttention: attentionQueue.filter((item) => !item.resolvedAt && !item.dismissedAt).length,
       conflicts: conflicts.length,
       completed,
@@ -403,9 +403,9 @@ function stringPayload(event: NormalizedEvent, key: string): string | undefined 
 }
 
 function latestNumberPayload(events: NormalizedEvent[], keys: string[]): number | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
+  for (const event of events.toSorted((a, b) => b.occurredAt.localeCompare(a.occurredAt))) {
     for (const key of keys) {
-      const value = events[index]?.payload[key];
+      const value = event.payload[key];
       if (typeof value === "number" && Number.isFinite(value)) return value;
     }
   }

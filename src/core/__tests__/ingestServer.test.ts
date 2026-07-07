@@ -142,11 +142,11 @@ describe("ingest server live projection", () => {
     expect(serialized).not.toContain("OPENAI_API_KEY");
   });
 
-  test("returns pending LLM-first Board headlines before OpenAI responds", async () => {
+  test("returns pending Board headline state when the LLM provider is configured but transcript evidence is absent", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
     const server = await startServer(join(tempDir, "events.ndjson"), {
-      MASTHEAD_LIVE_COPY: "1",
+      MASTHEAD_LLM_COPY: "1",
       OPENAI_API_KEY: "redacted-local-test-key"
     });
     servers.push(server.child);
@@ -159,7 +159,13 @@ describe("ingest server live projection", () => {
     expect(card).toMatchObject({
       sessionId: "server-live",
       headline: {
-        source: "pending"
+        headline: "Waiting for transcript...",
+        source: "pending",
+        status: "pending"
+      },
+      headlineRefresh: {
+        status: "pending",
+        failureMessage: expect.stringMatching(/transcript evidence/i)
       }
     });
     expect(card.headlineInput).toBeDefined();
@@ -380,6 +386,28 @@ describe("ingest server live projection", () => {
       "event:claude_code:server-live-tool"
     ]);
     expect(toolResultRows(databasePath)).toEqual([expect.objectContaining({ exit_code: 0, status: "succeeded" })]);
+  });
+
+  test("command starts clear stale user-question state in the live projection", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
+    tempDirs.push(tempDir);
+    const storePath = join(tempDir, "events.ndjson");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const server = await startServer(storePath, { MASTHEAD_DB_PATH: databasePath });
+    servers.push(server.child);
+
+    await postJson(server.baseUrl, "/ingest", liveQuestionPayload("server-live-question"));
+    await postJson(server.baseUrl, "/ingest", liveStartedToolPayload("server-live-tool-start"));
+
+    const projection = await getJson(server.baseUrl, "/projection?expandedSessionId=server-live");
+    const card = projection.projection.cards[0];
+
+    expect(card.sessionId).toBe("server-live");
+    expect(card).toMatchObject({
+      lifecycle: "running",
+      primaryStatus: "reading",
+      stateLabel: "Running"
+    });
   });
 
   test("deferred PostToolUse flushing after Stop does not reopen an ended canonical session", async () => {
@@ -1235,6 +1263,23 @@ function liveClaudePromptPayload(providerEventId: string): Record<string, unknow
   };
 }
 
+
+function liveStartedToolPayload(providerEventId: string): Record<string, unknown> {
+  return {
+    provider_event_id: providerEventId,
+    hookEventName: "PreToolUse",
+    sessionId: "server-live",
+    timestamp: new Date().toISOString(),
+    cwd: "/workspace/masthead",
+    repo_root: "/workspace/masthead",
+    project: "Masthead",
+    toolName: "Read",
+    toolUseId: "call-active-tool",
+    toolInput: {
+      path: "src/app/App.tsx"
+    }
+  };
+}
 
 function liveSuccessfulToolPayload(
   providerEventId: string,

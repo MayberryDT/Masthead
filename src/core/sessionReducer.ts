@@ -57,6 +57,7 @@ export function deriveSessions(
     const blocked = latest ? isBlockedEvent(latest) : false;
     const pendingApproval = latest?.type === "approval.requested";
     const pendingQuestion = latest?.type === "user.question";
+    const runtimeWaiting = latest ? runtimeWaitingStatus(latest) : undefined;
     const latestFailedCommand = latest ? isFailedCommandEvent(latest) : false;
     const flags: SessionFlag[] = [];
     let primaryStatus: SessionStatus = "unknown";
@@ -78,6 +79,9 @@ export function deriveSessions(
     } else if (pendingQuestion) {
       primaryStatus = "waiting_for_user";
       flags.push("question_pending");
+    } else if (runtimeWaiting) {
+      primaryStatus = runtimeWaiting;
+      flags.push(runtimeWaiting === "waiting_for_approval" ? "approval_pending" : "question_pending");
     } else if (latestFailedCommand && failedCommands.length >= 3 && hasEquivalentRepeatedFailures(failedCommands)) {
       primaryStatus = "possibly_looping";
       flags.push("tests_failed");
@@ -184,30 +188,60 @@ function deriveLifecycle({
 }): SessionLifecycle {
   if (latest?.type === "session.completed") return "ended";
   if (latest?.type === "approval.requested" || latest?.type === "user.question") return "running";
-  const runtimeLifecycle = lifecycleFromRuntimeState(latest);
+  if (runtimeWaitingStatus(latest)) return "running";
+  const runtimeLifecycle = freshRuntimeLifecycle(latest, latestSignalAt, now, idleAfterMs);
   if (runtimeLifecycle) return runtimeLifecycle;
   if (!latest) return "idle";
   if (!latestSignalAt) return "idle";
   return now.getTime() - latestSignalAt.getTime() > idleAfterMs ? "idle" : "running";
 }
 
-function lifecycleFromRuntimeState(event: NormalizedEvent | undefined): SessionLifecycle | undefined {
+function freshRuntimeLifecycle(
+  event: NormalizedEvent | undefined,
+  latestSignalAt: Date | undefined,
+  now: Date,
+  idleAfterMs: number
+): SessionLifecycle | undefined {
   const state = runtimeLifecycleState(event);
   if (!state) return undefined;
-  if (state === "blocked" || state === "running") return "running";
+  if (state === "blocked") return "running";
   if (state === "idle") return "idle";
-  return "ended";
+  if (state === "ended") return "ended";
+  if (!latestSignalAt) return "idle";
+  return now.getTime() - latestSignalAt.getTime() > idleAfterMs ? "idle" : "running";
 }
 
 function runtimeLifecycleState(event: NormalizedEvent | undefined): RuntimeLifecycleState | undefined {
   const explicitState = normalizeRuntimeState(stringPayload(event, "runtimeLifecycleState"));
   if (explicitState === "running" || explicitState === "idle" || explicitState === "blocked" || explicitState === "ended") return explicitState;
-  const state = normalizeRuntimeState(stringPayload(event, "state") ?? stringPayload(event, "status") ?? stringPayload(event, "runtimeState"));
+  const state = firstNormalizedStringPayload(event, ["state", "status", "runtimeState", "lifecycleState"]);
   if (!state) return undefined;
   if (["active", "working", "running", "busy", "thinking", "executing"].includes(state)) return "running";
   if (["idle", "logged", "ready", "waiting"].includes(state)) return "idle";
-  if (["blocked", "approval_requested", "waiting_for_approval", "waiting_for_user", "permission_requested"].includes(state)) return "blocked";
+  if (state === "blocked") return "blocked";
   if (["done", "completed", "complete", "stopped", "ended"].includes(state)) return "ended";
+  return undefined;
+}
+
+function runtimeWaitingStatus(event: NormalizedEvent | undefined): "waiting_for_approval" | "waiting_for_user" | undefined {
+  const state =
+    firstNormalizedStringPayload(event, ["state", "status", "runtimeState", "lifecycleState"]) ??
+    firstNormalizedStringPayload(event, ["primaryStatus"]);
+  if (!state) return undefined;
+  if (["approval_requested", "approval_required", "requires_approval", "waiting_for_approval", "permission_requested"].includes(state)) {
+    return "waiting_for_approval";
+  }
+  if (["waiting_for_user", "user_input_requested", "needs_user", "needs_input", "question_requested"].includes(state)) {
+    return "waiting_for_user";
+  }
+  return undefined;
+}
+
+function firstNormalizedStringPayload(event: NormalizedEvent | undefined, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const state = normalizeRuntimeState(stringPayload(event, key));
+    if (state) return state;
+  }
   return undefined;
 }
 
@@ -264,6 +298,8 @@ function isBlockedEvent(event: NormalizedEvent): boolean {
 
 function harnessLabel(runtime: string | undefined): string | undefined {
   switch (runtime) {
+    case "codex":
+      return "Codex";
     case "claude_code":
       return "Claude Code";
     case "cursor":

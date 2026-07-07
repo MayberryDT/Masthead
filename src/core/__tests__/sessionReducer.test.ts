@@ -76,6 +76,52 @@ describe("session reducer", () => {
     expect(sessions[0]?.endedAt).toBeUndefined();
   });
 
+  test("does not treat stale runtime-active payloads as live after the freshness window", () => {
+    const sessions = deriveSessions(
+      [baseEvent("runtime-active", "session.started", { status: "active", state: "running" }, "2026-06-23T02:00:00.000Z")],
+      [],
+      { now: new Date("2026-06-23T02:20:01.000Z"), idleAfterMs: 15 * 60_000 }
+    );
+
+    expect(sessions[0]).toMatchObject({
+      lifecycle: "idle",
+      primaryStatus: "stalled"
+    });
+    expect(sessions[0]?.endedAt).toBeUndefined();
+  });
+
+  test("keeps explicit runtime blockers action-worthy even when the event is old", () => {
+    const sessions = deriveSessions(
+      [baseEvent("runtime-blocked", "session.started", { status: "blocked" }, "2026-06-23T02:00:00.000Z")],
+      [],
+      { now: new Date("2026-06-23T02:20:01.000Z"), idleAfterMs: 15 * 60_000 }
+    );
+
+    expect(sessions[0]).toMatchObject({
+      lifecycle: "running",
+      primaryStatus: "blocked"
+    });
+  });
+
+  test.each([
+    ["waiting_for_approval", "waiting_for_approval", "approval_pending"],
+    ["permission_requested", "waiting_for_approval", "approval_pending"],
+    ["waiting_for_user", "waiting_for_user", "question_pending"]
+  ] as const)("maps runtime %s state to waiting status instead of blocked", (state, primaryStatus, flag) => {
+    const sessions = deriveSessions(
+      [baseEvent(`runtime-${state}`, "session.started", { status: state }, "2026-06-23T02:00:00.000Z")],
+      [],
+      { now: new Date("2026-06-23T02:20:01.000Z"), idleAfterMs: 15 * 60_000 }
+    );
+
+    expect(sessions[0]).toMatchObject({
+      lifecycle: "running",
+      primaryStatus
+    });
+    expect(sessions[0]?.flags).toContain(flag);
+    expect(sessions[0]?.primaryStatus).not.toBe("blocked");
+  });
+
   test("derives terminal completion as ended with completed reason", () => {
     const sessions = deriveSessions(
       [
@@ -252,6 +298,11 @@ describe("session reducer", () => {
     {
       name: "idle",
       payload: { status: "idle", state: "idle" },
+      expected: { lifecycle: "idle", primaryStatus: "stalled" }
+    },
+    {
+      name: "logged state with active status",
+      payload: { status: "active", state: "logged" },
       expected: { lifecycle: "idle", primaryStatus: "stalled" }
     }
   ] as const)("maps OMP $name runtime state names to Board lifecycle semantics", (testCase) => {

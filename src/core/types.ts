@@ -274,6 +274,7 @@ export type BoardHeadlineRefreshState = {
   model?: string;
   latencyMs?: number;
   failureMessage?: string;
+  freshness?: "fresh" | "stale";
 };
 
 export type SessionCardView = {
@@ -295,6 +296,7 @@ export type SessionCardView = {
   totalTokens?: number;
   branchOrWorktree?: string;
   model?: string;
+  provider?: string;
   thinkingLevel?: string;
   harness?: string;
   startedAt?: string;

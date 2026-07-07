@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const tempDir = await mkdtemp(join(tmpdir(), "masthead-live-smoke-"));
-const RELEASE_LIVE_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"];
+const RELEASE_LIVE_RUNTIMES = ["codex", "cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"];
 const PRIMARY_LIVE_RUNTIME = "claude_code";
 let server;
 
@@ -84,7 +84,7 @@ function livePayload(runtime, providerEventId) {
       sessionId
     };
   }
-  if (runtime === "claude_code" || runtime === "grok") {
+  if (runtime === "codex" || runtime === "claude_code" || runtime === "grok") {
     return {
       ...shared,
       hookEventName: "SessionStart",

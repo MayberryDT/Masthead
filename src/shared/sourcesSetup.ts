@@ -49,6 +49,51 @@ export type SourceDiagnosticDto = {
   sampleSourceIds?: string[];
 };
 
+export type SourceObserverKind = "herdr";
+
+export type SourceObserverCapabilityDto = {
+  passivePaneEvidence: boolean;
+  createsSessions: false;
+  providesTranscript: false;
+  providesTokens: false;
+  providesModel: false;
+  callsSocket: false;
+};
+
+export type SourceObserverPathDto = {
+  path: string;
+  exists: boolean;
+  readable: boolean;
+  kind: "file" | "directory" | "missing" | "other";
+  byteCount: number;
+  lastModifiedAt?: string;
+  diagnostics: SourceDiagnosticDto[];
+};
+
+export type SourceObserverObservationDto = {
+  observer: SourceObserverKind;
+  kind: "server" | "socket" | "workspace" | "pane" | "focus" | "process" | "agent" | "exit" | "session_save";
+  workspaceId?: string;
+  paneId?: string;
+  cwd?: string;
+  pid?: number;
+  pgid?: number;
+  agentLabel?: string;
+  mappedRuntime?: string;
+  observedAt: string;
+  confidence: "heuristic" | "inferred";
+};
+
+export type SourceObserverDto = {
+  observer: SourceObserverKind;
+  label: string;
+  state: "available" | "degraded" | "not_detected";
+  checkedPaths: SourceObserverPathDto[];
+  diagnostics: SourceDiagnosticDto[];
+  observations: SourceObserverObservationDto[];
+  capabilities: SourceObserverCapabilityDto;
+};
+
 export type SourcesOnboardingAdapterScanDto = {
   runtime: string;
   state: "connected" | "degraded" | "not_detected" | "planned";
@@ -67,6 +112,7 @@ export type SourcesOnboardingScanDto = {
   summary: HarnessScanSummaryDto;
   foundSources: FoundSourceDto[];
   adapters: SourcesOnboardingAdapterScanDto[];
+  observers?: SourceObserverDto[];
 };
 
 export type ConnectedSourceDto = FoundSourceDto & {
@@ -152,6 +198,7 @@ export type SourcesAdvancedDto = {
   adapters: SourcesAdvancedAdapterDto[];
   imports: SourcesAdvancedImportDto[];
   sources: ConnectedSourceDto[];
+  observers?: SourceObserverDto[];
 };
 
 export type SourcesSetupDto = {

@@ -14,6 +14,7 @@ export type UpsertBoardHeadlineFrameInput = {
   model: string;
   generatedAt: string;
   frame: BoardHeadlineFrame;
+  refreshKey?: string;
 };
 
 type BoardHeadlineFrameRow = {
@@ -23,6 +24,7 @@ type BoardHeadlineFrameRow = {
   model: string;
   generatedAt: string;
   frameJson: string;
+  refreshKeyHash: string | null;
 };
 
 export type BoardHeadlineGenerationStatus =
@@ -201,6 +203,7 @@ export function upsertBoardHeadlineFrame(db: MastheadDatabase, input: UpsertBoar
   }
 
   const now = new Date().toISOString();
+  const refreshKeyHash = input.refreshKey ? hashText(input.refreshKey) : null;
   db.prepare(
     `INSERT INTO board_headline_frames (
       frame_id,
@@ -210,9 +213,10 @@ export function upsertBoardHeadlineFrame(db: MastheadDatabase, input: UpsertBoar
       model,
       generated_at,
       frame_json,
+      refresh_key_hash,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(frame_id) DO UPDATE SET
       session_id = excluded.session_id,
       source_session_id = excluded.source_session_id,
@@ -220,6 +224,7 @@ export function upsertBoardHeadlineFrame(db: MastheadDatabase, input: UpsertBoar
       model = excluded.model,
       generated_at = excluded.generated_at,
       frame_json = excluded.frame_json,
+      refresh_key_hash = COALESCE(excluded.refresh_key_hash, board_headline_frames.refresh_key_hash),
       updated_at = excluded.updated_at`
   ).run(
     `board-headline:${input.sessionId}`,
@@ -229,6 +234,7 @@ export function upsertBoardHeadlineFrame(db: MastheadDatabase, input: UpsertBoar
     input.model,
     input.generatedAt,
     JSON.stringify(validation.frame),
+    refreshKeyHash,
     now,
     now
   );
@@ -253,7 +259,8 @@ export function currentBoardHeadlineFrames(db: MastheadDatabase, sessions: Itera
         provider,
         model,
         generated_at AS generatedAt,
-        frame_json AS frameJson
+        frame_json AS frameJson,
+        refresh_key_hash AS refreshKeyHash
       FROM board_headline_frames
       WHERE session_id IN (${scopedSessions.map(() => "?").join(", ")})
       ORDER BY session_id ASC, generated_at DESC, frame_id DESC`
@@ -275,7 +282,8 @@ export function currentBoardHeadlineFrames(db: MastheadDatabase, sessions: Itera
       status: "ready",
       generatedAt: row.generatedAt,
       model: row.model,
-      provider: row.provider
+      provider: row.provider,
+      ...(row.refreshKeyHash ? { refreshKeyHash: row.refreshKeyHash, freshness: "fresh" as const } : {})
     });
   }
   return views;

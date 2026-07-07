@@ -6,7 +6,7 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 const adminScript = new URL("../../../scripts/masthead-hook-admin.js", import.meta.url);
-const hookCommand = "MASTHEAD_INGEST_URL=http://127.0.0.1:17373/ingest node /app/scripts/masthead-hook.js";
+const hookCommand = "MASTHEAD_INGEST_URL=http://127.0.0.1:17373/ingest?runtime=codex node /app/scripts/masthead-hook.js";
 
 describe("Masthead hook admin CLI", () => {
   test("preview prints official hooks.json shape without writing a file", async () => {
@@ -21,7 +21,9 @@ describe("Masthead hook admin CLI", () => {
     expect(JSON.parse(result.stdout)).toEqual({
       hooks: {
         SessionStart: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 2 }] }],
+        UserPromptSubmit: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 2 }] }],
         PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 2 }] }],
+        PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 2 }] }],
         PostToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 2 }] }],
         Stop: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 2 }] }]
       }
@@ -43,7 +45,9 @@ describe("Masthead hook admin CLI", () => {
     expect(config).toMatchObject({
       hooks: {
         SessionStart: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
+        UserPromptSubmit: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
+        PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         PostToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         Stop: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }]
       }
@@ -62,6 +66,7 @@ describe("Masthead hook admin CLI", () => {
     const expectedHookPath = path.join(path.dirname(adminScript.pathname), "masthead-hook.js");
     expect(command).toContain(quoteShell(process.execPath));
     expect(command).toContain(quoteShell(expectedHookPath));
+    expect(command).toContain("/ingest?runtime=codex");
   });
 
   test("install creates a backup and merges Masthead handlers with existing hook groups", async () => {
@@ -95,7 +100,9 @@ describe("Masthead hook admin CLI", () => {
           { matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }
         ],
         Stop: [{ hooks: [{ type: "command", command: hookCommand, timeout: 3 }] }],
+        UserPromptSubmit: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
+        PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         PostToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }]
       }
     });
@@ -113,7 +120,9 @@ describe("Masthead hook admin CLI", () => {
     expect(result.code).toBe(1);
     expect(result.stdout).toContain("Missing Masthead hook events");
     expect(result.stdout).toContain("PermissionRequest");
+    expect(result.stdout).toContain("UserPromptSubmit");
     expect(result.stdout).toContain("PostToolUse");
+    expect(result.stdout).toContain("PreToolUse");
     expect(result.stdout).toContain("Stop");
     expect(result.stderr).toBe("");
     await expect(readBackups(dir, configPath)).resolves.toHaveLength(0);
@@ -123,7 +132,9 @@ describe("Masthead hook admin CLI", () => {
     const { configPath } = await writeConfig({
       hooks: {
         SessionStart: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
+        UserPromptSubmit: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
+        PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         PostToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         Stop: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }]
       }
@@ -141,7 +152,9 @@ describe("Masthead hook admin CLI", () => {
     const { configPath } = await writeConfig({
       hooks: {
         SessionStart: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
+        UserPromptSubmit: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
+        PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         PostToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         Stop: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }]
       }

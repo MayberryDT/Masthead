@@ -8,7 +8,10 @@ export const RUNTIME_KINDS = [
   "omp"
 ] as const;
 
-export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
+export const COMPAT_RUNTIME_KINDS = ["codex"] as const;
+export const ALL_RUNTIME_KINDS = [...RUNTIME_KINDS, ...COMPAT_RUNTIME_KINDS] as const;
+
+export type RuntimeKind = (typeof ALL_RUNTIME_KINDS)[number];
 export type SourceKind = "stream" | "hook" | "sdk" | "sqlite" | "jsonl" | "ui_signal" | "inference";
 export type SourceConfidence = "authoritative" | "inferred" | "heuristic";
 

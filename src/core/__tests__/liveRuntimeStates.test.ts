@@ -4,10 +4,11 @@ import { parseLiveHookPayload } from "../liveHookAdapter.ts";
 import { projectLiveEvents } from "../liveProjection.ts";
 import type { LiveBoardProjection, NormalizedEvent } from "../types.ts";
 
-const RELEASE_LIVE_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const satisfies readonly RuntimeKind[];
+const RELEASE_LIVE_RUNTIMES = ["codex", "cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const satisfies readonly RuntimeKind[];
 
 const RUNTIME_LABELS: Record<(typeof RELEASE_LIVE_RUNTIMES)[number], string> = {
   claude_code: "Claude Code",
+  codex: "Codex",
   cursor: "Cursor",
   grok: "Grok Build",
   hermes: "Hermes",
@@ -38,7 +39,7 @@ describe("release live runtime states", () => {
   test("projects idle live sessions for every release harness", () => {
     const board = projectRuntimeEvents("idle", "2026-07-05T16:00:00.000Z");
 
-    expect(board.summary).toMatchObject({ active: RELEASE_LIVE_RUNTIMES.length, idle: RELEASE_LIVE_RUNTIMES.length });
+    expect(board.summary).toMatchObject({ active: 0, idle: RELEASE_LIVE_RUNTIMES.length });
     for (const runtime of RELEASE_LIVE_RUNTIMES) {
       expect(cardForRuntime(board, runtime)).toMatchObject({
         branchOrWorktree: `agent/${runtime}`,
@@ -104,6 +105,8 @@ function payloadFor(runtime: (typeof RELEASE_LIVE_RUNTIMES)[number], state: "act
   };
   const sessionId = `${runtime}-${state}-session`;
   switch (runtime) {
+    case "codex":
+      return { ...base, cwd: `/workspace/${runtime}`, hookEventName: state === "blocked" ? "PermissionRequest" : "SessionStart", session_id: sessionId };
     case "claude_code":
       return { ...base, cwd: `/workspace/${runtime}`, hookEventName: state === "blocked" ? "Blocked" : "SessionStart", sessionId };
     case "cursor":

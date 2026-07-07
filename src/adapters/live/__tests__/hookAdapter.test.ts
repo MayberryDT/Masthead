@@ -14,6 +14,17 @@ const liveCases: Array<{
   sourceId: string;
 }> = [
   { runtime: "claude_code", fixture: "claude-user-prompt-submit.json", sourceId: "claude-code-hook-local", runtimeVersion: "hook-v1" },
+  {
+    runtime: "codex",
+    raw: JSON.stringify({
+      hookEventName: "SessionStart",
+      session_id: "codex-session-1",
+      timestamp: "2026-07-05T12:00:00.000Z",
+      cwd: "/workspace/masthead"
+    }),
+    sourceId: "codex-hook-local",
+    runtimeVersion: "hook-v1"
+  },
   { runtime: "cursor", fixture: "cursor-before-submit-prompt.json", sourceId: "cursor-hook-local", runtimeVersion: "hook-v1" },
   { runtime: "grok", fixture: "grok-pre-tool-use.json", sourceId: "grok-hook-local", runtimeVersion: "hook-v1" },
   { runtime: "opencode", fixture: "opencode-chat-message.json", sourceId: "opencode-plugin-local", runtimeVersion: "plugin-v1" },

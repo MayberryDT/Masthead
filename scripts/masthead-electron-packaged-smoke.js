@@ -39,7 +39,9 @@ if (!binary) {
   process.exit(1);
 }
 
-const resources = join(dirname(binary), "resources", "daemon");
+const resourceRoot = join(dirname(binary), "resources");
+const resources = join(resourceRoot, "daemon");
+await access(join(resourceRoot, "masthead-logo-sail.png"), constants.R_OK);
 await access(join(resources, process.platform === "win32" ? "node.exe" : "node"), constants.X_OK);
 await access(join(resources, "dist", "src", "daemon", "main.js"), constants.R_OK);
 await access(join(resources, "dist", "src", "mcp", "server.js"), constants.R_OK);

@@ -16,6 +16,14 @@ const liveCases: Array<{
   type: string;
 }> = [
   {
+    runtime: "codex",
+    fixture: "codex-session-start.json",
+    type: "session.started",
+    sourceSessionId: "codex-session-1",
+    sourceName: "codex.hook",
+    surface: "hook"
+  },
+  {
     runtime: "claude_code",
     fixture: "claude-user-prompt-submit.json",
     type: "user.question",
@@ -121,6 +129,68 @@ describe("live hook adapter", () => {
     });
   });
 
+  test("keeps explicit runtime authority when the payload reports a different runtime", () => {
+    const parsed = parseLiveHookPayload(
+      JSON.stringify({
+        event: "SessionStart",
+        session_id: "codex-runtime-authority-session",
+        timestamp: "2026-07-05T12:00:04.000Z",
+        runtime: "claude_code",
+        provider_event_id: "codex-runtime-authority-session:start"
+      }),
+      { receivedAt: "2026-07-05T12:00:10.000Z", runtime: "codex" }
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.event).toMatchObject({
+      eventId: "codex:codex-runtime-authority-session:start",
+      sessionId: "codex-runtime-authority-session",
+      source: { adapter: "codex", surface: "hook" },
+      type: "session.started"
+    });
+    expect(parsed.event.payload).toMatchObject({
+      runtime: "codex",
+      harness: "Codex",
+      sourceSessionId: "codex-runtime-authority-session",
+      runtimeDiagnostics: [
+        {
+          code: "runtime_mismatch",
+          normalizedRuntime: "codex",
+          reportedRuntime: "claude_code"
+        }
+      ]
+    });
+    expect(parsed.event.evidence[0]?.source).toBe("codex.hook");
+  });
+
+  test("reports source path mismatches without overriding the normalized runtime", () => {
+    const parsed = parseLiveHookPayload(
+      JSON.stringify({
+        event: "SessionStart",
+        session_id: "codex-path-mismatch-session",
+        transcriptPath: "/tmp/sanitized/.grok/sessions/session.jsonl",
+        timestamp: "2026-07-05T12:00:04.000Z"
+      }),
+      { receivedAt: "2026-07-05T12:00:10.000Z", runtime: "codex" }
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.event.source.adapter).toBe("codex");
+    expect(parsed.event.payload).toMatchObject({
+      runtime: "codex",
+      runtimeDiagnostics: [
+        {
+          code: "source_path_mismatch",
+          normalizedRuntime: "codex",
+          payloadKey: "transcriptPath",
+          reportedRuntime: "grok"
+        }
+      ]
+    });
+  });
+
   test("keeps OMP session files and turn ids as metadata instead of session keys", () => {
     const parsed = parseLiveHookPayload(
       JSON.stringify({
@@ -176,6 +246,29 @@ describe("live hook adapter", () => {
       provider: "openai",
       totalTokens: 42
     });
+  });
+
+  test.each([
+    ["waiting_for_approval", undefined],
+    ["permission_requested", undefined],
+    ["waiting_for_user", undefined],
+    ["blocked", "blocked"]
+  ] as const)("normalizes %s runtime state without false blocked waiting semantics", (state, runtimeLifecycleState) => {
+    const parsed = parseLiveHookPayload(
+      JSON.stringify({
+        type: "runtime_state",
+        sessionId: `omp-${state}-session`,
+        timestamp: "2026-07-05T12:05:00.000Z",
+        cwd: "/workspace/masthead",
+        status: state
+      }),
+      { receivedAt: "2026-07-05T12:05:00.100Z", runtime: "omp" }
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.event.payload.status).toBe(state);
+    expect(parsed.event.payload.runtimeLifecycleState).toBe(runtimeLifecycleState);
   });
 
   test("uses supported runtime identity fields for fallback event ids after redaction", () => {

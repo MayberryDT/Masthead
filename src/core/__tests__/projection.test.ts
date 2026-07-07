@@ -78,7 +78,29 @@ describe("Live Board projection", () => {
     });
   });
 
-  test("projects lifecycle lanes as four Kanban columns", () => {
+  test("projects numeric payload metadata by event timestamp instead of arrival order", () => {
+    const board = projectFixture(
+      {
+        events: [
+          event("timestamp-start", "timestamp-session", "session.started", "2026-06-23T02:00:00.000Z", {
+            title: "Timestamp metadata"
+          }),
+          event("timestamp-current-usage", "timestamp-session", "command.finished", "2026-06-23T02:10:00.000Z", {
+            totalTokens: 2400
+          }),
+          event("timestamp-stale-usage", "timestamp-session", "command.finished", "2026-06-23T02:05:00.000Z", {
+            totalTokens: 12
+          })
+        ],
+        gitSnapshots: []
+      },
+      { now: new Date("2026-06-23T02:11:00.000Z") }
+    );
+
+    expect(board.cards.find((card) => card.sessionId === "timestamp-session")?.totalTokens).toBe(2400);
+  });
+
+  test("counts only running lane sessions as active in lifecycle summary", () => {
     const board = projectFixture(
       {
         events: [
@@ -133,6 +155,7 @@ describe("Live Board projection", () => {
     );
 
     expect(board.summary).toMatchObject({
+      active: 1,
       running: 1,
       idle: 1,
       needsAction: 1,
@@ -164,6 +187,24 @@ describe("Live Board projection", () => {
     expect(board.cards[0]).toMatchObject({ lifecycle: "running", primaryStatus: "waiting_for_approval" });
     expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual(["session-running"]);
     expect(board.lanes?.find((lane) => lane.laneId === "needs_action")?.sessionIds).toEqual([]);
+  });
+
+  test("keeps waiting labels consistent when waiting sessions remain in Running", () => {
+    const board = projectFixture({
+      events: [
+        event("start", "session-waiting", "session.started", "2026-06-23T02:00:00.000Z"),
+        event("approval", "session-waiting", "approval.requested", "2026-06-23T02:01:00.000Z")
+      ],
+      gitSnapshots: []
+    });
+
+    expect(board.cards[0]).toMatchObject({
+      lifecycle: "running",
+      primaryStatus: "waiting_for_approval",
+      stateLabel: "Needs approval"
+    });
+    expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual(["session-waiting"]);
+    expect(board.summary).toMatchObject({ running: 1, needsAction: 0 });
   });
 
   test("keeps running sessions in Running even when a command failed", () => {
@@ -236,6 +277,53 @@ describe("Live Board projection", () => {
     });
     expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual([]);
     expect(board.lanes?.find((lane) => lane.laneId === "idle")?.sessionIds).toEqual(["stale-session"]);
+  });
+
+  test("does not keep stale runtime-active sessions in Running", () => {
+    const board = projectFixture(
+      {
+        events: [
+          event("runtime-active", "runtime-active-session", "session.started", "2026-06-23T02:00:00.000Z", {
+            status: "active",
+            state: "running",
+            title: "Runtime active work"
+          })
+        ],
+        gitSnapshots: [
+          {
+            snapshotId: "fresh-runtime-snapshot",
+            sessionId: "runtime-active-session",
+            repoRoot: "/workspace/app",
+            worktreePath: "/workspace/app",
+            gitCommonDir: "/workspace/app/.git",
+            branch: "agent/runtime-active-session",
+            headSha: "abc123",
+            changedPaths: [
+              {
+                path: "src/runtime.ts",
+                status: "modified",
+                staged: false,
+                additions: 1,
+                deletions: 0,
+                sensitivity: "metadata"
+              }
+            ],
+            observedAt: "2026-06-23T02:20:00.000Z"
+          }
+        ]
+      },
+      { now: new Date("2026-06-23T02:21:00.000Z"), idleAfterMs: 15 * 60_000 }
+    );
+
+    expect(board.cards[0]).toMatchObject({
+      changedFileCount: 1,
+      lifecycle: "idle",
+      primaryStatus: "stalled",
+      stateLabel: "Idle"
+    });
+    expect(board.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual([]);
+    expect(board.lanes?.find((lane) => lane.laneId === "idle")?.sessionIds).toEqual(["runtime-active-session"]);
+    expect(board.summary).toMatchObject({ running: 0, idle: 1, needsAction: 0 });
   });
 
   test("ignores generic updating-around enrichment for live session headlines", () => {

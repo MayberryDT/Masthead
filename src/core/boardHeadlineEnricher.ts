@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   renderBoardHeadlineFrame,
   type BoardHeadlineFrame,
@@ -197,12 +198,28 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
             provider: provider.provider,
             model: provider.model,
             requestedAt: generatedAt,
-            status: "pending"
+            status: "pending",
+            failureMessage: "Waiting for transcript evidence before refreshing Board headline."
           });
           summary.pending += 1;
         } else {
           overlays.set(card.sessionId, retained ?? buildOfflineBoardHeadlineView(input));
         }
+        continue;
+      }
+
+      const retainedRefreshKeyHash = retained?.refreshKeyHash;
+      const currentRefreshKeyHash = createHash("sha256").update(key).digest("hex");
+      if (retainedRefreshKeyHash && retainedRefreshKeyHash === currentRefreshKeyHash) {
+        overlays.set(card.sessionId, { ...retained, freshness: "fresh" });
+        refreshOverlays.set(card.sessionId, {
+          provider: retained.provider,
+          model: retained.model,
+          requestedAt: retained.generatedAt ?? generatedAt,
+          status: "success",
+          freshness: "fresh"
+        });
+        summary.succeeded += 1;
         continue;
       }
 
@@ -214,7 +231,8 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
           provider: cached.provider,
           model: cached.model,
           requestedAt: cached.generatedAt,
-          status: "success"
+          status: "success",
+          freshness: "fresh"
         });
         emitFrameApplied(key, card.sessionId, cached);
         summary.succeeded += 1;
@@ -238,7 +256,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       }
 
       if (retained) {
-        overlays.set(card.sessionId, retained);
+        overlays.set(card.sessionId, retained.refreshKeyHash ? { ...retained, status: "pending", freshness: "stale" } : retained);
       } else if (showPendingHeadline) {
         overlays.set(card.sessionId, buildPendingBoardHeadlineView(input));
       } else {

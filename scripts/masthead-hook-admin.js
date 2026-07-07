@@ -4,9 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
-const REQUIRED_HOOK_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"];
+const REQUIRED_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "PostToolUse", "Stop"];
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_HOOK_COMMAND = `MASTHEAD_INGEST_URL=http://127.0.0.1:17373/ingest MASTHEAD_HOOK_TIMEOUT_MS=750 ${quoteShell(process.execPath)} ${quoteShell(path.join(scriptDir, "masthead-hook.js"))}`;
+const DEFAULT_HOOK_COMMAND = `MASTHEAD_INGEST_URL=http://127.0.0.1:17373/ingest?runtime=codex MASTHEAD_HOOK_TIMEOUT_MS=750 ${quoteShell(process.execPath)} ${quoteShell(path.join(scriptDir, "masthead-hook.js"))}`;
 const DEFAULT_TIMEOUT_SECONDS = 1;
 
 class CliError extends Error {}

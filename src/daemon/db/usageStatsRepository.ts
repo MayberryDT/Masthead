@@ -98,6 +98,23 @@ type TokenTotalsRow = {
   totalTokens: number;
 };
 
+export type SessionUsageSummaryDto = {
+  totalTokens?: number;
+  model?: string;
+  provider?: string;
+  observedAt?: string;
+};
+
+type SessionUsageSummaryRow = {
+  sessionId: string;
+  tokenRows: number;
+  totalTokens: number;
+  model: string | null;
+  provider: string | null;
+  observedAt: string | null;
+};
+
+
 type CountRow = { count: number };
 
 type UsageByModelRow = UsageByModelDto & { provider: string };
@@ -124,6 +141,81 @@ export function getSessionTokenTotals(db: MastheadDatabase, sessionIds: string[]
     )
     .all(...uniqueSessionIds, ...uniqueSessionIds) as Array<{ sessionId: string; totalTokens: number }>;
   return new Map(rows.map((row) => [row.sessionId, Number(row.totalTokens) || 0]));
+}
+
+export function getSessionUsageSummaries(db: MastheadDatabase, sessionIds: string[]): Map<string, SessionUsageSummaryDto> {
+  const uniqueSessionIds = [...new Set(sessionIds.filter(Boolean))];
+  if (uniqueSessionIds.length === 0) return new Map();
+  const placeholders = uniqueSessionIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `WITH scoped_sessions AS (
+        SELECT session_id
+        FROM sessions
+        WHERE deleted_at IS NULL
+          AND (session_id IN (${placeholders}) OR source_session_id IN (${placeholders}))
+      ),
+      token_totals AS (
+        SELECT model_usage.session_id AS sessionId,
+          COUNT(*) AS tokenRows,
+          COALESCE(SUM(${TOKEN_TOTAL_SQL}), 0) AS totalTokens
+        FROM model_usage
+        JOIN scoped_sessions ON scoped_sessions.session_id = model_usage.session_id
+        WHERE ${TOKEN_VALUE_PRESENT_SQL}
+        GROUP BY model_usage.session_id
+      ),
+      latest_metadata AS (
+        SELECT sessionId, model, provider, observedAt
+        FROM (
+          SELECT model_usage.session_id AS sessionId,
+            NULLIF(TRIM(model_usage.model), '') AS model,
+            NULLIF(TRIM(model_usage.provider), '') AS provider,
+            model_usage.observed_at AS observedAt,
+            ROW_NUMBER() OVER (
+              PARTITION BY model_usage.session_id
+              ORDER BY model_usage.observed_at DESC, model_usage.usage_id DESC
+            ) AS rowNumber
+          FROM model_usage
+          JOIN scoped_sessions ON scoped_sessions.session_id = model_usage.session_id
+          WHERE NULLIF(TRIM(model_usage.model), '') IS NOT NULL
+            OR NULLIF(TRIM(model_usage.provider), '') IS NOT NULL
+        )
+        WHERE rowNumber = 1
+      )
+      SELECT scoped_sessions.session_id AS sessionId,
+        COALESCE(token_totals.tokenRows, 0) AS tokenRows,
+        COALESCE(token_totals.totalTokens, 0) AS totalTokens,
+        latest_metadata.model,
+        latest_metadata.provider,
+        latest_metadata.observedAt
+      FROM scoped_sessions
+      LEFT JOIN token_totals ON token_totals.sessionId = scoped_sessions.session_id
+      LEFT JOIN latest_metadata ON latest_metadata.sessionId = scoped_sessions.session_id
+      WHERE COALESCE(token_totals.tokenRows, 0) > 0 OR latest_metadata.observedAt IS NOT NULL
+      ORDER BY scoped_sessions.session_id ASC`
+    )
+    .all(...uniqueSessionIds, ...uniqueSessionIds) as SessionUsageSummaryRow[];
+
+  const summariesBySessionId = new Map(
+    rows.map((row) => [
+      row.sessionId,
+      {
+        ...(Number(row.tokenRows) > 0 ? { totalTokens: Number(row.totalTokens) || 0 } : {}),
+        ...(row.model ? { model: row.model } : {}),
+        ...(row.provider ? { provider: row.provider } : {}),
+        ...(row.observedAt ? { observedAt: row.observedAt } : {})
+      }
+    ])
+  );
+  const ordered = new Map<string, SessionUsageSummaryDto>();
+  for (const sessionId of uniqueSessionIds) {
+    const summary = summariesBySessionId.get(sessionId);
+    if (summary) ordered.set(sessionId, summary);
+  }
+  for (const [sessionId, summary] of summariesBySessionId) {
+    if (!ordered.has(sessionId)) ordered.set(sessionId, summary);
+  }
+  return ordered;
 }
 
 export function usageRangeForWindow(window: UsageWindow, now = new Date()): UsageRange {

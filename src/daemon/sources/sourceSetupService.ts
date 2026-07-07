@@ -55,6 +55,7 @@ export function scanResultToOnboardingScan(scan: SourceScanResult, status: Sourc
     adapters,
     foundSources,
     generatedAt: scan.generatedAt,
+    observers: scan.observers ?? [],
     scanId: scan.scanId,
     status,
     summary: {

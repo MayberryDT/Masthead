@@ -62,6 +62,11 @@ const migrations = [
     path: resolve(currentDir, "migrations/011_board_headline_generations.sql")
   },
   {
+    version: 12,
+    name: "012_board_headline_frame_refresh_keys",
+    path: resolve(currentDir, "migrations/012_board_headline_frame_refresh_keys.sql")
+  },
+  {
     version: 13,
     name: "013_dossier_enrichment_indexes",
     path: resolve(currentDir, "migrations/013_dossier_enrichment_indexes.sql")

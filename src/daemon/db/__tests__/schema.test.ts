@@ -78,6 +78,7 @@ describe("daemon database schema", () => {
       { version: 9, name: "009_import_ledger" },
       { version: 10, name: "010_board_headline_frames" },
       { version: 11, name: "011_board_headline_generations" },
+      { version: 12, name: "012_board_headline_frame_refresh_keys" },
       { version: 13, name: "013_dossier_enrichment_indexes" }
     ]);
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
@@ -89,6 +90,9 @@ describe("daemon database schema", () => {
         "checkpoints_session_observed_idx"
       ])
     );
+    const frameColumns = db.prepare("PRAGMA table_info(board_headline_frames)").all() as Array<{ name: string }>;
+    expect(frameColumns.map((row) => row.name)).toEqual(expect.arrayContaining(["refresh_key_hash"]));
+    expect(indexes.map((row) => row.name)).toEqual(expect.arrayContaining(["idx_board_headline_frames_refresh_key"]));
     expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     expect((db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toBe("wal");
     db.prepare("INSERT INTO session_search(session_id, title, normalized_text) VALUES (?, ?, ?)").run(
