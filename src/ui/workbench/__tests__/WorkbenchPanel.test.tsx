@@ -68,7 +68,7 @@ describe("WorkbenchPanel", () => {
         selectedSessionIds={new Set([publishReady.sessionId])}
         handoffText="Process these sessions"
         canRun={allow("publish", "copy_agent_prompt", "claim")}
-        runAction={() => undefined}
+        runAction={async () => undefined}
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
@@ -115,7 +115,7 @@ describe("WorkbenchPanel", () => {
         selectedSessionIds={new Set([enrichSession.sessionId])}
         handoffText="Agent handoff for enrichment"
         canRun={allow("copy_agent_prompt", "claim")}
-        runAction={() => undefined}
+        runAction={async () => undefined}
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
@@ -429,7 +429,7 @@ describe("WorkbenchPanel", () => {
   });
 });
 
-function session(overrides: Partial<WorkbenchQueueSessionDto>): WorkbenchQueueSessionDto {
+function session(overrides: Partial<WorkbenchQueueSessionDto> = {}): WorkbenchQueueSessionDto {
   return {
     activeClaim: undefined,
     bugFixTraceStatus: "unknown",
