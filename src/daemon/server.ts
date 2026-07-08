@@ -52,6 +52,15 @@ import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsReposit
 import { createRawEventRepository, type RawEventRepository, type RawEventSource } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
+import {
+  listWorkbenchActivity,
+  listWorkbenchQueue,
+  publishWorkbenchSession,
+  recordWorkbenchActivity,
+  type WorkbenchActivityRecord,
+  type WorkbenchSessionStateRecord
+} from "./db/workbenchPipelineRepository.ts";
+import { workbenchSessionIsPublished } from "./db/workbenchPublicationSql.ts";
 import { currentBoardHeadlineFrames, insertBoardHeadlineGeneration, upsertBoardHeadlineFrame } from "./db/boardHeadlineFrameRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
@@ -70,8 +79,9 @@ import {
 } from "./db/sqlite.ts";
 import { legacyCandidatesFromDirectory, maybeCopyLegacySqliteBeforeOpen } from "./legacyDataMigration.ts";
 import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
-import { addSourceExclusion, approveTranscriptImport, sourceIsExcluded, sourceRecordIsExcluded, transcriptImportApproved } from "./db/sourceRepository.ts";
-import { setSourcePolicy, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
+import { runLegacyWorkbenchPublicationBackfill } from "../workbench/legacyPublicationBackfill.ts";
+import { addSourceExclusion, sourceIsExcluded, sourceRecordIsExcluded } from "./db/sourceRepository.ts";
+import { setSourcePolicy, sourcePolicyExplicitlyEnabled, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
 import {
   cancelImportJob,
   getImportQueueState,
@@ -82,7 +92,6 @@ import {
 } from "./import/importCoordinator.ts";
 import { buildImportCompletionReport } from "./import/importCompletionReport.ts";
 import { buildImportManifestPlan, createManifestForJob } from "./import/importManifestService.ts";
-import { getRuntimePolicy, setRuntimePolicy } from "./import/runtimePolicyRepository.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { runImportWorkUnit } from "./import/importWorkUnitRunner.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
@@ -91,8 +100,27 @@ import { discoverSourceSnapshot, type SourceDiscoverySnapshot } from "./sources/
 import { scanLocalSources, type SourceScanResult } from "./sources/sourceScanService.ts";
 import { connectSelectedSources, type ConnectSourcesRequest } from "./sources/sourceConnectService.ts";
 import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/sourceSetupService.ts";
+import { clearConnectorActivation } from "./sources/connectorActivationStore.ts";
+import { discoverHarnessConnectors, listHarnessConnectors } from "./sources/harnessConnectorService.ts";
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
 import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier.ts";
+import type {
+  WorkbenchActivityDto,
+  WorkbenchActivityResponse,
+  WorkbenchMissingSessionDto,
+  WorkbenchMissingSessionsResponse,
+  WorkbenchNotAddedResponse,
+  WorkbenchNotAddedSessionDto,
+  WorkbenchNotAddedSummaryDto,
+  WorkbenchQueueSessionDto,
+  WorkbenchSessionsResponse
+} from "../shared/workbench.ts";
+import { queueWorkbenchSessions } from "../workbench/queueRepository.ts";
+import {
+  checkWorkbenchTranscript,
+  createWorkbenchTranscriptImport,
+  previewWorkbenchTranscriptImport
+} from "../workbench/transcriptWorkflow.ts";
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { createLiveIngestQueue } from "./liveIngestQueue.ts";
 import { buildMastheadHealth } from "./healthService.ts";
@@ -165,6 +193,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
       migrateDatabase(database);
       if (pendingMigrations && !config.skipMigrationQuickCheck) quickCheckMastheadDatabase(database);
+      runLegacyWorkbenchPublicationBackfill(database);
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
       markInterruptedImportJobs(database);
 
@@ -1034,6 +1063,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       for (const transcriptSource of await transcriptSources(source)) {
         controls?.throwIfCancelled();
         controls?.updateProgress({ currentPath: transcriptSource.path ?? transcriptSource.sourceId });
+        if (!transcriptSourceImportAllowed(source, transcriptSource)) {
+          result.queuedCount += 1;
+          controls?.updateProgress({
+            currentPath: transcriptSource.path ?? transcriptSource.sourceId,
+            queuedCount: result.queuedCount
+          });
+          continue;
+        }
         if (!transcriptSource.path || sourceIsExcluded(database, { sourceId: transcriptSource.sourceId, sourcePath: transcriptSource.path })) {
           result.queuedCount += 1;
           controls?.updateProgress({
@@ -1119,6 +1156,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return result;
   }
 
+  function transcriptSourceImportAllowed(source: DiscoveredSource, transcriptSource: DiscoveredSource): boolean {
+    return sourcePolicyExplicitlyEnabled(database, "transcript_import", transcriptSource.sourceId) ||
+      sourcePolicyExplicitlyEnabled(database, "transcript_import", source.sourceId);
+  }
+
   async function importTranscriptSourcesWithLedger(
     sources: DiscoveredSource[],
     controls: ImportJobControls,
@@ -1167,6 +1209,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       if (!adapter) throw new Error(`No adapter for runtime ${unit.runtime}`);
       const unitResult = await runImportWorkUnit({
         adapterBackfill: (source) => adapter.backfill(source, source.path ? readCursor(database, source.sourceId, source.path) : undefined),
+        approvedSourceIds: sources.map((source) => source.sourceId),
         db: database,
         hostId: `host:${config.host}`,
         hostname: config.host,
@@ -1259,17 +1302,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return { jobs, sources: sources.length };
   }
 
-  async function queueAdapterTranscriptImports(runtime?: string): Promise<{ jobs: ImportJobDto[]; sources: number }> {
-    if (runtime && isRuntimeKind(runtime) ? !transcriptImportApprovedForRuntime(runtime) : !transcriptImportApproved(database)) {
-      throw clientError("Transcript import requires persisted source review approval.");
-    }
-    const sources = (await discoverAllSourcesAndPersist()).filter((source) => !runtime || source.runtime === runtime);
-    const jobs = sources.map((source) =>
-      queueImportJob(database, { importKind: "transcript", sourceId: source.sourceId }, (controls) => importTranscriptSources([source], controls))
-    );
-    return { jobs, sources: sources.length };
-  }
-
   function scheduleHookTranscriptCatchup(event: NormalizedEvent): Promise<void> | undefined {
     const transcriptPath = stringFromPayload(event.payload, ["transcriptPath", "transcript_path"]);
     const key = transcriptPath ?? event.eventId;
@@ -1313,10 +1345,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   async function importHookTranscriptIfApproved(event: NormalizedEvent): Promise<void> {
-    if (!transcriptImportApproved(database)) return;
-
     try {
       const source = await transcriptSourceFromHookEvent(event, config.codexHomeDir);
+      if (!source || !sourcePolicyExplicitlyEnabled(database, "transcript_import", source.sourceId)) return;
       if (!source?.path || sourceIsExcluded(database, { sourceId: source.sourceId, sourcePath: source.path })) return;
       const result = await importTranscriptSources([source], undefined, {
         maxRecordsPerSource: HOOK_TRANSCRIPT_CATCHUP_RECORD_LIMIT,
@@ -1337,7 +1368,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   function shouldDeferLiveEnrichmentToHookTranscript(event: NormalizedEvent): boolean {
-    return config.hookTranscriptCatchupEnabled && transcriptImportApproved(database) && Boolean(hookTranscriptPath(event));
+    const sourceId = transcriptSourceIdFromHookEvent(event, config.codexHomeDir);
+    return Boolean(config.hookTranscriptCatchupEnabled && sourceId && sourcePolicyExplicitlyEnabled(database, "transcript_import", sourceId));
   }
 
   function shouldQueueHookTranscriptEnrichment(event: NormalizedEvent): boolean {
@@ -1430,16 +1462,18 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   function hookTranscriptCatchupEventsForSession(canonicalSessionIdValue: string): NormalizedEvent[] {
-    if (!config.hookTranscriptCatchupEnabled || !transcriptImportApproved(database)) return [];
+    if (!config.hookTranscriptCatchupEnabled) return [];
     const row = database
       .prepare("SELECT source_session_id AS sourceSessionId FROM sessions WHERE session_id = ? AND deleted_at IS NULL")
       .get(canonicalSessionIdValue) as { sourceSessionId: string } | undefined;
     const sourceSessionId = row?.sourceSessionId?.trim();
     if (!sourceSessionId) return [];
     return [...liveHookSources.values()].flatMap((source) =>
-      recentHookEventsWithTranscriptPathsForSessions(database, source.sourceId, new Set([sourceSessionId]), 1).filter((event) =>
-        needsHookTranscriptCatchup(canonicalSessionIdValue, event)
-      )
+      recentHookEventsWithTranscriptPathsForSessions(database, source.sourceId, new Set([sourceSessionId]), 1).filter((event) => {
+        const sourceId = transcriptSourceIdFromHookEvent(event, config.codexHomeDir);
+        return Boolean(sourceId && sourcePolicyExplicitlyEnabled(database, "transcript_import", sourceId)) &&
+          needsHookTranscriptCatchup(canonicalSessionIdValue, event);
+      })
     );
   }
 
@@ -1459,26 +1493,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       .get(canonicalSessionIdValue) as { assistantMessages: number | null; latestObservedAt: string | null; userMessages: number | null };
     const latestObservedAt = row.latestObservedAt ? Date.parse(row.latestObservedAt) : Number.NaN;
     return !row.userMessages || !row.assistantMessages || !Number.isFinite(latestObservedAt) || latestObservedAt < eventAt;
-  }
-
-  function approveTranscriptImports(runtime?: RuntimeKind): void {
-    approveTranscriptImport(database, {
-      approvedAt: new Date().toISOString(),
-      reason: "Source exclusions reviewed before transcript ingestion."
-    });
-    if (runtime) {
-      setRuntimePolicy(database, {
-        decidedAt: new Date().toISOString(),
-        enabled: true,
-        policyKind: "transcript_import",
-        reason: "Coding harness transcript import approved.",
-        runtime
-      });
-    }
-  }
-
-  function transcriptImportApprovedForRuntime(runtime: RuntimeKind): boolean {
-    return getRuntimePolicy(database, runtime, "transcript_import") || transcriptImportApproved(database);
   }
 
   function defaultTranscriptImportScope(): ImportScopeDto {
@@ -1756,6 +1770,68 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/sources/connectors") {
+      try {
+        const snapshot = await listHarnessConnectors(database, config);
+        sendJson(request, response, config.allowedOrigins, 200, { ok: true, ...snapshot });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 500, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/connectors/discover") {
+      try {
+        const snapshot = await discoverHarnessConnectors(database, config);
+        sendJson(request, response, config.allowedOrigins, 202, { ok: true, ...snapshot });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 500, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    const harnessConnectorActionMatch = url.pathname.match(
+      /^\/sources\/connectors\/([^/]+)\/(enable|test|uninstall|confirm-activation)$/
+    );
+    if (request.method === "POST" && harnessConnectorActionMatch?.[1] && harnessConnectorActionMatch[2]) {
+      const runtime = decodeURIComponent(harnessConnectorActionMatch[1]);
+      const action = harnessConnectorActionMatch[2];
+      if (!isLiveConnectorRuntime(runtime)) {
+        sendJson(request, response, config.allowedOrigins, 404, {
+          ok: false,
+          error: "live connector runtime not found"
+        });
+        return;
+      }
+
+      try {
+        if (action === "enable") {
+          await installRuntimeHooks(database, config, runtime);
+        } else if (action === "test") {
+          await testRuntimeHooks(database, config, runtime);
+        } else if (action === "uninstall") {
+          await uninstallRuntimeHooks(database, config, runtime);
+        } else if (action === "confirm-activation") {
+          await clearConnectorActivation(dirname(config.databasePath), runtime);
+        }
+
+        const snapshot = await listHarnessConnectors(database, config);
+        sendJson(request, response, config.allowedOrigins, 202, { ok: true, ...snapshot });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/adapters") {
       const includeLocations = url.searchParams.get("includeLocations") !== "false";
       const adapters = getAdapterStatuses(database).map((adapter) =>
@@ -1882,28 +1958,15 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const body = objectRecord(await optionalJsonBody(request));
         const runtimes = setupRuntimesFromBody(body, scan);
         const importScope = importScopeFromBody(body);
-        const importTranscripts = body.importTranscripts === true;
-        if (importTranscripts && body.transcriptApproved === true) {
-          for (const runtime of runtimes) approveTranscriptImports(runtime);
-        }
-        if (importTranscripts && !runtimes.every((runtime) => transcriptImportApprovedForRuntime(runtime))) {
-          sendJson(request, response, config.allowedOrigins, 409, {
-            ok: false,
-            error: "Transcript import requires explicit source review approval."
-          });
-          return;
-        }
         const result = connectSelectedSources(
           database,
           scan,
           {
             importMetadata: body.importMetadata !== false,
-            importTranscripts,
             importScope,
             queueEnrichment: body.queueEnrichment === true,
             runtimes,
-            sourceIds: sourceIdsFromBody(body),
-            transcriptApproved: body.transcriptApproved === true
+            sourceIds: sourceIdsFromBody(body)
           },
           async (kind, runtime, sources, controls) => {
             return runImportWorkerForSources(kind, runtime, sources, controls, importScope);
@@ -1931,18 +1994,15 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const runtime = stringRecordValue(body, "runtime");
         if (runtime && !isRuntimeKind(runtime)) throw new Error(`Unsupported adapter runtime: ${runtime}`);
         const metadata = await queueAdapterMetadataImports(runtime);
-        const transcriptsApproved = transcriptImportApproved(database);
-        const transcripts = transcriptsApproved ? await queueAdapterTranscriptImports(runtime) : { jobs: [], sources: 0 };
-        const jobs = [...metadata.jobs, ...transcripts.jobs];
         sendJson(request, response, config.allowedOrigins, 202, {
           ok: true,
-          jobs,
+          jobs: metadata.jobs,
           metadataJobs: metadata.jobs,
-          queued: jobs.length,
+          queued: metadata.jobs.length,
           setup: buildAndPersistSourcesSetup(),
-          skipped: transcriptsApproved ? 0 : 1,
-          sources: metadata.sources + transcripts.sources,
-          transcriptJobs: transcripts.jobs
+          skipped: 0,
+          sources: metadata.sources,
+          transcriptJobs: []
         });
       } catch (error) {
         sendJson(request, response, config.allowedOrigins, 400, {
@@ -2206,6 +2266,133 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/workbench/sessions") {
+      const limit = readWorkbenchLimit(url.searchParams.get("limit"));
+      const scope = url.searchParams.get("scope") ?? "default";
+      if (scope !== "default") {
+        sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: `unsupported Workbench scope: ${scope}` });
+        return;
+      }
+      const states = listWorkbenchQueue(database, { limit, publicationStatus: "publish_path" });
+      const body: WorkbenchSessionsResponse = {
+        ok: true,
+        generatedAt: new Date().toISOString(),
+        limit,
+        scope: "default",
+        sessions: workbenchQueueSessionDtos(database, states)
+      };
+      sendJson(request, response, config.allowedOrigins, 200, body);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/workbench/activity") {
+      const limit = readWorkbenchLimit(url.searchParams.get("limit"));
+      const sessionId = url.searchParams.get("sessionId") ?? undefined;
+      const body: WorkbenchActivityResponse = {
+        ok: true,
+        generatedAt: new Date().toISOString(),
+        limit,
+        activity: listWorkbenchActivity(database, { limit, sessionId }).map(workbenchActivityDto)
+      };
+      sendJson(request, response, config.allowedOrigins, 200, body);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/workbench/not-added-summary") {
+      sendJson(request, response, config.allowedOrigins, 200, workbenchNotAddedSummary(database));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/workbench/not-added") {
+      if (url.searchParams.get("includeDetails") !== "true") {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: "explicit includeDetails=true is required for Not Added inspection"
+        });
+        return;
+      }
+      const limit = readWorkbenchLimit(url.searchParams.get("limit"));
+      sendJson(request, response, config.allowedOrigins, 200, workbenchNotAddedDetails(database, limit));
+      return;
+    }
+
+    const workbenchPublishMatch = url.pathname.match(/^\/workbench\/sessions\/([^/]+)\/publish$/);
+    if (request.method === "POST" && workbenchPublishMatch?.[1]) {
+      request.resume();
+      const result = publishWorkbenchSession(database, {
+        actor: { kind: "agent", id: "workbench_api" },
+        sessionId: decodeURIComponent(workbenchPublishMatch[1])
+      });
+      sendJson(request, response, config.allowedOrigins, result.ok ? 200 : 409, result);
+      return;
+    }
+
+    const workbenchTranscriptMatch = url.pathname.match(/^\/workbench\/sessions\/([^/]+)\/(check-transcript|import-transcript-preview|import-transcript)$/);
+    if (request.method === "POST" && workbenchTranscriptMatch?.[1] && workbenchTranscriptMatch[2]) {
+      const sessionId = decodeURIComponent(workbenchTranscriptMatch[1]);
+      const action = workbenchTranscriptMatch[2];
+      const body = action === "check-transcript" ? {} : objectRecord(await optionalJsonBody(request));
+      const sourceId = typeof body.sourceId === "string" ? body.sourceId : undefined;
+      const actor = { kind: "agent" as const, id: "workbench_api" };
+      if (action === "check-transcript") {
+        const result = checkWorkbenchTranscript(database, { actor, sessionId });
+        sendJson(request, response, config.allowedOrigins, result.ok ? 200 : 409, result);
+        return;
+      }
+      if (action === "import-transcript-preview") {
+        const result = previewWorkbenchTranscriptImport(database, { actor, sessionId, sourceId });
+        sendJson(request, response, config.allowedOrigins, result.ok ? 200 : 409, result);
+        return;
+      }
+      const result = createWorkbenchTranscriptImport(database, { actor, sessionId, sourceId });
+      if (!result.ok) {
+        sendJson(request, response, config.allowedOrigins, 409, result);
+        return;
+      }
+      const source = (await discoverAllSourcesAndPersist()).find((candidate) => candidate.sourceId === result.sourceId);
+      if (!source) {
+        sendJson(request, response, config.allowedOrigins, 409, { ok: false, code: "source_required", sessionId, sourceId: result.sourceId });
+        return;
+      }
+      const job = queueImportJob(database, { importKind: "transcript", sourceId: source.sourceId }, (controls) =>
+        importTranscriptSourcesWithLedger([source], controls, defaultTranscriptImportScope())
+      );
+      recordWorkbenchActivity(database, {
+        actor,
+        details: { importJobId: job.importJobId, sourceId: source.sourceId },
+        eventType: "transcript_import_queued",
+        sessionId,
+        summary: "Transcript import queued"
+      });
+      sendJson(request, response, config.allowedOrigins, 202, { ...result, importJob: job });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/workbench/missing-sessions") {
+      const limit = readWorkbenchLimit(url.searchParams.get("limit"));
+      const sessions: WorkbenchMissingSessionDto[] = queueWorkbenchSessions(database, {
+        kind: "session_enrichment",
+        limit,
+        scope: "missing"
+      }).map((session) => ({
+        enrichmentStatus: mapWorkbenchMissingSessionStatus(session.status),
+        lastActivityAt: session.lastActivityAt,
+        lifecycle: session.lifecycle,
+        project: session.project,
+        runtime: session.runtime,
+        sessionId: session.sessionId,
+        title: session.title
+      }));
+      const body: WorkbenchMissingSessionsResponse = {
+        ok: true,
+        generatedAt: new Date().toISOString(),
+        limit,
+        sessions
+      };
+      sendJson(request, response, config.allowedOrigins, 200, body);
+      return;
+    }
+
 
     const runtimeHookSettingsMatch = url.pathname.match(/^\/settings\/hooks\/([^/]+)(?:\/(install|uninstall|test))?$/);
     if (runtimeHookSettingsMatch) {
@@ -2287,6 +2474,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const sessionDossierMatch = url.pathname.match(/^\/sessions\/([^/]+)\/dossier$/);
     if (request.method === "GET" && sessionDossierMatch?.[1]) {
       const sessionId = decodeURIComponent(sessionDossierMatch[1]);
+      if (!workbenchSessionIsPublished(database, sessionId)) {
+        sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "session not found" });
+        return;
+      }
       const dossier = getSessionDossier(database, sessionId);
       sendJson(
         request,
@@ -2328,6 +2519,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const sessionTranscriptMatch = url.pathname.match(/^\/sessions\/([^/]+)\/transcript$/);
     if (request.method === "GET" && sessionTranscriptMatch?.[1]) {
       const sessionId = decodeURIComponent(sessionTranscriptMatch[1]);
+      if (!workbenchSessionIsPublished(database, sessionId)) {
+        sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "session not found" });
+        return;
+      }
       await catchUpSessionTranscriptIfApproved(sessionId);
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
@@ -2479,10 +2674,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         if (!body.sourceId || !isImportJobKind(body.kind)) throw new Error("sourceId and kind are required");
         const source = await sourceById(body.sourceId);
         if (!source) throw new Error(`Unknown source: ${body.sourceId}`);
-        if (body.kind === "transcript" && !transcriptImportApprovedForRuntime(source.runtime)) {
+        if (body.kind === "transcript" && !sourcePolicyExplicitlyEnabled(database, "transcript_import", source.sourceId)) {
           sendJson(request, response, config.allowedOrigins, 409, {
             ok: false,
-            error: "Transcript import requires persisted source review approval."
+            error: "Transcript import requires source-scoped Workbench approval."
           });
           return;
         }
@@ -2560,23 +2755,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       try {
         const body = JSON.parse(await readBody(request)) as ConnectSourcesRequest;
         const scan = latestScan ?? (await scanSourcesAndPersist());
-        if (body.importTranscripts && body.transcriptApproved) {
-          for (const runtime of body.runtimes) if (isRuntimeKind(runtime)) approveTranscriptImports(runtime);
-        }
-        if (body.importTranscripts && !body.runtimes.every((runtime) => isRuntimeKind(runtime) && transcriptImportApprovedForRuntime(runtime))) {
-          sendJson(request, response, config.allowedOrigins, 409, {
-            ok: false,
-            error: "Transcript import requires explicit source review approval."
-          });
-          return;
-        }
         const result = connectSelectedSources(database, scan, body, async (kind, runtime, sources, controls) => {
           return runImportWorkerForSources(kind, runtime, sources, controls, body.importScope ?? defaultTranscriptImportScope());
         });
         recordRuntimeDiagnostic({
           details: {
             importMetadata: body.importMetadata,
-            importTranscripts: body.importTranscripts,
             queueEnrichment: body.queueEnrichment,
             queued: result.jobs.length,
             runtimes: body.runtimes,
@@ -2796,7 +2980,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
-    const adapterImportMatch = url.pathname.match(/^\/adapters\/([^/]+)\/(import-metadata|approve-transcripts|import-transcripts|sync)$/);
+    const adapterImportMatch = url.pathname.match(/^\/adapters\/([^/]+)\/(import-metadata|sync)$/);
     if (request.method === "POST" && adapterImportMatch?.[1] && adapterImportMatch[2]) {
       const runtime = decodeURIComponent(adapterImportMatch[1]);
       if (!isRuntimeKind(runtime) || !adapterForRuntime(runtime)) {
@@ -2804,11 +2988,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         return;
       }
       const action = adapterImportMatch[2];
-      if (action === "approve-transcripts") {
-        approveTranscriptImports(runtime);
-        sendJson(request, response, config.allowedOrigins, 202, { ok: true });
-        return;
-      }
       if (action === "import-metadata") {
         const queued = await queueAdapterMetadataImports(runtime);
         sendJson(request, response, config.allowedOrigins, 202, {
@@ -2820,38 +2999,16 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         });
         return;
       }
-      if (action === "import-transcripts") {
-        if (!transcriptImportApprovedForRuntime(runtime)) {
-          sendJson(request, response, config.allowedOrigins, 409, {
-            ok: false,
-            error: "Transcript import requires persisted source review approval."
-          });
-          return;
-        }
-        const queued = await queueAdapterTranscriptImports(runtime);
-        sendJson(request, response, config.allowedOrigins, 202, {
-          ok: true,
-          imported: 0,
-          jobs: queued.jobs,
-          queued: queued.jobs.length,
-          skipped: 0,
-          sources: queued.sources
-        });
-        return;
-      }
       const metadata = await queueAdapterMetadataImports(runtime);
-      const transcriptsApproved = transcriptImportApprovedForRuntime(runtime);
-      const transcripts = transcriptsApproved ? await queueAdapterTranscriptImports(runtime) : { jobs: [], sources: 0 };
-      const jobs = [...metadata.jobs, ...transcripts.jobs];
       sendJson(request, response, config.allowedOrigins, 202, {
         ok: true,
         imported: 0,
-        jobs,
+        jobs: metadata.jobs,
         metadataJobs: metadata.jobs,
-        queued: jobs.length,
-        skipped: transcriptsApproved ? 0 : 1,
-        sources: metadata.sources + transcripts.sources,
-        transcriptJobs: transcripts.jobs
+        queued: metadata.jobs.length,
+        skipped: 0,
+        sources: metadata.sources,
+        transcriptJobs: []
       });
       return;
     }
@@ -3517,23 +3674,30 @@ async function transcriptSources(source: DiscoveredSource): Promise<DiscoveredSo
 
 async function transcriptSourceFromHookEvent(event: NormalizedEvent, homeDir: string): Promise<DiscoveredSource | undefined> {
   const transcriptPath = hookTranscriptPath(event);
-  if (!transcriptPath || !transcriptPath.endsWith(".jsonl") || !isAbsolute(transcriptPath)) return undefined;
-  if (!isRuntimeKind(event.source.adapter)) return undefined;
-
+  const sourceId = transcriptSourceIdFromHookEvent(event, homeDir);
+  if (!transcriptPath || !sourceId || !isRuntimeKind(event.source.adapter)) return undefined;
   const runtime = event.source.adapter;
-  const relativePath = relative(homeDir, transcriptPath).replaceAll("\\", "/");
-  const sourcePathId = relativePath && !relativePath.startsWith("../") && relativePath !== ".." && !isAbsolute(relativePath)
-    ? relativePath
-    : transcriptPath.replaceAll("\\", "/");
   return {
     confidence: "authoritative",
     path: transcriptPath,
     runtime,
     runtimeVersion: "file",
     schemaVersion: `${runtime}-transcript-jsonl`,
-    sourceId: `${runtime}-hook-transcript:${sourcePathId}`,
+    sourceId,
     sourceKind: "jsonl"
   };
+}
+
+function transcriptSourceIdFromHookEvent(event: NormalizedEvent, homeDir: string): string | undefined {
+  const transcriptPath = hookTranscriptPath(event);
+  if (!transcriptPath || !transcriptPath.endsWith(".jsonl") || !isAbsolute(transcriptPath)) return undefined;
+  if (!isRuntimeKind(event.source.adapter)) return undefined;
+  const runtime = event.source.adapter;
+  const relativePath = relative(homeDir, transcriptPath).replaceAll("\\", "/");
+  const sourcePathId = relativePath && !relativePath.startsWith("../") && relativePath !== ".." && !isAbsolute(relativePath)
+    ? relativePath
+    : transcriptPath.replaceAll("\\", "/");
+  return `${runtime}-hook-transcript:${sourcePathId}`;
 }
 
 function hookTranscriptPath(event: NormalizedEvent): string | undefined {
@@ -3868,6 +4032,162 @@ function parseBoundedInteger(
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) return { ok: false };
   return { ok: true, value: parsed };
+}
+
+function readWorkbenchLimit(raw: string | null): number {
+  const parsed = raw ? Number(raw) : 50;
+  if (!Number.isFinite(parsed)) return 50;
+  return Math.max(1, Math.min(Math.trunc(parsed), 100));
+}
+
+type WorkbenchSessionMetadataRow = {
+  sessionId: string;
+  title: string | null;
+  project: string | null;
+  runtime: string;
+  lifecycle: string;
+  lastActivityAt: string;
+};
+
+type WorkbenchNotAddedSummaryRow = {
+  reason: string | null;
+  count: number;
+};
+
+type WorkbenchNotAddedDetailRow = WorkbenchSessionMetadataRow & {
+  reason: string | null;
+};
+
+function workbenchQueueSessionDtos(database: MastheadDatabase, states: WorkbenchSessionStateRecord[]): WorkbenchQueueSessionDto[] {
+  const metadata = workbenchSessionMetadata(database, states.map((state) => state.sessionId));
+  return states.flatMap((state) => {
+    const session = metadata.get(state.sessionId);
+    if (!session) return [];
+    return [
+      {
+        activeClaim: state.activeClaim
+          ? {
+              claimedBy: state.activeClaim.claimedBy,
+              expiresAt: state.activeClaim.expiresAt
+            }
+          : undefined,
+        bugFixTraceStatus: state.bugFixTraceStatus,
+        lastActivityAt: session.lastActivityAt,
+        latestActivity: listWorkbenchActivity(database, { limit: 1, sessionId: state.sessionId }).map(workbenchActivityDto)[0],
+        lifecycle: session.lifecycle,
+        nextAction: state.nextAction,
+        project: session.project ?? undefined,
+        publicationStatus: "publish_path",
+        qualityStatus: state.qualityStatus,
+        runtime: session.runtime,
+        sessionDossierStatus: state.sessionDossierStatus,
+        sessionEnrichmentStatus: state.sessionEnrichmentStatus,
+        sessionId: state.sessionId,
+        title: session.title ?? state.sessionId,
+        transcriptStatus: state.transcriptStatus
+      }
+    ];
+  });
+}
+
+function workbenchActivityDto(activity: WorkbenchActivityRecord): WorkbenchActivityDto {
+  return {
+    activityId: activity.activityId,
+    actorId: activity.actorId,
+    actorKind: activity.actorKind,
+    details: activity.details,
+    eventAt: activity.eventAt,
+    eventType: activity.eventType,
+    sessionId: activity.sessionId,
+    summary: activity.summary
+  };
+}
+
+function workbenchNotAddedSummary(database: MastheadDatabase): WorkbenchNotAddedSummaryDto {
+  const rows = database
+    .prepare(
+      `SELECT non_publication_reason AS reason, COUNT(*) AS count
+      FROM workbench_session_state
+      JOIN sessions ON sessions.session_id = workbench_session_state.session_id
+      WHERE workbench_session_state.publication_status = 'not_added_to_logbook'
+        AND sessions.deleted_at IS NULL
+      GROUP BY non_publication_reason
+      ORDER BY count DESC, lower(COALESCE(non_publication_reason, 'unknown'))`
+    )
+    .all() as WorkbenchNotAddedSummaryRow[];
+  return {
+    ok: true,
+    reasons: rows.map((row) => ({ count: row.count, reason: row.reason ?? "unknown" })),
+    total: rows.reduce((total, row) => total + row.count, 0)
+  };
+}
+
+function workbenchNotAddedDetails(database: MastheadDatabase, limit: number): WorkbenchNotAddedResponse {
+  const rows = database
+    .prepare(
+      `SELECT
+        sessions.session_id AS sessionId,
+        COALESCE(sessions.title, sessions.objective, sessions.source_session_id) AS title,
+        sessions.project_label AS project,
+        runtimes.runtime_kind AS runtime,
+        sessions.lifecycle AS lifecycle,
+        sessions.last_activity_at AS lastActivityAt,
+        workbench_session_state.non_publication_reason AS reason
+      FROM workbench_session_state
+      JOIN sessions ON sessions.session_id = workbench_session_state.session_id
+      JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+      WHERE workbench_session_state.publication_status = 'not_added_to_logbook'
+        AND sessions.deleted_at IS NULL
+      ORDER BY COALESCE(workbench_session_state.last_activity_at, sessions.last_activity_at, workbench_session_state.updated_at) DESC,
+        sessions.session_id DESC
+      LIMIT ?`
+    )
+    .all(limit) as WorkbenchNotAddedDetailRow[];
+  const total = workbenchNotAddedSummary(database).total;
+  return {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    limit,
+    sessions: rows.map(workbenchNotAddedSessionDto),
+    total
+  };
+}
+
+function workbenchNotAddedSessionDto(row: WorkbenchNotAddedDetailRow): WorkbenchNotAddedSessionDto {
+  return {
+    lastActivityAt: row.lastActivityAt,
+    lifecycle: row.lifecycle,
+    project: row.project ?? undefined,
+    reason: row.reason ?? "unknown",
+    runtime: row.runtime,
+    sessionId: row.sessionId,
+    title: row.title ?? row.sessionId
+  };
+}
+
+function workbenchSessionMetadata(database: MastheadDatabase, sessionIds: string[]): Map<string, WorkbenchSessionMetadataRow> {
+  if (sessionIds.length === 0) return new Map();
+  const rows = database
+    .prepare(
+      `SELECT
+        sessions.session_id AS sessionId,
+        COALESCE(sessions.title, sessions.objective, sessions.source_session_id) AS title,
+        sessions.project_label AS project,
+        runtimes.runtime_kind AS runtime,
+        sessions.lifecycle AS lifecycle,
+        sessions.last_activity_at AS lastActivityAt
+      FROM sessions
+      JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+      WHERE sessions.session_id IN (${sessionIds.map(() => "?").join(", ")})
+        AND sessions.deleted_at IS NULL`
+    )
+    .all(...sessionIds) as WorkbenchSessionMetadataRow[];
+  return new Map(rows.map((row) => [row.sessionId, row]));
+}
+
+function mapWorkbenchMissingSessionStatus(status: "current" | "stale" | "failed" | "disabled" | "missing"): WorkbenchMissingSessionDto["enrichmentStatus"] {
+  if (status === "stale" || status === "failed") return status;
+  return "missing";
 }
 
 function isRuntimeKind(value: unknown): value is RuntimeKind {

@@ -145,7 +145,11 @@ describe("Masthead worktree connector planning", () => {
     "/mcp/status",
     "/mcp/launch-config",
     "/mcp/tools",
-    "/mcp/audit"
+    "/mcp/audit",
+    "/workbench/sessions",
+    "/workbench/activity",
+    "/workbench/not-added-summary",
+    "/workbench/not-added"
   ])("forwards canonical read endpoint %s", async (pathname) => {
     expect(isAllowedReadOnlyBridgeRequest("GET", pathname)).toBe(true);
   });
@@ -155,9 +159,15 @@ describe("Masthead worktree connector planning", () => {
   });
 
   test("forwards read-only source scans but blocks source writes", () => {
+    expect(isAllowedReadOnlyBridgeRequest("GET", "/sources/connectors")).toBe(true);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/scan")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/connect")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/codex/import-metadata")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/connectors/discover")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/connectors/codex/enable")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/connectors/codex/test")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/connectors/codex/uninstall")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/sources/connectors/codex/confirm-activation")).toBe(false);
   });
 
   test("still blocks mutations", () => {
