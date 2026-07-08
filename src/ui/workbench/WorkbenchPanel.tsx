@@ -1,5 +1,6 @@
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
+import { formatWorkbenchActivityTime, workbenchActivityTone } from "./workbenchActivity";
 import { sanitizeWorkbenchVisibleText } from "./workbenchHandoff";
 
 type WorkbenchPanelProps = Partial<
@@ -370,12 +371,25 @@ export function WorkbenchPanel({
             ) : (
               <ol className="workbench-activity-list">
                 {activity.map((item) => (
-                  <li key={item.activityId}>
-                    <span>{sanitizeWorkbenchVisibleText(item.summary)}</span>
-                    <small>
-                      {sanitizeWorkbenchVisibleText(item.eventType)} /{" "}
-                      {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
-                    </small>
+                  <li
+                    key={item.activityId}
+                    className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)}`}
+                  >
+                    <span className="workbench-activity-gutter" aria-hidden="true" />
+                    <div className="workbench-activity-body">
+                      <div className="workbench-activity-meta">
+                        <time dateTime={item.eventAt}>{formatWorkbenchActivityTime(item.eventAt)}</time>
+                        <span className="workbench-activity-type">
+                          {sanitizeWorkbenchVisibleText(item.eventType)}
+                        </span>
+                        <span className="workbench-activity-actor">
+                          {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
+                        </span>
+                      </div>
+                      <p className="workbench-activity-summary">
+                        {sanitizeWorkbenchVisibleText(item.summary)}
+                      </p>
+                    </div>
                   </li>
                 ))}
               </ol>

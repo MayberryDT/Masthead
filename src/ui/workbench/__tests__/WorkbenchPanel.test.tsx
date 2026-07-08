@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import type { WorkbenchActionKind } from "../../../app/workbench/useWorkbenchController";
-import type { WorkbenchNotAddedSessionDto, WorkbenchQueueSessionDto } from "../../../shared/workbench";
+import type {
+  WorkbenchActivityDto,
+  WorkbenchNotAddedSessionDto,
+  WorkbenchQueueSessionDto
+} from "../../../shared/workbench";
+import { formatWorkbenchActivityTime } from "../workbenchActivity";
 import { WorkbenchPanel } from "../WorkbenchPanel";
 
 const forbiddenTokenParts = [
@@ -247,6 +252,56 @@ describe("WorkbenchPanel", () => {
     expect(html).not.toContain("Not Added");
     expect(html).not.toContain("not added to Logbook");
     expect(html).toContain("No activity yet");
+  });
+
+  test("activity rail renders console rows with tone gutters and sanitized text", () => {
+    const eventAt = "2026-07-08T12:34:56.000Z";
+    const items: WorkbenchActivityDto[] = [
+      {
+        activityId: "act-ok",
+        actorId: "agent-1",
+        actorKind: "agent",
+        details: {},
+        eventAt,
+        eventType: "quality_passed",
+        sessionId: "session:abc",
+        summary: "Quality accepted for session"
+      },
+      {
+        activityId: "act-bad",
+        actorKind: "system",
+        details: {},
+        eventAt,
+        eventType: "publication_gate_failed",
+        sessionId: "session:abc",
+        summary: "Gate blocked publication"
+      }
+    ];
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session()]}
+        activity={items}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAllVisible={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).toContain("workbench-activity-item is-ok");
+    expect(html).toContain("workbench-activity-item is-bad");
+    expect(html).toContain("workbench-activity-gutter");
+    expect(html).toContain("workbench-activity-type");
+    expect(html).toContain("workbench-activity-summary");
+    expect(html).toContain("quality_passed");
+    expect(html).toContain("publication_gate_failed");
+    expect(html).toContain("Quality accepted for session");
+    expect(html).toContain("Gate blocked publication");
+    expect(html).toContain("agent-1");
+    expect(html).toContain(`dateTime="${eventAt}"`);
+    expect(html).toContain(formatWorkbenchActivityTime(eventAt));
+    expect(html).not.toContain("No activity yet");
   });
 
   test("renders Not Added review table when open", () => {
