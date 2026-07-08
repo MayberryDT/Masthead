@@ -11,6 +11,7 @@ import {
   type CodexHookConfig
 } from "../core/hookAdmin.ts";
 import type { DaemonConfig } from "./config.ts";
+import { setConnectorActivation } from "./sources/connectorActivationStore.ts";
 
 export { LIVE_CONNECTOR_RUNTIMES, type LiveConnectorRuntime };
 
@@ -82,6 +83,10 @@ export async function getLiveConnectorSetting(config: DaemonConfig, runtime: Liv
   const latestBackupPath = await latestHookBackupPath(configPath).catch(() => undefined);
 
   try {
+    if (runtime === "hermes") {
+      return getHermesConnectorSetting(config, { command, endpoint, latestBackupPath, stateEndpoint });
+    }
+
     if (runtime === "cursor") {
       const { config: hookConfig, existed } = await readJsonConfig<CursorHookConfig>(configPath, { allowMissing: true });
       const verification = verifyCursorHookConfig(hookConfig, { command, events: CURSOR_EVENTS });
@@ -214,7 +219,7 @@ export function liveConnectorConfigPath(config: DaemonConfig, runtime: LiveConne
     case "pi":
       return resolve(process.env.MASTHEAD_PI_EXTENSION || join(homeDir, ".pi", "agent", "extensions", "masthead-live.js"));
     case "hermes":
-      return resolve(process.env.MASTHEAD_HERMES_PLUGIN || join(homeDir, ".hermes", "plugins", "masthead-live", "index.js"));
+      return resolve(process.env.MASTHEAD_HERMES_PLUGIN || join(homeDir, ".hermes", "plugins", "masthead-live", "plugin.yaml"));
   }
 }
 
@@ -316,6 +321,11 @@ export async function installLiveConnector(config: DaemonConfig, runtime: LiveCo
   const configPath = liveConnectorConfigPath(config, runtime);
   const command = liveConnectorCommand(config, runtime);
 
+  if (runtime === "hermes") {
+    await installHermesPlugin(config);
+    return;
+  }
+
   if (runtime === "cursor") {
     const { config: hookConfig, existed } = await readJsonConfig<CursorHookConfig>(configPath, { allowMissing: true });
     if (existed) await createHookBackup(configPath, "install");
@@ -340,10 +350,23 @@ export async function installLiveConnector(config: DaemonConfig, runtime: LiveCo
       timeout: 1
     })
   );
+
+  if (runtime === "codex") {
+    await setConnectorActivation(dirname(config.databasePath), "codex", {
+      required: "trust_hooks",
+      message:
+        "Open Codex and run /hooks to review and trust Masthead hooks. Untrusted hooks are skipped, including for codex exec."
+    });
+  }
 }
 
 export async function uninstallLiveConnector(config: DaemonConfig, runtime: LiveConnectorRuntime): Promise<void> {
   const configPath = liveConnectorConfigPath(config, runtime);
+
+  if (runtime === "hermes") {
+    await uninstallHermesPlugin(config);
+    return;
+  }
 
   if (runtime === "cursor") {
     const { config: hookConfig, existed } = await readJsonConfig<CursorHookConfig>(configPath, { allowMissing: true });
@@ -405,8 +428,6 @@ function markedConnectorMarker(runtime: LiveConnectorRuntime): string | undefine
       return OMP_EXTENSION_MARKER;
     case "pi":
       return PI_EXTENSION_MARKER;
-    case "hermes":
-      return HERMES_PLUGIN_MARKER;
     default:
       return undefined;
   }
@@ -420,11 +441,383 @@ function markedConnectorSource(runtime: LiveConnectorRuntime, endpoint: string, 
       return ompExtensionSource(endpoint, stateEndpoint);
     case "pi":
       return runtimePluginSource(PI_EXTENSION_MARKER, endpoint, stateEndpoint, "pi.extension", "pi");
-    case "hermes":
-      return runtimePluginSource(HERMES_PLUGIN_MARKER, endpoint, stateEndpoint, "hermes.plugin", "hermes");
     default:
       return undefined;
   }
+}
+
+const HERMES_PLUGIN_NAME = "masthead-live";
+const HERMES_PLUGIN_HOOKS = ["on_session_start", "pre_tool_call", "post_tool_call", "pre_approval_request", "on_session_end", "on_session_finalize"] as const;
+
+async function getHermesConnectorSetting(
+  config: DaemonConfig,
+  input: { command: string; endpoint: string; latestBackupPath?: string; stateEndpoint: string }
+): Promise<LiveConnectorSettings> {
+  const configPath = liveConnectorConfigPath(config, "hermes");
+  const pluginDir = dirname(configPath);
+  const initPath = join(pluginDir, "__init__.py");
+  const homeDir = resolve(config.codexHomeDir);
+  const hermesConfigPath = hermesUserConfigPath(homeDir);
+  const verification = await verifyHermesPluginInstall({
+    endpoint: input.endpoint,
+    hermesConfigPath,
+    initPath,
+    pluginYamlPath: configPath,
+    stateEndpoint: input.stateEndpoint
+  });
+
+  return {
+    command: input.command,
+    configExists: verification.configExists,
+    configPath,
+    endpoint: input.endpoint,
+    installed: verification.installed,
+    label: LABELS.hermes,
+    latestBackupPath: input.latestBackupPath,
+    mismatchedEvents: verification.mismatchedEvents,
+    missingEvents: verification.missingEvents,
+    runtime: "hermes",
+    stateEndpoint: input.stateEndpoint
+  };
+}
+
+async function installHermesPlugin(config: DaemonConfig): Promise<void> {
+  const pluginYamlPath = liveConnectorConfigPath(config, "hermes");
+  const pluginDir = dirname(pluginYamlPath);
+  const initPath = join(pluginDir, "__init__.py");
+  const homeDir = resolve(config.codexHomeDir);
+  const hermesConfigPath = hermesUserConfigPath(homeDir);
+  const endpoint = liveConnectorEndpoint(config, "hermes");
+  const stateEndpoint = liveStateEndpoint(config);
+
+  if (await pathExists(pluginYamlPath)) await createHookBackup(pluginYamlPath, "install");
+  if (await pathExists(initPath)) await createHookBackup(initPath, "install");
+  // Remove the old JS-only plugin shape that Hermes never loads.
+  await rm(join(pluginDir, "index.js"), { force: true });
+
+  await writeTextConfig(pluginYamlPath, hermesPluginYamlSource());
+  await writeTextConfig(initPath, hermesPluginPythonSource(endpoint, stateEndpoint));
+
+  if (await pathExists(hermesConfigPath)) {
+    await createHookBackup(hermesConfigPath, "install");
+    const raw = await readFile(hermesConfigPath, "utf8");
+    const next = enableHermesPluginInConfig(raw, HERMES_PLUGIN_NAME);
+    if (next !== raw) await writeTextConfig(hermesConfigPath, next);
+  } else {
+    await writeTextConfig(
+      hermesConfigPath,
+      `plugins:\n  enabled:\n    - ${HERMES_PLUGIN_NAME}\n`
+    );
+  }
+}
+
+async function uninstallHermesPlugin(config: DaemonConfig): Promise<void> {
+  const pluginYamlPath = liveConnectorConfigPath(config, "hermes");
+  const pluginDir = dirname(pluginYamlPath);
+  const initPath = join(pluginDir, "__init__.py");
+  const homeDir = resolve(config.codexHomeDir);
+  const hermesConfigPath = hermesUserConfigPath(homeDir);
+
+  if (await pathExists(pluginYamlPath)) {
+    await assertRegularHookFile(pluginYamlPath);
+    const raw = await readFile(pluginYamlPath, "utf8");
+    if (!raw.includes(HERMES_PLUGIN_MARKER) && !raw.includes(HERMES_PLUGIN_NAME)) {
+      throw new Error(`Refusing to uninstall non-Masthead Hermes connector: ${pluginYamlPath}`);
+    }
+    await createHookBackup(pluginYamlPath, "uninstall");
+  }
+  if (await pathExists(initPath)) {
+    await assertRegularHookFile(initPath);
+    await createHookBackup(initPath, "uninstall");
+  }
+  if (await pathExists(hermesConfigPath)) {
+    const raw = await readFile(hermesConfigPath, "utf8");
+    if (raw.includes(HERMES_PLUGIN_NAME)) {
+      await createHookBackup(hermesConfigPath, "uninstall");
+      const next = disableHermesPluginInConfig(raw, HERMES_PLUGIN_NAME);
+      if (next !== raw) await writeTextConfig(hermesConfigPath, next);
+    }
+  }
+
+  await rm(pluginYamlPath, { force: true });
+  await rm(initPath, { force: true });
+  await rm(join(pluginDir, "index.js"), { force: true });
+  try {
+    const remaining = await readdir(pluginDir);
+    if (remaining.length === 0) await rm(pluginDir, { force: true, recursive: true });
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) throw error;
+  }
+}
+
+function hermesUserConfigPath(homeDir: string): string {
+  return resolve(process.env.MASTHEAD_HERMES_CONFIG || join(homeDir, ".hermes", "config.yaml"));
+}
+
+async function verifyHermesPluginInstall(input: {
+  endpoint: string;
+  hermesConfigPath: string;
+  initPath: string;
+  pluginYamlPath: string;
+  stateEndpoint: string;
+}): Promise<{ configExists: boolean; installed: boolean; missingEvents: string[]; mismatchedEvents: string[] }> {
+  let pluginYaml = "";
+  let initPy = "";
+  try {
+    pluginYaml = await readFile(input.pluginYamlPath, "utf8");
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) {
+      return { configExists: false, installed: false, mismatchedEvents: [], missingEvents: ["plugin", "enabled"] };
+    }
+    throw error;
+  }
+  try {
+    initPy = await readFile(input.initPath, "utf8");
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) {
+      return { configExists: true, installed: false, mismatchedEvents: [], missingEvents: ["plugin_init", "enabled"] };
+    }
+    throw error;
+  }
+
+  const missingEvents: string[] = [];
+  const mismatchedEvents: string[] = [];
+  const hasMarker = pluginYaml.includes(HERMES_PLUGIN_MARKER) || pluginYaml.includes(`name: ${HERMES_PLUGIN_NAME}`);
+  if (!hasMarker) missingEvents.push("plugin");
+  if (!initPy.includes(HERMES_PLUGIN_MARKER) && !initPy.includes("masthead-live-connector")) missingEvents.push("plugin_init");
+  if (!initPy.includes(input.endpoint)) mismatchedEvents.push("event");
+  if (!initPy.includes(input.stateEndpoint)) mismatchedEvents.push("state");
+  for (const hookName of HERMES_PLUGIN_HOOKS) {
+    if (!initPy.includes(hookName)) missingEvents.push(hookName);
+  }
+
+  let enabled = false;
+  try {
+    const hermesConfig = await readFile(input.hermesConfigPath, "utf8");
+    enabled = isHermesPluginEnabledInConfig(hermesConfig, HERMES_PLUGIN_NAME);
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) throw error;
+  }
+  if (!enabled) missingEvents.push("enabled");
+
+  return {
+    configExists: true,
+    installed: missingEvents.length === 0 && mismatchedEvents.length === 0,
+    missingEvents,
+    mismatchedEvents
+  };
+}
+
+/** Pure helper: ensure `pluginName` is listed under plugins.enabled in Hermes config.yaml. */
+export function enableHermesPluginInConfig(raw: string, pluginName: string): string {
+  if (isHermesPluginEnabledInConfig(raw, pluginName)) return raw;
+
+  // plugins:\n  enabled: []
+  const emptyList = raw.replace(
+    /(^|\n)(plugins:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+enabled:\s*)\[\s*\]([ \t]*\n)/,
+    `$1$2\n    - ${pluginName}\n`
+  );
+  if (emptyList !== raw) return emptyList;
+
+  // plugins:\n  enabled:\n    - other
+  const underList = raw.replace(
+    /(^|\n)(plugins:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+enabled:\s*\n)((?:[ \t]+-[ \t]+[^\n]+\n)*)/,
+    (match, prefix: string, head: string, items: string) => {
+      if (new RegExp(`^[ \\t]+-[ \\t]+${escapeRegExp(pluginName)}\\s*$`, "m").test(items)) return match;
+      return `${prefix}${head}${items}    - ${pluginName}\n`;
+    }
+  );
+  if (underList !== raw) return underList;
+
+  // plugins:\n  enabled: [foo, bar]
+  const inlineList = raw.replace(
+    /(^|\n)(plugins:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+enabled:\s*)\[([^\]]*)\]([ \t]*\n)/,
+    (match, prefix: string, head: string, body: string, suffix: string) => {
+      const parts = body
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => part.replace(/^['"]|['"]$/g, ""));
+      if (parts.includes(pluginName)) return match;
+      parts.push(pluginName);
+      return `${prefix}${head}[${parts.join(", ")}]${suffix}`;
+    }
+  );
+  if (inlineList !== raw) return inlineList;
+
+  if (/(^|\n)plugins:\s*\n/.test(raw)) {
+    return raw.replace(/(^|\n)plugins:\s*\n/, `$1plugins:\n  enabled:\n    - ${pluginName}\n`);
+  }
+  const suffix = raw.endsWith("\n") || raw.length === 0 ? "" : "\n";
+  return `${raw}${suffix}plugins:\n  enabled:\n    - ${pluginName}\n`;
+}
+
+/** Pure helper: remove `pluginName` from plugins.enabled in Hermes config.yaml. */
+export function disableHermesPluginInConfig(raw: string, pluginName: string): string {
+  let next = raw.replace(new RegExp(`(^|\\n)([ \\t]+-[ \\t]+${escapeRegExp(pluginName)})\\s*(?=\\n|$)`, "g"), "$1");
+  next = next.replace(
+    new RegExp(`(^|\\n)([ \\t]+enabled:\\s*)\\[([^\\]]*)]([ \\t]*\\n)`),
+    (match, prefix: string, head: string, body: string, suffix: string) => {
+      const parts = body
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => part.replace(/^['"]|['"]$/g, ""))
+        .filter((part) => part !== pluginName);
+      if (parts.length === body.split(",").map((part) => part.trim()).filter(Boolean).length) return match;
+      return `${prefix}${head}[${parts.join(", ")}]${suffix}`;
+    }
+  );
+  return next;
+}
+
+export function isHermesPluginEnabledInConfig(raw: string, pluginName: string): boolean {
+  if (new RegExp(`^[ \\t]+-[ \\t]+${escapeRegExp(pluginName)}\\s*$`, "m").test(raw)) return true;
+  const inline = raw.match(/(^|\n)[ \t]+enabled:\s*\[([^\]]*)]/);
+  if (!inline) return false;
+  return inline[2]
+    .split(",")
+    .map((part) => part.trim().replace(/^['"]|['"]$/g, ""))
+    .includes(pluginName);
+}
+
+function hermesPluginYamlSource(): string {
+  return `# ${HERMES_PLUGIN_MARKER}: installed by Masthead.
+name: ${HERMES_PLUGIN_NAME}
+version: 1.0.0
+description: "Fail-open Masthead live session capture for Hermes CLI and gateway."
+author: "Masthead"
+hooks:
+${HERMES_PLUGIN_HOOKS.map((hook) => `  - ${hook}`).join("\n")}
+`;
+}
+
+function hermesPluginPythonSource(endpoint: string, stateEndpoint: string): string {
+  return `# ${HERMES_PLUGIN_MARKER}: installed by Masthead.
+from __future__ import annotations
+
+import json
+import threading
+import urllib.request
+from typing import Any, Optional
+
+MASTHEAD_ENDPOINT = ${JSON.stringify(endpoint)}
+MASTHEAD_STATE_ENDPOINT = ${JSON.stringify(stateEndpoint)}
+MASTHEAD_SOURCE = "hermes.plugin"
+MASTHEAD_RUNTIME = "hermes"
+_TIMEOUT_S = 0.75
+_seq = 0
+_lock = threading.Lock()
+
+
+def _first_str(*values: Any) -> Optional[str]:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _post(url: str, body: dict[str, Any]) -> None:
+    try:
+        data = json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:
+            response.read()
+    except Exception:
+        # Fail open: never block Hermes on Masthead capture.
+        return
+
+
+def _state_for(event_name: str) -> str:
+    normalized = (event_name or "").lower()
+    if "approval" in normalized or "permission" in normalized:
+        return "blocked"
+    if normalized in {"on_session_end", "on_session_finalize", "session_end", "session_stop"}:
+        return "idle"
+    return "working"
+
+
+def _emit(event_name: str, **kwargs: Any) -> None:
+    global _seq
+    with _lock:
+        _seq += 1
+        seq = _seq
+    session_id = _first_str(
+        kwargs.get("session_id"),
+        kwargs.get("sessionId"),
+        kwargs.get("task_id"),
+        kwargs.get("taskId"),
+    )
+    cwd = _first_str(kwargs.get("cwd"), kwargs.get("directory"), kwargs.get("working_directory"))
+    tool_name = _first_str(kwargs.get("tool_name"), kwargs.get("toolName"))
+    provider_event_id = _first_str(kwargs.get("tool_call_id"), kwargs.get("toolCallId")) or (
+        f"{session_id}:{event_name}:{seq}" if session_id else f"{event_name}:{seq}"
+    )
+    from datetime import datetime, timezone
+
+    observed_at = _first_str(kwargs.get("timestamp"), kwargs.get("time")) or (
+        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+    payload = {
+        "type": event_name,
+        "hook_event_name": event_name,
+        "sessionId": session_id,
+        "session_id": session_id,
+        "provider_event_id": provider_event_id,
+        "timestamp": observed_at,
+        "cwd": cwd,
+        "toolName": tool_name,
+        "tool_name": tool_name,
+        "source": MASTHEAD_SOURCE,
+        "runtime": MASTHEAD_RUNTIME,
+        "state": _state_for(event_name),
+    }
+    _post(MASTHEAD_ENDPOINT, payload)
+    if session_id:
+        _post(
+            MASTHEAD_STATE_ENDPOINT,
+            {
+                "runtime": MASTHEAD_RUNTIME,
+                "source": "masthead:" + MASTHEAD_SOURCE,
+                "sourceSessionId": session_id,
+                "sourceEventId": provider_event_id,
+                "state": _state_for(event_name),
+                "authority": "plugin",
+                "observedAt": observed_at,
+                "cwd": cwd,
+                "message": event_name,
+                "seq": seq,
+            },
+        )
+
+
+def _hook(event_name: str):
+    def _handler(**kwargs: Any) -> None:
+        _emit(event_name, **kwargs)
+
+    return _handler
+
+
+def register(ctx: Any) -> None:
+    for hook_name in (
+        "on_session_start",
+        "pre_tool_call",
+        "post_tool_call",
+        "pre_approval_request",
+        "on_session_end",
+        "on_session_finalize",
+    ):
+        ctx.register_hook(hook_name, _hook(hook_name))
+`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function installCursorHookConfig(config: CursorHookConfig, options: { command: string; events: readonly string[] }): CursorHookConfig {
