@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   confirmHarnessConnectorActivation,
   discoverHarnessConnectors,
@@ -19,7 +19,12 @@ export type UseSourcesConnectorsControllerOptions = {
 export type UseSourcesConnectorsControllerResult = {
   snapshot?: HarnessConnectorsSnapshotDto;
   busy: boolean;
-  status?: string;
+  /** Toolbar status next to Refresh only. */
+  refreshStatus?: string;
+  /** Per-connection action status shown on the card footer (Enable/Test/etc.). */
+  cardActionStatus: Record<string, string>;
+  /** Runtime currently running an action (if any). */
+  actionRuntime?: string;
   selectedRuntime?: string;
   onboardingOpen: boolean;
   setSelectedRuntime: (runtime: string | undefined) => void;
@@ -46,7 +51,15 @@ function errorMessage(error: unknown): string {
 function summarizeRefresh(snapshot: HarnessConnectorsSnapshotDto): string {
   const found = snapshot.connectors.filter((connector) => connector.presence === "found").length;
   const { ready, needsAction, notFound } = snapshot.summary;
-  return `Refreshed connections: ${found} found · ${ready} ready · ${needsAction} need action · ${notFound} not found.`;
+  return `Refreshed: ${found} found · ${ready} ready · ${needsAction} need action · ${notFound} not found.`;
+}
+
+function setCardStatus(
+  setter: Dispatch<SetStateAction<Record<string, string>>>,
+  runtime: string,
+  message: string
+): void {
+  setter((prev) => ({ ...prev, [runtime]: message }));
 }
 
 export function useSourcesConnectorsController(
@@ -58,7 +71,9 @@ export function useSourcesConnectorsController(
 
   const [snapshot, setSnapshot] = useState<HarnessConnectorsSnapshotDto>();
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string>();
+  const [refreshStatus, setRefreshStatus] = useState<string>();
+  const [cardActionStatus, setCardActionStatus] = useState<Record<string, string>>({});
+  const [actionRuntime, setActionRuntime] = useState<string | undefined>();
   const [selectedRuntime, setSelectedRuntime] = useState<string | undefined>();
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => readOnboardingDismissed());
   const [manualOnboardingOpen, setManualOnboardingOpen] = useState(false);
@@ -87,7 +102,7 @@ export function useSourcesConnectorsController(
       applySnapshot(next);
     } catch (error) {
       if (generation !== loadGenerationRef.current) return;
-      setStatus(`Failed to load connectors: ${errorMessage(error)}`);
+      setRefreshStatus(`Failed to load connections: ${errorMessage(error)}`);
     } finally {
       if (generation === loadGenerationRef.current) setBusy(false);
     }
@@ -100,20 +115,20 @@ export function useSourcesConnectorsController(
 
   const guardWritable = useCallback((): boolean => {
     if (!readOnly) return true;
-    setStatus("Sources are read-only on this connection.");
+    setRefreshStatus("Sources are read-only on this connection.");
     return false;
   }, [readOnly]);
 
   const discover = useCallback(async () => {
-    // Refresh = re-check harness presence + live connection status only (no history import).
     setBusy(true);
-    setStatus("Refreshing connections…");
+    setActionRuntime(undefined);
+    setRefreshStatus("Refreshing connections…");
     try {
       const next = await discoverHarnessConnectors(activeProjectionUrl);
       applySnapshot(next);
-      setStatus(summarizeRefresh(next));
+      setRefreshStatus(summarizeRefresh(next));
     } catch (error) {
-      setStatus(`Refresh failed: ${errorMessage(error)}`);
+      setRefreshStatus(`Refresh failed: ${errorMessage(error)}`);
     } finally {
       setBusy(false);
     }
@@ -123,25 +138,37 @@ export function useSourcesConnectorsController(
     async (runtime: string) => {
       if (!guardWritable()) return;
       setBusy(true);
-      setStatus(`Enabling ${runtime}...`);
+      setActionRuntime(runtime);
+      setCardStatus(setCardActionStatus, runtime, "Enabling…");
       try {
         const next = await enableHarnessConnector(runtime, activeProjectionUrl);
         applySnapshot(next);
         const connector = next.connectors.find((row) => row.runtime === runtime);
-        if (connector?.live === "ready") {
-          setStatus(`${connector.label} is ready.`);
+        if (connector?.presence === "not_found") {
+          setCardStatus(
+            setCardActionStatus,
+            runtime,
+            connector.live === "ready" || connector.live === "needs_action"
+              ? "Wired, but harness not found on this machine."
+              : "Harness not found on this machine."
+          );
+        } else if (connector?.live === "ready") {
+          setCardStatus(setCardActionStatus, runtime, "Enabled — ready.");
         } else if (connector?.live === "needs_action") {
-          setStatus(
-            `${connector.label} installed — ${connector.actionMessage ?? "host activation still required."}`
+          setCardStatus(
+            setCardActionStatus,
+            runtime,
+            connector.actionMessage ?? "Installed — host activation still required."
           );
         } else if (connector?.live === "error") {
-          setStatus(`${connector.label} enable failed: ${connector.actionMessage ?? "unknown error."}`);
+          setCardStatus(setCardActionStatus, runtime, connector.actionMessage ?? "Enable failed.");
         } else {
-          setStatus(`Enabled ${runtime}.`);
+          setCardStatus(setCardActionStatus, runtime, "Not installed.");
         }
       } catch (error) {
-        setStatus(`Enable ${runtime} failed: ${errorMessage(error)}`);
+        setCardStatus(setCardActionStatus, runtime, `Enable failed: ${errorMessage(error)}`);
       } finally {
+        setActionRuntime(undefined);
         setBusy(false);
       }
     },
@@ -152,31 +179,45 @@ export function useSourcesConnectorsController(
     if (!guardWritable()) return;
     const current = snapshotRef.current;
     if (!current) {
-      setStatus("Load connectors before enabling.");
+      setRefreshStatus("Load connections before enabling.");
       return;
     }
     const targets = current.connectors.filter(
       (connector) => connector.presence === "found" && connector.live !== "ready"
     );
     if (targets.length === 0) {
-      setStatus("No detected harnesses need enabling.");
+      setRefreshStatus("No found harnesses need enabling.");
       return;
     }
 
     setBusy(true);
-    setStatus(`Enabling ${targets.length} detected harness${targets.length === 1 ? "" : "es"}...`);
+    setActionRuntime(undefined);
+    setRefreshStatus(`Enabling ${targets.length} found harness${targets.length === 1 ? "" : "es"}…`);
     try {
       let next = current;
       for (const target of targets) {
+        setActionRuntime(target.runtime);
+        setCardStatus(setCardActionStatus, target.runtime, "Enabling…");
         next = await enableHarnessConnector(target.runtime, activeProjectionUrl);
         applySnapshot(next);
+        const connector = next.connectors.find((row) => row.runtime === target.runtime);
+        if (connector?.live === "ready") {
+          setCardStatus(setCardActionStatus, target.runtime, "Enabled — ready.");
+        } else if (connector?.live === "needs_action") {
+          setCardStatus(
+            setCardActionStatus,
+            target.runtime,
+            connector.actionMessage ?? "Host activation still required."
+          );
+        } else {
+          setCardStatus(setCardActionStatus, target.runtime, "Enable finished.");
+        }
       }
-      const ready = next.summary.ready;
-      const needsAction = next.summary.needsAction;
-      setStatus(`Enable all complete: ${ready} ready · ${needsAction} need action.`);
+      setRefreshStatus(`Enable all complete: ${next.summary.ready} ready · ${next.summary.needsAction} need action.`);
     } catch (error) {
-      setStatus(`Enable all failed: ${errorMessage(error)}`);
+      setRefreshStatus(`Enable all failed: ${errorMessage(error)}`);
     } finally {
+      setActionRuntime(undefined);
       setBusy(false);
     }
   }, [activeProjectionUrl, applySnapshot, guardWritable]);
@@ -185,22 +226,24 @@ export function useSourcesConnectorsController(
     async (runtime: string) => {
       if (!guardWritable()) return;
       setBusy(true);
-      setStatus(`Testing ${runtime}...`);
+      setActionRuntime(runtime);
+      setCardStatus(setCardActionStatus, runtime, "Testing…");
       try {
         const next = await testHarnessConnector(runtime, activeProjectionUrl);
         applySnapshot(next);
         const connector = next.connectors.find((row) => row.runtime === runtime);
         const lastTest = connector?.lastTest;
         if (lastTest?.status === "passed") {
-          setStatus(`${connector?.label ?? runtime} test passed.`);
+          setCardStatus(setCardActionStatus, runtime, `Test passed — ${lastTest.message}`);
         } else if (lastTest?.status === "failed") {
-          setStatus(`${connector?.label ?? runtime} test failed: ${lastTest.message}`);
+          setCardStatus(setCardActionStatus, runtime, `Test failed — ${lastTest.message}`);
         } else {
-          setStatus(`Test requested for ${runtime}.`);
+          setCardStatus(setCardActionStatus, runtime, "Test finished with no result payload.");
         }
       } catch (error) {
-        setStatus(`Test ${runtime} failed: ${errorMessage(error)}`);
+        setCardStatus(setCardActionStatus, runtime, `Test failed: ${errorMessage(error)}`);
       } finally {
+        setActionRuntime(undefined);
         setBusy(false);
       }
     },
@@ -211,15 +254,16 @@ export function useSourcesConnectorsController(
     async (runtime: string) => {
       if (!guardWritable()) return;
       setBusy(true);
-      setStatus(`Uninstalling ${runtime}...`);
+      setActionRuntime(runtime);
+      setCardStatus(setCardActionStatus, runtime, "Uninstalling…");
       try {
         const next = await uninstallHarnessConnector(runtime, activeProjectionUrl);
         applySnapshot(next);
-        const connector = next.connectors.find((row) => row.runtime === runtime);
-        setStatus(`Uninstalled ${connector?.label ?? runtime}.`);
+        setCardStatus(setCardActionStatus, runtime, "Uninstalled.");
       } catch (error) {
-        setStatus(`Uninstall ${runtime} failed: ${errorMessage(error)}`);
+        setCardStatus(setCardActionStatus, runtime, `Uninstall failed: ${errorMessage(error)}`);
       } finally {
+        setActionRuntime(undefined);
         setBusy(false);
       }
     },
@@ -230,21 +274,25 @@ export function useSourcesConnectorsController(
     async (runtime: string) => {
       if (!guardWritable()) return;
       setBusy(true);
-      setStatus(`Confirming activation for ${runtime}...`);
+      setActionRuntime(runtime);
+      setCardStatus(setCardActionStatus, runtime, "Confirming…");
       try {
         const next = await confirmHarnessConnectorActivation(runtime, activeProjectionUrl);
         applySnapshot(next);
         const connector = next.connectors.find((row) => row.runtime === runtime);
         if (connector?.live === "ready") {
-          setStatus(`${connector.label} activation confirmed — ready.`);
+          setCardStatus(setCardActionStatus, runtime, "Activation confirmed — ready.");
         } else {
-          setStatus(
-            `${connector?.label ?? runtime}: ${connector?.actionMessage ?? "activation still pending."}`
+          setCardStatus(
+            setCardActionStatus,
+            runtime,
+            connector?.actionMessage ?? "Activation still pending."
           );
         }
       } catch (error) {
-        setStatus(`Confirm activation for ${runtime} failed: ${errorMessage(error)}`);
+        setCardStatus(setCardActionStatus, runtime, `Confirm failed: ${errorMessage(error)}`);
       } finally {
+        setActionRuntime(undefined);
         setBusy(false);
       }
     },
@@ -277,7 +325,9 @@ export function useSourcesConnectorsController(
   return {
     snapshot,
     busy,
-    status,
+    refreshStatus,
+    cardActionStatus,
+    actionRuntime,
     selectedRuntime,
     onboardingOpen,
     setSelectedRuntime,

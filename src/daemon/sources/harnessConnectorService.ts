@@ -12,6 +12,7 @@ import {
 import type { DaemonConfig } from "../config.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 import { getLiveConnectorSettings } from "../liveConnectorSettings.ts";
+import { readRuntimeHookLastTest } from "../settingsService.ts";
 import {
   clearConnectorActivation,
   getConnectorActivation,
@@ -103,7 +104,7 @@ export async function listHarnessConnectors(
       endpoint: live.endpoint,
       stateEndpoint: live.stateEndpoint,
       lastLiveEventAt,
-      lastTest: undefined,
+      lastTest: readRuntimeHookLastTest(db, runtime),
       checkedPaths: presenceCheckedPaths(runtime, config),
       diagnostics: [],
       supportsActions: true,

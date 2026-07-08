@@ -13,6 +13,9 @@ type Props = {
   selected?: boolean;
   busy?: boolean;
   readOnly?: boolean;
+  /** Footer status for this card's Enable/Test action (not toolbar refresh). */
+  actionStatus?: string;
+  actionBusy?: boolean;
   onSelect?: (runtime: string) => void;
 } & HarnessConnectorRowActions;
 
@@ -21,6 +24,8 @@ export function HarnessConnectorRow({
   selected = false,
   busy = false,
   readOnly = false,
+  actionStatus,
+  actionBusy = false,
   onSelect,
   onEnable,
   onTest,
@@ -28,6 +33,13 @@ export function HarnessConnectorRow({
 }: Props) {
   const cta = resolvePrimaryCta(connector, { onEnable: Boolean(onEnable), onTest: Boolean(onTest), onConfirm: Boolean(onConfirm) });
   const disabled = busy || readOnly || !connector.supportsActions;
+  const footerStatus =
+    actionStatus ||
+    (connector.lastTest
+      ? connector.lastTest.status === "passed"
+        ? `Last test passed`
+        : `Last test failed`
+      : undefined);
 
   return (
     <article
@@ -83,10 +95,18 @@ export function HarnessConnectorRow({
               else if (cta.action === "confirm") onConfirm?.(connector.runtime);
             }}
           >
+            {actionBusy ? <span className="sources-refresh-spinner" aria-hidden="true" /> : null}
             {cta.label}
           </AppButton>
         )}
-        <span className="sources-connection-open-hint">Details</span>
+        <span
+          className={`sources-connection-open-hint${footerStatus ? " has-status" : ""}${
+            connector.lastTest?.status === "failed" || (actionStatus && /fail/i.test(actionStatus)) ? " is-fail" : ""
+          }${connector.lastTest?.status === "passed" || (actionStatus && /passed|ready/i.test(actionStatus)) ? " is-pass" : ""}`}
+          title={footerStatus ?? "Open detail"}
+        >
+          {footerStatus ?? "Details"}
+        </span>
       </div>
     </article>
   );

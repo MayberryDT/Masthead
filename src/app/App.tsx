@@ -637,7 +637,10 @@ export function App() {
           onboardingOpen={sourcesConnectors.onboardingOpen}
           readOnly={!connection.writable}
           settingsBaseUrl={activeProjectionUrl}
-          status={sourcesConnectors.status ?? sourcesStatus}
+          status={sourcesConnectors.refreshStatus ?? sourcesStatus}
+          refreshStatus={sourcesConnectors.refreshStatus}
+          cardActionStatus={sourcesConnectors.cardActionStatus}
+          actionRuntime={sourcesConnectors.actionRuntime}
           connectorsSnapshot={sourcesConnectors.snapshot}
           selectedConnectorRuntime={sourcesConnectors.selectedRuntime}
           onSelectConnectorRuntime={sourcesConnectors.setSelectedRuntime}

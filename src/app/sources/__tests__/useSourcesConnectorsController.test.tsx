@@ -100,7 +100,7 @@ describe("useSourcesConnectorsController", () => {
 
     expect(discoverHarnessConnectors).toHaveBeenCalledWith(baseUrl);
     expect(latest().snapshot?.summary.ready).toBe(1);
-    expect(latest().status).toMatch(/Refreshed connections/i);
+    expect(latest().refreshStatus).toMatch(/Refreshed/i);
   });
 
   test("enable updates snapshot; readOnly actions no-op", async () => {
@@ -116,7 +116,7 @@ describe("useSourcesConnectorsController", () => {
       await latest().enable("codex");
     });
     expect(enableHarnessConnector).not.toHaveBeenCalled();
-    expect(latest().status).toMatch(/read-only/i);
+    expect(latest().refreshStatus).toMatch(/read-only/i);
 
     await rerenderHarness({ activeProjectionUrl: baseUrl, readOnly: false });
     await act(async () => {
@@ -159,12 +159,17 @@ describe("useSourcesConnectorsController", () => {
 
     expect(enableHarnessConnector).toHaveBeenCalledTimes(1);
     expect(enableHarnessConnector).toHaveBeenCalledWith("codex", baseUrl);
-    expect(latest().status).toMatch(/Enable all complete/i);
+    expect(latest().refreshStatus).toMatch(/Enable all complete/i);
   });
 
   test("test, uninstall, and confirmActivation call daemon clients", async () => {
     vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 1, found: true, live: "ready" }));
-    vi.mocked(testHarnessConnector).mockResolvedValue(snapshot({ ready: 1, found: true, live: "ready" }));
+    const passed = snapshot({ ready: 1, found: true, live: "ready" });
+    passed.connectors[0] = {
+      ...passed.connectors[0]!,
+      lastTest: { status: "passed", testedAt: "2026-07-08T12:00:00.000Z", message: "ok" }
+    };
+    vi.mocked(testHarnessConnector).mockResolvedValue(passed);
     vi.mocked(uninstallHarnessConnector).mockResolvedValue(
       snapshot({ ready: 0, found: true, live: "not_installed" })
     );
@@ -177,11 +182,15 @@ describe("useSourcesConnectorsController", () => {
 
     await act(async () => {
       await latest().test("codex");
+    });
+    expect(testHarnessConnector).toHaveBeenCalledWith("codex", baseUrl);
+    expect(latest().cardActionStatus.codex).toMatch(/Test passed/i);
+
+    await act(async () => {
       await latest().uninstall("codex");
       await latest().confirmActivation("codex");
     });
 
-    expect(testHarnessConnector).toHaveBeenCalledWith("codex", baseUrl);
     expect(uninstallHarnessConnector).toHaveBeenCalledWith("codex", baseUrl);
     expect(confirmHarnessConnectorActivation).toHaveBeenCalledWith("codex", baseUrl);
   });

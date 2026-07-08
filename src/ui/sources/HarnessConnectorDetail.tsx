@@ -14,6 +14,7 @@ type Props = {
   connector: HarnessConnectorDto;
   busy?: boolean;
   readOnly?: boolean;
+  actionStatus?: string;
   onClose?: () => void;
   onEnable?: (runtime: string) => void;
   onTest?: (runtime: string) => void;
@@ -25,6 +26,7 @@ export function HarnessConnectorDetail({
   connector,
   busy = false,
   readOnly = false,
+  actionStatus,
   onClose,
   onEnable,
   onTest,
@@ -73,7 +75,22 @@ export function HarnessConnectorDetail({
         </p>
       ) : null}
 
-      <dl className="sources-connector-detail-facts" aria-label="Connector paths and endpoints">
+      {actionStatus ? (
+        <p className="surface-status sources-connector-action-message" role="status">
+          {actionStatus}
+        </p>
+      ) : null}
+
+      {connector.lastTest ? (
+        <p
+          className={`surface-status sources-connector-action-message sources-last-test sources-last-test-${connector.lastTest.status}`}
+          role="status"
+        >
+          Last test {connector.lastTest.status} · {connector.lastTest.message}
+        </p>
+      ) : null}
+
+      <dl className="sources-connector-detail-facts" aria-label="Connection paths and endpoints">
         <div>
           <dt>Config path</dt>
           <dd className="mono-path">{connector.configPath ?? "—"}</dd>

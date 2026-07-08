@@ -23,7 +23,7 @@ describe("HarnessConnectorList", () => {
     expect(listHtml).toContain("Claude Code");
     expect(listHtml).toContain("Codex");
     expect(listHtml).toContain("Needs action");
-    expect(listHtml).toContain("Connections");
+    expect(listHtml).toContain("Details");
     expect(listHtml).not.toContain("Import jobs");
     expect(listHtml).not.toContain("Live harness inventory");
 
@@ -46,10 +46,13 @@ describe("HarnessConnectorList", () => {
     );
 
     expect(panelHtml).toContain("Refresh");
+    expect(panelHtml).toContain("Connections");
+    expect(panelHtml).toContain("Detail");
     expect(panelHtml).toContain("Claude Code");
     expect(panelHtml).toContain("Needs action");
     expect(panelHtml).toContain("Codex");
     expect(panelHtml).toContain("Enable all found");
+    expect(panelHtml).toContain("observability-toolbar");
     expect(panelHtml).not.toContain("Discover local harnesses");
     expect(panelHtml).not.toContain("First-run setup");
     expect(panelHtml).not.toContain("Import jobs");
