@@ -49,6 +49,10 @@ export function isWeakLiveSummary(value: string | null | undefined): boolean {
   if (containsSensitiveMarker(cleaned)) return true;
   if (looksLikeRawCommand(cleaned)) return true;
   if (/\bcodex hook event\b/i.test(cleaned)) return true;
+  if (/\bwaiting for LLM\b/i.test(cleaned) || /\bLLM headline access\b/i.test(cleaned)) return true;
+  if (/^session narrative\s*:/i.test(cleaned)) return true;
+  if (/^board headlines\s*:\s*waiting for LLM\b/i.test(cleaned)) return true;
+  if (/\bpaused after latest collected evidence\b/i.test(cleaned)) return true;
   if (isWeakGeneratedTitle(cleaned)) return true;
   return false;
 }

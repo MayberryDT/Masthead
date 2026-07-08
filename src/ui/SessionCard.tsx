@@ -115,7 +115,6 @@ export function SessionCard({
         <span className="project" title={sessionName}>
           {sessionName}
         </span>
-        <HeadlineSourceBadge session={session} />
         <span className="runtime-tag">{harness}</span>
         <span className="state-pill">{sessionStatePillLabel(session)}</span>
       </header>
@@ -146,30 +145,6 @@ export function SessionCard({
       </footer>
     </article>
   );
-}
-
-function HeadlineSourceBadge({ session }: { session: SessionCardView }) {
-  const label = headlineSourceLabel(session);
-  if (!label) return null;
-
-  return (
-    <span className={`headline-source is-${label.toLowerCase()}`} title={headlineSourceTitle(session, label)}>
-      {label}
-    </span>
-  );
-}
-
-function headlineSourceLabel(session: SessionCardView): "Pending" | "Offline" | undefined {
-  if (session.headline.status === "pending" || session.headline.source === "pending") return "Pending";
-  if (session.headline.source === "offline") return "Offline";
-  return undefined;
-}
-
-function headlineSourceTitle(session: SessionCardView, label: "Pending" | "Offline"): string {
-  if (label === "Pending") return "Headline source: pending remote Board headline";
-  if (session.headlineRefresh?.failureMessage) return `Local headline: ${session.headlineRefresh.failureMessage}`;
-  if (session.headlineRefresh?.status === "not_configured") return "Local headline: Board headline provider not configured";
-  return "Headline source: offline deterministic Board headline";
 }
 
 function viewTransitionNamePart(value: string): string {
@@ -228,8 +203,23 @@ function sessionHeaderName(session: SessionCardView): string {
 
 function sessionHeadline(session: SessionCardView): string {
   const headline = cleanHeadline(session.headline.headline);
-  if (headline && !isWeakLiveSummary(headline)) return headline;
-  return firstUsefulSessionTitle([session.title, session.workContext?.label], sessionTextContext(session)) ?? `${session.project} session update`;
+  if (headline && !isWeakLiveSummary(headline) && !isObsoleteHeadlineCopy(headline)) return headline;
+  const usefulTitle = firstUsefulSessionTitle([session.title, session.workContext?.label], sessionTextContext(session));
+  if (usefulTitle) return usefulTitle;
+  const project = cleanProjectName(session.project);
+  const harness = session.harness?.trim();
+  if (harness && project) return `${project} · ${harness}`;
+  return `${project} session`;
+}
+
+function isObsoleteHeadlineCopy(value: string): boolean {
+  return (
+    /\bwaiting for LLM\b/i.test(value) ||
+    /\bLLM headline access\b/i.test(value) ||
+    /^session narrative\s*:/i.test(value) ||
+    /^board headlines\s*:\s*waiting for LLM\b/i.test(value) ||
+    /\bpaused after latest collected evidence\b/i.test(value)
+  );
 }
 
 function cleanSessionName(value: string | undefined): string | undefined {

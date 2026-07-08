@@ -108,7 +108,9 @@ describe("observability session card", () => {
       host.querySelectorAll(".card-topline .headline-source, .card-topline .runtime-tag, .card-topline .state-pill")
     ).map((chip) => chip.textContent);
 
-    expect(chipText).toEqual(["Offline", "OpenCode", "Idle"]);
+    expect(chipText).toEqual(["OpenCode", "Idle"]);
+    expect(chipText).not.toContain("Offline");
+    expect(chipText).not.toContain("Pending");
   });
 
   test("keeps stale attention on idle sessions visually quiet", () => {
@@ -1338,11 +1340,11 @@ describe("observability session card", () => {
     expect(html).not.toContain("Hermes");
   });
 
-  test("renders pending headline state without an AI failure badge", () => {
+  test("renders pending headline text without source badges or AI failure chrome", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
-          headline: headlineView("Generating headline...", { source: "pending", status: "pending" }),
+          headline: headlineView("Updating session status...", { source: "pending", status: "pending" }),
           headlineRefresh: {
             provider: "openai",
             requestedAt: "2026-06-23T02:04:00.000Z",
@@ -1353,19 +1355,20 @@ describe("observability session card", () => {
       />
     );
 
-    expect(html).toContain("Generating headline...");
-    expect(html).toContain("Pending");
+    expect(html).toContain("Updating session status...");
+    expect(html).not.toContain("Pending");
+    expect(html).not.toContain("Offline");
     expect(html).not.toContain(["AI", "headline", "failed"].join(" "));
     expect(html).not.toContain(["AI", "headline", "not", "configured"].join(" "));
     expect(html).not.toContain("api_error");
     expect(html).not.toContain("source: llm");
   });
 
-  test("renders offline headline source calmly without an AI failure badge", () => {
+  test("renders offline deterministic headlines without Offline badge or AI failure chrome", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
-          headline: headlineView("Board headlines: structured around subject and disposition.", { source: "offline" }),
+          headline: headlineView("Workbench layout: in progress.", { source: "offline" }),
           headlineRefresh: {
             provider: "openai",
             requestedAt: "2026-06-23T02:04:00.000Z",
@@ -1376,8 +1379,9 @@ describe("observability session card", () => {
       />
     );
 
-    expect(html).toContain("Board headlines: structured around subject and disposition.");
-    expect(html).toContain("Offline");
+    expect(html).toContain("Workbench layout: in progress.");
+    expect(html).not.toContain("Offline");
+    expect(html).not.toContain("Pending");
     expect(html).not.toContain(["AI", "headline", "failed"].join(" "));
     expect(html).not.toContain(["AI", "headline", "not", "configured"].join(" "));
   });

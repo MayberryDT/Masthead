@@ -42,7 +42,7 @@ function input(overrides: Partial<BoardHeadlineFacts> = {}, signals: BoardHeadli
 describe("offline board headline views", () => {
   test("returns a pending placeholder without a deterministic frame", () => {
     expect(buildPendingBoardHeadlineView(input())).toEqual({
-      headline: "Generating headline...",
+      headline: "Updating session status...",
       source: "pending",
       status: "pending"
     });
@@ -56,14 +56,15 @@ describe("offline board headline views", () => {
     });
   });
 
-  test("returns an offline deterministic frame when LLM headline access is unavailable", () => {
+  test("returns an offline deterministic frame without LLM fallback copy", () => {
     const view = buildOfflineBoardHeadlineView(input());
 
     expect(view.source).toBe("offline");
     expect(view.status).toBe("ready");
     expect(view.frame).toBeDefined();
     expect(validateBoardHeadlineFrame(view.frame).ok).toBe(true);
-    expect(view.headline).toBe("Board headlines: waiting for LLM headline access.");
+    expect(view.headline).not.toMatch(/LLM|waiting for LLM/i);
+    expect(view.headline).toMatch(/in progress|Board headline work|SessionCard/i);
   });
 
   test("uses failure evidence for blocked dispositions", () => {
@@ -82,18 +83,17 @@ describe("offline board headline views", () => {
     expect(view.frame?.disposition).toContain("vitest failed on Board headline frame tests");
   });
 
-  test("falls back to a valid frame when subject candidates are generic", () => {
+  test("falls back to project subject when candidates are generic", () => {
     const baseInput = input();
     const view = buildOfflineBoardHeadlineView({
       ...baseInput,
-      subjectCandidates: ["UI", "changes", "Masthead"]
+      subjectCandidates: ["UI", "changes", "session narrative"]
     });
 
     expect(view.source).toBe("offline");
     expect(view.status).toBe("ready");
-    expect(view.frame?.subject).toBe("Board headlines");
-    expect(view.headline).toBe("Board headlines: waiting for LLM headline access.");
-    expect(view.headline).not.toMatch(/\b(?:UI|changes|Masthead)\b/i);
+    expect(view.frame?.subject).toBe("Masthead");
+    expect(view.headline).not.toMatch(/LLM|session narrative|Board headlines/i);
     expect(validateBoardHeadlineFrame(view.frame).ok).toBe(true);
   });
 
