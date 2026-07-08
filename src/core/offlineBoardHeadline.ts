@@ -151,6 +151,11 @@ function subjectFromEvidence(evidence: string[], options: { allowFilenames: bool
     if (/^codex hook event\b/i.test(cleaned)) continue;
     if (/\bhttps?:\/\//i.test(cleaned)) continue;
     if (/^(npm|pnpm|yarn|node|git|rg|curl)\b/i.test(cleaned)) continue;
+    // Tool names and tool-call noise (read_file, todo_write, update_goal, etc.)
+    if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/i.test(cleaned)) continue;
+    if (/^(read_file|write|search_replace|todo_write|update_goal|run_terminal_command|spawn_subagent|grep|list_dir)\b/i.test(cleaned)) {
+      continue;
+    }
     if (/^[a-f0-9-]{12,}(?:\s+session)?$/i.test(cleaned)) continue;
     // Prefer short noun-phrase-ish evidence without command noise.
     if (/^(fix|feat|docs|test|chore)[:(\s]/i.test(cleaned)) {
@@ -230,8 +235,10 @@ function isGenericSubject(value: string): boolean {
 function isOpaqueIdentifier(value: string): boolean {
   const normalized = value.trim();
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)) return true;
-  if (/^[0-9a-f]{12,}$/i.test(normalized)) return true;
-  if (/\s+session$/i.test(normalized) && isOpaqueIdentifier(normalized.replace(/\s+session$/i, ""))) return true;
+  if (/^[0-9a-f]{8,}$/i.test(normalized)) return true;
+  if (/^[0-9a-f]{6,}(?:-[0-9a-f]+){1,}\b/i.test(normalized)) return true;
+  const withoutSession = normalized.replace(/\s+session$/i, "").trim();
+  if (withoutSession !== normalized) return isOpaqueIdentifier(withoutSession);
   return false;
 }
 
