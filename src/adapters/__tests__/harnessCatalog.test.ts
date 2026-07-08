@@ -11,13 +11,29 @@ import {
   onboardingHarnesses,
   scanTargetHarnesses
 } from "../harnessCatalog.ts";
+import { LIVE_CONNECTOR_RUNTIMES } from "../liveRuntimes.ts";
 
-const SUPPORTED_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const;
+const IMPORT_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const;
+const CATALOG_ONBOARDING_RUNTIMES = ["codex", ...IMPORT_RUNTIMES] as const;
 
 describe("harness catalog", () => {
-  test("onboards exactly the focused supported runtimes in catalog order", () => {
-    expect(onboardingHarnesses().map((entry) => entry.runtime)).toEqual(SUPPORTED_RUNTIMES);
-    expect(advancedHarnesses().map((entry) => entry.runtime)).toEqual(SUPPORTED_RUNTIMES);
+  test("catalog covers every live connector runtime", () => {
+    for (const runtime of LIVE_CONNECTOR_RUNTIMES) {
+      expect(harnessForRuntime(runtime), runtime).toBeTruthy();
+    }
+  });
+
+  test("codex is present as a live-capable catalog entry", () => {
+    const codex = harnessForRuntime("codex");
+    expect(codex?.supportsLiveWatch).toBe(true);
+    expect(codex?.visibility).not.toBe("hidden_legacy");
+    expect(codex?.label).toBe("Codex");
+    expect(codex?.sourceKinds).toEqual(expect.arrayContaining(["hook", "jsonl"]));
+  });
+
+  test("onboards live-capable and import runtimes in catalog order", () => {
+    expect(onboardingHarnesses().map((entry) => entry.runtime)).toEqual(CATALOG_ONBOARDING_RUNTIMES);
+    expect(advancedHarnesses().map((entry) => entry.runtime)).toEqual(CATALOG_ONBOARDING_RUNTIMES);
   });
 
   test("represents Grok as an importable local hook and transcript source", () => {
@@ -43,10 +59,12 @@ describe("harness catalog", () => {
     expect(omp?.knownCandidatePaths).toEqual(expect.arrayContaining(["~/.omp/agent/sessions", "~/.oh-my-pi/agent/sessions"]));
   });
 
-  test("uses the focused runtime set for imports, scans, and setup lists", () => {
-    expect(activeImportRuntimes()).toEqual(SUPPORTED_RUNTIMES);
-    expect(importAdapterHarnesses().map((entry) => entry.runtime)).toEqual(SUPPORTED_RUNTIMES);
-    expect(scanTargetHarnesses().map((entry) => entry.runtime)).toEqual(SUPPORTED_RUNTIMES);
+  test("keeps SessionAdapter-backed imports separate from live-only Codex", () => {
+    expect(activeImportRuntimes()).toEqual(IMPORT_RUNTIMES);
+    expect(importAdapterHarnesses().map((entry) => entry.runtime)).toEqual(IMPORT_RUNTIMES);
+    expect(scanTargetHarnesses().map((entry) => entry.runtime)).toEqual(CATALOG_ONBOARDING_RUNTIMES);
+    expect(canImportHarness(harnessForRuntime("codex")!)).toBe(false);
+    expect(canScanHarness(harnessForRuntime("codex")!)).toBe(true);
     expect(catalogOnlyHarnesses()).toEqual([]);
     expect(cloudReferenceHarnesses()).toEqual([]);
   });

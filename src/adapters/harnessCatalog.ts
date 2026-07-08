@@ -33,6 +33,28 @@ export type HarnessCatalogEntry = {
 };
 
 export const HARNESS_CATALOG: HarnessCatalogEntry[] = [
+  // Codex is live-capable (hooks + Workbench transcript path) but has no SessionAdapter bulk import.
+  // Keep import flags honest while remaining visible on live surfaces and Now harness filters.
+  {
+    aliases: ["OpenAI Codex"],
+    cloudOnly: false,
+    description: "Codex local hooks and session history.",
+    envOverrides: ["MASTHEAD_CODEX_HOME", "CODEX_HOME"],
+    knownCandidatePaths: ["~/.codex", "~/.codex/sessions", "~/.codex/hooks.json"],
+    label: "Codex",
+    localFirst: true,
+    runtime: "codex",
+    runtimeStatus: "scan_target",
+    sourceKinds: ["hook", "jsonl"],
+    supportLevel: "active_transcript",
+    supportsFileEffects: true,
+    supportsLiveWatch: true,
+    supportsMcpExposure: true,
+    supportsMetadataImport: false,
+    supportsTokenUsage: true,
+    supportsTranscriptImport: false,
+    visibility: "onboarding"
+  },
   active("cursor", "Cursor", ["Cursor Agent"], "Cursor local SQLite conversation and workspace history.", "active_transcript", ["sqlite"], [
     "~/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
     "~/Library/Application Support/Cursor/User/workspaceStorage",

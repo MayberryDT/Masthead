@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { chmod, copyFile, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import type { RuntimeKind } from "../adapters/types.ts";
+import { LIVE_CONNECTOR_RUNTIMES, type LiveConnectorRuntime } from "../adapters/liveRuntimes.ts";
 import {
   CLAUDE_STYLE_HOOK_EVENTS,
   installMastheadHookConfig,
@@ -12,9 +12,7 @@ import {
 } from "../core/hookAdmin.ts";
 import type { DaemonConfig } from "./config.ts";
 
-export const LIVE_CONNECTOR_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "opencode", "omp", "pi", "hermes"] as const satisfies readonly RuntimeKind[];
-
-export type LiveConnectorRuntime = (typeof LIVE_CONNECTOR_RUNTIMES)[number];
+export { LIVE_CONNECTOR_RUNTIMES, type LiveConnectorRuntime };
 
 export type LiveConnectorSettings = {
   runtime: LiveConnectorRuntime;
