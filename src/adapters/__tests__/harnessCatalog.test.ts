@@ -29,6 +29,13 @@ describe("harness catalog", () => {
     expect(codex?.visibility).not.toBe("hidden_legacy");
     expect(codex?.label).toBe("Codex");
     expect(codex?.sourceKinds).toEqual(expect.arrayContaining(["hook", "jsonl"]));
+    expect(codex?.supportLevel).toBe("detector_only");
+    expect(codex?.runtimeStatus).toBe("scan_target");
+    expect(codex?.supportsMetadataImport).toBe(false);
+    expect(codex?.supportsTranscriptImport).toBe(false);
+    expect(codex?.envOverrides).toEqual(["CODEX_HOME"]);
+    expect(codex?.envOverrides).not.toContain("MASTHEAD_CODEX_HOME");
+    expect(codex?.knownCandidatePaths).toEqual(["~/.codex/sessions", "~/.codex/hooks.json"]);
   });
 
   test("onboards live-capable and import runtimes in catalog order", () => {

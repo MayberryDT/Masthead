@@ -4,6 +4,7 @@ import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { AdapterMaturity } from "../adapters/capabilities.ts";
 import { adapterRecordFromLiveHook, liveHookSourceForRuntime } from "../adapters/live/hookAdapter.ts";
+import { LIVE_CONNECTOR_RUNTIMES } from "../adapters/liveRuntimes.ts";
 import { adapterForRuntime } from "../adapters/registry.ts";
 import { createDeterministicEnrichmentProvider } from "../enrichment/deterministicProvider.ts";
 import { createEnrichmentCoordinator, EnrichmentFailedError } from "../enrichment/enrichmentCoordinator.ts";
@@ -125,7 +126,7 @@ const RESPONSE_BACKGROUND_GRACE_MS = 50;
 const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
 const LIVE_STATE_BODY_LIMIT_BYTES = 65_536;
 const INGEST_BODY_LIMIT_BYTES = 262_144;
-const LIVE_INGEST_RUNTIMES = ["codex", "claude_code", "cursor", "grok", "opencode", "omp", "pi", "hermes"] as const satisfies readonly RuntimeKind[];
+const LIVE_INGEST_RUNTIMES = LIVE_CONNECTOR_RUNTIMES;
 
 type TranscriptImportOptions = {
   maxRecordsPerSource?: number;

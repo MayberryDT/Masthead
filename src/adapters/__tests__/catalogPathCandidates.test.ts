@@ -32,8 +32,12 @@ describe("catalog path candidates", () => {
         catalogPathCandidatesForRuntime(runtime, context).every((candidate) => candidate.runtime === runtime)
       )
     ).toBe(true);
-    expect(catalogPathCandidatesForRuntime("codex", context).map((candidate) => candidate.relativePath)).toEqual(
-      expect.arrayContaining(["/home/tester/.codex", "/home/tester/.codex/sessions"])
+    expect(catalogPathCandidatesForRuntime("codex", context).map((candidate) => candidate.relativePath)).toEqual([
+      "/home/tester/.codex/sessions",
+      "/home/tester/.codex/hooks.json"
+    ]);
+    expect(catalogPathCandidatesForRuntime("codex", context).map((candidate) => candidate.relativePath)).not.toContain(
+      "/home/tester/.codex"
     );
   });
 

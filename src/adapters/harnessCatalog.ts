@@ -34,19 +34,21 @@ export type HarnessCatalogEntry = {
 
 export const HARNESS_CATALOG: HarnessCatalogEntry[] = [
   // Codex is live-capable (hooks + Workbench transcript path) but has no SessionAdapter bulk import.
-  // Keep import flags honest while remaining visible on live surfaces and Now harness filters.
+  // detector_only + scan_target: live watch only; do not claim transcript import maturity.
+  // Candidate paths stay narrow (sessions + hooks) so we do not deep-scan all of ~/.codex.
+  // CODEX_HOME is the Codex install/config root; MASTHEAD_CODEX_HOME is user home (config), not here.
   {
     aliases: ["OpenAI Codex"],
     cloudOnly: false,
     description: "Codex local hooks and session history.",
-    envOverrides: ["MASTHEAD_CODEX_HOME", "CODEX_HOME"],
-    knownCandidatePaths: ["~/.codex", "~/.codex/sessions", "~/.codex/hooks.json"],
+    envOverrides: ["CODEX_HOME"],
+    knownCandidatePaths: ["~/.codex/sessions", "~/.codex/hooks.json"],
     label: "Codex",
     localFirst: true,
     runtime: "codex",
     runtimeStatus: "scan_target",
     sourceKinds: ["hook", "jsonl"],
-    supportLevel: "active_transcript",
+    supportLevel: "detector_only",
     supportsFileEffects: true,
     supportsLiveWatch: true,
     supportsMcpExposure: true,

@@ -29,6 +29,7 @@ describe("adapter capabilities", () => {
     expect(adapterCapabilityProfile("codex")).toMatchObject({
       label: "Codex",
       lifecycle: "scan_target",
+      maturity: "detector",
       runtime: "codex",
       runtimeStatus: "scan_target",
       supportsLiveWatch: true,
