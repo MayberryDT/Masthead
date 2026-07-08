@@ -19,6 +19,7 @@ import { ImportProgressPanel } from "./sources/ImportProgressPanel";
 import { SourcesConnectedDashboard } from "./sources/SourcesConnectedDashboard";
 import { SourcesEmptyState } from "./sources/SourcesEmptyState";
 import { SourcesImportModal } from "./sources/SourcesImportModal";
+import { SourcesConnectOnboarding } from "./sources/SourcesConnectOnboarding";
 import { SourcesOnboardingModal } from "./sources/SourcesOnboardingModal";
 import type { SourcesImportPreview } from "../app/daemonClient";
 import { SourceDiagnosticPanel } from "./sources/SourceDiagnosticPanel";
@@ -105,6 +106,10 @@ function SourcesPanelV2(props: Props) {
     props.onOpenOnboarding?.();
     setLocalOnboardingOpen(true);
   };
+  const skipOnboarding = () => {
+    props.onSkipOnboarding?.();
+    setLocalOnboardingOpen(false);
+  };
 
   const selected = useMemo(
     () => connectorsSnapshot?.connectors.find((connector) => connector.runtime === selectedConnectorRuntime),
@@ -112,9 +117,6 @@ function SourcesPanelV2(props: Props) {
   );
   const showEnableAll =
     Boolean(connectorsSnapshot) && hasDetectedNotReady(connectorsSnapshot?.connectors ?? []);
-  const adapterRows = (props.setup?.advanced.adapters.length
-    ? props.setup.advanced.adapters
-    : props.adapters ?? adaptersFromSources(props.sources)) as AdapterStatus[];
 
   return (
     <section id="sources" className="sources-panel sources-management surface-panel" aria-label="Session sources">
@@ -211,24 +213,15 @@ function SourcesPanelV2(props: Props) {
         </div>
       )}
 
-      <SourcesOnboardingModal
-        adapters={adapterRows}
-        busy={busy || readOnly}
-        hooks={props.hooks}
-        llm={props.llm}
-        enrichment={props.enrichment}
-        onClose={closeOnboarding}
-        onRuntimeHookAction={props.onRuntimeHookAction}
-        onConnectSelected={props.onConnectSelected}
-        onRunSetup={props.onRunSetup}
-        onSaveLlmProvider={props.onSaveLlmProvider}
-        onScan={props.onScan ?? props.onRefresh}
-        onScanSetup={props.onScanSetup}
-        onSkip={props.onSkipOnboarding}
+      <SourcesConnectOnboarding
         open={onboardingOpen}
-        scan={props.setup?.latestScan ?? props.setup?.scan}
-        settingsBaseUrl={props.settingsBaseUrl}
-        variant={props.onboardingOpen === undefined ? "modal" : "fullWindow"}
+        snapshot={connectorsSnapshot}
+        busy={busy || readOnly}
+        onClose={closeOnboarding}
+        onSkip={skipOnboarding}
+        onDiscover={() => props.onDiscoverConnectors?.()}
+        onEnable={(runtime) => props.onEnableConnector?.(runtime)}
+        onConfirmActivation={props.onConfirmConnectorActivation}
       />
     </section>
   );
