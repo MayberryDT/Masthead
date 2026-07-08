@@ -31,6 +31,7 @@ import {
   Timer,
   TrendUp,
   Warning,
+  Wrench,
   X,
   type Icon as PhosphorIcon
 } from "@phosphor-icons/react";
@@ -42,6 +43,7 @@ export const iconRegistry = {
   logbook: BookOpenText,
   performance: ChartLineUp,
   sources: Database,
+  workbench: Wrench,
   usage: Gauge,
   settings: GearSix,
 
