@@ -34,7 +34,7 @@ A few important contracts:
 
 `src/core/liveIdentity.ts` now scopes live projection sessions by host, runtime, and source session ID, so identical source IDs from different runtimes remain distinct in the canonical store. That identity shape is also what the live projection and replay logic use when they scope events and snapshots for projection.
 
-Historical Codex transcript recovery is compatibility-only. New live projection data comes through the focused live connector runtimes and transcript import remains an explicit Sources decision.
+Historical Codex transcript recovery is compatibility-only. New live projection data comes through the focused live connector runtimes; per-session transcript import is an explicit Workbench action that respects Sources source-scoped transcript permissions.
 
 ## MCP
 

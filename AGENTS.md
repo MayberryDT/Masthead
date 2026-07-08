@@ -9,10 +9,11 @@ manager.
 The product hierarchy is:
 
 1. canonical session database,
-2. Logbook and search,
-3. read-only MCP access,
-4. live Now view,
-5. source/import administration.
+2. Workbench (raw → publish pipeline),
+3. Logbook (published/searchable only),
+4. read-only MCP,
+5. live Now (shallow),
+6. Sources (capture + source-scoped transcript permissions).
 
 Observability is a view over continuously collected session data.
 
