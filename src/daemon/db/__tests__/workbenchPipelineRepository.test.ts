@@ -13,6 +13,7 @@ import {
   markWorkbenchArtifactSatisfied,
   markWorkbenchNotAdded,
   markWorkbenchPublished,
+  markWorkbenchQuality,
   markWorkbenchSessionEnrichmentSatisfied,
   publishWorkbenchSession,
   releaseWorkbenchClaim
@@ -262,6 +263,57 @@ describe("workbench pipeline repository", () => {
       activity: { eventType: "published" },
       state: { publicationStatus: "published", sessionId: "session:1" }
     });
+  });
+
+  test("quality pass advances next action toward enrichment", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:q",
+      title: "Quality pass"
+    });
+    ensureWorkbenchSessionState(db, "session:q");
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET transcript_status = 'imported', quality_status = 'unchecked', next_action = 'review_quality'
+       WHERE session_id = ?`
+    ).run("session:q");
+
+    const result = markWorkbenchQuality(db, {
+      actor: { kind: "user", id: "tyler" },
+      sessionId: "session:q",
+      status: "passed"
+    });
+
+    expect(result.state.qualityStatus).toBe("passed");
+    expect(result.state.nextAction).toBe("enrich");
+    expect(result.activity.eventType).toBe("quality_passed");
+  });
+
+  test("quality fail moves session to not_added_to_logbook", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:fail",
+      title: "Quality fail"
+    });
+    ensureWorkbenchSessionState(db, "session:fail");
+
+    const result = markWorkbenchQuality(db, {
+      actor: { kind: "user", id: "tyler" },
+      sessionId: "session:fail",
+      status: "failed",
+      reason: "hook_only_noise"
+    });
+
+    expect(result.state.qualityStatus).toBe("failed");
+    expect(result.state.publicationStatus).toBe("not_added_to_logbook");
+    expect(result.state.nonPublicationReason).toBe("hook_only_noise");
+    expect(result.activity.eventType).toBe("quality_failed");
   });
 });
 
