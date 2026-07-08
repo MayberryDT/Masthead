@@ -53,16 +53,40 @@ export function HarnessConnectorDetail({
         <div className="sources-connection-detail-hero-copy">
           <p className="mono-label">Connection</p>
           <h2>{connector.label}</h2>
-          <p className="sources-connection-detail-lead">
-            Live capture wiring for this harness. Presence means the tool is on this machine. Ready means Masthead can
-            receive live signals.
-          </p>
-        </div>
-        <div className="sources-connection-detail-hero-side">
           <div className="sources-connector-row-badges">
             <StatusBadge tone={presenceTone(connector.presence)}>{presenceLabel(connector.presence)}</StatusBadge>
             <StatusBadge tone={liveTone(connector.live)}>{liveLabel(connector)}</StatusBadge>
           </div>
+        </div>
+        <div className="sources-connection-detail-hero-actions">
+          {showEnable ? (
+            <AppButton variant="primary" disabled={disabled || !onEnable} onClick={() => onEnable?.(connector.runtime)}>
+              {showRepair ? "Repair" : "Enable"}
+            </AppButton>
+          ) : null}
+          {showConfirm ? (
+            <AppButton
+              variant="primary"
+              disabled={disabled || !onConfirm}
+              onClick={() => onConfirm?.(connector.runtime)}
+            >
+              Confirm trusted
+            </AppButton>
+          ) : null}
+          <AppButton
+            variant="default"
+            disabled={disabled || !onTest || connector.live === "not_installed"}
+            onClick={() => onTest?.(connector.runtime)}
+          >
+            Test
+          </AppButton>
+          <AppButton
+            variant="quiet"
+            disabled={disabled || !onUninstall || connector.live === "not_installed"}
+            onClick={() => onUninstall?.(connector.runtime)}
+          >
+            Uninstall
+          </AppButton>
           {onClose ? (
             <AppButton variant="quiet" onClick={onClose} aria-label="Close connection detail">
               Close
@@ -102,16 +126,6 @@ export function HarnessConnectorDetail({
           </div>
         </dl>
       </section>
-
-      {connector.lastTest ? (
-        <section className="sources-connection-detail-section" aria-label="Last test result">
-          <h3>Last test result</h3>
-          <p className={`sources-connection-detail-test sources-connection-detail-test-${connector.lastTest.status}`}>
-            <strong>{connector.lastTest.status === "passed" ? "Passed" : "Failed"}</strong>
-            <span>{connector.lastTest.message}</span>
-          </p>
-        </section>
-      ) : null}
 
       <section className="sources-connection-detail-section" aria-label="Wiring">
         <h3>Wiring</h3>
@@ -154,37 +168,6 @@ export function HarnessConnectorDetail({
           </ul>
         </section>
       ) : null}
-
-      <div className="source-detail-action-buttons sources-connection-detail-actions">
-        {showEnable ? (
-          <AppButton variant="primary" disabled={disabled || !onEnable} onClick={() => onEnable?.(connector.runtime)}>
-            {showRepair ? "Repair" : "Enable"}
-          </AppButton>
-        ) : null}
-        {showConfirm ? (
-          <AppButton
-            variant="primary"
-            disabled={disabled || !onConfirm}
-            onClick={() => onConfirm?.(connector.runtime)}
-          >
-            Confirm trusted
-          </AppButton>
-        ) : null}
-        <AppButton
-          variant="default"
-          disabled={disabled || !onTest || connector.live === "not_installed"}
-          onClick={() => onTest?.(connector.runtime)}
-        >
-          Test
-        </AppButton>
-        <AppButton
-          variant="quiet"
-          disabled={disabled || !onUninstall || connector.live === "not_installed"}
-          onClick={() => onUninstall?.(connector.runtime)}
-        >
-          Uninstall
-        </AppButton>
-      </div>
     </aside>
   );
 }
