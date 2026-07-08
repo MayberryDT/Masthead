@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
-import type { WorkbenchQueueSessionDto } from "../../../shared/workbench";
+import { describe, expect, test, vi } from "vitest";
+import type { WorkbenchActionKind } from "../../../app/workbench/useWorkbenchController";
+import type { WorkbenchNotAddedSessionDto, WorkbenchQueueSessionDto } from "../../../shared/workbench";
 import { WorkbenchPanel } from "../WorkbenchPanel";
 
 const forbiddenTokenParts = [
@@ -26,7 +27,116 @@ const heroCopyFragments = [
   "onboarding"
 ] as const;
 
+const OPS_BUTTON_LABELS = [
+  "Copy Agent Prompt",
+  "Check Transcript",
+  "Import Transcript",
+  "Precheck",
+  "Accept Quality",
+  "Fail Quality",
+  "Publish",
+  "Claim",
+  "Release",
+  "Select Visible",
+  "Clear",
+  "Refresh"
+] as const;
+
+function allow(...kinds: WorkbenchActionKind[]) {
+  const allowed = new Set(kinds);
+  return (kind: WorkbenchActionKind) => allowed.has(kind);
+}
+
 describe("WorkbenchPanel", () => {
+  test("ops toolbar exposes human actions without CLI recipes", () => {
+    const publishReady = session({
+      nextAction: "publish",
+      qualityStatus: "passed",
+      sessionDossierStatus: "satisfied",
+      sessionEnrichmentStatus: "satisfied",
+      title: "Ready to publish",
+      transcriptStatus: "imported"
+    });
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[publishReady]}
+        selectedSessionIds={new Set([publishReady.sessionId])}
+        handoffText="Process these sessions"
+        canRun={allow("publish", "copy_agent_prompt", "claim")}
+        runAction={() => undefined}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAllVisible={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    for (const label of OPS_BUTTON_LABELS) {
+      expect(html).toContain(label);
+    }
+    expect(html).toContain("Publish path");
+    expect(html).toContain("Selected");
+    expect(html).toContain("Ready to publish");
+    expect(html).toContain("Workbench Activity");
+    expect(html).toContain("observability-toolbar");
+    expect(html).toContain("metal-toolbar");
+    expect(html).toContain('app-button-primary');
+    expect(html).toContain("disabled");
+    expect(html).not.toContain("textarea");
+    expect(html).not.toContain("<h1");
+    expect(html).not.toContain("<h2");
+    for (const fragment of heroCopyFragments) {
+      expect(html).not.toContain(fragment);
+    }
+    for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
+      expect(html).not.toContain(forbiddenToken(index));
+    }
+    expect(html).not.toContain("Bug-fix candidates");
+    expect(html).not.toContain("Missing dossiers");
+  });
+
+  test("enrich next-action emphasizes agent prompt not edit form", () => {
+    const enrichSession = session({
+      nextAction: "enrich",
+      qualityStatus: "passed",
+      sessionEnrichmentStatus: "missing",
+      title: "Needs enrichment",
+      transcriptStatus: "imported"
+    });
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[enrichSession]}
+        selectedSessionIds={new Set([enrichSession.sessionId])}
+        handoffText="Agent handoff for enrichment"
+        canRun={allow("copy_agent_prompt", "claim")}
+        runAction={() => undefined}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAllVisible={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Copy Agent Prompt");
+    expect(html).toContain("app-button-primary");
+    expect(html).toContain("Enrichment and dossier work is agent-only");
+    expect(html).toContain("Needs enrichment");
+    expect(html).toContain("enrich");
+    expect(html).not.toContain("textarea");
+    expect(html).not.toContain("type=\"text\"");
+    expect(html).not.toContain("Enrichment editor");
+    expect(html).not.toContain("Apply enrichment");
+    // Accept Quality / Publish remain present but disabled when canRun denies them
+    expect(html).toMatch(/disabled[^>]*>Accept Quality<|>Accept Quality<\/button>/);
+    expect(html).toContain("Accept Quality");
+    expect(html).toContain("Publish");
+    for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
+      expect(html).not.toContain(forbiddenToken(index));
+    }
+  });
+
   test("renders a session-first Workbench view without visible CLI strings", () => {
     const html = renderToStaticMarkup(
       <WorkbenchPanel
@@ -42,6 +152,7 @@ describe("WorkbenchPanel", () => {
         ]}
         selectedSessionIds={new Set(["session:abc"])}
         handoffText={"Masthead is running locally.\n- Raw session needing enrichment (session:abc)"}
+        canRun={allow("copy_agent_prompt", "check_transcript", "claim")}
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
@@ -55,6 +166,7 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("Selected");
     expect(html).toContain("Raw session needing enrichment");
     expect(html).toContain("check transcript");
+    expect(html).toContain("Check Transcript");
     expect(html).toContain("Workbench Activity");
     expect(html).toContain("Masthead");
     expect(html).toContain("codex");
@@ -91,18 +203,21 @@ describe("WorkbenchPanel", () => {
         onRetry={() => undefined}
         onSelectAllVisible={() => undefined}
         onToggleSession={() => undefined}
+        setNotAddedOpen={() => undefined}
       />
     );
 
     expect(html).toContain("No publish-path sessions");
+    expect(html).toContain("12 not added to Logbook · open review");
     expect(html).toContain("Publish path");
     expect(html).toContain(">0</dd>");
     expect(html).toContain("Workbench Activity");
     expect(html).toContain("No activity yet");
-    expect(html).toContain("Not Added to Logbook");
-    expect(html).toContain(">12</dd>");
+    expect(html).toContain("Not Added");
+    expect(html).toContain(">12</");
     expect(html).not.toContain("hook_only");
     expect(html).toContain("Copy Agent Prompt");
+    expect(html).toContain("Check Transcript");
     expect(html).toContain("workbench-activity-rail");
     expect(html).not.toContain("workbench-reason-list");
     expect(html).not.toContain("<h1");
@@ -129,8 +244,84 @@ describe("WorkbenchPanel", () => {
     );
 
     expect(html).toContain("No publish-path sessions");
-    expect(html).not.toContain("Not Added to Logbook");
+    expect(html).not.toContain("Not Added");
+    expect(html).not.toContain("not added to Logbook");
     expect(html).toContain("No activity yet");
+  });
+
+  test("renders Not Added review table when open", () => {
+    const row: WorkbenchNotAddedSessionDto = {
+      lastActivityAt: "2026-07-08T11:00:00.000Z",
+      lifecycle: "ended",
+      project: "Masthead",
+      reason: "quality_failed",
+      runtime: "codex",
+      sessionId: "session:not-added",
+      title: "Rejected session"
+    };
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[]}
+        notAddedOpen
+        notAddedSessions={[row]}
+        notAddedSummary={{ ok: true, total: 1, reasons: [{ reason: "quality_failed", count: 1 }] }}
+        loading={false}
+        setNotAddedOpen={() => undefined}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAllVisible={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Not Added to Logbook");
+    expect(html).toContain("Rejected session");
+    expect(html).toContain("quality_failed");
+    expect(html).toContain("codex");
+    expect(html).toContain("2026-07-08T11:00:00.000Z");
+    expect(html).toContain(">session</th>");
+    expect(html).toContain(">reason</th>");
+    expect(html).toContain(">runtime</th>");
+    expect(html).toContain(">last activity</th>");
+    for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
+      expect(html).not.toContain(forbiddenToken(index));
+    }
+  });
+
+  test("shows action error strip and quiet last-action summary", () => {
+    const withError = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session()]}
+        selectedSessionIds={new Set(["session:abc"])}
+        actionError="Transcript import needs source permission for this session's source."
+        lastActionSummary="Should hide behind error"
+        canRun={allow("import_transcript")}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAllVisible={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    expect(withError).toContain("Action failed");
+    expect(withError).toContain("Transcript import needs source permission");
+    expect(withError).not.toContain("Should hide behind error");
+
+    const withSummary = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session()]}
+        selectedSessionIds={new Set(["session:abc"])}
+        lastActionSummary="Checked transcript for 1 session"
+        canRun={allow("check_transcript")}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAllVisible={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    expect(withSummary).toContain("Checked transcript for 1 session");
+    expect(withSummary).toContain("workbench-action-summary");
   });
 
   test("sanitizes forbidden session metadata before rendering the panel", () => {
@@ -148,6 +339,7 @@ describe("WorkbenchPanel", () => {
         ]}
         selectedSessionIds={new Set([`session:${forbiddenToken(4)}`])}
         handoffText={`Selected ${forbiddenToken(0)} ${forbiddenToken(1)} ${forbiddenToken(2)} ${forbiddenToken(3)} ${forbiddenToken(4)}`}
+        canRun={allow("copy_agent_prompt")}
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
@@ -159,6 +351,26 @@ describe("WorkbenchPanel", () => {
     for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
       expect(html).not.toContain(forbiddenToken(index));
     }
+  });
+
+  test("runAction is invoked for enabled ops", () => {
+    const runAction = vi.fn();
+    // Static markup does not fire handlers; this keeps the prop contract typed.
+    renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session({ nextAction: "check_transcript" })]}
+        selectedSessionIds={new Set(["session:abc"])}
+        handoffText="Agent prompt body"
+        canRun={allow("check_transcript", "copy_agent_prompt")}
+        runAction={runAction}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAllVisible={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    expect(runAction).not.toHaveBeenCalled();
   });
 });
 

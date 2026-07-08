@@ -1,10 +1,27 @@
-import type { UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
+import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
 import { sanitizeWorkbenchVisibleText } from "./workbenchHandoff";
 
-type WorkbenchPanelProps = Partial<Pick<UseWorkbenchControllerResult, "error" | "handoffText" | "loading" | "selectedSessionIds" | "sessions">> & {
-  activity?: UseWorkbenchControllerResult["activity"];
-  notAddedSummary?: UseWorkbenchControllerResult["notAddedSummary"];
+type WorkbenchPanelProps = Partial<
+  Pick<
+    UseWorkbenchControllerResult,
+    | "actionBusy"
+    | "actionError"
+    | "activity"
+    | "canRun"
+    | "error"
+    | "handoffText"
+    | "lastActionSummary"
+    | "loading"
+    | "notAddedOpen"
+    | "notAddedSessions"
+    | "notAddedSummary"
+    | "runAction"
+    | "selectedSessionIds"
+    | "sessions"
+    | "setNotAddedOpen"
+  >
+> & {
   onClearSelection?: () => void;
   onRetry?: () => void;
   onSelectAllVisible?: () => void;
@@ -12,43 +29,122 @@ type WorkbenchPanelProps = Partial<Pick<UseWorkbenchControllerResult, "error" | 
 };
 
 const EMPTY_SELECTION = new Set<string>();
+const EMPTY_SESSIONS: UseWorkbenchControllerResult["sessions"] = [];
+const EMPTY_NOT_ADDED: UseWorkbenchControllerResult["notAddedSessions"] = [];
+const EMPTY_ACTIVITY: UseWorkbenchControllerResult["activity"] = [];
+
+const defaultCanRun: UseWorkbenchControllerResult["canRun"] = () => false;
 
 export function WorkbenchPanel({
-  activity = [],
+  actionBusy = false,
+  actionError,
+  activity = EMPTY_ACTIVITY,
+  canRun = defaultCanRun,
   error,
   handoffText = "",
+  lastActionSummary,
   loading = false,
+  notAddedOpen = false,
+  notAddedSessions = EMPTY_NOT_ADDED,
   notAddedSummary,
   onClearSelection,
   onRetry,
   onSelectAllVisible,
   onToggleSession,
+  runAction,
   selectedSessionIds = EMPTY_SELECTION,
-  sessions = []
+  sessions = EMPTY_SESSIONS,
+  setNotAddedOpen
 }: WorkbenchPanelProps) {
   const selectionCount = selectedSessionIds.size;
-  const canCopyAgentPrompt = selectionCount > 0 && handoffText.trim().length > 0;
+  const selectedSessions = sessions.filter((session) => selectedSessionIds.has(session.sessionId));
   const publishPathLabel = loading ? "…" : String(sessions.length);
-  const notAddedLabel = notAddedSummary != null ? String(notAddedSummary.total) : undefined;
-  const copyAgentPrompt = () => {
-    if (!canCopyAgentPrompt) return;
-    void copyTextToClipboard(handoffText);
+  const notAddedTotal = notAddedSummary?.total;
+  const notAddedLabel = notAddedTotal != null ? String(notAddedTotal) : undefined;
+  const primaryKind = resolvePrimaryAction(selectedSessions, canRun);
+  const showAgentPromptEmphasis = selectedSessions.some(
+    (session) => session.nextAction === "enrich" || session.nextAction === "create_dossier"
+  );
+
+  const run = (kind: WorkbenchActionKind) => {
+    if (!canRun(kind) || actionBusy) return;
+    if (kind === "copy_agent_prompt") {
+      void copyTextToClipboard(handoffText);
+    }
+    void runAction?.(kind);
+  };
+
+  const toggleNotAdded = () => {
+    setNotAddedOpen?.(!notAddedOpen);
   };
 
   return (
     <section className="workbench-panel surface-panel" aria-label="Workbench">
       <div className="workbench-toolbar observability-toolbar metal-toolbar" role="toolbar" aria-label="Workbench actions">
-        <div className="workbench-toolbar-actions toolbar-select-row" aria-label="Workbench selection actions">
-          <AppButton variant="primary" onClick={copyAgentPrompt} disabled={!canCopyAgentPrompt}>
+        <div className="workbench-toolbar-actions toolbar-select-row" aria-label="Workbench ops actions">
+          <AppButton
+            variant={primaryKind === "copy_agent_prompt" ? "primary" : "default"}
+            onClick={() => run("copy_agent_prompt")}
+            disabled={!canRun("copy_agent_prompt")}
+          >
             Copy Agent Prompt
           </AppButton>
+          <AppButton
+            variant={primaryKind === "check_transcript" ? "primary" : "default"}
+            onClick={() => run("check_transcript")}
+            disabled={!canRun("check_transcript")}
+          >
+            Check Transcript
+          </AppButton>
+          <AppButton
+            variant={primaryKind === "import_transcript" ? "primary" : "default"}
+            onClick={() => run("import_transcript")}
+            disabled={!canRun("import_transcript")}
+          >
+            Import Transcript
+          </AppButton>
+          <AppButton
+            variant={primaryKind === "quality_precheck" ? "primary" : "default"}
+            onClick={() => run("quality_precheck")}
+            disabled={!canRun("quality_precheck")}
+          >
+            Precheck
+          </AppButton>
+          <AppButton
+            variant={primaryKind === "quality_pass" ? "primary" : "default"}
+            onClick={() => run("quality_pass")}
+            disabled={!canRun("quality_pass")}
+          >
+            Accept Quality
+          </AppButton>
+          <AppButton variant="quiet" onClick={() => run("quality_fail")} disabled={!canRun("quality_fail")}>
+            Fail Quality
+          </AppButton>
+          <AppButton
+            variant={primaryKind === "publish" ? "primary" : "default"}
+            onClick={() => run("publish")}
+            disabled={!canRun("publish")}
+          >
+            Publish
+          </AppButton>
+          <AppButton
+            variant={primaryKind === "claim" ? "primary" : "default"}
+            onClick={() => run("claim")}
+            disabled={!canRun("claim")}
+          >
+            Claim
+          </AppButton>
+          <AppButton onClick={() => run("release")} disabled={!canRun("release")}>
+            Release
+          </AppButton>
+          <span className="workbench-toolbar-divider" aria-hidden="true" />
           <AppButton onClick={onSelectAllVisible} disabled={loading || sessions.length === 0}>
             Select Visible
           </AppButton>
           <AppButton variant="quiet" onClick={onClearSelection} disabled={selectionCount === 0}>
             Clear
           </AppButton>
-          <AppButton onClick={onRetry} disabled={loading}>
+          <AppButton onClick={onRetry} disabled={loading || actionBusy}>
             Refresh
           </AppButton>
         </div>
@@ -57,20 +153,49 @@ export function WorkbenchPanel({
             <dt>Publish path</dt>
             <dd>{publishPathLabel}</dd>
           </div>
-          {selectionCount > 0 ? (
-            <div>
-              <dt>Selected</dt>
-              <dd>{selectionCount}</dd>
-            </div>
-          ) : null}
+          <div>
+            <dt>Selected</dt>
+            <dd>{selectionCount}</dd>
+          </div>
           {notAddedLabel != null ? (
-            <div>
-              <dt>Not Added to Logbook</dt>
-              <dd>{notAddedLabel}</dd>
+            <div className={notAddedOpen ? "is-active" : undefined}>
+              <dt>Not Added</dt>
+              <dd>
+                <button
+                  type="button"
+                  className="workbench-fact-toggle"
+                  onClick={toggleNotAdded}
+                  aria-pressed={notAddedOpen}
+                  aria-label={`Not Added ${notAddedLabel}, ${notAddedOpen ? "close" : "open"} review`}
+                >
+                  {notAddedLabel}
+                </button>
+              </dd>
             </div>
           ) : null}
         </dl>
       </div>
+
+      {actionError ? (
+        <section className="workbench-error surface-status" aria-live="polite">
+          <div>
+            <p className="mono-label">Action failed</p>
+            <p>{sanitizeWorkbenchVisibleText(actionError)}</p>
+          </div>
+        </section>
+      ) : null}
+
+      {lastActionSummary && !actionError ? (
+        <p className="workbench-action-summary" aria-live="polite">
+          {sanitizeWorkbenchVisibleText(lastActionSummary)}
+        </p>
+      ) : null}
+
+      {showAgentPromptEmphasis ? (
+        <p className="workbench-agent-hint" aria-live="polite">
+          Enrichment and dossier work is agent-only — use Copy Agent Prompt
+        </p>
+      ) : null}
 
       {error ? (
         <section className="workbench-error surface-status" aria-live="polite">
@@ -81,6 +206,69 @@ export function WorkbenchPanel({
           <AppButton variant="primary" onClick={onRetry}>
             Retry
           </AppButton>
+        </section>
+      ) : null}
+
+      {notAddedOpen ? (
+        <section className="workbench-not-added-panel" aria-label="Not Added to Logbook">
+          <div className="workbench-not-added-header">
+            <p className="mono-label">Not Added to Logbook</p>
+            <AppButton variant="quiet" onClick={() => setNotAddedOpen?.(false)}>
+              Close
+            </AppButton>
+          </div>
+          <div className="workbench-table-wrap workbench-not-added-table-wrap">
+            <table className="workbench-session-table workbench-not-added-table">
+              <thead>
+                <tr>
+                  <th scope="col">session</th>
+                  <th scope="col">reason</th>
+                  <th scope="col">runtime</th>
+                  <th scope="col">last activity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {notAddedSessions.length === 0 ? (
+                  <tr className="workbench-empty-row">
+                    <td className="workbench-session-empty" colSpan={4}>
+                      <span className="workbench-empty-title">No not-added sessions loaded</span>
+                    </td>
+                  </tr>
+                ) : (
+                  notAddedSessions.map((session) => {
+                    const safeTitle = sanitizeWorkbenchVisibleText(session.title);
+                    const safeSessionId = sanitizeWorkbenchVisibleText(session.sessionId);
+                    const safeReason = sanitizeWorkbenchVisibleText(session.reason);
+                    const safeRuntime = sanitizeWorkbenchVisibleText(session.runtime);
+                    const safeLastActivity = sanitizeWorkbenchVisibleText(session.lastActivityAt);
+                    const safeProject = session.project ? sanitizeWorkbenchVisibleText(session.project) : undefined;
+                    return (
+                      <tr key={session.sessionId}>
+                        <td>
+                          <span className="workbench-session-meta">
+                            <strong>{safeTitle}</strong>
+                            <span>
+                              {safeProject ? `${safeProject} / ` : ""}
+                              {safeSessionId}
+                            </span>
+                          </span>
+                        </td>
+                        <td>
+                          <span className="workbench-claim">{safeReason}</span>
+                        </td>
+                        <td>
+                          <span className="workbench-claim">{safeRuntime}</span>
+                        </td>
+                        <td>
+                          <span className="workbench-latest">{safeLastActivity}</span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 
@@ -104,6 +292,11 @@ export function WorkbenchPanel({
                 <tr className="workbench-empty-row">
                   <td className="workbench-session-empty" colSpan={8}>
                     <span className="workbench-empty-title">{loading ? "Loading" : "No publish-path sessions"}</span>
+                    {!loading && notAddedTotal != null && notAddedTotal > 0 ? (
+                      <button type="button" className="workbench-empty-not-added" onClick={toggleNotAdded}>
+                        {notAddedTotal} not added to Logbook · open review
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               ) : (
@@ -115,14 +308,21 @@ export function WorkbenchPanel({
                   const safeRuntime = sanitizeWorkbenchVisibleText(session.runtime);
                   const safeLifecycle = sanitizeWorkbenchVisibleText(session.lifecycle);
                   const safeLastActivity = sanitizeWorkbenchVisibleText(session.lastActivityAt);
-                  const latestSummary = session.latestActivity?.summary ? sanitizeWorkbenchVisibleText(session.latestActivity.summary) : safeLastActivity;
+                  const latestSummary = session.latestActivity?.summary
+                    ? sanitizeWorkbenchVisibleText(session.latestActivity.summary)
+                    : safeLastActivity;
                   const claim = session.activeClaim ? sanitizeWorkbenchVisibleText(session.activeClaim.claimedBy) : "-";
 
                   return (
                     <tr key={session.sessionId} className={selected ? "is-selected" : undefined}>
                       <td>
                         <label className="workbench-session-main">
-                          <input type="checkbox" checked={selected} onChange={() => onToggleSession?.(session.sessionId)} aria-label={`Select ${safeTitle}`} />
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => onToggleSession?.(session.sessionId)}
+                            aria-label={`Select ${safeTitle}`}
+                          />
                           <span className="workbench-session-meta">
                             <strong>{safeTitle}</strong>
                             <span>
@@ -173,7 +373,8 @@ export function WorkbenchPanel({
                   <li key={item.activityId}>
                     <span>{sanitizeWorkbenchVisibleText(item.summary)}</span>
                     <small>
-                      {sanitizeWorkbenchVisibleText(item.eventType)} / {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
+                      {sanitizeWorkbenchVisibleText(item.eventType)} /{" "}
+                      {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
                     </small>
                   </li>
                 ))}
@@ -186,9 +387,48 @@ export function WorkbenchPanel({
   );
 }
 
+function resolvePrimaryAction(
+  selectedSessions: UseWorkbenchControllerResult["sessions"],
+  canRun: UseWorkbenchControllerResult["canRun"]
+): WorkbenchActionKind | null {
+  if (selectedSessions.length === 0) return null;
+
+  const nextActions = new Set(selectedSessions.map((session) => session.nextAction));
+  if (nextActions.size === 1) {
+    const next = selectedSessions[0]?.nextAction;
+    const mapped = mapNextActionToKind(next);
+    if (mapped && canRun(mapped)) return mapped;
+  }
+
+  if (canRun("copy_agent_prompt")) return "copy_agent_prompt";
+  return null;
+}
+
+function mapNextActionToKind(nextAction: string | undefined): WorkbenchActionKind | null {
+  switch (nextAction) {
+    case "check_transcript":
+      return "check_transcript";
+    case "import_transcript":
+      return "import_transcript";
+    case "review_quality":
+      return "quality_pass";
+    case "enrich":
+    case "create_dossier":
+      return "copy_agent_prompt";
+    case "publish":
+      return "publish";
+    default:
+      return null;
+  }
+}
+
 function StatusToken({ value, tone }: { value: string; tone?: "next" }) {
   const safeValue = sanitizeWorkbenchVisibleText(value);
-  return <span className={`workbench-status-token is-${statusClass(value)} ${tone === "next" ? "is-next" : ""}`.trim()}>{formatStatus(value, safeValue)}</span>;
+  return (
+    <span className={`workbench-status-token is-${statusClass(value)} ${tone === "next" ? "is-next" : ""}`.trim()}>
+      {formatStatus(value, safeValue)}
+    </span>
+  );
 }
 
 function statusClass(value: string): string {

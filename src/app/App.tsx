@@ -711,17 +711,25 @@ export function App() {
     ) : activeSurface === "workbench" ? (
       <WorkbenchSurface>
         <WorkbenchPanel
+          actionBusy={workbench.actionBusy}
+          actionError={workbench.actionError}
           activity={workbench.activity}
+          canRun={workbench.canRun}
           error={workbench.error}
           handoffText={workbench.handoffText}
+          lastActionSummary={workbench.lastActionSummary}
           loading={workbench.loading}
+          notAddedOpen={workbench.notAddedOpen}
+          notAddedSessions={workbench.notAddedSessions}
           notAddedSummary={workbench.notAddedSummary}
           onClearSelection={workbench.clearSelection}
           onRetry={workbench.retry}
           onSelectAllVisible={workbench.selectAllVisible}
           onToggleSession={workbench.toggleSession}
+          runAction={workbench.runAction}
           selectedSessionIds={workbench.selectedSessionIds}
           sessions={workbench.sessions}
+          setNotAddedOpen={workbench.setNotAddedOpen}
         />
       </WorkbenchSurface>
     ) : activeSurface === "usage" ? (
