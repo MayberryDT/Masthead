@@ -2027,8 +2027,9 @@
   box-shadow:
     0 0 0 1px rgba(92, 153, 187, 0.08),
     0 10px 28px rgba(0, 0, 0, 0.22);
-  /* Always reserve gutter so content width doesn't jump when overflow appears. */
-  overflow-y: auto;
+  /* Always show vertical scrollbar track so width never jumps between cards. */
+  overflow-x: hidden;
+  overflow-y: scroll;
   scrollbar-gutter: stable;
 }
 
@@ -2053,16 +2054,21 @@
   max-width: 34ch;
 }
 
-.sources-connections-detail-enter {
-  min-height: 100%;
-}
-
 .sources-connections-detail-pane .sources-connector-detail {
   border: 0;
   box-shadow: none;
   background: transparent;
   max-height: none;
   min-height: 100%;
+}
+
+/* No bounce/scale when selecting connection cards. */
+.sources-connection-card,
+.sources-connection-card:hover,
+.sources-connection-card:focus-visible,
+.sources-connection-card:active {
+  transform: none;
+  transition-property: border-color, background-color, box-shadow;
 }
 
 .sources-connection-card-grid {
@@ -2151,7 +2157,8 @@
   gap: 10px;
   align-content: start;
   min-height: 100%;
-  padding: 14px 14px 16px;
+  /* Extra bottom pad so last section (checked paths) doesn't sit under the scrollbar edge. */
+  padding: 14px 14px 28px;
 }
 
 .sources-connection-detail-hero {
@@ -2159,7 +2166,7 @@
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px 12px;
+  gap: var(--space-sm);
   padding-bottom: 10px;
   border-bottom: 1px solid rgba(194, 221, 241, 0.12);
 }
@@ -2191,7 +2198,7 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--space-sm);
   min-width: 0;
 }
 
@@ -2301,6 +2308,7 @@
   display: grid;
   gap: 3px;
   margin: 0;
+  margin-bottom: 4px;
   padding: 8px 10px;
   list-style: none;
   border: 1px solid rgba(92, 153, 187, 0.14);
@@ -2311,6 +2319,10 @@
 
 .sources-connection-detail-path-list li {
   overflow-wrap: anywhere;
+}
+
+.sources-connection-detail-section:last-child {
+  padding-bottom: 8px;
 }
 
 @media (max-width: 980px) {

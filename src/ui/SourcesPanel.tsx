@@ -191,19 +191,17 @@ function SourcesPanelV2(props: Props) {
             </div>
             <div className="sources-connections-detail-pane" aria-live="polite">
               {selected ? (
-                <div key={selected.runtime} className="sources-connections-detail-enter">
-                  <HarnessConnectorDetail
-                    connector={selected}
-                    busy={busy}
-                    readOnly={readOnly}
-                    actionStatus={cardActionStatus[selected.runtime]}
-                    onClose={() => props.onSelectConnectorRuntime?.(undefined)}
-                    onEnable={props.onEnableConnector}
-                    onTest={props.onTestConnector}
-                    onUninstall={props.onUninstallConnector}
-                    onConfirm={props.onConfirmConnectorActivation}
-                  />
-                </div>
+                <HarnessConnectorDetail
+                  connector={selected}
+                  busy={busy}
+                  readOnly={readOnly}
+                  actionStatus={cardActionStatus[selected.runtime]}
+                  onClose={() => props.onSelectConnectorRuntime?.(undefined)}
+                  onEnable={props.onEnableConnector}
+                  onTest={props.onTestConnector}
+                  onUninstall={props.onUninstallConnector}
+                  onConfirm={props.onConfirmConnectorActivation}
+                />
               ) : (
                 <div className="sources-connections-detail-empty">
                   <p className="mono-label">Detail</p>
