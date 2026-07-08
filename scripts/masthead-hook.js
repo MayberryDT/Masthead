@@ -1,14 +1,23 @@
 #!/usr/bin/env node
 import http from "node:http";
 import https from "node:https";
+import { pathToFileURL } from "node:url";
+import {
+  resolveHookRuntime,
+  withRuntimeOnIngestUrl
+} from "./resolve-hook-runtime.js";
 
 const DEFAULT_URL = "http://127.0.0.1:17373/ingest";
 const DEFAULT_TIMEOUT_MS = 750;
 const DEFAULT_MAX_BYTES = 256 * 1024;
 
-main().catch(() => {
-  process.exit(0);
-});
+const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMain) {
+  main().catch(() => {
+    process.exit(0);
+  });
+}
 
 async function main() {
   const maxBytes = Number.parseInt(process.env.MASTHEAD_HOOK_MAX_BYTES || "", 10) || DEFAULT_MAX_BYTES;
@@ -16,20 +25,34 @@ async function main() {
   if (!isValidJsonObject(raw)) {
     process.exit(0);
   }
+  let payload = {};
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    process.exit(0);
+  }
+
+  const resolvedRuntime = resolveHookRuntime({
+    env: process.env,
+    payload,
+    processPath: process.execPath,
+    argv: process.argv
+  });
   const body = redactText(raw);
-  const url = process.env.MASTHEAD_INGEST_URL || DEFAULT_URL;
+  const baseUrl = process.env.MASTHEAD_INGEST_URL || DEFAULT_URL;
+  const url = withRuntimeOnIngestUrl(baseUrl, resolvedRuntime);
   const stateUrl = process.env.MASTHEAD_STATE_URL || stateUrlFromIngestUrl(url);
   const timeoutMs = Number.parseInt(process.env.MASTHEAD_HOOK_TIMEOUT_MS || "", 10) || DEFAULT_TIMEOUT_MS;
 
   try {
-    await post(url, body, timeoutMs);
+    await post(url, body, timeoutMs, resolvedRuntime);
   } catch {
-    // Fail open: Codex hook execution must never block or fail the source session.
+    // Fail open: hook execution must never block or fail the source session.
   }
-  const stateBody = stateReportBody(raw, url);
+  const stateBody = stateReportBody(payload, resolvedRuntime);
   if (stateUrl && stateBody) {
     try {
-      await post(stateUrl, JSON.stringify(stateBody), timeoutMs);
+      await post(stateUrl, JSON.stringify(stateBody), timeoutMs, resolvedRuntime);
     } catch {
       // Fail open: live state is opportunistic and must not affect hook execution.
     }
@@ -65,18 +88,20 @@ function isValidJsonObject(raw) {
   }
 }
 
-function post(target, body, timeoutMs) {
+function post(target, body, timeoutMs, runtime) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(target);
     const client = parsed.protocol === "https:" ? https : http;
+    const headers = {
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(body)
+    };
+    if (runtime) headers["x-masthead-runtime"] = runtime;
     const request = client.request(
       parsed,
       {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(body)
-        },
+        headers,
         timeout: timeoutMs
       },
       (response) => {
@@ -103,15 +128,9 @@ function stateUrlFromIngestUrl(ingestUrl) {
   }
 }
 
-function stateReportBody(raw, ingestUrl) {
-  let payload;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
+function stateReportBody(payload, resolvedRuntime) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
-  const runtime = runtimeFromIngestUrl(ingestUrl) || stringValue(payload.runtime) || stringValue(payload.adapter);
+  const runtime = resolvedRuntime || stringValue(payload.runtime) || stringValue(payload.adapter);
   const state = explicitOrImpliedState(payload);
   if (!runtime || !state) return undefined;
   return {
@@ -126,14 +145,6 @@ function stateReportBody(raw, ingestUrl) {
     repoRoot: firstString(payload, ["workspaceRoot", "repoRoot", "repo_root"]),
     branch: firstString(payload, ["gitBranch", "branch"])
   };
-}
-
-function runtimeFromIngestUrl(ingestUrl) {
-  try {
-    return new URL(ingestUrl).searchParams.get("runtime") || undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function explicitOrImpliedState(payload) {

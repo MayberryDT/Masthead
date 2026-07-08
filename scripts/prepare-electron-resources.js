@@ -6,7 +6,7 @@ const resourceRoot = resolve(".electron-resources/daemon");
 const nodeTarget = resolve(resourceRoot, process.platform === "win32" ? "node.exe" : "node");
 const distTarget = resolve(resourceRoot, "dist");
 const hookScriptTarget = resolve(resourceRoot, "scripts", "masthead-hook.js");
-const devIconTarget = resolve(resourceRoot, "masthead-logo-sail-dev.svg");
+const devIconTarget = resolve(resourceRoot, "masthead-logo-sail-dev.png");
 
 await rm(resourceRoot, { force: true, recursive: true });
 await mkdir(resourceRoot, { recursive: true });
@@ -15,7 +15,8 @@ await writeFile(resolve(resourceRoot, "README.txt"), "Generated daemon resources
 await cp(process.execPath, nodeTarget);
 await cp(resolve("dist/daemon"), distTarget, { recursive: true });
 await cp(resolve("scripts/masthead-hook.js"), hookScriptTarget);
-await cp(resolve("public/assets/masthead-logo-sail-dev.svg"), devIconTarget);
+await cp(resolve("scripts/resolve-hook-runtime.js"), resolve(resourceRoot, "scripts", "resolve-hook-runtime.js"));
+await cp(resolve("public/assets/masthead-logo-sail-dev.png"), devIconTarget);
 
 console.log(`Prepared Electron daemon resources in ${resourceRoot}`);
 console.log(`Bundled Node runtime as ${basename(nodeTarget)}`);

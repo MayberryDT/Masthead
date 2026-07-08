@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../config";
-import { installLiveConnector } from "../liveConnectorSettings";
+import { installLiveConnector, liveConnectorCommand } from "../liveConnectorSettings";
 
 type OmpSessionManager = {
   getCwd?: () => string;
@@ -29,6 +29,16 @@ afterEach(async () => {
 });
 
 describe("live connector settings", () => {
+  test("live connector install commands pin MASTHEAD_RUNTIME for every live runtime", () => {
+    const config = configFor("/tmp/masthead-live-connector-pin");
+    for (const runtime of ["codex", "claude_code", "cursor", "grok", "opencode", "omp", "pi", "hermes"] as const) {
+      const command = liveConnectorCommand(config, runtime);
+      expect(command).toContain(`MASTHEAD_RUNTIME='${runtime}'`);
+      expect(command).toContain(`/ingest?runtime=${runtime}`);
+      expect(command).toContain("MASTHEAD_STATE_URL=");
+    }
+  });
+
   test("generated OpenCode plugin does not post blocked state for questions or needs_input", async () => {
     const tempDir = await makeTempDir();
     const pluginPath = join(tempDir, "masthead-opencode-live.js");

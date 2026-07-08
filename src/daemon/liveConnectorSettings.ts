@@ -222,7 +222,7 @@ export function liveConnectorConfigPath(config: DaemonConfig, runtime: LiveConne
 
 export function liveConnectorCommand(config: DaemonConfig, runtime: LiveConnectorRuntime, endpoint?: string): string {
   const { nodePath, scriptPath } = resolveLiveConnectorCommandPaths();
-  return `MASTHEAD_INGEST_URL=${quoteShell(liveConnectorEndpoint(config, runtime, endpoint))} MASTHEAD_STATE_URL=${quoteShell(liveStateEndpoint(config, endpoint))} MASTHEAD_HOOK_TIMEOUT_MS=750 ${quoteShell(nodePath)} ${quoteShell(scriptPath)}`;
+  return `MASTHEAD_RUNTIME=${quoteShell(runtime)} MASTHEAD_INGEST_URL=${quoteShell(liveConnectorEndpoint(config, runtime, endpoint))} MASTHEAD_STATE_URL=${quoteShell(liveStateEndpoint(config, endpoint))} MASTHEAD_HOOK_TIMEOUT_MS=750 ${quoteShell(nodePath)} ${quoteShell(scriptPath)}`;
 }
 
 export function resolveLiveConnectorCommandPaths(
