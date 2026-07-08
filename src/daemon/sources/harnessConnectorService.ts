@@ -31,7 +31,7 @@ export async function listHarnessConnectors(
   const context = {
     homeDir: config.codexHomeDir,
     now,
-    exclusions: [] as string[]
+    exclusions: [] as import("../../adapters/types.ts").SourceExclusion[]
   };
 
   const [preflights, liveSettings, latestByRuntime] = await Promise.all([
