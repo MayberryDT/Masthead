@@ -77,18 +77,104 @@ function fallbackBoardHeadlineFrame(input: BoardHeadlineInput): BoardHeadlineFra
 function offlineSubject(input: BoardHeadlineInput): string {
   for (const candidate of input.subjectCandidates) {
     const normalized = normalizeSubject(candidate);
-    if (normalized && !isGenericSubject(normalized)) {
+    if (normalized && !isGenericSubject(normalized) && !isWeakAreaSubject(normalized, input)) {
       return normalized;
     }
   }
 
+  const fromEvidence = subjectFromEvidence(input.evidence);
+  if (fromEvidence) return fromEvidence;
+
   const workContext = normalizeSubject(input.facts.workContext?.label);
-  if (workContext && !isGenericSubject(workContext)) return workContext;
+  if (workContext && !isGenericSubject(workContext) && !isWeakAreaSubject(workContext, input)) {
+    return workContext;
+  }
 
   const title = normalizeSubject(input.facts.title);
-  if (title && !isGenericSubject(title) && !isOpaqueIdentifier(title)) return title;
+  if (title && !isGenericSubject(title) && !isOpaqueIdentifier(title) && !isWeakAreaSubject(title, input)) {
+    return title;
+  }
+
+  const projectRuntime = projectRuntimeSubject(input);
+  if (projectRuntime) return projectRuntime;
 
   return projectSubject(input) ?? "Session";
+}
+
+/** Broad path-cluster area labels that collapse many sessions when used as the only subject. */
+function isWeakAreaSubject(value: string, input: BoardHeadlineInput): boolean {
+  const normalized = value.toLowerCase().replace(/\s+work$/i, "").trim();
+  const weakAreas = new Set([
+    "settings ui",
+    "settings",
+    "ui",
+    "test",
+    "tests",
+    "documentation",
+    "docs",
+    "auth",
+    "session",
+    "mixed area"
+  ]);
+  if (!weakAreas.has(normalized)) return false;
+
+  // Allow Settings UI only when clusters are settings-focused or transcript evidence mentions settings.
+  if (normalized === "settings ui" || normalized === "settings") {
+    const clusters = input.facts.workContext?.pathClusters ?? [];
+    const settingsFocused =
+      clusters.length > 0 && clusters.every((cluster) => cluster === "settings" || cluster === "ui") && clusters.includes("settings");
+    const transcriptMentionsSettings = (input.facts.recentTranscriptMessages ?? []).some((message) => /\bsettings?\b/i.test(message));
+    return !(settingsFocused || transcriptMentionsSettings);
+  }
+
+  // Other single-word area labels are weak unless they are the only path cluster.
+  const clusters = input.facts.workContext?.pathClusters ?? [];
+  return clusters.length !== 1;
+}
+
+function subjectFromEvidence(evidence: string[]): string | undefined {
+  for (const raw of evidence) {
+    const cleaned = raw.replace(/\s+/g, " ").trim();
+    if (!cleaned || cleaned.length < 8 || cleaned.length > 72) continue;
+    if (/^grok build hook event$/i.test(cleaned)) continue;
+    if (/^high-risk change$/i.test(cleaned)) continue;
+    if (/^codex hook event\b/i.test(cleaned)) continue;
+    if (/\bhttps?:\/\//i.test(cleaned)) continue;
+    if (/^(npm|pnpm|yarn|node|git|rg|curl)\b/i.test(cleaned)) continue;
+    if (/^[a-f0-9-]{12,}(?:\s+session)?$/i.test(cleaned)) continue;
+    // Prefer short noun-phrase-ish evidence without command noise.
+    if (/^(fix|feat|docs|test|chore)[:(\s]/i.test(cleaned)) {
+      const subject = cleaned.replace(/^(fix|feat|docs|test|chore)[:\s]*/i, "").replace(/\s+/g, " ").trim();
+      if (subject.length >= 6 && subject.length <= 56) return subject.replace(/[.?!]+$/g, "");
+    }
+    // File basenames that are specific components.
+    if (/^[A-Za-z][A-Za-z0-9]+(?:Card|Panel|Surface|Toolbar|Board|Workbench|Controller)\.(?:tsx?|jsx?)$/i.test(cleaned)) {
+      return cleaned.replace(/\.[^.]+$/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
+    }
+    if (/^[A-Za-z][\w .-]{5,55}$/.test(cleaned) && !/[{}`|=]/.test(cleaned)) {
+      return cleaned.replace(/[.?!]+$/g, "");
+    }
+  }
+  return undefined;
+}
+
+function projectRuntimeSubject(input: BoardHeadlineInput): string | undefined {
+  const project = projectSubject(input);
+  const runtime = input.facts.runtime?.trim().toLowerCase();
+  if (!project || !runtime) return undefined;
+  const labels: Record<string, string> = {
+    codex: "Codex",
+    claude_code: "Claude Code",
+    cursor: "Cursor",
+    grok: "Grok Build",
+    opencode: "OpenCode",
+    omp: "Oh My Pi",
+    pi: "Pi",
+    hermes: "Hermes"
+  };
+  const harness = labels[runtime];
+  if (!harness) return project;
+  return `${project} · ${harness}`;
 }
 
 function projectSubject(input: BoardHeadlineInput): string | undefined {

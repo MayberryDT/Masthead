@@ -30,6 +30,23 @@ describe("work context", () => {
     expect(context.confidence).toBe("path_cluster");
   });
 
+  test("does not label multi-area path clusters as Settings UI work", () => {
+    const context = deriveWorkContext({
+      title: "Codex session",
+      branchOrWorktree: "agent/session-123",
+      events: [],
+      gitSnapshots: [
+        snapshot("src/ui/settings/ProfilePanel.tsx"),
+        snapshot("docs/acceptance/product-release-gate.md"),
+        snapshot("src/core/__tests__/workContext.test.ts"),
+        snapshot("src/ui/SessionCard.tsx")
+      ]
+    });
+
+    expect(context.label).not.toBe("Settings UI work");
+    expect(context.pathClusters).toEqual(expect.arrayContaining(["docs", "settings", "tests", "ui"]));
+  });
+
   test("prefers recent event context over stale path clusters", () => {
     const context = deriveWorkContext({
       title: "Codex session",

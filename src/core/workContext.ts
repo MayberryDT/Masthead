@@ -76,12 +76,19 @@ function labelFromTitle(title: string): { label: string; signal: string } | unde
 }
 
 function labelFromClusters(clusters: string[]): string | undefined {
-  if (clusters.includes("settings") && clusters.includes("ui")) return "Settings UI work";
-  if (clusters.includes("auth")) return "Auth work";
-  if (clusters.includes("settings")) return "Settings work";
-  if (clusters.includes("ui")) return "UI work";
-  if (clusters.includes("tests")) return "Test work";
-  if (clusters.includes("docs")) return "Documentation work";
+  // Settings+UI only when those are the only area signals. Broader Masthead work often
+  // touches settings paths plus any .tsx (ui), docs, and tests — that must not collapse
+  // every session to "Settings UI work".
+  const unique = [...new Set(clusters)];
+  if (unique.includes("settings") && unique.includes("ui") && unique.every((c) => c === "settings" || c === "ui")) {
+    return "Settings UI work";
+  }
+  if (unique.length >= 3) return undefined;
+  if (unique.includes("auth")) return "Auth work";
+  if (unique.includes("settings") && !unique.includes("docs") && !unique.includes("tests")) return "Settings work";
+  if (unique.includes("ui") && unique.length === 1) return "UI work";
+  if (unique.includes("tests") && unique.length === 1) return "Test work";
+  if (unique.includes("docs") && unique.length === 1) return "Documentation work";
   return undefined;
 }
 

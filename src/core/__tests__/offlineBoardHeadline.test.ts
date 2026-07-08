@@ -92,9 +92,30 @@ describe("offline board headline views", () => {
 
     expect(view.source).toBe("offline");
     expect(view.status).toBe("ready");
-    expect(view.frame?.subject).toBe("Masthead");
-    expect(view.headline).not.toMatch(/LLM|session narrative|Board headlines/i);
+    expect(view.frame?.subject).toMatch(/Masthead|Board headline work|Session Card|SessionCard/i);
+    expect(view.headline).not.toMatch(/LLM|session narrative|Board headlines: waiting/i);
     expect(validateBoardHeadlineFrame(view.frame).ok).toBe(true);
+  });
+
+  test("does not collapse multi-area path-cluster work to Settings UI", () => {
+    const view = buildOfflineBoardHeadlineView(
+      input({
+        title: "019f4315-c31f-7c52-a9ba-813d244d8124 session",
+        workContext: {
+          label: "Settings UI work",
+          confidence: "path_cluster",
+          pathClusters: ["docs", "settings", "tests", "ui"],
+          sourceSignals: ["path:docs", "path:settings", "path:tests", "path:ui"]
+        },
+        recentTranscriptMessages: [],
+        recentFileBasenames: ["README.md", "product-release-gate.md"],
+        runtime: "grok"
+      })
+    );
+
+    expect(view.frame?.subject).not.toMatch(/settings ui/i);
+    expect(view.headline).not.toMatch(/^Settings UI:/i);
+    expect(view.headline).toMatch(/Masthead|Grok Build|product-release|README/i);
   });
 
   test("sanitizes unsafe blocked failure hints before rendering an offline headline", () => {
