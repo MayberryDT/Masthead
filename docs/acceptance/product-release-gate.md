@@ -17,7 +17,7 @@
 - [x] Sources shows the focused support set: Cursor, Claude Code, OpenCode, Grok, Hermes, Pi, and OMP. Evidence: support set narrowed in runtime catalog, registry, source-status filtering, and live connector settings on 2026-07-06.
 - [x] Scan this computer checks known local locations only. Evidence: `sourceScanService.test.ts` verifies arbitrary home files are ignored on 2026-06-27.
 - [x] Connect selected queues metadata import jobs. Evidence: `sourceConnectService.test.ts` verifies per-source metadata jobs on 2026-06-27.
-- [x] Transcript import requires explicit approval. Evidence: `/sources/connect` rejects transcript import without approval and adapter transcript routes use existing policy checks.
+- [x] Transcript import requires exact source-scoped approval and Workbench intent. Evidence: Workbench API/CLI tests cover unrelated approved source rejection; import worker tests cover exact-source policy enforcement.
 - [x] Imported sessions appear in Logbook search. Evidence: focused import tests cover supported adapters.
 - [x] Unrecognized schemas produce diagnostics and do not create fake transcripts. Evidence: focused import tests cover unrecognized source diagnostics with zero sessions.
 - [x] Harness catalog exposes only active focused harnesses. Evidence: `RUNTIME_KINDS` and `HARNESS_CATALOG` are the seven-runtime support contract.
@@ -26,9 +26,9 @@
 - [ ] No whole-home scan guarantee reviewed in docs and UI copy.
 
 ## Logbook
-- [ ] Empty state explains source/import next step.
+- [ ] Empty state explains published-session search state.
 - [ ] Search returns imported sessions.
-- [ ] Row inspector shows provenance.
+- [x] Logbook table does not own Workbench selection or bulk enrichment. Evidence: App no longer wires Logbook session selection, bulk enrich, or selected detail modal; focused UI tests passed on 2026-07-08.
 - [ ] Restart does not duplicate sessions.
 
 ## Session dossier
@@ -50,13 +50,26 @@
 - [x] Hook-only sessions show a coverage warning. Evidence: `SessionDossier.test.tsx` covers hook-only coverage warning and sparse transcript copy on 2026-06-27.
 - [x] Repeated low-value hook events are collapsed. Evidence: `SessionDossier.test.tsx` covers grouped low-value transcript rows on 2026-06-27.
 - [x] Detail view does not show raw JSON in primary content. Evidence: transcript DTO exposes text, labels, status, and source refs separately; UI renders text rows, not raw JSON.
-- [x] Sparse sessions route user to Sources for transcript import. Evidence: `DossierCoverageBanner` renders the transcript import CTA when coverage includes `transcript_missing`.
+- [x] Sparse sessions route user to Workbench for transcript work. Evidence: Dossier coverage warnings use the Workbench target; focused Dossier tests passed on 2026-07-08.
 
 ## Agent Access
 - [x] MCP config uses active database. Evidence: `npm run verify` MCP smoke passed on 2026-06-26.
 - [x] Invalid config cannot be copied. Evidence: `npm run verify` MCP tests passed on 2026-06-26.
 - [x] Test connection passes. Evidence: focused MCP launch tests and `npm run verify` passed on 2026-06-26.
 - [x] Query appears in audit. Evidence: `npm run verify` MCP smoke passed on 2026-06-26.
+- [x] MCP stays read-only. Evidence: `src/mcp/__tests__/tools.test.ts` asserts no registered tool name exposes apply, write, import, delete, settings, provider, enrich, or mutation operations.
+
+## Workbench
+- [x] `mastheadctl` is emitted by the daemon build. Evidence: CLI tests and `npm run build:daemon` cover the package-bin path.
+- [x] Workbench status, queue, next, claim, release, activity, not-added, transcript check/preview/import, schema, evidence, validate, apply, artifacts, publish, and batch commands have focused tests.
+- [x] Workbench app surface is a dense operations table plus Activity rail, not command-first. Evidence: Workbench UI/controller/handoff tests cover pipeline sessions, selected-session handoff, Activity, Not Added summary, loading/error/empty states, and absence of user-facing CLI command copy.
+- [x] Workbench human ops toolbar covers check transcript, import, quality precheck/pass/fail, claim/release, publish, and agent handoff without command-first CLI recipes. Evidence: `docs/acceptance/workbench-ops-complete-evidence.md` (Task 10 focused suites + dogfood path; panel/controller tests).
+- [x] Activity rail is a high-contrast console with readable event rows (ok/bad tones, gutter, type, summary). Evidence: `docs/acceptance/workbench-ops-complete-evidence.md` and style commit `02a3d49`; `WorkbenchPanel` Activity tests.
+- [x] Workbench can list publish-path sessions through read-only daemon APIs. Evidence: `/workbench/sessions`, `/workbench/activity`, and Not Added read API daemon/client/bridge tests cover pipeline queue semantics.
+- [x] User handoff stays disposable while the CLI remains agent-facing. Evidence: handoff builder tests cover selected sessions and redaction of command/file tokens from UI-rendered text.
+- [x] Workbench-applied enrichment is visible through current readers. Evidence: apply tests write current `session_capsule`, `live_summary`, and `search_projection` rows using the current prompt version and verify search exposure.
+- [x] Local artifacts are visible in session detail. Evidence: dossier UI and repository tests cover current `session_artifacts`.
+- [x] Native remote enrichment is not required for launch. Evidence: Dossier no longer renders a native enrich button; Workbench docs and UI make the V1 launch path a user handoff to an agent-facing CLI loop.
 
 ## Settings
 - [x] Settings loads real state. Evidence: `npm run doctor:json` settings contract passed on 2026-06-26.
@@ -76,4 +89,3 @@
 - [x] cargo tests pass. Evidence: 23 Rust tests passed on 2026-06-26.
 - [x] npm run doctor passes. Evidence: isolated current-branch daemon doctor passed on 2026-06-26.
 - [ ] GitHub Actions run passes for the final commit.
-

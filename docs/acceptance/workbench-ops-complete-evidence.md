@@ -101,9 +101,33 @@ Suggested focused re-run:
 npm test -- --run \
   src/daemon/db/__tests__/workbenchPipelineRepository.test.ts \
   src/daemon/__tests__/workbenchApi.test.ts \
+  src/app/__tests__/daemonClient.test.ts \
   src/app/workbench \
-  src/ui/workbench
+  src/ui/workbench \
+  src/cli/__tests__/mastheadctl.test.ts \
+  src/workbench
 ```
+
+## Task 10 final verification gate (2026-07-08)
+
+| Check | Result |
+|---|---|
+| Focused Workbench suites (18 files / 133 tests) | **PASS** |
+| `npm run typecheck` | **FAIL** (pre-existing unrelated Sources only after Workbench panel test types fixed): `src/app/sources/__tests__/setupPlanRunner.test.ts` still uses removed `importTranscripts` on `SourcesSetupPlan` |
+| `npm run check:product-contract` | **PASS** |
+| `npm run check:surface-contract` | **PASS** |
+| `npm run verify:no-citations` | **PASS** |
+| `npm run check:endpoint-matrix` | **PASS** |
+| CLI tokens in `WorkbenchPanel.tsx` / `SessionDossier.tsx` (`mastheadctl`, `npm run`, `output.json`, `schema.json`, `apply.sh`) | **none** (handoff builder may still use agent-facing tokens; not in panel/dossier UI sources) |
+
+Product release gate bullets for human ops toolbar + Activity contrast link here:
+`docs/acceptance/product-release-gate.md` → Workbench section.
+
+### Known non-blockers for this gate
+
+- Live Electron Dev full human toolbar walkthrough remains deferred (see Manual UI checklist).
+- Repo-wide `typecheck` still fails on Sources setup-plan test fixtures (`importTranscripts`); out of Workbench ops scope.
+- Full `npm run verify` / GitHub Actions not re-run as part of Task 10.
 
 ## Scope boundaries
 
