@@ -6246,6 +6246,19 @@ body {
   padding: 8px;
 }
 
+.observability-console .session-card .fact-grid.fact-grid-pair,
+.masthead-shell .session-card .fact-grid.fact-grid-pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+  padding: 10px 12px;
+}
+
+.observability-console .session-card .fact-grid.fact-grid-pair .fact-value,
+.masthead-shell .session-card .fact-grid.fact-grid-pair .fact-value {
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
 .observability-console .session-card .fact,
 .masthead-shell .session-card .fact {
   min-width: 0;

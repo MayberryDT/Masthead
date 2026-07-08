@@ -32,14 +32,15 @@ describe("observability session card", () => {
     expect(html).toContain("Active");
     expect(html).toContain("8m 42s");
     expect(html).toContain("Runtime");
-    expect(html).toContain("Tokens");
-    expect(html).toContain("126.7M");
+    expect(html).toContain("Worktree");
+    expect(html).toContain("fact-grid-pair");
     expect(html).toContain("Duration");
     expect(html).toContain("runtime-tag");
     expect(html).toContain("bottom-variant-card dovetail-card is-active tier-live");
     expect(html).toContain("bottom-signal");
-    expect(html).toContain("Model");
-    expect(html).toContain("Worktree");
+    expect(html).not.toContain("Tokens");
+    expect(html).not.toContain("Model");
+    expect(html).not.toContain("126.7M");
     expect(html).not.toContain("Thinking");
     expect(html).not.toContain("High");
     expect(html).toContain("Last activity");
@@ -1307,13 +1308,17 @@ describe("observability session card", () => {
     expect(html).not.toContain("is-waiting");
   });
 
-  test("does not apply demo harness or model values to live observability cards", () => {
+  test("does not apply demo harness values to live observability cards", () => {
     const html = renderToStaticMarkup(
       <SessionBoard cards={[boardSession({ thinkingLevel: undefined })]} variant="observability" onOpenSession={() => undefined} />
     );
 
     expect(html).toContain("OpenCode");
-    expect(html).toContain("Not captured");
+    expect(html).toContain("Runtime");
+    expect(html).toContain("Worktree");
+    expect(html).not.toContain("Tokens");
+    expect(html).not.toContain("Model");
+    expect(html).not.toContain("Not captured");
     expect(html).not.toContain("High");
     expect(html).not.toContain("Claude Code");
     expect(html).not.toContain("Cursor");
@@ -1330,12 +1335,16 @@ describe("observability session card", () => {
     expect(html).toContain("observability-card-grid compact");
   });
 
-  test("renders captured live model values without demo telemetry", () => {
+  test("keeps model values off the card face even when present on the session", () => {
     const html = renderToStaticMarkup(
       <SessionBoard cards={[boardSession({ model: "gpt-5.5" })]} variant="observability" onOpenSession={() => undefined} />
     );
 
-    expect(html).toContain("gpt-5.5");
+    expect(html).toContain("OpenCode");
+    expect(html).toContain("Worktree");
+    expect(html).not.toContain("gpt-5.5");
+    expect(html).not.toContain("Model");
+    expect(html).not.toContain("Tokens");
     expect(html).not.toContain("Cursor");
     expect(html).not.toContain("Hermes");
   });

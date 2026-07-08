@@ -31,7 +31,6 @@ export function SessionCard({
 }: Props) {
   const stateClass = sessionStateClassName(session);
   const tierClass = `tier-${sessionVisualTier(session)}`;
-  const model = demoTelemetry?.model.value ?? session.model ?? "Not captured";
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Unknown";
   const worktree = session.branchOrWorktree ?? "None";
   const headline = sessionHeadline(session);
@@ -128,10 +127,8 @@ export function SessionCard({
         <span className="headline-text headline-current">{visibleHeadline}</span>
       </h3>
 
-      <div className="fact-grid">
+      <div className="fact-grid fact-grid-pair">
         <Fact label="Runtime" value={harness} />
-        <Fact label="Tokens" value={tokenLabel(session.totalTokens)} />
-        <Fact label="Model" value={model} />
         <Fact label="Worktree" value={worktree} />
       </div>
 
@@ -184,14 +181,6 @@ function startedLabel(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function tokenLabel(value: number | undefined): string {
-  if (value === undefined) return "-";
-  return new Intl.NumberFormat("en-US", {
-    notation: value >= 10_000 ? "compact" : "standard",
-    maximumFractionDigits: value >= 10_000 ? 1 : 0
-  }).format(value);
 }
 
 function sessionHeaderName(session: SessionCardView): string {
