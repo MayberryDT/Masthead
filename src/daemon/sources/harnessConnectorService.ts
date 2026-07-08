@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { accessSync, constants as fsConstants, readdirSync } from "node:fs";
+import { dirname, join, resolve, delimiter } from "node:path";
 import { LIVE_CONNECTOR_RUNTIMES, type LiveConnectorRuntime } from "../../adapters/liveRuntimes.ts";
 import {
   deriveLiveStatus,
@@ -16,11 +17,23 @@ import {
   getConnectorActivation,
   type StoredConnectorActivation
 } from "./connectorActivationStore.ts";
-import { preflightAllAdapters, type AdapterPreflightResult } from "./sourcePreflight.ts";
+/** CLI names that prove a harness is actually installed (not just a Masthead plugin path). */
+const HARNESS_BINARIES: Record<LiveConnectorRuntime, readonly string[]> = {
+  codex: ["codex"],
+  claude_code: ["claude"],
+  cursor: ["cursor", "cursor-agent"],
+  grok: ["grok"],
+  opencode: ["opencode"],
+  omp: ["omp", "oh-my-pi"],
+  pi: ["pi"],
+  hermes: ["hermes"]
+};
 
 /**
- * Merge presence preflight + live connector settings + activation store into
- * the Sources V2 harness connector snapshot.
+ * Merge lightweight harness presence + live connector settings + activation store.
+ *
+ * Intentionally does NOT run full history preflight/session counting — that is Workbench work
+ * and made Sources refresh multi-minute. Presence uses CLI-on-PATH + real home markers only.
  */
 export async function listHarnessConnectors(
   db: MastheadDatabase,
@@ -28,19 +41,12 @@ export async function listHarnessConnectors(
 ): Promise<HarnessConnectorsSnapshotDto> {
   const now = new Date().toISOString();
   const dataDirectory = dirname(config.databasePath);
-  const context = {
-    homeDir: config.codexHomeDir,
-    now,
-    exclusions: [] as import("../../adapters/types.ts").SourceExclusion[]
-  };
 
-  const [preflights, liveSettings, latestByRuntime] = await Promise.all([
-    preflightAllAdapters(context),
+  const [liveSettings, latestByRuntime] = await Promise.all([
     getLiveConnectorSettings(config),
     Promise.resolve(latestLiveEventAtByRuntime(db))
   ]);
 
-  const preflightByRuntime = new Map(preflights.map((preflight) => [preflight.runtime, preflight]));
   const liveByRuntime = new Map(liveSettings.map((setting) => [setting.runtime, setting]));
 
   const connectors: HarnessConnectorDto[] = [];
@@ -52,15 +58,17 @@ export async function listHarnessConnectors(
       continue;
     }
 
-    const pre = preflightByRuntime.get(runtime);
-    const presence = resolvePresence(runtime, config, pre);
-    const lastLiveEventAt = latestByRuntime.get(runtime);
+    const presence = resolvePresence(runtime, config);
+    const observedLiveAt = latestByRuntime.get(runtime);
+    // Only surface last live event when the harness is actually present — avoids
+    // synthetic/settings-test timestamps making missing harnesses look active.
+    const lastLiveEventAt = presence === "found" ? observedLiveAt : undefined;
 
     let storedActivation = await getConnectorActivation(dataDirectory, runtime);
 
     // Auto-clear host activation once a real live event arrives after the flag was set
-    // (e.g. Codex hooks trusted and emitting).
-    if (storedActivation && lastLiveEventAt && isIsoAfter(lastLiveEventAt, storedActivation.setAt)) {
+    // (e.g. Codex hooks trusted and emitting). Use raw observed time, not display-filtered.
+    if (storedActivation && observedLiveAt && isIsoAfter(observedLiveAt, storedActivation.setAt)) {
       await clearConnectorActivation(dataDirectory, runtime);
       storedActivation = undefined;
     }
@@ -69,7 +77,7 @@ export async function listHarnessConnectors(
     // Prefer store activation when present; otherwise leave deriveLiveStatus to handle enable_plugin.
     const activation = toConnectorActivation(storedActivation);
 
-    const derived = deriveLiveStatus({
+    let derived = deriveLiveStatus({
       installed: live.installed,
       configExists: live.configExists,
       missingEvents: live.missingEvents,
@@ -78,6 +86,11 @@ export async function listHarnessConnectors(
       activation,
       lastLiveEventAt
     });
+
+    // Harness missing: do not claim Ready just because we wrote a plugin file under its home.
+    if (presence === "not_found" && derived.live === "ready") {
+      derived = { live: "not_installed" };
+    }
 
     connectors.push({
       runtime,
@@ -91,11 +104,11 @@ export async function listHarnessConnectors(
       stateEndpoint: live.stateEndpoint,
       lastLiveEventAt,
       lastTest: undefined,
-      checkedPaths: pre?.checkedPaths.map((path) => path.path) ?? [],
-      diagnostics: (pre?.diagnostics ?? []).map((diagnostic) => diagnostic.message),
+      checkedPaths: presenceCheckedPaths(runtime, config),
+      diagnostics: [],
       supportsActions: true,
-      historyFound: (pre?.discoveredCount ?? 0) > 0,
-      historySessionCount: pre?.discoveredCount
+      historyFound: false,
+      historySessionCount: 0
     });
   }
 
@@ -106,7 +119,7 @@ export async function listHarnessConnectors(
   };
 }
 
-/** Discover re-scans presence + live status. For V1 this is the same recompute as list. */
+/** Refresh re-scans harness presence + live connector status only (no history import work). */
 export async function discoverHarnessConnectors(
   db: MastheadDatabase,
   config: DaemonConfig
@@ -114,12 +127,18 @@ export async function discoverHarnessConnectors(
   return listHarnessConnectors(db, config);
 }
 
-/** Latest live_state_reports.observed_at per runtime. */
+/** Latest live_state_reports.observed_at per runtime (excluding synthetic test sessions). */
 export function latestLiveEventAtByRuntime(db: MastheadDatabase): Map<string, string> {
   const rows = db
     .prepare(
       `SELECT runtime AS runtime, MAX(observed_at) AS observedAt
        FROM live_state_reports
+       WHERE source_session_id IS NULL
+          OR (
+            source_session_id NOT LIKE 'masthead-hook-test-%'
+            AND source_session_id NOT LIKE 'now-proof-%'
+            AND source_session_id NOT LIKE 'masthead-settings-%'
+          )
        GROUP BY runtime`
     )
     .all() as Array<{ runtime: string; observedAt: string | null }>;
@@ -133,41 +152,138 @@ export function latestLiveEventAtByRuntime(db: MastheadDatabase): Map<string, st
   return result;
 }
 
-function resolvePresence(
-  runtime: LiveConnectorRuntime,
-  config: DaemonConfig,
-  pre: AdapterPreflightResult | undefined
-): ConnectorPresence {
-  if (pre && pre.state !== "not_detected" && pre.state !== "planned") {
+/**
+ * Presence = harness is installed on this machine.
+ * Strong signals only: harness CLI on PATH, or a real home marker (not Masthead-only files).
+ * Masthead writing a plugin under ~/.pi (etc.) must NOT count as the harness existing.
+ */
+export function resolvePresence(runtime: LiveConnectorRuntime, config: DaemonConfig): ConnectorPresence {
+  if (harnessBinaryOnPath(runtime)) {
     return "found";
   }
 
-  if (pathHintsExist(runtime, config, pre)) {
+  if (hasRealHarnessHome(runtime, config)) {
     return "found";
   }
 
   return "not_found";
 }
 
-/**
- * Presence path hints when preflight is not_detected/planned/missing.
- * Codex may lack session history while `~/.codex` exists; other runtimes use
- * preflight checkedPaths that exist on disk.
- */
-function pathHintsExist(
-  runtime: LiveConnectorRuntime,
-  config: DaemonConfig,
-  pre: AdapterPreflightResult | undefined
-): boolean {
-  if (runtime === "codex") {
-    return existsSync(join(resolve(config.codexHomeDir), ".codex"));
-  }
+function presenceCheckedPaths(runtime: LiveConnectorRuntime, config: DaemonConfig): string[] {
+  const home = resolve(config.codexHomeDir);
+  const roots: Partial<Record<LiveConnectorRuntime, string[]>> = {
+    codex: [join(home, ".codex")],
+    claude_code: [join(home, ".claude")],
+    cursor: [join(home, ".cursor")],
+    grok: [join(home, ".grok")],
+    opencode: [join(home, ".config", "opencode"), join(home, ".local", "share", "opencode")],
+    omp: [join(home, ".omp"), join(home, ".oh-my-pi")],
+    pi: [join(home, ".pi")],
+    hermes: [join(home, ".hermes")]
+  };
+  return (roots[runtime] ?? []).filter((path) => existsSync(path));
+}
 
-  if (pre?.checkedPaths.some((path) => path.exists)) {
-    return true;
+function hasRealHarnessHome(runtime: LiveConnectorRuntime, config: DaemonConfig): boolean {
+  const home = resolve(config.codexHomeDir);
+  if (runtime === "codex") return hasRealCodexHome(config);
+  if (runtime === "claude_code") return hasNonMastheadEntries(join(home, ".claude"), { allow: ["projects", "settings.json", "history"] });
+  if (runtime === "cursor") return hasNonMastheadEntries(join(home, ".cursor"), { allow: ["projects", "chats", "extensions"] });
+  if (runtime === "grok") return hasNonMastheadEntries(join(home, ".grok"), { allow: ["sessions", "hooks"] });
+  if (runtime === "opencode") {
+    return (
+      hasNonMastheadEntries(join(home, ".config", "opencode"), { allow: ["plugins", "config"] }) ||
+      hasNonMastheadEntries(join(home, ".local", "share", "opencode"), { allow: ["storage", "sessions"] })
+    );
   }
-
+  if (runtime === "omp") {
+    return (
+      hasNonMastheadEntries(join(home, ".omp"), { allow: ["agent"] }) ||
+      hasNonMastheadEntries(join(home, ".oh-my-pi"), { allow: ["agent"] })
+    );
+  }
+  if (runtime === "pi") {
+    // ~/.pi/agent/extensions/masthead-live.js alone is NOT Pi installed.
+    return hasRealPiHome(join(home, ".pi"));
+  }
+  if (runtime === "hermes") {
+    return hasNonMastheadEntries(join(home, ".hermes"), { allow: ["sessions", "config.yaml", "hermes-agent", "state.db"] });
+  }
   return false;
+}
+
+function hasNonMastheadEntries(
+  root: string,
+  options: { allow?: string[]; denyOnlyMasthead?: boolean } = {}
+): boolean {
+  if (!existsSync(root)) return false;
+  try {
+    const entries = readdirSync(root);
+    if (entries.length === 0) return false;
+    const nonMasthead = entries.filter((name) => !name.includes("masthead"));
+    if (nonMasthead.length === 0) return false;
+    if (options.allow?.length) {
+      // Prefer known real harness markers when present.
+      if (nonMasthead.some((name) => options.allow!.includes(name))) return true;
+    }
+    // For shallow homes: any non-masthead entry counts (e.g. sessions dir).
+    return nonMasthead.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function harnessBinaryOnPath(runtime: LiveConnectorRuntime): boolean {
+  const names = HARNESS_BINARIES[runtime] ?? [];
+  const pathDirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+  for (const name of names) {
+    for (const dir of pathDirs) {
+      const candidate = join(dir, name);
+      try {
+        accessSync(candidate, fsConstants.X_OK);
+        return true;
+      } catch {
+        // try next
+      }
+    }
+  }
+  return false;
+}
+
+function hasRealCodexHome(config: DaemonConfig): boolean {
+  const root = join(resolve(config.codexHomeDir), ".codex");
+  if (!existsSync(root)) return false;
+  try {
+    const entries = readdirSync(root);
+    // sessions, config.toml, auth.json, etc. prove Codex itself; hooks.json alone may be ours.
+    return entries.some((name) => name !== "hooks.json" && !name.includes("masthead"));
+  } catch {
+    return false;
+  }
+}
+
+/** True only when Pi has real install content beyond Masthead's extension install path. */
+function hasRealPiHome(root: string): boolean {
+  if (!existsSync(root)) return false;
+  try {
+    const top = readdirSync(root).filter((name) => !name.includes("masthead"));
+    if (top.length === 0) return false;
+    // Only agent/ with only extensions/masthead* is still not a real Pi install.
+    if (top.length === 1 && top[0] === "agent") {
+      const agentRoot = join(root, "agent");
+      const agentEntries = readdirSync(agentRoot).filter((name) => !name.includes("masthead"));
+      if (agentEntries.length === 0) return false;
+      if (agentEntries.length === 1 && agentEntries[0] === "extensions") {
+        const extRoot = join(agentRoot, "extensions");
+        const extEntries = readdirSync(extRoot);
+        return extEntries.some((name) => !name.includes("masthead"));
+      }
+      return true;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function toConnectorActivation(

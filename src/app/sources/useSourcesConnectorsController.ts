@@ -43,10 +43,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function summarizeDiscover(snapshot: HarnessConnectorsSnapshotDto): string {
+function summarizeRefresh(snapshot: HarnessConnectorsSnapshotDto): string {
   const found = snapshot.connectors.filter((connector) => connector.presence === "found").length;
-  const { ready, needsAction } = snapshot.summary;
-  return `Discovery complete: ${found} found · ${ready} ready · ${needsAction} need action.`;
+  const { ready, needsAction, notFound } = snapshot.summary;
+  return `Refreshed connections: ${found} found · ${ready} ready · ${needsAction} need action · ${notFound} not found.`;
 }
 
 export function useSourcesConnectorsController(
@@ -105,19 +105,19 @@ export function useSourcesConnectorsController(
   }, [readOnly]);
 
   const discover = useCallback(async () => {
-    if (!guardWritable()) return;
+    // Refresh = re-check harness presence + live connection status only (no history import).
     setBusy(true);
-    setStatus("Discovering local harnesses...");
+    setStatus("Refreshing connections…");
     try {
       const next = await discoverHarnessConnectors(activeProjectionUrl);
       applySnapshot(next);
-      setStatus(summarizeDiscover(next));
+      setStatus(summarizeRefresh(next));
     } catch (error) {
-      setStatus(`Discover failed: ${errorMessage(error)}`);
+      setStatus(`Refresh failed: ${errorMessage(error)}`);
     } finally {
       setBusy(false);
     }
-  }, [activeProjectionUrl, applySnapshot, guardWritable]);
+  }, [activeProjectionUrl, applySnapshot]);
 
   const enable = useCallback(
     async (runtime: string) => {

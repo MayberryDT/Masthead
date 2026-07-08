@@ -100,7 +100,7 @@ describe("useSourcesConnectorsController", () => {
 
     expect(discoverHarnessConnectors).toHaveBeenCalledWith(baseUrl);
     expect(latest().snapshot?.summary.ready).toBe(1);
-    expect(latest().status).toMatch(/Discovery complete/i);
+    expect(latest().status).toMatch(/Refreshed connections/i);
   });
 
   test("enable updates snapshot; readOnly actions no-op", async () => {

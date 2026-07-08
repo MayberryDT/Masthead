@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -173,14 +173,28 @@ describe("harnessConnectorService", () => {
     db.close();
   });
 
-  test("codex presence found when ~/.codex exists without history", async () => {
+  test("codex presence found when ~/.codex has real config, not only empty dir", async () => {
     const { db, config, tempDir } = await openTestFixture();
     await mkdir(join(tempDir, ".codex"), { recursive: true });
+    await writeFile(join(tempDir, ".codex", "config.toml"), 'model = "gpt-5"\n', "utf8");
 
     const snapshot = await listHarnessConnectors(db, config);
     const codex = snapshot.connectors.find((connector) => connector.runtime === "codex");
     expect(codex?.presence).toBe("found");
-    expect(codex?.live).toBe("not_installed");
+
+    db.close();
+  });
+
+  test("pi presence is not_found when only Masthead extension files exist", async () => {
+    const { db, config, tempDir } = await openTestFixture();
+    // Mimic installLiveConnector creating ~/.pi/agent/extensions without a real Pi CLI.
+    await mkdir(join(tempDir, ".pi", "agent", "extensions"), { recursive: true });
+    await writeFile(join(tempDir, ".pi", "agent", "extensions", "masthead-live.js"), "// masthead\n", "utf8");
+
+    const snapshot = await listHarnessConnectors(db, config);
+    const pi = snapshot.connectors.find((connector) => connector.runtime === "pi");
+    expect(pi?.presence).toBe("not_found");
+    expect(pi?.lastLiveEventAt).toBeUndefined();
 
     db.close();
   });

@@ -26,7 +26,6 @@ import {
   SessionBoard
 } from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
-import { SessionLibraryDetail } from "../ui/SessionLibraryDetail";
 import { SourcesPanel } from "../ui/SourcesPanel";
 import { Toolbar } from "../ui/Toolbar";
 import type { CollapsibleSearchHandle } from "../ui/primitives/CollapsibleSearch";
@@ -56,7 +55,9 @@ import { NowSurface } from "./surfaces/NowSurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
 import { SourcesSurface } from "./surfaces/SourcesSurface";
 import { UsageSurface } from "./surfaces/UsageSurface";
+import { WorkbenchSurface } from "./surfaces/WorkbenchSurface";
 import { UsagePanel } from "../ui/usage/UsagePanel";
+import { WorkbenchPanel } from "../ui/workbench/WorkbenchPanel";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
 import { useBoardSessionDetailController } from "./board/useBoardSessionDetailController";
@@ -65,6 +66,7 @@ import { useSettingsDataController } from "./settings/useSettingsDataController"
 import { useSourcesController } from "./sources/useSourcesController";
 import { useSourcesConnectorsController } from "./sources/useSourcesConnectorsController";
 import { useUsageStatsController } from "./usage/useUsageStatsController";
+import { useWorkbenchController } from "./workbench/useWorkbenchController";
 import { clearUnsupportedLocationHash } from "./locationHash";
 
 type ConnectorActionState = ConnectorActionView;
@@ -104,7 +106,7 @@ export function App() {
   const [harnessFilter, setHarnessFilter] = useState<HarnessFilter>("all");
   const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("operational_priority");
-  const [activityWindow, setActivityWindow] = useState<ActivityWindow>("24h");
+  const [activityWindow, setActivityWindow] = useState<ActivityWindow>("7d");
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
   const [motionDisabled, setMotionDisabled] = useState(() => readStoredMotionDisabled());
@@ -145,14 +147,12 @@ export function App() {
     cancel: handleCancelImport,
     clearImportJobsFilter: handleClearImportJobsFilter,
     connectSelected: handleConnectSelectedSources,
-    enableTranscriptImport: handleEnableTranscriptImport,
     excludePath: handleExcludeSourcePath,
     hookActionBusy,
     hooks: sourceHooks,
     importFilterRuntime,
     importMetadata: handleImportMetadata,
     importPage,
-    importTranscripts: handleImportTranscripts,
     imports,
     lastRefreshAt: sourcesLastRefreshAt,
     loadAdapterSources: handleLoadAdapterSources,
@@ -223,7 +223,7 @@ export function App() {
     filter !== "all" ||
     harnessFilter !== "all" ||
     lifecycleFilter !== "all" ||
-    activityWindow !== "24h";
+    activityWindow !== "7d";
   const filteredAttentionItems = useMemo(
     () => filterAttentionItemsForCards(board.attentionQueue, filteredCards),
     [board.attentionQueue, filteredCards]
@@ -249,6 +249,12 @@ export function App() {
   }, [connection.state, liveConnection]);
   const usage = useUsageStatsController({
     active: activeSurface === "usage",
+    activeProjectionUrl,
+    isLive: effectiveLiveConnection.state === "live",
+    refreshKey: sourceLibraryRefreshKey
+  });
+  const workbench = useWorkbenchController({
+    active: activeSurface === "workbench",
     activeProjectionUrl,
     isLive: effectiveLiveConnection.state === "live",
     refreshKey: sourceLibraryRefreshKey
@@ -646,10 +652,8 @@ export function App() {
           onCloseOnboarding={sourcesConnectors.closeOnboarding}
           onRuntimeHookAction={handleRuntimeHookAction}
           onConnectSelected={handleConnectSelectedSources}
-          onEnableTranscriptImport={handleEnableTranscriptImport}
           onExcludePath={handleExcludeSourcePath}
           onImportMetadata={handleImportMetadata}
-          onImportTranscripts={handleImportTranscripts}
           onLoadAdapterSources={handleLoadAdapterSources}
           onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
           onOpenOnboarding={reopenOnboarding}
@@ -657,8 +661,8 @@ export function App() {
           onPreviewImport={sourcesController.previewImport}
           onRepairSources={handleRepairSources}
           onRefresh={() => {
-            void sourcesConnectors.load();
-            void handleRefreshSources();
+            // Sources V2: refresh only live harness connections (not history import scan).
+            void sourcesConnectors.discover();
           }}
           onRetryImport={handleRetryImport}
           onRunSetup={handleRunSourcesSetup}
@@ -686,25 +690,8 @@ export function App() {
             query={logbook.query}
             density="compact"
             loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbook.loadState}
-            bulkConfirmMessage={logbook.bulkConfirmMessage}
-            bulkEnrichBusy={logbook.bulkEnrichBusy}
-            bulkEnrichError={logbook.bulkEnrichError}
-            bulkStatus={logbook.bulkStatus}
-            bulkTargetCapped={logbook.bulkTargetCapped}
-            bulkTargetCount={logbook.bulkTargetCount}
-            bulkTargetKind={logbook.bulkTargetKind}
             enrichment={settingsData.settingsState?.enrichment}
-            onBulkEnrichFull={() => void logbook.bulkEnrichFull()}
-            onBulkEnrichSummary={() => void logbook.bulkEnrichSummary()}
-            onCancelBulkEnrichFull={logbook.cancelBulkEnrichFull}
-            onClearBulkSelection={logbook.clearBulkSelection}
-            onConfirmBulkEnrichFull={() => void logbook.confirmBulkEnrichFull()}
-            onSelectBulkFiltered={() => void logbook.selectAllMatchingFilter()}
-            onSelectBulkPage={logbook.selectCurrentPage}
-            onToggleBulkSelect={logbook.toggleBulkSelection}
             refreshError={logbook.refreshError}
-            selectedSessionId={logbook.selectedSessionId}
-            selectedSessionIds={logbook.selectedSessionIds}
             sort={logbook.sort}
             sources={sources}
             summary={logbook.summary}
@@ -714,36 +701,26 @@ export function App() {
             onQueryChange={logbook.changeQuery}
             onPageChange={logbook.changePage}
             onRetry={logbook.retry}
-            onSessionSelect={logbook.selectSession}
             onSortChange={logbook.changeSort}
           />
-          {logbook.selectedSessionId ? (
-            <SessionLibraryDetail
-              session={logbook.selectedSession}
-              excerpts={logbook.excerpts}
-              loading={logbook.detailLoading}
-              dossier={logbook.dossier}
-              dossierLoading={logbook.dossierLoading}
-              dossierError={logbook.dossierError}
-              dossierEnrichmentBusy={logbook.dossierEnrichmentBusy}
-              dossierEnrichmentError={logbook.dossierEnrichmentError}
-              onEnrichDossier={() => void logbook.enrichDossier()}
-              onRetryDossier={logbook.retryDossier}
-              transcript={logbook.transcript}
-              transcriptLoading={logbook.transcriptLoading}
-              transcriptError={logbook.transcriptError}
-              transcriptFilter={logbook.transcriptFilter}
-              transcriptQuery={logbook.transcriptQuery}
-              onTranscriptFilterChange={logbook.setTranscriptFilter}
-              onTranscriptQueryChange={logbook.setTranscriptQuery}
-              onTranscriptLoadMore={() => void logbook.loadMoreTranscript()}
-              onRetryTranscript={logbook.retryTranscript}
-              onOpenSources={() => setActiveSurface("sources")}
-              onClose={logbook.closeSession}
-            />
-          ) : null}
         </>
       </LogbookSurface>
+    ) : activeSurface === "workbench" ? (
+      <WorkbenchSurface>
+        <WorkbenchPanel
+          activity={workbench.activity}
+          error={workbench.error}
+          handoffText={workbench.handoffText}
+          loading={workbench.loading}
+          notAddedSummary={workbench.notAddedSummary}
+          onClearSelection={workbench.clearSelection}
+          onRetry={workbench.retry}
+          onSelectAllVisible={workbench.selectAllVisible}
+          onToggleSession={workbench.toggleSession}
+          selectedSessionIds={workbench.selectedSessionIds}
+          sessions={workbench.sessions}
+        />
+      </WorkbenchSurface>
     ) : activeSurface === "usage" ? (
       <UsageSurface>
         {needsRecoveryPanel ? (
@@ -792,7 +769,6 @@ export function App() {
             onConfirmScopedDelete={settingsData.confirmScopedDelete}
             onRequestDeleteLocalData={settingsData.requestDeleteLocalData}
             onConfirmDeleteLocalData={settingsData.confirmDeleteLocalData}
-            onSaveLlmProvider={settingsData.saveLlmProviderSettings}
             readOnly={!connection.writable}
           />
         )}
@@ -865,7 +841,6 @@ export function App() {
           dossierError={boardDetail.dossierError}
           dossierEnrichmentBusy={boardDetail.dossierEnrichmentBusy}
           dossierEnrichmentError={boardDetail.dossierEnrichmentError}
-          onEnrichDossier={() => void boardDetail.enrichDossier()}
           onRetryDossier={boardDetail.retryDossier}
           transcript={boardDetail.transcript}
           transcriptLoading={boardDetail.transcriptLoading}

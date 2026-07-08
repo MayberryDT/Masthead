@@ -7,7 +7,7 @@ import { HarnessConnectorList } from "../HarnessConnectorList";
 const noop = () => undefined;
 
 describe("HarnessConnectorList", () => {
-  test("renders Discover, Claude Code, Needs action for codex", () => {
+  test("renders Connections cards and Refresh without Discover chrome", () => {
     const snapshot = sampleSnapshot();
     const listHtml = renderToStaticMarkup(
       <HarnessConnectorList
@@ -23,8 +23,9 @@ describe("HarnessConnectorList", () => {
     expect(listHtml).toContain("Claude Code");
     expect(listHtml).toContain("Codex");
     expect(listHtml).toContain("Needs action");
-    expect(listHtml).toContain("Found");
+    expect(listHtml).toContain("Connections");
     expect(listHtml).not.toContain("Import jobs");
+    expect(listHtml).not.toContain("Live harness inventory");
 
     const panelHtml = renderToStaticMarkup(
       <SourcesPanel
@@ -44,11 +45,13 @@ describe("HarnessConnectorList", () => {
       />
     );
 
-    expect(panelHtml).toContain("Discover");
+    expect(panelHtml).toContain("Refresh");
     expect(panelHtml).toContain("Claude Code");
     expect(panelHtml).toContain("Needs action");
     expect(panelHtml).toContain("Codex");
-    expect(panelHtml).toContain("Enable all detected");
+    expect(panelHtml).toContain("Enable all found");
+    expect(panelHtml).not.toContain("Discover local harnesses");
+    expect(panelHtml).not.toContain("First-run setup");
     expect(panelHtml).not.toContain("Import jobs");
     expect(panelHtml).not.toContain("Import data");
   });

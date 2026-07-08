@@ -1,5 +1,4 @@
 import type { HarnessConnectorDto, HarnessConnectorsSnapshotDto } from "../../shared/harnessConnectors";
-import { StatusBadge } from "../primitives/StatusBadge";
 import { HarnessConnectorRow } from "./HarnessConnectorRow";
 
 type Props = {
@@ -23,36 +22,21 @@ export function HarnessConnectorList({
   onTest,
   onConfirm
 }: Props) {
-  const { summary, connectors } = snapshot;
+  const { connectors } = snapshot;
 
   return (
-    <section className="sources-connector-list" aria-label="Harness connectors">
-      <div className="sources-connector-list-head">
-        <div>
-          <p className="mono-label">Connectors</p>
-          <h2>Live harness inventory</h2>
-        </div>
-        <div className="sources-connector-summary-chips" aria-label="Connector summary">
-          <StatusBadge tone="active">{summary.ready} ready</StatusBadge>
-          <StatusBadge tone="warning">{summary.needsAction} needs action</StatusBadge>
-          <StatusBadge tone="neutral">{summary.notInstalled} not installed</StatusBadge>
-          <StatusBadge tone="neutral">{summary.notFound} not found</StatusBadge>
-          {summary.error > 0 ? <StatusBadge tone="danger">{summary.error} error</StatusBadge> : null}
-        </div>
+    <section className="sources-connection-section" aria-label="Connections">
+      <div className="sources-connection-section-head">
+        <h2>Connections</h2>
       </div>
 
       {connectors.length === 0 ? (
         <div className="empty-session-state surface-empty-state sources-connector-empty">
-          <p className="mono-label">Sources</p>
-          <h2>{busy ? "Loading connectors" : "No harness connectors"}</h2>
-          <p>
-            {busy
-              ? "Masthead is reading local harness presence and live connector status."
-              : "Run Discover to scan for supported local harnesses."}
-          </p>
+          <h2>{busy ? "Loading connections" : "No connections"}</h2>
+          <p>{busy ? "Checking local harnesses and live capture wiring." : "Press Refresh to scan for supported harnesses."}</p>
         </div>
       ) : (
-        <div className="sources-connector-rows" role="list">
+        <div className="sources-connection-card-grid" role="list">
           {connectors.map((connector) => (
             <div key={connector.runtime} role="listitem">
               <HarnessConnectorRow

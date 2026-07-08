@@ -31,8 +31,8 @@ export function HarnessConnectorRow({
 
   return (
     <article
-      className={`sources-connector-row${selected ? " is-selected" : ""}`}
-      aria-label={`${connector.label} harness connector`}
+      className={`adapter-card sources-connection-card${selected ? " is-selected" : ""}${connector.presence === "not_found" ? " adapter-card-not_detected" : ""}`}
+      aria-label={`${connector.label} connection`}
       aria-current={selected ? "true" : undefined}
       data-runtime={connector.runtime}
       onClick={() => onSelect?.(connector.runtime)}
@@ -43,24 +43,34 @@ export function HarnessConnectorRow({
       }}
       tabIndex={0}
     >
-      <div className="sources-connector-row-main">
-        <div className="sources-connector-row-title">
-          <h3>{connector.label}</h3>
+      <div className="adapter-card-head">
+        <div className="adapter-card-title-row">
+          <div className="adapter-card-select">
+            <h2>{connector.label}</h2>
+          </div>
           <div className="sources-connector-row-badges">
             <StatusBadge tone={presenceTone(connector.presence)}>{presenceLabel(connector.presence)}</StatusBadge>
             <StatusBadge tone={liveTone(connector.live)}>{liveLabel(connector)}</StatusBadge>
           </div>
         </div>
-        <p className="sources-connector-row-meta">
-          <span>Last event</span>
-          <span>{formatLastEvent(connector.lastLiveEventAt)}</span>
-        </p>
-        {connector.actionMessage && connector.live === "needs_action" ? (
-          <p className="sources-connector-row-message">{connector.actionMessage}</p>
-        ) : null}
       </div>
 
-      <div className="sources-connector-row-cta" onClick={(event) => event.stopPropagation()}>
+      <dl className="adapter-card-metrics">
+        <div>
+          <dt>Last event</dt>
+          <dd>{formatLastEvent(connector.lastLiveEventAt)}</dd>
+        </div>
+        <div>
+          <dt>Live capture</dt>
+          <dd>{liveLabel(connector)}</dd>
+        </div>
+      </dl>
+
+      {connector.actionMessage && connector.live === "needs_action" ? (
+        <p className="sources-connector-row-message">{connector.actionMessage}</p>
+      ) : null}
+
+      <div className="adapter-card-footer sources-connection-card-footer" onClick={(event) => event.stopPropagation()}>
         {cta.kind === "message" ? (
           <span className="sources-connector-cta-message">{cta.label}</span>
         ) : (
@@ -76,6 +86,7 @@ export function HarnessConnectorRow({
             {cta.label}
           </AppButton>
         )}
+        <span className="sources-connection-open-hint">Details</span>
       </div>
     </article>
   );

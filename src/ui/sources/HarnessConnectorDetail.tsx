@@ -45,17 +45,17 @@ export function HarnessConnectorDetail({
     showRepair;
 
   return (
-    <aside className="sources-connector-detail" aria-label={`${connector.label} connector detail`}>
+    <aside className="sources-connector-detail" aria-label={`${connector.label} connection detail`}>
       <header className="sources-connector-detail-head">
         <div>
-          <p className="mono-label">Connector</p>
+          <p className="mono-label">Connection</p>
           <h2>{connector.label}</h2>
         </div>
         <div className="sources-connector-row-badges">
           <StatusBadge tone={presenceTone(connector.presence)}>{presenceLabel(connector.presence)}</StatusBadge>
           <StatusBadge tone={liveTone(connector.live)}>{liveLabel(connector)}</StatusBadge>
           {onClose ? (
-            <AppButton variant="quiet" onClick={onClose} aria-label="Close connector detail">
+            <AppButton variant="quiet" onClick={onClose} aria-label="Close connection detail">
               Close
             </AppButton>
           ) : null}
@@ -63,8 +63,8 @@ export function HarnessConnectorDetail({
       </header>
 
       <p className="sources-connector-honest-copy">
-        Masthead captures live session presence and shallow runtime signals. Deeper transcript processing is in
-        Workbench.
+        Live capture only. Presence means the harness is installed on this machine. Ready means Masthead is wired to
+        receive live signals. Deeper transcript work is in Workbench.
       </p>
 
       {connector.actionMessage ? (
