@@ -257,6 +257,11 @@ export async function runWorkbenchCli(args: string[], options: WorkbenchCliOptio
         );
       }
       return errorResult("unknown_command", `Unknown workbench quality command: ${subCommand ?? ""}`.trim(), json);
+    } catch (error) {
+      if (isCannotFailQualityOnPublishedError(error)) {
+        return errorResult("invalid_state", error.message, json);
+      }
+      throw error;
     } finally {
       db.close();
     }
@@ -497,6 +502,10 @@ async function openCliDatabase(args: string[], env: NodeJS.ProcessEnv | undefine
 
 function isInvalidScopeError(error: unknown): error is Error {
   return error instanceof Error && error.message.startsWith("invalid_scope:");
+}
+
+function isCannotFailQualityOnPublishedError(error: unknown): error is Error {
+  return error instanceof Error && error.message === "cannot_fail_quality_on_published_session";
 }
 
 function isArtifactKind(value: string): value is SessionArtifactKind {

@@ -267,14 +267,26 @@ export function markWorkbenchQuality(
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
   const now = new Date().toISOString();
   return writeStateTransition(db, () => {
-    ensureWorkbenchSessionState(db, input.sessionId);
+    const current = ensureWorkbenchSessionState(db, input.sessionId);
     if (input.status === "passed") {
-      db.prepare(
-        `UPDATE workbench_session_state
-         SET quality_status = 'passed', non_publication_reason = NULL, updated_at = ?
-         WHERE session_id = ?`
-      ).run(now, input.sessionId);
-      updateWorkbenchNextAction(db, input.sessionId, now);
+      // Re-admit failed / not-added sessions to the publish path. Leave published rows published.
+      if (current.publicationStatus === "published") {
+        db.prepare(
+          `UPDATE workbench_session_state
+           SET quality_status = 'passed', non_publication_reason = NULL, updated_at = ?
+           WHERE session_id = ?`
+        ).run(now, input.sessionId);
+      } else {
+        db.prepare(
+          `UPDATE workbench_session_state
+           SET quality_status = 'passed',
+               publication_status = 'publish_path',
+               non_publication_reason = NULL,
+               updated_at = ?
+           WHERE session_id = ?`
+        ).run(now, input.sessionId);
+        updateWorkbenchNextAction(db, input.sessionId, now);
+      }
       const activity = insertWorkbenchActivity(db, {
         activityId: stableRecordId("workbench_activity", [input.sessionId, "quality_passed", now]),
         actor: input.actor,
@@ -290,6 +302,10 @@ export function markWorkbenchQuality(
         input.sessionId
       );
       return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+    }
+
+    if (current.publicationStatus === "published") {
+      throw new Error("cannot_fail_quality_on_published_session");
     }
 
     const reason = input.reason?.trim() || "quality_failed";

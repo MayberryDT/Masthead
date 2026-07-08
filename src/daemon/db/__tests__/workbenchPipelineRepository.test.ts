@@ -16,6 +16,7 @@ import {
   markWorkbenchQuality,
   markWorkbenchSessionEnrichmentSatisfied,
   publishWorkbenchSession,
+  readWorkbenchSessionState,
   releaseWorkbenchClaim
 } from "../workbenchPipelineRepository.ts";
 
@@ -314,6 +315,86 @@ describe("workbench pipeline repository", () => {
     expect(result.state.publicationStatus).toBe("not_added_to_logbook");
     expect(result.state.nonPublicationReason).toBe("hook_only_noise");
     expect(result.activity.eventType).toBe("quality_failed");
+  });
+
+  test("quality pass after fail restores publish_path and advances next action", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:recover",
+      title: "Quality recover"
+    });
+    ensureWorkbenchSessionState(db, "session:recover");
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET transcript_status = 'imported', next_action = 'review_quality'
+       WHERE session_id = ?`
+    ).run("session:recover");
+
+    markWorkbenchQuality(db, {
+      actor: { kind: "user", id: "tyler" },
+      sessionId: "session:recover",
+      status: "failed",
+      reason: "hook_only_noise"
+    });
+
+    const recovered = markWorkbenchQuality(db, {
+      actor: { kind: "user", id: "tyler" },
+      sessionId: "session:recover",
+      status: "passed"
+    });
+
+    expect(recovered.state.qualityStatus).toBe("passed");
+    expect(recovered.state.publicationStatus).toBe("publish_path");
+    expect(recovered.state.nonPublicationReason).toBeUndefined();
+    expect(recovered.state.nextAction).toBe("enrich");
+    expect(recovered.activity.eventType).toBe("quality_passed");
+  });
+
+  test("quality fail on published session throws and leaves publication unchanged", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:published",
+      title: "Already published"
+    });
+    ensureWorkbenchSessionState(db, "session:published");
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET transcript_status = 'imported',
+           quality_status = 'passed',
+           session_enrichment_status = 'satisfied',
+           session_dossier_status = 'satisfied',
+           bug_fix_trace_status = 'satisfied'
+       WHERE session_id = ?`
+    ).run("session:published");
+    markWorkbenchPublished(db, {
+      actor: { kind: "agent", id: "codex" },
+      publishedVia: "workbench_publish",
+      sessionId: "session:published"
+    });
+
+    const before = readWorkbenchSessionState(db, "session:published")!;
+    expect(before.publicationStatus).toBe("published");
+
+    expect(() =>
+      markWorkbenchQuality(db, {
+        actor: { kind: "user", id: "tyler" },
+        sessionId: "session:published",
+        status: "failed",
+        reason: "late_reject"
+      })
+    ).toThrow("cannot_fail_quality_on_published_session");
+
+    const after = readWorkbenchSessionState(db, "session:published")!;
+    expect(after.publicationStatus).toBe("published");
+    expect(after.qualityStatus).toBe("passed");
+    expect(after.nonPublicationReason).toBeUndefined();
+    expect(after.publishedActivityId).toBe(before.publishedActivityId);
   });
 });
 

@@ -14,6 +14,7 @@ import {
   ensureWorkbenchSessionState,
   markWorkbenchNotAdded,
   markWorkbenchArtifactSatisfied,
+  markWorkbenchPublished,
   markWorkbenchSessionEnrichmentSatisfied,
   readWorkbenchSessionState
 } from "../../daemon/db/workbenchPipelineRepository.ts";
@@ -395,6 +396,82 @@ describe("mastheadctl workbench CLI foundation", () => {
           sessionId: "session:fail"
         }
       });
+
+      const recovered = await runMastheadCli(
+        ["workbench", "quality", "pass", "--session", "session:fail", "--db", dbPath, "--json"],
+        { env: {} }
+      );
+      expect(recovered.exitCode).toBe(0);
+      expect(JSON.parse(recovered.stdout)).toMatchObject({
+        activity: { eventType: "quality_passed" },
+        state: {
+          qualityStatus: "passed",
+          publicationStatus: "publish_path",
+          sessionId: "session:fail"
+        }
+      });
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  test("refuses quality fail on published sessions through the CLI", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-cli-quality-published-"));
+    try {
+      const dbPath = join(tempDir, "masthead.sqlite");
+      const db = await openMastheadDatabase(dbPath);
+      migrateDatabase(db);
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId: "session:published",
+        title: "Published quality guard"
+      });
+      ensureWorkbenchSessionState(db, "session:published");
+      db.prepare(
+        `UPDATE workbench_session_state
+        SET transcript_status = 'imported',
+            quality_status = 'passed',
+            session_enrichment_status = 'satisfied',
+            session_dossier_status = 'satisfied',
+            bug_fix_trace_status = 'satisfied'
+        WHERE session_id = ?`
+      ).run("session:published");
+      markWorkbenchPublished(db, {
+        actor: { kind: "agent", id: "codex" },
+        publishedVia: "workbench_publish",
+        sessionId: "session:published"
+      });
+      db.close();
+
+      const refused = await runMastheadCli(
+        [
+          "workbench",
+          "quality",
+          "fail",
+          "--session",
+          "session:published",
+          "--reason",
+          "late_reject",
+          "--db",
+          dbPath,
+          "--json"
+        ],
+        { env: {} }
+      );
+      expect(refused.exitCode).toBe(1);
+      expect(JSON.parse(refused.stderr)).toMatchObject({
+        ok: false,
+        error: {
+          code: "invalid_state",
+          message: "cannot_fail_quality_on_published_session"
+        }
+      });
+
+      const afterDb = await openMastheadDatabase(dbPath);
+      expect(readWorkbenchSessionState(afterDb, "session:published")?.publicationStatus).toBe("published");
+      afterDb.close();
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
