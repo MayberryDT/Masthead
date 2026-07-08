@@ -15,7 +15,7 @@ export async function getJson<T>(baseUrl: string, pathname: string, options: Jso
     headers: { accept: "application/json" },
     signal: options.signal
   });
-  if (!response.ok) throw new Error(`${options.label} failed: ${response.status}`);
+  if (!response.ok) throw new Error(await formatHttpError(options.label, response));
   return response.json() as Promise<T>;
 }
 
@@ -28,8 +28,34 @@ export async function postJson<T>(baseUrl: string, pathname: string, options: Js
     method: "POST",
     signal: options.signal
   });
-  if (!response.ok) throw new Error(`${options.label} failed: ${response.status}`);
+  if (!response.ok) throw new Error(await formatHttpError(options.label, response));
   return response.json() as Promise<T>;
+}
+
+async function formatHttpError(label: string, response: Response): Promise<string> {
+  const detail = await readErrorDetail(response);
+  return detail ? `${label} failed: ${response.status} ${detail}` : `${label} failed: ${response.status}`;
+}
+
+async function readErrorDetail(response: Response): Promise<string | undefined> {
+  try {
+    const text = await response.text();
+    if (!text) return undefined;
+    try {
+      const body = JSON.parse(text) as { code?: unknown; error?: unknown };
+      if (typeof body.code === "string" && body.code.trim()) return body.code.trim();
+      if (typeof body.error === "string" && body.error.trim()) {
+        const error = body.error.trim();
+        // Keep messages short so UI mapping and logs stay readable.
+        return error.length > 120 ? error.slice(0, 120) : error;
+      }
+    } catch {
+      // Non-JSON bodies are ignored; status alone is enough.
+    }
+  } catch {
+    // Body read failures should not mask the original HTTP status.
+  }
+  return undefined;
 }
 
 function daemonUrl(baseUrl: string, pathname: string, query: Record<string, QueryValue> = {}): string {

@@ -69,4 +69,56 @@ describe("httpJsonClient", () => {
       signal: undefined
     });
   });
+
+  test("includes JSON error code from failed post responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ code: "transcript_permission_required" }), {
+          headers: { "content-type": "application/json" },
+          status: 409
+        })
+      )
+    );
+
+    await expect(
+      postJson("http://127.0.0.1:17373/projection", "/workbench/sessions/session%3Aabc/import-transcript", {
+        label: "workbench import transcript"
+      })
+    ).rejects.toThrow("workbench import transcript failed: 409 transcript_permission_required");
+  });
+
+  test("prefers code over error and falls back to short error text", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ code: "claim_conflict", error: "someone else holds the claim" }), {
+          headers: { "content-type": "application/json" },
+          status: 409
+        })
+      )
+    );
+
+    await expect(
+      postJson("http://127.0.0.1:17373/projection", "/workbench/sessions/session%3Aabc/claim", {
+        label: "workbench claim"
+      })
+    ).rejects.toThrow("workbench claim failed: 409 claim_conflict");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: "not found" }), {
+          headers: { "content-type": "application/json" },
+          status: 404
+        })
+      )
+    );
+
+    await expect(
+      getJson("http://127.0.0.1:17373/projection", "/sessions/missing", {
+        label: "session detail"
+      })
+    ).rejects.toThrow("session detail failed: 404 not found");
+  });
 });
