@@ -4067,6 +4067,7 @@ function workbenchQueueSessionDtos(database: MastheadDatabase, states: Workbench
       {
         activeClaim: state.activeClaim
           ? {
+              claimId: state.activeClaim.claimId,
               claimedBy: state.activeClaim.claimedBy,
               expiresAt: state.activeClaim.expiresAt
             }
