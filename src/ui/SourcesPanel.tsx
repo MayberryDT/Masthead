@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   AdapterStatus,
   CodexHookSettingsDto,
+  HarnessConnectorsSnapshotDto,
   ImportJob,
   SourceStatus,
   SourceStatusPage,
@@ -40,6 +41,16 @@ type Props = {
   sources: SourceStatus[];
   busy: boolean;
   status?: string;
+  /** Sources V2 live-connect snapshot (optional until UI rebuild). */
+  connectorsSnapshot?: HarnessConnectorsSnapshotDto;
+  selectedConnectorRuntime?: string;
+  onSelectConnectorRuntime?: (runtime: string | undefined) => void;
+  onDiscoverConnectors?: () => void;
+  onEnableConnector?: (runtime: string) => void;
+  onEnableAllDetectedConnectors?: () => void;
+  onTestConnector?: (runtime: string) => void;
+  onUninstallConnector?: (runtime: string) => void;
+  onConfirmConnectorActivation?: (runtime: string) => void;
   onCancelImport?: (importJobId: string) => void;
   onCloseOnboarding?: () => void;
   onRuntimeHookAction?: (runtime: string, action: HookAction) => Promise<void> | void;

@@ -63,50 +63,14 @@ import { useBoardSessionDetailController } from "./board/useBoardSessionDetailCo
 import { useLogbookController } from "./logbook/useLogbookController";
 import { useSettingsDataController } from "./settings/useSettingsDataController";
 import { useSourcesController } from "./sources/useSourcesController";
+import { useSourcesConnectorsController } from "./sources/useSourcesConnectorsController";
 import { useUsageStatsController } from "./usage/useUsageStatsController";
 import { clearUnsupportedLocationHash } from "./locationHash";
-import { readOnboardingDismissed, writeOnboardingDismissed } from "./onboardingPreference";
 
 type ConnectorActionState = ConnectorActionView;
 type LiveProjectionLoadResult = "loaded" | "superseded" | "failed";
 
 const STARTUP_PROJECTION_ERROR_MESSAGE = "Collector started, but live projection did not load.";
-const firstRunSetupStatuses = new Set(["empty", "scan_needed", "scan_available", "detected"]);
-
-type FirstRunSourceCandidate = {
-  enrichedSessions?: number;
-  importedCount?: number;
-  importedRecords?: number;
-  importedSessions?: number;
-  lastSync?: string;
-  lastSyncAt?: string;
-  metadataSessions?: number;
-  queuedCount?: number;
-  queuedRecords?: number;
-  transcriptSessions?: number;
-};
-
-function shouldOpenSourcesOnboardingForSetup(setup: {
-  connectedSources?: FirstRunSourceCandidate[];
-  status?: string;
-} | undefined): boolean {
-  if (!setup) return false;
-  if (setup.status && firstRunSetupStatuses.has(setup.status)) return true;
-  const connectedSources = setup.connectedSources ?? [];
-  return connectedSources.length > 0 && connectedSources.every(isDetectedOnlyFirstRunSource);
-}
-
-function isDetectedOnlyFirstRunSource(source: FirstRunSourceCandidate): boolean {
-  return !(
-    (source.importedSessions ?? 0) > 0 ||
-    (source.importedRecords ?? source.importedCount ?? 0) > 0 ||
-    (source.metadataSessions ?? 0) > 0 ||
-    (source.transcriptSessions ?? 0) > 0 ||
-    (source.enrichedSessions ?? 0) > 0 ||
-    (source.queuedRecords ?? source.queuedCount ?? 0) > 0 ||
-    Boolean(source.lastSyncAt ?? source.lastSync)
-  );
-}
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
@@ -147,8 +111,6 @@ export function App() {
   const [sessionEndedNotificationsEnabled, setSessionEndedNotificationsEnabled] = useState(() =>
     readStoredSessionEndedNotificationsEnabled()
   );
-  const [onboardingDismissed, setOnboardingDismissed] = useState(() => readOnboardingDismissed());
-  const [manualOnboardingOpen, setManualOnboardingOpen] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedSessionSnapshot, setSelectedSessionSnapshot] = useState<SessionDetailView>();
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
@@ -209,6 +171,9 @@ export function App() {
     syncAll: handleSyncSources,
     syncRuntime: handleSyncAdapter
   } = sourcesController;
+  const sourcesConnectors = useSourcesConnectorsController(activeProjectionUrl, {
+    readOnly: !connection.writable
+  });
   const logbook = useLogbookController({
     activeProjectionUrl,
     activeSurface,
@@ -330,32 +295,20 @@ export function App() {
     onReviewDispositionsChanged: handleReviewDispositionsChanged,
     writable: connection.writable
   });
-  const shouldShowFirstRunOnboarding =
-    !onboardingDismissed &&
-    effectiveLiveConnection.state === "live" &&
-    connection.writable &&
-    shouldOpenSourcesOnboardingForSetup(sourcesSetup);
-  const onboardingOpen = manualOnboardingOpen || shouldShowFirstRunOnboarding;
-  const closeOnboarding = useCallback(() => {
-    setManualOnboardingOpen(false);
-    setOnboardingDismissed(true);
-    writeOnboardingDismissed(true);
-  }, []);
-  const skipOnboarding = useCallback(() => {
-    setManualOnboardingOpen(false);
-    setOnboardingDismissed(true);
-    writeOnboardingDismissed(true);
-  }, []);
   const reopenOnboarding = useCallback(() => {
     setActiveSurface("sources");
-    setOnboardingDismissed(false);
-    writeOnboardingDismissed(false);
-    setManualOnboardingOpen(true);
-  }, []);
+    sourcesConnectors.openOnboarding();
+  }, [sourcesConnectors.openOnboarding]);
 
   useEffect(() => {
-    if (shouldShowFirstRunOnboarding) setActiveSurface("sources");
-  }, [shouldShowFirstRunOnboarding]);
+    if (
+      sourcesConnectors.onboardingOpen &&
+      effectiveLiveConnection.state === "live" &&
+      connection.writable
+    ) {
+      setActiveSurface("sources");
+    }
+  }, [connection.writable, effectiveLiveConnection.state, sourcesConnectors.onboardingOpen]);
 
   const toggleDensity = useCallback(() => {
     setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
@@ -670,18 +623,27 @@ export function App() {
           importFilterRuntime={importFilterRuntime}
           lastRefreshAt={sourcesLastRefreshAt}
           setup={sourcesSetup}
-          busy={sourcesBusy}
+          busy={sourcesBusy || sourcesConnectors.busy}
           enrichment={settingsData.settingsState?.enrichment}
           hooks={sourceHooks}
           hookActionBusy={hookActionBusy}
           llm={settingsData.settingsState?.llm}
-          onboardingOpen={onboardingOpen}
+          onboardingOpen={sourcesConnectors.onboardingOpen}
           readOnly={!connection.writable}
           settingsBaseUrl={activeProjectionUrl}
-          status={sourcesStatus}
+          status={sourcesConnectors.status ?? sourcesStatus}
+          connectorsSnapshot={sourcesConnectors.snapshot}
+          selectedConnectorRuntime={sourcesConnectors.selectedRuntime}
+          onSelectConnectorRuntime={sourcesConnectors.setSelectedRuntime}
+          onDiscoverConnectors={() => void sourcesConnectors.discover()}
+          onEnableConnector={(runtime) => void sourcesConnectors.enable(runtime)}
+          onEnableAllDetectedConnectors={() => void sourcesConnectors.enableAllDetected()}
+          onTestConnector={(runtime) => void sourcesConnectors.test(runtime)}
+          onUninstallConnector={(runtime) => void sourcesConnectors.uninstall(runtime)}
+          onConfirmConnectorActivation={(runtime) => void sourcesConnectors.confirmActivation(runtime)}
           onCancelImport={handleCancelImport}
           onClearImportJobsFilter={handleClearImportJobsFilter}
-          onCloseOnboarding={closeOnboarding}
+          onCloseOnboarding={sourcesConnectors.closeOnboarding}
           onRuntimeHookAction={handleRuntimeHookAction}
           onConnectSelected={handleConnectSelectedSources}
           onEnableTranscriptImport={handleEnableTranscriptImport}
@@ -694,13 +656,16 @@ export function App() {
           onPollImports={handlePollActiveImports}
           onPreviewImport={sourcesController.previewImport}
           onRepairSources={handleRepairSources}
-          onRefresh={handleRefreshSources}
+          onRefresh={() => {
+            void sourcesConnectors.load();
+            void handleRefreshSources();
+          }}
           onRetryImport={handleRetryImport}
           onRunSetup={handleRunSourcesSetup}
           onSaveLlmProvider={settingsData.saveLlmProviderSettings}
           onScan={handleScanSources}
           onScanSetup={handleScanSourcesSetup}
-          onSkipOnboarding={skipOnboarding}
+          onSkipOnboarding={sourcesConnectors.skipOnboarding}
           onSyncAdapter={handleSyncAdapter}
           onSyncSources={handleSyncSources}
         />
