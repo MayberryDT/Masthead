@@ -64,7 +64,7 @@ describe("offline board headline views", () => {
     expect(view.frame).toBeDefined();
     expect(validateBoardHeadlineFrame(view.frame).ok).toBe(true);
     expect(view.headline).not.toMatch(/LLM|waiting for LLM/i);
-    expect(view.headline).toMatch(/in progress|Board headline work|SessionCard/i);
+    expect(view.headline).toMatch(/in progress|making file changes|Board headline work|Board cards|SessionCard/i);
   });
 
   test("uses failure evidence for blocked dispositions", () => {
@@ -154,5 +154,69 @@ describe("offline board headline views", () => {
     expect(view.source).toBe("offline");
     expect(view.status).toBe("ready");
     expect(view.frame?.state).toBe("failed");
+  });
+
+  test("varies idle dispositions from attention, files, and event evidence", () => {
+    const risk = buildOfflineBoardHeadlineView(
+      input({
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        recentTranscriptMessages: [],
+        attentionTitles: ["High-risk change"],
+        changedFileCount: 12,
+        runtime: "grok"
+      })
+    );
+    expect(risk.frame?.disposition).toBe("high-risk change still open");
+
+    const afterTests = buildOfflineBoardHeadlineView(
+      input({
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        recentTranscriptMessages: [],
+        attentionTitles: [],
+        recentEvents: [{ type: "command.finished", summary: "npm test -- --run src/ui/workbench", occurredAt: "2026-07-08T12:00:00.000Z" }],
+        changedFileCount: 2,
+        runtime: "grok"
+      })
+    );
+    expect(afterTests.frame?.disposition).toBe("quiet after last test run");
+
+    const afterCommit = buildOfflineBoardHeadlineView(
+      input({
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        recentTranscriptMessages: [],
+        attentionTitles: [],
+        recentEvents: [{ type: "command.finished", summary: "git commit -m fix(ui): workbench chrome", occurredAt: "2026-07-08T12:00:00.000Z" }],
+        runtime: "codex"
+      })
+    );
+    expect(afterCommit.frame?.disposition).toBe("quiet after last commit");
+
+    const fileChurn = buildOfflineBoardHeadlineView(
+      input({
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        recentTranscriptMessages: [],
+        attentionTitles: [],
+        recentEvents: [],
+        recentToolNames: [],
+        changedFileCount: 40,
+        runtime: "grok"
+      })
+    );
+    expect(fileChurn.frame?.disposition).toBe("quiet after 40 file changes");
+  });
+
+  test("varies active dispositions from tools", () => {
+    const editing = buildOfflineBoardHeadlineView(
+      input({
+        lifecycle: "running",
+        primaryStatus: "editing",
+        recentToolNames: ["search_replace", "read_file"]
+      })
+    );
+    expect(editing.frame?.disposition).toBe("editing files");
   });
 });

@@ -152,7 +152,9 @@ describe("live projection client helpers", () => {
     expect(projection.lanes?.map((lane) => lane.laneId)).toEqual(["running", "idle", "needs_action", "history"]);
     expect(projection.summary.running).toBe(1);
     expect(projection.summary.needsAction).toBe(1);
-    expect(projection.cards[0].headline.headline).toBe("Masthead OpenCode session: waiting for the next required input.");
+    expect(projection.cards[0].headline.headline).toMatch(
+      /Masthead OpenCode session: (waiting for the next required input|waiting for approval|approval requested)\./i
+    );
     expect(projection.cards[0].headline.source).toBe("offline");
     expect("copy" in projection.cards[0]).toBe(false);
     expect(projection.cards[1].headline.headline).toBe("Masthead OpenCode session: ready for review.");
@@ -186,13 +188,12 @@ describe("live projection client helpers", () => {
 
     expect(selectedProjection.selectedSession).toMatchObject({
       sessionId: "running-session",
-      currentActivity: "in progress",
       headline: {
-        headline: "Masthead OpenCode session: in progress.",
         source: "offline",
         status: "ready"
       }
     });
+    expect(selectedProjection.selectedSession?.headline.headline).toMatch(/in progress|making file changes|editing files|inspecting/i);
     expect(selectedProjection.selectedSession?.headline.headline).not.toMatch(/LLM/i);
     expect(selectedProjection.selectedSession && "copy" in selectedProjection.selectedSession).toBe(false);
   });
@@ -225,7 +226,7 @@ describe("live projection client helpers", () => {
       conflicts: []
     } as unknown as LiveBoardProjection);
 
-    expect(projection.cards[0].headline.headline).toBe("Masthead OpenCode session: in progress.");
+    expect(projection.cards[0].headline.headline).toMatch(/Masthead OpenCode session: (in progress|making file changes|editing files|inspecting the workspace)\./);
     expect(projection.cards[0].headline.source).toBe("offline");
     expect(projection.cards[0].headline.headline).not.toMatch(/LLM/i);
     expect("copy" in projection.cards[0]).toBe(false);

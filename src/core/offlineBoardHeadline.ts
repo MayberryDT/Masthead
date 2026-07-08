@@ -243,24 +243,186 @@ function isOpaqueIdentifier(value: string): boolean {
 }
 
 function offlineDisposition(input: BoardHeadlineInput): string {
+  // Blocked keeps explicit "blocked by …" shape for inspectors and tests.
+  if (input.stateHint === "blocked") {
+    return `blocked by ${blockedFailure(input)}`;
+  }
+
+  const specific = dispositionFromSessionEvidence(input);
+  if (specific) return specific;
+
   switch (input.stateHint) {
-    case "blocked":
-      return `blocked by ${blockedFailure(input)}`;
     case "needs_verification":
       return "needs verification after recent changes";
     case "paused":
-      return "idle after latest activity";
+      return idleDispositionFallback(input);
     case "completed":
       return "ready for review";
     case "failed":
       return "failed on latest recorded evidence";
     case "waiting":
-      return "waiting for the next required input";
+      return waitingDispositionFallback(input);
     case "active":
-      return "in progress";
+      return activeDispositionFallback(input);
     case "unknown":
       return "latest activity recorded";
   }
+}
+
+/**
+ * Build a short disposition from real session signals so idle cards are not all
+ * "idle after latest activity".
+ */
+function dispositionFromSessionEvidence(input: BoardHeadlineInput): string | undefined {
+  const status = input.primaryStatus.toLowerCase();
+  const facts = input.facts;
+  const attention = facts.attentionTitles.map((title) => title.trim()).filter(Boolean);
+  const failures = facts.recentCommandFailures.map((value) => value.trim()).filter(Boolean);
+  const tools = facts.recentToolNames.map((value) => value.trim()).filter(Boolean);
+  const events = facts.recentEvents.map((event) => event.summary.trim()).filter(Boolean);
+  const files = facts.recentFileBasenames.map((value) => value.trim()).filter(Boolean);
+  const fileCount = facts.changedFileCount ?? 0;
+
+  // Attention / risk first — these cards already surface risk indicators.
+  const riskAttention = attention.find((title) => /\bhigh[- ]?risk\b/i.test(title) || /\brisk\b/i.test(title));
+  if (riskAttention && (input.stateHint === "paused" || input.stateHint === "unknown")) {
+    return "high-risk change still open";
+  }
+  const cleanAttention = attention.find((title) => isUsefulDispositionSnippet(title));
+  if (cleanAttention && (input.stateHint === "paused" || input.stateHint === "waiting" || input.stateHint === "blocked")) {
+    return clipDisposition(cleanAttention);
+  }
+
+  // Command failures
+  const failure = failures.find((value) => isSafeBlockedFailure(value) || isUsefulDispositionSnippet(value));
+  if (failure && (input.stateHint === "blocked" || input.stateHint === "failed" || input.stateHint === "paused")) {
+    if (/\btest\b|\bvitest\b|\bjest\b|\bpytest\b/i.test(failure)) return "last test run failed";
+    if (/\bbuild\b|\bcompile\b/i.test(failure)) return "last build failed";
+    return `last command failed`;
+  }
+
+  // Recent event summaries (git commit, npm test, etc.)
+  for (const summary of events) {
+    const fromEvent = dispositionFromEventSummary(summary, input.stateHint);
+    if (fromEvent) return fromEvent;
+  }
+  for (const hint of input.dispositionHints) {
+    const fromHint = dispositionFromEventSummary(hint, input.stateHint);
+    if (fromHint) return fromHint;
+  }
+  for (const item of input.evidence) {
+    const fromEvidence = dispositionFromEventSummary(item, input.stateHint);
+    if (fromEvidence) return fromEvidence;
+  }
+
+  // Tool activity
+  if (tools.length > 0) {
+    const lastTool = tools[0]!;
+    if (input.stateHint === "active") {
+      if (/edit|write|search_replace|apply/i.test(lastTool)) return "editing files";
+      if (/test|vitest|npm/i.test(lastTool)) return "running checks";
+      if (/read|grep|search|list/i.test(lastTool)) return "inspecting the workspace";
+      return "working through tool calls";
+    }
+    if (input.stateHint === "paused" || input.stateHint === "unknown") {
+      if (/edit|write|search_replace|apply/i.test(lastTool)) return "quiet after last file edit";
+      if (/test|vitest/i.test(lastTool)) return "quiet after last test run";
+      if (/commit|git/i.test(lastTool)) return "quiet after last commit";
+      if (/read|grep|search|list/i.test(lastTool)) return "quiet after last inspection";
+      return "quiet after last tool activity";
+    }
+  }
+
+  // File churn
+  if (fileCount >= 20 && (input.stateHint === "paused" || input.stateHint === "unknown")) {
+    return `quiet after ${fileCount} file changes`;
+  }
+  if (fileCount >= 3 && (input.stateHint === "paused" || input.stateHint === "unknown")) {
+    return "quiet after recent file changes";
+  }
+  if (files.some((name) => /\.test\.|\.spec\.|__tests__/i.test(name)) && input.stateHint === "paused") {
+    return "quiet after test file changes";
+  }
+  if (files.some((name) => /workbench|headline|sessioncard/i.test(name)) && input.stateHint === "paused") {
+    return "quiet after UI changes";
+  }
+
+  // Primary status nuances
+  if (status === "stalled" || status === "possibly_looping") return "stalled with no new turns";
+  if (status.includes("waiting") && input.stateHint !== "active") return "waiting for the next required input";
+
+  return undefined;
+}
+
+function dispositionFromEventSummary(summary: string, stateHint: BoardHeadlineInput["stateHint"]): string | undefined {
+  const cleaned = summary.replace(/\s+/g, " ").trim();
+  if (!cleaned || cleaned.length > 120) return undefined;
+  if (!isUsefulDispositionSnippet(cleaned) && !/git |npm |vitest|commit|test/i.test(cleaned)) return undefined;
+
+  const idle = stateHint === "paused" || stateHint === "unknown" || stateHint === "completed";
+  const active = stateHint === "active";
+
+  if (/\bgit\s+commit\b|\bgit commit\b|fix\([^)]+\):|feat\([^)]+\):|docs\([^)]+\):/i.test(cleaned) || /^fix:|^feat:|^docs:|^test:|^chore:/i.test(cleaned)) {
+    return idle ? "quiet after last commit" : active ? "committing changes" : "after last commit";
+  }
+  if (/\bnpm test\b|\bvitest\b|\bjest\b|\bpytest\b|\btest run\b/i.test(cleaned)) {
+    if (/\bfail/i.test(cleaned)) return "last test run failed";
+    return idle ? "quiet after last test run" : active ? "running tests" : "after last test run";
+  }
+  if (/\bnpm run build\b|\btsc\b|\btypecheck\b|\bbuild\b/i.test(cleaned)) {
+    if (/\bfail/i.test(cleaned)) return "last build failed";
+    return idle ? "quiet after last build" : active ? "building" : "after last build";
+  }
+  if (/\bgit add\b|\bgit status\b|\bgit diff\b/i.test(cleaned)) {
+    return idle ? "quiet after git review" : active ? "reviewing git changes" : "after git review";
+  }
+  if (/^grok build hook event$/i.test(cleaned) || /^codex hook event\b/i.test(cleaned)) {
+    return idle ? "hook activity settled" : undefined;
+  }
+  return undefined;
+}
+
+function idleDispositionFallback(input: BoardHeadlineInput): string {
+  const status = input.primaryStatus.toLowerCase();
+  if (status === "stalled" || status === "possibly_looping") return "stalled with no new turns";
+  if ((input.facts.changedFileCount ?? 0) > 0) return "no new agent turns";
+  if (input.facts.recentToolNames.length > 0) return "no new tool activity";
+  return "no new agent activity";
+}
+
+function activeDispositionFallback(input: BoardHeadlineInput): string {
+  const tools = input.facts.recentToolNames;
+  if (tools.some((tool) => /test|vitest/i.test(tool))) return "running checks";
+  if (tools.some((tool) => /edit|write|search_replace/i.test(tool))) return "editing files";
+  if (tools.some((tool) => /read|grep|search|list/i.test(tool))) return "inspecting the workspace";
+  if ((input.facts.changedFileCount ?? 0) > 0) return "making file changes";
+  return "in progress";
+}
+
+function waitingDispositionFallback(input: BoardHeadlineInput): string {
+  if (input.signals.includes("approval_waiting")) return "waiting for approval";
+  if (input.signals.includes("user_reply_waiting")) return "waiting for a user reply";
+  return "waiting for the next required input";
+}
+
+function isUsefulDispositionSnippet(value: string): boolean {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (!cleaned || cleaned.length < 6 || cleaned.length > 72) return false;
+  if (/\bhttps?:\/\//i.test(cleaned)) return false;
+  if (/::[-\w]+\{[^}]*\}/i.test(cleaned)) return false;
+  if (/\bsk-[A-Za-z0-9_-]+\b/i.test(cleaned)) return false;
+  if (hasUnsafeCredentialName(cleaned)) return false;
+  if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/i.test(cleaned)) return false; // tool names
+  if (/^grok build hook event$/i.test(cleaned) || /^codex hook event\b/i.test(cleaned)) return false;
+  if (/^high-risk change$/i.test(cleaned)) return true;
+  if (/[{}`|=]/.test(cleaned)) return false;
+  return true;
+}
+
+function clipDisposition(value: string): string {
+  const cleaned = value.replace(/\s+/g, " ").trim().replace(/[.?!]+$/g, "");
+  if (cleaned.length <= 72) return cleaned.charAt(0).toLowerCase() + cleaned.slice(1);
+  return `${cleaned.slice(0, 69).trim()}...`;
 }
 
 function blockedFailure(input: BoardHeadlineInput): string {
@@ -295,8 +457,9 @@ function hasUnsafeCredentialName(value: string): boolean {
 
 function fallbackDisposition(input: BoardHeadlineInput): string {
   if (input.stateHint === "blocked") return "blocked by recorded session evidence";
-  if (input.stateHint === "active") return "in progress";
-  if (input.stateHint === "paused") return "idle after latest activity";
+  if (input.stateHint === "active") return activeDispositionFallback(input);
+  if (input.stateHint === "paused") return idleDispositionFallback(input);
+  if (input.stateHint === "waiting") return waitingDispositionFallback(input);
   return "latest activity recorded";
 }
 
