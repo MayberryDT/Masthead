@@ -77,13 +77,16 @@ function fallbackBoardHeadlineFrame(input: BoardHeadlineInput): BoardHeadlineFra
 function offlineSubject(input: BoardHeadlineInput): string {
   for (const candidate of input.subjectCandidates) {
     const normalized = normalizeSubject(candidate);
-    if (normalized && !isGenericSubject(normalized) && !isWeakAreaSubject(normalized, input)) {
+    if (
+      normalized &&
+      !isGenericSubject(normalized) &&
+      !isWeakAreaSubject(normalized, input) &&
+      !isWeakFilenameEvidence(normalized) &&
+      !isOpaqueIdentifier(normalized)
+    ) {
       return normalized;
     }
   }
-
-  const fromEvidence = subjectFromEvidence(input.evidence);
-  if (fromEvidence) return fromEvidence;
 
   const workContext = normalizeSubject(input.facts.workContext?.label);
   if (workContext && !isGenericSubject(workContext) && !isWeakAreaSubject(workContext, input)) {
@@ -95,8 +98,15 @@ function offlineSubject(input: BoardHeadlineInput): string {
     return title;
   }
 
+  // Prefer specific non-filename evidence (commit subjects, short phrases) before project/runtime.
+  const phraseEvidence = subjectFromEvidence(input.evidence, { allowFilenames: false });
+  if (phraseEvidence) return phraseEvidence;
+
   const projectRuntime = projectRuntimeSubject(input);
   if (projectRuntime) return projectRuntime;
+
+  const fileEvidence = subjectFromEvidence(input.evidence, { allowFilenames: true });
+  if (fileEvidence) return fileEvidence;
 
   return projectSubject(input) ?? "Session";
 }
@@ -132,7 +142,7 @@ function isWeakAreaSubject(value: string, input: BoardHeadlineInput): boolean {
   return clusters.length !== 1;
 }
 
-function subjectFromEvidence(evidence: string[]): string | undefined {
+function subjectFromEvidence(evidence: string[], options: { allowFilenames: boolean } = { allowFilenames: true }): string | undefined {
   for (const raw of evidence) {
     const cleaned = raw.replace(/\s+/g, " ").trim();
     if (!cleaned || cleaned.length < 8 || cleaned.length > 72) continue;
@@ -147,15 +157,28 @@ function subjectFromEvidence(evidence: string[]): string | undefined {
       const subject = cleaned.replace(/^(fix|feat|docs|test|chore)[:\s]*/i, "").replace(/\s+/g, " ").trim();
       if (subject.length >= 6 && subject.length <= 56) return subject.replace(/[.?!]+$/g, "");
     }
-    // File basenames that are specific components.
-    if (/^[A-Za-z][A-Za-z0-9]+(?:Card|Panel|Surface|Toolbar|Board|Workbench|Controller)\.(?:tsx?|jsx?)$/i.test(cleaned)) {
-      return cleaned.replace(/\.[^.]+$/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
+    // File basenames that are specific components (never README.md / package.json / etc.).
+    if (options.allowFilenames) {
+      if (isWeakFilenameEvidence(cleaned)) continue;
+      if (/^[A-Za-z][A-Za-z0-9]+(?:Card|Panel|Surface|Toolbar|Board|Workbench|Controller|Repository)\.(?:tsx?|jsx?)$/i.test(cleaned)) {
+        return cleaned.replace(/\.[^.]+$/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
+      }
+    } else if (/\.[a-z0-9]+$/i.test(cleaned) && !/\s/.test(cleaned)) {
+      continue;
     }
-    if (/^[A-Za-z][\w .-]{5,55}$/.test(cleaned) && !/[{}`|=]/.test(cleaned)) {
+    if (/^[A-Za-z][\w .-]{5,55}$/.test(cleaned) && !/[{}`|=]/.test(cleaned) && !/\.[a-z0-9]+$/i.test(cleaned)) {
       return cleaned.replace(/[.?!]+$/g, "");
     }
   }
   return undefined;
+}
+
+function isWeakFilenameEvidence(value: string): boolean {
+  if (!/\.[a-z0-9]+$/i.test(value) || /\s/.test(value)) return false;
+  const base = value.replace(/\.[^.]+$/, "").toLowerCase();
+  return /^(readme|changelog|license|package|tsconfig|vite\.config|index|main|app|utils?|helpers?|types?|constants?|styles?|masthead)$/i.test(
+    base
+  ) || /^(product-release-gate|acceptance|quickstart)$/i.test(base);
 }
 
 function projectRuntimeSubject(input: BoardHeadlineInput): string | undefined {

@@ -115,7 +115,8 @@ describe("offline board headline views", () => {
 
     expect(view.frame?.subject).not.toMatch(/settings ui/i);
     expect(view.headline).not.toMatch(/^Settings UI:/i);
-    expect(view.headline).toMatch(/Masthead|Grok Build|product-release|README/i);
+    expect(view.headline).not.toMatch(/^README\.md:/i);
+    expect(view.headline).toMatch(/Masthead · Grok Build|Masthead/i);
   });
 
   test("sanitizes unsafe blocked failure hints before rendering an offline headline", () => {
