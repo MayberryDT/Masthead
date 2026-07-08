@@ -29,6 +29,7 @@ export function WorkbenchPanel({
   const selectionCount = selectedSessionIds.size;
   const canCopyAgentPrompt = selectionCount > 0 && handoffText.trim().length > 0;
   const publishPathLabel = loading ? "…" : String(sessions.length);
+  const notAddedLabel = notAddedSummary != null ? String(notAddedSummary.total) : undefined;
   const copyAgentPrompt = () => {
     if (!canCopyAgentPrompt) return;
     void copyTextToClipboard(handoffText);
@@ -60,6 +61,12 @@ export function WorkbenchPanel({
             <div>
               <dt>Selected</dt>
               <dd>{selectionCount}</dd>
+            </div>
+          ) : null}
+          {notAddedLabel != null ? (
+            <div>
+              <dt>Not Added to Logbook</dt>
+              <dd>{notAddedLabel}</dd>
             </div>
           ) : null}
         </dl>
@@ -97,9 +104,6 @@ export function WorkbenchPanel({
                 <tr className="workbench-empty-row">
                   <td className="workbench-session-empty" colSpan={8}>
                     <span className="workbench-empty-title">{loading ? "Loading" : "No publish-path sessions"}</span>
-                    {!loading && notAddedSummary != null ? (
-                      <span className="workbench-empty-not-added">Not Added to Logbook · {notAddedSummary.total}</span>
-                    ) : null}
                   </td>
                 </tr>
               ) : (
@@ -121,7 +125,9 @@ export function WorkbenchPanel({
                           <input type="checkbox" checked={selected} onChange={() => onToggleSession?.(session.sessionId)} aria-label={`Select ${safeTitle}`} />
                           <span className="workbench-session-meta">
                             <strong>{safeTitle}</strong>
-                            <span>{safeProject} / {safeRuntime} / {safeLifecycle}</span>
+                            <span>
+                              {safeProject} / {safeRuntime} / {safeLifecycle}
+                            </span>
                             <span>{safeSessionId}</span>
                           </span>
                         </label>
@@ -157,7 +163,7 @@ export function WorkbenchPanel({
         </div>
 
         <aside className="workbench-activity-rail" aria-label="Workbench Activity">
-          <div className="workbench-rail-block">
+          <div className="workbench-rail-block workbench-activity-block">
             <p className="mono-label">Workbench Activity</p>
             {activity.length === 0 ? (
               <p className="workbench-muted">No activity yet</p>
@@ -166,26 +172,12 @@ export function WorkbenchPanel({
                 {activity.map((item) => (
                   <li key={item.activityId}>
                     <span>{sanitizeWorkbenchVisibleText(item.summary)}</span>
-                    <small>{sanitizeWorkbenchVisibleText(item.eventType)} / {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}</small>
+                    <small>
+                      {sanitizeWorkbenchVisibleText(item.eventType)} / {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
+                    </small>
                   </li>
                 ))}
               </ol>
-            )}
-          </div>
-          <div className="workbench-rail-block">
-            <p className="mono-label">Not Added to Logbook</p>
-            <p className="workbench-not-added-total">{notAddedSummary ? String(notAddedSummary.total) : "-"}</p>
-            {notAddedSummary?.reasons.length ? (
-              <ul className="workbench-reason-list">
-                {notAddedSummary.reasons.slice(0, 5).map((item) => (
-                  <li key={item.reason}>
-                    <span>{sanitizeWorkbenchVisibleText(item.reason)}</span>
-                    <strong>{item.count}</strong>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="workbench-muted">No filtered sessions</p>
             )}
           </div>
         </aside>

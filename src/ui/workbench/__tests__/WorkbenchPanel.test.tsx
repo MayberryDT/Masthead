@@ -56,7 +56,6 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("Raw session needing enrichment");
     expect(html).toContain("check transcript");
     expect(html).toContain("Workbench Activity");
-    expect(html).toContain("Not Added to Logbook");
     expect(html).toContain("Masthead");
     expect(html).toContain("codex");
     expect(html).toContain("ended");
@@ -96,14 +95,16 @@ describe("WorkbenchPanel", () => {
     );
 
     expect(html).toContain("No publish-path sessions");
-    expect(html).toContain("Not Added to Logbook · 12");
     expect(html).toContain("Publish path");
     expect(html).toContain(">0</dd>");
     expect(html).toContain("Workbench Activity");
     expect(html).toContain("No activity yet");
     expect(html).toContain("Not Added to Logbook");
-    expect(html).toContain("hook_only");
+    expect(html).toContain(">12</dd>");
+    expect(html).not.toContain("hook_only");
     expect(html).toContain("Copy Agent Prompt");
+    expect(html).toContain("workbench-activity-rail");
+    expect(html).not.toContain("workbench-reason-list");
     expect(html).not.toContain("<h1");
     expect(html).not.toContain("<h2");
     expect(html).not.toContain("textarea");
@@ -128,8 +129,8 @@ describe("WorkbenchPanel", () => {
     );
 
     expect(html).toContain("No publish-path sessions");
-    expect(html).not.toContain("Not Added to Logbook ·");
-    expect(html).toContain("No filtered sessions");
+    expect(html).not.toContain("Not Added to Logbook");
+    expect(html).toContain("No activity yet");
   });
 
   test("sanitizes forbidden session metadata before rendering the panel", () => {

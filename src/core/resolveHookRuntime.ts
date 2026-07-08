@@ -22,20 +22,21 @@ export type ResolveHookRuntimeInput = {
 
 /**
  * Resolve the runtime a hook should attribute to, in priority order:
- * 1. Host detection from process/env when unambiguous
- *    (beats a conflicting MASTHEAD_RUNTIME pin — e.g. Grok dual-firing a Claude-pinned command)
- * 2. MASTHEAD_RUNTIME env (explicit install pin; used when host is unknown or matches)
+ * 1. Strong dual-fire host markers only (Grok hook fire markers beat a Claude pin)
+ * 2. MASTHEAD_RUNTIME env (explicit install pin — preferred for normal installs)
  * 3. runtime query param on MASTHEAD_INGEST_URL
  * 4. payload runtime / adapter
+ * 5. Weak host markers for unpinned legacy hooks (never ambient GROK_AGENT/HOME)
+ *
+ * Ambient vars like GROK_AGENT / GROK_HOME must not steal Codex or other harness
+ * sessions when those agents inherit a shared user environment.
  */
 export function resolveHookRuntime(input: ResolveHookRuntimeInput = {}): HookRuntimeKind | undefined {
   const env = input.env ?? {};
 
-  const host = detectHostRuntime(env, {
-    processPath: input.processPath,
-    argv: input.argv
-  });
-  if (host) return host;
+  // Strong dual-fire only: Grok Build sets these when it actually fires hooks
+  // (including when it dual-invokes Claude settings.json hooks).
+  if (hasStrongGrokDualFireMarkers(env)) return "grok";
 
   const pinned = normalizeRuntime(env.MASTHEAD_RUNTIME);
   if (pinned) return pinned;
@@ -44,22 +45,22 @@ export function resolveHookRuntime(input: ResolveHookRuntimeInput = {}): HookRun
   if (fromUrl) return fromUrl;
 
   const payload = input.payload && typeof input.payload === "object" && !Array.isArray(input.payload) ? input.payload : {};
-  return normalizeRuntime(stringField(payload, "runtime") ?? stringField(payload, "adapter"));
+  const fromPayload = normalizeRuntime(stringField(payload, "runtime") ?? stringField(payload, "adapter"));
+  if (fromPayload) return fromPayload;
+
+  return detectWeakHostRuntime(env, {
+    processPath: input.processPath,
+    argv: input.argv
+  });
 }
 
+/** @deprecated Prefer resolveHookRuntime; kept for tests that assert dual-fire vs ambient. */
 export function detectHostRuntime(
   env: Record<string, string | undefined> = {},
   options: { processPath?: string; argv?: readonly string[] } = {}
 ): HookRuntimeKind | undefined {
-  if (hasGrokHostMarkers(env, options)) return "grok";
-  if (hasClaudeHostMarkers(env, options)) return "claude_code";
-  if (hasCodexHostMarkers(env, options)) return "codex";
-  if (hasCursorHostMarkers(env, options)) return "cursor";
-  if (hasOpenCodeHostMarkers(env, options)) return "opencode";
-  if (hasOmpHostMarkers(env, options)) return "omp";
-  if (hasPiHostMarkers(env, options)) return "pi";
-  if (hasHermesHostMarkers(env, options)) return "hermes";
-  return undefined;
+  if (hasStrongGrokDualFireMarkers(env)) return "grok";
+  return detectWeakHostRuntime(env, options);
 }
 
 export function runtimeFromIngestUrl(ingestUrl: string | undefined): HookRuntimeKind | undefined {
@@ -90,27 +91,41 @@ export function normalizeRuntime(value: string | undefined | null): HookRuntimeK
   return (HOOK_RUNTIME_KINDS as readonly string[]).includes(trimmed) ? (trimmed as HookRuntimeKind) : undefined;
 }
 
-function hasGrokHostMarkers(
+/** Markers Grok sets only while executing a hook (including dual-fired Claude hooks). */
+function hasStrongGrokDualFireMarkers(env: Record<string, string | undefined>): boolean {
+  return nonEmpty(env.GROK_HOOK_EVENT) || nonEmpty(env.GROK_HOOK_NAME) || nonEmpty(env.GROK_SESSION_ID);
+}
+
+/**
+ * Weak host hints for legacy unpinned hooks only.
+ * Intentionally excludes ambient GROK_AGENT / GROK_HOME / any-GROK_* — those leak into
+ * sibling harness processes and mis-attribute Codex/Claude/etc.
+ */
+function detectWeakHostRuntime(
   env: Record<string, string | undefined>,
   options: { processPath?: string; argv?: readonly string[] }
-): boolean {
-  // Strong session/hook markers set by Grok Build when firing hooks (including dual-fired Claude settings).
-  if (nonEmpty(env.GROK_HOOK_EVENT) || nonEmpty(env.GROK_HOOK_NAME) || nonEmpty(env.GROK_SESSION_ID)) return true;
-  if (nonEmpty(env.GROK_WORKSPACE_ROOT) || nonEmpty(env.GROK_AGENT) || nonEmpty(env.GROK_HOME)) return true;
-  if (envKeyPrefixPresent(env, "GROK_")) return true;
-  if (pathLooksLike(options.processPath, "grok") || argvLooksLike(options.argv, "grok")) return true;
-  return false;
+): HookRuntimeKind | undefined {
+  if (hasClaudeHostMarkers(env, options)) return "claude_code";
+  if (hasCodexHostMarkers(env, options)) return "codex";
+  if (hasCursorHostMarkers(env, options)) return "cursor";
+  if (hasOpenCodeHostMarkers(env, options)) return "opencode";
+  if (hasOmpHostMarkers(env, options)) return "omp";
+  if (hasPiHostMarkers(env, options)) return "pi";
+  if (hasHermesHostMarkers(env, options)) return "hermes";
+  // Grok only via strong dual-fire markers above, or explicit pin/URL — not ambient agent flags.
+  return undefined;
 }
 
 function hasClaudeHostMarkers(
   env: Record<string, string | undefined>,
   options: { processPath?: string; argv?: readonly string[] }
 ): boolean {
-  // Prefer Claude-specific markers. CLAUDE_PROJECT_DIR alone is also set by Grok Build, so only
-  // treat it as Claude when no Grok markers fired (caller already ruled Grok out).
   if (nonEmpty(env.CLAUDE_CODE_ENTRYPOINT) || nonEmpty(env.CLAUDE_CODE_SESSION)) return true;
-  if (nonEmpty(env.CLAUDE_PROJECT_DIR) || nonEmpty(env.CLAUDE_HOME)) return true;
+  if (nonEmpty(env.CLAUDE_HOME)) return true;
   if (envKeyPrefixPresent(env, "CLAUDE_CODE_")) return true;
+  // CLAUDE_PROJECT_DIR is also set by Grok Build dual-fire; only use with other Claude signals
+  // or when no strong Grok dual-fire markers (caller already checked strong Grok).
+  if (nonEmpty(env.CLAUDE_PROJECT_DIR) && !hasStrongGrokDualFireMarkers(env)) return true;
   if (pathLooksLike(options.processPath, "claude") || argvLooksLike(options.argv, "claude")) return true;
   return false;
 }
@@ -119,8 +134,9 @@ function hasCodexHostMarkers(
   env: Record<string, string | undefined>,
   options: { processPath?: string; argv?: readonly string[] }
 ): boolean {
-  if (nonEmpty(env.CODEX_HOME) || nonEmpty(env.CODEX_THREAD_ID) || nonEmpty(env.CODEX_SESSION_ID)) return true;
-  if (envKeyPrefixPresent(env, "CODEX_") && !envKeyPrefixPresent(env, "GROK_")) return true;
+  if (nonEmpty(env.CODEX_THREAD_ID) || nonEmpty(env.CODEX_SESSION_ID)) return true;
+  // CODEX_HOME alone is a path config and may be set outside Codex; require thread/session or path.
+  if (envKeyPrefixPresent(env, "CODEX_") && (nonEmpty(env.CODEX_THREAD_ID) || nonEmpty(env.CODEX_SESSION_ID))) return true;
   if (pathLooksLike(options.processPath, "codex") || argvLooksLike(options.argv, "codex")) return true;
   return false;
 }

@@ -15,7 +15,7 @@ describe("resolveHookRuntime", () => {
     ).toBe("grok");
   });
 
-  test("Grok host markers override URL claude_code", () => {
+  test("strong Grok dual-fire markers override URL claude_code", () => {
     expect(
       resolveHookRuntime({
         env: {
@@ -28,7 +28,7 @@ describe("resolveHookRuntime", () => {
     ).toBe("grok");
   });
 
-  test("Grok host markers override Claude MASTHEAD_RUNTIME pin and URL (dual-fire after reinstall)", () => {
+  test("strong Grok dual-fire markers override Claude MASTHEAD_RUNTIME pin (dual-fire after reinstall)", () => {
     expect(
       resolveHookRuntime({
         env: {
@@ -42,17 +42,40 @@ describe("resolveHookRuntime", () => {
     ).toBe("grok");
   });
 
-  test("unambiguous host beats any conflicting pin", () => {
+  test("ambient GROK_AGENT does not steal Codex pin or URL", () => {
     expect(
       resolveHookRuntime({
         env: {
-          MASTHEAD_RUNTIME: "cursor",
-          GROK_HOOK_EVENT: "UserPromptSubmit",
-          GROK_SESSION_ID: "sess-1"
+          MASTHEAD_RUNTIME: "codex",
+          MASTHEAD_INGEST_URL: "http://127.0.0.1:17373/ingest?runtime=codex",
+          GROK_AGENT: "1"
         },
         payload: {}
       })
-    ).toBe("grok");
+    ).toBe("codex");
+
+    expect(
+      resolveHookRuntime({
+        env: {
+          MASTHEAD_INGEST_URL: "http://127.0.0.1:17373/ingest?runtime=codex",
+          GROK_AGENT: "1",
+          GROK_HOME: "/home/user/.grok"
+        },
+        payload: {}
+      })
+    ).toBe("codex");
+  });
+
+  test("ambient GROK_AGENT does not steal unpinned Claude URL", () => {
+    expect(
+      resolveHookRuntime({
+        env: {
+          MASTHEAD_INGEST_URL: "http://127.0.0.1:17373/ingest?runtime=claude_code",
+          GROK_AGENT: "1"
+        },
+        payload: {}
+      })
+    ).toBe("claude_code");
   });
 
   test("pin is used when host is unknown", () => {
@@ -67,7 +90,7 @@ describe("resolveHookRuntime", () => {
     ).toBe("grok");
   });
 
-  test("matching pin and host stay on that runtime", () => {
+  test("matching pin and Claude weak markers stay on that runtime", () => {
     expect(
       resolveHookRuntime({
         env: {
@@ -111,14 +134,19 @@ describe("resolveHookRuntime", () => {
     ).toBe("hermes");
   });
 
-  test("Grok host markers beat Claude markers when both present", () => {
+  test("strong Grok dual-fire markers beat Claude markers when both present", () => {
     expect(
       detectHostRuntime({
-        GROK_AGENT: "1",
+        GROK_HOOK_EVENT: "PreToolUse",
+        GROK_SESSION_ID: "sess-1",
         CLAUDE_PROJECT_DIR: "/workspace/masthead",
         CLAUDE_CODE_SUBAGENT_MODEL: "openrouter/free"
       })
     ).toBe("grok");
+  });
+
+  test("ambient GROK_AGENT alone is not host detection", () => {
+    expect(detectHostRuntime({ GROK_AGENT: "1", GROK_HOME: "/tmp/.grok" })).toBeUndefined();
   });
 });
 

@@ -2271,13 +2271,16 @@ main {
 .workbench-panel.surface-panel,
 .workbench-panel {
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   width: 100%;
+  height: 100%;
   gap: var(--space-sm);
   margin: 0;
   border: 0;
   background: transparent;
   padding: 0;
   min-width: 0;
+  min-height: 0;
 }
 
 .workbench-surface {
@@ -2286,10 +2289,12 @@ main {
   height: 100%;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .workbench-surface > .workbench-panel {
   min-height: 0;
+  height: 100%;
 }
 
 .workbench-toolbar.observability-toolbar {
@@ -2382,15 +2387,18 @@ main {
 
 .workbench-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.32fr);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.34fr);
   gap: var(--space-sm);
   min-width: 0;
   min-height: 0;
+  height: 100%;
+  align-items: stretch;
 }
 
 .workbench-table-wrap {
   min-width: 0;
   min-height: 0;
+  height: 100%;
   overflow: auto;
   border: 1px solid rgba(92, 153, 187, 0.16);
   border-radius: 5px;
@@ -2614,15 +2622,21 @@ main {
 
 .workbench-activity-rail {
   display: grid;
-  align-content: start;
+  grid-template-rows: minmax(0, 1fr);
   gap: var(--space-sm);
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .workbench-rail-block {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   border: 1px solid rgba(92, 153, 187, 0.16);
   border-radius: 5px;
   background: #081d2b;
@@ -2630,6 +2644,11 @@ main {
     0 0 0 1px rgba(92, 153, 187, 0.08),
     0 2px 8px rgba(0, 0, 0, 0.12);
   padding: 12px 14px;
+  overflow: hidden;
+}
+
+.workbench-activity-block {
+  min-height: 0;
 }
 
 .workbench-rail-block .mono-label {
@@ -2649,6 +2668,14 @@ main {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.workbench-activity-list {
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  align-content: start;
 }
 
 .workbench-activity-list li {
