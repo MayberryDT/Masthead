@@ -1142,6 +1142,98 @@ export async function getWorkbenchNotAddedSessions(
   });
 }
 
+export async function postWorkbenchCheckTranscript(
+  baseUrl: string,
+  sessionId: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<unknown> {
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/check-transcript`, {
+    label: "workbench check transcript",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchImportTranscriptPreview(
+  baseUrl: string,
+  sessionId: string,
+  options: { sourceId?: string; signal?: AbortSignal } = {}
+): Promise<unknown> {
+  const body = options.sourceId === undefined ? undefined : { sourceId: options.sourceId };
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/import-transcript-preview`, {
+    body,
+    label: "workbench import transcript preview",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchImportTranscript(
+  baseUrl: string,
+  sessionId: string,
+  options: { sourceId?: string; signal?: AbortSignal } = {}
+): Promise<unknown> {
+  const body = options.sourceId === undefined ? undefined : { sourceId: options.sourceId };
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/import-transcript`, {
+    body,
+    label: "workbench import transcript",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchPublish(
+  baseUrl: string,
+  sessionId: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<unknown> {
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/publish`, {
+    label: "workbench publish",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchClaim(
+  baseUrl: string,
+  sessionId: string,
+  options: { claimedBy?: string; ttlSeconds?: number; signal?: AbortSignal } = {}
+): Promise<unknown> {
+  const body: { claimedBy?: string; ttlSeconds?: number } = {};
+  if (options.claimedBy !== undefined) body.claimedBy = options.claimedBy;
+  if (options.ttlSeconds !== undefined) body.ttlSeconds = options.ttlSeconds;
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/claim`, {
+    body: Object.keys(body).length > 0 ? body : undefined,
+    label: "workbench claim",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchReleaseClaim(
+  baseUrl: string,
+  claimId: string,
+  options: { reason?: string; signal?: AbortSignal } = {}
+): Promise<unknown> {
+  const body = options.reason === undefined ? undefined : { reason: options.reason };
+  return postJson(baseUrl, `/workbench/claims/${encodeURIComponent(claimId)}/release`, {
+    body,
+    label: "workbench release claim",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchQuality(
+  baseUrl: string,
+  sessionId: string,
+  options: { status?: "passed" | "failed"; mode?: "precheck"; reason?: string; signal?: AbortSignal }
+): Promise<unknown> {
+  const body: { status?: "passed" | "failed"; mode?: "precheck"; reason?: string } = {};
+  if (options.status !== undefined) body.status = options.status;
+  if (options.mode !== undefined) body.mode = options.mode;
+  if (options.reason !== undefined) body.reason = options.reason;
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/quality`, {
+    body,
+    label: "workbench quality",
+    signal: options.signal
+  });
+}
+
 export async function listProjects(baseUrl = defaultLiveProjectionUrl(), options: { signal?: AbortSignal } = {}): Promise<ProjectOption[]> {
   const url = new URL(baseUrl);
   url.pathname = "/projects";

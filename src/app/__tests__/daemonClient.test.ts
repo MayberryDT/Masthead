@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+  getWorkbenchMissingSessions,
+  getWorkbenchActivity,
+  getWorkbenchNotAddedSessions,
+  getWorkbenchNotAddedSummary,
+  getWorkbenchSessions,
   getLiveHookSettings,
   getRuntimeHookSettings,
   getSessionTranscript,
@@ -10,6 +15,13 @@ import {
   listImports,
   listImportWorkUnits,
   listReviewDispositions,
+  postWorkbenchCheckTranscript,
+  postWorkbenchClaim,
+  postWorkbenchImportTranscript,
+  postWorkbenchImportTranscriptPreview,
+  postWorkbenchPublish,
+  postWorkbenchQuality,
+  postWorkbenchReleaseClaim,
   previewSourcesImport,
   rebuildEnrichments,
   repairSources,
@@ -179,6 +191,139 @@ describe("daemon client review dispositions", () => {
     });
   });
 
+  test("loads Workbench missing sessions from the daemon", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          generatedAt: "2026-07-08T00:00:00.000Z",
+          limit: 25,
+          sessions: []
+        })
+      )
+    );
+
+    await getWorkbenchMissingSessions("http://127.0.0.1:17373/projection", { limit: 25 });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:17373/workbench/missing-sessions?limit=25",
+      expect.objectContaining({ headers: { accept: "application/json" } })
+    );
+  });
+
+  test("loads Workbench pipeline endpoints from the daemon", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          generatedAt: "2026-07-08T00:00:00.000Z",
+          limit: 25,
+          scope: "default",
+          sessions: [],
+          activity: [],
+          reasons: [],
+          total: 0
+        })
+      )
+    );
+
+    await getWorkbenchSessions("http://127.0.0.1:17373/projection", { limit: 25 });
+    await getWorkbenchActivity("http://127.0.0.1:17373/projection", { limit: 10, sessionId: "session:1" });
+    await getWorkbenchNotAddedSummary("http://127.0.0.1:17373/projection");
+    await getWorkbenchNotAddedSessions("http://127.0.0.1:17373/projection", { limit: 10 });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:17373/workbench/sessions?limit=25",
+      expect.objectContaining({ headers: { accept: "application/json" } })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:17373/workbench/activity?limit=10&sessionId=session%3A1",
+      expect.objectContaining({ headers: { accept: "application/json" } })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:17373/workbench/not-added-summary",
+      expect.objectContaining({ headers: { accept: "application/json" } })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:17373/workbench/not-added?includeDetails=true&limit=10",
+      expect.objectContaining({ headers: { accept: "application/json" } })
+    );
+  });
+
+  test("posts Workbench pipeline write actions to the daemon", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true })));
+
+    const base = "http://127.0.0.1:17373/projection";
+    await postWorkbenchCheckTranscript(base, "session:1");
+    await postWorkbenchImportTranscriptPreview(base, "session:1", { sourceId: "source:allowed" });
+    await postWorkbenchImportTranscript(base, "session:1", { sourceId: "source:allowed" });
+    await postWorkbenchPublish(base, "session:1");
+    await postWorkbenchClaim(base, "session:1", { claimedBy: "ui-user", ttlSeconds: 300 });
+    await postWorkbenchReleaseClaim(base, "claim:abc", { reason: "done" });
+    await postWorkbenchQuality(base, "session:1", { status: "passed" });
+    await postWorkbenchQuality(base, "session:1", { status: "failed", reason: "hook_only_noise" });
+    await postWorkbenchQuality(base, "session:1", { mode: "precheck" });
+
+    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:17373/workbench/sessions/session%3A1/check-transcript", {
+      headers: { accept: "application/json" },
+      method: "POST",
+      signal: undefined
+    });
+    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:17373/workbench/sessions/session%3A1/import-transcript-preview", {
+      body: JSON.stringify({ sourceId: "source:allowed" }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined
+    });
+    expect(fetch).toHaveBeenNthCalledWith(3, "http://127.0.0.1:17373/workbench/sessions/session%3A1/import-transcript", {
+      body: JSON.stringify({ sourceId: "source:allowed" }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined
+    });
+    expect(fetch).toHaveBeenNthCalledWith(4, "http://127.0.0.1:17373/workbench/sessions/session%3A1/publish", {
+      headers: { accept: "application/json" },
+      method: "POST",
+      signal: undefined
+    });
+    expect(fetch).toHaveBeenNthCalledWith(5, "http://127.0.0.1:17373/workbench/sessions/session%3A1/claim", {
+      body: JSON.stringify({ claimedBy: "ui-user", ttlSeconds: 300 }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined
+    });
+    expect(fetch).toHaveBeenNthCalledWith(6, "http://127.0.0.1:17373/workbench/claims/claim%3Aabc/release", {
+      body: JSON.stringify({ reason: "done" }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined
+    });
+    expect(fetch).toHaveBeenNthCalledWith(7, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
+      body: JSON.stringify({ status: "passed" }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined
+    });
+    expect(fetch).toHaveBeenNthCalledWith(8, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
+      body: JSON.stringify({ status: "failed", reason: "hook_only_noise" }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined
+    });
+    expect(fetch).toHaveBeenNthCalledWith(9, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
+      body: JSON.stringify({ mode: "precheck" }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined
+    });
+  });
+
   test("loads paged import jobs from the daemon", async () => {
     vi.stubGlobal(
       "fetch",
@@ -243,14 +388,12 @@ describe("daemon client review dispositions", () => {
     await expect(
       previewSourcesImport("http://127.0.0.1:17373/projection", {
         importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
-        importTranscripts: true,
         runtimes: ["opencode"]
       })
     ).resolves.toHaveLength(1);
     expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/sources/import/preview", {
       body: JSON.stringify({
         importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
-        importTranscripts: true,
         runtimes: ["opencode"]
       }),
       headers: { accept: "application/json", "content-type": "application/json" },
