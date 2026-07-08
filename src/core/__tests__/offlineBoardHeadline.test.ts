@@ -163,11 +163,13 @@ describe("offline board headline views", () => {
         primaryStatus: "stalled",
         recentTranscriptMessages: [],
         attentionTitles: ["High-risk change"],
+        recentEvents: [],
+        recentToolNames: [],
         changedFileCount: 12,
         runtime: "grok"
       })
     );
-    expect(risk.frame?.disposition).toBe("high-risk change still open");
+    expect(risk.frame?.disposition).toBe("high-risk change still open with many file edits");
 
     const afterTests = buildOfflineBoardHeadlineView(
       input({

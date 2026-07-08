@@ -283,17 +283,7 @@ function dispositionFromSessionEvidence(input: BoardHeadlineInput): string | und
   const files = facts.recentFileBasenames.map((value) => value.trim()).filter(Boolean);
   const fileCount = facts.changedFileCount ?? 0;
 
-  // Attention / risk first — these cards already surface risk indicators.
-  const riskAttention = attention.find((title) => /\bhigh[- ]?risk\b/i.test(title) || /\brisk\b/i.test(title));
-  if (riskAttention && (input.stateHint === "paused" || input.stateHint === "unknown")) {
-    return "high-risk change still open";
-  }
-  const cleanAttention = attention.find((title) => isUsefulDispositionSnippet(title));
-  if (cleanAttention && (input.stateHint === "paused" || input.stateHint === "waiting" || input.stateHint === "blocked")) {
-    return clipDisposition(cleanAttention);
-  }
-
-  // Command failures
+  // Command failures before generic risk labels.
   const failure = failures.find((value) => isSafeBlockedFailure(value) || isUsefulDispositionSnippet(value));
   if (failure && (input.stateHint === "blocked" || input.stateHint === "failed" || input.stateHint === "paused")) {
     if (/\btest\b|\bvitest\b|\bjest\b|\bpytest\b/i.test(failure)) return "last test run failed";
@@ -301,7 +291,7 @@ function dispositionFromSessionEvidence(input: BoardHeadlineInput): string | und
     return `last command failed`;
   }
 
-  // Recent event summaries (git commit, npm test, etc.)
+  // Recent event summaries (git commit, npm test, etc.) — preferred over blanket risk copy.
   for (const summary of events) {
     const fromEvent = dispositionFromEventSummary(summary, input.stateHint);
     if (fromEvent) return fromEvent;
@@ -313,6 +303,21 @@ function dispositionFromSessionEvidence(input: BoardHeadlineInput): string | und
   for (const item of input.evidence) {
     const fromEvidence = dispositionFromEventSummary(item, input.stateHint);
     if (fromEvidence) return fromEvidence;
+  }
+
+  // Attention / risk — keep, but layer on file-count detail when that is all we have.
+  const riskAttention = attention.find((title) => /\bhigh[- ]?risk\b/i.test(title) || /\brisk\b/i.test(title));
+  if (riskAttention && (input.stateHint === "paused" || input.stateHint === "unknown")) {
+    if (fileCount >= 50) return `high-risk change still open across ${fileCount} files`;
+    if (fileCount >= 10) return "high-risk change still open with many file edits";
+    if (files.some((name) => /workbench|headline|sessioncard|icon-registry/i.test(name))) {
+      return "high-risk UI change still open";
+    }
+    return "high-risk change still open";
+  }
+  const cleanAttention = attention.find((title) => isUsefulDispositionSnippet(title) && !/\bhigh[- ]?risk\b/i.test(title));
+  if (cleanAttention && (input.stateHint === "paused" || input.stateHint === "waiting" || input.stateHint === "blocked")) {
+    return clipDisposition(cleanAttention);
   }
 
   // Tool activity
