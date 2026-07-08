@@ -28,6 +28,57 @@ describe("resolveHookRuntime", () => {
     ).toBe("grok");
   });
 
+  test("Grok host markers override Claude MASTHEAD_RUNTIME pin and URL (dual-fire after reinstall)", () => {
+    expect(
+      resolveHookRuntime({
+        env: {
+          MASTHEAD_RUNTIME: "claude_code",
+          MASTHEAD_INGEST_URL: "http://127.0.0.1:17373/ingest?runtime=claude_code",
+          GROK_HOOK_EVENT: "UserPromptSubmit",
+          GROK_SESSION_ID: "sess-1"
+        },
+        payload: {}
+      })
+    ).toBe("grok");
+  });
+
+  test("unambiguous host beats any conflicting pin", () => {
+    expect(
+      resolveHookRuntime({
+        env: {
+          MASTHEAD_RUNTIME: "cursor",
+          GROK_HOOK_EVENT: "UserPromptSubmit",
+          GROK_SESSION_ID: "sess-1"
+        },
+        payload: {}
+      })
+    ).toBe("grok");
+  });
+
+  test("pin is used when host is unknown", () => {
+    expect(
+      resolveHookRuntime({
+        env: {
+          MASTHEAD_RUNTIME: "grok",
+          MASTHEAD_INGEST_URL: "http://127.0.0.1:17373/ingest?runtime=claude_code"
+        },
+        payload: {}
+      })
+    ).toBe("grok");
+  });
+
+  test("matching pin and host stay on that runtime", () => {
+    expect(
+      resolveHookRuntime({
+        env: {
+          MASTHEAD_RUNTIME: "claude_code",
+          CLAUDE_PROJECT_DIR: "/workspace/masthead"
+        },
+        payload: {}
+      })
+    ).toBe("claude_code");
+  });
+
   test("Claude host markers with URL claude_code stay claude_code", () => {
     expect(
       resolveHookRuntime({

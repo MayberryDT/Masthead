@@ -12,8 +12,9 @@ export const HOOK_RUNTIME_KINDS = [
 
 /**
  * Resolve the runtime a hook should attribute to, in priority order:
- * 1. MASTHEAD_RUNTIME env (explicit install pin)
- * 2. Host detection from process/env when unambiguous
+ * 1. Host detection from process/env when unambiguous
+ *    (beats a conflicting MASTHEAD_RUNTIME pin — e.g. Grok dual-firing a Claude-pinned command)
+ * 2. MASTHEAD_RUNTIME env (explicit install pin; used when host is unknown or matches)
  * 3. runtime query param on MASTHEAD_INGEST_URL
  * 4. payload runtime / adapter
  *
@@ -21,14 +22,15 @@ export const HOOK_RUNTIME_KINDS = [
  */
 export function resolveHookRuntime(input = {}) {
   const env = input.env ?? {};
-  const pinned = normalizeRuntime(env.MASTHEAD_RUNTIME);
-  if (pinned) return pinned;
 
   const host = detectHostRuntime(env, {
     processPath: input.processPath,
     argv: input.argv
   });
   if (host) return host;
+
+  const pinned = normalizeRuntime(env.MASTHEAD_RUNTIME);
+  if (pinned) return pinned;
 
   const fromUrl = runtimeFromIngestUrl(env.MASTHEAD_INGEST_URL);
   if (fromUrl) return fromUrl;
