@@ -175,10 +175,13 @@ function subjectFromEvidence(evidence: string[], options: { allowFilenames: bool
 
 function isWeakFilenameEvidence(value: string): boolean {
   if (!/\.[a-z0-9]+$/i.test(value) || /\s/.test(value)) return false;
+  const ext = value.split(".").pop()?.toLowerCase() ?? "";
+  // Bare docs / config files are almost never good session subjects.
+  if (["md", "txt", "json", "yml", "yaml", "toml", "lock", "css", "scss"].includes(ext)) return true;
   const base = value.replace(/\.[^.]+$/, "").toLowerCase();
   return /^(readme|changelog|license|package|tsconfig|vite\.config|index|main|app|utils?|helpers?|types?|constants?|styles?|masthead)$/i.test(
     base
-  ) || /^(product-release-gate|acceptance|quickstart)$/i.test(base);
+  );
 }
 
 function projectRuntimeSubject(input: BoardHeadlineInput): string | undefined {
