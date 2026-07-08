@@ -182,6 +182,7 @@ describe("board card filtering", () => {
   test("filters cards only by valid supported harness options and does not infer missing harnesses", () => {
     expect(HARNESS_OPTIONS.map((option) => option.value)).toEqual([
       "all",
+      "codex",
       "cursor",
       "claude_code",
       "opencode",

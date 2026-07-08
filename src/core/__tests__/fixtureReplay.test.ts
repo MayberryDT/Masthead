@@ -7,10 +7,18 @@ describe("fixture replay vertical slice", () => {
   test("projects a live board with sessions, attention, conflict evidence, and safe actions", () => {
     const board = projectFixture(fixture as FixtureReplay);
 
-    expect(board.summary.active).toBeGreaterThanOrEqual(3);
+    // Live-state semantics: summary.active is the Running lane only and requires fresh
+    // working proof (live-state report or recent command.started / turn.started /
+    // user.response). This static fixture has multi-minute event/snapshot gaps and no
+    // live-state reports, so all three non-ended sessions correctly land in Idle.
+    expect(board.summary.active).toBe(0);
+    expect(board.summary.running).toBe(0);
+    expect(board.summary.idle).toBe(3);
     expect(board.summary.needsAttention).toBeGreaterThanOrEqual(2);
     expect(board.summary.conflicts).toBe(1);
     expect(board.cards).toHaveLength(3);
+    expect(board.cards.every((card) => card.lifecycle !== "ended")).toBe(true);
+    expect(board.cards.every((card) => card.displayState === "idle")).toBe(true);
     expect(board.cards[0]?.indicators).toContain("attention");
     expect(board.attentionQueue.some((item) => item.type === "approval_requested")).toBe(true);
     expect(board.conflicts[0]).toMatchObject({
