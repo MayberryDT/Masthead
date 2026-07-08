@@ -53,10 +53,13 @@ import { createRawEventRepository, type RawEventRepository, type RawEventSource 
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import {
+  claimWorkbenchSessions,
   listWorkbenchActivity,
   listWorkbenchQueue,
+  markWorkbenchQuality,
   publishWorkbenchSession,
   recordWorkbenchActivity,
+  releaseWorkbenchClaim,
   type WorkbenchActivityRecord,
   type WorkbenchSessionStateRecord
 } from "./db/workbenchPipelineRepository.ts";
@@ -80,6 +83,7 @@ import {
 import { legacyCandidatesFromDirectory, maybeCopyLegacySqliteBeforeOpen } from "./legacyDataMigration.ts";
 import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
 import { runLegacyWorkbenchPublicationBackfill } from "../workbench/legacyPublicationBackfill.ts";
+import { runCaptureQualityPrecheck } from "../workbench/qualityPrecheck.ts";
 import { addSourceExclusion, sourceIsExcluded, sourceRecordIsExcluded } from "./db/sourceRepository.ts";
 import { setSourcePolicy, sourcePolicyExplicitlyEnabled, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
 import {
@@ -2325,6 +2329,92 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       });
       sendJson(request, response, config.allowedOrigins, result.ok ? 200 : 409, result);
       return;
+    }
+
+    const workbenchClaimMatch = url.pathname.match(/^\/workbench\/sessions\/([^/]+)\/claim$/);
+    if (request.method === "POST" && workbenchClaimMatch?.[1]) {
+      const sessionId = decodeURIComponent(workbenchClaimMatch[1]);
+      const body = objectRecord(await optionalJsonBody(request));
+      const claimedBy = typeof body.claimedBy === "string" && body.claimedBy.trim() ? body.claimedBy.trim() : "workbench_ui";
+      const ttlSecondsRaw = body.ttlSeconds;
+      const ttlSeconds =
+        typeof ttlSecondsRaw === "number" && Number.isFinite(ttlSecondsRaw) && ttlSecondsRaw > 0
+          ? Math.floor(ttlSecondsRaw)
+          : 900;
+      const result = claimWorkbenchSessions(database, {
+        claimedBy,
+        expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+        sessionIds: [sessionId]
+      });
+      sendJson(request, response, config.allowedOrigins, 200, { ok: true, ...result });
+      return;
+    }
+
+    const workbenchReleaseMatch = url.pathname.match(/^\/workbench\/claims\/([^/]+)\/release$/);
+    if (request.method === "POST" && workbenchReleaseMatch?.[1]) {
+      const claimId = decodeURIComponent(workbenchReleaseMatch[1]);
+      const body = objectRecord(await optionalJsonBody(request));
+      const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : "released";
+      const claim = releaseWorkbenchClaim(database, { claimId, reason });
+      if (!claim) {
+        sendJson(request, response, config.allowedOrigins, 404, { ok: false, code: "claim_not_found", claimId });
+        return;
+      }
+      sendJson(request, response, config.allowedOrigins, 200, { ok: true, claim });
+      return;
+    }
+
+    const workbenchQualityMatch = url.pathname.match(/^\/workbench\/sessions\/([^/]+)\/quality$/);
+    if (request.method === "POST" && workbenchQualityMatch?.[1]) {
+      const sessionId = decodeURIComponent(workbenchQualityMatch[1]);
+      const body = objectRecord(await optionalJsonBody(request));
+      const actor = {
+        kind: "user" as const,
+        id: typeof body.actorId === "string" && body.actorId.trim() ? body.actorId.trim() : "workbench_ui"
+      };
+      try {
+        if (body.mode === "precheck") {
+          const precheck = runCaptureQualityPrecheck(database, sessionId);
+          const result = markWorkbenchQuality(database, {
+            actor,
+            reason: precheck.reason,
+            sessionId,
+            status: precheck.ok ? "passed" : "failed"
+          });
+          sendJson(request, response, config.allowedOrigins, 200, {
+            ok: precheck.ok,
+            activity: result.activity,
+            precheck,
+            state: result.state
+          });
+          return;
+        }
+
+        const status = body.status;
+        if (status !== "passed" && status !== "failed") {
+          sendJson(request, response, config.allowedOrigins, 400, {
+            ok: false,
+            code: "invalid_quality_request",
+            error: 'body must include status "passed"|"failed" or mode "precheck"'
+          });
+          return;
+        }
+        const reason = typeof body.reason === "string" ? body.reason : undefined;
+        const result = markWorkbenchQuality(database, { actor, reason, sessionId, status });
+        sendJson(request, response, config.allowedOrigins, 200, { ok: true, ...result });
+        return;
+      } catch (error) {
+        if (error instanceof Error && error.message === "cannot_fail_quality_on_published_session") {
+          sendJson(request, response, config.allowedOrigins, 409, {
+            ok: false,
+            code: "cannot_fail_quality_on_published_session",
+            error: error.message,
+            sessionId
+          });
+          return;
+        }
+        throw error;
+      }
     }
 
     const workbenchTranscriptMatch = url.pathname.match(/^\/workbench\/sessions\/([^/]+)\/(check-transcript|import-transcript-preview|import-transcript)$/);

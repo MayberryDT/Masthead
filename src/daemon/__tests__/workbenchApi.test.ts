@@ -251,6 +251,171 @@ describe("workbench API", () => {
     });
   });
 
+  test("POST claim and release round-trip on queue DTO", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:claim",
+      title: "Claim candidate"
+    });
+    ensureWorkbenchSessionState(daemon.database, "session:claim");
+
+    const claimBody = await postJson(baseUrl, "/workbench/sessions/session%3Aclaim/claim", {
+      claimedBy: "ui-user",
+      ttlSeconds: 300
+    });
+    expect(claimBody).toMatchObject({
+      ok: true,
+      claims: [expect.objectContaining({ claimedBy: "ui-user", sessionId: "session:claim" })]
+    });
+    const claimId = claimBody.claims[0].claimId as string;
+    expect(typeof claimId).toBe("string");
+
+    const queue = await getJson(baseUrl, "/workbench/sessions?limit=20");
+    const row = queue.sessions.find((session: { sessionId: string }) => session.sessionId === "session:claim");
+    expect(row).toMatchObject({
+      activeClaim: {
+        claimId,
+        claimedBy: "ui-user"
+      },
+      sessionId: "session:claim"
+    });
+
+    const released = await postJson(baseUrl, `/workbench/claims/${encodeURIComponent(claimId)}/release`, {
+      reason: "done"
+    });
+    expect(released).toMatchObject({
+      ok: true,
+      claim: expect.objectContaining({
+        claimId,
+        releaseReason: "done",
+        sessionId: "session:claim"
+      })
+    });
+    expect(typeof released.claim.releasedAt).toBe("string");
+
+    const afterRelease = await getJson(baseUrl, "/workbench/sessions?limit=20");
+    const releasedRow = afterRelease.sessions.find((session: { sessionId: string }) => session.sessionId === "session:claim");
+    expect(releasedRow?.activeClaim).toBeUndefined();
+  });
+
+  test("POST quality pass, fail, and precheck", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:quality",
+      title: "Quality candidate"
+    });
+    ensureWorkbenchSessionState(daemon.database, "session:quality");
+    daemon.database
+      .prepare(
+        `UPDATE workbench_session_state
+         SET transcript_status = 'imported', quality_status = 'unchecked', next_action = 'review_quality'
+         WHERE session_id = ?`
+      )
+      .run("session:quality");
+
+    const passed = await postJson(baseUrl, "/workbench/sessions/session%3Aquality/quality", {
+      actorId: "ui-user",
+      status: "passed"
+    });
+    expect(passed).toMatchObject({
+      ok: true,
+      activity: expect.objectContaining({ actorId: "ui-user", eventType: "quality_passed" }),
+      state: expect.objectContaining({
+        nextAction: "enrich",
+        publicationStatus: "publish_path",
+        qualityStatus: "passed",
+        sessionId: "session:quality"
+      })
+    });
+
+    const failed = await postJson(baseUrl, "/workbench/sessions/session%3Aquality/quality", {
+      reason: "hook_only_noise",
+      status: "failed"
+    });
+    expect(failed).toMatchObject({
+      ok: true,
+      activity: expect.objectContaining({ actorId: "workbench_ui", eventType: "quality_failed" }),
+      state: expect.objectContaining({
+        nonPublicationReason: "hook_only_noise",
+        publicationStatus: "not_added_to_logbook",
+        qualityStatus: "failed",
+        sessionId: "session:quality"
+      })
+    });
+
+    // Re-admit to publish path, then exercise precheck (seedSession includes a meaningful user message).
+    await postJson(baseUrl, "/workbench/sessions/session%3Aquality/quality", { status: "passed" });
+    const precheckPass = await postJson(baseUrl, "/workbench/sessions/session%3Aquality/quality", { mode: "precheck" });
+    expect(precheckPass).toMatchObject({
+      ok: true,
+      precheck: expect.objectContaining({ ok: true, reason: "meaningful_message", sessionId: "session:quality" }),
+      state: expect.objectContaining({
+        publicationStatus: "publish_path",
+        qualityStatus: "passed",
+        sessionId: "session:quality"
+      })
+    });
+
+    // Strip transcript so precheck fails and marks not-added.
+    daemon.database.prepare("DELETE FROM messages WHERE session_id = ?").run("session:quality");
+    daemon.database.prepare("DELETE FROM tool_results WHERE session_id = ?").run("session:quality");
+    daemon.database.prepare("DELETE FROM tool_calls WHERE session_id = ?").run("session:quality");
+    daemon.database.prepare("DELETE FROM file_effects WHERE session_id = ?").run("session:quality");
+    daemon.database.prepare("DELETE FROM runtime_signals WHERE session_id = ?").run("session:quality");
+    daemon.database.prepare("DELETE FROM checkpoints WHERE session_id = ?").run("session:quality");
+    const precheckFail = await postJson(baseUrl, "/workbench/sessions/session%3Aquality/quality", { mode: "precheck" });
+    expect(precheckFail).toMatchObject({
+      ok: false,
+      precheck: expect.objectContaining({ ok: false, reason: "metadata_only", sessionId: "session:quality" }),
+      state: expect.objectContaining({
+        nonPublicationReason: "metadata_only",
+        publicationStatus: "not_added_to_logbook",
+        qualityStatus: "failed",
+        sessionId: "session:quality"
+      })
+    });
+
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:published-quality",
+      title: "Published quality block"
+    });
+    ensureWorkbenchSessionState(daemon.database, "session:published-quality");
+    daemon.database
+      .prepare(
+        `UPDATE workbench_session_state
+         SET transcript_status = 'imported',
+             quality_status = 'passed',
+             session_enrichment_status = 'satisfied',
+             session_dossier_status = 'satisfied',
+             bug_fix_trace_status = 'satisfied'
+         WHERE session_id = ?`
+      )
+      .run("session:published-quality");
+    const published = await postJson(baseUrl, "/workbench/sessions/session%3Apublished-quality/publish");
+    expect(published).toMatchObject({ ok: true, state: { publicationStatus: "published" } });
+
+    const blockedFail = await postJson(
+      baseUrl,
+      "/workbench/sessions/session%3Apublished-quality/quality",
+      { reason: "late_reject", status: "failed" },
+      409
+    );
+    expect(blockedFail).toMatchObject({
+      ok: false,
+      code: "cannot_fail_quality_on_published_session",
+      sessionId: "session:published-quality"
+    });
+  });
+
   test("returns recent sessions missing Workbench enrichment", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedSession(daemon.database, {
