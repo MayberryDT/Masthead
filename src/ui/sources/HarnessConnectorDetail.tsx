@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { HarnessConnectorDto } from "../../shared/harnessConnectors";
 import { AppButton } from "../primitives/AppButton";
 import { StatusBadge } from "../primitives/StatusBadge";
@@ -33,7 +32,6 @@ export function HarnessConnectorDetail({
   onUninstall,
   onConfirm
 }: Props) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const disabled = busy || readOnly || !connector.supportsActions;
   const showConfirm =
     connector.live === "needs_action" &&
@@ -46,16 +44,25 @@ export function HarnessConnectorDetail({
     (connector.live === "needs_action" && connector.actionRequired === "enable_plugin") ||
     showRepair;
 
+  const statusTone = statusBannerTone(connector, actionStatus);
+  const statusText = primaryStatusText(connector, actionStatus);
+
   return (
-    <aside className="sources-connector-detail" aria-label={`${connector.label} connection detail`}>
-      <header className="sources-connector-detail-head">
-        <div>
+    <aside className="sources-connector-detail sources-connection-detail-rich" aria-label={`${connector.label} connection detail`}>
+      <header className="sources-connection-detail-hero">
+        <div className="sources-connection-detail-hero-copy">
           <p className="mono-label">Connection</p>
           <h2>{connector.label}</h2>
+          <p className="sources-connection-detail-lead">
+            Live capture wiring for this harness. Presence means the tool is on this machine. Ready means Masthead can
+            receive live signals.
+          </p>
         </div>
-        <div className="sources-connector-row-badges">
-          <StatusBadge tone={presenceTone(connector.presence)}>{presenceLabel(connector.presence)}</StatusBadge>
-          <StatusBadge tone={liveTone(connector.live)}>{liveLabel(connector)}</StatusBadge>
+        <div className="sources-connection-detail-hero-side">
+          <div className="sources-connector-row-badges">
+            <StatusBadge tone={presenceTone(connector.presence)}>{presenceLabel(connector.presence)}</StatusBadge>
+            <StatusBadge tone={liveTone(connector.live)}>{liveLabel(connector)}</StatusBadge>
+          </div>
           {onClose ? (
             <AppButton variant="quiet" onClick={onClose} aria-label="Close connection detail">
               Close
@@ -64,70 +71,91 @@ export function HarnessConnectorDetail({
         </div>
       </header>
 
-      <p className="sources-connector-honest-copy">
-        Live capture only. Presence means the harness is installed on this machine. Ready means Masthead is wired to
-        receive live signals. Deeper transcript work is in Workbench.
-      </p>
-
-      {connector.actionMessage ? (
-        <p className="surface-status sources-connector-action-message" role="status">
-          {connector.actionMessage}
+      {statusText ? (
+        <p className={`sources-connection-detail-status sources-connection-detail-status-${statusTone}`} role="status">
+          {statusText}
         </p>
       ) : null}
 
-      {actionStatus ? (
-        <p className="surface-status sources-connector-action-message" role="status">
-          {actionStatus}
-        </p>
-      ) : null}
-
-      {connector.lastTest ? (
-        <p
-          className={`surface-status sources-connector-action-message sources-last-test sources-last-test-${connector.lastTest.status}`}
-          role="status"
-        >
-          Last test {connector.lastTest.status} · {connector.lastTest.message}
-        </p>
-      ) : null}
-
-      <dl className="sources-connector-detail-facts" aria-label="Connection paths and endpoints">
-        <div>
-          <dt>Config path</dt>
-          <dd className="mono-path">{connector.configPath ?? "—"}</dd>
-        </div>
-        <div>
-          <dt>Endpoint</dt>
-          <dd className="mono-path">{connector.endpoint ?? "—"}</dd>
-        </div>
-        <div>
-          <dt>State endpoint</dt>
-          <dd className="mono-path">{connector.stateEndpoint ?? "—"}</dd>
-        </div>
-        <div>
-          <dt>Last live event</dt>
-          <dd>{formatLastEvent(connector.lastLiveEventAt)}</dd>
-        </div>
-        <div>
-          <dt>Last test</dt>
-          <dd>
-            {connector.lastTest
-              ? `${connector.lastTest.status} · ${formatLastEvent(connector.lastTest.testedAt)}`
-              : "Not run"}
-          </dd>
-        </div>
-        {connector.historyFound != null ? (
+      <section className="sources-connection-detail-section" aria-label="Snapshot">
+        <h3>Snapshot</h3>
+        <dl className="sources-connection-detail-grid">
           <div>
-            <dt>Local history</dt>
+            <dt>Presence</dt>
+            <dd>{presenceLabel(connector.presence)}</dd>
+          </div>
+          <div>
+            <dt>Live capture</dt>
+            <dd>{liveLabel(connector)}</dd>
+          </div>
+          <div>
+            <dt>Last live event</dt>
+            <dd>{formatLastEvent(connector.lastLiveEventAt)}</dd>
+          </div>
+          <div>
+            <dt>Last test</dt>
             <dd>
-              {connector.historyFound
-                ? `Found${connector.historySessionCount != null ? ` · ${connector.historySessionCount} sessions` : ""}`
-                : "Not found"}
+              {connector.lastTest
+                ? `${connector.lastTest.status} · ${formatLastEvent(connector.lastTest.testedAt)}`
+                : "Not run"}
             </dd>
           </div>
-        ) : null}
-      </dl>
+        </dl>
+      </section>
 
-      <div className="source-detail-action-buttons sources-connector-detail-actions">
+      {connector.lastTest ? (
+        <section className="sources-connection-detail-section" aria-label="Last test result">
+          <h3>Last test result</h3>
+          <p className={`sources-connection-detail-test sources-connection-detail-test-${connector.lastTest.status}`}>
+            <strong>{connector.lastTest.status === "passed" ? "Passed" : "Failed"}</strong>
+            <span>{connector.lastTest.message}</span>
+          </p>
+        </section>
+      ) : null}
+
+      <section className="sources-connection-detail-section" aria-label="Wiring">
+        <h3>Wiring</h3>
+        <dl className="sources-connection-detail-stack">
+          <div>
+            <dt>Config path</dt>
+            <dd className="mono-path">{connector.configPath ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>Ingest endpoint</dt>
+            <dd className="mono-path">{connector.endpoint ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>Live state endpoint</dt>
+            <dd className="mono-path">{connector.stateEndpoint ?? "—"}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="sources-connection-detail-section" aria-label="Checked paths">
+        <h3>Checked paths</h3>
+        {(connector.checkedPaths?.length ?? 0) === 0 ? (
+          <p className="sources-connection-detail-empty-line">No local paths checked for this harness.</p>
+        ) : (
+          <ul className="sources-connection-detail-path-list">
+            {connector.checkedPaths!.map((path) => (
+              <li key={path}>{path}</li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {(connector.diagnostics?.length ?? 0) > 0 ? (
+        <section className="sources-connection-detail-section" aria-label="Diagnostics">
+          <h3>Diagnostics</h3>
+          <ul className="sources-connection-detail-path-list">
+            {connector.diagnostics!.map((line, index) => (
+              <li key={`${index}-${line}`}>{line}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <div className="source-detail-action-buttons sources-connection-detail-actions">
         {showEnable ? (
           <AppButton variant="primary" disabled={disabled || !onEnable} onClick={() => onEnable?.(connector.runtime)}>
             {showRepair ? "Repair" : "Enable"}
@@ -157,46 +185,31 @@ export function HarnessConnectorDetail({
           Uninstall
         </AppButton>
       </div>
-
-      <section className="sources-connector-advanced" aria-label="Advanced diagnostics">
-        <button
-          type="button"
-          className="sources-connector-advanced-toggle"
-          aria-expanded={advancedOpen}
-          onClick={() => setAdvancedOpen((open) => !open)}
-        >
-          <span className="mono-label">Advanced</span>
-          <span>{advancedOpen ? "Hide paths & diagnostics" : "Show paths & diagnostics"}</span>
-        </button>
-        {advancedOpen ? (
-          <div className="sources-connector-advanced-body">
-            <div>
-              <p className="mono-label">Checked paths</p>
-              {(connector.checkedPaths?.length ?? 0) === 0 ? (
-                <p className="sources-connector-advanced-empty">No checked paths recorded.</p>
-              ) : (
-                <ul className="sources-connector-mono-list">
-                  {connector.checkedPaths!.map((path) => (
-                    <li key={path}>{path}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <div>
-              <p className="mono-label">Diagnostics</p>
-              {(connector.diagnostics?.length ?? 0) === 0 ? (
-                <p className="sources-connector-advanced-empty">No diagnostics.</p>
-              ) : (
-                <ul className="sources-connector-mono-list">
-                  {connector.diagnostics!.map((line, index) => (
-                    <li key={`${index}-${line}`}>{line}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        ) : null}
-      </section>
     </aside>
   );
+}
+
+function primaryStatusText(connector: HarnessConnectorDto, actionStatus?: string): string | undefined {
+  if (actionStatus?.trim()) return actionStatus.trim();
+  if (connector.actionMessage && connector.live === "needs_action") return connector.actionMessage;
+  if (connector.presence === "not_found") {
+    return connector.live === "not_installed"
+      ? "Harness not found on this machine."
+      : "Harness not found on this machine. Live wiring may still exist from a previous install.";
+  }
+  if (connector.lastTest?.status === "passed") return `Test passed — ${connector.lastTest.message}`;
+  if (connector.lastTest?.status === "failed") return `Test failed — ${connector.lastTest.message}`;
+  if (connector.live === "ready") return "Live capture is ready for this harness.";
+  return undefined;
+}
+
+function statusBannerTone(
+  connector: HarnessConnectorDto,
+  actionStatus?: string
+): "neutral" | "pass" | "fail" | "warn" {
+  const text = `${actionStatus ?? ""} ${connector.actionMessage ?? ""} ${connector.lastTest?.status ?? ""}`.toLowerCase();
+  if (text.includes("fail") || connector.live === "error" || connector.lastTest?.status === "failed") return "fail";
+  if (text.includes("pass") || text.includes("ready") || connector.lastTest?.status === "passed") return "pass";
+  if (connector.live === "needs_action" || connector.presence === "not_found") return "warn";
+  return "neutral";
 }

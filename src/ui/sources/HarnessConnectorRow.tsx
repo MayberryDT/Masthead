@@ -67,10 +67,12 @@ export function HarnessConnectorRow({
         </div>
       </div>
 
-      <dl className="adapter-card-metrics">
+      <dl className="adapter-card-metrics sources-connection-card-metrics">
         <div>
           <dt>Last event</dt>
-          <dd>{formatLastEvent(connector.lastLiveEventAt)}</dd>
+          <dd title={connector.lastLiveEventAt ? formatLastEvent(connector.lastLiveEventAt) : undefined}>
+            {formatLastEvent(connector.lastLiveEventAt)}
+          </dd>
         </div>
         <div>
           <dt>Live capture</dt>
@@ -78,9 +80,9 @@ export function HarnessConnectorRow({
         </div>
       </dl>
 
-      {connector.actionMessage && connector.live === "needs_action" ? (
-        <p className="sources-connector-row-message">{connector.actionMessage}</p>
-      ) : null}
+      <p className="sources-connector-row-message" title={connector.actionMessage && connector.live === "needs_action" ? connector.actionMessage : undefined}>
+        {connector.actionMessage && connector.live === "needs_action" ? connector.actionMessage : "\u00a0"}
+      </p>
 
       <div className="adapter-card-footer sources-connection-card-footer" onClick={(event) => event.stopPropagation()}>
         {cta.kind === "message" ? (
