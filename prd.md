@@ -1,5 +1,12 @@
 # Masthead PRD
 
+> **Supersession (2026-07):** Logbook’s primary searchable unit is a **published artifact**, not a
+> session row. Workbench still owns the raw→ready session pipeline; multi-kind publish (session
+> package + runbook/ADR/incident timeline) is defined in **ADR 0011** and `CONTEXT.md`. Sections below
+> that say “Logbook of past sessions” or “show imported sessions in Logbook” are historical scope
+> language—do not reintroduce session-library Logbook UX. Prefer OpenWiki + ADR 0011 for current
+> product truth.
+
 ## Product Definition
 
 Masthead is a local-first, harness-neutral data layer and session manager for AI agents.

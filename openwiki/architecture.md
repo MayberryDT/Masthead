@@ -7,11 +7,12 @@ Masthead is built as a thin desktop shell around a local daemon and a canonical 
 - `src/daemon` owns HTTP APIs, persistence, source discovery/import, health, and runtime diagnostics.
 - `src/core` holds pure domain logic and reducers used by the daemon and UI.
 - `src/enrichment` turns canonical sessions into durable summaries and search projections.
-- `src/mcp` exposes read-only access to the same database over stdio MCP.
+- `src/workbench` owns the raw→ready session pipeline (state, quality, claims, activity).
+- `src/mcp` exposes read-only access to the same database over stdio MCP (artifact-primary reuse).
 
 ## Runtime shape
 
-A typical local run starts from `npm run dev` or `npm run dev:desktop`.
+A typical local run starts from `npm run dev` or the Electron Dev launcher (`npm run install:electron-dev-launcher` from the intended checkout).
 
 - Electron launches the app shell and can own daemon lifecycle in desktop mode.
 - The daemon binds to `127.0.0.1:17373` by default and serves the live projection plus the local HTTP API.
@@ -22,11 +23,12 @@ The repository’s main data-flow summary is:
 
 ```text
 source files / hooks / local scans
-  -> daemon source discovery and import
+  -> daemon source discovery and live ingest
   -> canonical SQLite session graph
-  -> live projection, Logbook, dossiers, search, usage, settings
-  -> enrichment / search projections
-  -> read-only MCP retrieval
+  -> Now projection (shallow live cards)
+  -> Workbench pipeline (session readiness + multi-kind compile/publish)
+  -> published artifacts (session_dossier, runbook, adr, incident_timeline)
+  -> Logbook UI + artifact-primary MCP retrieval
 ```
 
 ## Renderer and shell
@@ -34,10 +36,17 @@ source files / hooks / local scans
 `src/app/App.tsx` is the top-level renderer coordinator. It:
 
 - tracks active surfaces and board filters,
-- wires the sources controller,
+- wires Sources, Workbench, Logbook, and settings controllers,
 - manages first-run onboarding visibility,
 - handles collector autostart state and startup log entries,
-- consumes live projection, logbook, usage, and session detail data.
+- consumes live projection, logbook artifacts, usage, and session detail data.
+
+Surface modules (do not force Now card DOM onto every surface):
+
+- Logbook: `src/ui/logbook/`, `src/app/logbook/` — artifact search + body/provenance inspector.
+- Workbench: `src/ui/workbench/`, `src/app/workbench/` — package path ops table + Activity rail.
+- Sources: `src/ui/sources/` — live connector rows.
+- Now/Board: session cards over `/projection`.
 
 The Electron main process (`src/electron/main.ts`) is responsible for:
 
@@ -53,28 +62,30 @@ The daemon is the runtime owner of canonical state.
 
 - `src/daemon/main.ts` starts the ingest server and background hydration.
 - `src/daemon/server.ts` wires the HTTP API and the database-backed services.
-- `src/daemon/sources/sourceSetupService.ts` derives source setup status and onboarding-friendly scan results.
-- `src/core/ingestion.ts`, `src/core/liveProjection.ts`, and `src/core/sessionReducer.ts` provide the pure transformations that turn events into board/session state.
+- `src/daemon/db/sessionArtifactRepository.ts` / `logbookArtifactRepository.ts` own published artifact capsules and search.
+- `src/daemon/sources/` derives source setup, preflight, and harness connector snapshots.
+- `src/core/ingestion.ts`, `src/core/liveProjection.ts`, and `src/core/sessionReducer.ts` provide pure transformations that turn events into board/session state.
 
-`src/core/index.ts` re-exports the shared domain helpers. The files under `src/core` are where the business rules are easiest to inspect when changing attention, conflicts, outcomes, redaction, or session history behavior. Recent work also tightened the live hook adapter in `src/core/liveHookAdapter.ts` and the board-headline framing path in `src/core/openaiBoardHeadlineFrame.ts`, so keep the canonical event model and the card headline contract in sync with any UI or daemon changes that depend on them. The renderer now also owns session-ended desktop notifications and logbook bulk-enrich selection state in `src/app/App.tsx`, while `src/app/logbook/useLogbookController.ts` handles bulk enrichment requests against the daemon.
+`src/core/index.ts` re-exports shared domain helpers. Keep the live hook adapter (`src/core/liveHookAdapter.ts`) and board-headline framing in sync with UI/daemon changes that depend on them. Session-ended desktop notifications live in the renderer; **Logbook no longer has bulk-enrich selection** — detail open is single-artifact via `getLogbookArtifact`.
 
-## Enrichment and MCP
+## Enrichment, Workbench, and MCP
 
-Enrichment is a separate derived-data pipeline.
+Enrichment is a derived-data pipeline used on the Workbench path:
 
-- `src/enrichment/enrichmentCoordinator.ts` builds session facts, calls providers, writes `session_capsule`, `live_summary`, and `search_projection`, and avoids needless rewrites when the fingerprint is unchanged.
-- The enrichment code treats transcript-rich and transcript-poor sessions differently, so output quality is evidence-sensitive.
+- `src/enrichment/enrichmentCoordinator.ts` builds session facts, calls providers, writes capsules/summaries/search projections, and avoids needless rewrites when the fingerprint is unchanged.
+- Workbench apply paths and agent CLI write validated enrichment/dossier/kind outputs; **apply ≠ publish**.
 
-MCP is a read-only boundary.
+MCP is a read-only boundary:
 
 - `src/mcp/server.ts` opens the active database and handles stdio requests.
-- `src/mcp/protocol.ts`, `src/mcp/tools.ts`, and `src/mcp/sessionRetrieval.ts` define the model-facing retrieval surface.
+- Prefer `search_artifacts` / `get_artifact` for knowledge reuse; session tools remain for evidence/compile.
 - The MCP server is intentionally separate from the local ingest daemon; it is for retrieval, not mutation.
 
 ## What to watch out for
 
 - Do not blur the daemon/core boundary. Core should stay as pure as possible; daemon owns storage and process state.
 - Do not treat Electron as the source of truth for product data. It is a shell around the daemon and renderer.
-- Keep onboarding logic aligned between renderer state and daemon setup status; the first-run flow spans both layers.
+- Keep Logbook and Workbench product language aligned with ADR 0011 and `CONTEXT.md`.
 - Keep `MASTHEAD_DB_PATH` and `MASTHEAD_DATA_DIR` semantics consistent across daemon, MCP, and desktop launch code.
-- Use `design.md` and `prd.md` as the product and UI contract before changing screens or workflows.
+- After moving checkouts, re-run `npm run install:electron-dev-launcher` so Masthead Dev is not stuck on a stale worktree path.
+- Use `design.md` for visual contract and `CONTEXT.md` + ADR 0011 for Logbook/Workbench product truth.

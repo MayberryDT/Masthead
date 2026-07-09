@@ -29,7 +29,7 @@ Sources does **not** own:
 - Workbench quality, publication, or Logbook visibility,
 - bulk history “connect selected sources” as the primary product action.
 
-Workbench owns deepening captured sessions (metadata/transcripts when permitted, enrichment, publication). Now owns shallow live presence. Logbook owns published sessions only.
+Workbench owns deepening captured sessions (metadata/transcripts when permitted, enrichment, multi-kind publication). Now owns shallow live presence. Logbook owns **published artifacts only** (ADR 0011), not session rows.
 
 The authoritative product contract is `docs/reference/sources-v2.md`.
 

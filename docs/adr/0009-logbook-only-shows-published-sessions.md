@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted.
+Accepted. **Read with ADR 0011:** Logbook’s searchable unit is a **published artifact**, not a
+session row. Phrases below that say “published sessions” mean “only quality-gated, Workbench-published
+material reaches Logbook”—not “each Logbook hit is a session.” This ADR still governs Workbench
+raw→ready pipeline ownership, explicit publish transitions, quality gates, and “unpublished capture
+stays out of Logbook.”
 
 ## Context
 

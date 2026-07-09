@@ -22,13 +22,15 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /sources/connectors` returns the Sources V2 harness-connector snapshot: eight live targets with `presence` (`not_found` | `found`), `live` (`not_installed` | `needs_action` | `ready` | `error`), optional activation fields, config/endpoints, and a `summary` of ready / needsAction / notInstalled / notFound / error counts. Read-only and safe through a worktree bridge.
 - `GET /sources/scan/latest` returns the latest multi-adapter scan result, or runs a bounded scan if none is cached.
 - `GET /diagnostics/runtime` returns runtime diagnostics, import queue state, and a small active import page for Advanced diagnostics.
-- `GET /sessions` searches canonical sessions. Query params include `q`, `project`, `runtime`, `host`, `model`, `state`, date filters, and `limit`.
+- `GET /logbook/artifacts` searches **published Logbook artifacts** (primary Logbook path). Query params include `q`, `kind` (`session_dossier` \| `runbook` \| `adr` \| `incident_timeline`), `project`, `dateFrom`, `dateTo`, `limit`, `offset`. Bridge-safe read.
+- `GET /logbook/artifacts/:artifactId` returns one published artifact detail: body, provenance session ids, join rationale, confidence, evidence refs. Bridge-safe read.
+- `GET /sessions` searches canonical sessions (evidence / Workbench / compile — not the primary Logbook listing). Query params include `q`, `project`, `runtime`, `host`, `model`, `state`, date filters, and `limit`.
 - `GET /sessions/:sessionId` returns one session detail.
 - `GET /sessions/:sessionId/excerpts` returns bounded excerpts, with optional `q` and `limit`.
-- `GET /sessions/:sessionId/dossier` returns the canonical session dossier used by Board and Logbook detail views.
+- `GET /sessions/:sessionId/dossier` returns the session dossier (Workbench/evidence; Logbook opens **artifacts**, not this, as the primary detail path).
 - `GET /sessions/:sessionId/live-explain` explains the current Board live-state decision for one session, including the selected authority, latest live report, latest event fallback, unresolved blockers, and headline fact freshness.
 - `GET /sessions/:sessionId/transcript` returns paginated canonical transcript items from messages, tools, checkpoints, runtime signals, and file effects. Query params include `cursor`, `limit`, `kind=all|user|assistant|tools|checkpoints|files|signals`, and `q`.
-- `GET /workbench/sessions?limit=...` returns publish-path Workbench sessions with next action, readiness fields, active claim, and latest Activity. This endpoint is read-only and safe through a worktree bridge.
+- `GET /workbench/sessions?limit=...` returns package-path Workbench sessions with next action, readiness/package/kind/resolution fields, active claim, and latest Activity. This endpoint is read-only and safe through a worktree bridge.
 - `GET /workbench/activity?limit=...&sessionId=...` returns recent Workbench Activity receipts.
 - `GET /workbench/not-added-summary` returns aggregate Not Added to Logbook counts by reason.
 - `GET /workbench/not-added?includeDetails=true&limit=...` explicitly inspects Not Added to Logbook sessions.
@@ -71,7 +73,7 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 - `POST /workbench/sessions/:sessionId/claim` claims a publish-path session for an operator. Optional body: `{ "claimedBy"?: string, "ttlSeconds"?: number }` (defaults `workbench_ui`, `900`). Returns `{ ok: true, claims: [...] }` with `claimId`. Primary-only; not bridge-safe.
 - `POST /workbench/claims/:claimId/release` releases an active claim. Optional body: `{ "reason"?: string }` (default `released`). Returns `{ ok: true, claim }` or `404` when the claim is missing. Primary-only; not bridge-safe.
 - `POST /workbench/sessions/:sessionId/quality` marks capture quality. Body is either `{ "status": "passed" | "failed", "reason"?: string, "actorId"?: string }` or `{ "mode": "precheck", "actorId"?: string }`. Precheck runs capture quality heuristics then marks pass/fail. Actor defaults to user `workbench_ui`. Failing quality on an already published session returns `409` with `cannot_fail_quality_on_published_session`. Primary-only; not bridge-safe.
-- `POST /workbench/sessions/:sessionId/publish` explicitly publishes a session after transcript, quality, enrichment, dossier, and bug-fix readiness gates are satisfied.
+- `POST /workbench/sessions/:sessionId/publish` publishes the **session package** (dossier capsule) when package gates are satisfied. Multi-kind artifacts (runbook/ADR/timeline) use separate apply/publish or N/A paths; apply ≠ publish.
 - `POST /imports/:importJobId/cancel` cancels an import job.
 - `POST /imports/:importJobId/retry` queues a retry.
 - `PUT /sources/:sourceId/policies` updates source policy state.

@@ -358,9 +358,20 @@ Tier controls visual intensity. Lifecycle controls state meaning. Do not conflat
 
 ### Logbook
 
-The Logbook is not an old utility list. It should optimize scanning, filtering, pagination, and opening durable session records while retaining the shared surface language.
+> **Product unit (ADR 0011):** Logbook is an **artifact book**. Rows are published artifacts
+> (session dossier, runbook, ADR, incident timeline), not sessions. See `CONTEXT.md` and
+> `openwiki/logbook-and-workbench.md`.
 
-Each Logbook card should answer: what happened, where, when, what state it ended in, and what evidence or snippet makes it reviewable. Snippets belong in constrained evidence blocks, not free-floating paragraphs.
+The Logbook is not an old utility list or session library. It should optimize scanning, filtering,
+pagination, and opening **published artifact** capsules while retaining the shared surface language.
+
+Locked composition: dense capsule table (Kind · Title/Highlight · Project · Conf · Provenance ·
+Published) plus a selection-driven inspector with **kind-specific body** and **always-visible
+provenance**. No bulk selection checkboxes, no bulk enrich chrome, no session-era summary metrics strip.
+
+Each capsule should answer: what kind of knowledge this is, what it claims, where/when it was
+published, confidence, and which sessions provenance it. Body detail and multi-session join rationale
+belong in the inspector, not free-floating table paragraphs.
 
 ### Sources
 

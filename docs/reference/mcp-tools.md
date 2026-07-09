@@ -2,6 +2,8 @@
 
 Masthead MCP is read-only for launch. It reads from the canonical SQLite database specified by `MASTHEAD_DB_PATH` and writes only MCP audit rows to that same Masthead database.
 
+**Artifact-primary:** prefer `search_artifacts` / `get_artifact` for knowledge reuse (ADR 0011). Session and transcript tools are for compile-time evidence and deep inspection, not the default memory API.
+
 Start the server through the launch config from Agent Access or:
 
 ```bash
@@ -10,6 +12,15 @@ MASTHEAD_DB_PATH=/path/to/masthead.sqlite node dist/daemon/src/mcp/server.js
 ```
 
 ## Tools
+
+### Knowledge reuse (prefer)
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `search_artifacts` | optional `query`, `kind` (`session_dossier` \| `runbook` \| `adr` \| `incident_timeline`), `project`, `limit`, `offset` | Published artifact capsules (title, kind, project, confidence, provenance, highlight) |
+| `get_artifact` | `artifactId` | One published artifact body with provenance session ids, join rationale, and evidence refs |
+
+### Evidence / compile
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
@@ -25,7 +36,8 @@ MASTHEAD_DB_PATH=/path/to/masthead.sqlite node dist/daemon/src/mcp/server.js
 
 Allowed:
 
-- Search session summaries.
+- Search and fetch **published artifacts**.
+- Search session summaries (evidence/compile).
 - Read bounded historical excerpts.
 - Read bounded canonical transcript rows.
 - Read project history.

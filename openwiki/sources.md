@@ -10,8 +10,8 @@ Sources is the harness connection control plane for **live capture only**. It is
 ```text
 Sources wires harnesses
   → live events → canonical DB + Now
-    → Workbench deepens sessions
-      → Logbook shows published sessions
+    → Workbench deepens sessions and publishes artifacts
+      → Logbook shows published artifacts (not session rows)
 ```
 
 ## Job
@@ -35,10 +35,11 @@ Do not rebuild Sources as:
 
 - import job dashboard,
 - bulk metadata/transcript import UI,
-- session table,
+- session table or Logbook browser,
 - Workbench activity surface.
 
 History adapters and import APIs may still exist in the daemon for Workbench. They are not Sources V2 UX.
+Workbench publishes **artifacts** into Logbook (ADR 0011); Sources never owns Logbook visibility.
 
 ## UI shape
 

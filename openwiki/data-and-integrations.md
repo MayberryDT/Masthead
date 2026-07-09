@@ -1,6 +1,6 @@
 # Data and integrations
 
-This page covers the canonical local store, the daemon HTTP surface, the MCP boundary, and derived data from enrichment.
+This page covers the canonical local store, the daemon HTTP surface, the MCP boundary, published artifacts, and derived enrichment data.
 
 ## Canonical data path
 
@@ -13,28 +13,28 @@ The main idea is simple:
 - the SQLite store becomes the source of truth for Masthead-owned data,
 - read-only consumers read from that canonical store.
 
-Live connector events are part of that flow too: `src/daemon/server.ts` routes ingest by runtime, and `src/core/liveIdentity.ts` scopes canonical live sessions by host plus runtime so Cursor, Claude Code, OpenCode, Grok Build, Hermes, Pi, and OMP can share a source session ID without colliding.
+Live connector events are part of that flow: `src/daemon/server.ts` routes ingest by runtime, and `src/core/liveIdentity.ts` scopes canonical live sessions by host plus runtime so multiple harnesses can share a source session ID without colliding.
+
+**Published knowledge** lives in artifact tables (`session_artifacts` + provenance), not as “Logbook session rows.” Schema migration `018_artifact_first_logbook` introduces that model. Dogfood may wipe published artifact state and rebuild via Workbench; see `docs/reference/artifact-first-logbook-cutover.md`.
 
 ## Daemon API
 
 The local HTTP daemon is the main integration surface for the app, smoke tests, doctor, and worktree bridge. `src/daemon/server.ts` implements the API; `docs/reference/daemon-api.md` lists the endpoints.
 
-A few important contracts:
+Important contracts:
 
-- `GET /health` is the compatibility oracle,
-- `GET /projection` serves the live Now projection,
-- `GET /sessions`, `GET /projects`, `GET /imports`, and related endpoints expose canonical reads,
-- `GET /settings/hooks` exposes live connector status and installer/test/uninstall controls for Cursor, Claude Code, OpenCode, Grok Build, Hermes, Pi, and OMP,
-- runtime-specific `/settings/hooks/:runtime` routes manage one connector at a time for the focused runtime set,
-- write endpoints like `/ingest`, `/sources/connect`, `/imports`, `/data/delete`, and hook-management routes stay local to the daemon and are not exposed through MCP.
+- `GET /health` is the compatibility oracle (includes schema version; artifact-first expects schema **18+**).
+- `GET /projection` serves the live Now projection.
+- **`GET /logbook/artifacts`** searches published artifact capsules (`q`, `kind`, `project`, `dateFrom`, `dateTo`, `limit`, `offset`). This is the Logbook primary read path.
+- **`GET /logbook/artifacts/:artifactId`** returns one artifact body, provenance session ids, join rationale, and evidence refs.
+- `GET /sessions` and session detail routes remain for evidence, Workbench, and compile — not the primary Logbook listing.
+- `GET /workbench/sessions` (and related Workbench reads) expose package-path pipeline state.
+- `GET /sources/connectors` and hook routes support Sources V2 live connect.
+- Write endpoints (`/ingest`, Workbench mutations, `/data/delete`, etc.) stay local to the daemon and are not exposed through MCP.
 
-`POST /ingest` uses the runtime query parameter or `x-masthead-runtime` header, defaulting only to Claude Code for legacy local callers. Live data is stored under the correct runtime-specific source and canonical session identity. Connector tests hit a validation-only ingest variant (`validate=1` or `dryRun=true`) so installer/test flows can verify the hook path without mutating the canonical store. The live hook normalizer in `src/core/liveHookAdapter.ts` hardens the hook boundary by rejecting oversized payloads, validating runtime support, redacting raw prompt/output fields, and mapping each runtime’s event vocabulary into the canonical event model before ingest. The runtime profiles in `src/adapters/live/runtimeProfiles.ts` keep the mapping data-driven.
+`POST /ingest` uses the runtime query parameter or `x-masthead-runtime` header. Connector tests use a validation-only ingest variant so installer/test flows can verify the hook path without mutating the store when appropriate.
 
-`src/enrichment/enrichmentCoordinator.ts` writes `session_capsule`, `live_summary`, and `search_projection` together in one transaction after a successful provider response. It records durable audit events for the start, facts, provider response, failure, and persisted states, and it skips rewriting a current capsule when the content fingerprint and provider still match. When a provider result is weak for a transcript-rich session, the coordinator falls back to the deterministic enrichment path rather than treating the current capsule as authoritative. The logbook bulk-enrich flow now calls the daemon with a `sessionIds` scope so selected sessions can be rebuilt in one request instead of reusing a single-session path.
-
-`src/core/liveIdentity.ts` now scopes live projection sessions by host, runtime, and source session ID, so identical source IDs from different runtimes remain distinct in the canonical store. That identity shape is also what the live projection and replay logic use when they scope events and snapshots for projection.
-
-Historical Codex transcript recovery is compatibility-only. New live projection data comes through the focused live connector runtimes; per-session transcript import is an explicit Workbench action that respects Sources source-scoped transcript permissions.
+Workbench enrichment and kind authoring go through Workbench/CLI paths with receipts. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
 
 ## MCP
 
@@ -43,21 +43,22 @@ Historical Codex transcript recovery is compatibility-only. New live projection 
 The MCP layer is intentionally read-only:
 
 - it opens the active Masthead database,
-- exposes retrieval/tools over the same canonical data,
+- exposes retrieval tools over the same canonical data,
 - writes audit rows for access,
 - does not mutate Masthead state, source state, Git, or shell state.
 
-That makes MCP the model-facing retrieval boundary rather than another control plane.
+**Artifact-primary tools** (prefer for reuse):
+
+- `search_artifacts`
+- `get_artifact`
+
+Session/transcript tools remain for compile-time evidence. Full list: `docs/reference/mcp-tools.md`.
 
 ## Enrichment
 
-`src/enrichment/enrichmentCoordinator.ts` turns session facts into durable derived records. It writes three kinds of enrichment artifacts:
+`src/enrichment/enrichmentCoordinator.ts` turns session facts into durable derived records (capsules, live summaries, search projections). The pipeline is evidence-sensitive: it fingerprints facts and avoids rewriting a current result when the fingerprint and provider match.
 
-- `session_capsule`
-- `live_summary`
-- `search_projection`
-
-The enrichment pipeline is evidence-sensitive. It fingerprints the facts for a session and avoids rewriting a current result when the fingerprint and provider match. It also backs off after recent failures.
+Published multi-kind artifacts (dossier / runbook / ADR / timeline) are authored and published on the Workbench path with per-artifact gates; enrichment alone does not put a row in Logbook.
 
 ## Identity and privacy notes
 
@@ -69,5 +70,6 @@ The enrichment pipeline is evidence-sensitive. It fingerprints the facts for a s
 
 - Keep the writable daemon and read-only MCP roles separate in docs and code changes.
 - Don’t treat enrichment as raw storage; it is derived data that depends on canonical facts.
-- Keep the data-path docs consistent with the current runtime behavior of `MASTHEAD_DATA_DIR` and `MASTHEAD_DB_PATH`.
-- If you change what is persisted, check the repository’s data lifecycle and retention behavior before assuming the new data should be long-lived.
+- Don’t document Logbook as reading only session search; primary path is `/logbook/artifacts`.
+- Keep the data-path docs consistent with `MASTHEAD_DATA_DIR` and `MASTHEAD_DB_PATH`.
+- If you change what is persisted, check data lifecycle and retention before assuming long-lived storage.

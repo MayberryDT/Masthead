@@ -28,7 +28,7 @@ It exists so Masthead can:
 | **Sources** | Harness presence, live connector install/repair/uninstall, activation status, connector test |
 | **Now** | Shallow live session presence (working / idle / blocked, identity, last activity) |
 | **Workbench** | Captured-session pipeline: transcript checks/import, quality, enrichment, publication, purge/suppress |
-| **Logbook** | Published sessions only |
+| **Logbook** | Published artifacts only (ADR 0011) |
 | **Settings** | Global app/data policy; may deep-link to connector management but does not replace Sources |
 
 ### Explicit non-goals for Sources V2

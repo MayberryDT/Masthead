@@ -1,39 +1,36 @@
 # Masthead
 
-Masthead is a local-first, harness-neutral session data layer and session manager
-for AI-agent work. It discovers local harness history, imports it into a
-canonical SQLite session graph, makes it searchable in Logbook, and exposes
-bounded historical context to existing agents through read-only MCP tools.
+Masthead is a local-first, harness-neutral session data layer for AI-agent work.
+It captures local harness history into a canonical SQLite session graph, runs a
+Workbench raw→publish pipeline, stores **published knowledge as artifacts** in
+Logbook, and exposes that knowledge to existing agents through read-only MCP
+tools (artifact-primary).
 
-Masthead starts Codex-first because one complete adapter loop is more useful
-than shallow support for many runtimes. The core model remains adapter-neutral.
-Live Now is a view over collected session data, not the product category.
+Sessions remain the unit of capture and Workbench pipeline. **Logbook rows are
+published artifacts** (session dossiers, runbooks, ADRs, incident timelines),
+not session table rows. Live Now is a shallow view over collected session data,
+not the product category.
+
+Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
+`docs/adr/0011-artifact-first-logbook.md`.
 
 ## Stable Today
 
-- Canonical local SQLite ownership for Masthead-owned sessions, source state,
-  import jobs, search records, settings, and MCP audit rows.
-- Multi-adapter source discovery for Codex, Cursor, Claude Code,
-  Antigravity, OpenCode, Aider, OpenClaw, Hermes, and Pi, with conservative
-  metadata imports and reviewed transcript history.
-- A harness catalog that also names detector-only local harnesses and
-  cloud-reference harnesses without claiming import support before local
-  schema coverage exists.
-- Logbook search and session detail APIs backed by the canonical store.
-- Shared Board and Logbook session dossier backed by canonical identity,
-  coverage diagnostics, transcript rows, files, tools, verification, timeline,
-  usage, and provenance.
-- Read-only local MCP access for search, bounded session retrieval, project
-  history, and coverage counts.
-- Workbench as the user-facing raw-to-published operations surface with
-  pipeline state, Activity, transcript checks/import intent, quality cleanup,
-  artifacts, publication, and disposable handoffs for coding agents.
-- Agent-facing CLI Workbench guidance so coding agents can consistently validate
-  and apply session enrichment, session dossiers, and bug-fix traces.
-- `npm run dev` launcher that starts either a writable daemon or a read-only
-  worktree bridge as needed.
-- `npm run dev:desktop` Electron/Chromium desktop shell for app-menu and
-  packaged-app workflows.
+- Canonical local SQLite ownership for Masthead-owned sessions, published
+  artifacts + provenance, source/connector state, import jobs, settings, and MCP
+  audit rows (schema 18+ for artifact-first Logbook).
+- Multi-adapter / multi-harness live connect (Sources V2) and conservative
+  history adapters where coverage exists.
+- Workbench package path: transcript checks/import, quality, claims, Activity,
+  disposable agent handoffs, **session package publish**, and multi-kind
+  resolution (runbook / ADR / incident timeline or N/A).
+- Logbook artifact book: `GET /logbook/artifacts` + body/provenance inspector;
+  filters kind · project · date · search; no bulk enrich / checkboxes / summary strip.
+- Read-only MCP with **`search_artifacts` / `get_artifact`** preferred for reuse;
+  session/transcript tools for evidence and compile.
+- `npm run dev` launcher (writable daemon or read-only worktree bridge).
+- Electron Dev desktop launcher (`npm run install:electron-dev-launcher` from the
+  checkout you intend to run — path is hardwired into the desktop entry).
 - Product, surface, endpoint-matrix, doctor, smoke, build, and test gates.
 
 ## Experimental

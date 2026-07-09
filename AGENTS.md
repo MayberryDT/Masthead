@@ -9,13 +9,17 @@ manager.
 The product hierarchy is:
 
 1. canonical session database,
-2. Workbench (raw → publish pipeline),
-3. Logbook (published/searchable only),
-4. read-only MCP,
+2. Workbench (raw → publish pipeline for sessions + multi-kind artifacts),
+3. Logbook (**published artifacts only** — not session rows; ADR 0011),
+4. read-only MCP (artifact-primary; session tools for evidence),
 5. live Now (shallow),
 6. Sources V2 (harness live-connect only; see `docs/reference/sources-v2.md`).
 
 Observability is a view over continuously collected session data.
+
+**Logbook = published artifacts** (`session_dossier`, `runbook`, `adr`, `incident_timeline`).
+Sessions are capture/Workbench/provenance units only. Vocabulary: `CONTEXT.md`. Decision:
+`docs/adr/0011-artifact-first-logbook.md`. Surface map: `openwiki/logbook-and-workbench.md`.
 
 ## OpenWiki
 
@@ -23,10 +27,15 @@ This repository has documentation located in the /openwiki directory.
 
 Start here:
 - [OpenWiki quickstart](openwiki/quickstart.md)
+- [Logbook and Workbench](openwiki/logbook-and-workbench.md)
 
 OpenWiki includes repository overview, architecture notes, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
 
 When working in this repository, read the OpenWiki quickstart first, then follow its links to the relevant architecture, workflow, domain, operation, and testing notes.
+
+After switching checkouts or worktrees, re-run `npm run install:electron-dev-launcher` from the
+tree you mean to run. The Masthead Dev desktop entry hardwires that path; a stale worktree looks
+like “connected but wrong product.”
 
 ## Read-Only Run Exceptions
 
@@ -48,7 +57,7 @@ Surface archetypes:
 
 - Now: live cards.
 - Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
-- Logbook: dense table plus inspector.
+- Logbook: dense **artifact** capsule table plus body/provenance inspector (no bulk/checkboxes/summary strip).
 - Sources: harness connector rows plus live enablement (Discover → Enable → Activate → Test); see `docs/reference/sources-v2.md`.
 - Agent Access: setup, permissions, tools, and audit tables.
 - Settings: vertical settings sections and danger zone.
