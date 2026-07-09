@@ -104,7 +104,6 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
   return (
     <SettingsSection
       className="settings-section-wide settings-section-mcp"
-      eyebrow="MCP"
       title="MCP server"
       description="Read-only local session retrieval for agents that support MCP."
     >

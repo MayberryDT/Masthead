@@ -10,7 +10,6 @@ type OnboardingSettingsProps = {
 export function OnboardingSettings({ onOpenOnboarding, readOnly = false }: OnboardingSettingsProps) {
   return (
     <SettingsSection
-      eyebrow="Setup"
       title="Onboarding"
       description="Reopen first-run setup for source detection, live capture, imports, and enrichment configuration."
     >

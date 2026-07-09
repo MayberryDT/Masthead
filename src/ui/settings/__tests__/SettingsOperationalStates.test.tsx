@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -23,8 +23,26 @@ afterEach(() => {
 });
 
 describe("Settings operational states", () => {
-  test("keeps read-only state out of the Settings chrome while disabling destructive actions", () => {
-    const html = renderToStaticMarkup(
+  async function renderPanel(panel: ReactNode) {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(panel);
+    });
+  }
+
+  async function selectCategory(label: string) {
+    const button = [...(container?.querySelectorAll<HTMLButtonElement>(".settings-category-nav button") ?? [])]
+      .find((candidate) => candidate.textContent === label);
+    expect(button).toBeDefined();
+    await act(async () => {
+      button?.click();
+    });
+  }
+
+  test("keeps read-only state out of the Settings chrome while disabling destructive actions", async () => {
+    await renderPanel(
       <OperationsPanel
         deletionScopeKind="project"
         deletionScopeTarget="Masthead"
@@ -32,6 +50,10 @@ describe("Settings operational states", () => {
         settingsState={settings}
       />
     );
+    await selectCategory("Data");
+    const dataHtml = container?.innerHTML ?? "";
+    await selectCategory("Danger zone");
+    const html = `${dataHtml}${container?.innerHTML ?? ""}`;
 
     expect(html).not.toContain("Read-only connection");
     expect(html).not.toContain("hook writes");

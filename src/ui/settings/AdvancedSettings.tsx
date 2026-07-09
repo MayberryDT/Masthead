@@ -8,7 +8,7 @@ type AdvancedSettingsProps = {
 
 export function AdvancedSettings({ settings }: AdvancedSettingsProps) {
   return (
-    <SettingsSection eyebrow="System" title="Advanced">
+    <SettingsSection title="Advanced">
       <SettingsRow label="Database ID" value={settings?.data.databaseId ?? "Loading"} />
       <SettingsRow label="Database path" value={settings?.data.databasePath ?? "Loading"} />
       <SettingsRow label="Data directory" value={settings?.data.dataDirectory ?? "Loading"} />

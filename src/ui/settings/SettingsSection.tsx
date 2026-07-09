@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
 type SettingsSectionProps = {
-  eyebrow: string;
   title: string;
   description?: string;
   children: ReactNode;

@@ -16,7 +16,7 @@ export function PreferencesSettings({
   onSessionEndedNotificationsEnabledChange
 }: PreferencesSettingsProps) {
   return (
-    <SettingsSection eyebrow="Interface" title="Preferences">
+    <SettingsSection title="Preferences">
       <SettingsRow
         label="Motion"
         description="Turns off app animations and animated layout transitions on this device."

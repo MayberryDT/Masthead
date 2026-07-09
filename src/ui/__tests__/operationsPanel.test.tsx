@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -25,8 +25,30 @@ describe("OperationsPanel", () => {
     vi.unstubAllGlobals();
   });
 
-  test("renders local export and delete controls", () => {
-    const html = renderToStaticMarkup(<OperationsPanel />);
+  async function renderPanel(panel: ReactNode) {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(panel);
+    });
+  }
+
+  async function selectCategory(label: string) {
+    const button = [...(container?.querySelectorAll<HTMLButtonElement>(".settings-category-nav button") ?? [])]
+      .find((candidate) => candidate.textContent === label);
+    expect(button).toBeDefined();
+    await act(async () => {
+      button?.click();
+    });
+  }
+
+  test("renders local export and delete controls", async () => {
+    await renderPanel(<OperationsPanel settingsLoadState="loading" />);
+    await selectCategory("Data");
+    const dataHtml = container?.innerHTML ?? "";
+    await selectCategory("Danger zone");
+    const html = `${dataHtml}${container?.innerHTML ?? ""}`;
 
     expect(html).toContain("Export data");
     expect(html).toContain("Delete raw copies");
@@ -72,8 +94,8 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Confirm deletion of 4 raw source copies.");
   });
 
-  test("renders selective deletion controls for scoped records", () => {
-    const html = renderToStaticMarkup(
+  test("renders selective deletion controls for scoped records", async () => {
+    await renderPanel(
       <OperationsPanel
         deletionScopeKind="project"
         deletionScopeTarget="Pip"
@@ -81,8 +103,11 @@ describe("OperationsPanel", () => {
           state: "confirm_scoped_delete",
           message: "Confirm scoped deletion for project Pip."
         }}
+        settingsLoadState="loading"
       />
     );
+    await selectCategory("Danger zone");
+    const html = container?.innerHTML ?? "";
 
     expect(html).toContain("Delete scoped records");
     expect(html).toContain("Project");
@@ -92,8 +117,8 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Cancel");
   });
 
-  test("renders data summary preview before deletion", () => {
-    const html = renderToStaticMarkup(
+  test("renders data summary preview before deletion", async () => {
+    await renderPanel(
       <OperationsPanel
         dataSummary={{
           auditRows: 2,
@@ -117,8 +142,11 @@ describe("OperationsPanel", () => {
             sessions: 5
           }
         }}
+        settingsLoadState="loading"
       />
     );
+    await selectCategory("Data");
+    const html = container?.innerHTML ?? "";
 
     expect(html).toContain("Storage");
     expect(html).toContain("Source copies");
@@ -127,10 +155,17 @@ describe("OperationsPanel", () => {
     expect(html).not.toContain("Retention classes");
   });
 
-  test("renders local action errors without changing action labels", () => {
-    const html = renderToStaticMarkup(
-      <OperationsPanel localDataStatus={{ state: "error", message: "Export failed: unavailable" }} />
+  test("renders local action errors without changing action labels", async () => {
+    await renderPanel(
+      <OperationsPanel
+        localDataStatus={{ state: "error", message: "Export failed: unavailable" }}
+        settingsLoadState="loading"
+      />
     );
+    await selectCategory("Data");
+    const dataHtml = container?.innerHTML ?? "";
+    await selectCategory("Danger zone");
+    const html = `${dataHtml}${container?.innerHTML ?? ""}`;
 
     expect(html).toContain("Export failed: unavailable");
     expect(html).toContain("Export data");
@@ -163,6 +198,7 @@ describe("OperationsPanel", () => {
         />
       );
     });
+    await selectCategory("Danger zone");
 
     const triggers = Array.from(container.querySelectorAll<HTMLButtonElement>(".settings-delete-controls .filterable-select-trigger"));
     expect(triggers).toHaveLength(2);
@@ -201,6 +237,7 @@ describe("OperationsPanel", () => {
     await act(async () => {
       root?.render(<OperationsPanel deletionScopeKind="project" deletionScopeTarget="" settingsState={settings} />);
     });
+    await selectCategory("Danger zone");
 
     const triggers = Array.from(container.querySelectorAll<HTMLButtonElement>(".settings-delete-controls .filterable-select-trigger"));
     expect(triggers).toHaveLength(2);
@@ -228,6 +265,7 @@ describe("OperationsPanel", () => {
     await act(async () => {
       root?.render(<OperationsPanel settingsState={settings} />);
     });
+    await selectCategory("Data");
     const openButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Open folder");
 
     await act(async () => {
@@ -251,6 +289,7 @@ describe("OperationsPanel", () => {
     await act(async () => {
       root?.render(<OperationsPanel settingsState={settings} />);
     });
+    await selectCategory("Data");
     const openButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Open folder");
 
     await act(async () => {

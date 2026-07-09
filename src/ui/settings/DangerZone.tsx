@@ -46,7 +46,6 @@ export function DangerZone({
     <SettingsSection
       danger
       description="These actions only mutate Masthead's local database and generated indexes. Original harness files are untouched."
-      eyebrow="Danger zone"
       title="Danger zone"
     >
       <SettingsRow
