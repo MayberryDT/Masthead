@@ -307,6 +307,89 @@ env = {"MASTHEAD_DB_PATH":"/tmp/masthead.sqlite"}`);
     expect(container?.textContent).not.toContain("Initial MCP load failed.");
   });
 
+  test("keeps a newer connection-test failure after an older pending load rejects", async () => {
+    let rejectInitialLoad: ((reason?: unknown) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const pathname = requestPath(input);
+        if (pathname === "/mcp/status") {
+          return new Promise<Response>((_resolve, reject) => {
+            rejectInitialLoad = reject;
+          });
+        }
+        if (pathname === "/mcp/test-connection") {
+          return jsonResponse({
+            ok: true,
+            test: { status: "failed", message: "Newest connection test failed." }
+          });
+        }
+        return mcpResponse(input);
+      })
+    );
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Agent access");
+    expect(rowNamed("MCP server")?.textContent).toContain("Loading");
+
+    await act(async () => {
+      buttonNamed("Test connection")?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => container?.textContent?.includes("Newest connection test failed.") === true);
+
+    await act(async () => {
+      rejectInitialLoad?.(new Error("Older MCP load failed."));
+      await Promise.resolve();
+    });
+    await waitFor(() => rowNamed("MCP server")?.textContent?.includes("Unavailable") === true);
+
+    expect(container?.textContent).toContain("Newest connection test failed.");
+    expect(container?.textContent).not.toContain("Older MCP load failed.");
+  });
+
+  test("keeps a successful test's reload authoritative over an older initial load", async () => {
+    let resolveInitialLoad: ((response: Response) => void) | undefined;
+    let statusRequests = 0;
+    let validationRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const pathname = requestPath(input);
+        if (pathname === "/mcp/status") {
+          statusRequests += 1;
+          if (statusRequests === 1) {
+            return new Promise<Response>((resolve) => {
+              resolveInitialLoad = resolve;
+            });
+          }
+          return Promise.reject(new Error("Current MCP reload failed."));
+        }
+        if (pathname === "/mcp/test-connection") {
+          return jsonResponse({ ok: true, test: { status: "passed", message: "Connection passed." } });
+        }
+        if (pathname === "/mcp/launch-config/validate") validationRequests += 1;
+        return mcpResponse(input);
+      })
+    );
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Agent access");
+
+    await act(async () => {
+      buttonNamed("Test connection")?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => container?.textContent?.includes("Current MCP reload failed.") === true);
+
+    await act(async () => {
+      resolveInitialLoad?.(mcpResponse("http://127.0.0.1/mcp/status"));
+      await Promise.resolve();
+    });
+    await waitFor(() => validationRequests === 1);
+
+    expect(container?.textContent).toContain("Current MCP reload failed.");
+    expect(rowNamed("MCP server")?.textContent).toContain("Unavailable");
+  });
+
   test("reports clipboard failure inline without exposing configuration text", async () => {
     vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => mcpResponse(input)));
     vi.stubGlobal("navigator", {

@@ -38,10 +38,14 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
   const [status, setStatus] = useState<McpStatusDto>();
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const copyRequestRef = useRef(0);
+  const feedbackOperationRef = useRef(0);
+  const loadOperationRef = useRef(0);
   const [testResult, setTestResult] = useState<McpTestConnectionDto>();
   const [testState, setTestState] = useState<TestState>("idle");
 
   const loadMcp = useCallback((signal?: AbortSignal) => {
+    const loadOperationId = ++loadOperationRef.current;
+    const feedbackOperationId = ++feedbackOperationRef.current;
     setLoadState("loading");
     void (async () => {
       try {
@@ -50,15 +54,17 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
           getMcpLaunchConfig(baseUrl, { signal })
         ]);
         const nextValidation = await validateMcpLaunchConfig(nextLaunchConfig, baseUrl, { signal });
-        if (signal?.aborted) return;
+        if (signal?.aborted || loadOperationId !== loadOperationRef.current) return;
         setStatus(nextStatus);
         setLaunchConfig(nextLaunchConfig);
         setLaunchValidation(nextValidation);
-        setLoadError(undefined);
+        if (feedbackOperationId === feedbackOperationRef.current) setLoadError(undefined);
         setLoadState("ready");
       } catch (error: unknown) {
-        if (signal?.aborted) return;
-        setLoadError(error instanceof Error ? error.message : String(error));
+        if (signal?.aborted || loadOperationId !== loadOperationRef.current) return;
+        if (feedbackOperationId === feedbackOperationRef.current) {
+          setLoadError(error instanceof Error ? error.message : String(error));
+        }
         setLoadState("error");
       }
     })();
@@ -93,6 +99,7 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
   }
 
   async function runLaunchTest(): Promise<void> {
+    feedbackOperationRef.current += 1;
     setLoadError(undefined);
     setTestState("testing");
     setTestResult(undefined);
