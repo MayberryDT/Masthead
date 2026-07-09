@@ -304,11 +304,6 @@ export function App() {
     onReviewDispositionsChanged: handleReviewDispositionsChanged,
     writable: connection.writable
   });
-  const reopenOnboarding = useCallback(() => {
-    setActiveSurface("sources");
-    sourcesConnectors.openOnboarding();
-  }, [sourcesConnectors.openOnboarding]);
-
   useEffect(() => {
     if (
       sourcesConnectors.onboardingOpen &&
@@ -663,7 +658,7 @@ export function App() {
           onImportMetadata={handleImportMetadata}
           onLoadAdapterSources={handleLoadAdapterSources}
           onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
-          onOpenOnboarding={reopenOnboarding}
+          onOpenOnboarding={sourcesConnectors.openOnboarding}
           onPollImports={handlePollActiveImports}
           onPreviewImport={sourcesController.previewImport}
           onRepairSources={handleRepairSources}
@@ -771,7 +766,6 @@ export function App() {
             onDeletionScopeTargetChange={settingsData.changeDeletionScopeTarget}
             onExportLocalData={settingsData.exportLocalData}
             onMotionDisabledChange={handleMotionDisabledChange}
-            onOpenOnboarding={reopenOnboarding}
             onReloadSettings={() => void settingsData.loadSettingsState()}
             onRequestPruneLocalData={settingsData.requestPruneLocalData}
             onConfirmPruneLocalData={settingsData.confirmPruneLocalData}

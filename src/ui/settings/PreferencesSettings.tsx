@@ -19,7 +19,6 @@ export function PreferencesSettings({
     <SettingsSection title="Preferences">
       <SettingsRow
         label="Motion"
-        description="Turns off app animations and animated layout transitions on this device."
         control={
           <SettingsToggle
             checked={!motionDisabled}
@@ -31,8 +30,7 @@ export function PreferencesSettings({
         }
       />
       <SettingsRow
-        label="Session transition notifications"
-        description="Desktop only. Notify when a live session becomes idle, blocked, or ended."
+        label="Session notifications"
         control={
           <SettingsToggle
             checked={sessionEndedNotificationsEnabled}

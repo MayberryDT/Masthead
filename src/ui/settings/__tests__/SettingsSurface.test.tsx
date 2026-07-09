@@ -9,6 +9,8 @@ import type { SettingsStateDto } from "../../../app/daemonClient";
 import { SettingsSurface } from "../../../app/surfaces/SettingsSurface";
 import { OperationsPanel } from "../../OperationsPanel";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 describe("Settings surface", () => {
   test("renders the focused Settings shell with General selected", () => {
     const html = renderToStaticMarkup(
@@ -107,6 +109,40 @@ describe("Settings surface", () => {
     host.remove();
   });
 
+  test("shows only direct General and Data controls", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(<OperationsPanel settingsState={settings} />);
+    });
+
+    const pane = host.querySelector<HTMLElement>(".settings-pane");
+    expect(pane?.textContent).toContain("Motion");
+    expect(pane?.textContent).toContain("Session notifications");
+    expect(pane?.textContent).not.toContain("Turns off app animations");
+    expect(pane?.textContent).not.toContain("Desktop only");
+
+    const dataButton = [...host.querySelectorAll("button")].find((button) => button.textContent === "Data");
+    await act(async () => {
+      dataButton?.click();
+    });
+
+    expect(pane?.textContent).toContain("Database");
+    expect(pane?.textContent).toContain("Open folder");
+    expect(pane?.textContent).toContain("Export data");
+    expect(pane?.textContent).toContain("Raw source copies");
+    expect(pane?.textContent).not.toContain("Data directory");
+    expect(pane?.textContent).not.toContain("Database ID");
+    expect(pane?.textContent).not.toContain("Runtime");
+    expect(host.textContent).not.toContain("Run onboarding again");
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
   test("switches to the compact Advanced identity pane", async () => {
     const host = document.createElement("div");
     document.body.append(host);
@@ -127,6 +163,30 @@ describe("Settings surface", () => {
     expect(pane?.textContent).toContain("127.0.0.1:17373");
     expect(pane?.textContent).toContain("API 1 / schema 5");
     expect(pane?.textContent).not.toContain("Delete all Masthead data");
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  test("shortens the Data database path while preserving the full path as a title", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(<OperationsPanel settingsState={settings} />);
+    });
+
+    const dataButton = [...host.querySelectorAll("button")].find((button) => button.textContent === "Data");
+    await act(async () => {
+      dataButton?.click();
+    });
+
+    const compactPath = host.querySelector<HTMLElement>(
+      '[title="/home/tyler/.local/share/masthead/masthead.sqlite"]'
+    );
+    expect(compactPath?.textContent).toBe("…/masthead/masthead.sqlite");
 
     await act(async () => {
       root.unmount();

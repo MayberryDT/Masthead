@@ -16,6 +16,7 @@ type StorageSettingsProps = {
 export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDataDirectory, onRequestPrune, settings, writeDisabled = busy }: StorageSettingsProps) {
   const summary = dataSummary ?? settings?.storage.dataSummary;
   const hasDatabaseIdentity = Boolean(settings?.data.databaseId);
+  const databasePath = settings?.storage.databasePath;
   return (
     <SettingsSection className="settings-section-wide" title="Storage">
       <SettingsRow
@@ -25,27 +26,7 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
           </AppButton>
         }
         label="Database"
-        value={settings?.storage.databasePath ?? "Loading"}
-      />
-      <SettingsRow label="Data directory" value={settings?.storage.dataDirectory ?? "Loading"} />
-      <SettingsRow label="Database ID" value={settings?.data.databaseId ?? "Loading"} />
-      <SettingsRow
-        label="Runtime"
-        value={
-          settings
-            ? `${settings.runtime.mode} / ${settings.runtime.writable ? "writable" : "read only"} / API ${settings.apiVersion} / schema ${settings.schemaVersion}`
-            : "Loading"
-        }
-      />
-      <SettingsRow
-        control={
-          <AppButton disabled={writeDisabled || !summary || !hasDatabaseIdentity} onClick={onRequestPrune} variant="danger">
-            Delete raw copies
-          </AppButton>
-        }
-        description="Keeps normalized session metadata, summaries, and search records. Original source harness files are not modified."
-        label="Source copies"
-        value={summary ? formatCount(summary.rawEvents) : "Loading"}
+        value={databasePath ? <span title={databasePath}>{compactPath(databasePath)}</span> : "Loading"}
       />
       <SettingsRow
         control={
@@ -53,11 +34,25 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
             Export data
           </AppButton>
         }
-        description="Export the local Masthead database graph."
         label="Export"
+      />
+      <SettingsRow
+        control={
+          <AppButton disabled={writeDisabled || !summary || !hasDatabaseIdentity} onClick={onRequestPrune} variant="danger">
+            Delete raw copies
+          </AppButton>
+        }
+        label="Raw source copies"
+        value={summary ? formatCount(summary.rawEvents) : "Loading"}
       />
     </SettingsSection>
   );
+}
+
+function compactPath(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  if (parts.length <= 2) return path;
+  return `…/${parts.slice(-2).join("/")}`;
 }
 
 function formatCount(value: number): string {

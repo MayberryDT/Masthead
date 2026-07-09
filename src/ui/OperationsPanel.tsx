@@ -52,7 +52,6 @@ type Props = {
   onDeletionScopeTargetChange?: (target: string) => void;
   onExportLocalData?: () => void;
   onMotionDisabledChange?: (disabled: boolean) => void;
-  onOpenOnboarding?: () => void;
   onReloadSettings?: () => void;
   onRequestPruneLocalData?: () => void;
   onConfirmPruneLocalData?: () => void;

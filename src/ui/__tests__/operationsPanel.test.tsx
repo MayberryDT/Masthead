@@ -53,7 +53,7 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Export data");
     expect(html).toContain("Delete raw copies");
     expect(html).toContain("Delete all Masthead data");
-    expect(html).toContain("Keeps normalized session metadata, summaries, and search records.");
+    expect(html).not.toContain("Keeps normalized session metadata, summaries, and search records.");
     expect(html).toContain("Original harness files are untouched.");
     expect(html).not.toContain("OpenCode integration");
     expect(html).not.toContain("ops-card");
@@ -149,7 +149,7 @@ describe("OperationsPanel", () => {
     const html = container?.innerHTML ?? "";
 
     expect(html).toContain("Storage");
-    expect(html).toContain("Source copies");
+    expect(html).toContain("Raw source copies");
     expect(html).toContain("4");
     expect(html).not.toContain("Sessions");
     expect(html).not.toContain("Retention classes");
@@ -170,6 +170,45 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Export failed: unavailable");
     expect(html).toContain("Export data");
     expect(html).toContain("Delete all Masthead data");
+  });
+
+  test("keeps preference, export, and raw-copy callbacks wired", async () => {
+    const onMotionDisabledChange = vi.fn();
+    const onSessionEndedNotificationsEnabledChange = vi.fn();
+    const onExportLocalData = vi.fn();
+    const onRequestPruneLocalData = vi.fn();
+    await renderPanel(
+      <OperationsPanel
+        motionDisabled={false}
+        onExportLocalData={onExportLocalData}
+        onMotionDisabledChange={onMotionDisabledChange}
+        onRequestPruneLocalData={onRequestPruneLocalData}
+        onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange}
+        sessionEndedNotificationsEnabled
+        settingsState={settings}
+      />
+    );
+
+    const motion = container?.querySelector<HTMLInputElement>('input[aria-label="Enable motion"]');
+    const notifications = container?.querySelector<HTMLInputElement>('input[aria-label="Session transition notifications"]');
+    await act(async () => {
+      motion?.click();
+      notifications?.click();
+    });
+    expect(onMotionDisabledChange).toHaveBeenCalledWith(true);
+    expect(onSessionEndedNotificationsEnabledChange).toHaveBeenCalledWith(false);
+
+    await selectCategory("Data");
+    const exportButton = [...(container?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      .find((button) => button.textContent === "Export data");
+    const pruneButton = [...(container?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      .find((button) => button.textContent === "Delete raw copies");
+    await act(async () => {
+      exportButton?.click();
+      pruneButton?.click();
+    });
+    expect(onExportLocalData).toHaveBeenCalledTimes(1);
+    expect(onRequestPruneLocalData).toHaveBeenCalledTimes(1);
   });
 
   test("uses searchable scrolling dropdowns for populated danger-zone delete targets", async () => {
