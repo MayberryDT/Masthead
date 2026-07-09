@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
 import { formatWorkbenchActivityTime, workbenchActivityTone } from "./workbenchActivity";
@@ -48,7 +48,7 @@ const TOOLTIPS = {
     "Copy a plain-language prompt for your coding agent to enrich, dossier, and process the selected sessions.",
   selectAll: "Select every publish-path session across all pages (not just this page).",
   clear: "Clear the current selection.",
-  pipeline: "Show pipeline operations: enroll, transcript, quality, publish, and claims.",
+  pipeline: "Expand pipeline operations to the right: enroll, transcript, quality, publish, and claims.",
   enrollMissing: "Add captured sessions that are not yet on the Workbench publish path.",
   checkTranscript: "Run a lightweight transcript availability check on selected sessions.",
   importTranscript: "Import transcript content for selected sessions (requires source permission).",
@@ -136,23 +136,15 @@ export function WorkbenchPanel({
   const somePageSelected = pageSelectedCount > 0 && !allPageSelected;
 
   const [pipelineOpen, setPipelineOpen] = useState(false);
-  const pipelineRef = useRef<HTMLDivElement | null>(null);
-  const pipelineMenuId = useId();
+  const pipelineActionsId = useId();
 
   useEffect(() => {
     if (!pipelineOpen) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!pipelineRef.current?.contains(event.target as Node)) setPipelineOpen(false);
-    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setPipelineOpen(false);
     };
-    window.addEventListener("mousedown", onPointerDown);
     window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [pipelineOpen]);
 
   const run = (kind: WorkbenchActionKind) => {
@@ -161,7 +153,6 @@ export function WorkbenchPanel({
       void copyTextToClipboard(handoffText);
     }
     void runAction?.(kind);
-    setPipelineOpen(false);
   };
 
   const toggleNotAdded = () => {
@@ -216,39 +207,40 @@ export function WorkbenchPanel({
             Clear
           </AppButton>
 
-          <div className="workbench-pipeline-menu" ref={pipelineRef}>
+          <div className={`workbench-pipeline-rail${pipelineOpen ? " is-expanded" : ""}`}>
             <AppButton
+              className="workbench-pipeline-trigger"
               aria-expanded={pipelineOpen}
-              aria-controls={pipelineMenuId}
-              aria-haspopup="menu"
+              aria-controls={pipelineActionsId}
               onClick={() => setPipelineOpen((open) => !open)}
               disabled={actionBusy}
               title={TOOLTIPS.pipeline}
             >
               Pipeline
               <span className="workbench-pipeline-caret" aria-hidden="true">
-                ▾
+                {pipelineOpen ? "‹" : "›"}
               </span>
             </AppButton>
-            {pipelineOpen ? (
-              <div id={pipelineMenuId} className="workbench-pipeline-popover" role="menu" aria-label="Pipeline operations">
-                {PIPELINE_ITEMS.map((item) => (
-                  <button
-                    key={item.kind}
-                    type="button"
-                    role="menuitem"
-                    className={`workbench-pipeline-item${item.quiet ? " is-quiet" : ""}${
-                      canRun(item.kind) ? "" : " is-disabled"
-                    }`}
-                    disabled={!canRun(item.kind) || actionBusy}
-                    title={item.tooltip}
-                    onClick={() => run(item.kind)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
+            <div
+              id={pipelineActionsId}
+              className="workbench-pipeline-actions"
+              role="group"
+              aria-label="Pipeline operations"
+              aria-hidden={!pipelineOpen}
+            >
+              {PIPELINE_ITEMS.map((item) => (
+                <AppButton
+                  key={item.kind}
+                  variant={item.quiet ? "quiet" : "default"}
+                  disabled={!canRun(item.kind) || actionBusy || !pipelineOpen}
+                  title={item.tooltip}
+                  tabIndex={pipelineOpen ? 0 : -1}
+                  onClick={() => run(item.kind)}
+                >
+                  {item.label}
+                </AppButton>
+              ))}
+            </div>
           </div>
         </div>
 

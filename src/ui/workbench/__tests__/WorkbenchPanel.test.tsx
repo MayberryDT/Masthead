@@ -87,6 +87,8 @@ describe("WorkbenchPanel", () => {
     // Pipeline ops are hidden until the menu is open (client-only); labels not required in static markup
     expect(html).not.toContain("Select Visible");
     expect(html).not.toContain("Refresh");
+    expect(html).toContain("workbench-pipeline-rail");
+    expect(html).toContain("›");
     expect(html).toContain("Publish path");
     expect(html).toContain("Selected");
     expect(html).toContain("Ready to publish");
@@ -142,8 +144,10 @@ describe("WorkbenchPanel", () => {
     expect(html).not.toContain("type=\"text\"");
     expect(html).not.toContain("Enrichment editor");
     expect(html).not.toContain("Apply enrichment");
-    // Pipeline ops stay collapsed until the menu is opened
-    expect(html).not.toContain("Accept Quality");
+    // Pipeline rail is collapsed (aria-hidden) but actions stay mounted for expand animation
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain("workbench-pipeline-rail");
+    expect(html).not.toContain("workbench-pipeline-rail is-expanded");
     for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
       expect(html).not.toContain(forbiddenToken(index));
     }
@@ -186,7 +190,8 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("Copy Agent Prompt");
     expect(html).toContain("Select all");
     expect(html).toContain("Clear");
-    expect(html).not.toContain("Check Transcript");
+    expect(html).toContain("workbench-pipeline-actions");
+    expect(html).not.toContain("workbench-pipeline-rail is-expanded");
     expect(html).toContain("observability-toolbar");
     expect(html).toContain("metal-toolbar");
     expect(html).not.toContain("textarea");
@@ -232,7 +237,8 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("Enroll missing");
     expect(html).toContain("Copy Agent Prompt");
     expect(html).toContain("Pipeline");
-    expect(html).not.toContain("Check Transcript");
+    expect(html).toContain("workbench-pipeline-rail");
+    expect(html).not.toContain("workbench-pipeline-rail is-expanded");
     expect(html).toContain("workbench-activity-rail");
     expect(html).not.toContain("workbench-reason-list");
     expect(html).not.toContain("<h1");
@@ -261,8 +267,9 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("No publish-path sessions");
     expect(html).toContain("If Now has captures, open Pipeline → Enroll missing");
     expect(html).toContain("Enroll missing");
-    expect(html).not.toContain("Not Added");
-    expect(html).not.toContain("not added to Logbook");
+    // Fact chip absent; pipeline Fail Quality tooltip still mentions Logbook wording
+    expect(html).not.toContain("<dt>Not Added</dt>");
+    expect(html).not.toContain("not added to Logbook · open review");
     expect(html).toContain("No activity yet");
   });
 
