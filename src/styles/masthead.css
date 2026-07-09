@@ -2350,22 +2350,29 @@ main {
 .workbench-toolbar-facts {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(88px, max-content);
+  grid-auto-columns: minmax(96px, max-content);
   gap: 8px;
   min-width: 0;
   margin: 0;
   margin-left: auto;
+  align-items: stretch;
 }
 
 .workbench-toolbar-facts div {
-  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 96px;
+  min-height: 56px;
   border: 1px solid rgba(92, 153, 187, 0.14);
   border-radius: 4px;
   background: rgba(3, 16, 25, 0.5);
   box-shadow:
     inset 0 0 0 1px rgba(92, 153, 187, 0.08),
     inset 0 1px 0 rgba(246, 251, 255, 0.035);
-  padding: 8px 10px;
+  padding: 6px 10px 8px;
+  text-align: center;
 }
 
 .workbench-toolbar-facts div.is-active {
@@ -2376,39 +2383,58 @@ main {
 }
 
 .workbench-toolbar-facts dt {
+  flex: 0 0 auto;
+  width: 100%;
+  margin: 0;
   color: var(--mute);
   font-family: var(--font-mono);
   font-size: 10.5px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .workbench-toolbar-facts dd {
-  margin: 3px 0 0;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 0;
   overflow: hidden;
   color: var(--ink);
   font-family: var(--font-technical);
-  font-size: 13px;
+  font-size: 18px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .workbench-fact-toggle {
   appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
   margin: 0;
   border: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
   font: inherit;
+  font-size: inherit;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   line-height: inherit;
   padding: 0;
+  text-align: center;
   text-decoration: underline;
   text-decoration-color: rgba(46, 167, 255, 0.45);
-  text-underline-offset: 2px;
+  text-underline-offset: 3px;
 }
 
 .workbench-fact-toggle:hover,
