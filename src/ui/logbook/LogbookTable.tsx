@@ -9,12 +9,8 @@ type Props = {
   density: "comfortable" | "compact";
   sessions: LogbookSession[];
   selectedSessionId?: string;
-  // Kept for parent compatibility until a later task removes bulk selection wiring.
-  selectedSessionIds?: string[];
   updating?: boolean;
   onSelect: (sessionId: string) => void;
-  // Kept for parent compatibility until a later task removes bulk selection wiring.
-  onToggleBulkSelect?: (sessionId: string) => void;
 };
 
 export function LogbookTable({ animateOnMount = false, density, onSelect, selectedSessionId, sessions, updating = false }: Props) {

@@ -7,22 +7,15 @@ import { HistoryPanel } from "../../../ui/HistoryPanel";
 import { useLogbookController } from "../useLogbookController";
 import {
   getLogbookArtifact,
-  getLogbookSummary,
   listProjects,
-  rebuildEnrichments,
   searchLogbook,
   type LogbookArtifactDetail,
   type LogbookSession
 } from "../../daemonClient";
 
 const daemonClientMocks = vi.hoisted(() => ({
-  enrichSessionDossier: vi.fn(),
   getLogbookArtifact: vi.fn(),
-  getLogbookSummary: vi.fn(),
-  getSessionDossier: vi.fn(),
-  getSessionTranscript: vi.fn(),
   listProjects: vi.fn(),
-  rebuildEnrichments: vi.fn(),
   searchLogbook: vi.fn()
 }));
 
@@ -46,6 +39,25 @@ afterEach(async () => {
 });
 
 describe("useLogbookController artifact detail", () => {
+  test("selecting a row id loads artifact detail via getLogbookArtifact", async () => {
+    mockLogbookSearch([session("session-a", "First artifact")], 1);
+    vi.mocked(getLogbookArtifact).mockResolvedValueOnce(artifactDetail("session-a", "Problem body"));
+    await renderHarness();
+
+    await act(async () => {
+      latestController?.selectSession("session-a");
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(getLogbookArtifact).toHaveBeenCalledWith("session-a", baseUrl, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(latestController?.selectedSessionId).toBe("session-a");
+    expect(latestController?.selectedArtifact?.title).toBe("First");
+    expect(latestController?.detailLoading).toBe(false);
+    expect(latestController?.detailError).toBeUndefined();
+    expect(container?.textContent).toContain("Problem body");
+  });
+
   test("clears previous artifact body immediately when selection changes", async () => {
     mockLogbookSearch([session("session-a", "First"), session("session-b", "Second")], 2);
     let resolveB: ((value: LogbookArtifactDetail) => void) | undefined;
@@ -57,7 +69,6 @@ describe("useLogbookController artifact detail", () => {
             resolveB = resolve;
           })
       );
-    mockDetailSideLoads();
     await renderHarness();
 
     await act(async () => {
@@ -95,7 +106,6 @@ describe("useLogbookController artifact detail", () => {
   test("surfaces a user-visible error when artifact detail fails to load", async () => {
     mockLogbookSearch([session("session-err", "Broken artifact")], 1);
     vi.mocked(getLogbookArtifact).mockRejectedValueOnce(new Error("network down"));
-    mockDetailSideLoads();
     await renderHarness();
 
     await act(async () => {
@@ -109,94 +119,25 @@ describe("useLogbookController artifact detail", () => {
     expect(latestController?.detailError).toBe("Could not load artifact");
     expect(container?.textContent).toContain("Could not load artifact");
   });
-});
 
-describe("useLogbookController bulk enrichment", () => {
-  // Bulk toolbar UI is removed (Task 3); controller methods remain until Task 5 strips them.
-  test("sends summary and full rebuilds with the selected session ids and requested depth", async () => {
-    mockLogbookSearch([session("session-1", "Repair OAuth callback")], 1);
-    vi.mocked(rebuildEnrichments).mockResolvedValue({ failed: 0, requested: 1, sessions: [{ sessionId: "session-1", status: "succeeded" }], succeeded: 1 });
+  test("does not load dossier or transcript side effects for selection", async () => {
+    mockLogbookSearch([session("session-a", "First")], 1);
+    vi.mocked(getLogbookArtifact).mockResolvedValueOnce(artifactDetail("session-a", "Body"));
     await renderHarness();
 
     await act(async () => {
-      latestController?.toggleBulkSelection("session-1");
+      latestController?.selectSession("session-a");
       await Promise.resolve();
     });
-    await act(async () => {
-      await latestController?.bulkEnrichSummary();
-    });
+    await flushAsync();
 
-    expect(rebuildEnrichments).toHaveBeenCalledWith(
-      { depth: "summary", limit: 1, scope: "sessionIds", sessionIds: ["session-1"] },
-      baseUrl
-    );
-
-    vi.mocked(rebuildEnrichments).mockClear();
-    await act(async () => {
-      await latestController?.bulkEnrichFull();
-    });
-
-    expect(rebuildEnrichments).toHaveBeenCalledWith(
-      { depth: "full", limit: 1, scope: "sessionIds", sessionIds: ["session-1"] },
-      baseUrl
-    );
-  });
-
-  test("requires typed confirmation before posting full enrichment for more than 50 selected sessions", async () => {
-    const pageSessions = Array.from({ length: 51 }, (_, index) => session(`session-${index + 1}`, `Session ${index + 1}`));
-    mockLogbookSearch(pageSessions, 51);
-    vi.mocked(rebuildEnrichments).mockResolvedValue({ failed: 0, requested: 51, sessions: [], succeeded: 51 });
-    await renderHarness();
-
-    await act(async () => {
-      latestController?.selectCurrentPage();
-      await Promise.resolve();
-    });
-    await act(async () => {
-      await latestController?.bulkEnrichFull();
-    });
-
-    expect(container?.textContent).toContain("Full enrichment can call the configured remote provider for 51 sessions. Type ENRICH to continue.");
-    expect(rebuildEnrichments).not.toHaveBeenCalled();
-    expect(confirmButton().disabled).toBe(true);
-
-    await act(async () => {
-      setInputValue(typedConfirmationInput(), "ENRICH");
-      await Promise.resolve();
-    });
-    expect(confirmButton().disabled).toBe(false);
-
-    await act(async () => {
-      confirmButton().click();
-      await Promise.resolve();
-    });
-
-    expect(rebuildEnrichments).toHaveBeenCalledWith(
-      { depth: "full", limit: 51, scope: "sessionIds", sessionIds: pageSessions.map((row) => row.sessionId) },
-      baseUrl
-    );
-  });
-
-  test("selects all filtered matches through the Logbook search API with the server rebuild cap", async () => {
-    const pageSession = session("session-page", "Visible page session");
-    const matchingSessions = Array.from({ length: 500 }, (_, index) => session(`matching-${index + 1}`, `Matching ${index + 1}`));
-    vi.mocked(searchLogbook)
-      .mockResolvedValueOnce({ nextCursor: undefined, sessions: [pageSession], total: 750 })
-      .mockResolvedValueOnce({ nextCursor: undefined, sessions: matchingSessions, total: 750 });
-    mockMetadata();
-    await renderHarness();
-
-    await act(async () => {
-      await latestController?.selectAllMatchingFilter();
-    });
-
-    expect(searchLogbook).toHaveBeenLastCalledWith(
-      { limit: 500, offset: 0, q: "", sort: "recent" },
-      baseUrl
-    );
-    expect(latestController?.bulkTargetCount).toBe(500);
-    expect(latestController?.bulkTargetCapped).toBe(true);
-    expect(latestController?.bulkTargetKind).toBe("filtered");
+    expect(getLogbookArtifact).toHaveBeenCalledTimes(1);
+    expect(Object.keys(daemonClientMocks)).toEqual(["getLogbookArtifact", "listProjects", "searchLogbook"]);
+    expect(latestController).not.toHaveProperty("dossier");
+    expect(latestController).not.toHaveProperty("transcript");
+    expect(latestController).not.toHaveProperty("bulkEnrichFull");
+    expect(latestController).not.toHaveProperty("selectedSessionIds");
+    expect(latestController).not.toHaveProperty("summary");
   });
 });
 
@@ -225,19 +166,11 @@ function LogbookHarness() {
   });
   return (
     <HistoryPanel
-      bulkConfirmMessage={logbook.bulkConfirmMessage}
-      bulkEnrichBusy={logbook.bulkEnrichBusy}
-      bulkEnrichError={logbook.bulkEnrichError}
-      bulkStatus={logbook.bulkStatus}
-      bulkTargetCapped={logbook.bulkTargetCapped}
-      bulkTargetCount={logbook.bulkTargetCount}
-      bulkTargetKind={logbook.bulkTargetKind}
       density="compact"
       detailError={logbook.detailError}
       detailLoading={logbook.detailLoading}
       filterOptions={logbook.filterOptions}
       filters={logbook.filters}
-      fullEnrichmentAvailable
       loadState={logbook.loadState}
       pageIndex={logbook.pageIndex}
       pageSize={logbook.pageSize}
@@ -245,24 +178,14 @@ function LogbookHarness() {
       refreshError={logbook.refreshError}
       selectedArtifact={logbook.selectedArtifact}
       selectedSessionId={logbook.selectedSessionId}
-      selectedSessionIds={logbook.selectedSessionIds}
       sort={logbook.sort}
-      summary={logbook.summary}
-      onBulkEnrichFull={() => void logbook.bulkEnrichFull()}
-      onBulkEnrichSummary={() => void logbook.bulkEnrichSummary()}
-      onCancelBulkEnrichFull={logbook.cancelBulkEnrichFull}
-      onClearBulkSelection={logbook.clearBulkSelection}
       onCloseDetail={logbook.closeSession}
-      onConfirmBulkEnrichFull={() => void logbook.confirmBulkEnrichFull()}
       onFilterChange={logbook.changeFilters}
       onPageChange={logbook.changePage}
       onQueryChange={logbook.changeQuery}
       onRetry={logbook.retry}
-      onSelectBulkFiltered={() => void logbook.selectAllMatchingFilter()}
-      onSelectBulkPage={logbook.selectCurrentPage}
       onSessionSelect={logbook.selectSession}
       onSortChange={logbook.changeSort}
-      onToggleBulkSelect={logbook.toggleBulkSelection}
     />
   );
 }
@@ -272,13 +195,7 @@ function mockLogbookSearch(sessions: LogbookSession[], total: number): void {
 }
 
 function mockMetadata(): void {
-  vi.mocked(getLogbookSummary).mockResolvedValue({ fileEffects: 0, lifecycles: [], messages: 0, models: [], projects: 0, runtimes: [], sessions: 0, toolCalls: 0 });
   vi.mocked(listProjects).mockResolvedValue([]);
-}
-
-function mockDetailSideLoads(): void {
-  daemonClientMocks.getSessionDossier.mockResolvedValue({ sessionId: "unused" });
-  daemonClientMocks.getSessionTranscript.mockResolvedValue({ items: [], nextCursor: undefined });
 }
 
 function artifactDetail(sessionId: string, problemStatement: string): LogbookArtifactDetail {
@@ -328,29 +245,6 @@ function session(sessionId: string, title: string): LogbookSession {
     topics: [],
     unresolved: []
   };
-}
-
-function typedConfirmationInput(): HTMLInputElement {
-  const input = currentContainer().querySelector<HTMLInputElement>(".confirm-dialog input");
-  expect(input).not.toBeNull();
-  return input as HTMLInputElement;
-}
-
-function confirmButton(): HTMLButtonElement {
-  const button = currentContainer().querySelector<HTMLButtonElement>(".confirm-dialog .confirm-dialog-actions button:last-child");
-  expect(button).not.toBeNull();
-  return button as HTMLButtonElement;
-}
-
-function setInputValue(input: HTMLInputElement, value: string): void {
-  const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
-  descriptor?.set?.call(input, value);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
-function currentContainer(): HTMLDivElement {
-  expect(container).toBeDefined();
-  return container as HTMLDivElement;
 }
 
 async function flushAsync(): Promise<void> {

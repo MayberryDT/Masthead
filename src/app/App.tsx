@@ -702,14 +702,11 @@ export function App() {
             query={logbook.query}
             density="compact"
             loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbook.loadState}
-            enrichment={settingsData.settingsState?.enrichment}
             refreshError={logbook.refreshError}
             selectedArtifact={logbook.selectedArtifact}
             selectedSessionId={logbook.selectedSessionId}
-            selectedSessionIds={logbook.selectedSessionIds}
             sort={logbook.sort}
             sources={sources}
-            summary={logbook.summary}
             onCloseDetail={logbook.closeSession}
             onFilterChange={logbook.changeFilters}
             onImportMetadata={handleImportMetadata}
@@ -719,7 +716,6 @@ export function App() {
             onRetry={logbook.retry}
             onSessionSelect={logbook.selectSession}
             onSortChange={logbook.changeSort}
-            onToggleBulkSelect={logbook.toggleBulkSelection}
           />
         </>
       </LogbookSurface>

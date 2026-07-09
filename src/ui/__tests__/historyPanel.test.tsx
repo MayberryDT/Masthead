@@ -122,7 +122,6 @@ describe("HistoryPanel", () => {
         loadState={{ state: "ready", sessions: [], total: 0 }}
         loading={false}
         query=""
-        summary={summary({ earliestActivityAt: "2026-05-24T07:00:00.000Z", latestActivityAt: "2026-06-24T07:00:00.000Z" })}
         onQueryChange={() => {}}
       />
     );
@@ -133,6 +132,8 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain(">Tool calls</dt>");
     expect(html).not.toContain("<dt>Date range</dt>");
     expect(html).not.toContain("May 2026 - Jun 2026");
+    expect(html).toContain("No published artifacts yet.");
+    expect(html).toContain("Compile and publish from Workbench.");
   });
 
   test("renders more than six database-backed sessions and exposes detail actions", () => {
@@ -280,6 +281,28 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("History case");
   });
 
+  test("renders artifact-first empty and filter-miss copy", () => {
+    const empty = renderToStaticMarkup(
+      <HistoryPanel loadState={{ state: "ready", sessions: [], total: 0 }} loading={false} query="" onQueryChange={() => {}} />
+    );
+    expect(empty).toContain("No published artifacts yet.");
+    expect(empty).toContain("Compile and publish from Workbench.");
+    expect(empty).not.toContain("No sessions imported yet.");
+
+    const filtered = renderToStaticMarkup(
+      <HistoryPanel
+        filters={{ project: "Missing" }}
+        loadState={{ state: "ready", sessions: [], total: 0 }}
+        loading={false}
+        query="incident"
+        onFilterChange={() => undefined}
+        onQueryChange={() => {}}
+      />
+    );
+    expect(filtered).toContain("No artifacts match these filters.");
+    expect(filtered).not.toContain("No sessions match these filters.");
+  });
+
   test("does not fall back to local history when the canonical Logbook request fails", () => {
     const html = renderToStaticMarkup(
       <HistoryPanel
@@ -360,18 +383,4 @@ function records(): StoreRecord[] {
   ];
 }
 
-function summary(overrides: Partial<Parameters<typeof HistoryPanel>[0]["summary"]> = {}): NonNullable<Parameters<typeof HistoryPanel>[0]["summary"]> {
-  return {
-    sessions: 1,
-    projects: 1,
-    runtimes: [{ runtime: "opencode", count: 1 }],
-    messages: 10,
-    toolCalls: 2,
-    fileEffects: 0,
-    earliestActivityAt: "2026-05-24T07:00:00.000Z",
-    latestActivityAt: "2026-06-24T07:00:00.000Z",
-    models: [],
-    lifecycles: [],
-    ...overrides
-  };
-}
+

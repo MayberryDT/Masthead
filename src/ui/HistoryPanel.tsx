@@ -5,8 +5,6 @@ import type {
   AdapterStatus,
   ImportJob,
   LogbookSort,
-  LogbookSummary,
-  SettingsStateDto,
   SourceStatus
 } from "../app/daemonClient";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
@@ -19,7 +17,6 @@ import { logbookColumns } from "./logbook/logbookColumns";
 import { Icon } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
 import { AppButton } from "./primitives/AppButton";
-import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = {
   records?: StoreRecord[];
@@ -30,30 +27,11 @@ type Props = {
   total?: number;
   nextCursor?: string;
   loading?: boolean;
-  summary?: LogbookSummary;
   sort?: LogbookSort;
   filters?: LogbookFilterState;
   filterOptions?: LogbookFilterOptions;
   density?: "comfortable" | "compact";
-  bulkConfirmMessage?: string;
-  bulkEnrichBusy?: boolean;
-  bulkEnrichError?: string;
-  bulkStatus?: string;
-  bulkTargetCount?: number;
-  bulkTargetKind?: "explicit" | "page" | "filtered";
-  bulkTargetCapped?: boolean;
-  enrichment?: SettingsStateDto["enrichment"];
-  fullEnrichmentAvailable?: boolean;
-  onBulkEnrichSummary?: () => void;
-  onBulkEnrichFull?: () => void;
-  onConfirmBulkEnrichFull?: () => void;
-  onCancelBulkEnrichFull?: () => void;
-  onSelectBulkPage?: () => void;
-  onSelectBulkFiltered?: () => void;
-  onClearBulkSelection?: () => void;
-  onToggleBulkSelect?: (sessionId: string) => void;
   selectedSessionId?: string;
-  selectedSessionIds?: string[];
   selectedArtifact?: LogbookInspectorArtifact;
   detailError?: string;
   detailLoading?: boolean;
@@ -159,24 +137,17 @@ export function HistoryPanel({
   pageSize = 100,
   query,
   records = [],
-  bulkConfirmMessage,
-  bulkEnrichBusy,
   detailError,
   detailLoading = false,
-  onCancelBulkEnrichFull,
   onCloseDetail,
-  onConfirmBulkEnrichFull,
-  onToggleBulkSelect,
   refreshError,
   selectedArtifact,
   selectedSessionId,
-  selectedSessionIds = [],
   sessions,
   sort = "recent",
   sources = [],
   total
 }: Props) {
-  // `summary` remains on Props for parent compatibility; Task 5 removes the fetch.
   const legacyFilters = filtersFromQuery(query);
   const resolvedLoadState =
     loadState ??
@@ -267,16 +238,6 @@ export function HistoryPanel({
       <LogbookFacets facets={activeFilters} />
 
       {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
-      <ConfirmDialog
-        open={Boolean(bulkConfirmMessage)}
-        title="Confirm full enrichment"
-        description={bulkConfirmMessage}
-        confirmLabel="Enrich full sessions"
-        expectedConfirmation="ENRICH"
-        busy={bulkEnrichBusy}
-        onCancel={onCancelBulkEnrichFull}
-        onConfirm={onConfirmBulkEnrichFull}
-      />
 
       {errorState ? (
         <CanonicalErrorPanel message={errorState.message} onRetry={onRetry} />
@@ -294,10 +255,8 @@ export function HistoryPanel({
               density={density}
               sessions={tableSessions}
               selectedSessionId={selectedSessionId}
-              selectedSessionIds={selectedSessionIds}
               updating={isLoading}
               onSelect={(sessionId) => onSessionSelect?.(sessionId)}
-              onToggleBulkSelect={onToggleBulkSelect}
             />
           </div>
           {selectedSessionId || detailLoading || detailError ? (
@@ -529,7 +488,7 @@ function emptyStateFor(
     return {
       reason,
       title: "Logbook is offline.",
-      message: "Masthead needs the local daemon before it can read canonical session history.",
+      message: "Masthead needs the local daemon before it can read published artifacts.",
       actions: [
         { label: "Retry connection", onClick: options.onRetry, variant: "primary" },
         { label: "Open Sources", onClick: options.onOpenSources }
@@ -550,7 +509,7 @@ function emptyStateFor(
     return {
       reason,
       title: "Import is building the Logbook.",
-      message: "Session metadata is queued or importing. Results will appear here when the canonical rows finish indexing.",
+      message: "Session metadata is queued or importing. Published artifacts will appear here after compile and publish from Workbench.",
       support: "Use Sources to inspect job progress or cancel a stuck import.",
       actions: [{ label: "Open Sources", onClick: options.onOpenSources, variant: "primary" }]
     };
@@ -559,8 +518,8 @@ function emptyStateFor(
   if (reason === "query_no_results") {
     return {
       reason,
-      title: "No sessions match these filters.",
-      message: "The canonical Logbook has sessions, but none match the active search, facet, date, file, or sort criteria.",
+      title: "No artifacts match these filters.",
+      message: "The Logbook has published artifacts, but none match the active search, facet, date, or sort criteria.",
       support: options.activeFilters.length > 0 ? `Active filters: ${options.activeFilters.map((facet) => `${facet.label} ${facet.value}`).join(", ")}` : undefined,
       actions: [{ label: "Clear filters", onClick: options.onClearFilters, variant: "primary" }]
     };
@@ -571,7 +530,7 @@ function emptyStateFor(
     return {
       reason,
       title: "Sources are detected but not imported.",
-      message: "Masthead found local agent history stores, but the Logbook only reads canonical imported metadata.",
+      message: "Masthead found local agent history stores. Import metadata, then compile and publish from Workbench to populate the Logbook.",
       support: `${formatCount(options.sourceSummary.detectedSources)} sources detected; ${formatCount(options.sourceSummary.discoveredSessions)} sessions available to import.`,
       actions: [
         { label: "Import metadata", onClick: runtime && options.onImportMetadata ? () => options.onImportMetadata?.(runtime) : undefined, disabled: options.importBusy, variant: "primary" },
@@ -582,8 +541,8 @@ function emptyStateFor(
 
   return {
     reason,
-    title: "No sessions imported yet.",
-    message: "Discover local OpenCode, OMP, Claude Code, Pi, Cursor, Grok, or Hermes sources, then import metadata to populate the canonical Logbook.",
+    title: "No published artifacts yet.",
+    message: "Compile and publish from Workbench.",
     actions: [{ label: "Open Sources", onClick: options.onOpenSources, variant: "primary" }]
   };
 }
