@@ -70,6 +70,7 @@ import { currentBoardHeadlineFrames, insertBoardHeadlineGeneration, upsertBoardH
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
+import { getKnowledgeFlowSummary } from "./db/knowledgeFlowRepository.ts";
 import { getLogbookSummary } from "./db/logbookSummaryRepository.ts";
 import {
   getLogbookArtifactDetail,
@@ -2309,6 +2310,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       sendJson(request, response, config.allowedOrigins, 200, {
         hooks: await getLiveHookSettings(database, config),
         ok: true
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/knowledge-flow/summary") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        summary: getKnowledgeFlowSummary(database)
       });
       return;
     }

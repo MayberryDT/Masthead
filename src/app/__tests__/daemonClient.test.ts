@@ -5,6 +5,7 @@ import {
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
   getWorkbenchSessions,
+  getKnowledgeFlowSummary,
   getLiveHookSettings,
   getRuntimeHookSettings,
   getSessionTranscript,
@@ -292,6 +293,34 @@ describe("daemon client review dispositions", () => {
       "http://127.0.0.1:17373/workbench/missing-sessions?limit=25",
       expect.objectContaining({ headers: { accept: "application/json" } })
     );
+  });
+
+  test("loads the Knowledge flow summary from the daemon", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          summary: {
+            capturedSessions: 3,
+            workbenchSessions: 2,
+            publishedArtifacts: 2,
+            automaticallyResolvedSessions: 1
+          }
+        })
+      )
+    );
+
+    await expect(getKnowledgeFlowSummary("http://127.0.0.1:17373/projection")).resolves.toEqual({
+      capturedSessions: 3,
+      workbenchSessions: 2,
+      publishedArtifacts: 2,
+      automaticallyResolvedSessions: 1
+    });
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/knowledge-flow/summary", {
+      headers: { accept: "application/json" },
+      signal: undefined
+    });
   });
 
   test("loads Workbench pipeline endpoints from the daemon", async () => {

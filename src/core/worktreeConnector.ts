@@ -66,6 +66,7 @@ const staticReadOnlyBridgePaths = new Set([
   "/projects",
   "/imports",
   "/data/summary",
+  "/knowledge-flow/summary",
   "/usage/summary",
   "/mcp/status",
   "/mcp/launch-config",

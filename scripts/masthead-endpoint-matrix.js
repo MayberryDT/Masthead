@@ -34,6 +34,7 @@ export const READ_ONLY_ENDPOINTS = [
   { method: "GET", path: "/imports", label: "import jobs" },
   { method: "GET", path: "/imports/import-1", label: "import detail", allowNotFound: true },
   { method: "GET", path: "/data/summary", label: "data summary" },
+  { method: "GET", path: "/knowledge-flow/summary", label: "sidebar knowledge flow summary" },
   { method: "GET", path: "/usage/summary?window=today", label: "usage summary" },
   { method: "GET", path: "/mcp/status", label: "mcp status" },
   { method: "GET", path: "/mcp/launch-config", label: "mcp launch config" },

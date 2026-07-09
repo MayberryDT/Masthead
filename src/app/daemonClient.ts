@@ -1,6 +1,7 @@
 import { defaultLiveProjectionUrl } from "./liveProjectionClient";
 import { getJson, postJson } from "./httpJsonClient";
 import type { ReviewDisposition } from "../core/store";
+import type { KnowledgeFlowSummaryDto } from "../shared/knowledgeFlow";
 import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
@@ -1255,6 +1256,17 @@ export async function getWorkbenchMissingSessions(
     query: { limit: options.limit },
     signal: options.signal
   });
+}
+
+export async function getKnowledgeFlowSummary(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<KnowledgeFlowSummaryDto> {
+  const body = await getJson<{ ok: true; summary: KnowledgeFlowSummaryDto }>(baseUrl, "/knowledge-flow/summary", {
+    label: "knowledge flow summary",
+    signal: options.signal
+  });
+  return body.summary;
 }
 
 export async function getWorkbenchSessions(
