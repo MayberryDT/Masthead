@@ -4,12 +4,16 @@ import { readFileSync } from "node:fs";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { SettingsStateDto } from "../../../app/daemonClient";
 import { SettingsSurface } from "../../../app/surfaces/SettingsSurface";
 import { OperationsPanel } from "../../OperationsPanel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("Settings surface", () => {
   test("renders the focused Settings shell with General selected", () => {
@@ -146,6 +150,44 @@ describe("Settings surface", () => {
     host.remove();
   });
 
+  test("compresses Agent access into three direct Settings rows", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => mcpResponse(input)));
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(<OperationsPanel settingsState={settings} />);
+    });
+
+    const agentAccessButton = [...host.querySelectorAll("button")].find(
+      (button) => button.textContent === "Agent access"
+    );
+    await act(async () => {
+      agentAccessButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const panel = host.querySelector<HTMLElement>('.settings-pane[data-settings-category="agent-access"]');
+    expect(panel?.textContent).toContain("MCP server");
+    expect(panel?.textContent).toContain("Test connection");
+    expect(panel?.textContent).toContain("Access");
+    expect(panel?.textContent).toContain("Client setup");
+    expect(panel?.textContent).toContain("Copy configuration");
+    expect(panel?.textContent).not.toContain("Checking the local MCP launch configuration");
+    expect(panel?.textContent).not.toContain("Refresh MCP");
+    expect(panel?.textContent).not.toContain("Test MCP launch");
+    expect(panel?.textContent).not.toContain("Works for Claude Code");
+    expect(panel?.textContent).not.toContain("Use when a client expects TOML");
+    expect(panel?.textContent).not.toContain("Raw command, args, and environment");
+    expect(panel?.querySelector("pre")).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
   test("switches to the compact Advanced identity pane", async () => {
     const host = document.createElement("div");
     document.body.append(host);
@@ -265,6 +307,10 @@ describe("Settings surface", () => {
     expect(css).toMatch(/\.settings-row-detail\s*\{[\s\S]*grid-column: 2;/);
     expect(css).toMatch(/\.settings-toggle > span\s*\{[\s\S]*width: 42px;[\s\S]*height: 24px;/);
     expect(css).toMatch(/\.settings-toggle\.checked > span::after\s*\{[\s\S]*transform: translateX\(20px\);/);
+    expect(css).toMatch(/\.settings-mcp-setup\s*\{[\s\S]*display: flex;[\s\S]*flex-wrap: wrap;[\s\S]*gap: 8px;/);
+    expect(css).toContain(".settings-mcp-inline-result");
+    expect(css).not.toContain(".settings-mcp-summary");
+    expect(css).not.toContain(".settings-section-mcp .code-block");
   });
 
   test("uses shared card entrance motion for settings sections", () => {
@@ -280,6 +326,45 @@ describe("Settings surface", () => {
     expect(css).toMatch(/\.masthead-shell\[data-motion-mode="off"\],[\s\S]*\.masthead-shell\[data-motion-mode="off"\] \*::after\s*\{[\s\S]*animation: none !important;[\s\S]*transition-duration: 1ms !important;/);
   });
 });
+
+function mcpResponse(input: string | URL | Request): Response {
+  const pathname = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+  if (pathname === "/mcp/status") {
+    return jsonResponse({
+      ok: true,
+      status: {
+        ready: true,
+        databasePath: "/tmp/masthead.sqlite",
+        mode: "stdio",
+        readOnly: true,
+        toolCount: 8,
+        queryCount: 0,
+        globalAccessEnabled: true
+      }
+    });
+  }
+  if (pathname === "/mcp/launch-config") {
+    return jsonResponse({
+      ok: true,
+      launchConfig: {
+        command: "/usr/bin/node",
+        args: ["/app/dist/mcp/server.js"],
+        env: { MASTHEAD_DB_PATH: "/tmp/masthead.sqlite" }
+      }
+    });
+  }
+  if (pathname === "/mcp/launch-config/validate") {
+    return jsonResponse({
+      ok: true,
+      validation: { valid: true, commandExists: true, entryExists: true, databaseMatches: true, problems: [] }
+    });
+  }
+  return jsonResponse({ ok: true });
+}
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+}
 
 const settings: SettingsStateDto = {
   apiVersion: 1,

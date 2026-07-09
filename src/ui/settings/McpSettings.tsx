@@ -10,8 +10,8 @@ import {
   type McpTestConnectionDto
 } from "../../app/mcpLaunchClient";
 import { AppButton } from "../primitives/AppButton";
-import { CodeBlock } from "../primitives/CodeBlock";
 import { StatusBadge } from "../primitives/StatusBadge";
+import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 
 type McpSettingsProps = {
@@ -23,10 +23,10 @@ type LoadState = "idle" | "loading" | "ready" | "error";
 type TestState = "idle" | "testing" | "passed" | "failed";
 type ConfigKind = "json" | "codex" | "stdio";
 
-const configTabs: Array<{ kind: ConfigKind; label: string; description: string }> = [
-  { kind: "json", label: "MCP JSON", description: "Works for Claude Code, Cursor, and most MCP clients." },
-  { kind: "codex", label: "MCP TOML", description: "Use when a client expects TOML server entries." },
-  { kind: "stdio", label: "stdio", description: "Raw command, args, and environment for custom launchers." }
+const configTabs: Array<{ kind: ConfigKind; label: string }> = [
+  { kind: "json", label: "MCP JSON" },
+  { kind: "codex", label: "MCP TOML" },
+  { kind: "stdio", label: "stdio" }
 ];
 
 export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
@@ -70,12 +70,16 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
   }, [loadMcp]);
 
   const configs = useMemo(() => agentConfigs(launchConfig), [launchConfig]);
-  const activeTab = configTabs.find((tab) => tab.kind === activeConfig) ?? configTabs[0];
-  const activeCode = configs[activeConfig] ?? "MCP launch configuration is loading.";
+  const activeCode = configs[activeConfig];
   const canCopy = Boolean(launchConfig && launchValidation?.valid);
+  const accessEnabled = privacy?.mcpAccessEnabled ?? status?.globalAccessEnabled ?? false;
 
   async function copyConfig(): Promise<void> {
-    if (!canCopy || !globalThis.navigator?.clipboard) return;
+    if (!canCopy || !activeCode) return;
+    if (!globalThis.navigator?.clipboard) {
+      setCopyState("failed");
+      return;
+    }
     try {
       await globalThis.navigator.clipboard.writeText(activeCode);
       setCopyState("copied");
@@ -101,79 +105,73 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
     }
   }
 
+  const serverError = loadError ?? (testState === "failed" ? testResult?.message : undefined);
+
   return (
-    <SettingsSection
-      className="settings-section-wide settings-section-mcp"
-      title="MCP server"
-      description="Read-only local session retrieval for agents that support MCP."
-    >
-      <div className="settings-mcp-summary">
-        <div>
-          <span className="settings-mcp-label">Status</span>
-          <p>{statusSummary(status, loadState, loadError)}</p>
-        </div>
-        <div className="settings-mcp-actions">
-          <AppButton className="settings-mcp-refresh-button" onClick={() => loadMcp()} variant="quiet">
-            Refresh MCP
-          </AppButton>
-          <StatusBadge className="settings-mcp-status" tone={statusTone(status, loadState)}>
+    <SettingsSection title="Agent access">
+      <SettingsRow
+        label="MCP server"
+        value={
+          <StatusBadge tone={statusTone(status, loadState)}>
             {statusLabel(status, loadState)}
           </StatusBadge>
+        }
+        control={
           <AppButton
-            className="settings-mcp-test-button"
             disabled={testState === "testing"}
             onClick={() => void runLaunchTest()}
             variant="quiet"
           >
-            {testState === "testing" ? "Testing..." : "Test MCP launch"}
+            {testState === "testing" ? "Testing…" : "Test connection"}
           </AppButton>
-        </div>
-      </div>
+        }
+      />
+      {serverError ? (
+        <p className="settings-mcp-inline-result error" role="status">
+          {serverError}
+        </p>
+      ) : null}
 
-      <div className="settings-mcp-access">
-        <div>
-          <span className="settings-mcp-label">MCP access</span>
-          <p>Allow read-only MCP clients to query sessions that are not excluded by source or session policy.</p>
-        </div>
-        <StatusBadge tone={privacy?.mcpAccessEnabled ?? status?.globalAccessEnabled ? "active" : "neutral"}>
-          {privacy?.mcpAccessEnabled ?? status?.globalAccessEnabled ? "Enabled" : "Disabled"}
-        </StatusBadge>
-      </div>
+      <SettingsRow
+        label="Access"
+        value={
+          <StatusBadge tone={accessEnabled ? "active" : "neutral"}>
+            {accessEnabled ? "Enabled" : "Disabled"}
+          </StatusBadge>
+        }
+      />
 
-      <div className="settings-mcp-config" aria-label="MCP config formats">
-        <div className="settings-mcp-tabs" role="tablist" aria-label="MCP config format">
-          {configTabs.map((tab) => (
-            <button
-              key={tab.kind}
-              type="button"
-              className={tab.kind === activeConfig ? "active" : ""}
-              role="tab"
-              aria-selected={tab.kind === activeConfig}
-              onClick={() => setActiveConfig(tab.kind)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="settings-mcp-tab-panel" role="tabpanel">
-          <div className="settings-mcp-tab-meta">
-            <p>{activeTab.description}</p>
+      <SettingsRow
+        label="Client setup"
+        control={
+          <div className="settings-mcp-setup">
+            <div className="settings-mcp-tabs" role="tablist" aria-label="MCP config format">
+              {configTabs.map((tab) => (
+                <button
+                  key={tab.kind}
+                  type="button"
+                  className={tab.kind === activeConfig ? "active" : ""}
+                  role="tab"
+                  aria-selected={tab.kind === activeConfig}
+                  onClick={() => {
+                    setActiveConfig(tab.kind);
+                    setCopyState("idle");
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
             <AppButton disabled={!canCopy} onClick={() => void copyConfig()} variant="quiet">
-              {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy config"}
+              {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy configuration"}
             </AppButton>
           </div>
-          <CodeBlock code={activeCode} label={activeTab.label} />
-        </div>
-      </div>
-
-      {testResult ? (
-        <div className="settings-mcp-result" role="status">
-          <StatusBadge tone={testResult.status === "passed" ? "active" : "danger"}>
-            {testResult.status === "passed" ? "Launch passed" : "Launch failed"}
-          </StatusBadge>
-          <p>{testResult.message}</p>
-          {testResult.toolCount !== undefined ? <p>{testResult.toolCount} MCP tools responded.</p> : null}
-        </div>
+        }
+      />
+      {copyState === "failed" ? (
+        <p className="settings-mcp-inline-result error" role="status">
+          Could not copy configuration.
+        </p>
       ) : null}
     </SettingsSection>
   );
@@ -205,15 +203,6 @@ function statusLabel(status: McpStatusDto | undefined, loadState: LoadState): st
   if (!status.globalAccessEnabled) return "Disabled";
   if (!status.readOnly) return "Write access";
   return "Ready";
-}
-
-function statusSummary(status: McpStatusDto | undefined, loadState: LoadState, error?: string): string {
-  if (error) return error;
-  if (loadState === "loading" && !status) return "Checking the local MCP launch configuration.";
-  if (!status?.ready) return "The local daemon has not reported a ready MCP server.";
-  if (!status.globalAccessEnabled) return "MCP retrieval is disabled by local privacy settings.";
-  if (!status.readOnly) return "MCP is not in read-only mode. Masthead should only expose read tools.";
-  return `${status.toolCount} read-only tools available. Database: ${status.databasePath}`;
 }
 
 function statusTone(status: McpStatusDto | undefined, loadState: LoadState): "active" | "danger" | "neutral" | "warning" {

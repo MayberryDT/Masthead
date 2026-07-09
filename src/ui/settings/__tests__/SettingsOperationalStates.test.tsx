@@ -9,6 +9,8 @@ import type { SettingsStateDto } from "../../../app/daemonClient";
 import type { MastheadHealthDto } from "../../../shared/protocol";
 import { OperationsPanel } from "../../OperationsPanel";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
@@ -101,7 +103,220 @@ describe("Settings operational states", () => {
     expect(container.textContent).toContain("settings offline");
     expect(container.textContent).toContain("Retry settings");
   });
+
+  test("copies the selected MCP client format and resets copy feedback when the format changes", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => mcpResponse(input)));
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { ...globalThis.navigator, clipboard: { writeText } });
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Agent access");
+    await waitFor(() => buttonNamed("Copy configuration")?.disabled === false);
+
+    await act(async () => {
+      buttonNamed("Copy configuration")?.click();
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenLastCalledWith(`{
+  "mcpServers": {
+    "masthead": {
+      "command": "/usr/bin/node",
+      "args": [
+        "/app/dist/mcp/server.js"
+      ],
+      "env": {
+        "MASTHEAD_DB_PATH": "/tmp/masthead.sqlite"
+      }
+    }
+  }
+}`);
+    expect(buttonNamed("Copied")).toBeDefined();
+
+    await act(async () => {
+      buttonNamed("MCP TOML")?.click();
+    });
+    expect(buttonNamed("Copy configuration")).toBeDefined();
+    await act(async () => {
+      buttonNamed("Copy configuration")?.click();
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenLastCalledWith(`[mcp_servers.masthead]
+command = "/usr/bin/node"
+args = ["/app/dist/mcp/server.js"]
+env = {"MASTHEAD_DB_PATH":"/tmp/masthead.sqlite"}`);
+
+    await act(async () => {
+      buttonNamed("stdio")?.click();
+    });
+    await act(async () => {
+      buttonNamed("Copy configuration")?.click();
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenLastCalledWith(
+      '/usr/bin/node "/app/dist/mcp/server.js"  {\n  "env": {\n    "MASTHEAD_DB_PATH": "/tmp/masthead.sqlite"\n  }\n}'
+    );
+  });
+
+  test("shows concise loading and load failure states beside the MCP server row", async () => {
+    let rejectStatus: ((reason?: unknown) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const pathname = requestPath(input);
+        if (pathname === "/mcp/status") {
+          return new Promise<Response>((_resolve, reject) => {
+            rejectStatus = reject;
+          });
+        }
+        return mcpResponse(input);
+      })
+    );
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Agent access");
+
+    expect(rowNamed("MCP server")?.textContent).toContain("Loading");
+    expect(buttonNamed("Copy configuration")?.disabled).toBe(true);
+    expect(container?.querySelector("pre")).toBeNull();
+
+    await act(async () => {
+      rejectStatus?.(new Error("MCP status unavailable"));
+      await Promise.resolve();
+    });
+    await waitFor(() => container?.textContent?.includes("MCP status unavailable") === true);
+    expect(rowNamed("MCP server")?.textContent).toContain("Unavailable");
+    expect(container?.textContent).not.toContain("Checking the local MCP launch configuration");
+  });
+
+  test("keeps read-only Agent access checks and configuration copy available", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => mcpResponse(input)));
+    vi.stubGlobal("navigator", {
+      ...globalThis.navigator,
+      clipboard: { writeText: vi.fn(() => Promise.resolve()) }
+    });
+    await renderPanel(<OperationsPanel readOnly settingsState={settings} />);
+    await selectCategory("Agent access");
+    await waitFor(() => buttonNamed("Copy configuration")?.disabled === false);
+
+    expect(rowNamed("MCP server")?.textContent).toContain("Ready");
+    expect(rowNamed("Access")?.textContent).toContain("Enabled");
+    expect(buttonNamed("Test connection")?.disabled).toBe(false);
+    expect(buttonNamed("Copy configuration")?.disabled).toBe(false);
+  });
+
+  test("shows connection-test progress and one concise inline failure", async () => {
+    let resolveTest: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        if (requestPath(input) === "/mcp/test-connection") {
+          return new Promise<Response>((resolve) => {
+            resolveTest = resolve;
+          });
+        }
+        return mcpResponse(input);
+      })
+    );
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Agent access");
+    await waitFor(() => buttonNamed("Test connection") !== undefined);
+
+    await act(async () => {
+      buttonNamed("Test connection")?.click();
+    });
+    expect(buttonNamed("Testing…")?.disabled).toBe(true);
+
+    await act(async () => {
+      resolveTest?.(jsonResponse({ ok: true, test: { status: "failed", message: "MCP process did not answer." } }));
+      await Promise.resolve();
+    });
+    await waitFor(() => container?.textContent?.includes("MCP process did not answer.") === true);
+    expect(buttonNamed("Test connection")?.disabled).toBe(false);
+    expect(container?.querySelectorAll(".settings-mcp-inline-result")).toHaveLength(1);
+  });
+
+  test("reports clipboard failure inline without exposing configuration text", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => mcpResponse(input)));
+    vi.stubGlobal("navigator", {
+      ...globalThis.navigator,
+      clipboard: { writeText: vi.fn(() => Promise.reject(new Error("clipboard denied"))) }
+    });
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Agent access");
+    await waitFor(() => buttonNamed("Copy configuration")?.disabled === false);
+
+    await act(async () => {
+      buttonNamed("Copy configuration")?.click();
+      await Promise.resolve();
+    });
+    expect(buttonNamed("Copy failed")).toBeDefined();
+    expect(container?.textContent).toContain("Could not copy configuration.");
+    expect(container?.querySelector("pre")).toBeNull();
+  });
+
+  function buttonNamed(label: string): HTMLButtonElement | undefined {
+    return [...(container?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      (button) => button.textContent === label
+    );
+  }
+
+  function rowNamed(label: string): HTMLElement | undefined {
+    return [...(container?.querySelectorAll<HTMLElement>(".settings-row") ?? [])].find(
+      (row) => row.querySelector(".settings-row-copy > span")?.textContent === label
+    );
+  }
 });
+
+function mcpResponse(input: string | URL | Request): Response {
+  const pathname = requestPath(input);
+  if (pathname === "/mcp/status") {
+    return jsonResponse({
+      ok: true,
+      status: {
+        ready: true,
+        databasePath: "/tmp/masthead.sqlite",
+        mode: "stdio",
+        readOnly: true,
+        toolCount: 8,
+        queryCount: 0,
+        globalAccessEnabled: true
+      }
+    });
+  }
+  if (pathname === "/mcp/launch-config") {
+    return jsonResponse({
+      ok: true,
+      launchConfig: {
+        command: "/usr/bin/node",
+        args: ["/app/dist/mcp/server.js"],
+        env: { MASTHEAD_DB_PATH: "/tmp/masthead.sqlite" }
+      }
+    });
+  }
+  if (pathname === "/mcp/launch-config/validate") {
+    return jsonResponse({
+      ok: true,
+      validation: { valid: true, commandExists: true, entryExists: true, databaseMatches: true, problems: [] }
+    });
+  }
+  return jsonResponse({ ok: true });
+}
+
+function requestPath(input: string | URL | Request): string {
+  return new URL(input instanceof Request ? input.url : input.toString()).pathname;
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (condition()) return;
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+  expect(condition()).toBe(true);
+}
 
 const settings: SettingsStateDto = {
   apiVersion: 1,

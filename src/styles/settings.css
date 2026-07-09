@@ -127,10 +127,6 @@
   margin-top: 9px;
 }
 
-.settings-section-mcp {
-  grid-column: auto;
-}
-
 .settings-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(180px, 360px);
@@ -473,46 +469,13 @@
   color: #ffaaa5;
 }
 
-.settings-mcp-summary,
-.settings-mcp-access {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px 14px;
-  min-width: 0;
-  border-bottom: 1px solid rgba(194, 221, 241, 0.08);
-  padding: 8px 0;
-}
-
-.settings-mcp-label {
-  display: block;
-  color: var(--ink, #f6fbff);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.settings-mcp-summary p,
-.settings-mcp-access p,
-.settings-mcp-tab-meta p {
-  margin: 3px 0 0;
-  color: var(--mute, #91a8ba);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.settings-mcp-actions {
+.settings-mcp-setup {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.settings-mcp-config {
-  display: grid;
-  gap: 10px;
   min-width: 0;
-  padding-top: 10px;
 }
 
 .settings-mcp-tabs {
@@ -551,62 +514,18 @@
   color: var(--ink, #f6fbff);
 }
 
-.settings-mcp-tab-panel {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.settings-mcp-tab-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-}
-
-.settings-section-mcp .code-block {
-  min-width: 0;
-  margin: 0;
-}
-
-.settings-section-mcp .code-block pre {
-  max-height: 150px;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-.settings-section-mcp .code-block code {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.settings-mcp-secondary {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
-.settings-mcp-secondary summary {
-  cursor: pointer;
-  color: var(--body, #d6e4ef);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.settings-mcp-result {
-  display: grid;
-  gap: 6px;
-  border-top: 1px solid rgba(194, 221, 241, 0.08);
-  margin-top: 10px;
-  padding-top: 10px;
-}
-
-.settings-mcp-result p {
-  margin: 0;
+.settings-mcp-inline-result {
+  justify-self: end;
+  width: min(360px, 100%);
+  margin: -4px 0 8px;
   color: var(--mute, #91a8ba);
   font-size: 12px;
   line-height: 1.35;
+  text-align: right;
+}
+
+.settings-mcp-inline-result.error {
+  color: #ffaaa5;
 }
 
 .settings-delete-controls {
@@ -737,24 +656,12 @@
     border-right: 0;
   }
 
-  .settings-mcp-summary,
-  .settings-mcp-access,
-  .settings-mcp-tab-meta {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-  }
-
-  .settings-mcp-actions,
   .settings-inline-actions,
   .confirm-dialog-actions {
     justify-content: flex-start;
     justify-self: stretch;
     max-width: none;
     text-align: left;
-  }
-
-  .settings-mcp-tab-meta {
-    display: grid;
   }
 
   .confirm-dialog {
@@ -781,6 +688,13 @@
   }
 
   .settings-row-value {
+    text-align: left;
+  }
+
+  .settings-mcp-setup,
+  .settings-mcp-inline-result {
+    justify-self: stretch;
+    justify-content: flex-start;
     text-align: left;
   }
 
