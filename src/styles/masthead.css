@@ -2315,26 +2315,32 @@ main {
   justify-self: stretch;
   width: 100%;
   max-width: 100%;
+  min-height: 56px;
   align-items: center;
   justify-content: space-between;
+  /* Panel gap supplies bottom rhythm; avoid stacking shared toolbar margin. */
   margin: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-xs);
+  padding: var(--space-sm);
+  overflow: hidden;
 }
 
 .workbench-toolbar-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   flex: 1 1 auto;
   justify-content: flex-start;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow-x: auto;
 }
 
 .workbench-toolbar-actions .app-button {
-  min-height: 36px;
-  padding-inline: 10px;
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding-inline: 12px;
   font-size: 12px;
 }
 
@@ -2350,11 +2356,12 @@ main {
 .workbench-toolbar-facts {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(96px, max-content);
-  gap: 8px;
+  grid-auto-columns: minmax(88px, max-content);
+  gap: 6px;
   min-width: 0;
   margin: 0;
   margin-left: auto;
+  flex: 0 0 auto;
   align-items: stretch;
 }
 
@@ -2362,16 +2369,16 @@ main {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  min-width: 96px;
-  min-height: 56px;
+  justify-content: center;
+  min-width: 88px;
+  min-height: 40px;
   border: 1px solid rgba(92, 153, 187, 0.14);
   border-radius: 4px;
   background: rgba(3, 16, 25, 0.5);
   box-shadow:
     inset 0 0 0 1px rgba(92, 153, 187, 0.08),
     inset 0 1px 0 rgba(246, 251, 255, 0.035);
-  padding: 6px 10px 8px;
+  padding: 3px 8px 4px;
   text-align: center;
 }
 
@@ -2388,8 +2395,8 @@ main {
   margin: 0;
   color: var(--mute);
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  line-height: 1.2;
+  font-size: 10px;
+  line-height: 1.15;
   text-align: center;
   white-space: nowrap;
 }
@@ -2404,7 +2411,7 @@ main {
   overflow: hidden;
   color: var(--ink);
   font-family: var(--font-technical);
-  font-size: 18px;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   line-height: 1;
@@ -2950,7 +2957,9 @@ main {
 @media (max-width: 1120px) {
   .workbench-toolbar.observability-toolbar {
     flex-direction: column;
+    flex-wrap: nowrap;
     align-items: stretch;
+    overflow: visible;
   }
 
   .workbench-toolbar-facts {
@@ -2962,6 +2971,7 @@ main {
 
   .workbench-toolbar-actions {
     justify-content: flex-start;
+    width: 100%;
   }
 
   .workbench-layout {
@@ -2978,6 +2988,8 @@ main {
 @media (max-width: 640px) {
   .workbench-toolbar-actions {
     width: 100%;
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 
   .workbench-toolbar-actions .app-button {
