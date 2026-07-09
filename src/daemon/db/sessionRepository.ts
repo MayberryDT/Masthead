@@ -7,6 +7,7 @@ import { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.t
 import { upsertSessionSource } from "./sessionSourceRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 import { deriveTranscriptFileEffects } from "./transcriptEffects.ts";
+import { enrollWorkbenchSession } from "./workbenchPipelineRepository.ts";
 
 export { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
 
@@ -73,6 +74,7 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
     upsertFileEffect(event, sessionId);
     upsertRuntimeSignal(event, sessionId);
     upsertModelUsage(event, sessionId);
+    afterSessionMaterialized(db, sessionId, "live_ingest");
     return sessionId;
   };
 
@@ -633,7 +635,20 @@ export function ingestAdapterRecord(db: MastheadDatabase, record: AdapterRecord,
     throw error;
   }
 
+  if (sessionId) {
+    afterSessionMaterialized(db, sessionId, "session_materialize");
+  }
+
   return { created: sessionId ? !sessionExistedBefore : undefined, sessionId };
+}
+
+/** Auto-enroll a newly materialized session onto the Workbench publish path (idempotent). */
+function afterSessionMaterialized(
+  db: MastheadDatabase,
+  sessionId: string,
+  actorId: "live_ingest" | "session_materialize"
+): void {
+  enrollWorkbenchSession(db, { actor: { kind: "system", id: actorId }, sessionId });
 }
 
 function predictedCanonicalSessionId(record: AdapterRecord, context: AdapterIngestionContext): string | undefined {
