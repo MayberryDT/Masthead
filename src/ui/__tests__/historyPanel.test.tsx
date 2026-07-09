@@ -246,8 +246,8 @@ describe("HistoryPanel", () => {
       />
     );
 
-    expect(html).toContain('aria-label="Loading Logbook session records"');
-    expect(html).toContain("Loading session records");
+    expect(html).toContain('aria-label="Loading published artifacts"');
+    expect(html).toContain("Loading published artifacts");
     expect(html).toContain("<table");
     expect(html).toContain("TITLE / HIGHLIGHT");
     expect(html).toContain("KIND");

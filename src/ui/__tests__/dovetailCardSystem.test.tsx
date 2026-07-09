@@ -371,13 +371,12 @@ describe("dovetail card system", () => {
     expect(mastheadCss).not.toContain(".masthead-shell .session-dossier");
   });
 
-  test("Logbook summary cards override usage stagger timing", () => {
+  test("Logbook CSS no longer carries session-era summary strip chrome", () => {
     const logbookCss = readFileSync("src/styles/logbook.css", "utf8");
-    const summaryMetricRule = cssRuleBody(logbookCss, ".logbook-summary-strip.usage-summary-strip .usage-metric");
-    const summaryMetricStaggerRule = cssRuleBody(logbookCss, ".logbook-summary-strip.usage-summary-strip .usage-metric:nth-child(n)");
-
-    expect(summaryMetricRule).toContain("animation-delay: 0ms;");
-    expect(summaryMetricStaggerRule).toContain("animation-delay: 0ms;");
+    expect(logbookCss).not.toContain(".logbook-summary-strip");
+    expect(logbookCss).toContain(".logbook-col-kind");
+    expect(logbookCss).toContain(".logbook-col-confidence");
+    expect(logbookCss).toContain(".logbook-col-provenance");
   });
 });
 

@@ -387,13 +387,13 @@ function LogbookSkeleton({ mode = "initial" }: { mode?: "initial" | "page" }) {
       role="status"
       aria-live="polite"
       aria-busy="true"
-      aria-label={isPageLoading ? "Loading next Logbook page" : "Loading Logbook session records"}
+      aria-label={isPageLoading ? "Loading next Logbook page" : "Loading published artifacts"}
     >
       {isPageLoading ? null : (
         <div className="logbook-loading-copy" aria-hidden="true">
           <p className="mono-label">Logbook</p>
-          <strong>Loading session records</strong>
-          <span>Hydrating the canonical session database.</span>
+          <strong>Loading published artifacts</strong>
+          <span>Hydrating the published artifact index.</span>
         </div>
       )}
       <table className="logbook-table compact logbook-skeleton-table" aria-hidden="true">
