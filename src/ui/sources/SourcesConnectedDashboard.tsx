@@ -55,7 +55,7 @@ export function SourcesConnectedDashboard({
         <ToolbarFacts imports={imports} lastRefreshAt={lastRefreshAt} />
       </div>
 
-      <dl className="usage-summary-strip sources-summary-strip" aria-label="Source coverage summary">
+      <dl className="summary-strip sources-summary-strip" aria-label="Source coverage summary">
         <SourceMetric label="Sources" tone="sessions" value={rows.length} />
         <SourceMetric label="Locations" tone="tokens" value={locationCount} />
         <SourceMetric label="Sessions" tone="rate" value={coverage.sessions} />
@@ -113,8 +113,8 @@ function ToolbarFacts({ imports, lastRefreshAt }: { imports: ImportJob[]; lastRe
 
 function SourceMetric({ label, tone, value }: { label: string; tone: string; value: number }) {
   return (
-    <div className={`usage-metric ${tone}`}>
-      <span className="usage-metric-accent" aria-hidden="true" />
+    <div className={`summary-metric ${tone}`}>
+      <span className="summary-metric-accent" aria-hidden="true" />
       <dt>{label}</dt>
       <dd>{value}</dd>
     </div>

@@ -59,9 +59,7 @@ import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
 import { SourcesSurface } from "./surfaces/SourcesSurface";
-import { UsageSurface } from "./surfaces/UsageSurface";
 import { WorkbenchSurface } from "./surfaces/WorkbenchSurface";
-import { UsagePanel } from "../ui/usage/UsagePanel";
 import { WorkbenchPanel } from "../ui/workbench/WorkbenchPanel";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
@@ -71,7 +69,6 @@ import { useSettingsDataController } from "./settings/useSettingsDataController"
 import { useSourcesController } from "./sources/useSourcesController";
 import { useSourcesConnectorsController } from "./sources/useSourcesConnectorsController";
 import { useKnowledgeFlowSummary } from "./sidebar/useKnowledgeFlowSummary";
-import { useUsageStatsController } from "./usage/useUsageStatsController";
 import { useWorkbenchController } from "./workbench/useWorkbenchController";
 import { clearUnsupportedLocationHash } from "./locationHash";
 
@@ -254,12 +251,6 @@ export function App() {
     if (connection.state.state === "probing") return { state: "connecting" };
     return liveConnection;
   }, [connection.state, liveConnection]);
-  const usage = useUsageStatsController({
-    active: activeSurface === "usage",
-    activeProjectionUrl,
-    isLive: effectiveLiveConnection.state === "live",
-    refreshKey: sourceLibraryRefreshKey
-  });
   const knowledgeFlow = useKnowledgeFlowSummary({
     activeProjectionUrl,
     isLive: effectiveLiveConnection.state === "live",
@@ -755,21 +746,6 @@ export function App() {
           total={workbench.total}
         />
       </WorkbenchSurface>
-    ) : activeSurface === "usage" ? (
-      <UsageSurface>
-        {needsRecoveryPanel ? (
-          recoveryPanel
-        ) : (
-          <UsagePanel
-            stats={usage.stats}
-            window={usage.window}
-            loading={usage.loading}
-            error={usage.error}
-            onWindowChange={usage.setWindow}
-            onRetry={usage.retry}
-          />
-        )}
-      </UsageSurface>
     ) : activeSurface === "settings" ? (
       <SettingsSurface>
         {needsRecoveryPanel ? (

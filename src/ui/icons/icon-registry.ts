@@ -16,7 +16,6 @@ import {
   Database,
   FileMagnifyingGlass,
   FolderOpen,
-  Gauge,
   GearSix,
   GitBranch,
   LockSimple,
@@ -44,7 +43,6 @@ export const iconRegistry = {
   performance: ChartLineUp,
   sources: Database,
   workbench: Wrench,
-  usage: Gauge,
   settings: GearSix,
 
   search: MagnifyingGlass,

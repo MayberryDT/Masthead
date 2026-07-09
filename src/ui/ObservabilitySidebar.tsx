@@ -15,7 +15,7 @@ type Props = {
   onSurfaceChange?: (surface: AppSurface) => void;
 };
 
-export type AppSurface = "now" | "logbook" | "sources" | "workbench" | "usage" | "settings";
+export type AppSurface = "now" | "logbook" | "sources" | "workbench" | "settings";
 
 export function ObservabilitySidebar({
   version,
@@ -56,12 +56,6 @@ export function ObservabilitySidebar({
             label="Logbook"
             active={activeSurface === "logbook"}
             onClick={() => onSurfaceChange?.("logbook")}
-          />
-          <SidebarLink
-            icon="usage"
-            label="Usage"
-            active={activeSurface === "usage"}
-            onClick={() => onSurfaceChange?.("usage")}
           />
           <SidebarLink
             icon="sources"

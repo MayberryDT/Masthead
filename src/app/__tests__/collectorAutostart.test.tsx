@@ -68,22 +68,16 @@ describe("collector autostart", () => {
 
     await assertSurfaceDoesNotShowOfflineRecovery(container, "Logbook");
     await assertSurfaceDoesNotShowOfflineRecovery(container, "Sources");
-    await assertSurfaceDoesNotShowOfflineRecovery(container, "Usage");
     await assertSurfaceDoesNotShowOfflineRecovery(container, "Settings");
 
     root.unmount();
   });
 
-  test("keeps first-run sources onboarding open after a scan finds sources", async () => {
+  test("keeps first-run sources onboarding open after connector discovery", async () => {
     window.localStorage.removeItem(mastheadOnboardingDismissedStorageKey);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: string | URL | Request) => {
-        const requestUrl = String(url);
-        const { pathname } = new URL(requestUrl);
-        if (pathname === "/sources/setup") return jsonResponse({ ok: true, setup: detectedSourcesSetup() });
-        return jsonResponse(responseForUrl(requestUrl));
-      })
+      vi.fn(async (url: string | URL | Request) => jsonResponse(responseForUrl(String(url))))
     );
 
     const container = document.createElement("div");
@@ -101,30 +95,19 @@ describe("collector autostart", () => {
       await waitFor(() => container.querySelector(".sources-onboarding-modal") !== null);
     });
 
-    expect(container.textContent).toContain("Sources setup");
-    expect(container.textContent).toContain("Set up sources");
+    expect(container.textContent).toContain("Sources connect");
+    expect(container.textContent).toContain("Connect live harnesses");
     expect(container.textContent).not.toContain("ADAPTERS");
     expect(container.textContent).not.toContain("Import data");
 
     root.unmount();
   });
 
-  test("keeps the sources wizard open after scanning detected-only sources", async () => {
+  test("keeps the sources wizard open while selecting detected connectors", async () => {
     window.localStorage.removeItem(mastheadOnboardingDismissedStorageKey);
-    let scanned = false;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: string | URL | Request) => {
-        const requestUrl = String(url);
-        const { pathname } = new URL(requestUrl);
-        if (pathname === "/sources/setup/scan") {
-          scanned = true;
-          const setup = detectedSourcesSetup("needs_attention");
-          return jsonResponse({ ok: true, setup, scan: setup.scan });
-        }
-        if (pathname === "/sources/setup") return jsonResponse({ ok: true, setup: scanned ? detectedSourcesSetup("needs_attention") : emptySourcesSetup() });
-        return jsonResponse(responseForUrl(requestUrl));
-      })
+      vi.fn(async (url: string | URL | Request) => jsonResponse(responseForUrl(String(url))))
     );
 
     const container = document.createElement("div");
@@ -143,7 +126,7 @@ describe("collector autostart", () => {
     });
 
     await act(async () => {
-      clickButtonByText(container, "Check local sources");
+      clickButtonByText(container, "Continue");
       await flushTimers();
       await flushTimers();
     });
@@ -538,13 +521,14 @@ function responseForUrl(url: string) {
   if (pathname === "/health") return currentHealth;
   if (pathname === "/projection") return liveProjectionResponse();
   if (pathname === "/sources/setup") return { ok: true, setup: emptySourcesSetup() };
+  if (pathname.startsWith("/sources/connectors")) return { ok: true, ...detectedHarnessConnectors() };
   if (pathname === "/adapters") return { ok: true, adapters: [] };
   if (pathname === "/sources") return { ok: true, sources: [] };
   if (pathname === "/imports") return { ok: true, imports: [], limit: 50, offset: 0, total: 0 };
   if (pathname === "/sessions") return { sessions: [], total: 0 };
   if (pathname === "/logbook/summary") return { ok: true, summary: emptyLogbookSummary() };
   if (pathname === "/projects") return { ok: true, projects: [] };
-  if (pathname === "/usage/summary") return { ok: true, usage: emptyUsageStats() };
+  if (pathname === "/knowledge-flow/summary") return { ok: true, summary: emptyKnowledgeFlowSummary() };
   if (pathname === "/settings") return { ok: true, settings: settingsState() };
   if (pathname === "/mcp/status") return { ok: true, status: mcpStatus() };
   if (pathname === "/mcp/tools") return { ok: true, tools: [] };
@@ -595,45 +579,6 @@ function emptySourcesSetup() {
   };
 }
 
-function detectedSourcesSetup(status = "detected") {
-  return {
-    ...emptySourcesSetup(),
-    connectedSources: [
-      {
-        discoveredSessions: 0,
-        importedSessions: 0,
-        label: "OpenCode",
-        path: "/home/tyler/.opencode/session_index.jsonl",
-        runtime: "opencode",
-        sourceId: "opencode-sessions",
-        state: "connected"
-      }
-    ],
-    scan: {
-      adapters: [],
-      foundSources: [
-        {
-          discoveredSessions: 0,
-          importable: true,
-          label: "OpenCode sessions",
-          path: "/home/tyler/.opencode/session_index.jsonl",
-          runtime: "opencode",
-          sourceId: "opencode-sessions"
-        }
-      ],
-      generatedAt: "2026-07-04T00:00:00.000Z",
-      scanId: "scan:detected",
-      status: "completed",
-      summary: {
-        detectedHarnesses: 1,
-        foundSources: 1,
-        scannedHarnesses: 1
-      }
-    },
-    status
-  };
-}
-
 function emptyLogbookSummary() {
   return {
     runtimes: [],
@@ -647,40 +592,28 @@ function emptyLogbookSummary() {
   };
 }
 
-function emptyUsageStats() {
+function detectedHarnessConnectors() {
   return {
-    window: "today",
     generatedAt: "2026-07-04T00:00:00.000Z",
-    range: {
-      to: "2026-07-04T00:00:00.000Z"
-    },
-    totals: {
-      sessions: 0,
-      projects: 0,
-      runtimes: 0,
-      models: 0,
-      messages: 0,
-      toolCalls: 0,
-      fileEffects: 0,
-      mcpQueries: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      tokenRows: 0,
-      tokenCoverageSessions: 0
-    },
-    byModel: [],
-    byProject: [],
-    byRuntime: [],
-    activity: [],
-    coverage: {
-      sources: 0,
-      importedSessions: 0,
-      sessionsWithTokenUsage: 0,
-      sessionsWithoutTokenUsage: 0,
-      currentEnrichments: 0,
-      mcpQueries: 0
-    }
+    summary: { ready: 0, needsAction: 0, notInstalled: 1, notFound: 0, error: 0 },
+    connectors: [
+      {
+        runtime: "opencode",
+        label: "OpenCode",
+        presence: "found",
+        live: "not_installed",
+        supportsActions: true
+      }
+    ]
+  };
+}
+
+function emptyKnowledgeFlowSummary() {
+  return {
+    capturedSessions: 0,
+    workbenchSessions: 0,
+    publishedArtifacts: 0,
+    automaticallyResolvedSessions: 0
   };
 }
 

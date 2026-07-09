@@ -4,7 +4,6 @@ import { readFileSync } from "node:fs";
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import type { UsageStatsDto } from "../../app/daemonClient";
 import type { AttentionItem, SessionCardView } from "../../core/types";
 import type { SessionDossierDto } from "../../shared/sessionDossier";
 import type { SourcesSetupDto } from "../../shared/sourcesSetup";
@@ -13,11 +12,9 @@ import { HistoryPanel } from "../HistoryPanel";
 import { MetricCard } from "../MetricCard";
 import { OperationsPanel } from "../OperationsPanel";
 import { SessionCard } from "../SessionCard";
-import { SidebarUsageStats } from "../SidebarUsageStats";
 import { SourcesPanel } from "../SourcesPanel";
 import { SessionDossier } from "../session-dossier/SessionDossier";
 import { ImportJobsTable } from "../sources/ImportJobsTable";
-import { UsagePanel } from "../usage/UsagePanel";
 
 describe("dovetail card system", () => {
   test("Board session cards render the selected Dovetail Compression Base mockup structure", () => {
@@ -46,7 +43,7 @@ describe("dovetail card system", () => {
     expect(active.querySelector(":scope > .card-topline .runtime-tag")?.textContent).toBe("OpenCode");
     expect(active.querySelector(":scope > .card-topline .state-pill")?.textContent).toBe("Active");
     expect(active.querySelector(":scope > h3.headline")?.textContent).toBe("Refining the live card hierarchy.");
-    expect(active.querySelectorAll(":scope > .fact-grid .fact")).toHaveLength(4);
+    expect(active.querySelectorAll(":scope > .fact-grid .fact")).toHaveLength(2);
     expect(active.querySelector(":scope > .footer-line .timestamp")?.textContent).toBe("2m ago");
   });
 
@@ -119,10 +116,6 @@ describe("dovetail card system", () => {
   });
 
   test("secondary app cards stay outside the session-card dovetail treatment", () => {
-    const sidebarHtml = renderToStaticMarkup(<SidebarUsageStats stats={usageStatsFixture()} />);
-    const usageHtml = renderToStaticMarkup(
-      <UsagePanel stats={usageStatsFixture()} window="today" onRetry={() => undefined} onWindowChange={() => undefined} />
-    );
     const logbookHtml = renderToStaticMarkup(
       <HistoryPanel
         loadState={{
@@ -157,12 +150,10 @@ describe("dovetail card system", () => {
     const settingsHtml = renderToStaticMarkup(<OperationsPanel />);
 
     expect(logbookHtml).not.toContain("logbook-summary-strip");
-    expect(logbookHtml).not.toContain("usage-metric sessions");
+    expect(logbookHtml).not.toContain("summary-metric sessions");
     expect(sourcesHtml).not.toContain("3 sources detected");
-    expectNoDovetailTreatment(sidebarHtml);
     expectNoDovetailTreatment(logbookHtml);
     expectNoDovetailTreatment(sourcesHtml);
-    expectNoDovetailTreatment(usageHtml);
     expectNoDovetailTreatment(settingsHtml);
   });
 
@@ -332,11 +323,7 @@ describe("dovetail card system", () => {
     ]);
     const prototypeSheetRule = cssRuleBody(prototypeHtml, ".weld-sheet .metal-card::before");
     const targetSelectors = [
-      ".masthead-shell .sidebar-usage",
-      ".masthead-shell .usage-summary-strip .usage-metric",
-      ".masthead-shell .usage-table-card",
-      ".masthead-shell .usage-coverage",
-      ".masthead-shell .usage-state",
+      ".masthead-shell .summary-strip .summary-metric",
       ".masthead-shell .settings-section",
       ".masthead-shell .connected-source-row",
       ".masthead-shell .adapter-card"
@@ -357,12 +344,12 @@ describe("dovetail card system", () => {
     expect(cssRuleBody(mastheadCss, ".masthead-shell .secondary-tier-live::after")).toContain("border-bottom-color: rgba(46, 167, 255, 0.42);");
     expect(cssRuleBody(mastheadCss, ".masthead-shell .secondary-tier-action::after")).toContain("border-bottom-color: rgba(255, 72, 62, 0.48);");
 
-    expect(cssRuleBody(mastheadCss, ".masthead-shell .usage-metric-accent")).toContain("display: none;");
-    const sidebarPositionRule = cssRuleBodyContaining(mastheadCss, ".masthead-shell .sidebar-usage", "bottom: 16px;");
+    expect(cssRuleBody(mastheadCss, ".masthead-shell .summary-metric-accent")).toContain("display: none;");
+    const sidebarPositionRule = cssRuleBodyContaining(mastheadCss, ".masthead-shell .sidebar-knowledge-flow", "bottom: 16px;");
     const sidebarMobileRule = cssRuleBodyContaining(
       mastheadCss,
       "@media (max-width: 760px)",
-      ".masthead-shell .sidebar-usage"
+      ".masthead-shell .sidebar-knowledge-flow"
     );
     expect(sidebarPositionRule).toContain("position: absolute;");
     expect(sidebarPositionRule).toContain("bottom: 16px;");
@@ -562,45 +549,6 @@ function attentionFixture(): AttentionItem {
     support: "deterministic",
     title: "Command failed",
     type: "command_failed"
-  };
-}
-
-function usageStatsFixture(overrides: Partial<UsageStatsDto["totals"]> = {}): UsageStatsDto {
-  const totals = {
-    fileEffects: 1,
-    inputTokens: 8000,
-    mcpQueries: 1,
-    messages: 2,
-    models: 1,
-    outputTokens: 4500,
-    projects: 1,
-    runtimes: 1,
-    sessions: 1,
-    tokenCoverageSessions: 1,
-    tokenRows: 1,
-    tokensPerMinute: 17,
-    toolCalls: 3,
-    totalTokens: 12500,
-    ...overrides
-  };
-
-  return {
-    activity: [{ bucketStart: "2026-06-29T20:00:00.000Z", fileEffects: 1, messages: 2, sessions: totals.sessions, toolCalls: 3, totalTokens: totals.totalTokens }],
-    byModel: [{ inputTokens: totals.inputTokens, model: "gpt-5-opencode", outputTokens: totals.outputTokens, provider: "openai", sessions: totals.sessions, totalTokens: totals.totalTokens }],
-    byProject: [{ fileEffects: 1, messages: 2, project: "Masthead", sessions: totals.sessions, toolCalls: 3, totalTokens: totals.totalTokens }],
-    byRuntime: [{ fileEffects: 1, messages: 2, runtime: "opencode", sessions: totals.sessions, toolCalls: 3, totalTokens: totals.totalTokens }],
-    coverage: {
-      currentEnrichments: 1,
-      importedSessions: totals.sessions,
-      mcpQueries: 1,
-      sessionsWithTokenUsage: totals.tokenCoverageSessions,
-      sessionsWithoutTokenUsage: Math.max(0, totals.sessions - totals.tokenCoverageSessions),
-      sources: 1
-    },
-    generatedAt: "2026-06-29T20:30:00.000Z",
-    range: { from: "2026-06-29T00:00:00.000Z", to: "2026-06-29T20:30:00.000Z" },
-    totals,
-    window: "today"
   };
 }
 

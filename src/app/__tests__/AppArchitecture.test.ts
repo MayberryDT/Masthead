@@ -43,12 +43,12 @@ describe("App component architecture", () => {
     expect(appSource).not.toContain("boardDossierRetryKey");
   });
 
-  test("keeps Usage stats loading orchestration out of App.tsx", async () => {
+  test("keeps the retired Usage surface out of App orchestration", async () => {
     const appPath = fileURLToPath(new URL("../App.tsx", import.meta.url));
     const appSource = await readFile(appPath, "utf8");
 
-    expect(appSource).not.toContain("getUsageStats");
-    expect(appSource).not.toContain("const loadSidebarUsageStats");
-    expect(appSource).not.toContain("const loadUsageStats");
+    expect(appSource).not.toContain("UsageSurface");
+    expect(appSource).not.toContain("UsagePanel");
+    expect(appSource).not.toContain("useUsageStatsController");
   });
 });

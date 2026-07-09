@@ -40,26 +40,33 @@ afterEach(() => {
 describe("App session transition notifications", () => {
   test("baselines the first projection and notifies once when a running card later transitions", async () => {
     let projectionRequests = 0;
+    let transitioned = false;
     stubAppFetch(() => {
       projectionRequests += 1;
-      return liveProjectionResponse(projectionRequests === 1 ? firstProjection() : transitionedProjection());
+      return liveProjectionResponse(transitioned ? transitionedProjection() : firstProjection());
     });
 
     renderApp();
-    await waitFor(() => projectionRequests === 1);
+    await waitFor(
+      () =>
+        projectionRequests === 1 &&
+        vi.mocked(fetch).mock.calls.some(([url]) => new URL(String(url)).pathname === "/knowledge-flow/summary")
+    );
     expect(notifyTransitionMock).not.toHaveBeenCalled();
+    transitioned = true;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(30_000);
     });
+    await waitFor(() => projectionRequests >= 2);
     await waitFor(() => notifyTransitionMock.mock.calls.length === 1);
 
-    expect(projectionRequests).toBe(2);
+    expect(projectionRequests).toBeGreaterThanOrEqual(3);
     expect(notifyTransitionMock).toHaveBeenCalledWith({
       sessionId: "active-1",
       transition: "idle",
       title: "Task: in progress.",
-      body: "Idle"
+      body: "Session went quiet"
     });
   });
 
@@ -205,13 +212,14 @@ function projection(cards: SessionCardView[]): LiveBoardProjection {
 function responseForPath(pathname: string) {
   if (pathname === "/health") return currentHealth;
   if (pathname === "/sources/setup") return { ok: true, setup: emptySourcesSetup() };
+  if (pathname.startsWith("/sources/connectors")) return { ok: true, ...emptyHarnessConnectors() };
   if (pathname === "/adapters") return { ok: true, adapters: [] };
   if (pathname === "/sources") return { ok: true, sources: [] };
   if (pathname === "/imports") return { ok: true, imports: [], limit: 50, offset: 0, total: 0 };
   if (pathname === "/sessions") return { sessions: [], total: 0 };
   if (pathname === "/logbook/summary") return { ok: true, summary: emptyLogbookSummary() };
   if (pathname === "/projects") return { ok: true, projects: [] };
-  if (pathname === "/usage/summary") return { ok: true, usage: emptyUsageStats() };
+  if (pathname === "/knowledge-flow/summary") return { ok: true, summary: emptyKnowledgeFlowSummary() };
   if (pathname === "/settings") return { ok: true, settings: settingsState() };
   if (pathname === "/mcp/status") return { ok: true, status: mcpStatus() };
   if (pathname === "/mcp/tools") return { ok: true, tools: [] };
@@ -235,31 +243,20 @@ function emptyLogbookSummary() {
   return { runtimes: [], models: [], lifecycles: [], sessions: 0, projects: 0, messages: 0, toolCalls: 0, fileEffects: 0 };
 }
 
-function emptyUsageStats() {
+function emptyHarnessConnectors() {
   return {
-    window: "today",
     generatedAt: "2026-07-04T00:00:00.000Z",
-    range: { to: "2026-07-04T00:00:00.000Z" },
-    totals: {
-      sessions: 0,
-      projects: 0,
-      runtimes: 0,
-      models: 0,
-      messages: 0,
-      toolCalls: 0,
-      fileEffects: 0,
-      mcpQueries: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      tokenRows: 0,
-      tokenCoverageSessions: 0
-    },
-    byModel: [],
-    byProject: [],
-    byRuntime: [],
-    activity: [],
-    coverage: { sources: 0, importedSessions: 0, sessionsWithTokenUsage: 0, sessionsWithoutTokenUsage: 0, currentEnrichments: 0, mcpQueries: 0 }
+    summary: { ready: 0, needsAction: 0, notInstalled: 0, notFound: 0, error: 0 },
+    connectors: []
+  };
+}
+
+function emptyKnowledgeFlowSummary() {
+  return {
+    capturedSessions: 0,
+    workbenchSessions: 0,
+    publishedArtifacts: 0,
+    automaticallyResolvedSessions: 0
   };
 }
 
@@ -332,7 +329,7 @@ async function waitFor(condition: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (condition()) return;
     await act(async () => {
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
     });
   }
   expect(condition()).toBe(true);

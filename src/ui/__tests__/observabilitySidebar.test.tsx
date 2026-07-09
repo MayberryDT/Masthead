@@ -18,8 +18,9 @@ describe("ObservabilitySidebar", () => {
     expect(html).not.toContain("Alerts");
     expect(html).toContain("Logbook");
     expect(html).toContain("Sources");
-    expect(html).toContain("Usage");
+    expect(html).not.toContain("Usage");
     expect(html).not.toContain("Agent Access");
+    expect(html).toContain("Knowledge flow");
     expect(html).not.toContain("Workspace");
     expect(html).not.toContain("Overview");
     expect(html).not.toContain("Analysis");

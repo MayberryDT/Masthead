@@ -16,7 +16,6 @@ describe("folded sheet-metal control system", () => {
     for (const selector of [
       ".masthead-shell .observability-toolbar::before",
       ".masthead-shell .sidebar-group > div",
-      ".masthead-shell .usage-toolbar",
       ".masthead-shell .import-jobs-section"
     ]) {
       const plateRule = cssRuleBody(mastheadCss, selector);
@@ -31,8 +30,7 @@ describe("folded sheet-metal control system", () => {
       ".masthead-shell .observability-toolbar .search-field",
       ".masthead-shell .filterable-select-search",
       ".masthead-shell .settings-delete-controls input",
-      ".masthead-shell .dossier-transcript-toolbar input",
-      ".masthead-shell .usage-toolbar button"
+      ".masthead-shell .dossier-transcript-toolbar input"
     ]) {
       expect(cssRuleBody(mastheadCss, selector), selector).toContain("clip-path: var(--folded-control-clip);");
     }

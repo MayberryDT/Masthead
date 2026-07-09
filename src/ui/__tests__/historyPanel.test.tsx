@@ -259,7 +259,7 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain(">Tool calls</dt>");
     expect(html).not.toContain("Date range");
     expect(html).not.toContain("Records</dt>");
-    expect(html).not.toContain('class="usage-metric ');
+    expect(html).not.toContain('class="summary-metric ');
     expect(html).toContain("logbook-loading-inspector");
     expect(html).toContain("logbook-footer observability-toolbar metal-toolbar logbook-skeleton-footer");
     expect(html).toContain("logbook-page-button toolbar-icon-button");
@@ -382,5 +382,4 @@ function records(): StoreRecord[] {
     }
   ];
 }
-
 

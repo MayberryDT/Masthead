@@ -11,11 +11,12 @@ describe("product navigation", () => {
     expect(html).toContain("Logbook");
     expect(html).toContain("Sources");
     expect(html).toContain("Workbench");
-    expect(html).toContain("Usage");
     expect(html).toContain("Settings");
-    expect(navOrder(html, ["Now", "Workbench", "Logbook", "Usage", "Sources", "Settings"])).toBe(true);
+    expect(navOrder(html, ["Now", "Workbench", "Logbook", "Sources", "Settings"])).toBe(true);
     expect(html).not.toContain("href=\"#");
+    expect(html).not.toContain("Usage");
     expect(html).not.toContain("Agent Access");
+    expect(html).toContain("Knowledge flow");
     expect(html).not.toContain("#agent-access");
     expect(html).not.toContain("Performance");
     expect(html).not.toContain("Models");
