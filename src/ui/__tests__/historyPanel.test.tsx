@@ -27,7 +27,7 @@ describe("HistoryPanel", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:App" onQueryChange={() => {}} />);
 
     expect(html).toContain("Logbook");
-    expect(html).toContain("Search all session history");
+    expect(html).toContain("Search published artifacts");
     expect(html).not.toContain("Session library");
     expect(html).not.toContain("Search and inspect durable agent-session history.");
     expect(html).toContain("TITLE / HIGHLIGHT");
@@ -73,91 +73,67 @@ describe("HistoryPanel", () => {
     expect(html).toContain("OpenCode history into");
     expect(html).toContain("<mark>SQLite</mark>");
     expect(html).toContain("&lt;script&gt;");
-    expect(html).toContain("logbook-summary-strip");
-    expect(html).toContain("usage-metric sessions");
-    expect(html).toContain("Messages");
-    expect(html).toContain("Tool calls");
-    expect(html).toContain("Date range");
-    expect(html).not.toContain("Records</dt>");
-    expect((html.match(/class="usage-metric /g) ?? []).length).toBe(6);
+    expect(html).not.toContain("logbook-summary-strip");
+    expect(html).not.toContain(">Sessions</dt>");
+    expect(html).not.toContain(">Messages</dt>");
+    expect(html).not.toContain(">Tool calls</dt>");
     expect(html).not.toContain("stat-strip");
     expect(html).not.toContain('<script>alert("x")</script>');
     expect(html).not.toContain("Showing 1 of 1");
   });
 
-  test("keeps dropdown-managed filters out of the external facet strip", () => {
+  test("surfaces Kind / Project / Date / Query facets and omits Sort", () => {
     const html = renderToStaticMarkup(
       <HistoryPanel
         filters={{
           dateFrom: "2026-06-01",
-          model: "gpt-5",
-          project: "Masthead",
-          runtime: "opencode"
+          kind: "runbook",
+          project: "Masthead"
         }}
         loadState={{ state: "ready", sessions: [], total: 1 }}
         loading={false}
-        query=""
-        sort="recent"
+        query="incident"
+        sort="oldest"
         onFilterChange={() => undefined}
         onQueryChange={() => undefined}
+        onSortChange={() => undefined}
       />
     );
 
     expect(html).toContain('aria-label="Active Logbook filters"');
+    expect(html).toContain("Query: incident");
+    expect(html).toContain("Remove Query filter");
+    expect(html).toContain("Kind: Runbook");
+    expect(html).toContain("Remove Kind filter");
+    expect(html).toContain("Project: Masthead");
+    expect(html).toContain("Remove Project filter");
     expect(html).toContain("From: 2026-06-01");
     expect(html).toContain("Remove From filter");
-    expect(html).not.toContain("Project: Masthead");
-    expect(html).not.toContain("Runtime: opencode");
-    expect(html).not.toContain("Model: gpt-5");
-    expect(html).not.toContain("Remove Project filter");
-    expect(html).not.toContain("Remove Runtime filter");
-    expect(html).not.toContain("Remove Model filter");
+    expect(html).not.toContain("Sort:");
+    expect(html).not.toContain("Remove Sort filter");
+    expect(html).not.toContain("Runtime filter");
+    expect(html).not.toContain("Model filter");
+    expect(html).not.toContain("Enrich summaries");
   });
 
-  test("renders invalid summary date ranges as n/a", () => {
+  test("does not render session-era summary strip metrics", () => {
     const html = renderToStaticMarkup(
       <HistoryPanel
         loadState={{ state: "ready", sessions: [], total: 0 }}
         loading={false}
         query=""
-        summary={summary({ earliestActivityAt: "1969-12-31T23:59:59.000Z", latestActivityAt: "2026-06-24T07:00:00.000Z" })}
         onQueryChange={() => {}}
       />
     );
 
-    expect(html).toContain("<dt>Date range</dt>");
-    expect(html).toContain("<dd>n/a</dd>");
-    expect(html).not.toContain("Dec 1969");
-  });
-
-  test("renders far future summary date ranges as n/a", () => {
-    const html = renderToStaticMarkup(
-      <HistoryPanel
-        loadState={{ state: "ready", sessions: [], total: 0 }}
-        loading={false}
-        query=""
-        summary={summary({ earliestActivityAt: "2026-06-24T07:00:00.000Z", latestActivityAt: "2999-01-01T00:00:00.000Z" })}
-        onQueryChange={() => {}}
-      />
-    );
-
-    expect(html).toContain("<dt>Date range</dt>");
-    expect(html).toContain("<dd>n/a</dd>");
-    expect(html).not.toContain("2999");
-  });
-
-  test("renders valid summary date ranges as month and year", () => {
-    const html = renderToStaticMarkup(
-      <HistoryPanel
-        loadState={{ state: "ready", sessions: [], total: 0 }}
-        loading={false}
-        query=""
-        summary={summary({ earliestActivityAt: "2026-05-24T07:00:00.000Z", latestActivityAt: "2026-06-24T07:00:00.000Z" })}
-        onQueryChange={() => {}}
-      />
-    );
-
-    expect(html).toContain("<dd>May 2026 - Jun 2026</dd>");
+    expect(html).not.toContain("logbook-summary-strip");
+    expect(html).not.toContain(">Sessions</dt>");
+    expect(html).not.toContain(">Messages</dt>");
+    expect(html).not.toContain(">Tool calls</dt>");
+    expect(html).not.toContain("<dt>Date range</dt>");
+    expect(html).not.toContain("May 2026 - Jun 2026");
+    expect(html).toContain("No published artifacts yet.");
+    expect(html).toContain("Compile and publish from Workbench.");
   });
 
   test("renders more than six database-backed sessions and exposes detail actions", () => {
@@ -270,18 +246,20 @@ describe("HistoryPanel", () => {
       />
     );
 
-    expect(html).toContain('aria-label="Loading Logbook session records"');
-    expect(html).toContain("Loading session records");
+    expect(html).toContain('aria-label="Loading published artifacts"');
+    expect(html).toContain("Loading published artifacts");
     expect(html).toContain("<table");
     expect(html).toContain("TITLE / HIGHLIGHT");
     expect(html).toContain("KIND");
     expect(html).toContain("PROJECT");
     expect(html).toContain("PROVENANCE");
-    expect(html).toContain("Messages");
-    expect(html).toContain("Tool calls");
-    expect(html).toContain("Date range");
+    expect(html).not.toContain("logbook-summary-strip");
+    expect(html).not.toContain(">Sessions</dt>");
+    expect(html).not.toContain(">Messages</dt>");
+    expect(html).not.toContain(">Tool calls</dt>");
+    expect(html).not.toContain("Date range");
     expect(html).not.toContain("Records</dt>");
-    expect((html.match(/class="usage-metric /g) ?? []).length).toBe(6);
+    expect(html).not.toContain('class="usage-metric ');
     expect(html).toContain("logbook-loading-inspector");
     expect(html).toContain("logbook-footer observability-toolbar metal-toolbar logbook-skeleton-footer");
     expect(html).toContain("logbook-page-button toolbar-icon-button");
@@ -291,14 +269,38 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("Logbook could not read");
   });
 
-  test("renders no-match queries with an explicit zero result count", () => {
+  test("renders no-match queries with an empty state instead of summary metrics", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:Missing" onQueryChange={() => {}} />);
 
     expect(html).toContain("Logbook");
     expect(html).not.toContain("Session library");
-    expect(html).toContain("<dd>0</dd>");
+    expect(html).not.toContain("logbook-summary-strip");
+    expect(html).not.toContain(">Sessions</dt>");
+    expect(html).not.toContain("<dd>0</dd>");
     expect(html).not.toContain("Showing 0 of 0; searching 0 local records");
     expect(html).not.toContain("History case");
+  });
+
+  test("renders artifact-first empty and filter-miss copy", () => {
+    const empty = renderToStaticMarkup(
+      <HistoryPanel loadState={{ state: "ready", sessions: [], total: 0 }} loading={false} query="" onQueryChange={() => {}} />
+    );
+    expect(empty).toContain("No published artifacts yet.");
+    expect(empty).toContain("Compile and publish from Workbench.");
+    expect(empty).not.toContain("No sessions imported yet.");
+
+    const filtered = renderToStaticMarkup(
+      <HistoryPanel
+        filters={{ project: "Missing" }}
+        loadState={{ state: "ready", sessions: [], total: 0 }}
+        loading={false}
+        query="incident"
+        onFilterChange={() => undefined}
+        onQueryChange={() => {}}
+      />
+    );
+    expect(filtered).toContain("No artifacts match these filters.");
+    expect(filtered).not.toContain("No sessions match these filters.");
   });
 
   test("does not fall back to local history when the canonical Logbook request fails", () => {
@@ -381,18 +383,4 @@ function records(): StoreRecord[] {
   ];
 }
 
-function summary(overrides: Partial<Parameters<typeof HistoryPanel>[0]["summary"]> = {}): NonNullable<Parameters<typeof HistoryPanel>[0]["summary"]> {
-  return {
-    sessions: 1,
-    projects: 1,
-    runtimes: [{ runtime: "opencode", count: 1 }],
-    messages: 10,
-    toolCalls: 2,
-    fileEffects: 0,
-    earliestActivityAt: "2026-05-24T07:00:00.000Z",
-    latestActivityAt: "2026-06-24T07:00:00.000Z",
-    models: [],
-    lifecycles: [],
-    ...overrides
-  };
-}
+

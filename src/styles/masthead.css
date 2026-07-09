@@ -7992,6 +7992,4 @@ body {
   border: 1px solid #000;
 }
 
-.logbook-col-select { width: 36px; text-align: center; }
-.logbook-col-select input { accent-color: var(--blue, #2ea7ff); }
-.logbook-bulk-actions { display: inline-flex; align-items: center; gap: 8px; margin-right: 8px; }
+

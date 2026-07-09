@@ -46,7 +46,7 @@ const PIPELINE_LABELS = [
   "Precheck",
   "Accept Quality",
   "Fail Quality",
-  "Publish",
+  "Publish package",
   "Claim",
   "Release"
 ] as const;
@@ -89,9 +89,15 @@ describe("WorkbenchPanel", () => {
     expect(html).not.toContain("Refresh");
     expect(html).toContain("workbench-pipeline-rail");
     expect(html).toContain("›");
-    expect(html).toContain("Publish path");
+    expect(html).toContain("Package path");
     expect(html).toContain("Selected");
     expect(html).toContain("Ready to publish");
+    expect(html).toContain(">package</th>");
+    expect(html).toContain(">runbook</th>");
+    expect(html).toContain(">adr</th>");
+    expect(html).toContain(">timeline</th>");
+    expect(html).toContain(">resolution</th>");
+    expect(html).toContain("Publish package");
     expect(html).toContain("Workbench Activity");
     expect(html).toContain("observability-toolbar");
     expect(html).toContain("metal-toolbar");
@@ -107,6 +113,7 @@ describe("WorkbenchPanel", () => {
       expect(html).not.toContain(forbiddenToken(index));
     }
     expect(html).not.toContain("Bug-fix candidates");
+    expect(html).not.toContain("bug fix");
     expect(html).not.toContain("Missing dossiers");
   });
 
@@ -177,7 +184,7 @@ describe("WorkbenchPanel", () => {
       />
     );
 
-    expect(html).toContain("Publish path");
+    expect(html).toContain("Package path");
     expect(html).toContain(">1</dd>");
     expect(html).toContain("Selected");
     expect(html).toContain("Raw session needing enrichment");
@@ -206,6 +213,7 @@ describe("WorkbenchPanel", () => {
     expect(html).not.toContain(forbiddenToken(3));
     expect(html).not.toContain(forbiddenToken(4));
     expect(html).not.toContain("Bug-fix candidates");
+    expect(html).not.toContain("bug fix");
     expect(html).not.toContain("Missing dossiers");
   });
 
@@ -224,10 +232,10 @@ describe("WorkbenchPanel", () => {
       />
     );
 
-    expect(html).toContain("No publish-path sessions");
+    expect(html).toContain("No package-path sessions");
     expect(html).toContain("If Now has captures, open Pipeline → Enroll missing");
-    expect(html).toContain("12 not added to Logbook · open review");
-    expect(html).toContain("Publish path");
+    expect(html).toContain("12 excluded from package path · open review");
+    expect(html).toContain("Package path");
     expect(html).toContain(">0</dd>");
     expect(html).toContain("Workbench Activity");
     expect(html).toContain("No activity yet");
@@ -264,12 +272,12 @@ describe("WorkbenchPanel", () => {
       />
     );
 
-    expect(html).toContain("No publish-path sessions");
+    expect(html).toContain("No package-path sessions");
     expect(html).toContain("If Now has captures, open Pipeline → Enroll missing");
     expect(html).toContain("Enroll missing");
-    // Fact chip absent; pipeline Fail Quality tooltip still mentions Logbook wording
+    // Fact chip absent; pipeline Fail Quality tooltip uses package/Not Added wording
     expect(html).not.toContain("<dt>Not Added</dt>");
-    expect(html).not.toContain("not added to Logbook · open review");
+    expect(html).not.toContain("excluded from package path · open review");
     expect(html).toContain("No activity yet");
   });
 
@@ -375,7 +383,7 @@ describe("WorkbenchPanel", () => {
       />
     );
 
-    expect(html).toContain("Not Added to Logbook");
+    expect(html).toContain("Not Added — excluded from package path");
     expect(html).toContain("Rejected session");
     expect(html).toContain("quality_failed");
     expect(html).toContain("codex");
@@ -482,7 +490,9 @@ describe("WorkbenchPanel", () => {
 function session(overrides: Partial<WorkbenchQueueSessionDto> = {}): WorkbenchQueueSessionDto {
   return {
     activeClaim: undefined,
+    adrStatus: "unknown",
     bugFixTraceStatus: "unknown",
+    incidentTimelineStatus: "unknown",
     lastActivityAt: "2026-07-08T12:00:00.000Z",
     latestActivity: undefined,
     lifecycle: "ended",
@@ -490,10 +500,13 @@ function session(overrides: Partial<WorkbenchQueueSessionDto> = {}): WorkbenchQu
     project: "Masthead",
     publicationStatus: "publish_path",
     qualityStatus: "unchecked",
+    resolutionStatus: "in_progress",
+    runbookStatus: "unknown",
     runtime: "codex",
     sessionDossierStatus: "missing",
     sessionEnrichmentStatus: "missing",
     sessionId: "session:abc",
+    sessionPackageStatus: "missing",
     title: "Workbench session",
     transcriptStatus: "unchecked",
     ...overrides

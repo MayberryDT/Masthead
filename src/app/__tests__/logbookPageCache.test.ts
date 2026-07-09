@@ -6,17 +6,17 @@ describe("logbook page cache", () => {
     expect(
       logbookPageSearchFilters({
         baseUrl: "http://127.0.0.1:17373/projection",
-        filters: { project: "", runtime: "opencode" },
+        filters: { project: "", kind: "runbook" },
         pageIndex: 2,
         pageSize: 50,
         query: "toolbar",
         sort: "recent"
       })
     ).toEqual({
+      kind: "runbook",
       limit: 50,
       offset: 100,
       q: "toolbar",
-      runtime: "opencode",
       sort: "recent"
     });
   });
@@ -24,7 +24,7 @@ describe("logbook page cache", () => {
   test("uses a stable key for equivalent filter objects", () => {
     const first = logbookPageCacheKey({
       baseUrl: "http://127.0.0.1:17373/projection",
-      filters: { project: "Masthead", runtime: "opencode" },
+      filters: { project: "Masthead", kind: "runbook" },
       pageIndex: 1,
       pageSize: 50,
       query: "",
@@ -32,7 +32,7 @@ describe("logbook page cache", () => {
     });
     const second = logbookPageCacheKey({
       baseUrl: "http://127.0.0.1:17373/projection",
-      filters: { runtime: "opencode", project: "Masthead" },
+      filters: { kind: "runbook", project: "Masthead" },
       pageIndex: 1,
       pageSize: 50,
       query: "",

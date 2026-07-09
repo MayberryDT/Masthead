@@ -45,23 +45,25 @@ const defaultCanRun: UseWorkbenchControllerResult["canRun"] = () => false;
 
 const TOOLTIPS = {
   copyAgentPrompt:
-    "Copy a plain-language prompt for your coding agent to enrich, dossier, and process the selected sessions.",
-  selectAll: "Select every publish-path session across all pages (not just this page).",
+    "Copy a plain-language prompt for your coding agent to compile and publish artifacts from the selected sessions (session package always; runbook, ADR, and incident timeline when evidence supports them).",
+  selectAll: "Select every package-path session across all pages (not just this page).",
   clear: "Clear the current selection.",
-  pipeline: "Expand pipeline operations to the right: enroll, transcript, quality, publish, and claims.",
-  enrollMissing: "Add captured sessions that are not yet on the Workbench publish path.",
+  pipeline:
+    "Expand pipeline operations to the right: enroll, transcript, quality, package publish, and claims.",
+  enrollMissing: "Add captured sessions that are not yet on the Workbench package path.",
   checkTranscript: "Run a lightweight transcript availability check on selected sessions.",
   importTranscript: "Import transcript content for selected sessions (requires source permission).",
   precheck: "Run the cheap capture quality precheck and apply pass/fail automatically.",
   acceptQuality: "Mark quality as passed so selected sessions can move toward enrichment.",
-  failQuality: "Fail quality and move selected sessions to Not Added to Logbook.",
-  publish: "Publish selected sessions to Logbook when all gates are satisfied.",
+  failQuality: "Fail quality and remove sessions from the publish path (Not Added).",
+  publish:
+    "Publish the session package (dossier capsule) for selected sessions when package gates are satisfied. Automatic kinds still need apply/publish or N/A for full resolution.",
   claim: "Place a short-lived claim so agents avoid duplicate work on selected sessions.",
   release: "Release active claims on selected sessions.",
-  pagePrevious: "Show the previous page of publish-path sessions.",
-  pageNext: "Show the next page of publish-path sessions.",
+  pagePrevious: "Show the previous page of package-path sessions.",
+  pageNext: "Show the next page of package-path sessions.",
   selectPage: "Select or clear all sessions on this page.",
-  notAdded: "Review sessions excluded from Logbook."
+  notAdded: "Review sessions excluded from the package path (Not Added)."
 } as const;
 
 type PipelineItem = {
@@ -78,7 +80,7 @@ const PIPELINE_ITEMS: PipelineItem[] = [
   { kind: "quality_precheck", label: "Precheck", tooltip: TOOLTIPS.precheck },
   { kind: "quality_pass", label: "Accept Quality", tooltip: TOOLTIPS.acceptQuality },
   { kind: "quality_fail", label: "Fail Quality", tooltip: TOOLTIPS.failQuality, quiet: true },
-  { kind: "publish", label: "Publish", tooltip: TOOLTIPS.publish },
+  { kind: "publish", label: "Publish package", tooltip: TOOLTIPS.publish },
   { kind: "claim", label: "Claim", tooltip: TOOLTIPS.claim },
   { kind: "release", label: "Release", tooltip: TOOLTIPS.release }
 ];
@@ -288,8 +290,8 @@ export function WorkbenchPanel({
         </div>
 
         <dl className="workbench-toolbar-facts" aria-label="Workbench queue facts">
-          <div title="Sessions on the publish path waiting for Workbench processing">
-            <dt>Publish path</dt>
+          <div title="Sessions on the package path waiting for Workbench processing and automatic kind resolution">
+            <dt>Package path</dt>
             <dd>{publishPathLabel}</dd>
           </div>
           <div title="Sessions currently selected for bulk actions">
@@ -352,9 +354,9 @@ export function WorkbenchPanel({
       ) : null}
 
       {notAddedOpen ? (
-        <section className="workbench-not-added-panel" aria-label="Not Added to Logbook">
+        <section className="workbench-not-added-panel" aria-label="Not Added (excluded from package path)">
           <div className="workbench-not-added-header">
-            <p className="mono-label">Not Added to Logbook</p>
+            <p className="mono-label">Not Added — excluded from package path</p>
             <AppButton variant="quiet" onClick={() => setNotAddedOpen?.(false)}>
               Close
             </AppButton>
@@ -430,7 +432,10 @@ export function WorkbenchPanel({
                   <th scope="col">quality</th>
                   <th scope="col">enrichment</th>
                   <th scope="col">dossier</th>
+                  <th scope="col">package</th>
                   <th scope="col">runbook</th>
+                  <th scope="col">adr</th>
+                  <th scope="col">timeline</th>
                   <th scope="col">resolution</th>
                   <th scope="col">claim</th>
                 </tr>
@@ -438,14 +443,14 @@ export function WorkbenchPanel({
               <tbody>
                 {sessions.length === 0 ? (
                   <tr className="workbench-empty-row">
-                    <td className="workbench-session-empty" colSpan={9}>
-                      <span className="workbench-empty-title">{loading ? "Loading" : "No publish-path sessions"}</span>
+                    <td className="workbench-session-empty" colSpan={13}>
+                      <span className="workbench-empty-title">{loading ? "Loading" : "No package-path sessions"}</span>
                       {!loading ? (
                         <span className="workbench-empty-hint">If Now has captures, open Pipeline → Enroll missing</span>
                       ) : null}
                       {!loading && notAddedTotal != null && notAddedTotal > 0 ? (
                         <button type="button" className="workbench-empty-not-added" onClick={toggleNotAdded}>
-                          {notAddedTotal} not added to Logbook · open review
+                          {notAddedTotal} excluded from package path · open review
                         </button>
                       ) : null}
                     </td>
@@ -463,6 +468,11 @@ export function WorkbenchPanel({
                       ? sanitizeWorkbenchVisibleText(session.latestActivity.summary)
                       : safeLastActivity;
                     const claim = session.activeClaim ? sanitizeWorkbenchVisibleText(session.activeClaim.claimedBy) : "-";
+                    const packageStatus = session.sessionPackageStatus ?? "missing";
+                    const runbookStatus = session.runbookStatus ?? session.bugFixTraceStatus;
+                    const adrStatus = session.adrStatus ?? "unknown";
+                    const timelineStatus = session.incidentTimelineStatus ?? "unknown";
+                    const resolutionStatus = session.resolutionStatus ?? "in_progress";
 
                     return (
                       <tr
@@ -504,10 +514,19 @@ export function WorkbenchPanel({
                           <StatusToken value={session.sessionDossierStatus} />
                         </td>
                         <td>
-                          <StatusToken value={session.runbookStatus ?? session.bugFixTraceStatus} />
+                          <StatusToken value={packageStatus} />
                         </td>
                         <td>
-                          <StatusToken value={session.resolutionStatus ?? "in_progress"} tone="next" />
+                          <StatusToken value={runbookStatus} />
+                        </td>
+                        <td>
+                          <StatusToken value={adrStatus} />
+                        </td>
+                        <td>
+                          <StatusToken value={timelineStatus} />
+                        </td>
+                        <td>
+                          <StatusToken value={resolutionStatus} tone="next" />
                         </td>
                         <td>
                           <span className="workbench-claim">{claim}</span>

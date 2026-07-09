@@ -2,16 +2,14 @@ import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import type { LogbookSession } from "../HistoryPanel";
 
 type Props = {
-  bulkSelected?: boolean;
   density: "comfortable" | "compact";
   rowIndex?: number;
   selected?: boolean;
   session: LogbookSession;
   onSelect: (sessionId: string) => void;
-  onToggleBulkSelect?: (sessionId: string) => void;
 };
 
-export function LogbookRow({ bulkSelected = false, density, onSelect, onToggleBulkSelect, rowIndex = 0, selected = false, session }: Props) {
+export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, session }: Props) {
   const title = session.title || "Untitled artifact";
   const highlight = session.snippet || session.objective;
   const style = {
@@ -39,15 +37,6 @@ export function LogbookRow({ bulkSelected = false, density, onSelect, onToggleBu
       onClick={handleRowClick}
       onKeyDown={handleRowKeyDown}
     >
-      <td className="logbook-col-select" data-logbook-row-stop>
-        <input
-          type="checkbox"
-          aria-label={`Select ${title}`}
-          checked={bulkSelected}
-          onChange={() => onToggleBulkSelect?.(session.sessionId)}
-          onClick={(event) => event.stopPropagation()}
-        />
-      </td>
       <td className="logbook-col-kind">
         <span className="state-token">{kindLabel(session.runtime || session.lifecycle)}</span>
       </td>

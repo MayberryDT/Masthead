@@ -141,7 +141,6 @@ describe("dovetail card system", () => {
         loading={false}
         onQueryChange={() => undefined}
         query=""
-        summary={logbookSummaryFixture()}
       />
     );
     const sourcesHtml = renderToStaticMarkup(
@@ -157,7 +156,8 @@ describe("dovetail card system", () => {
     );
     const settingsHtml = renderToStaticMarkup(<OperationsPanel />);
 
-    expect(logbookHtml).toContain("usage-metric sessions");
+    expect(logbookHtml).not.toContain("logbook-summary-strip");
+    expect(logbookHtml).not.toContain("usage-metric sessions");
     expect(sourcesHtml).not.toContain("3 sources detected");
     expectNoDovetailTreatment(sidebarHtml);
     expectNoDovetailTreatment(logbookHtml);
@@ -371,13 +371,12 @@ describe("dovetail card system", () => {
     expect(mastheadCss).not.toContain(".masthead-shell .session-dossier");
   });
 
-  test("Logbook summary cards override usage stagger timing", () => {
+  test("Logbook CSS no longer carries session-era summary strip chrome", () => {
     const logbookCss = readFileSync("src/styles/logbook.css", "utf8");
-    const summaryMetricRule = cssRuleBody(logbookCss, ".logbook-summary-strip.usage-summary-strip .usage-metric");
-    const summaryMetricStaggerRule = cssRuleBody(logbookCss, ".logbook-summary-strip.usage-summary-strip .usage-metric:nth-child(n)");
-
-    expect(summaryMetricRule).toContain("animation-delay: 0ms;");
-    expect(summaryMetricStaggerRule).toContain("animation-delay: 0ms;");
+    expect(logbookCss).not.toContain(".logbook-summary-strip");
+    expect(logbookCss).toContain(".logbook-col-kind");
+    expect(logbookCss).toContain(".logbook-col-confidence");
+    expect(logbookCss).toContain(".logbook-col-provenance");
   });
 });
 
@@ -602,21 +601,6 @@ function usageStatsFixture(overrides: Partial<UsageStatsDto["totals"]> = {}): Us
     range: { from: "2026-06-29T00:00:00.000Z", to: "2026-06-29T20:30:00.000Z" },
     totals,
     window: "today"
-  };
-}
-
-function logbookSummaryFixture() {
-  return {
-    earliestActivityAt: "2026-06-02T12:00:00.000Z",
-    fileEffects: 2,
-    latestActivityAt: "2026-06-29T20:00:00.000Z",
-    lifecycles: [{ count: 1, lifecycle: "ended" }],
-    messages: 12,
-    models: [{ count: 1, model: "gpt-5-opencode" }],
-    projects: 1,
-    runtimes: [{ count: 1, runtime: "opencode" }],
-    sessions: 1,
-    toolCalls: 5
   };
 }
 

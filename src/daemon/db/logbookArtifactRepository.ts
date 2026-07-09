@@ -11,6 +11,8 @@ export type LogbookArtifactSearchQuery = {
   q?: string;
   kind?: SessionArtifactKind;
   project?: string;
+  dateFrom?: string;
+  dateTo?: string;
   limit?: number;
   offset?: number;
 };

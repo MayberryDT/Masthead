@@ -4,21 +4,19 @@ import type { StoreRecord } from "../core/store";
 import type {
   AdapterStatus,
   ImportJob,
-  LogbookSearchFilters,
   LogbookSort,
-  LogbookSummary,
-  SettingsStateDto,
   SourceStatus
 } from "../app/daemonClient";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
 import { LogbookFacets } from "./logbook/LogbookFacets";
+import type { LogbookInspectorArtifact } from "../app/logbook/logbookInspectorModel";
+import { LogbookInspector } from "./logbook/LogbookInspector";
 import { LogbookTable } from "./logbook/LogbookTable";
 import { LogbookToolbar } from "./logbook/LogbookToolbar";
 import { logbookColumns } from "./logbook/logbookColumns";
 import { Icon } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
 import { AppButton } from "./primitives/AppButton";
-import { ConfirmDialog } from "./ConfirmDialog";
 
 type Props = {
   records?: StoreRecord[];
@@ -29,30 +27,15 @@ type Props = {
   total?: number;
   nextCursor?: string;
   loading?: boolean;
-  summary?: LogbookSummary;
   sort?: LogbookSort;
   filters?: LogbookFilterState;
   filterOptions?: LogbookFilterOptions;
   density?: "comfortable" | "compact";
-  bulkConfirmMessage?: string;
-  bulkEnrichBusy?: boolean;
-  bulkEnrichError?: string;
-  bulkStatus?: string;
-  bulkTargetCount?: number;
-  bulkTargetKind?: "explicit" | "page" | "filtered";
-  bulkTargetCapped?: boolean;
-  enrichment?: SettingsStateDto["enrichment"];
-  fullEnrichmentAvailable?: boolean;
-  onBulkEnrichSummary?: () => void;
-  onBulkEnrichFull?: () => void;
-  onConfirmBulkEnrichFull?: () => void;
-  onCancelBulkEnrichFull?: () => void;
-  onSelectBulkPage?: () => void;
-  onSelectBulkFiltered?: () => void;
-  onClearBulkSelection?: () => void;
-  onToggleBulkSelect?: (sessionId: string) => void;
   selectedSessionId?: string;
-  selectedSessionIds?: string[];
+  selectedArtifact?: LogbookInspectorArtifact;
+  detailError?: string;
+  detailLoading?: boolean;
+  onCloseDetail?: () => void;
   sources?: SourceStatus[];
   adapters?: AdapterStatus[];
   imports?: ImportJob[];
@@ -104,11 +87,14 @@ export type LogbookSession = {
   sourceConfidence?: "authoritative" | "inferred" | "heuristic";
 };
 
-export type LogbookFilterState = Pick<LogbookSearchFilters, "runtime" | "project" | "model" | "state" | "dateFrom" | "dateTo" | "file">;
+export type LogbookFilterState = {
+  kind?: string | string[];
+  project?: string | string[];
+  dateFrom?: string;
+  dateTo?: string;
+};
 
 export type LogbookFilterOptions = {
-  runtimes?: string[];
-  models?: string[];
   projects?: string[];
 };
 
@@ -127,15 +113,6 @@ type SourceImportSummary = {
   importedSessions: number;
   metadataRuntime?: string;
 };
-
-type LogbookSummaryItem = {
-  label: string;
-  value: string;
-  tone: "sessions" | "projects" | "runtime" | "messages" | "tools" | "range";
-};
-
-const MIN_REASONABLE_SESSION_DATE = Date.UTC(2020, 0, 1);
-const FUTURE_DATE_TOLERANCE_MS = 24 * 60 * 60 * 1000;
 
 export function HistoryPanel({
   adapters = [],
@@ -160,30 +137,15 @@ export function HistoryPanel({
   pageSize = 100,
   query,
   records = [],
-  bulkConfirmMessage,
-  bulkEnrichBusy,
-  bulkEnrichError,
-  bulkStatus,
-  bulkTargetCapped,
-  bulkTargetCount,
-  bulkTargetKind,
-  enrichment,
-  fullEnrichmentAvailable,
-  onBulkEnrichFull,
-  onBulkEnrichSummary,
-  onCancelBulkEnrichFull,
-  onClearBulkSelection,
-  onConfirmBulkEnrichFull,
-  onSelectBulkFiltered,
-  onSelectBulkPage,
-  onToggleBulkSelect,
+  detailError,
+  detailLoading = false,
+  onCloseDetail,
   refreshError,
+  selectedArtifact,
   selectedSessionId,
-  selectedSessionIds = [],
   sessions,
   sort = "recent",
   sources = [],
-  summary,
   total
 }: Props) {
   const legacyFilters = filtersFromQuery(query);
@@ -203,7 +165,6 @@ export function HistoryPanel({
   const legacySessions = result?.sessions ?? [];
   const tableSessions = usesLogbookStore ? canonicalSessions : legacySessions.map(legacyToLogbookSession);
   const visibleTotal = readyState?.total ?? result?.sessions.length ?? tableSessions.length;
-  const recordCount = result?.recordCount ?? visibleTotal;
   const isLoading = loading || loadingState;
   const [optimisticPageIndex, setOptimisticPageIndex] = useState<number>();
   const totalPages = Math.max(1, Math.ceil(visibleTotal / pageSize));
@@ -223,7 +184,7 @@ export function HistoryPanel({
     onPageChange?.(boundedPageIndex);
   };
   const sourceSummary = sourceImportSummary(sources, adapters);
-  const activeFilters = activeFilterFacets(query, filters, sort, onQueryChange, onFilterChange, onSortChange);
+  const activeFilters = activeFilterFacets(query, filters, onQueryChange, onFilterChange);
   const hasActiveFilters = activeFilters.length > 0;
   const isFirstRunLoading = isLoading && tableSessions.length === 0 && !errorState;
   const isPageLoading = (isLoading || isOptimisticPaging) && tableSessions.length > 0 && !errorState;
@@ -252,7 +213,6 @@ export function HistoryPanel({
     onRetry,
     sourceSummary
   });
-  const summaryItems = summaryItemsFor(summary, visibleTotal, recordCount);
   const logbookFooterClassName = [
     "logbook-footer",
     "observability-toolbar",
@@ -267,42 +227,17 @@ export function HistoryPanel({
     <section id="history" className="history-panel logbook-panel surface-panel" aria-label="Logbook">
 
       <LogbookToolbar
-        bulkEnrichBusy={bulkEnrichBusy}
-        bulkEnrichError={bulkEnrichError}
-        bulkSelectionCount={selectedSessionIds.length}
-        bulkStatus={bulkStatus}
-        bulkTargetCapped={bulkTargetCapped}
-        bulkTargetCount={bulkTargetCount}
-        bulkTargetKind={bulkTargetKind}
-        enrichment={enrichment}
         filters={filters}
         filterOptions={filterOptions}
-        fullEnrichmentAvailable={fullEnrichmentAvailable ?? enrichment?.remoteModelEnabled === true}
         query={query}
         sort={sort}
-        onBulkEnrichFull={onBulkEnrichFull}
-        onBulkEnrichSummary={onBulkEnrichSummary}
-        onClearBulkSelection={onClearBulkSelection}
         onFilterChange={onFilterChange ?? (() => undefined)}
         onQueryChange={onQueryChange}
-        onSelectBulkFiltered={onSelectBulkFiltered}
-        onSelectBulkPage={onSelectBulkPage}
         onSortChange={onSortChange ?? (() => undefined)}
       />
       <LogbookFacets facets={activeFilters} />
-      <LogbookSummaryStrip items={summaryItems} />
 
       {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
-      <ConfirmDialog
-        open={Boolean(bulkConfirmMessage)}
-        title="Confirm full enrichment"
-        description={bulkConfirmMessage}
-        confirmLabel="Enrich full sessions"
-        expectedConfirmation="ENRICH"
-        busy={bulkEnrichBusy}
-        onCancel={onCancelBulkEnrichFull}
-        onConfirm={onConfirmBulkEnrichFull}
-      />
 
       {errorState ? (
         <CanonicalErrorPanel message={errorState.message} onRetry={onRetry} />
@@ -313,16 +248,28 @@ export function HistoryPanel({
       ) : tableSessions.length === 0 ? (
         <EmptyPanel {...emptyState} />
       ) : (
-        <LogbookTable
-          animateOnMount={shouldAnimateLoadedPage}
-          density={density}
-          sessions={tableSessions}
-          selectedSessionId={selectedSessionId}
-          selectedSessionIds={selectedSessionIds}
-          updating={isLoading}
-          onSelect={(sessionId) => onSessionSelect?.(sessionId)}
-          onToggleBulkSelect={onToggleBulkSelect}
-        />
+        <div className={`logbook-master-detail${selectedSessionId || detailLoading ? " has-detail" : ""}`.trim()}>
+          <div className="logbook-master-detail-list">
+            <LogbookTable
+              animateOnMount={shouldAnimateLoadedPage}
+              density={density}
+              sessions={tableSessions}
+              selectedSessionId={selectedSessionId}
+              updating={isLoading}
+              onSelect={(sessionId) => onSessionSelect?.(sessionId)}
+            />
+          </div>
+          {selectedSessionId || detailLoading || detailError ? (
+            <div className="logbook-master-detail-inspector">
+              <LogbookInspector
+                artifact={selectedArtifact}
+                error={detailError}
+                loading={detailLoading}
+                onClose={onCloseDetail ?? (() => undefined)}
+              />
+            </div>
+          ) : null}
+        </div>
       )}
 
       {!errorState && (showPagination || isFirstRunLoading) ? (
@@ -440,13 +387,13 @@ function LogbookSkeleton({ mode = "initial" }: { mode?: "initial" | "page" }) {
       role="status"
       aria-live="polite"
       aria-busy="true"
-      aria-label={isPageLoading ? "Loading next Logbook page" : "Loading Logbook session records"}
+      aria-label={isPageLoading ? "Loading next Logbook page" : "Loading published artifacts"}
     >
       {isPageLoading ? null : (
         <div className="logbook-loading-copy" aria-hidden="true">
           <p className="mono-label">Logbook</p>
-          <strong>Loading session records</strong>
-          <span>Hydrating the canonical session database.</span>
+          <strong>Loading published artifacts</strong>
+          <span>Hydrating the published artifact index.</span>
         </div>
       )}
       <table className="logbook-table compact logbook-skeleton-table" aria-hidden="true">
@@ -479,20 +426,6 @@ function LogbookSkeleton({ mode = "initial" }: { mode?: "initial" | "page" }) {
         <div />
       </aside>
     </div>
-  );
-}
-
-function LogbookSummaryStrip({ items }: { items: LogbookSummaryItem[] }) {
-  return (
-    <dl className="logbook-summary-strip usage-summary-strip" aria-label="Logbook summary">
-      {items.map((item) => (
-        <div key={item.label} className={`usage-metric ${item.tone}`}>
-          <span className="usage-metric-accent" aria-hidden="true" />
-          <dt>{item.label}</dt>
-          <dd>{item.value}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 
@@ -555,7 +488,7 @@ function emptyStateFor(
     return {
       reason,
       title: "Logbook is offline.",
-      message: "Masthead needs the local daemon before it can read canonical session history.",
+      message: "Masthead needs the local daemon before it can read published artifacts.",
       actions: [
         { label: "Retry connection", onClick: options.onRetry, variant: "primary" },
         { label: "Open Sources", onClick: options.onOpenSources }
@@ -576,7 +509,7 @@ function emptyStateFor(
     return {
       reason,
       title: "Import is building the Logbook.",
-      message: "Session metadata is queued or importing. Results will appear here when the canonical rows finish indexing.",
+      message: "Session metadata is queued or importing. Published artifacts will appear here after compile and publish from Workbench.",
       support: "Use Sources to inspect job progress or cancel a stuck import.",
       actions: [{ label: "Open Sources", onClick: options.onOpenSources, variant: "primary" }]
     };
@@ -585,8 +518,8 @@ function emptyStateFor(
   if (reason === "query_no_results") {
     return {
       reason,
-      title: "No sessions match these filters.",
-      message: "The canonical Logbook has sessions, but none match the active search, facet, date, file, or sort criteria.",
+      title: "No artifacts match these filters.",
+      message: "The Logbook has published artifacts, but none match the active search, facet, date, or sort criteria.",
       support: options.activeFilters.length > 0 ? `Active filters: ${options.activeFilters.map((facet) => `${facet.label} ${facet.value}`).join(", ")}` : undefined,
       actions: [{ label: "Clear filters", onClick: options.onClearFilters, variant: "primary" }]
     };
@@ -597,7 +530,7 @@ function emptyStateFor(
     return {
       reason,
       title: "Sources are detected but not imported.",
-      message: "Masthead found local agent history stores, but the Logbook only reads canonical imported metadata.",
+      message: "Masthead found local agent history stores. Import metadata, then compile and publish from Workbench to populate the Logbook.",
       support: `${formatCount(options.sourceSummary.detectedSources)} sources detected; ${formatCount(options.sourceSummary.discoveredSessions)} sessions available to import.`,
       actions: [
         { label: "Import metadata", onClick: runtime && options.onImportMetadata ? () => options.onImportMetadata?.(runtime) : undefined, disabled: options.importBusy, variant: "primary" },
@@ -608,8 +541,8 @@ function emptyStateFor(
 
   return {
     reason,
-    title: "No sessions imported yet.",
-    message: "Discover local OpenCode, OMP, Claude Code, Pi, Cursor, Grok, or Hermes sources, then import metadata to populate the canonical Logbook.",
+    title: "No published artifacts yet.",
+    message: "Compile and publish from Workbench.",
     actions: [{ label: "Open Sources", onClick: options.onOpenSources, variant: "primary" }]
   };
 }
@@ -617,23 +550,60 @@ function emptyStateFor(
 function activeFilterFacets(
   query: string,
   filters: LogbookFilterState,
-  sort: LogbookSort,
   onQueryChange: (query: string) => void,
-  onFilterChange: Props["onFilterChange"],
-  onSortChange: Props["onSortChange"]
+  onFilterChange: Props["onFilterChange"]
 ) {
   const facets: Array<{ label: string; value: string; onRemove?: () => void }> = [];
   if (query) facets.push({ label: "Query", value: query, onRemove: () => onQueryChange("") });
-  const addFilterFacet = (key: keyof LogbookFilterState, label: string) => {
-    const value = filters[key];
-    if (!value || Array.isArray(value)) return;
-    facets.push({ label, value, onRemove: () => onFilterChange?.({ ...filters, [key]: undefined }) });
+
+  const addMultiFilterFacet = (
+    key: "kind" | "project",
+    label: string,
+    formatValue: (value: string) => string = (value) => value
+  ) => {
+    const raw = filters[key];
+    const values = Array.isArray(raw) ? raw.filter(Boolean) : raw ? [raw] : [];
+    for (const value of values) {
+      facets.push({
+        label,
+        value: formatValue(value),
+        onRemove: () => {
+          const remaining = values.filter((item) => item !== value);
+          onFilterChange?.({
+            ...filters,
+            [key]: remaining.length > 0 ? remaining : undefined
+          });
+        }
+      });
+    }
   };
-  addFilterFacet("dateFrom", "From");
-  addFilterFacet("dateTo", "To");
-  addFilterFacet("file", "File");
-  if (sort !== "recent") facets.push({ label: "Sort", value: sortLabel(sort), onRemove: () => onSortChange?.("recent") });
+
+  addMultiFilterFacet("kind", "Kind", kindFacetLabel);
+  addMultiFilterFacet("project", "Project");
+
+  if (filters.dateFrom) {
+    facets.push({
+      label: "From",
+      value: filters.dateFrom,
+      onRemove: () => onFilterChange?.({ ...filters, dateFrom: undefined })
+    });
+  }
+  if (filters.dateTo) {
+    facets.push({
+      label: "To",
+      value: filters.dateTo,
+      onRemove: () => onFilterChange?.({ ...filters, dateTo: undefined })
+    });
+  }
   return facets;
+}
+
+function kindFacetLabel(kind: string): string {
+  if (kind === "session_dossier") return "Session dossier";
+  if (kind === "runbook") return "Runbook";
+  if (kind === "adr") return "ADR";
+  if (kind === "incident_timeline") return "Incident timeline";
+  return kind;
 }
 
 function sourceImportSummary(sources: SourceStatus[], adapters: AdapterStatus[]): SourceImportSummary {
@@ -657,28 +627,6 @@ function sourceImportSummary(sources: SourceStatus[], adapters: AdapterStatus[])
 
 function hasActiveImports(imports: ImportJob[]): boolean {
   return imports.some((job) => job.status === "queued" || job.status === "running");
-}
-
-function summaryItemsFor(summary: LogbookSummary | undefined, visibleTotal: number, recordCount: number): LogbookSummaryItem[] {
-  if (!summary) {
-    return [
-      { label: "Sessions", value: formatCount(visibleTotal), tone: "sessions" },
-      { label: "Projects", value: "n/a", tone: "projects" },
-      { label: "Harnesses", value: "n/a", tone: "runtime" },
-      { label: "Messages", value: formatCount(recordCount), tone: "messages" },
-      { label: "Tool calls", value: "n/a", tone: "tools" },
-      { label: "Date range", value: "n/a", tone: "range" }
-    ];
-  }
-
-  return [
-    { label: "Sessions", value: formatCount(summary.sessions), tone: "sessions" },
-    { label: "Projects", value: formatCount(summary.projects), tone: "projects" },
-    { label: "Harnesses", value: formatCount(summary.runtimes.length), tone: "runtime" },
-    { label: "Messages", value: formatCount(summary.messages), tone: "messages" },
-    { label: "Tool calls", value: formatCount(summary.toolCalls), tone: "tools" },
-    { label: "Date range", value: dateRange(summary.earliestActivityAt, summary.latestActivityAt), tone: "range" }
-  ];
 }
 
 function legacyToLogbookSession(session: HistorySession): LogbookSession {
@@ -756,33 +704,3 @@ function formatCount(value: number): string {
   return new Intl.NumberFormat().format(value);
 }
 
-function dateRange(earliest: string | undefined, latest: string | undefined): string {
-  const start = validActivityDate(earliest);
-  const end = validActivityDate(latest);
-  if (!start || !end) return "n/a";
-  return `${formatMonthDate(start)} - ${formatMonthDate(end)}`;
-}
-
-function validActivityDate(value: string | undefined, now = new Date()): Date | undefined {
-  if (!value) return undefined;
-
-  const date = new Date(value);
-  const time = date.getTime();
-  if (!Number.isFinite(time)) return undefined;
-  if (time <= 0) return undefined;
-  if (time < MIN_REASONABLE_SESSION_DATE) return undefined;
-  if (time > now.getTime() + FUTURE_DATE_TOLERANCE_MS) return undefined;
-  return date;
-}
-
-function formatMonthDate(date: Date): string {
-  return date.toLocaleDateString([], { month: "short", year: "numeric" });
-}
-
-function sortLabel(sort: LogbookSort): string {
-  if (sort === "duration_desc") return "Duration";
-  if (sort === "files_desc") return "Files changed";
-  if (sort === "tools_desc") return "Tool calls";
-  if (sort === "errors_desc") return "Errors";
-  return sort[0].toUpperCase() + sort.slice(1);
-}

@@ -135,6 +135,54 @@ describe("session artifact repository", () => {
     });
   });
 
+  test("filters published artifacts by published_at dateFrom/dateTo bounds", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Artifact session" });
+
+    // Publish each before applying the next so applied drafts are not superseded.
+    const early = applySessionArtifact(db, {
+      ...runbookInput("fp-early", "Early runbook"),
+      projectLabel: "Masthead"
+    });
+    publishSessionArtifact(db, early.artifactId);
+    const mid = applySessionArtifact(db, {
+      ...runbookInput("fp-mid", "Mid runbook"),
+      projectLabel: "Masthead"
+    });
+    publishSessionArtifact(db, mid.artifactId);
+    const late = applySessionArtifact(db, {
+      ...runbookInput("fp-late", "Late runbook"),
+      projectLabel: "Masthead"
+    });
+    publishSessionArtifact(db, late.artifactId);
+
+    setPublishedAt(db, early.artifactId, "2026-06-01T12:00:00.000Z");
+    setPublishedAt(db, mid.artifactId, "2026-06-15T12:00:00.000Z");
+    setPublishedAt(db, late.artifactId, "2026-06-30T12:00:00.000Z");
+
+    const fromOnly = searchPublishedArtifactCapsules(db, { dateFrom: "2026-06-15" });
+    expect(fromOnly.total).toBe(2);
+    expect(fromOnly.artifacts.map((a) => a.artifactId).sort()).toEqual([late.artifactId, mid.artifactId].sort());
+
+    const toOnly = searchPublishedArtifactCapsules(db, { dateTo: "2026-06-15" });
+    expect(toOnly.total).toBe(2);
+    expect(toOnly.artifacts.map((a) => a.artifactId).sort()).toEqual([early.artifactId, mid.artifactId].sort());
+
+    const range = searchPublishedArtifactCapsules(db, {
+      dateFrom: "2026-06-10",
+      dateTo: "2026-06-20"
+    });
+    expect(range.total).toBe(1);
+    expect(range.artifacts[0]?.artifactId).toBe(mid.artifactId);
+
+    const isoRange = searchPublishedArtifactCapsules(db, {
+      dateFrom: "2026-06-15T00:00:00.000Z",
+      dateTo: "2026-06-15T23:59:59.999Z"
+    });
+    expect(isoRange.total).toBe(1);
+    expect(isoRange.artifacts[0]?.artifactId).toBe(mid.artifactId);
+  });
+
   test("wipe removes artifacts and provenance for dogfood cutover", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Artifact session" });
@@ -174,6 +222,14 @@ function runbookInput(contentFingerprint: string, title: string, sessionId = "se
     title,
     validation: { ok: true }
   };
+}
+
+function setPublishedAt(db: MastheadDatabase, artifactId: string, publishedAt: string): void {
+  db.prepare("UPDATE session_artifacts SET published_at = ?, updated_at = ? WHERE artifact_id = ?").run(
+    publishedAt,
+    publishedAt,
+    artifactId
+  );
 }
 
 async function testDb(): Promise<MastheadDatabase> {

@@ -51,6 +51,7 @@ describe("LogbookTable", () => {
     expect(html).toContain("<table");
     expect(html).toContain("<thead");
     expect(html).toContain("<tbody");
+    expect(html).not.toContain('type="checkbox"');
     expect(html).toContain("KIND");
     expect(html).toContain("TITLE / HIGHLIGHT");
     expect(html).toContain("PROVENANCE");
@@ -174,52 +175,12 @@ describe("LogbookTable", () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith("artifact-1");
   });
-
-  test("marks selected bulk rows and toggles the checkbox without opening the artifact", async () => {
-    const onSelect = vi.fn();
-    const onToggleBulkSelect = vi.fn();
-    await renderTable(onSelect, { onToggleBulkSelect, selectedSessionIds: ["artifact-1"] });
-
-    const checkbox = checkboxByLabel("Select Repair OAuth callback");
-    expect(checkbox.checked).toBe(true);
-
-    await act(async () => {
-      checkbox.click();
-    });
-
-    expect(onToggleBulkSelect).toHaveBeenCalledTimes(1);
-    expect(onToggleBulkSelect).toHaveBeenCalledWith("artifact-1");
-    expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  test("keeps outgoing transition rows from exposing a stale selected bulk checkbox", async () => {
-    vi.useFakeTimers();
-    const onToggleBulkSelect = vi.fn();
-    await renderTable(vi.fn(), { onToggleBulkSelect, selectedSessionIds: ["artifact-1"] });
-
-    await act(async () => {
-      root?.render(
-        <LogbookTable
-          density="compact"
-          selectedSessionIds={["artifact-2"]}
-          sessions={[sessionRow("artifact-2", "New visible artifact")]}
-          onSelect={() => undefined}
-          onToggleBulkSelect={onToggleBulkSelect}
-        />
-      );
-    });
-
-    const checkbox = checkboxByLabel("Select New visible artifact");
-    expect(checkbox.checked).toBe(true);
-  });
 });
 
 async function renderTable(
   onSelect?: (sessionId: string) => void,
   options: {
     animateOnMount?: boolean;
-    onToggleBulkSelect?: (sessionId: string) => void;
-    selectedSessionIds?: string[];
   } = {}
 ): Promise<void> {
   container = document.createElement("div");
@@ -230,10 +191,8 @@ async function renderTable(
       <LogbookTable
         animateOnMount={options.animateOnMount}
         density="compact"
-        selectedSessionIds={options.selectedSessionIds}
         sessions={[sessionRow("artifact-1", "Repair OAuth callback")]}
         onSelect={onSelect ?? (() => undefined)}
-        onToggleBulkSelect={options.onToggleBulkSelect}
       />
     );
   });
@@ -260,12 +219,4 @@ function sessionRow(sessionId: string, title: string) {
 function currentContainer(): HTMLDivElement {
   if (!container) throw new Error("container missing");
   return container;
-}
-
-function checkboxByLabel(label: string): HTMLInputElement {
-  const checkbox = Array.from(currentContainer().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(
-    (candidate) => candidate.getAttribute("aria-label") === label
-  );
-  expect(checkbox).toBeDefined();
-  return checkbox as HTMLInputElement;
 }

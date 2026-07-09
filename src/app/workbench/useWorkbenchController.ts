@@ -23,7 +23,7 @@ import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
 const TRANSCRIPT_PERMISSION_ERROR =
   "Transcript import needs source permission for this session's source. Grant it under Sources, then retry Import.";
 
-/** Page size for the publish-path table. Large libraries paginate; never load thousands at once. */
+/** Page size for the package-path table. Large libraries paginate; never load thousands at once. */
 export const WORKBENCH_PAGE_SIZE = 100;
 
 type UseWorkbenchControllerOptions = {
@@ -363,7 +363,7 @@ export function useWorkbenchController({
       }
       setSelectedSessionIds(ids);
       setLastActionSummary(
-        ids.size === 0 ? "No publish-path sessions to select" : `Selected all ${ids.size} publish-path sessions`
+        ids.size === 0 ? "No package-path sessions to select" : `Selected all ${ids.size} package-path sessions`
       );
     } catch (selectError) {
       setActionError(formatActionError(selectError));

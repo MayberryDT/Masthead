@@ -2157,6 +2157,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           ? kindParam
           : undefined;
       const result = searchLogbookArtifacts(database, {
+        dateFrom: url.searchParams.get("dateFrom") ?? undefined,
+        dateTo: url.searchParams.get("dateTo") ?? undefined,
         kind,
         limit: Number.parseInt(url.searchParams.get("limit") || "50", 10),
         offset: Number.parseInt(url.searchParams.get("offset") || "0", 10),

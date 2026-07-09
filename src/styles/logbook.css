@@ -1,4 +1,5 @@
 .logbook-panel {
+  /* auto header slots (toolbar / facets / status) · content · footer — summary strip removed */
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 8px;
@@ -332,7 +333,6 @@
 }
 
 .logbook-table-wrap {
-  grid-row: 4;
   position: relative;
   overflow: auto;
   min-height: 0;
@@ -346,48 +346,6 @@
   max-height: none;
 }
 
-.logbook-summary-strip.usage-summary-strip {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.logbook-summary-strip.usage-summary-strip .usage-metric {
-  min-height: 44px;
-  padding: 7px 10px 8px;
-  animation-delay: 0ms;
-}
-
-.logbook-summary-strip.usage-summary-strip .usage-metric:nth-child(n) {
-  animation-delay: 0ms;
-}
-
-.logbook-summary-strip .usage-metric.projects .usage-metric-accent {
-  background: var(--green);
-}
-
-.logbook-summary-strip .usage-metric.runtime .usage-metric-accent {
-  background: var(--blue);
-}
-
-.logbook-summary-strip .usage-metric.messages .usage-metric-accent {
-  background: var(--yellow);
-}
-
-.logbook-summary-strip .usage-metric.tools .usage-metric-accent {
-  background: var(--red);
-}
-
-.logbook-summary-strip .usage-metric.range .usage-metric-accent {
-  background: var(--ash);
-}
-
-.logbook-summary-strip.usage-summary-strip dd {
-  overflow: hidden;
-  font-size: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .logbook-table-wrap.is-refreshing {
   border-color: rgba(116, 185, 224, 0.24);
   box-shadow:
@@ -397,7 +355,9 @@
 
 .logbook-table {
   width: 100%;
-  min-width: 1180px;
+  /* kind · title · project · conf · provenance · published (no select column) */
+  min-width: 920px;
+  table-layout: fixed;
   border-collapse: collapse;
   color: var(--body);
   font-size: 13px;
@@ -688,7 +648,6 @@
 }
 
 .logbook-loading-state {
-  grid-row: 4;
   display: block;
   height: 100%;
   min-height: 0;
@@ -821,8 +780,13 @@
   min-height: 56px;
 }
 
+/* Content row always fills the flexible track (empty auto header rows collapse) */
+.logbook-panel > .logbook-table-wrap,
+.logbook-panel > .logbook-master-detail,
+.logbook-panel > .logbook-loading-state,
 .logbook-panel > .empty-session-state {
   grid-row: 4;
+  min-height: 0;
 }
 
 .logbook-pagination {
@@ -901,12 +865,138 @@
   margin-top: 2px;
 }
 
+.logbook-master-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.logbook-master-detail.has-detail {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 38%);
+}
+
+.logbook-master-detail-list,
+.logbook-master-detail-inspector {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+.logbook-master-detail-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.logbook-master-detail-list > .logbook-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.logbook-master-detail-inspector {
+  display: grid;
+  align-content: start;
+}
+
 .logbook-inspector {
   display: grid;
   gap: 14px;
   align-self: start;
   border-radius: 5px;
   padding: 16px;
+}
+
+.logbook-inspector-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.logbook-inspector-meta-chip {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.logbook-inspector-body,
+.logbook-inspector-sections {
+  display: grid;
+  gap: 10px;
+  color: var(--body);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.logbook-inspector-body p,
+.logbook-inspector-section p {
+  margin: 4px 0 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.logbook-inspector-body .mono-label,
+.logbook-inspector-section .mono-label {
+  margin: 0;
+  color: var(--mute);
+}
+
+.logbook-inspector-section,
+.logbook-inspector-join {
+  border: 1px solid rgba(92, 153, 187, 0.13);
+  border-radius: 5px;
+  background: rgba(6, 25, 37, 0.55);
+  padding: 10px;
+}
+
+.logbook-inspector-section ul,
+.logbook-inspector-section ol,
+.logbook-inspector-provenance-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.logbook-inspector-section li,
+.logbook-inspector-provenance-list li {
+  margin: 3px 0;
+  color: var(--ink);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.logbook-inspector-timeline time {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.logbook-inspector-json {
+  margin: 0;
+  border: 1px solid rgba(92, 153, 187, 0.13);
+  border-radius: 5px;
+  background: rgba(6, 25, 37, 0.55);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.logbook-inspector-provenance-list code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.logbook-inspector-join {
+  margin-top: 10px;
 }
 
 .logbook-detail-modal {
@@ -1029,6 +1119,13 @@
   color: var(--ink);
 }
 
+@media (max-width: 1100px) {
+  .logbook-master-detail.has-detail {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(240px, 45%);
+  }
+}
+
 @media (max-width: 1280px) {
   .logbook-filter-drawer {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1058,7 +1155,7 @@
   }
 
   .logbook-table {
-    min-width: 880px;
+    min-width: 720px;
   }
 }
 
@@ -1071,10 +1168,6 @@
 
   .logbook-table-wrap {
     height: clamp(220px, 42vh, 320px);
-  }
-
-  .logbook-summary-strip.usage-summary-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .logbook-toolbar,
@@ -1133,29 +1226,57 @@
   .logbook-page-button {
     transition-duration: 1ms;
   }
-
-  .logbook-summary-strip .usage-metric {
-    animation: none;
-    transition-duration: 0ms;
-  }
 }
 
-/* Artifact-first Logbook columns */
+/* Artifact-first Logbook columns (no checkbox / select column) */
 .logbook-col-kind {
   width: 6.5rem;
+  max-width: 7.5rem;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
 .logbook-col-confidence {
   width: 4.5rem;
+  max-width: 5.5rem;
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
 .logbook-col-provenance {
-  width: 7rem;
+  width: 7.5rem;
+  max-width: 9rem;
+  color: var(--mute);
+  font-size: 12px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.logbook-col-project {
+  width: 8.5rem;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.logbook-col-date {
+  width: 6.5rem;
+  vertical-align: middle;
 }
 .logbook-col-kind .state-token {
+  display: inline-flex;
+  max-width: 100%;
   border-radius: 1px;
   font-size: 0.72rem;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

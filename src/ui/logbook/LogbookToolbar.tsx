@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { LogbookSort, SettingsStateDto } from "../../app/daemonClient";
+import type { LogbookSort } from "../../app/daemonClient";
 import type { LogbookFilterOptions, LogbookFilterState } from "../HistoryPanel";
 import { AppButton } from "../primitives/AppButton";
 import { AppSelect } from "../primitives/AppSelect";
@@ -10,20 +10,6 @@ import { iconWeights } from "../icons/icon-tokens";
 import { prefersReducedMotion } from "../motionPreference";
 
 type Props = {
-  bulkEnrichBusy?: boolean;
-  bulkEnrichError?: string;
-  bulkStatus?: string;
-  bulkSelectionCount?: number;
-  bulkTargetCount?: number;
-  bulkTargetKind?: "explicit" | "page" | "filtered";
-  bulkTargetCapped?: boolean;
-  enrichment?: SettingsStateDto["enrichment"];
-  fullEnrichmentAvailable?: boolean;
-  onBulkEnrichSummary?: () => void;
-  onBulkEnrichFull?: () => void;
-  onSelectBulkPage?: () => void;
-  onSelectBulkFiltered?: () => void;
-  onClearBulkSelection?: () => void;
   query: string;
   sort: LogbookSort;
   filters?: LogbookFilterState;
@@ -33,12 +19,16 @@ type Props = {
   onSortChange: (sort: LogbookSort) => void;
 };
 
+const kindOptions = [
+  { value: "session_dossier", label: "Session dossier" },
+  { value: "runbook", label: "Runbook" },
+  { value: "adr", label: "ADR" },
+  { value: "incident_timeline", label: "Incident timeline" }
+];
+
 const sortOptions: Array<{ value: LogbookSort; label: string }> = [
   { value: "recent", label: "Recent" },
   { value: "oldest", label: "Oldest" },
-  { value: "duration_desc", label: "Duration" },
-  { value: "tools_desc", label: "Tool calls" },
-  { value: "errors_desc", label: "Errors" },
   { value: "project", label: "Project" }
 ];
 
@@ -57,14 +47,9 @@ function dropdownCloseDelayMs(): number {
   return cssDurationMs(window.getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur"), 150);
 }
 
-export function LogbookToolbar({ bulkEnrichBusy = false, bulkEnrichError, bulkSelectionCount = 0, bulkStatus, bulkTargetCapped, bulkTargetCount, bulkTargetKind = "explicit", enrichment, filterOptions, filters = {}, fullEnrichmentAvailable, onBulkEnrichFull, onBulkEnrichSummary, onClearBulkSelection, onFilterChange, onQueryChange, onSelectBulkFiltered, onSelectBulkPage, onSortChange, query, sort }: Props) {
-  const runtimeOptions = optionRows(filterOptions?.runtimes, filters.runtime);
+export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, onQueryChange, onSortChange, query, sort }: Props) {
   const projectOptions = optionRows(filterOptions?.projects, filters.project);
-  const modelOptions = optionRows(filterOptions?.models, filters.model);
   const activeDateFilterCount = [filters.dateFrom, filters.dateTo].filter(Boolean).length;
-  const resolvedBulkTargetCount = bulkTargetCount ?? bulkSelectionCount;
-  const showBulkActions = resolvedBulkTargetCount > 0 || bulkTargetKind === "page" || bulkTargetKind === "filtered";
-  const canRunFullEnrichment = fullEnrichmentAvailable ?? enrichment?.remoteModelEnabled === true;
   const [dateState, setDateState] = useState<"closed" | "open" | "closing">("closed");
   const dateCloseTimerRef = useRef<number | undefined>(undefined);
   const dateRootRef = useRef<HTMLDivElement | null>(null);
@@ -126,8 +111,8 @@ export function LogbookToolbar({ bulkEnrichBusy = false, bulkEnrichError, bulkSe
     <div className="logbook-toolbar observability-toolbar metal-toolbar" aria-label="Logbook controls">
       <CollapsibleSearch
         containerClassName="logbook-search"
-        label="Search sessions"
-        placeholder="Search all session history..."
+        label="Search published artifacts"
+        placeholder="Search published artifacts…"
         value={query}
         onChange={(event) => onQueryChange(event.currentTarget.value)}
         onClear={() => onQueryChange("")}
@@ -185,15 +170,16 @@ export function LogbookToolbar({ bulkEnrichBusy = false, bulkEnrichError, bulkSe
         </div>
 
         <FilterableSelect
-          label="Runtime filter"
-          icon="runtime"
+          label="Kind filter"
+          icon="logbook"
           multiple
-          value={filterValues(filters.runtime)}
-          options={runtimeOptions}
-          placeholder="All runtimes"
-          searchPlaceholder="Type or choose runtime"
-          className="logbook-filter-select logbook-runtime-filter"
-          onChange={(value) => onFilterChange?.({ ...filters, runtime: filterChangeValues(value) })}
+          value={filterValues(filters.kind)}
+          options={kindOptions}
+          placeholder="All kinds"
+          searchPlaceholder="Type or choose kind"
+          allowCustomValue={false}
+          className="logbook-filter-select logbook-kind-filter"
+          onChange={(value) => onFilterChange?.({ ...filters, kind: filterChangeValues(value) })}
         />
         <FilterableSelect
           label="Project filter"
@@ -206,47 +192,13 @@ export function LogbookToolbar({ bulkEnrichBusy = false, bulkEnrichError, bulkSe
           className="logbook-combobox-filter logbook-project-filter"
           onChange={(value) => onFilterChange?.({ ...filters, project: filterChangeValues(value) })}
         />
-        <FilterableSelect
-          label="Model filter"
-          icon="model"
-          multiple
-          value={filterValues(filters.model)}
-          options={modelOptions}
-          placeholder="Any model"
-          searchPlaceholder="Type or choose model"
-          className="logbook-combobox-filter logbook-model-filter"
-          onChange={(value) => onFilterChange?.({ ...filters, model: filterChangeValues(value) })}
-        />
 
-        {showBulkActions ? (
-          <div className="logbook-bulk-actions" data-logbook-row-stop>
-            <span className="mono-label">{resolvedBulkTargetCount} selected</span>
-            <AppButton disabled={bulkEnrichBusy} onClick={() => onSelectBulkPage?.()}>
-              Select page
-            </AppButton>
-            <AppButton disabled={bulkEnrichBusy} onClick={() => void onSelectBulkFiltered?.()}>
-              Select all matching filter
-            </AppButton>
-            <AppButton disabled={bulkEnrichBusy || resolvedBulkTargetCount === 0} onClick={() => void onBulkEnrichSummary?.()}>
-              Enrich summaries
-            </AppButton>
-            <AppButton disabled={bulkEnrichBusy || resolvedBulkTargetCount === 0 || !canRunFullEnrichment} onClick={() => void onBulkEnrichFull?.()}>
-              Enrich full sessions
-            </AppButton>
-            <AppButton disabled={bulkEnrichBusy} onClick={() => onClearBulkSelection?.()}>
-              Clear
-            </AppButton>
-          </div>
-        ) : null}
-        {bulkTargetCapped ? <p className="surface-status">First 500 matching sessions selected.</p> : null}
-        {!canRunFullEnrichment && showBulkActions ? <p className="surface-status">Remote provider is off. Summary refresh is still available.</p> : null}
-        {bulkEnrichError ? <p className="surface-status">{bulkEnrichError}</p> : !bulkEnrichError && bulkStatus ? <p className="surface-status">{bulkStatus}</p> : null}
-
-        <AppSelect label="Sort sessions" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
+        <AppSelect label="Sort artifacts" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
       </div>
     </div>
   );
 }
+
 function optionRows(values: string[] | undefined, currentValue?: string | string[]): Array<{ value: string; label: string }> {
   const uniqueValues = Array.from(new Set([...(values ?? []), ...filterValues(currentValue)].filter(Boolean)));
   return uniqueValues.map((value) => ({ value, label: formatFilterLabel(value) }));
