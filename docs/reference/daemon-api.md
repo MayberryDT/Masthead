@@ -40,6 +40,7 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /imports` lists import jobs.
 - `GET /imports/:importJobId` returns one import job.
 - `GET /data/summary` returns Masthead-owned data counts for a scope.
+- `GET /knowledge-flow/summary` returns `{ ok: true, summary: { capturedSessions, workbenchSessions, publishedArtifacts, automaticallyResolvedSessions } }`. `capturedSessions` counts non-deleted canonical sessions; `workbenchSessions` counts non-deleted sessions currently on the Workbench `publish_path`; `publishedArtifacts` counts published artifacts whose status is `current`; and `automaticallyResolvedSessions` counts non-deleted Workbench sessions whose resolution status is `automatic_resolved`. This endpoint is GET-only, read-only, and safe through a worktree bridge; there is no mutation counterpart.
 - `GET /data/export` exports the local session graph.
 - `GET /usage/summary?window=today|24h|7d|30d|all` returns canonical usage totals, token aggregates, model/project/runtime breakdowns, activity buckets, and source coverage. It does not estimate cost.
 - `GET /mcp/status` returns MCP readiness, permissions, and audit summary.
