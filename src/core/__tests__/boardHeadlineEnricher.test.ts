@@ -627,7 +627,7 @@ describe("board headline enricher", () => {
       source: "offline",
       status: "ready"
     });
-    expect(first.cards[0]?.headline.headline).not.toBe("Generating headline...");
+    expect(first.cards[0]?.headline.headline).not.toBe("Updating session status...");
     expect(first.cards[0]?.headlineRefresh).toBeUndefined();
 
     response.resolve(responseWithFrame(validFrame({ disposition: "restored from the known-good artifact", state: "completed" })));

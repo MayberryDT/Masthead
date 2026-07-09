@@ -28,13 +28,9 @@ describe("runSourcesSetupPlan", () => {
       enrichmentMode: "skip",
       importMetadata: true,
       importScope: undefined,
-      importTranscripts: false,
       queueEnrichment: false,
-      runtimeApprovals: undefined,
       runtimes: undefined,
-      sourceIds: ["opencode-source"],
-      transcriptApproved: undefined,
-      transcriptApprovals: undefined
+      sourceIds: ["opencode-source"]
     });
     expect(result.status).toBe("needs_attention");
     expect(result.steps.map((step) => step.status)).toEqual(["running", "failed", "running", "succeeded"]);

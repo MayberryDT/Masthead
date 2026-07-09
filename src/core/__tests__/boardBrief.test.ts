@@ -95,7 +95,7 @@ function card(overrides: Partial<SessionCardView> = {}): SessionCardView {
     project: "App",
     title: "Session title",
     headline: {
-      headline: "Generating headline...",
+      headline: "Updating session status...",
       source: "pending",
       status: "pending"
     },

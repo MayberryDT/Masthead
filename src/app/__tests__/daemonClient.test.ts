@@ -44,27 +44,22 @@ describe("daemon client review dispositions", () => {
       "fetch",
       vi.fn(async (url: string | URL | Request) => {
         const requestUrl = new URL(String(url));
+        expect(requestUrl.pathname).toContain("/logbook/artifacts");
         const project = requestUrl.searchParams.get("project");
         return response({
-          nextCursor: undefined,
-          sessions: project
+          artifacts: project
             ? [
                 {
-                  errorCount: 0,
-                  fileCount: 0,
-                  hostId: "host:test",
-                  lastActivityAt: project === "Project one" ? "2026-07-03T10:00:00.000Z" : "2026-07-03T11:00:00.000Z",
-                  lifecycle: "ended",
-                  models: [],
+                  artifactId: project === "Project one" ? "artifact-one" : "artifact-two",
+                  confidence: "high",
+                  kind: "runbook",
                   project,
-                  runtime: "opencode",
-                  sessionId: project === "Project one" ? "session-one" : "session-two",
-                  sourceConfidence: "authoritative",
-                  sourceSessionId: `${project}:source`,
-                  title: `${project} session`,
-                  toolCount: 0,
-                  topics: [],
-                  unresolved: []
+                  provenanceLabel: "1 session",
+                  provenanceSize: 1,
+                  publishedAt: project === "Project one" ? "2026-07-03T10:00:00.000Z" : "2026-07-03T11:00:00.000Z",
+                  status: "current",
+                  summary: `${project} summary`,
+                  title: `${project} session`
                 }
               ]
             : [],
@@ -77,8 +72,8 @@ describe("daemon client review dispositions", () => {
       searchLogbook({ limit: 50, offset: 0, project: ["Project one", "Project two"], sort: "recent" }, "http://127.0.0.1:17373/projection")
     ).resolves.toMatchObject({
       sessions: [
-        { project: "Project two", sessionId: "session-two" },
-        { project: "Project one", sessionId: "session-one" }
+        { project: "Project two", sessionId: "artifact-two" },
+        { project: "Project one", sessionId: "artifact-one" }
       ],
       total: 2
     });

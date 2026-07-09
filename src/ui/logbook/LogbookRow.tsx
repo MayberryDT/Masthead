@@ -62,7 +62,7 @@ export function LogbookRow({ bulkSelected = false, density, onSelect, onToggleBu
           aria-pressed={selected}
         >
           <strong>{title}</strong>
-          {highlight ? <span>{stripMarks(highlight)}</span> : null}
+          {highlight ? <HighlightedSnippet snippet={highlight} /> : null}
         </button>
       </td>
       <td className="logbook-col-project" title={session.project ?? ""}>
@@ -90,8 +90,26 @@ function kindLabel(kind: string): string {
   return kind || "Artifact";
 }
 
-function stripMarks(value: string): string {
-  return value.replace(/<\/?mark>/g, "");
+function HighlightedSnippet({ snippet }: { snippet: string }) {
+  const parts = snippet.split(/(<mark>|<\/mark>)/g);
+  let highlighted = false;
+
+  return (
+    <span className="logbook-snippet">
+      {parts.map((part, index) => {
+        if (part === "<mark>") {
+          highlighted = true;
+          return null;
+        }
+        if (part === "</mark>") {
+          highlighted = false;
+          return null;
+        }
+        if (!part) return null;
+        return highlighted ? <mark key={index}>{part}</mark> : <span key={index}>{part}</span>;
+      })}
+    </span>
+  );
 }
 
 function formatDate(value: string): string {

@@ -921,6 +921,31 @@ export async function searchLogbook(
   options: { signal?: AbortSignal } = {}
 ): Promise<LogbookSearchResult> {
   const filters: LogbookSearchFilters = typeof input === "string" ? { q: input } : input;
+  const expandedFilters = expandLogbookMultiValueFilters(filters);
+  if (expandedFilters.length === 1) {
+    return fetchArtifactLogbookPage(expandedFilters[0]!, baseUrl, options);
+  }
+
+  const offset = logbookSearchOffset(filters);
+  const limit = logbookSearchLimit(filters);
+  const requestLimit = Math.min(100, offset + limit);
+  const results = await Promise.all(
+    expandedFilters.map((expandedFilter) =>
+      fetchArtifactLogbookPage(
+        { ...expandedFilter, cursor: undefined, limit: requestLimit, offset: 0 },
+        baseUrl,
+        options
+      )
+    )
+  );
+  return mergeLogbookSearchResults(results, filters.sort, offset, limit);
+}
+
+async function fetchArtifactLogbookPage(
+  filters: LogbookSearchFilters,
+  baseUrl: string,
+  options: { signal?: AbortSignal }
+): Promise<LogbookSearchResult> {
   const kind = typeof filters.state === "string" && isArtifactKindFilter(filters.state) ? filters.state : undefined;
   const project = Array.isArray(filters.project) ? filters.project[0] : filters.project;
   const result = await getJson<LogbookArtifactSearchResult>(baseUrl, "/logbook/artifacts", {
