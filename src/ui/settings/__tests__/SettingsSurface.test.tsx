@@ -349,6 +349,19 @@ describe("Settings surface", () => {
     expect(focusRule).toContain("0 0 0 3px rgba(46, 167, 255, 0.12);");
   });
 
+  test("keeps the MCP focus ring authoritative for an active tab", () => {
+    const css = readFileSync("src/styles/settings.css", "utf8");
+    const activeSelector = ".settings-mcp-tabs button.active";
+    const focusSelector = ".settings-mcp-tabs button:focus-visible";
+    const activeRule = css.match(/\.settings-mcp-tabs button\.active\s*\{([^}]*)\}/)?.[1];
+    const activeRuleIndex = css.indexOf(`${activeSelector} {`);
+    const focusRingRuleIndex = css.indexOf(`${focusSelector} {\n  outline: 0;`);
+
+    expect(stateSpecificity(focusSelector)).toBe(stateSpecificity(activeSelector));
+    expect(activeRule).toContain("box-shadow: 0 0 0 1px rgba(112, 173, 205, 0.2);");
+    expect(focusRingRuleIndex).toBeGreaterThan(activeRuleIndex);
+  });
+
   test("uses shared card entrance motion for settings sections", () => {
     const css = readFileSync("src/styles/masthead.css", "utf8");
 
@@ -365,6 +378,10 @@ describe("Settings surface", () => {
 
 function classSpecificity(selector: string): number {
   return selector.match(/\.[a-z0-9_-]+/gi)?.length ?? 0;
+}
+
+function stateSpecificity(selector: string): number {
+  return selector.match(/[.:][a-z0-9_-]+/gi)?.length ?? 0;
 }
 
 function mcpResponse(input: string | URL | Request): Response {

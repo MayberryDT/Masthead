@@ -507,17 +507,17 @@
   color: var(--ink, #f6fbff);
 }
 
+.settings-mcp-tabs button.active {
+  background: #092231;
+  box-shadow: 0 0 0 1px rgba(112, 173, 205, 0.2);
+  color: var(--ink, #f6fbff);
+}
+
 .settings-mcp-tabs button:focus-visible {
   outline: 0;
   box-shadow:
     0 0 0 1px rgba(116, 185, 224, 0.34),
     0 0 0 3px rgba(46, 167, 255, 0.12);
-}
-
-.settings-mcp-tabs button.active {
-  background: #092231;
-  box-shadow: 0 0 0 1px rgba(112, 173, 205, 0.2);
-  color: var(--ink, #f6fbff);
 }
 
 .settings-mcp-inline-result {
