@@ -2427,6 +2427,56 @@ main {
   font-size: 11.5px;
 }
 
+/* Cascade out of Pipeline (lightweight; avoids a full CollapsibleSearch-style width machine). */
+@keyframes workbench-pipeline-cascade {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button {
+  animation: workbench-pipeline-cascade 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(1) {
+  animation-delay: 0ms;
+}
+.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(2) {
+  animation-delay: 20ms;
+}
+.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(3) {
+  animation-delay: 40ms;
+}
+.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(4) {
+  animation-delay: 55ms;
+}
+.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(5) {
+  animation-delay: 70ms;
+}
+.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(6) {
+  animation-delay: 85ms;
+}
+.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(7) {
+  animation-delay: 100ms;
+}
+.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(8) {
+  animation-delay: 115ms;
+}
+.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(9) {
+  animation-delay: 130ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button {
+    animation: none;
+  }
+}
+
 .workbench-toolbar-facts {
   display: grid;
   grid-auto-flow: column;
@@ -2507,9 +2557,11 @@ main {
   margin: 0;
   border: 1px solid rgba(92, 153, 187, 0.28);
   border-radius: 3px;
-  background:
-    linear-gradient(180deg, rgba(205, 232, 246, 0.05), transparent 42%),
-    var(--control-raised, #081d2a);
+  background-color: var(--control-raised, #081d2a);
+  background-image: linear-gradient(180deg, rgba(205, 232, 246, 0.05), transparent 42%);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 11px 11px;
   box-shadow:
     inset 0 1px 0 rgba(205, 232, 246, 0.06),
     inset 0 -1px 0 rgba(0, 0, 0, 0.42),
@@ -2517,17 +2569,14 @@ main {
   color: #eaf7ff;
   cursor: pointer;
   vertical-align: middle;
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease;
+  /* Instant paint — transition made checks feel laggy */
+  transition: none;
 }
 
-.workbench-select-col input[type="checkbox"]:hover:not(:disabled) {
+.workbench-select-col input[type="checkbox"]:hover:not(:disabled):not(:checked):not(:indeterminate) {
   border-color: rgba(112, 173, 205, 0.4);
-  background:
-    linear-gradient(180deg, rgba(205, 232, 246, 0.07), transparent 42%),
-    var(--control-raised-hover, #092231);
+  background-color: var(--control-raised-hover, #092231);
+  background-image: linear-gradient(180deg, rgba(205, 232, 246, 0.07), transparent 42%);
 }
 
 .workbench-select-col input[type="checkbox"]:focus-visible {
@@ -2542,14 +2591,30 @@ main {
   border-color: rgba(90, 190, 255, 0.55);
   background-color: #0a314b;
   background-image:
-    linear-gradient(180deg, rgba(205, 232, 246, 0.1), transparent 50%),
-    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23eaf7ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M2.4 6.2 4.8 8.6 9.6 3.4'/%3E%3C/svg%3E");
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 11px 11px;
+    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23eaf7ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M2.4 6.2 4.8 8.6 9.6 3.4'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, rgba(205, 232, 246, 0.1), transparent 50%);
+  background-size: 11px 11px, auto;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
   box-shadow:
     0 0 0 1px rgba(46, 167, 255, 0.18),
     inset 0 1px 0 rgba(205, 232, 246, 0.1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+}
+
+/* Checked hover must stay filled + keep the check mark (generic :hover was wiping it). */
+.workbench-select-col input[type="checkbox"]:checked:hover:not(:disabled) {
+  border-color: rgba(120, 205, 255, 0.7);
+  background-color: #0d3f5c;
+  background-image:
+    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23f6fbff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M2.4 6.2 4.8 8.6 9.6 3.4'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, rgba(205, 232, 246, 0.14), transparent 50%);
+  background-size: 11px 11px, auto;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  box-shadow:
+    0 0 0 1px rgba(46, 167, 255, 0.28),
+    inset 0 1px 0 rgba(205, 232, 246, 0.12),
     inset 0 -1px 0 rgba(0, 0, 0, 0.35);
 }
 
@@ -2557,11 +2622,22 @@ main {
   border-color: rgba(90, 190, 255, 0.5);
   background-color: #0a314b;
   background-image:
-    linear-gradient(180deg, rgba(205, 232, 246, 0.1), transparent 50%),
-    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23eaf7ff' stroke-width='1.8' stroke-linecap='round' d='M2.6 6h6.8'/%3E%3C/svg%3E");
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 11px 11px;
+    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23eaf7ff' stroke-width='1.8' stroke-linecap='round' d='M2.6 6h6.8'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, rgba(205, 232, 246, 0.1), transparent 50%);
+  background-size: 11px 11px, auto;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+}
+
+.workbench-select-col input[type="checkbox"]:indeterminate:hover:not(:disabled) {
+  border-color: rgba(120, 205, 255, 0.7);
+  background-color: #0d3f5c;
+  background-image:
+    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23f6fbff' stroke-width='1.8' stroke-linecap='round' d='M2.6 6h6.8'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, rgba(205, 232, 246, 0.14), transparent 50%);
+  background-size: 11px 11px, auto;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
 }
 
 .workbench-select-col input[type="checkbox"]:disabled {
@@ -2729,9 +2805,8 @@ main {
 
 .workbench-session-table tbody tr {
   height: 56px;
-  transition-property: background-color;
-  transition-duration: 160ms;
-  transition-timing-function: ease;
+  /* No row paint delay — selection should feel instant */
+  transition: none;
 }
 
 .workbench-session-table tbody tr:hover td {

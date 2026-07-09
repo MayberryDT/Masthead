@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
@@ -165,14 +165,25 @@ export function useWorkbenchController({
     return () => controller.abort();
   }, [active, isLive, load, refreshKey]);
 
+  // Immediate selection for UI enablement / counts (must feel instant on checkbox click).
   const selectedSessions = useMemo(
     () => sessions.filter((session) => selectedSessionIds.has(session.sessionId)),
     [selectedSessionIds, sessions]
   );
 
+  // Handoff text can lag a frame when selection is large — keep checkbox paint snappy.
+  const deferredSelectedSessionIds = useDeferredValue(selectedSessionIds);
+  const handoffSessions = useMemo(
+    () =>
+      deferredSelectedSessionIds === selectedSessionIds
+        ? selectedSessions
+        : sessions.filter((session) => deferredSelectedSessionIds.has(session.sessionId)),
+    [deferredSelectedSessionIds, selectedSessionIds, selectedSessions, sessions]
+  );
+
   const handoffText = useMemo(
-    () => buildWorkbenchHandoff({ sessions: selectedSessions }),
-    [selectedSessions]
+    () => buildWorkbenchHandoff({ sessions: handoffSessions }),
+    [handoffSessions]
   );
 
   const canRun = useCallback(
