@@ -42,6 +42,7 @@ export function StorageSettings({ busy = false, dataSummary, onExport, onOpenDat
             Delete raw copies
           </AppButton>
         }
+        description="Deletes stored raw copies only; normalized records and original harness files remain."
         label="Raw source copies"
         value={summary ? formatCount(summary.rawEvents) : "Loading"}
       />

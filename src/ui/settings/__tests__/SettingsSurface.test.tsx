@@ -132,6 +132,9 @@ describe("Settings surface", () => {
     expect(pane?.textContent).toContain("Open folder");
     expect(pane?.textContent).toContain("Export data");
     expect(pane?.textContent).toContain("Raw source copies");
+    expect(pane?.textContent).toContain(
+      "Deletes stored raw copies only; normalized records and original harness files remain."
+    );
     expect(pane?.textContent).not.toContain("Data directory");
     expect(pane?.textContent).not.toContain("Database ID");
     expect(pane?.textContent).not.toContain("Runtime");
