@@ -119,6 +119,52 @@ describe("daemon client review dispositions", () => {
     expect(requested.searchParams.get("q")).toBe("decision");
   });
 
+  test("passes dateFrom and dateTo into artifact logbook search query", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = new URL(String(url));
+      expect(requestUrl.pathname).toContain("/logbook/artifacts");
+      return response({
+        artifacts: [
+          {
+            artifactId: "artifact-dated",
+            confidence: "high",
+            kind: "runbook",
+            project: "Masthead",
+            provenanceLabel: "1 session",
+            provenanceSize: 1,
+            publishedAt: "2026-06-15T12:00:00.000Z",
+            status: "current",
+            summary: "Dated summary",
+            title: "Dated runbook"
+          }
+        ],
+        total: 1
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      searchLogbook(
+        {
+          dateFrom: "2026-06-01",
+          dateTo: "2026-06-30",
+          limit: 50,
+          offset: 0,
+          q: "dated"
+        },
+        "http://127.0.0.1:17373/projection"
+      )
+    ).resolves.toMatchObject({
+      sessions: [{ sessionId: "artifact-dated", title: "Dated runbook" }],
+      total: 1
+    });
+
+    const requested = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requested.searchParams.get("dateFrom")).toBe("2026-06-01");
+    expect(requested.searchParams.get("dateTo")).toBe("2026-06-30");
+    expect(requested.searchParams.get("q")).toBe("dated");
+  });
+
   test("loads sources setup state from the daemon", async () => {
     vi.stubGlobal(
       "fetch",

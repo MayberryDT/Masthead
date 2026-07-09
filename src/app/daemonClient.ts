@@ -955,6 +955,8 @@ async function fetchArtifactLogbookPage(
   const result = await getJson<LogbookArtifactSearchResult>(baseUrl, "/logbook/artifacts", {
     label: "logbook artifact search",
     query: {
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
       kind,
       limit: logbookSearchLimit(filters),
       offset: logbookSearchOffset(filters),

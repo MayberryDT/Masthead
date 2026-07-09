@@ -72,6 +72,8 @@ export type SearchPublishedArtifactsQuery = {
   q?: string;
   kind?: SessionArtifactKind;
   project?: string;
+  dateFrom?: string;
+  dateTo?: string;
   limit?: number;
   offset?: number;
 };
@@ -265,6 +267,16 @@ export function searchPublishedArtifactCapsules(
     )`);
     const like = `%${query.q.trim()}%`;
     params.push(like, like, like, like);
+  }
+  const dateFrom = normalizeDateLowerBound(query.dateFrom);
+  if (dateFrom) {
+    clauses.push("published_at >= ?");
+    params.push(dateFrom);
+  }
+  const dateTo = normalizeDateUpperBound(query.dateTo);
+  if (dateTo) {
+    clauses.push("published_at <= ?");
+    params.push(dateTo);
   }
 
   const where = `WHERE ${clauses.join(" AND ")}`;
@@ -540,4 +552,18 @@ function firstString(value: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeDateLowerBound(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return isDateOnly(value) ? `${value}T00:00:00.000Z` : value;
+}
+
+function normalizeDateUpperBound(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return isDateOnly(value) ? `${value}T23:59:59.999Z` : value;
+}
+
+function isDateOnly(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
