@@ -82,7 +82,7 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("Showing 1 of 1");
   });
 
-  test("keeps dropdown-managed filters out of the external facet strip", () => {
+  test("surfaces Kind / Project / Date / Query facets and omits Sort", () => {
     const html = renderToStaticMarkup(
       <HistoryPanel
         filters={{
@@ -92,20 +92,25 @@ describe("HistoryPanel", () => {
         }}
         loadState={{ state: "ready", sessions: [], total: 1 }}
         loading={false}
-        query=""
-        sort="recent"
+        query="incident"
+        sort="oldest"
         onFilterChange={() => undefined}
         onQueryChange={() => undefined}
+        onSortChange={() => undefined}
       />
     );
 
     expect(html).toContain('aria-label="Active Logbook filters"');
+    expect(html).toContain("Query: incident");
+    expect(html).toContain("Remove Query filter");
+    expect(html).toContain("Kind: Runbook");
+    expect(html).toContain("Remove Kind filter");
+    expect(html).toContain("Project: Masthead");
+    expect(html).toContain("Remove Project filter");
     expect(html).toContain("From: 2026-06-01");
     expect(html).toContain("Remove From filter");
-    expect(html).not.toContain("Project: Masthead");
-    expect(html).not.toContain("Kind: runbook");
-    expect(html).not.toContain("Remove Project filter");
-    expect(html).not.toContain("Remove Kind filter");
+    expect(html).not.toContain("Sort:");
+    expect(html).not.toContain("Remove Sort filter");
     expect(html).not.toContain("Runtime filter");
     expect(html).not.toContain("Model filter");
     expect(html).not.toContain("Enrich summaries");

@@ -203,7 +203,7 @@ export function HistoryPanel({
     onPageChange?.(boundedPageIndex);
   };
   const sourceSummary = sourceImportSummary(sources, adapters);
-  const activeFilters = activeFilterFacets(query, filters, sort, onQueryChange, onFilterChange, onSortChange);
+  const activeFilters = activeFilterFacets(query, filters, onQueryChange, onFilterChange);
   const hasActiveFilters = activeFilters.length > 0;
   const isFirstRunLoading = isLoading && tableSessions.length === 0 && !errorState;
   const isPageLoading = (isLoading || isOptimisticPaging) && tableSessions.length > 0 && !errorState;
@@ -567,14 +567,37 @@ function emptyStateFor(
 function activeFilterFacets(
   query: string,
   filters: LogbookFilterState,
-  sort: LogbookSort,
   onQueryChange: (query: string) => void,
-  onFilterChange: Props["onFilterChange"],
-  onSortChange: Props["onSortChange"]
+  onFilterChange: Props["onFilterChange"]
 ) {
   const facets: Array<{ label: string; value: string; onRemove?: () => void }> = [];
   if (query) facets.push({ label: "Query", value: query, onRemove: () => onQueryChange("") });
-  // Kind / Project stay in dropdown multi-select UI; facet strip surfaces Query + Date only.
+
+  const addMultiFilterFacet = (
+    key: "kind" | "project",
+    label: string,
+    formatValue: (value: string) => string = (value) => value
+  ) => {
+    const raw = filters[key];
+    const values = Array.isArray(raw) ? raw.filter(Boolean) : raw ? [raw] : [];
+    for (const value of values) {
+      facets.push({
+        label,
+        value: formatValue(value),
+        onRemove: () => {
+          const remaining = values.filter((item) => item !== value);
+          onFilterChange?.({
+            ...filters,
+            [key]: remaining.length > 0 ? remaining : undefined
+          });
+        }
+      });
+    }
+  };
+
+  addMultiFilterFacet("kind", "Kind", kindFacetLabel);
+  addMultiFilterFacet("project", "Project");
+
   if (filters.dateFrom) {
     facets.push({
       label: "From",
@@ -589,8 +612,15 @@ function activeFilterFacets(
       onRemove: () => onFilterChange?.({ ...filters, dateTo: undefined })
     });
   }
-  if (sort !== "recent") facets.push({ label: "Sort", value: sortLabel(sort), onRemove: () => onSortChange?.("recent") });
   return facets;
+}
+
+function kindFacetLabel(kind: string): string {
+  if (kind === "session_dossier") return "Session dossier";
+  if (kind === "runbook") return "Runbook";
+  if (kind === "adr") return "ADR";
+  if (kind === "incident_timeline") return "Incident timeline";
+  return kind;
 }
 
 function sourceImportSummary(sources: SourceStatus[], adapters: AdapterStatus[]): SourceImportSummary {
@@ -691,10 +721,3 @@ function formatCount(value: number): string {
   return new Intl.NumberFormat().format(value);
 }
 
-function sortLabel(sort: LogbookSort): string {
-  if (sort === "duration_desc") return "Duration";
-  if (sort === "files_desc") return "Files changed";
-  if (sort === "tools_desc") return "Tool calls";
-  if (sort === "errors_desc") return "Errors";
-  return sort[0].toUpperCase() + sort.slice(1);
-}
