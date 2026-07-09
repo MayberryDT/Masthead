@@ -251,6 +251,41 @@ describe("workbench API", () => {
     });
   });
 
+  test("POST /workbench/enroll-missing enrolls only sessions without state", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:missing",
+      title: "Missing from pipeline"
+    });
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:published",
+      title: "Already published"
+    });
+    publishSessionToLogbook(daemon.database, "session:published");
+
+    const body = await postJson(baseUrl, "/workbench/enroll-missing", { limit: 100 });
+    expect(body).toMatchObject({
+      ok: true,
+      enrolled: expect.any(Number),
+      skippedExisting: expect.any(Number),
+      enrolledSessionIds: expect.any(Array),
+      limit: 100
+    });
+    expect(body.enrolled).toBeGreaterThanOrEqual(1);
+    expect(body.enrolledSessionIds).toContain("session:missing");
+    expect(typeof body.generatedAt).toBe("string");
+
+    const queue = await getJson(baseUrl, "/workbench/sessions?limit=50");
+    expect(queue.sessions.some((session: { sessionId: string }) => session.sessionId === "session:missing")).toBe(true);
+    expect(queue.sessions.some((session: { sessionId: string }) => session.sessionId === "session:published")).toBe(false);
+  });
+
   test("POST claim and release round-trip on queue DTO", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedSession(daemon.database, {

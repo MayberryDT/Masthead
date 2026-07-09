@@ -54,6 +54,7 @@ import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import {
   claimWorkbenchSessions,
+  enrollMissingWorkbenchSessions,
   listWorkbenchActivity,
   listWorkbenchQueue,
   markWorkbenchQuality,
@@ -111,6 +112,7 @@ import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../sh
 import type {
   WorkbenchActivityDto,
   WorkbenchActivityResponse,
+  WorkbenchEnrollMissingResponse,
   WorkbenchMissingSessionDto,
   WorkbenchMissingSessionsResponse,
   WorkbenchNotAddedResponse,
@@ -2317,6 +2319,27 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
       const limit = readWorkbenchLimit(url.searchParams.get("limit"));
       sendJson(request, response, config.allowedOrigins, 200, workbenchNotAddedDetails(database, limit));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/workbench/enroll-missing") {
+      const body = objectRecord(await optionalJsonBody(request));
+      const actor = {
+        kind: "user" as const,
+        id: typeof body.actorId === "string" && body.actorId.trim() ? body.actorId.trim() : "workbench_ui"
+      };
+      const limit =
+        typeof body.limit === "number" && Number.isFinite(body.limit) ? body.limit : undefined;
+      const result = enrollMissingWorkbenchSessions(database, { actor, limit });
+      const responseBody: WorkbenchEnrollMissingResponse = {
+        ok: true,
+        enrolled: result.enrolled,
+        skippedExisting: result.skippedExisting,
+        enrolledSessionIds: result.enrolledSessionIds,
+        limit: result.limit,
+        generatedAt: new Date().toISOString()
+      };
+      sendJson(request, response, config.allowedOrigins, 200, responseBody);
       return;
     }
 

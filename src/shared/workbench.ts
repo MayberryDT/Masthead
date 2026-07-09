@@ -95,3 +95,12 @@ export type WorkbenchMissingSessionsResponse = {
   limit: number;
   sessions: WorkbenchMissingSessionDto[];
 };
+
+export type WorkbenchEnrollMissingResponse = {
+  ok: true;
+  enrolled: number;
+  skippedExisting: number;
+  enrolledSessionIds: string[];
+  limit: number;
+  generatedAt: string;
+};
