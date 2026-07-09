@@ -505,7 +505,13 @@
 .settings-mcp-tabs button:hover,
 .settings-mcp-tabs button:focus-visible {
   color: var(--ink, #f6fbff);
+}
+
+.settings-mcp-tabs button:focus-visible {
   outline: 0;
+  box-shadow:
+    0 0 0 1px rgba(116, 185, 224, 0.34),
+    0 0 0 3px rgba(46, 167, 255, 0.12);
 }
 
 .settings-mcp-tabs button.active {
@@ -541,6 +547,19 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
+}
+
+.settings-panel .settings-delete-controls .toolbar-select-trigger {
+  grid-template-columns: var(--icon-toolbar) minmax(0, 1fr) 27px;
+  justify-content: normal;
+  gap: 7px;
+  padding: 0 0 0 var(--space-sm);
+  text-align: left;
+}
+
+.settings-panel .settings-delete-controls .toolbar-select-trigger > span,
+.settings-panel .settings-delete-controls .toolbar-select-chevron {
+  display: block;
 }
 
 .settings-delete-controls input {

@@ -319,6 +319,36 @@ describe("Settings surface", () => {
     expect(css).not.toContain(".settings-priority-column");
   });
 
+  test("keeps Danger select labels visible over later global responsive rules", () => {
+    const main = readFileSync("src/main.tsx", "utf8");
+    const settingsCss = readFileSync("src/styles/settings.css", "utf8");
+    const mastheadCss = readFileSync("src/styles/masthead.css", "utf8");
+    const labelSelector = ".settings-panel .settings-delete-controls .toolbar-select-trigger > span";
+    const chevronSelector = ".settings-panel .settings-delete-controls .toolbar-select-chevron";
+
+    expect(main.indexOf('import "./styles/settings.css"')).toBeLessThan(
+      main.indexOf('import "./styles/masthead.css"')
+    );
+    expect(mastheadCss).toMatch(/@media \(min-width: 761px\) and \(max-width: 1040px\) \{[\s\S]*\.toolbar-select-trigger span,[\s\S]*\.toolbar-select-chevron,[\s\S]*display: none;/);
+    expect(mastheadCss).toMatch(/@media \(min-width: 401px\) and \(max-width: 760px\) \{[\s\S]*\.toolbar-select-trigger span,[\s\S]*\.toolbar-select-chevron,[\s\S]*display: none;/);
+    expect(settingsCss).toContain(`${labelSelector},\n${chevronSelector} {`);
+    expect(settingsCss).toMatch(/\.settings-panel \.settings-delete-controls \.toolbar-select-trigger > span,[\s\S]*\.settings-panel \.settings-delete-controls \.toolbar-select-chevron\s*\{[\s\S]*display: block;/);
+    expect(classSpecificity(labelSelector)).toBeGreaterThan(classSpecificity(".toolbar-select-trigger span"));
+    expect(classSpecificity(chevronSelector)).toBeGreaterThan(classSpecificity(".toolbar-select-chevron"));
+  });
+
+  test("gives MCP tabs a visible keyboard focus ring", () => {
+    const css = readFileSync("src/styles/settings.css", "utf8");
+    const focusRule = [...css.matchAll(/\.settings-mcp-tabs button:focus-visible\s*\{([^}]*)\}/g)]
+      .map((match) => match[1])
+      .find((rule) => rule.includes("box-shadow:"));
+
+    expect(focusRule).toContain("outline: 0;");
+    expect(focusRule).toContain("box-shadow:");
+    expect(focusRule).toContain("0 0 0 1px rgba(116, 185, 224, 0.34),");
+    expect(focusRule).toContain("0 0 0 3px rgba(46, 167, 255, 0.12);");
+  });
+
   test("uses shared card entrance motion for settings sections", () => {
     const css = readFileSync("src/styles/masthead.css", "utf8");
 
@@ -332,6 +362,10 @@ describe("Settings surface", () => {
     expect(css).toMatch(/\.masthead-shell\[data-motion-mode="off"\],[\s\S]*\.masthead-shell\[data-motion-mode="off"\] \*::after\s*\{[\s\S]*animation: none !important;[\s\S]*transition-duration: 1ms !important;/);
   });
 });
+
+function classSpecificity(selector: string): number {
+  return selector.match(/\.[a-z0-9_-]+/gi)?.length ?? 0;
+}
 
 function mcpResponse(input: string | URL | Request): Response {
   const pathname = new URL(input instanceof Request ? input.url : input.toString()).pathname;
