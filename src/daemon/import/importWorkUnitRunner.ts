@@ -4,6 +4,7 @@ import { getImportWorkUnit, recordImportFailureGroup, updateImportWorkUnit } fro
 import { recordImportSessionImpact } from "../db/importSessionImpactRepository.ts";
 import { ingestAdapterRecord } from "../db/sessionRepository.ts";
 import { sourceRecordIsExcluded } from "../db/sourceRepository.ts";
+import { sourcePolicyExplicitlyEnabled } from "../db/sourcePolicyRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 
 export async function runImportWorkUnit(input: {
@@ -14,6 +15,7 @@ export async function runImportWorkUnit(input: {
   hostname?: string;
   now?: () => string;
   adapterBackfill: (source: DiscoveredSource) => AsyncIterable<AdapterRecord>;
+  approvedSourceIds?: string[];
   indexSession?: (sessionId: string) => void;
   onSessionImported?: (sessionId: string) => void;
 }): Promise<{ imported: number; failed: number; processed: number; sessionIds: string[] }> {
@@ -21,6 +23,32 @@ export async function runImportWorkUnit(input: {
   const unit = getImportWorkUnit(input.db, input.workUnitId);
   if (!unit) throw new Error(`Import work unit not found: ${input.workUnitId}`);
   if (unit.status === "skipped" || unit.status === "cancelled") return { failed: 0, imported: 0, processed: 0, sessionIds: [] };
+  const sourceAllowed = sourcePolicyExplicitlyEnabled(input.db, "transcript_import", unit.sourceId) ||
+    Boolean(input.approvedSourceIds?.some((sourceId) => sourcePolicyExplicitlyEnabled(input.db, "transcript_import", sourceId)));
+  if (unit.unitKind === "transcript_file" && !sourceAllowed) {
+    const observedAt = now();
+    const failureGroup = recordImportFailureGroup(input.db, {
+      code: "transcript_permission_required",
+      failureKind: "unreadable",
+      importJobId: unit.importJobId,
+      manifestId: unit.manifestId,
+      message: "Transcript import requires explicit source-scoped permission.",
+      observedAt,
+      retryable: false,
+      runtime: unit.runtime,
+      samplePath: unit.sourcePath
+    });
+    updateImportWorkUnit(input.db, unit.workUnitId, {
+      failedRecords: 1,
+      failureGroupId: failureGroup.failureGroupId,
+      finishedAt: observedAt,
+      heartbeatAt: observedAt,
+      processedRecords: 0,
+      status: "failed",
+      statusReason: "transcript_permission_required"
+    });
+    return { failed: 1, imported: 0, processed: 0, sessionIds: [] };
+  }
 
   updateImportWorkUnit(input.db, unit.workUnitId, {
     heartbeatAt: now(),

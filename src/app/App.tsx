@@ -23,10 +23,14 @@ import {
 } from "../ui/motionPreference";
 import { emitSessionTransitionNotifications } from "./liveSessionEndedNotifications";
 import {
+  applyIdlePresentationToProjection,
+  markIdleDoneSeen,
+  type IdlePresentationTrack
+} from "./sessionIdlePresentation";
+import {
   SessionBoard
 } from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
-import { SessionLibraryDetail } from "../ui/SessionLibraryDetail";
 import { SourcesPanel } from "../ui/SourcesPanel";
 import { Toolbar } from "../ui/Toolbar";
 import type { CollapsibleSearchHandle } from "../ui/primitives/CollapsibleSearch";
@@ -56,57 +60,24 @@ import { NowSurface } from "./surfaces/NowSurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
 import { SourcesSurface } from "./surfaces/SourcesSurface";
 import { UsageSurface } from "./surfaces/UsageSurface";
+import { WorkbenchSurface } from "./surfaces/WorkbenchSurface";
 import { UsagePanel } from "../ui/usage/UsagePanel";
+import { WorkbenchPanel } from "../ui/workbench/WorkbenchPanel";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
 import { useBoardSessionDetailController } from "./board/useBoardSessionDetailController";
 import { useLogbookController } from "./logbook/useLogbookController";
 import { useSettingsDataController } from "./settings/useSettingsDataController";
 import { useSourcesController } from "./sources/useSourcesController";
+import { useSourcesConnectorsController } from "./sources/useSourcesConnectorsController";
 import { useUsageStatsController } from "./usage/useUsageStatsController";
+import { useWorkbenchController } from "./workbench/useWorkbenchController";
 import { clearUnsupportedLocationHash } from "./locationHash";
-import { readOnboardingDismissed, writeOnboardingDismissed } from "./onboardingPreference";
 
 type ConnectorActionState = ConnectorActionView;
 type LiveProjectionLoadResult = "loaded" | "superseded" | "failed";
 
 const STARTUP_PROJECTION_ERROR_MESSAGE = "Collector started, but live projection did not load.";
-const firstRunSetupStatuses = new Set(["empty", "scan_needed", "scan_available", "detected"]);
-
-type FirstRunSourceCandidate = {
-  enrichedSessions?: number;
-  importedCount?: number;
-  importedRecords?: number;
-  importedSessions?: number;
-  lastSync?: string;
-  lastSyncAt?: string;
-  metadataSessions?: number;
-  queuedCount?: number;
-  queuedRecords?: number;
-  transcriptSessions?: number;
-};
-
-function shouldOpenSourcesOnboardingForSetup(setup: {
-  connectedSources?: FirstRunSourceCandidate[];
-  status?: string;
-} | undefined): boolean {
-  if (!setup) return false;
-  if (setup.status && firstRunSetupStatuses.has(setup.status)) return true;
-  const connectedSources = setup.connectedSources ?? [];
-  return connectedSources.length > 0 && connectedSources.every(isDetectedOnlyFirstRunSource);
-}
-
-function isDetectedOnlyFirstRunSource(source: FirstRunSourceCandidate): boolean {
-  return !(
-    (source.importedSessions ?? 0) > 0 ||
-    (source.importedRecords ?? source.importedCount ?? 0) > 0 ||
-    (source.metadataSessions ?? 0) > 0 ||
-    (source.transcriptSessions ?? 0) > 0 ||
-    (source.enrichedSessions ?? 0) > 0 ||
-    (source.queuedRecords ?? source.queuedCount ?? 0) > 0 ||
-    Boolean(source.lastSyncAt ?? source.lastSync)
-  );
-}
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
@@ -140,19 +111,18 @@ export function App() {
   const [harnessFilter, setHarnessFilter] = useState<HarnessFilter>("all");
   const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("operational_priority");
-  const [activityWindow, setActivityWindow] = useState<ActivityWindow>("24h");
+  const [activityWindow, setActivityWindow] = useState<ActivityWindow>("7d");
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
   const [motionDisabled, setMotionDisabled] = useState(() => readStoredMotionDisabled());
   const [sessionEndedNotificationsEnabled, setSessionEndedNotificationsEnabled] = useState(() =>
     readStoredSessionEndedNotificationsEnabled()
   );
-  const [onboardingDismissed, setOnboardingDismissed] = useState(() => readOnboardingDismissed());
-  const [manualOnboardingOpen, setManualOnboardingOpen] = useState(false);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedSessionSnapshot, setSelectedSessionSnapshot] = useState<SessionDetailView>();
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
   const liveProjectionRef = useRef<LiveBoardProjection | undefined>(undefined);
+  const idlePresentationTracksRef = useRef(new Map<string, IdlePresentationTrack>());
   const notifiedSessionTransitionKeysRef = useRef(new Set<string>());
   const [liveConnection, setLiveConnection] = useState<ConnectionState>({ state: "connecting" });
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
@@ -183,14 +153,12 @@ export function App() {
     cancel: handleCancelImport,
     clearImportJobsFilter: handleClearImportJobsFilter,
     connectSelected: handleConnectSelectedSources,
-    enableTranscriptImport: handleEnableTranscriptImport,
     excludePath: handleExcludeSourcePath,
     hookActionBusy,
     hooks: sourceHooks,
     importFilterRuntime,
     importMetadata: handleImportMetadata,
     importPage,
-    importTranscripts: handleImportTranscripts,
     imports,
     lastRefreshAt: sourcesLastRefreshAt,
     loadAdapterSources: handleLoadAdapterSources,
@@ -209,6 +177,9 @@ export function App() {
     syncAll: handleSyncSources,
     syncRuntime: handleSyncAdapter
   } = sourcesController;
+  const sourcesConnectors = useSourcesConnectorsController(activeProjectionUrl, {
+    readOnly: !connection.writable
+  });
   const logbook = useLogbookController({
     activeProjectionUrl,
     activeSurface,
@@ -258,7 +229,7 @@ export function App() {
     filter !== "all" ||
     harnessFilter !== "all" ||
     lifecycleFilter !== "all" ||
-    activityWindow !== "24h";
+    activityWindow !== "7d";
   const filteredAttentionItems = useMemo(
     () => filterAttentionItemsForCards(board.attentionQueue, filteredCards),
     [board.attentionQueue, filteredCards]
@@ -284,6 +255,12 @@ export function App() {
   }, [connection.state, liveConnection]);
   const usage = useUsageStatsController({
     active: activeSurface === "usage",
+    activeProjectionUrl,
+    isLive: effectiveLiveConnection.state === "live",
+    refreshKey: sourceLibraryRefreshKey
+  });
+  const workbench = useWorkbenchController({
+    active: activeSurface === "workbench",
     activeProjectionUrl,
     isLive: effectiveLiveConnection.state === "live",
     refreshKey: sourceLibraryRefreshKey
@@ -330,32 +307,20 @@ export function App() {
     onReviewDispositionsChanged: handleReviewDispositionsChanged,
     writable: connection.writable
   });
-  const shouldShowFirstRunOnboarding =
-    !onboardingDismissed &&
-    effectiveLiveConnection.state === "live" &&
-    connection.writable &&
-    shouldOpenSourcesOnboardingForSetup(sourcesSetup);
-  const onboardingOpen = manualOnboardingOpen || shouldShowFirstRunOnboarding;
-  const closeOnboarding = useCallback(() => {
-    setManualOnboardingOpen(false);
-    setOnboardingDismissed(true);
-    writeOnboardingDismissed(true);
-  }, []);
-  const skipOnboarding = useCallback(() => {
-    setManualOnboardingOpen(false);
-    setOnboardingDismissed(true);
-    writeOnboardingDismissed(true);
-  }, []);
   const reopenOnboarding = useCallback(() => {
     setActiveSurface("sources");
-    setOnboardingDismissed(false);
-    writeOnboardingDismissed(false);
-    setManualOnboardingOpen(true);
-  }, []);
+    sourcesConnectors.openOnboarding();
+  }, [sourcesConnectors.openOnboarding]);
 
   useEffect(() => {
-    if (shouldShowFirstRunOnboarding) setActiveSurface("sources");
-  }, [shouldShowFirstRunOnboarding]);
+    if (
+      sourcesConnectors.onboardingOpen &&
+      effectiveLiveConnection.state === "live" &&
+      connection.writable
+    ) {
+      setActiveSurface("sources");
+    }
+  }, [connection.writable, effectiveLiveConnection.state, sourcesConnectors.onboardingOpen]);
 
   const toggleDensity = useCallback(() => {
     setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
@@ -395,9 +360,10 @@ export function App() {
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
       const previousProjection = liveProjectionRef.current;
       const normalized = normalizeLiveBoardProjection(body.projection, selectedSessionId);
-      liveProjectionRef.current = normalized;
-      setLiveProjection(normalized);
-      void emitSessionTransitionNotifications(previousProjection, normalized, {
+      const presented = applyIdlePresentationToProjection(normalized, idlePresentationTracksRef.current);
+      liveProjectionRef.current = presented;
+      setLiveProjection(presented);
+      void emitSessionTransitionNotifications(previousProjection, presented, {
         enabled: sessionEndedNotificationsEnabled,
         notifiedTransitionKeys: notifiedSessionTransitionKeysRef.current
       });
@@ -670,37 +636,50 @@ export function App() {
           importFilterRuntime={importFilterRuntime}
           lastRefreshAt={sourcesLastRefreshAt}
           setup={sourcesSetup}
-          busy={sourcesBusy}
+          busy={sourcesBusy || sourcesConnectors.busy}
           enrichment={settingsData.settingsState?.enrichment}
           hooks={sourceHooks}
           hookActionBusy={hookActionBusy}
           llm={settingsData.settingsState?.llm}
-          onboardingOpen={onboardingOpen}
+          onboardingOpen={sourcesConnectors.onboardingOpen}
           readOnly={!connection.writable}
           settingsBaseUrl={activeProjectionUrl}
-          status={sourcesStatus}
+          status={sourcesConnectors.refreshStatus ?? sourcesStatus}
+          refreshStatus={sourcesConnectors.refreshStatus}
+          cardActionStatus={sourcesConnectors.cardActionStatus}
+          actionRuntime={sourcesConnectors.actionRuntime}
+          connectorsSnapshot={sourcesConnectors.snapshot}
+          selectedConnectorRuntime={sourcesConnectors.selectedRuntime}
+          onSelectConnectorRuntime={sourcesConnectors.setSelectedRuntime}
+          onDiscoverConnectors={() => void sourcesConnectors.discover()}
+          onEnableConnector={(runtime) => void sourcesConnectors.enable(runtime)}
+          onEnableAllDetectedConnectors={() => void sourcesConnectors.enableAllDetected()}
+          onTestConnector={(runtime) => void sourcesConnectors.test(runtime)}
+          onUninstallConnector={(runtime) => void sourcesConnectors.uninstall(runtime)}
+          onConfirmConnectorActivation={(runtime) => void sourcesConnectors.confirmActivation(runtime)}
           onCancelImport={handleCancelImport}
           onClearImportJobsFilter={handleClearImportJobsFilter}
-          onCloseOnboarding={closeOnboarding}
+          onCloseOnboarding={sourcesConnectors.closeOnboarding}
           onRuntimeHookAction={handleRuntimeHookAction}
           onConnectSelected={handleConnectSelectedSources}
-          onEnableTranscriptImport={handleEnableTranscriptImport}
           onExcludePath={handleExcludeSourcePath}
           onImportMetadata={handleImportMetadata}
-          onImportTranscripts={handleImportTranscripts}
           onLoadAdapterSources={handleLoadAdapterSources}
           onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
           onOpenOnboarding={reopenOnboarding}
           onPollImports={handlePollActiveImports}
           onPreviewImport={sourcesController.previewImport}
           onRepairSources={handleRepairSources}
-          onRefresh={handleRefreshSources}
+          onRefresh={() => {
+            // Sources V2: refresh only live harness connections (not history import scan).
+            void sourcesConnectors.discover();
+          }}
           onRetryImport={handleRetryImport}
           onRunSetup={handleRunSourcesSetup}
           onSaveLlmProvider={settingsData.saveLlmProviderSettings}
           onScan={handleScanSources}
           onScanSetup={handleScanSourcesSetup}
-          onSkipOnboarding={skipOnboarding}
+          onSkipOnboarding={sourcesConnectors.skipOnboarding}
           onSyncAdapter={handleSyncAdapter}
           onSyncSources={handleSyncSources}
         />
@@ -721,25 +700,8 @@ export function App() {
             query={logbook.query}
             density="compact"
             loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbook.loadState}
-            bulkConfirmMessage={logbook.bulkConfirmMessage}
-            bulkEnrichBusy={logbook.bulkEnrichBusy}
-            bulkEnrichError={logbook.bulkEnrichError}
-            bulkStatus={logbook.bulkStatus}
-            bulkTargetCapped={logbook.bulkTargetCapped}
-            bulkTargetCount={logbook.bulkTargetCount}
-            bulkTargetKind={logbook.bulkTargetKind}
             enrichment={settingsData.settingsState?.enrichment}
-            onBulkEnrichFull={() => void logbook.bulkEnrichFull()}
-            onBulkEnrichSummary={() => void logbook.bulkEnrichSummary()}
-            onCancelBulkEnrichFull={logbook.cancelBulkEnrichFull}
-            onClearBulkSelection={logbook.clearBulkSelection}
-            onConfirmBulkEnrichFull={() => void logbook.confirmBulkEnrichFull()}
-            onSelectBulkFiltered={() => void logbook.selectAllMatchingFilter()}
-            onSelectBulkPage={logbook.selectCurrentPage}
-            onToggleBulkSelect={logbook.toggleBulkSelection}
             refreshError={logbook.refreshError}
-            selectedSessionId={logbook.selectedSessionId}
-            selectedSessionIds={logbook.selectedSessionIds}
             sort={logbook.sort}
             sources={sources}
             summary={logbook.summary}
@@ -749,36 +711,40 @@ export function App() {
             onQueryChange={logbook.changeQuery}
             onPageChange={logbook.changePage}
             onRetry={logbook.retry}
-            onSessionSelect={logbook.selectSession}
             onSortChange={logbook.changeSort}
           />
-          {logbook.selectedSessionId ? (
-            <SessionLibraryDetail
-              session={logbook.selectedSession}
-              excerpts={logbook.excerpts}
-              loading={logbook.detailLoading}
-              dossier={logbook.dossier}
-              dossierLoading={logbook.dossierLoading}
-              dossierError={logbook.dossierError}
-              dossierEnrichmentBusy={logbook.dossierEnrichmentBusy}
-              dossierEnrichmentError={logbook.dossierEnrichmentError}
-              onEnrichDossier={() => void logbook.enrichDossier()}
-              onRetryDossier={logbook.retryDossier}
-              transcript={logbook.transcript}
-              transcriptLoading={logbook.transcriptLoading}
-              transcriptError={logbook.transcriptError}
-              transcriptFilter={logbook.transcriptFilter}
-              transcriptQuery={logbook.transcriptQuery}
-              onTranscriptFilterChange={logbook.setTranscriptFilter}
-              onTranscriptQueryChange={logbook.setTranscriptQuery}
-              onTranscriptLoadMore={() => void logbook.loadMoreTranscript()}
-              onRetryTranscript={logbook.retryTranscript}
-              onOpenSources={() => setActiveSurface("sources")}
-              onClose={logbook.closeSession}
-            />
-          ) : null}
         </>
       </LogbookSurface>
+    ) : activeSurface === "workbench" ? (
+      <WorkbenchSurface>
+        <WorkbenchPanel
+          actionBusy={workbench.actionBusy}
+          actionError={workbench.actionError}
+          activity={workbench.activity}
+          canRun={workbench.canRun}
+          clearActionFeedback={workbench.clearActionFeedback}
+          error={workbench.error}
+          handoffText={workbench.handoffText}
+          lastActionSummary={workbench.lastActionSummary}
+          loading={workbench.loading}
+          notAddedOpen={workbench.notAddedOpen}
+          notAddedSessions={workbench.notAddedSessions}
+          notAddedSummary={workbench.notAddedSummary}
+          onClearSelection={workbench.clearSelection}
+          onRetry={workbench.retry}
+          onSelectAll={workbench.selectAll}
+          onSelectPage={workbench.selectPage}
+          onToggleSession={workbench.toggleSession}
+          page={workbench.page}
+          pageSize={workbench.pageSize}
+          runAction={workbench.runAction}
+          selectedSessionIds={workbench.selectedSessionIds}
+          sessions={workbench.sessions}
+          setNotAddedOpen={workbench.setNotAddedOpen}
+          setPage={workbench.setPage}
+          total={workbench.total}
+        />
+      </WorkbenchSurface>
     ) : activeSurface === "usage" ? (
       <UsageSurface>
         {needsRecoveryPanel ? (
@@ -827,7 +793,6 @@ export function App() {
             onConfirmScopedDelete={settingsData.confirmScopedDelete}
             onRequestDeleteLocalData={settingsData.requestDeleteLocalData}
             onConfirmDeleteLocalData={settingsData.confirmDeleteLocalData}
-            onSaveLlmProvider={settingsData.saveLlmProviderSettings}
             readOnly={!connection.writable}
           />
         )}
@@ -864,7 +829,22 @@ export function App() {
             variant="observability"
             emptyTitle={emptyBoardTitle({ showDemoData, hasActiveToolbarFilters, liveConnection: effectiveLiveConnection })}
             emptyMessage={emptyBoardMessage({ showDemoData, hasActiveToolbarFilters, liveConnection: effectiveLiveConnection })}
-            onOpenSession={handleOpenSession}
+            onDoneSeen={(sessionId) => {
+              markIdleDoneSeen(idlePresentationTracksRef.current, sessionId);
+              setLiveProjection((current) => {
+                if (!current) return current;
+                const next = {
+                  ...current,
+                  cards: current.cards.map((card) =>
+                    card.sessionId === sessionId && card.displayState === "done"
+                      ? { ...card, displayState: "idle" as const, stateLabel: "Idle" }
+                      : card
+                  )
+                };
+                liveProjectionRef.current = next;
+                return next;
+              });
+            }}
             showDemoTelemetry={showDemoData}
             density={density}
           />
@@ -900,7 +880,6 @@ export function App() {
           dossierError={boardDetail.dossierError}
           dossierEnrichmentBusy={boardDetail.dossierEnrichmentBusy}
           dossierEnrichmentError={boardDetail.dossierEnrichmentError}
-          onEnrichDossier={() => void boardDetail.enrichDossier()}
           onRetryDossier={boardDetail.retryDossier}
           transcript={boardDetail.transcript}
           transcriptLoading={boardDetail.transcriptLoading}

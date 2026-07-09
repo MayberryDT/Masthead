@@ -230,11 +230,11 @@ The UI helps the developer answer what is happening now, what happened before, w
 from, and what an existing agent can safely retrieve. It is not a marketing site, KPI dashboard,
 analytics product, task manager, employee monitor, chat client, or token-spend console.
 
-The center workspace is the product. Now, Logbook, Sources, Agent Access, and Settings must share
-one visual language: a headed surface, compact controls, restrained stats when useful, and
-evidence-forward records. Healthy background work should stay visually quiet. Attention, conflicts,
-failed verification, stale data, and inferred states should be prominent only when they change what
-the developer should do next.
+The center workspace is the product. Now, Workbench, Logbook, Sources, Agent Access, and Settings
+must share one visual language: a headed surface, compact controls, restrained stats when useful,
+and evidence-forward records. Healthy background work should stay visually quiet. Attention,
+conflicts, failed verification, stale data, and inferred states should be prominent only when they
+change what the developer should do next.
 
 Masthead should look specific to local agent-session memory. Every repeated record should expose
 concrete evidence such as session state, project, branch, command, source path, changed files,
@@ -281,8 +281,9 @@ The center workspace is organized, not a stack of generic panels. Shared surface
 recur across views, but each surface may use the structure that fits its job:
 
 - Now may use cards and state lanes.
+- Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
 - Logbook should optimize scanning, filtering, and opening historical records.
-- Sources should optimize import progress and adapter diagnosis.
+- Sources should optimize harness discovery and live-connector enablement (not session import jobs).
 - Agent Access should optimize setup, permission boundaries, and auditability.
 - Settings should optimize exact blast-radius controls and local data policy.
 - The right rail is optional and must be contextual to the active surface.
@@ -290,8 +291,12 @@ recur across views, but each surface may use the structure that fits its job:
 ## Surface Archetypes
 
 - Now: live cards.
+- Workbench: dense publish-path table + Activity console rail + metal ops toolbar.
+  Human ops cover transcript check/import, quality review, claim/release, publish,
+  and Not Added inspection. Agent-authored enrichment/dossier/bug-fix work is
+  requested via Copy Agent Prompt, never via an in-app enrichment editor.
 - Logbook: dense table plus inspector.
-- Sources: adapter/settings rows plus import jobs.
+- Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
 - Agent Access: setup, permissions, tools, and audit tables.
 - Settings: vertical settings sections and danger zone.
 
@@ -359,9 +364,11 @@ Each Logbook card should answer: what happened, where, when, what state it ended
 
 ### Sources
 
-Sources is not a settings table. It should look like an inventory for local data sources and import jobs, with progress and adapter health easier to scan than decorative status cards.
+Sources is the harness connection control plane for live capture, not an import console and not a session browser. Product contract: `docs/reference/sources-v2.md`.
 
-Each source card should show source identity, health, event volume, freshness, capture policy, and any action that affects local observation. Exclude or retention controls should be compact and plainly scoped.
+It should look like a connector inventory: one row per live-capable harness, with presence, live status, and a clear Enable / Repair / Test action. Detail drawers show managed paths, endpoints, activation steps (for example Codex hook trust), and diagnostics. Do not center import job tables, transcript bulk import, or Workbench pipeline progress on Sources.
+
+Each connector row should answer: is this harness on the machine, is Masthead wired for live capture, what human activation remains, and did the last test or live event prove it. Deeper session processing belongs in Workbench; published history belongs in Logbook.
 
 ### Toolbar, Filters, And Dropdowns
 

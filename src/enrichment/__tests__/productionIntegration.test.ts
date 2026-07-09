@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../../daemon/config.ts";
+import { markWorkbenchPublished } from "../../daemon/db/workbenchPipelineRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../../daemon/server.ts";
 
 const tempDirs: string[] = [];
@@ -35,6 +36,7 @@ describe("production enrichment integration", () => {
         { kind: "session_capsule", status: "current" }
       ]);
     });
+    publishSourceSession(daemon, "production-enrichment");
 
     const logbook = await getJson(baseUrl, "/logbook/search?q=OAuth");
     expect(logbook.sessions[0]).toMatchObject({
@@ -80,6 +82,18 @@ describe("production enrichment integration", () => {
     });
   });
 });
+
+function publishSourceSession(daemon: MastheadDaemon, sourceSessionId: string): void {
+  const row = daemon.database
+    .prepare("SELECT session_id AS sessionId FROM sessions WHERE source_session_id = ? AND deleted_at IS NULL")
+    .get(sourceSessionId) as { sessionId: string } | undefined;
+  expect(row?.sessionId).toBeTruthy();
+  markWorkbenchPublished(daemon.database, {
+    actor: { kind: "system", id: "test" },
+    publishedVia: "test",
+    sessionId: row!.sessionId
+  });
+}
 
 async function createTestHarness(): Promise<{ daemon: MastheadDaemon; databasePath: string; storePath: string; tempDir: string }> {
   const tempDir = await mkdtemp(join(tmpdir(), "masthead-production-enrichment-"));

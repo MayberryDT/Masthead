@@ -6,6 +6,7 @@ import { indexCanonicalSessionSearch } from "../searchRepository.ts";
 import { querySessions } from "../sessionQueryRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
+import { publishSessionToLogbook } from "./sessionTestHelpers.ts";
 
 const tempDirs: string[] = [];
 
@@ -174,4 +175,5 @@ function seedFilteredSession(
     now,
     "{}"
   );
+  publishSessionToLogbook(db, options.sessionId);
 }

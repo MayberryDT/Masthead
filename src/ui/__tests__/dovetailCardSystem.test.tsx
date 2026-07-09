@@ -21,8 +21,8 @@ import { UsagePanel } from "../usage/UsagePanel";
 
 describe("dovetail card system", () => {
   test("Board session cards render the selected Dovetail Compression Base mockup structure", () => {
-    const active = elementFor(<SessionCard session={sessionFixture()} onToggle={() => undefined} />, ".session-card");
-    const idle = elementFor(<SessionCard session={sessionFixture({ lifecycle: "idle", primaryStatus: "stalled", stateLabel: "Idle" })} onToggle={() => undefined} />, ".session-card");
+    const active = elementFor(<SessionCard session={sessionFixture()} />, ".session-card");
+    const idle = elementFor(<SessionCard session={sessionFixture({ lifecycle: "idle", primaryStatus: "stalled", stateLabel: "Idle" })} />, ".session-card");
     const blocked = elementFor(
       <SessionCard
         session={sessionFixture({
@@ -30,7 +30,7 @@ describe("dovetail card system", () => {
           primaryStatus: "blocked",
           stateLabel: "Blocked"
         })}
-        onToggle={() => undefined}
+       
       />,
       ".session-card"
     );
@@ -60,7 +60,7 @@ describe("dovetail card system", () => {
           runtimeState: "blocked",
           stateLabel: "Blocked"
         })}
-        onToggle={() => undefined}
+       
       />,
       ".session-card"
     );
@@ -74,7 +74,7 @@ describe("dovetail card system", () => {
           runtimeState: "idle",
           stateLabel: "Idle"
         })}
-        onToggle={() => undefined}
+       
       />,
       ".session-card"
     );
@@ -90,7 +90,7 @@ describe("dovetail card system", () => {
       {
         name: "plain idle",
         card: elementFor(
-          <SessionCard session={sessionFixture({ lifecycle: "idle", primaryStatus: "stalled", stateLabel: "Idle" })} onToggle={() => undefined} />,
+          <SessionCard session={sessionFixture({ lifecycle: "idle", primaryStatus: "stalled", stateLabel: "Idle" })} />,
           ".session-card"
         )
       },
@@ -104,7 +104,7 @@ describe("dovetail card system", () => {
               stateLabel: "Idle",
               indicators: ["attention"]
             })}
-            onToggle={() => undefined}
+           
           />,
           ".session-card"
         )
@@ -623,6 +623,7 @@ function logbookSummaryFixture() {
 function dossierFixture(): SessionDossierDto {
   return {
     attention: [],
+    artifacts: [],
     coverage: {
       level: "complete",
       transcript: {

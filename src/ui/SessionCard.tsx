@@ -7,7 +7,8 @@ import type { DemoSessionTelemetry } from "./observabilityDemo";
 
 type Props = {
   session: SessionCardView;
-  onToggle?: (sessionId: string) => void;
+  /** Clears temporary Done highlight after the user notices the card. */
+  onDoneSeen?: (sessionId: string) => void;
   demoTelemetry?: DemoSessionTelemetry;
   isNew?: boolean;
   newCardIndex?: number;
@@ -22,7 +23,7 @@ const HEADLINE_ANIMATION_CLEANUP_MS = 2_700;
 
 export function SessionCard({
   session,
-  onToggle,
+  onDoneSeen,
   demoTelemetry,
   isNew = false,
   newCardIndex = 0,
@@ -31,7 +32,6 @@ export function SessionCard({
 }: Props) {
   const stateClass = sessionStateClassName(session);
   const tierClass = `tier-${sessionVisualTier(session)}`;
-  const model = demoTelemetry?.model.value ?? session.model ?? "Not captured";
   const harness = demoTelemetry?.harness.value ?? session.harness ?? "Unknown";
   const worktree = session.branchOrWorktree ?? "None";
   const headline = sessionHeadline(session);
@@ -42,6 +42,7 @@ export function SessionCard({
   const sessionName = sessionHeaderName(session);
   const isHeadlineRefreshing = outgoingHeadline !== undefined || (headlineUpdateIndex !== undefined && visibleHeadline !== headline);
   const isRefreshPulsing = refreshPulseIndex !== undefined && !isHeadlineRefreshing;
+  const isDoneHighlight = session.displayState === "done";
   const style = {
     viewTransitionName: `session-card-${viewTransitionNamePart(session.sessionId)}`,
     "--new-card-index": Math.min(newCardIndex, 4),
@@ -91,6 +92,7 @@ export function SessionCard({
         "dovetail-card",
         stateClass,
         tierClass,
+        isDoneHighlight ? "is-done" : "",
         isNew ? "is-new-card" : "",
         isHeadlineRefreshing ? "is-headline-refreshing" : "",
         isRefreshPulsing ? "is-refresh-pulsing" : ""
@@ -99,15 +101,12 @@ export function SessionCard({
         .join(" ")}
       data-session-id={session.sessionId}
       style={style}
-      role="button"
-      aria-label={`Open ${headline} details`}
-      tabIndex={0}
-      onClick={() => onToggle?.(session.sessionId)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onToggle?.(session.sessionId);
-        }
+      aria-label={`${headline} · ${sessionStatePillLabel(session)}`}
+      onMouseEnter={() => {
+        if (isDoneHighlight) onDoneSeen?.(session.sessionId);
+      }}
+      onFocus={() => {
+        if (isDoneHighlight) onDoneSeen?.(session.sessionId);
       }}
     >
       <span className="bottom-signal" aria-hidden="true" />
@@ -115,7 +114,6 @@ export function SessionCard({
         <span className="project" title={sessionName}>
           {sessionName}
         </span>
-        <HeadlineSourceBadge session={session} />
         <span className="runtime-tag">{harness}</span>
         <span className="state-pill">{sessionStatePillLabel(session)}</span>
       </header>
@@ -129,10 +127,8 @@ export function SessionCard({
         <span className="headline-text headline-current">{visibleHeadline}</span>
       </h3>
 
-      <div className="fact-grid">
+      <div className="fact-grid fact-grid-pair">
         <Fact label="Runtime" value={harness} />
-        <Fact label="Tokens" value={tokenLabel(session.totalTokens)} />
-        <Fact label="Model" value={model} />
         <Fact label="Worktree" value={worktree} />
       </div>
 
@@ -146,30 +142,6 @@ export function SessionCard({
       </footer>
     </article>
   );
-}
-
-function HeadlineSourceBadge({ session }: { session: SessionCardView }) {
-  const label = headlineSourceLabel(session);
-  if (!label) return null;
-
-  return (
-    <span className={`headline-source is-${label.toLowerCase()}`} title={headlineSourceTitle(session, label)}>
-      {label}
-    </span>
-  );
-}
-
-function headlineSourceLabel(session: SessionCardView): "Pending" | "Offline" | undefined {
-  if (session.headline.status === "pending" || session.headline.source === "pending") return "Pending";
-  if (session.headline.source === "offline") return "Offline";
-  return undefined;
-}
-
-function headlineSourceTitle(session: SessionCardView, label: "Pending" | "Offline"): string {
-  if (label === "Pending") return "Headline source: pending remote Board headline";
-  if (session.headlineRefresh?.failureMessage) return `Local headline: ${session.headlineRefresh.failureMessage}`;
-  if (session.headlineRefresh?.status === "not_configured") return "Local headline: Board headline provider not configured";
-  return "Headline source: offline deterministic Board headline";
 }
 
 function viewTransitionNamePart(value: string): string {
@@ -187,18 +159,21 @@ function Fact({ label, value }: { label: string; value: string }) {
 
 function sessionStatePillLabel(session: SessionCardView): string {
   if (isBlockedSessionCard(session)) return "Blocked";
+  if (session.displayState === "done") return "Done";
   if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") return "Idle";
   return "Active";
 }
 
-function sessionStateClassName(session: SessionCardView): "is-active" | "is-idle" | "is-blocked" {
+function sessionStateClassName(session: SessionCardView): "is-active" | "is-idle" | "is-blocked" | "is-done" {
   if (isBlockedSessionCard(session)) return "is-blocked";
+  if (session.displayState === "done") return "is-done";
   if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") return "is-idle";
   return "is-active";
 }
 
 function sessionVisualTier(session: SessionCardView): SessionVisualTier {
   if (isBlockedSessionCard(session)) return "action";
+  if (session.displayState === "done") return "quiet";
   if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") {
     return session.primaryStatus === "failed" || session.outcomeLabel === "failed" ? "action" : "quiet";
   }
@@ -211,14 +186,6 @@ function startedLabel(value: string): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function tokenLabel(value: number | undefined): string {
-  if (value === undefined) return "-";
-  return new Intl.NumberFormat("en-US", {
-    notation: value >= 10_000 ? "compact" : "standard",
-    maximumFractionDigits: value >= 10_000 ? 1 : 0
-  }).format(value);
-}
-
 function sessionHeaderName(session: SessionCardView): string {
   const project = cleanProjectName(session.project);
   const context = meaningfulWorkContext(session.workContext?.label, project);
@@ -228,8 +195,23 @@ function sessionHeaderName(session: SessionCardView): string {
 
 function sessionHeadline(session: SessionCardView): string {
   const headline = cleanHeadline(session.headline.headline);
-  if (headline && !isWeakLiveSummary(headline)) return headline;
-  return firstUsefulSessionTitle([session.title, session.workContext?.label], sessionTextContext(session)) ?? `${session.project} session update`;
+  if (headline && !isWeakLiveSummary(headline) && !isObsoleteHeadlineCopy(headline)) return headline;
+  const usefulTitle = firstUsefulSessionTitle([session.title, session.workContext?.label], sessionTextContext(session));
+  if (usefulTitle) return usefulTitle;
+  const project = cleanProjectName(session.project);
+  const harness = session.harness?.trim();
+  if (harness && project) return `${project} · ${harness}`;
+  return `${project} session`;
+}
+
+function isObsoleteHeadlineCopy(value: string): boolean {
+  return (
+    /\bwaiting for LLM\b/i.test(value) ||
+    /\bLLM headline access\b/i.test(value) ||
+    /^session narrative\s*:/i.test(value) ||
+    /^board headlines\s*:\s*waiting for LLM\b/i.test(value) ||
+    /\bpaused after latest collected evidence\b/i.test(value)
+  );
 }
 
 function cleanSessionName(value: string | undefined): string | undefined {

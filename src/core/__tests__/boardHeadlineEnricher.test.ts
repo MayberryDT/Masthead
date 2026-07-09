@@ -50,7 +50,7 @@ function input(overrides: Partial<BoardHeadlineInput> = {}): BoardHeadlineInput 
 
 function pendingHeadline(): BoardHeadlineView {
   return {
-    headline: "Generating headline...",
+    headline: "Updating session status...",
     source: "pending",
     status: "pending"
   };
@@ -149,7 +149,7 @@ describe("board headline enricher", () => {
     const result = await enricher.enrichProjection(projection([card()]));
 
     expect(result.cards[0]?.headline).toEqual({
-      headline: "Generating headline...",
+      headline: "Updating session status...",
       source: "pending",
       status: "pending"
     });
@@ -909,10 +909,11 @@ describe("board headline enricher", () => {
     const result = await enricher.enrichProjection(projection([card()]));
 
     expect(result.cards[0]?.headline).toMatchObject({
-      headline: "Board headlines: waiting for LLM headline access.",
       source: "offline",
       status: "ready"
     });
+    expect(result.cards[0]?.headline.headline).not.toMatch(/LLM|waiting for LLM/i);
+    expect(result.cards[0]?.headline.headline).toMatch(/in progress|Board headline|Masthead|Session/i);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

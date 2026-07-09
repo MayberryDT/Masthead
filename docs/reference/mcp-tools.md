@@ -16,6 +16,7 @@ MASTHEAD_DB_PATH=/path/to/masthead.sqlite node dist/daemon/src/mcp/server.js
 | `search_sessions` | `query`; optional `project`, `runtime`, `model`, `host`, `state`, `dateFrom`, `dateTo`, `limit` | Session summaries with IDs, titles, projects, models, snippets, and source refs |
 | `get_session` | `sessionId`, optional `maxBytes` | One bounded normalized session record |
 | `get_session_excerpt` | `sessionId`; optional `query`, `limit`, `maxBytes` | Bounded query-relevant historical excerpts |
+| `get_session_transcript` | `sessionId`; optional `limit`, `maxBytes`, `role` (`all`, `user`, `assistant`, `tool`) | Bounded canonical transcript rows with coverage |
 | `list_project_sessions` | `project`, optional `limit` | Recent sessions for a project label |
 | `get_project_history` | `project`, optional `limit` | Structured project history and relevant excerpts |
 | `get_masthead_coverage` | none | Counts for indexed sessions, projects, messages, tool calls, and audit rows |
@@ -26,6 +27,7 @@ Allowed:
 
 - Search session summaries.
 - Read bounded historical excerpts.
+- Read bounded canonical transcript rows.
 - Read project history.
 - Inspect coverage counts.
 

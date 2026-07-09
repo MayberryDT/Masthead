@@ -11,7 +11,8 @@ import {
 } from "../sessionQueryRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
-import { seedSession } from "./sessionTestHelpers.ts";
+import { markWorkbenchNotAdded } from "../workbenchPipelineRepository.ts";
+import { publishSessionToLogbook, seedSession } from "./sessionTestHelpers.ts";
 
 const tempDirs: string[] = [];
 
@@ -21,6 +22,43 @@ afterEach(async () => {
 });
 
 describe("session query repository", () => {
+  test("only returns sessions explicitly published to Logbook", async () => {
+    const db = await openTestDatabase();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Pip",
+      sessionId: "session-published",
+      title: "Published"
+    });
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Pip",
+      sessionId: "session-not-added",
+      title: "Not added"
+    });
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Pip",
+      sessionId: "session-unpublished",
+      title: "Unpublished"
+    });
+    publishSessionToLogbook(db, "session-published");
+    markWorkbenchNotAdded(db, {
+      actor: { kind: "system", id: "test" },
+      reason: "metadata_only",
+      sessionId: "session-not-added"
+    });
+
+    expect(sessionIds(querySessions(db, { limit: 25, sort: "oldest" }))).toEqual(["session-published"]);
+    expect(getSessionDetail(db, "session-not-added")).toBeUndefined();
+    expect(getSessionExcerpts(db, "session-unpublished", { limit: 8 })).toEqual([]);
+    expect(listProjects(db)).toEqual([{ project: "Pip", sessionCount: 1 }]);
+    db.close();
+  });
+
   test("returns rich canonical list items, detail, excerpts, and projects", async () => {
     const db = await openTestDatabase();
     seedSession(db, {
@@ -30,6 +68,7 @@ describe("session query repository", () => {
       sessionId: "session-1",
       title: "OAuth callback repair"
     });
+    publishSessionToLogbook(db, "session-1");
     indexCanonicalSessionSearch(db, "session-1");
 
     const result = querySessions(db, { limit: 25, query: "OAuth" });
@@ -79,6 +118,7 @@ describe("session query repository", () => {
       sessionId: "session-1",
       title: "Single file repair"
     });
+    publishSessionToLogbook(db, "session-1");
     seedSession(db, {
       lifecycle: "ended",
       model: "gpt-5",
@@ -86,6 +126,7 @@ describe("session query repository", () => {
       sessionId: "session-2",
       title: "Wide refactor"
     });
+    publishSessionToLogbook(db, "session-2");
     db.prepare("UPDATE sessions SET last_activity_at = ? WHERE session_id = ?").run("2026-06-25T12:05:00.000Z", "session-1");
     db.prepare("INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)").run(
       "session-2:file-extra",
@@ -111,6 +152,7 @@ describe("session query repository", () => {
         sessionId: `session-${index}`,
         title: `Session ${index}`
       });
+      publishSessionToLogbook(db, `session-${index}`);
       db.prepare("UPDATE sessions SET last_activity_at = ? WHERE session_id = ?").run(`2026-06-25T12:0${index}:00.000Z`, `session-${index}`);
     }
 
@@ -131,6 +173,7 @@ describe("session query repository", () => {
       sessionId: "session-weak-source",
       title: "session narrative"
     });
+    publishSessionToLogbook(db, "session-weak-source");
     db.prepare("DELETE FROM session_enrichments WHERE session_id = ?").run("session-weak-source");
     db.prepare(
       `UPDATE sessions
@@ -305,6 +348,7 @@ function seedQueryableSession(db: MastheadDatabase, options: QueryableSessionOpt
     options.lastActivityAt,
     options.sessionId
   );
+  publishSessionToLogbook(db, options.sessionId);
   indexCanonicalSessionSearch(db, options.sessionId);
 }
 

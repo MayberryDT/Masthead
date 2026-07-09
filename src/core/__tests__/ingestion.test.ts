@@ -201,6 +201,95 @@ describe("hook ingestion", () => {
     expect(exitCode).toBe(0);
     expect(posted()).toHaveLength(0);
   });
+
+  test("hook helper rewrites Claude Code ingest URL to grok when Grok host markers are present", async () => {
+    const received: Array<{ body: string; url: string | undefined }> = [];
+    const server = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        received.push({ body, url: request.url });
+        response.writeHead(202, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true }));
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("expected tcp server");
+
+    const exitCode = await runHook(
+      JSON.stringify({
+        ...hookPayload,
+        hookEventName: "UserPromptSubmit",
+        session_id: "grok-dual-fire-session"
+      }),
+      {
+        MASTHEAD_INGEST_URL: `http://127.0.0.1:${address.port}/ingest?runtime=claude_code`,
+        MASTHEAD_STATE_URL: `http://127.0.0.1:${address.port}/live/state`,
+        MASTHEAD_HOOK_TIMEOUT_MS: "500",
+        GROK_HOOK_EVENT: "UserPromptSubmit",
+        GROK_SESSION_ID: "grok-dual-fire-session"
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    const ingest = received.find((entry) => entry.url?.startsWith("/ingest"));
+    const state = received.find((entry) => entry.url === "/live/state");
+    expect(ingest?.url).toContain("runtime=grok");
+    expect(ingest?.url).not.toContain("runtime=claude_code");
+    expect(state?.body).toContain('"runtime":"grok"');
+    expect(state?.body).not.toContain('"runtime":"claude_code"');
+  });
+
+  test("hook helper dual-fire with MASTHEAD_RUNTIME=claude_code still posts as grok", async () => {
+    const received: Array<{ body: string; url: string | undefined }> = [];
+    const server = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        received.push({ body, url: request.url });
+        response.writeHead(202, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true }));
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("expected tcp server");
+
+    const exitCode = await runHook(
+      JSON.stringify({
+        ...hookPayload,
+        hookEventName: "UserPromptSubmit",
+        session_id: "grok-dual-fire-pinned-session"
+      }),
+      {
+        MASTHEAD_RUNTIME: "claude_code",
+        MASTHEAD_INGEST_URL: `http://127.0.0.1:${address.port}/ingest?runtime=claude_code`,
+        MASTHEAD_STATE_URL: `http://127.0.0.1:${address.port}/live/state`,
+        MASTHEAD_HOOK_TIMEOUT_MS: "500",
+        GROK_HOOK_EVENT: "UserPromptSubmit",
+        GROK_SESSION_ID: "grok-dual-fire-pinned-session"
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    const ingest = received.find((entry) => entry.url?.startsWith("/ingest"));
+    const state = received.find((entry) => entry.url === "/live/state");
+    expect(ingest?.url).toContain("runtime=grok");
+    expect(ingest?.url).not.toContain("runtime=claude_code");
+    expect(state?.body).toContain('"runtime":"grok"');
+    expect(state?.body).not.toContain('"runtime":"claude_code"');
+  });
 });
 
 async function runHookWithServer(

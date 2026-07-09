@@ -1,7 +1,9 @@
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
+import { publishedWorkbenchSessionSql } from "../daemon/db/workbenchPublicationSql.ts";
 
 export function mcpSessionPolicySql(sessionAlias = "sessions"): string {
   return `${sessionAlias}.deleted_at IS NULL
+    AND ${publishedWorkbenchSessionSql(sessionAlias)}
     AND ${sessionAlias}.excluded_from_mcp_at IS NULL
     AND NOT EXISTS (
       SELECT 1

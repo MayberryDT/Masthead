@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   AdapterStatus,
   CodexHookSettingsDto,
+  HarnessConnectorsSnapshotDto,
   ImportJob,
   SourceStatus,
   SourceStatusPage,
@@ -11,11 +12,14 @@ import type {
 import type { SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunInput } from "../shared/sourcesSetup";
 import { runtimeLabel } from "./sources/AdapterRow";
 import { AdapterList } from "./sources/AdapterList";
+import { HarnessConnectorDetail } from "./sources/HarnessConnectorDetail";
+import { HarnessConnectorList, hasDetectedNotReady } from "./sources/HarnessConnectorList";
 import { ImportJobsTable } from "./sources/ImportJobsTable";
 import { ImportProgressPanel } from "./sources/ImportProgressPanel";
 import { SourcesConnectedDashboard } from "./sources/SourcesConnectedDashboard";
 import { SourcesEmptyState } from "./sources/SourcesEmptyState";
 import { SourcesImportModal } from "./sources/SourcesImportModal";
+import { SourcesConnectOnboarding } from "./sources/SourcesConnectOnboarding";
 import { SourcesOnboardingModal } from "./sources/SourcesOnboardingModal";
 import type { SourcesImportPreview } from "../app/daemonClient";
 import { SourceDiagnosticPanel } from "./sources/SourceDiagnosticPanel";
@@ -40,14 +44,27 @@ type Props = {
   sources: SourceStatus[];
   busy: boolean;
   status?: string;
+  /** Sources V2 live-connect snapshot. When set (or Discover is wired), render connector inventory. */
+  connectorsSnapshot?: HarnessConnectorsSnapshotDto;
+  selectedConnectorRuntime?: string;
+  onSelectConnectorRuntime?: (runtime: string | undefined) => void;
+  onDiscoverConnectors?: () => void;
+  onEnableConnector?: (runtime: string) => void;
+  onEnableAllDetectedConnectors?: () => void;
+  onTestConnector?: (runtime: string) => void;
+  onUninstallConnector?: (runtime: string) => void;
+  onConfirmConnectorActivation?: (runtime: string) => void;
+  /** Toolbar status next to Refresh only. */
+  refreshStatus?: string;
+  /** Per-card action status (Enable/Test), keyed by runtime. */
+  cardActionStatus?: Record<string, string>;
+  actionRuntime?: string;
   onCancelImport?: (importJobId: string) => void;
   onCloseOnboarding?: () => void;
   onRuntimeHookAction?: (runtime: string, action: HookAction) => Promise<void> | void;
-  onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
   onOpenOnboarding?: () => void;
   onImportMetadata?: (runtime: string) => void;
-  onImportTranscripts?: (runtime: string) => void;
   onLoadAdapterSources?: (runtime: string, page: { limit: number; offset: number }) => Promise<SourceStatusPage>;
   onClearImportJobsFilter?: () => void;
   onOpenImportJobsForRuntime?: (runtime: string) => void;
@@ -67,6 +84,165 @@ type Props = {
 };
 
 export function SourcesPanel(props: Props) {
+  const v2Mode = props.connectorsSnapshot !== undefined || props.onDiscoverConnectors !== undefined;
+
+  if (v2Mode) {
+    return <SourcesPanelV2 {...props} />;
+  }
+
+  return <SourcesPanelLegacy {...props} />;
+}
+
+function SourcesPanelV2(props: Props) {
+  const {
+    busy,
+    connectorsSnapshot,
+    readOnly = false,
+    selectedConnectorRuntime,
+    refreshStatus,
+    cardActionStatus = {},
+    actionRuntime
+  } = props;
+
+  const selected = useMemo(
+    () => connectorsSnapshot?.connectors.find((connector) => connector.runtime === selectedConnectorRuntime),
+    [connectorsSnapshot, selectedConnectorRuntime]
+  );
+  const showEnableAll =
+    Boolean(connectorsSnapshot) && hasDetectedNotReady(connectorsSnapshot?.connectors ?? []);
+  const isRefreshing = busy && !actionRuntime;
+
+  const refresh = () => {
+    if (props.onDiscoverConnectors) props.onDiscoverConnectors();
+    else props.onRefresh();
+  };
+
+  return (
+    <section id="sources" className="sources-panel sources-management surface-panel sources-v2-panel" aria-label="Connections">
+      <div
+        className="sources-action-bar sources-toolbar observability-toolbar metal-toolbar sources-connections-toolbar"
+        role="toolbar"
+        aria-label="Connections actions"
+      >
+        <div className="toolbar-select-row sources-action-group" aria-label="Refresh">
+          <AppButton type="button" variant="primary" disabled={busy} onClick={refresh} aria-busy={isRefreshing}>
+            {isRefreshing ? <span className="sources-refresh-spinner" aria-hidden="true" /> : null}
+            Refresh
+          </AppButton>
+          {showEnableAll ? (
+            <AppButton
+              type="button"
+              disabled={busy || readOnly || !props.onEnableAllDetectedConnectors}
+              onClick={() => props.onEnableAllDetectedConnectors?.()}
+            >
+              Enable all found
+            </AppButton>
+          ) : null}
+          {refreshStatus || isRefreshing ? (
+            <span className="sources-v2-inline-status" role="status">
+              {isRefreshing && !refreshStatus ? "Refreshing connections…" : refreshStatus}
+            </span>
+          ) : null}
+        </div>
+        <dl className="sources-connections-facts" aria-label="Connection summary">
+          <div>
+            <dt>Ready</dt>
+            <dd>{connectorsSnapshot?.summary.ready ?? 0}</dd>
+          </div>
+          <div>
+            <dt>Need action</dt>
+            <dd>{connectorsSnapshot?.summary.needsAction ?? 0}</dd>
+          </div>
+          <div>
+            <dt>Not found</dt>
+            <dd>{connectorsSnapshot?.summary.notFound ?? 0}</dd>
+          </div>
+          {(connectorsSnapshot?.summary.error ?? 0) > 0 ? (
+            <div>
+              <dt>Error</dt>
+              <dd>{connectorsSnapshot?.summary.error}</dd>
+            </div>
+          ) : null}
+        </dl>
+      </div>
+
+      {connectorsSnapshot ? (
+        <div className="sources-connections-split">
+          <div className="sources-connections-split-column">
+            <div className="sources-connections-split-head">
+              <h2>Connections</h2>
+            </div>
+            <HarnessConnectorList
+              snapshot={connectorsSnapshot}
+              selectedRuntime={selectedConnectorRuntime}
+              busy={busy}
+              readOnly={readOnly}
+              cardActionStatus={cardActionStatus}
+              actionRuntime={actionRuntime}
+              onSelect={(runtime) => props.onSelectConnectorRuntime?.(runtime)}
+              onEnable={props.onEnableConnector}
+              onTest={props.onTestConnector}
+              onConfirm={props.onConfirmConnectorActivation}
+            />
+          </div>
+          <div className="sources-connections-split-column sources-connections-detail-column">
+            <div className="sources-connections-split-head">
+              <h2>Detail</h2>
+            </div>
+            <div className="sources-connections-detail-pane" aria-live="polite">
+              {selected ? (
+                <HarnessConnectorDetail
+                  connector={selected}
+                  busy={busy}
+                  readOnly={readOnly}
+                  actionStatus={cardActionStatus[selected.runtime]}
+                  onClose={() => props.onSelectConnectorRuntime?.(undefined)}
+                  onEnable={props.onEnableConnector}
+                  onTest={props.onTestConnector}
+                  onUninstall={props.onUninstallConnector}
+                  onConfirm={props.onConfirmConnectorActivation}
+                />
+              ) : (
+                <div className="sources-connections-detail-empty">
+                  <p className="mono-label">Detail</p>
+                  <p>Select a connection card to inspect live capture wiring.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="empty-session-state surface-empty-state">
+          <h2>{busy ? "Loading connections" : "No connection data yet"}</h2>
+          <p>{busy ? "Checking local harnesses and live capture wiring." : "Press Refresh to scan for harnesses."}</p>
+        </div>
+      )}
+
+      <SourcesConnectOnboarding
+        open={Boolean(props.onboardingOpen)}
+        snapshot={connectorsSnapshot}
+        busy={busy || readOnly}
+        onClose={() => props.onCloseOnboarding?.()}
+        onSkip={() => props.onSkipOnboarding?.()}
+        onDiscover={async () => {
+          props.onDiscoverConnectors?.();
+        }}
+        onEnable={async (runtime) => {
+          props.onEnableConnector?.(runtime);
+        }}
+        onConfirmActivation={
+          props.onConfirmConnectorActivation
+            ? async (runtime) => {
+                props.onConfirmConnectorActivation?.(runtime);
+              }
+            : undefined
+        }
+      />
+    </section>
+  );
+}
+
+function SourcesPanelLegacy(props: Props) {
   const { adapters, busy, imports = [], lastRefreshAt, readOnly = false, setup, sources, status } = props;
   const adapterRows = (setup?.advanced.adapters.length ? setup.advanced.adapters : adapters ?? adaptersFromSources(sources)) as AdapterStatus[];
   const diagnosticImports = imports as ImportJob[];
@@ -139,10 +315,8 @@ export function SourcesPanel(props: Props) {
           hookActionBusy={props.hookActionBusy}
           llm={props.llm}
           onRuntimeHookAction={props.onRuntimeHookAction}
-          onEnableTranscriptImport={props.onEnableTranscriptImport}
           onExcludePath={props.onExcludePath}
           onImportMetadata={props.onImportMetadata}
-          onImportTranscripts={props.onImportTranscripts}
           onLoadAdapterSources={props.onLoadAdapterSources}
           onOpenImportJobsForRuntime={props.onOpenImportJobsForRuntime}
           onSaveLlmProvider={props.onSaveLlmProvider}
@@ -243,6 +417,7 @@ export function SourcesPanel(props: Props) {
     </section>
   );
 }
+
 
 function adaptersFromSources(sources: SourceStatus[]): AdapterStatus[] {
   const byRuntime = new Map<string, SourceStatus[]>();

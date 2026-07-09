@@ -10,11 +10,32 @@ describe("adapter capabilities", () => {
     expect(RUNTIME_KINDS).toEqual(SUPPORTED_RUNTIMES);
   });
 
-  test("exposes one active capability profile for each supported import runtime", () => {
-    expect(ADAPTER_CAPABILITY_PROFILES.map((profile) => profile.runtime)).toEqual(SUPPORTED_RUNTIMES);
-    expect(ADAPTER_CAPABILITY_PROFILES.map((profile) => profile.runtime)).toEqual(activeImportRuntimes());
-    expect(ADAPTER_CAPABILITY_PROFILES.every((profile) => profile.lifecycle === "active")).toBe(true);
-    expect(ADAPTER_CAPABILITY_PROFILES.every((profile) => profile.runtimeStatus === "import_adapter")).toBe(true);
+  test("exposes capability profiles for import runtimes plus live-capable Codex", () => {
+    expect(ADAPTER_CAPABILITY_PROFILES.map((profile) => profile.runtime)).toEqual([...SUPPORTED_RUNTIMES, "codex"]);
+    expect(ADAPTER_CAPABILITY_PROFILES.filter((profile) => profile.runtime !== "codex").map((profile) => profile.runtime)).toEqual(
+      activeImportRuntimes()
+    );
+    expect(
+      ADAPTER_CAPABILITY_PROFILES.filter((profile) => profile.runtime !== "codex").every((profile) => profile.lifecycle === "active")
+    ).toBe(true);
+    expect(
+      ADAPTER_CAPABILITY_PROFILES.filter((profile) => profile.runtime !== "codex").every(
+        (profile) => profile.runtimeStatus === "import_adapter"
+      )
+    ).toBe(true);
+  });
+
+  test("marks Codex as live-capable without inventing Sources bulk import", () => {
+    expect(adapterCapabilityProfile("codex")).toMatchObject({
+      label: "Codex",
+      lifecycle: "scan_target",
+      maturity: "detector",
+      runtime: "codex",
+      runtimeStatus: "scan_target",
+      supportsLiveWatch: true,
+      supportsMetadataImport: false,
+      supportsTranscriptImport: false
+    });
   });
 
   test("marks Grok as a transcript-capable live import adapter", () => {

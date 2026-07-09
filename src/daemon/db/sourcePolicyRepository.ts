@@ -53,3 +53,18 @@ export function sourcePolicyEnabled(db: MastheadDatabase, policyKind: SourcePoli
     .get(...(sourceId ? [policyKind, sourceId] : [policyKind])) as { enabled: number } | undefined;
   return row?.enabled === 1;
 }
+
+export function sourcePolicyExplicitlyEnabled(db: MastheadDatabase, policyKind: SourcePolicyKind, sourceId: string): boolean {
+  if (sourceId === "global") return false;
+  const row = db
+    .prepare(
+      `SELECT enabled
+      FROM source_policies
+      WHERE policy_kind = ?
+        AND source_id = ?
+      ORDER BY decided_at DESC
+      LIMIT 1`
+    )
+    .get(policyKind, sourceId) as { enabled: number } | undefined;
+  return row?.enabled === 1;
+}

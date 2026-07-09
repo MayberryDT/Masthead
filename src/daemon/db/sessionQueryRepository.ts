@@ -4,6 +4,7 @@ import { firstUsefulSessionTitle } from "../../shared/sessionTextQuality.ts";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../../shared/sessionEnrichment.ts";
 import { currentSessionEnrichmentViews, type SessionEnrichmentView } from "./enrichmentViewRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
+import { publishedWorkbenchSessionSql, workbenchSessionIsPublished } from "./workbenchPublicationSql.ts";
 
 export type SessionListItemDto = {
   sessionId: string;
@@ -193,6 +194,7 @@ export function getSessionExcerpts(
   sessionId: string,
   options: { query?: string; limit: number }
 ): SessionExcerptDto[] {
+  if (!workbenchSessionIsPublished(db, sessionId)) return [];
   const limit = clampLimit(options.limit, 8);
   const textFilter = likePattern(options.query);
   const rows = db
@@ -245,7 +247,10 @@ export function listProjects(db: MastheadDatabase): ProjectDto[] {
     .prepare(
       `SELECT project_label AS project, COUNT(*) AS sessionCount
       FROM sessions
-      WHERE deleted_at IS NULL AND project_label IS NOT NULL AND trim(project_label) <> ''
+      WHERE deleted_at IS NULL
+        AND ${publishedWorkbenchSessionSql("sessions")}
+        AND project_label IS NOT NULL
+        AND trim(project_label) <> ''
       GROUP BY project_label
       ORDER BY lower(project_label)`
     )
@@ -341,6 +346,7 @@ function sessionWhereClause(
   const params: Array<string | number | null> = [];
 
   if (!options.includeDeleted) where.push("sessions.deleted_at IS NULL");
+  where.push(publishedWorkbenchSessionSql("sessions"));
   if (query.mcpAllowedOnly) where.push(mcpSessionPolicySql("sessions"));
   if (candidateIds) {
     where.push(`sessions.session_id IN (${candidateIds.map(() => "?").join(", ")})`);

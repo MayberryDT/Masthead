@@ -155,22 +155,37 @@ function compareLastActivityDesc(a: SessionCardView, b: SessionCardView): number
   return a.sessionId.localeCompare(b.sessionId);
 }
 
+/**
+ * Priority mode buckets (lower first):
+ * 0 blocked → 1 active/working → 2 idle
+ * Within a bucket, most recent activity wins.
+ */
 function operationalBucket(card: SessionCardView): number {
   if (isBlockedScanCard(card)) return 0;
-  if (card.indicators.includes("attention") || card.indicators.includes("conflict")) return 0;
-  if (card.lifecycle === "running") return 1;
-  if (card.lifecycle === "idle") return 2;
-  return 3;
+  if (isActiveScanCard(card)) return 1;
+  return 2;
+}
+
+function isActiveScanCard(card: SessionCardView): boolean {
+  if (isBlockedScanCard(card)) return false;
+  if (card.displayState === "working" || card.runtimeState === "working") return true;
+  if (card.lifecycle === "running") return true;
+  const label = (card.stateLabel ?? "").toLowerCase();
+  return label === "running" || label === "active" || label === "working";
 }
 
 function compareOperationalPriority(a: SessionCardView, b: SessionCardView): number {
   const bucketDelta = operationalBucket(a) - operationalBucket(b);
   if (bucketDelta !== 0) return bucketDelta;
 
+  // Within blocked / active / idle: most recent activity first.
+  const activityDelta = lastActivityTime(b) - lastActivityTime(a);
+  if (activityDelta !== 0) return activityDelta;
+
   const priorityDelta = a.priorityRank - b.priorityRank;
   if (priorityDelta !== 0) return priorityDelta;
 
-  return compareLastActivityDesc(a, b);
+  return a.sessionId.localeCompare(b.sessionId);
 }
 
 function compareCardsForSort(a: SessionCardView, b: SessionCardView, sort: SortMode): number {

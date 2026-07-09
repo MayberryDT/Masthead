@@ -5,9 +5,9 @@ import { RUNTIME_KINDS } from "../../../adapters/types.ts";
 import { supportedAdapters } from "../supportedAdapters.ts";
 
 describe("supportedAdapters", () => {
-  test("matches the full runtime kind registry", () => {
+  test("includes focused import runtimes plus live-capable Codex", () => {
     const runtimes = supportedAdapters.map((adapter) => adapter.runtime);
-    expect(runtimes).toEqual([...RUNTIME_KINDS]);
+    expect(runtimes).toEqual([...RUNTIME_KINDS, "codex"]);
   });
 
 
@@ -25,5 +25,13 @@ describe("supportedAdapters", () => {
     expect(canImportMetadata(omp)).toBe(true);
     expect(canImportTranscripts(omp)).toBe(true);
     expect(scanTargetHarnesses().map((entry) => entry.runtime)).toContain("omp");
+
+    const codex = supportedAdapters.find((adapter) => adapter.runtime === "codex")!;
+    expect(codex.implementationState).toBe("scan_target");
+    expect(codex.enabled).toBe(true);
+    expect(codex.supportsLiveWatch).toBe(true);
+    expect(canImportMetadata(codex)).toBe(false);
+    expect(canImportTranscripts(codex)).toBe(false);
+    expect(scanTargetHarnesses().map((entry) => entry.runtime)).toContain("codex");
   });
 });

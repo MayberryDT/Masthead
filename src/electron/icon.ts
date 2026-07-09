@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 export const MASTHEAD_APP_ICON_FILE = "masthead-logo-sail.png";
+export const MASTHEAD_DEV_APP_ICON_FILE = "masthead-logo-sail-dev.png";
 
 export type MastheadAppIconResolverOptions = {
   appPath: string;
@@ -18,7 +19,9 @@ export function resolveMastheadAppIconPath(options: MastheadAppIconResolverOptio
 }
 
 function mastheadAppIconCandidates(options: MastheadAppIconResolverOptions): string[] {
+  const sourceDevIcon = join(options.appPath, "public", "assets", MASTHEAD_DEV_APP_ICON_FILE);
+  const packagedDevIcon = join(options.resourcesPath, "daemon", MASTHEAD_DEV_APP_ICON_FILE);
   const sourceIcon = join(options.appPath, "public", "assets", MASTHEAD_APP_ICON_FILE);
   const packagedIcon = join(options.resourcesPath, MASTHEAD_APP_ICON_FILE);
-  return options.isDev ? [sourceIcon, packagedIcon] : [packagedIcon, sourceIcon];
+  return options.isDev ? [sourceDevIcon, packagedDevIcon, sourceIcon, packagedIcon] : [packagedIcon, sourceIcon];
 }

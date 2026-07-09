@@ -1,4 +1,4 @@
-import { RUNTIME_KINDS, type RuntimeKind } from "../adapters/types.ts";
+import { ALL_RUNTIME_KINDS, type RuntimeKind } from "../adapters/types.ts";
 import { canonicalSessionId, runtimeIdFor } from "../shared/sessionIdentity.ts";
 import type { GitSnapshot, NormalizedEvent } from "./types.ts";
 
@@ -13,7 +13,7 @@ export type LiveProjectionSessionScope = LiveSessionKey & {
 };
 
 export function runtimeFromAdapter(value: string | undefined): RuntimeKind | undefined {
-  return RUNTIME_KINDS.find((runtime) => runtime === value);
+  return ALL_RUNTIME_KINDS.find((runtime) => runtime === value);
 }
 
 export function liveSessionKeyFromEvent(event: NormalizedEvent): LiveSessionKey | undefined {

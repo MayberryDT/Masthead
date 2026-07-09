@@ -144,6 +144,7 @@ function excerpts(): LogbookExcerpt[] {
 function dossier(): SessionDossierDto {
   return {
     attention: [],
+    artifacts: [],
     coverage: {
       level: "partial",
       transcript: {

@@ -24,7 +24,7 @@ describe("observability session card", () => {
     const referenceSession = session();
     const expectedHeaderTime = new Date(referenceSession.lastActivity).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const html = renderToStaticMarkup(
-      <SessionCard session={referenceSession} onToggle={() => undefined} demoTelemetry={sessionDemoTelemetry("session-1", 0)} />
+      <SessionCard session={referenceSession} demoTelemetry={sessionDemoTelemetry("session-1", 0)} />
     );
 
     expect(html).toContain(`Masthead · ${expectedHeaderTime}`);
@@ -32,14 +32,15 @@ describe("observability session card", () => {
     expect(html).toContain("Active");
     expect(html).toContain("8m 42s");
     expect(html).toContain("Runtime");
-    expect(html).toContain("Tokens");
-    expect(html).toContain("126.7M");
+    expect(html).toContain("Worktree");
+    expect(html).toContain("fact-grid-pair");
     expect(html).toContain("Duration");
     expect(html).toContain("runtime-tag");
     expect(html).toContain("bottom-variant-card dovetail-card is-active tier-live");
     expect(html).toContain("bottom-signal");
-    expect(html).toContain("Model");
-    expect(html).toContain("Worktree");
+    expect(html).not.toContain("Tokens");
+    expect(html).not.toContain("Model");
+    expect(html).not.toContain("126.7M");
     expect(html).not.toContain("Thinking");
     expect(html).not.toContain("High");
     expect(html).toContain("Last activity");
@@ -61,7 +62,7 @@ describe("observability session card", () => {
           headline: headlineView("Magnetic slug lock copy")
         })}
         headlineUpdateIndex={2}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -100,7 +101,7 @@ describe("observability session card", () => {
           primaryStatus: "stalled",
           stateLabel: "Idle"
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -108,7 +109,9 @@ describe("observability session card", () => {
       host.querySelectorAll(".card-topline .headline-source, .card-topline .runtime-tag, .card-topline .state-pill")
     ).map((chip) => chip.textContent);
 
-    expect(chipText).toEqual(["Offline", "OpenCode", "Idle"]);
+    expect(chipText).toEqual(["OpenCode", "Idle"]);
+    expect(chipText).not.toContain("Offline");
+    expect(chipText).not.toContain("Pending");
   });
 
   test("keeps stale attention on idle sessions visually quiet", () => {
@@ -120,7 +123,7 @@ describe("observability session card", () => {
           stateLabel: "Idle",
           indicators: ["attention"]
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -133,7 +136,7 @@ describe("observability session card", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({ lifecycle: "running", primaryStatus: "blocked", stateLabel: "Blocked", indicators: ["attention"] })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -153,7 +156,7 @@ describe("observability session card", () => {
           stateLabel: "Blocked",
           indicators: ["attention"]
         })}
-        onToggle={() => undefined}
+       
       />
     );
     const input = renderToStaticMarkup(
@@ -169,7 +172,7 @@ describe("observability session card", () => {
           }),
           attentionReason: "User input requested"
         }}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -197,7 +200,7 @@ describe("observability session card", () => {
             sourceSignals: ["event:seo"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -220,7 +223,7 @@ describe("observability session card", () => {
             sourceSignals: ["event:seo"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -242,7 +245,7 @@ describe("observability session card", () => {
             sourceSignals: ["path:ui"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -264,7 +267,7 @@ describe("observability session card", () => {
             sourceSignals: ["event:headline"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -285,7 +288,7 @@ describe("observability session card", () => {
             sourceSignals: ["event:narrative"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -304,7 +307,7 @@ describe("observability session card", () => {
           indicators: ["attention"],
           attentionReason: "Timeout waiting for response"
         })}
-        onToggle={() => undefined}
+       
         demoTelemetry={sessionDemoTelemetry("session-blocked", 1)}
       />
     );
@@ -325,7 +328,7 @@ describe("observability session card", () => {
           stateLabel: "Completed",
           indicators: []
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -343,7 +346,7 @@ describe("observability session card", () => {
           stateLabel: "Failed",
           indicators: ["attention"]
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -362,7 +365,7 @@ describe("observability session card", () => {
           indicators: ["attention", "conflict"],
           attentionReason: "Same tracked path changed by 2 active sessions"
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -384,7 +387,7 @@ describe("observability session card", () => {
   });
 
   test("keeps exact mockup class names when a new-card hint is provided", () => {
-    const html = renderToStaticMarkup(<SessionCard session={session()} isNew newCardIndex={2} onToggle={() => undefined} />);
+    const html = renderToStaticMarkup(<SessionCard session={session()} isNew newCardIndex={2} />);
 
     expect(html).toContain("session-card bottom-variant-card dovetail-card is-active tier-live is-new-card");
     expect(html).toContain("--new-card-index:2");
@@ -1273,7 +1276,7 @@ describe("observability session card", () => {
           project: "Masthead",
           title: "Import correctness"
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -1292,7 +1295,7 @@ describe("observability session card", () => {
           stateLabel: "Running",
           indicators: ["attention"]
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -1305,13 +1308,17 @@ describe("observability session card", () => {
     expect(html).not.toContain("is-waiting");
   });
 
-  test("does not apply demo harness or model values to live observability cards", () => {
+  test("does not apply demo harness values to live observability cards", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[boardSession({ thinkingLevel: undefined })]} variant="observability" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession({ thinkingLevel: undefined })]} variant="observability" />
     );
 
     expect(html).toContain("OpenCode");
-    expect(html).toContain("Not captured");
+    expect(html).toContain("Runtime");
+    expect(html).toContain("Worktree");
+    expect(html).not.toContain("Tokens");
+    expect(html).not.toContain("Model");
+    expect(html).not.toContain("Not captured");
     expect(html).not.toContain("High");
     expect(html).not.toContain("Claude Code");
     expect(html).not.toContain("Cursor");
@@ -1322,69 +1329,75 @@ describe("observability session card", () => {
 
   test("applies compact density to the observability card grid", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[boardSession()]} variant="observability" density="compact" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession()]} variant="observability" density="compact" />
     );
 
     expect(html).toContain("observability-card-grid compact");
   });
 
-  test("renders captured live model values without demo telemetry", () => {
+  test("keeps model values off the card face even when present on the session", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[boardSession({ model: "gpt-5.5" })]} variant="observability" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession({ model: "gpt-5.5" })]} variant="observability" />
     );
 
-    expect(html).toContain("gpt-5.5");
+    expect(html).toContain("OpenCode");
+    expect(html).toContain("Worktree");
+    expect(html).not.toContain("gpt-5.5");
+    expect(html).not.toContain("Model");
+    expect(html).not.toContain("Tokens");
     expect(html).not.toContain("Cursor");
     expect(html).not.toContain("Hermes");
   });
 
-  test("renders pending headline state without an AI failure badge", () => {
+  test("renders pending headline text without source badges or AI failure chrome", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
-          headline: headlineView("Generating headline...", { source: "pending", status: "pending" }),
+          headline: headlineView("Updating session status...", { source: "pending", status: "pending" }),
           headlineRefresh: {
             provider: "openai",
             requestedAt: "2026-06-23T02:04:00.000Z",
             status: "pending"
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
-    expect(html).toContain("Generating headline...");
-    expect(html).toContain("Pending");
+    expect(html).toContain("Updating session status...");
+    expect(html).not.toContain("Pending");
+    expect(html).not.toContain("Offline");
     expect(html).not.toContain(["AI", "headline", "failed"].join(" "));
     expect(html).not.toContain(["AI", "headline", "not", "configured"].join(" "));
     expect(html).not.toContain("api_error");
     expect(html).not.toContain("source: llm");
   });
 
-  test("renders offline headline source calmly without an AI failure badge", () => {
+  test("renders offline deterministic headlines without Offline badge or AI failure chrome", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({
-          headline: headlineView("Board headlines: structured around subject and disposition.", { source: "offline" }),
+          headline: headlineView("Workbench layout: in progress.", { source: "offline" }),
           headlineRefresh: {
             provider: "openai",
             requestedAt: "2026-06-23T02:04:00.000Z",
             status: "not_configured"
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
-    expect(html).toContain("Board headlines: structured around subject and disposition.");
-    expect(html).toContain("Offline");
+    expect(html).toContain("Workbench layout: in progress.");
+    expect(html).not.toContain("Offline");
+    expect(html).not.toContain("Pending");
     expect(html).not.toContain(["AI", "headline", "failed"].join(" "));
     expect(html).not.toContain(["AI", "headline", "not", "configured"].join(" "));
   });
 
   test("does not render captured thinking values as a primary card fact", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[boardSession({ thinkingLevel: "Extra High" })]} variant="observability" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession({ thinkingLevel: "Extra High" })]} variant="observability" />
     );
 
     expect(html).not.toContain("Extra High");
@@ -1403,7 +1416,7 @@ describe("observability session card", () => {
             sourceSignals: ["path:ui"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 

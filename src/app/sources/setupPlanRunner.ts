@@ -1,3 +1,8 @@
+/**
+ * Legacy import + live-capture setup planner used by SourcesOnboardingModal / import modal.
+ * Sources V2 first-run uses `SourcesConnectOnboarding` (Discover → Enable → Activate) and does
+ * not require metadata import through this runner.
+ */
 import { HARNESS_CATALOG, harnessForRuntime } from "../../adapters/harnessCatalog";
 import type { RuntimeKind } from "../../adapters/types";
 import type {
@@ -68,20 +73,16 @@ export async function runSourcesSetupPlan(plan: SourcesSetupPlan, deps: SetupPla
     }
   }
 
-  if (plan.importMetadata || plan.importTranscripts || plan.queueEnrichment) {
+  if (plan.importMetadata || plan.queueEnrichment) {
     const targets = setupTargets(plan);
     for (const target of targets) {
       const setupInput: SourcesSetupRunInput = {
         enrichmentMode: plan.enrichmentMode,
         importMetadata: plan.importMetadata,
         importScope: plan.importScope,
-        importTranscripts: plan.importTranscripts,
         queueEnrichment: plan.queueEnrichment,
-        runtimeApprovals: filterRuntimeApprovals(plan.runtimeApprovals, target.runtime),
         runtimes: target.runtime ? [target.runtime] : plan.runtimes,
-        sourceIds: target.sourceIds ?? plan.sourceIds,
-        transcriptApproved: plan.transcriptApproved,
-        transcriptApprovals: filterTranscriptApprovals(plan.transcriptApprovals, target.runtime)
+        sourceIds: target.sourceIds ?? plan.sourceIds
       };
       const label = setupLabel(plan, target.runtime);
       appendStep(steps, deps, runningStep(`sources:setup:${target.runtime ?? "selected"}`, label));
@@ -126,34 +127,22 @@ function completedStep(id: string, label: string, status: "succeeded" | "failed"
 }
 
 function setupTargets(plan: SourcesSetupPlan): Array<{ runtime?: string; sourceIds?: string[] }> {
-  const runtimes = Array.from(new Set(plan.runtimes ?? plan.transcriptApprovals?.map((approval) => approval.runtime) ?? []));
+  const runtimes = Array.from(new Set(plan.runtimes ?? []));
   if (runtimes.length === 0) return [{ sourceIds: plan.sourceIds }];
 
   return runtimes.map((runtime) => {
-    const sourceIds = plan.transcriptApprovals
-      ?.filter((approval) => approval.runtime === runtime)
-      .map((approval) => approval.sourceId);
-    return {
-      runtime,
-      sourceIds: sourceIds && sourceIds.length > 0 ? sourceIds : undefined
-    };
+    const sourceIds = sourceIdsForRuntime(plan.sourceIds, runtime);
+    return { runtime, sourceIds };
   });
 }
 
-function filterRuntimeApprovals(
-  approvals: SourcesSetupRunInput["runtimeApprovals"],
-  runtime: string | undefined
-): SourcesSetupRunInput["runtimeApprovals"] {
-  if (!approvals || !runtime) return approvals;
-  return approvals.filter((approval) => approval.runtime === runtime);
-}
-
-function filterTranscriptApprovals(
-  approvals: SourcesSetupRunInput["transcriptApprovals"],
-  runtime: string | undefined
-): SourcesSetupRunInput["transcriptApprovals"] {
-  if (!approvals || !runtime) return approvals;
-  return approvals.filter((approval) => approval.runtime === runtime);
+function sourceIdsForRuntime(sourceIds: string[] | undefined, runtime: string): string[] | undefined {
+  if (!sourceIds) return undefined;
+  const prefixes = [`${runtime}-`, `${runtime}:`];
+  const dashRuntime = runtime.replaceAll("_", "-");
+  if (dashRuntime !== runtime) prefixes.push(`${dashRuntime}-`, `${dashRuntime}:`);
+  const matched = sourceIds.filter((sourceId) => prefixes.some((prefix) => sourceId.startsWith(prefix)));
+  return matched.length > 0 ? matched : sourceIds;
 }
 
 function setupLabel(plan: SourcesSetupPlan, runtime: string | undefined): string {

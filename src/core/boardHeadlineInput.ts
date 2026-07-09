@@ -50,11 +50,16 @@ export function toBoardHeadlineInput(input: {
         canonical?.object,
         supportedWorkContextLabel(facts.workContext?.label, {
           hasTranscriptSubjects,
-          transcriptMentionsSettings: transcriptSupport.settings
+          transcriptMentionsSettings: transcriptSupport.settings,
+          pathClusters: facts.workContext?.pathClusters ?? []
         }),
         ...facts.recentFileBasenames.flatMap((basename) =>
           fileSubjectCandidates(basename, {
-            allowSettingsSubjects: transcriptSupport.settings || !hasTranscriptSubjects,
+            // Settings file basenames only promote Settings UI when transcript is about settings,
+            // or when there is no transcript subject and path clusters are settings-focused.
+            allowSettingsSubjects: hasTranscriptSubjects
+              ? transcriptSupport.settings
+              : isSettingsFocusedClusters(facts.workContext?.pathClusters),
             hasTranscriptSubjects
           })
         ),
@@ -160,12 +165,26 @@ function cleanWorkContextLabel(value: string | undefined): string | undefined {
 
 function supportedWorkContextLabel(
   value: string | undefined,
-  context: { hasTranscriptSubjects: boolean; transcriptMentionsSettings: boolean }
+  context: {
+    hasTranscriptSubjects: boolean;
+    transcriptMentionsSettings: boolean;
+    pathClusters: string[];
+  }
 ): string | undefined {
   const label = cleanWorkContextLabel(value);
   if (!label) return undefined;
   if (context.hasTranscriptSubjects && isSettingsSubject(label) && !context.transcriptMentionsSettings) return undefined;
+  // Multi-area path clusters must not promote Settings UI as the session subject.
+  if (isSettingsSubject(label) && !context.transcriptMentionsSettings && !isSettingsFocusedClusters(context.pathClusters)) {
+    return undefined;
+  }
   return label;
+}
+
+function isSettingsFocusedClusters(clusters: string[] | undefined): boolean {
+  if (!clusters?.length) return false;
+  const unique = [...new Set(clusters)];
+  return unique.every((cluster) => cluster === "settings" || cluster === "ui") && unique.includes("settings");
 }
 
 function fileSubjectCandidates(

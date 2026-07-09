@@ -11,6 +11,7 @@ import {
 } from "../../db/importLedgerRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
 import { addSourceExclusion } from "../../db/sourceRepository.ts";
+import { setSourcePolicy } from "../../db/sourcePolicyRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
 import { runImportWorkUnit } from "../importWorkUnitRunner.ts";
 
@@ -26,6 +27,7 @@ describe("import work unit runner", () => {
     db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
     migrateDatabase(db);
     seedSourceAndImportJob(db, join(tempDir, "thread.jsonl"));
+    allowTranscriptSource(db);
   });
 
   afterEach(async () => {
@@ -224,6 +226,30 @@ describe("import work unit runner", () => {
       status: "succeeded"
     });
   });
+
+  test("fails transcript units without explicit source-scoped permission", async () => {
+    const sourcePath = join(tempDir, "thread.jsonl");
+    db.prepare("DELETE FROM source_policies").run();
+    const unitId = seedWorkUnit(db, sourcePath);
+
+    const result = await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        throw new Error("adapter should not run without permission");
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(result).toEqual({ failed: 1, imported: 0, processed: 0, sessionIds: [] });
+    expect(listImportWorkUnits(db, { importJobId: "import-1" })[0]).toMatchObject({
+      status: "failed",
+      statusReason: "transcript_permission_required"
+    });
+  });
 });
 
 function seedSourceAndImportJob(db: MastheadDatabase, sourcePath: string): void {
@@ -278,4 +304,13 @@ function sourceForPath(path: string): DiscoveredSource {
     sourceId: "opencode-sessions:thread.jsonl",
     sourceKind: "jsonl"
   };
+}
+
+function allowTranscriptSource(db: MastheadDatabase): void {
+  setSourcePolicy(db, {
+    decidedAt: "2026-07-01T00:00:00.000Z",
+    enabled: true,
+    policyKind: "transcript_import",
+    sourceId: "opencode-sessions:thread.jsonl"
+  });
 }

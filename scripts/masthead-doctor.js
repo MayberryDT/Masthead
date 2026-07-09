@@ -70,6 +70,7 @@ checks.push(await checkHookTranscriptCapture());
 checks.push(await checkSettings());
 checks.push(await checkDestructivePreviewSafety());
 checks.push(await checkLiveConnectors());
+checks.push(await checkHarnessConnectors());
 checks.push(await checkLiveState());
 checks.push(await checkHooks());
 
@@ -744,7 +745,7 @@ async function checkHooks() {
       label: "codex hooks",
       status: ok ? "ok" : strictHooks ? "fail" : "warn",
       message: ok
-        ? `installed in ${hookConfigPath}`
+        ? `installed in ${hookConfigPath}; after reinstall/repair open Codex /hooks to re-trust (untrusted hooks are skipped)`
         : `missing ${verified.missingEvents.join(", ") || "none"}; mismatched ${verified.mismatchedEvents.join(", ") || "none"}; mode ${mode.toString(8)}`,
       details: {
         hookConfigPath,
@@ -752,7 +753,8 @@ async function checkHooks() {
         ...verified,
         daemonInstalled: isRecord(daemonHooks?.hooks) ? daemonHooks.hooks.installed : undefined,
         mode: mode.toString(8),
-        privateMode
+        privateMode,
+        trustNote: "Codex skips untrusted non-managed hooks, including for codex exec. Re-trust via /hooks after hook command changes."
       }
     };
   } catch (error) {
@@ -771,7 +773,7 @@ async function checkLiveConnectors() {
     const body = await getJson("/settings/hooks");
     const hooks = isRecord(body.hooks) ? body.hooks : {};
     const integrations = Array.isArray(hooks.integrations) ? hooks.integrations.filter(isRecord) : [];
-    const targetRuntimes = ["codex", "claude_code", "cursor", "grok", "omp", "opencode"];
+    const targetRuntimes = ["codex", "claude_code", "cursor", "grok", "omp", "opencode", "hermes", "pi"];
     const targets = targetRuntimes.map((runtime) => {
       const integration = integrations.find((item) => item.runtime === runtime);
       return {
@@ -810,6 +812,55 @@ async function checkLiveConnectors() {
       status: strictHooks ? "fail" : "warn",
       message: errorMessage(error),
       details: { baseUrl, strict: strictHooks }
+    };
+  }
+}
+
+async function checkHarnessConnectors() {
+  try {
+    const body = await getJson("/sources/connectors");
+    const summary = isRecord(body.summary) ? body.summary : {};
+    const ready = numberValue(summary.ready) ?? 0;
+    const needsAction = numberValue(summary.needsAction) ?? 0;
+    const notInstalled = numberValue(summary.notInstalled) ?? 0;
+    const notFound = numberValue(summary.notFound) ?? 0;
+    const errorCount = numberValue(summary.error) ?? 0;
+    const connectors = Array.isArray(body.connectors) ? body.connectors.filter(isRecord) : [];
+    const found = connectors.filter((connector) => connector.presence === "found");
+    const attention = found.filter((connector) => {
+      const live = stringValue(connector.live);
+      return live === "needs_action" || live === "not_installed" || live === "error";
+    });
+    const summaryMessage = `${ready} ready, ${needsAction} needs action, ${notInstalled} not installed, ${notFound} not found, ${errorCount} error`;
+    const ok = attention.length === 0;
+
+    return {
+      id: "harness-connectors",
+      label: "harness connectors",
+      status: ok ? "ok" : "warn",
+      message: ok
+        ? found.length === 0
+          ? `No found harnesses (${summaryMessage}).`
+          : `All found harnesses are ready (${summaryMessage}).`
+        : `${attention.length} found harness(es) need attention (${summaryMessage}).`,
+      details: {
+        summary: { ready, needsAction, notInstalled, notFound, error: errorCount },
+        found: found.length,
+        attention: attention.map((connector) => ({
+          runtime: stringValue(connector.runtime),
+          live: stringValue(connector.live),
+          actionRequired: stringValue(connector.actionRequired)
+        })),
+        generatedAt: stringValue(body.generatedAt)
+      }
+    };
+  } catch (error) {
+    return {
+      id: "harness-connectors",
+      label: "harness connectors",
+      status: "fail",
+      message: errorMessage(error),
+      details: { baseUrl }
     };
   }
 }

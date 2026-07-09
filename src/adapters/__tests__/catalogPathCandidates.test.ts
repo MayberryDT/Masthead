@@ -8,7 +8,7 @@ const context: DiscoveryContext = {
   now: "2026-06-23T02:04:00.000Z"
 };
 
-const SUPPORTED_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const;
+const SCAN_RUNTIMES = ["codex", "cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const;
 
 describe("catalog path candidates", () => {
   test("expands home and Windows application data placeholders from catalog paths", () => {
@@ -25,13 +25,20 @@ describe("catalog path candidates", () => {
     }
   });
 
-  test("creates catalog candidates only for the focused supported runtimes", () => {
-    expect(SUPPORTED_RUNTIMES.flatMap((runtime) => catalogPathCandidatesForRuntime(runtime, context))).not.toEqual([]);
+  test("creates catalog candidates for every scannable catalog runtime including Codex", () => {
+    expect(SCAN_RUNTIMES.flatMap((runtime) => catalogPathCandidatesForRuntime(runtime, context))).not.toEqual([]);
     expect(
-      SUPPORTED_RUNTIMES.every((runtime) =>
+      SCAN_RUNTIMES.every((runtime) =>
         catalogPathCandidatesForRuntime(runtime, context).every((candidate) => candidate.runtime === runtime)
       )
     ).toBe(true);
+    expect(catalogPathCandidatesForRuntime("codex", context).map((candidate) => candidate.relativePath)).toEqual([
+      "/home/tester/.codex/sessions",
+      "/home/tester/.codex/hooks.json"
+    ]);
+    expect(catalogPathCandidatesForRuntime("codex", context).map((candidate) => candidate.relativePath)).not.toContain(
+      "/home/tester/.codex"
+    );
   });
 
   test("uses catalog Grok hook and session roots as bounded candidates", () => {

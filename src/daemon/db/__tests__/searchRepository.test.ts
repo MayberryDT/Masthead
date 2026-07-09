@@ -7,6 +7,7 @@ import { createSessionRepository } from "../sessionRepository.ts";
 import { indexCanonicalSessionSearch, indexSessionSearch, searchSessions } from "../searchRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
+import { publishSessionToLogbook, seedSession } from "./sessionTestHelpers.ts";
 
 const tempDirs: string[] = [];
 
@@ -21,6 +22,14 @@ describe("logbook FTS search", () => {
     tempDirs.push(tempDir);
     const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
     migrateDatabase(db);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session-1",
+      title: "Masthead data layer"
+    });
+    publishSessionToLogbook(db, "session-1");
 
     indexSessionSearch(db, {
       capsule: "Import OpenCode history into canonical SQLite",
@@ -53,7 +62,8 @@ describe("logbook FTS search", () => {
       hostname: "masthead-test-host",
       runtimeKind: "opencode"
     });
-    repository.upsertLiveEvent(liveEvent("blank", { project: "Masthead", title: "Blank query session" }));
+    const sessionId = repository.upsertLiveEvent(liveEvent("blank", { project: "Masthead", title: "Blank query session" }));
+    publishSessionToLogbook(db, sessionId!);
 
     expect(searchSessions(db, { limit: 10, query: "" })).toMatchObject({
       sessions: [expect.objectContaining({ title: "Blank query session" })],
@@ -81,6 +91,7 @@ describe("logbook FTS search", () => {
       })
     );
     expect(sessionId).toBeTruthy();
+    publishSessionToLogbook(db, sessionId!);
     indexCanonicalSessionSearch(db, sessionId!);
 
     expect(searchSessions(db, { limit: 10, query: "Durable Board" }).sessions[0]).toMatchObject({

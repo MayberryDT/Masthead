@@ -45,7 +45,8 @@ const activeLayoutAnimations = new WeakMap<HTMLElement, ActiveLayoutAnimation>()
 type Props = {
   cards: SessionCardView[];
   lanes?: LifecycleLaneView[];
-  onOpenSession?: (sessionId: string) => void;
+  /** Clears temporary Done highlight after the user notices the card. */
+  onDoneSeen?: (sessionId: string) => void;
   emptyTitle?: string;
   emptyMessage?: string;
   variant?: "lanes" | "observability";
@@ -56,7 +57,7 @@ type Props = {
 export function SessionBoard({
   cards,
   lanes,
-  onOpenSession,
+  onDoneSeen,
   emptyTitle = "No sessions",
   emptyMessage = "No sessions are available for the current view.",
   variant = "lanes",
@@ -113,7 +114,7 @@ export function SessionBoard({
               <SessionCard
                 key={card.sessionId}
                 session={card}
-                onToggle={onOpenSession}
+                onDoneSeen={onDoneSeen}
                 demoTelemetry={showDemoTelemetry ? sessionDemoTelemetry(card.sessionId, index) : undefined}
                 isNew={newSessionOrder.has(card.sessionId)}
                 newCardIndex={newSessionOrder.get(card.sessionId)}
@@ -167,7 +168,7 @@ export function SessionBoard({
                     <SessionCard
                       key={sessionId}
                       session={card}
-                      onToggle={onOpenSession}
+                      onDoneSeen={onDoneSeen}
                       isNew={newSessionOrder.has(sessionId)}
                       newCardIndex={newSessionOrder.get(sessionId)}
                       headlineUpdateIndex={headlineUpdateOrder.get(sessionId)}

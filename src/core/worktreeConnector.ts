@@ -61,6 +61,7 @@ const staticReadOnlyBridgePaths = new Set([
   "/sources",
   "/sources/setup",
   "/sources/advanced",
+  "/sources/connectors",
   "/sessions",
   "/projects",
   "/imports",
@@ -72,6 +73,11 @@ const staticReadOnlyBridgePaths = new Set([
   "/mcp/audit",
   "/settings",
   "/settings/hooks",
+  "/workbench/missing-sessions",
+  "/workbench/sessions",
+  "/workbench/activity",
+  "/workbench/not-added-summary",
+  "/workbench/not-added",
   "/logbook/summary",
   "/logbook/search"
 ]);

@@ -14,7 +14,6 @@ type Props = {
   dossierError?: string;
   dossierEnrichmentBusy?: boolean;
   dossierEnrichmentError?: string;
-  onEnrichDossier?: () => void;
   onRetryDossier?: () => void;
   transcript?: SessionTranscriptResult;
   transcriptLoading?: boolean;
@@ -37,7 +36,6 @@ export function SessionDetailModal({
   dossierLoading,
   onAction,
   onClose,
-  onEnrichDossier,
   onOpenSources,
   onRetryDossier,
   onRetryTranscript,
@@ -142,7 +140,6 @@ export function SessionDetailModal({
             error={dossierError}
             dossierEnrichmentBusy={dossierEnrichmentBusy}
             dossierEnrichmentError={dossierEnrichmentError}
-            onEnrichDossier={onEnrichDossier}
             onRetry={onRetryDossier}
             transcript={transcript}
             transcriptLoading={transcriptLoading}

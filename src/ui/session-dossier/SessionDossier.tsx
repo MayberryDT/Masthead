@@ -16,7 +16,6 @@ type Props = {
   error?: string;
   dossierEnrichmentBusy?: boolean;
   dossierEnrichmentError?: string;
-  onEnrichDossier?: () => void;
   onRetry?: () => void;
   transcript?: SessionTranscriptResult;
   transcriptLoading?: boolean;
@@ -51,7 +50,6 @@ export function SessionDossier({
   live,
   loading = false,
   onClose,
-  onEnrichDossier,
   onTranscriptFilterChange,
   onTranscriptLoadMore,
   titleId,
@@ -131,7 +129,6 @@ export function SessionDossier({
               enrichmentError={dossierEnrichmentError}
               error={error}
               loading={loading}
-              onEnrich={onEnrichDossier}
               summary={summary}
             />
 
@@ -346,7 +343,6 @@ function DossierEnrichmentPanel({
   enrichmentError,
   error,
   loading,
-  onEnrich,
   summary
 }: {
   dossier?: SessionDossierDto;
@@ -354,7 +350,6 @@ function DossierEnrichmentPanel({
   enrichmentError?: string;
   error?: string;
   loading?: boolean;
-  onEnrich?: () => void;
   summary?: string;
 }) {
   const coverage = dossier?.coverage.transcript;
@@ -366,16 +361,6 @@ function DossierEnrichmentPanel({
         <h3>Enrichment summary</h3>
         <div className="dossier-enrichment-actions">
           <span className={["dossier-enrichment-status", `is-${status.toLowerCase().replace(/\s+/g, "-")}`].join(" ")}>{status}</span>
-          <AppButton className="dossier-enrich-button" type="button" onClick={onEnrich} disabled={!onEnrich || enrichmentBusy || (loading && !dossier)}>
-            {enrichmentBusy ? (
-              <>
-                <span className="dossier-loading-spinner" aria-hidden="true" />
-                Enriching
-              </>
-            ) : (
-              "Enrich data"
-            )}
-          </AppButton>
         </div>
       </div>
       <div className="summary-scroll">
@@ -388,6 +373,12 @@ function DossierEnrichmentPanel({
         {enrichmentError ? <SummarySection label="Enrichment error" section="error" value={enrichmentError} /> : null}
         {error ? <SummarySection label="Dossier error" section="error" value={error} /> : null}
         <DossierEvidenceBlocks dossier={dossier} hasCurrentEnrichment={hasCurrentEnrichment} />
+        <SummarySection
+          label="Workbench"
+          section="workbench-handoff"
+          value={dossier ? "Use Workbench to prepare an agent handoff for this session." : undefined}
+        />
+        <WorkbenchArtifactsSection dossier={dossier} />
         <SummarySection label="First prompt" section="first-prompt" value={dossier?.narrative.firstUserPrompt} />
         <SummarySection label="Technologies" section="technologies" values={hasCurrentEnrichment ? dossier?.narrative.technologies : undefined} />
         <DiagnosticCoverage coverage={coverage} />
@@ -443,6 +434,53 @@ function DurableList({ label, values }: { label: string; values: string[] }) {
       </ul>
     </div>
   );
+}
+
+function WorkbenchArtifactsSection({ dossier }: { dossier?: SessionDossierDto }) {
+  const artifacts = dossier?.artifacts ?? [];
+  if (artifacts.length === 0) return null;
+  return (
+    <div className="summary-section workbench-artifacts" data-dossier-section="workbench-artifacts">
+      <h4>Workbench artifacts</h4>
+      <ul className="workbench-artifact-list">
+        {artifacts.map((artifact) => (
+          <li key={artifact.artifactId}>
+            <details>
+              <summary>
+                <span>{artifactKindLabel(artifact.artifactKind)}</span>
+                <strong>{artifact.title ?? "Untitled artifact"}</strong>
+                <em>{[artifact.confidence, `${artifact.evidenceRefs.length} refs`, formatDateTime(artifact.createdAt)].filter(Boolean).join(" / ")}</em>
+              </summary>
+              <pre>{artifactContentPreview(artifact.content)}</pre>
+            </details>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function artifactKindLabel(kind: SessionDossierDto["artifacts"][number]["artifactKind"]): string {
+  return kind === "bug_fix_trace" ? "Bug-Fix Trace" : "Session Dossier";
+}
+
+function artifactContentPreview(content: unknown): string {
+  try {
+    return sanitizeWorkbenchArtifactPreview(JSON.stringify(content, null, 2));
+  } catch {
+    return "Artifact content could not be rendered.";
+  }
+}
+
+function sanitizeWorkbenchArtifactPreview(preview: string): string {
+  const redactions: Array<[RegExp, string]> = [
+    [/masthead(?:ctl)/gi, "Workbench CLI"],
+    [/npm\s+run/gi, "project script"],
+    [/output[.]json/gi, "artifact output file"],
+    [/schema[.]json/gi, "artifact schema file"],
+    [/apply[.]sh/gi, "artifact patch script"]
+  ];
+  return redactions.reduce((result, [pattern, replacement]) => result.replace(pattern, replacement), preview);
 }
 
 function DiagnosticCoverage({ coverage }: { coverage?: SessionDossierDto["coverage"]["transcript"] }) {

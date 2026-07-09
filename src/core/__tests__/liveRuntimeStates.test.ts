@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
 import type { RuntimeKind } from "../../adapters/types.ts";
-import { parseLiveHookPayload } from "../liveHookAdapter.ts";
+import { liveStateReportFromHookPayload, parseLiveHookPayload } from "../liveHookAdapter.ts";
 import { projectLiveEvents } from "../liveProjection.ts";
-import type { LiveBoardProjection, NormalizedEvent } from "../types.ts";
+import { normalizeLiveStateReport, type LiveStateReport } from "../liveState.ts";
+import type { LiveBoardProjection, NormalizedEvent } from "../types";
 
 const RELEASE_LIVE_RUNTIMES = ["codex", "cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const satisfies readonly RuntimeKind[];
 
@@ -57,7 +58,12 @@ describe("release live runtime states", () => {
   test("projects blocked live sessions for every release harness", () => {
     const board = projectRuntimeEvents("blocked", "2026-07-05T16:00:00.000Z");
 
-    expect(board.summary).toMatchObject({ active: RELEASE_LIVE_RUNTIMES.length, running: RELEASE_LIVE_RUNTIMES.length });
+    // Blocked cards live in needs_action, not the Running/active lane.
+    expect(board.summary).toMatchObject({
+      active: 0,
+      running: 0,
+      needsAction: RELEASE_LIVE_RUNTIMES.length
+    });
     for (const runtime of RELEASE_LIVE_RUNTIMES) {
       const card = cardForRuntime(board, runtime);
       expect(card).toMatchObject({
@@ -78,9 +84,12 @@ describe("release live runtime states", () => {
 function projectRuntimeEvents(state: "active" | "blocked" | "idle", generatedAt: string): LiveBoardProjection {
   const occurredAt = state === "idle" ? "2026-07-05T15:40:00.000Z" : "2026-07-05T15:59:30.000Z";
   const events = RELEASE_LIVE_RUNTIMES.map((runtime) => liveEvent(runtime, state, occurredAt));
+  // Mirror production: hook ingest also upserts live-state reports from the same payload.
+  // Board Active/Blocked requires that fresh proof, not just historical session.started events.
   return projectLiveEvents(events, [], {
     generatedAt,
-    headlineMode: "offline"
+    headlineMode: "offline",
+    liveStateReports: liveStateReportsFor(RELEASE_LIVE_RUNTIMES, state, occurredAt, events)
   }).projection;
 }
 
@@ -92,6 +101,29 @@ function liveEvent(runtime: (typeof RELEASE_LIVE_RUNTIMES)[number], state: "acti
   expect(parsed.ok).toBe(true);
   if (!parsed.ok) throw new Error(parsed.diagnostic.message);
   return parsed.event;
+}
+
+function liveStateReportsFor(
+  runtimes: readonly (typeof RELEASE_LIVE_RUNTIMES)[number][],
+  state: "active" | "blocked" | "idle",
+  occurredAt: string,
+  events: NormalizedEvent[]
+): Map<string, LiveStateReport> {
+  const reports = new Map<string, LiveStateReport>();
+  for (const [index, runtime] of runtimes.entries()) {
+    const event = events[index];
+    if (!event?.sessionId) continue;
+    const input = liveStateReportFromHookPayload(payloadFor(runtime, state, occurredAt), {
+      receivedAt: "2026-07-05T16:00:01.000Z",
+      runtime
+    });
+    if (!input) continue;
+    const report = normalizeLiveStateReport(input, new Date(occurredAt));
+    reports.set(event.sessionId, report);
+    const sourceSessionId = typeof event.payload.sourceSessionId === "string" ? event.payload.sourceSessionId : undefined;
+    if (sourceSessionId) reports.set(sourceSessionId, report);
+  }
+  return reports;
 }
 
 function payloadFor(runtime: (typeof RELEASE_LIVE_RUNTIMES)[number], state: "active" | "blocked" | "idle", occurredAt: string): Record<string, unknown> {

@@ -1,78 +1,98 @@
-# Sources and onboarding
+# Sources V2 (live connect)
 
-Masthead’s Sources area is the product surface for discovering local harness history, connecting selected sources, approving transcript import, and tracking setup/import health. It is also the first-run path for getting data into the canonical store, including the setup flow that can scan local sources, select harness history, and install or repair live connectors for Cursor, Claude Code, OpenCode, Grok Build, Hermes, Pi, and OMP.
+Sources is the harness connection control plane for **live capture only**. It is not the session import/publish pipeline (Workbench) and not the published archive (Logbook).
 
-## The setup model
+**Contract (source of truth):** [docs/reference/sources-v2.md](../docs/reference/sources-v2.md)  
+**Decision:** [ADR 0010](../docs/adr/0010-sources-v2-live-connect-only.md)
 
-The daemon computes source setup state in `src/daemon/sources/sourceSetupService.ts` and the renderer reads it through `src/app/daemonClient.ts` and `src/app/sources/useSourcesController.ts`.
+## Product hierarchy (Sources slice)
 
-The core status values are:
+```text
+Sources wires harnesses
+  → live events → canonical DB + Now
+    → Workbench deepens sessions
+      → Logbook shows published sessions
+```
 
-- `empty` — no connected sources and no useful scan result yet,
-- `detected` — scans found sources, but nothing is connected,
-- `importing` — a connected source has active import work,
-- `needs_attention` — a connected source has failures or transcript/enrichment follow-up,
-- `ready` — connected sources are healthy.
+## Job
 
-That status is not just a label; it decides whether the first-run onboarding opens automatically.
+Sources answers only:
 
-## First-run onboarding
+1. Which supported harnesses are present?
+2. Is Masthead’s live connector installed?
+3. What host activation remains (trust, enable, login, repair)?
+4. Did Test (or a real event) prove the wire?
 
-`src/app/App.tsx` contains the onboarding decision logic. It opens onboarding when setup status is one of the first-run states, or when the connected sources are all detected-only records with no imported sessions/records.
+Primary loop:
 
-This means the onboarding flow is a mix of persisted user preference and live source state:
+```text
+Discover → Select → Enable → Activate → Test → Ready
+```
 
-- `src/app/onboardingPreference.ts` stores dismissal state,
-- `src/app/App.tsx` decides whether to show onboarding,
-- `src/daemon/sources/sourceSetupService.ts` reports the underlying setup state,
-- `src/app/sources/SourcesOnboardingModal.tsx` renders the guided setup UI.
+## Non-goals
 
-## Discovery, scan, connect, import
+Do not rebuild Sources as:
 
-The renderer controller in `src/app/sources/useSourcesController.ts` orchestrates the main actions:
+- import job dashboard,
+- bulk metadata/transcript import UI,
+- session table,
+- Workbench activity surface.
 
-- `scanSources` and `scanSourcesSetup` refresh discovery,
-- `connectSources` persists selected source inventory,
-- `importAdapterMetadata` and `importAdapterTranscripts` queue import work,
-- `repairSources`, `retryImport`, `cancelImport`, and `syncAdapter` manage follow-up work.
+History adapters and import APIs may still exist in the daemon for Workbench. They are not Sources V2 UX.
 
-The daemon source services separate these concerns further:
+## UI shape
 
-- discovery/scanning identifies local harness locations,
-- setup summarizes what is connected and what needs attention,
-- connect/import moves the selected source into the canonical store,
-- transcript import remains opt-in.
+- Full catalog of live targets as connector rows (Codex, Claude Code, Cursor, Grok, Hermes, Pi, OMP, OpenCode).
+- Top **Discover** rescan (presence + live status); never silent install.
+- Row CTAs: Enable / Repair / Test / Uninstall as appropriate.
+- Detail: config path, endpoints, activation checklist, advanced checked paths.
+- First-run uses the same loop, not “connect history and queue imports.”
 
-`src/daemon/sources/sourceSetupService.ts` also converts raw discoveries into onboarding-friendly records. A discovered source is considered importable only when the adapter capability profile supports metadata import, the source kind is recognized, the path is present, and the kind is not an inference-only source.
+Status model:
 
-## Transcript approval boundary
+- Presence: `not_found` | `found`
+- Live: `not_installed` | `needs_action` | `ready` | `error`
+- Installed ≠ ready when host action remains (especially Codex `/hooks` trust; Hermes plugin enablement).
 
-Transcript import is intentionally explicit because transcript data may contain private prompts, code, secrets, or customer material.
+## Implementation map
 
-The setup code marks transcript import as requiring approval when the adapter capability supports it. The UI should therefore treat metadata discovery and transcript import as separate decisions.
+| Concern | Where |
+|---|---|
+| Presence scan / preflight | `src/daemon/sources/` (`sourceScanService`, `sourcePreflight*`) |
+| Harness connector service | `src/daemon/sources/harnessConnectorService.ts`, `src/shared/harnessConnectors.ts` |
+| Live install/test/uninstall | `src/daemon/liveConnectorSettings.ts`, `/settings/hooks/*` (underlying) |
+| Sources V2 HTTP API | `GET/POST /sources/connectors*` (see below) |
+| Renderer client | `src/app/daemonClient.ts` (`getHarnessConnectors`, connector actions) |
+| UI | `src/ui/sources/` |
+| Workbench session pipeline | `src/workbench/`, `src/ui/workbench/` |
 
-## Live connector state
+Reuse live-connector install/test paths behind the Sources V2 connector API. Do not invent a second install stack.
 
-Live connector state comes from `/settings/hooks`. The daemon exposes the focused runtime set—Cursor, Claude Code, OpenCode, Grok Build, Hermes, Pi, and OMP—as a runtime list, with status, managed config path, endpoint, and whether Settings/Sources can run install, test, or uninstall actions.
+## Daemon API (Sources V2)
 
-The settings test path uses a validation-only ingest endpoint, so hook checks can confirm the connector path without creating live rows. Runtime-specific daemon routes operate on one connector at a time for the focused runtimes. Live capture can create canonical session identity and runtime-signal rows before transcript import is approved; transcript import remains a separate Sources decision. Import progress surfaces stalled status, heartbeat, current path, progress counts, and grouped failures without requiring transcript approval.
+Product contract remains [sources-v2.md](../docs/reference/sources-v2.md). Route reference: [daemon-api.md](../docs/reference/daemon-api.md).
 
-## What the Sources page is for
+| Method | Path | Role |
+|---|---|---|
+| `GET` | `/sources/connectors` | Connector snapshot + summary (bridge-safe read) |
+| `POST` | `/sources/connectors/discover` | Recompute snapshot (primary-only) |
+| `POST` | `/sources/connectors/:runtime/enable` | Install/repair live connector |
+| `POST` | `/sources/connectors/:runtime/test` | Prove ingest + live-state |
+| `POST` | `/sources/connectors/:runtime/uninstall` | Remove Masthead-managed connector |
+| `POST` | `/sources/connectors/:runtime/confirm-activation` | Clear host-activation after user action |
 
-Sources is not just a discovery list. It is the administrative surface for:
+Doctor check id: `harness-connectors` (`npm run doctor`). Endpoint matrix lists the same paths under read-only GET and blocked mutations.
 
-- recognizing supported harnesses,
-- previewing what Masthead can import,
-- approving or withholding transcript capture,
-- watching active imports and failures,
-- understanding whether a source is healthy, importing, or needs attention.
+## Runtime notes (capture fidelity)
 
-The canonical reference docs `docs/reference/sources.md` and `docs/adr/0008-sources-onboarding-and-harness-catalog.md` add more detail about the harness catalog and setup flow.
+- **Codex:** hooks in `~/.codex/hooks.json`; user must re-trust via `/hooks` after install/repair. Untrusted hooks are skipped.
+- **Hermes:** Python plugin `~/.hermes/plugins/masthead-live/` + `plugins.enabled`; not a bare JS plugin file.
+- All connectors: fail-open, preserve foreign hooks, Masthead-managed uninstall only.
 
 ## What to watch out for
 
-- Keep renderer onboarding rules aligned with daemon setup statuses.
-- Avoid describing detected-only harnesses as imported or connected.
-- Do not imply transcript import is automatic; it is an approval-gated step.
-- Preserve the distinction between scan, connect, import, and sync when changing labels or APIs.
-- If a new runtime is added, update both capability mapping and onboarding behavior together.
+- Do not mark Ready when `needs_action` remains.
+- Do not put import jobs or transcript bulk CTAs back on Sources.
+- Keep Discover non-mutating; Enable is explicit.
+- Bounded local scan only (no whole-home crawl).
+- When adding a runtime, update catalog, live connector install, presence preflight, and Sources row together.

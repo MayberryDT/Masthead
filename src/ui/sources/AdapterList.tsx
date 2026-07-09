@@ -21,10 +21,8 @@ type Props = {
   llm?: SettingsStateDto["llm"];
   settingsBaseUrl?: string;
   onRuntimeHookAction?: (runtime: string, action: HookAction) => Promise<void> | void;
-  onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
-  onImportTranscripts?: (runtime: string) => void;
   onLoadAdapterSources?: (runtime: string, page: { limit: number; offset: number }) => Promise<SourceStatusPage>;
   onOpenImportJobsForRuntime?: (runtime: string) => void;
   onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
@@ -40,11 +38,9 @@ export function AdapterList({
   hooks,
   hookActionBusy,
   llm,
-  onEnableTranscriptImport,
   onRuntimeHookAction,
   onExcludePath,
   onImportMetadata,
-  onImportTranscripts,
   onLoadAdapterSources,
   onOpenImportJobsForRuntime,
   onSaveLlmProvider,
@@ -164,10 +160,8 @@ export function AdapterList({
           settingsBaseUrl={settingsBaseUrl}
           onClose={() => setOpenRuntime(undefined)}
           onRuntimeHookAction={onRuntimeHookAction}
-          onEnableTranscriptImport={onEnableTranscriptImport}
           onExcludePath={onExcludePath}
           onImportMetadata={onImportMetadata}
-          onImportTranscripts={onImportTranscripts}
           onLoadMoreLocations={() => handleLoadMoreSources(openAdapterWithSources.runtime)}
           onOpenImportJobs={onOpenImportJobsForRuntime}
           onSaveLlmProvider={onSaveLlmProvider}

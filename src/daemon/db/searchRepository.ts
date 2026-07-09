@@ -1,5 +1,6 @@
 import { currentSessionEnrichmentView, currentSessionEnrichmentViews } from "./enrichmentViewRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
+import { publishedWorkbenchSessionSql } from "./workbenchPublicationSql.ts";
 
 export type SessionSearchDocument = {
   sessionId: string;
@@ -204,17 +205,25 @@ export function searchSessions(db: MastheadDatabase, query: SessionSearchQuery):
 
   const rows = db
     .prepare(
-      `SELECT session_id AS sessionId,
-        title,
+      `SELECT session_search.session_id AS sessionId,
+        session_search.title,
         snippet(session_search, 2, '<mark>', '</mark>', ' ', 12) AS snippet
       FROM session_search
+      JOIN sessions ON sessions.session_id = session_search.session_id
       WHERE session_search MATCH ?
+        AND ${publishedWorkbenchSessionSql("sessions")}
       ORDER BY rank
       LIMIT ? OFFSET ?`
     )
     .all(match, limit, offset) as Array<{ sessionId: string; title: string; snippet: string }>;
   const total = (
-    db.prepare("SELECT COUNT(*) AS count FROM session_search WHERE session_search MATCH ?").get(match) as { count: number }
+    db.prepare(
+      `SELECT COUNT(*) AS count
+      FROM session_search
+      JOIN sessions ON sessions.session_id = session_search.session_id
+      WHERE session_search MATCH ?
+        AND ${publishedWorkbenchSessionSql("sessions")}`
+    ).get(match) as { count: number }
   ).count;
   return { sessions: rows, total };
 }
@@ -228,12 +237,20 @@ function listRecentSessions(db: MastheadDatabase, limit: number, offset: number)
         '' AS snippet
       FROM sessions
       WHERE deleted_at IS NULL
+        AND ${publishedWorkbenchSessionSql("sessions")}
       ORDER BY last_activity_at DESC
       LIMIT ? OFFSET ?`
     )
     .all(limit, offset) as Array<{ sessionId: string; title: string; snippet: string }>;
   const enrichments = currentSessionEnrichmentViews(db, rows.map((row) => row.sessionId));
-  const total = (db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE deleted_at IS NULL").get() as { count: number }).count;
+  const total = (
+    db.prepare(
+      `SELECT COUNT(*) AS count
+      FROM sessions
+      WHERE deleted_at IS NULL
+        AND ${publishedWorkbenchSessionSql("sessions")}`
+    ).get() as { count: number }
+  ).count;
   return {
     sessions: rows.map((row) => ({
       ...row,

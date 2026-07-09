@@ -6,6 +6,7 @@ import type { SessionCapsule } from "../../enrichment/types.ts";
 import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
 import type {
   SessionDossierAttention,
+  SessionDossierArtifact,
   SessionDossierCoverage,
   SessionDossierCoverageLevel,
   SessionDossierCoverageWarning,
@@ -22,6 +23,7 @@ import type {
 } from "../../shared/sessionDossier.ts";
 import type { SessionTranscriptCoverage } from "../../shared/sessionTranscript.ts";
 import { readCurrentSessionEnrichment, readLatestFailedSessionEnrichment } from "./enrichmentRepository.ts";
+import { listSessionArtifacts } from "./sessionArtifactRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 import { getTranscriptCoverage } from "./sessionTranscriptRepository.ts";
 import { sessionMcpAllowed } from "../../mcp/policy.ts";
@@ -122,10 +124,12 @@ export function getSessionDossier(db: MastheadDatabase, sessionId: string): Sess
   const coverage = getDossierCoverage(db, sessionId, files, tools, runtimeSignals, attention, usage, verification);
   const durableEnrichment = getDurableEnrichment(db, sessionId);
   const enrichment = getDossierEnrichmentState(db, sessionId);
+  const artifacts = getDossierArtifacts(db, sessionId);
   const dossierIdentity = durableEnrichment ? { ...identity, title: durableEnrichment.sessionTitle.text } : identity;
   const narrative = withCoverageCaveat(getNarrative(db, sessionId, dossierIdentity, messages), coverage);
   const partial: DossierWithoutReuse = {
     attention,
+    artifacts,
     coverage,
     durableEnrichment,
     enrichment,
@@ -149,6 +153,28 @@ export function getSessionDossier(db: MastheadDatabase, sessionId: string): Sess
 }
 
 type DossierWithoutReuse = Omit<SessionDossierDto, "reuse">;
+
+function getDossierArtifacts(db: MastheadDatabase, sessionId: string): SessionDossierArtifact[] {
+  return listSessionArtifacts(db, { sessionId })
+    .filter((artifact) => artifact.status === "current")
+    .map((artifact) => ({
+      artifactId: artifact.artifactId,
+      artifactKind: artifact.artifactKind,
+      confidence: artifactConfidence(artifact.content),
+      content: artifact.content,
+      createdAt: artifact.createdAt,
+      evidenceRefs: artifact.evidenceRefs,
+      status: artifact.status,
+      title: artifact.title,
+      updatedAt: artifact.updatedAt
+    }));
+}
+
+function artifactConfidence(content: unknown): SessionDossierArtifact["confidence"] | undefined {
+  if (!content || typeof content !== "object" || !("confidence" in content)) return undefined;
+  const confidence = content.confidence;
+  return confidence === "high" || confidence === "medium" || confidence === "low" ? confidence : undefined;
+}
 
 function getIdentity(db: MastheadDatabase, sessionId: string): SessionDossierIdentity | undefined {
   const row = db
@@ -434,7 +460,7 @@ function coverageWarnings(input: {
   const warnings: SessionDossierCoverageWarning[] = [];
   if (!input.transcript.hasUsableTranscript) {
     warnings.push({
-      action: { label: "Import transcripts in Sources", target: "sources" },
+      action: { label: "Open Workbench", target: "workbench" },
       code: "transcript_missing",
       message: "Full transcript messages are not available for this session."
     });

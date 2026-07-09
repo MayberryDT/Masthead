@@ -182,6 +182,7 @@ describe("board card filtering", () => {
   test("filters cards only by valid supported harness options and does not infer missing harnesses", () => {
     expect(HARNESS_OPTIONS.map((option) => option.value)).toEqual([
       "all",
+      "codex",
       "cursor",
       "claude_code",
       "opencode",
@@ -312,6 +313,94 @@ describe("board card filtering", () => {
         (card) => card.sessionId
       )
     ).toEqual(["newer-active", "older-active"]);
+  });
+
+  test("priority mode is blocked, then active, then idle, each by most recent activity", () => {
+    const cards = [
+      {
+        ...baseCard,
+        sessionId: "old-idle",
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        lastActivity: "2026-06-24T07:00:00.000Z",
+        priorityRank: 1
+      },
+      {
+        ...baseCard,
+        sessionId: "new-idle",
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        lastActivity: "2026-06-24T08:00:00.000Z",
+        priorityRank: 99
+      },
+      {
+        ...baseCard,
+        sessionId: "old-active",
+        lifecycle: "running",
+        primaryStatus: "editing",
+        lastActivity: "2026-06-24T06:00:00.000Z",
+        priorityRank: 1
+      },
+      {
+        ...baseCard,
+        sessionId: "new-active",
+        lifecycle: "running",
+        primaryStatus: "editing",
+        lastActivity: "2026-06-24T07:30:00.000Z",
+        priorityRank: 50
+      },
+      {
+        ...baseCard,
+        sessionId: "old-blocked",
+        lifecycle: "running",
+        primaryStatus: "blocked",
+        lastActivity: "2026-06-24T05:00:00.000Z",
+        priorityRank: 1
+      },
+      {
+        ...baseCard,
+        sessionId: "new-blocked",
+        lifecycle: "running",
+        primaryStatus: "blocked",
+        lastActivity: "2026-06-24T07:45:00.000Z",
+        priorityRank: 50
+      }
+    ] satisfies SessionCardView[];
+
+    expect(
+      filterCards(cards, { query: "", filter: "all", harness: "all", lifecycle: "all", sort: "operational_priority" }).map(
+        (card) => card.sessionId
+      )
+    ).toEqual(["new-blocked", "old-blocked", "new-active", "old-active", "new-idle", "old-idle"]);
+  });
+
+  test("attention indicators alone do not outrank active sessions in priority mode", () => {
+    const cards = [
+      {
+        ...baseCard,
+        sessionId: "idle-attention",
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        indicators: ["attention"],
+        lastActivity: "2026-06-24T08:00:00.000Z",
+        priorityRank: 1
+      },
+      {
+        ...baseCard,
+        sessionId: "active",
+        lifecycle: "running",
+        primaryStatus: "editing",
+        indicators: [],
+        lastActivity: "2026-06-24T07:00:00.000Z",
+        priorityRank: 50
+      }
+    ] satisfies SessionCardView[];
+
+    expect(
+      filterCards(cards, { query: "", filter: "all", harness: "all", lifecycle: "all", sort: "operational_priority" }).map(
+        (card) => card.sessionId
+      )
+    ).toEqual(["active", "idle-attention"]);
   });
 
   test("main scan window filters by last activity across visible scan cards", () => {

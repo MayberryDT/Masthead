@@ -1,26 +1,40 @@
 # OpenWiki Quickstart
 
-Masthead is a local-first, harness-neutral session data layer and session manager for AI-agent work. It discovers local harness history, imports it into a canonical SQLite session graph, makes it searchable in Logbook, enriches sessions into durable capsules, and exposes read-only MCP access for existing agents.
+Masthead is a local-first, harness-neutral session data layer and session manager for AI-agent work. It captures local harness history into a canonical SQLite session graph, runs a Workbench raw→publish pipeline, makes published sessions searchable in Logbook, and exposes read-only MCP access for existing agents.
 
 This wiki is the fastest map for both humans and coding agents. Start here, then follow the links that match the area you want to change.
 
 ## What Masthead is
 
-Masthead is not primarily a chat client or task manager. The product is organized around a local canonical store and a few views over that store:
+Masthead is not primarily a chat client or task manager. The product hierarchy is:
 
 1. canonical session database,
-2. Logbook and search,
-3. read-only MCP access,
-4. live Now view,
-5. source/import administration.
+2. Workbench (raw → publish pipeline),
+3. Logbook (published/searchable only),
+4. read-only MCP,
+5. live Now (shallow),
+6. Sources V2 (harness live-connect only).
 
-That ordering comes from the product and design docs, and it is reflected in the runtime split between renderer, daemon, core logic, enrichment, MCP, and Electron shell.
+Ownership in one line each:
+
+- **Workbench** owns transcript import, cleanup, enrichment, and publication into Logbook.
+- **Logbook** is published sessions only — search/browse/dossier, not the raw import or publish pipeline.
+- **Sources** owns discovering local harnesses and enabling live connectors (hooks/plugins) — not import jobs or per-session Workbench work. Contract: [sources.md](sources.md) → `docs/reference/sources-v2.md`.
+
+That ordering is reflected in the runtime split between renderer, daemon, core logic, workbench, enrichment, MCP, and Electron shell.
 
 ## Major domains
 
 - [Architecture](architecture.md) — how `src/app`, `src/daemon`, `src/core`, `src/enrichment`, `src/mcp`, and `src/electron` fit together.
-- [Sources and onboarding](sources.md) — discovery, setup, import, and the first-run onboarding flow.
+- [Sources V2](sources.md) — discover harnesses, enable live connectors, activation, first-run connect.
 - [Data and integrations](data-and-integrations.md) — canonical storage, data paths, MCP boundary, and enrichment outputs.
+
+## Where to go for Workbench code
+
+- `src/ui/workbench/` — Workbench UI panel and handoff helpers.
+- `src/app/workbench/` — Workbench renderer controller.
+- `src/workbench/` — pipeline state, queue, transcript workflow, quality, apply paths.
+- `src/cli/` — agent-facing CLI (`mastheadctl`, workbench commands).
 
 ## Canonical source docs
 
@@ -32,7 +46,8 @@ These are the main existing docs this wiki synthesizes:
 - `docs/architecture/data-paths.md` — runtime data directory and store ownership.
 - `docs/explanation/session-graph.md` — canonical session graph model.
 - `docs/reference/daemon-api.md` — daemon HTTP API.
-- `docs/reference/sources.md` — source setup and import behavior.
+- `docs/reference/sources-v2.md` — Sources V2 live-connect contract (current).
+- `docs/reference/sources.md` — legacy Sources/import reference (historical; import UX moved to Workbench).
 
 ## Run and verify
 
@@ -49,7 +64,8 @@ Useful scripts from `package.json`:
 ## Where to go next
 
 - Changing app state, navigation, or UI orchestration: [Architecture](architecture.md)
-- Changing source setup, import, or onboarding: [Sources and onboarding](sources.md)
+- Changing Workbench raw→publish pipeline: `src/workbench/`, `src/ui/workbench/`, `src/app/workbench/`, `src/cli/`
+- Changing harness discovery, live connectors, or connect onboarding: [Sources V2](sources.md)
 - Changing persistence, MCP, or enrichment behavior: [Data and integrations](data-and-integrations.md)
 
 ## Notes for future agents

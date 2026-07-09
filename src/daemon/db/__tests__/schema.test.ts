@@ -1,11 +1,14 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
 
 const tempDirs: string[] = [];
+const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
 afterEach(async () => {
   await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
@@ -63,7 +66,12 @@ describe("daemon database schema", () => {
         "legacy_migrations",
         "board_headline_frames",
         "board_headline_generations",
-        "live_state_reports"
+        "live_state_reports",
+        "workbench_runs",
+        "session_artifacts",
+        "workbench_session_state",
+        "workbench_activity",
+        "workbench_claims"
       ])
     );
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
@@ -81,7 +89,10 @@ describe("daemon database schema", () => {
       { version: 11, name: "011_board_headline_generations" },
       { version: 12, name: "012_board_headline_frame_refresh_keys" },
       { version: 13, name: "013_dossier_enrichment_indexes" },
-      { version: 14, name: "014_live_state_reports" }
+      { version: 14, name: "014_live_state_reports" },
+      { version: 15, name: "015_workbench_runs" },
+      { version: 16, name: "016_session_artifacts" },
+      { version: 17, name: "017_workbench_pipeline" }
     ]);
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
     expect(indexes.map((row) => row.name)).toEqual(
@@ -122,6 +133,56 @@ describe("daemon database schema", () => {
     );
 
     expect(() => migrateDatabase(db)).toThrow(/missing critical tables|no such table/i);
+    db.close();
+  });
+
+  test("repairs historical version 12 marker drift for board headline refresh keys", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+
+    db.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL, applied_at TEXT NOT NULL);");
+    for (const migration of [
+      [1, "001_initial"],
+      [2, "002_session_data_product"],
+      [3, "003_session_sources"],
+      [4, "004_cursor_context"],
+      [5, "005_import_progress"],
+      [6, "006_source_setup"],
+      [7, "007_live_projection_enrichment_indexes"],
+      [8, "008_live_projection_usage_indexes"],
+      [9, "009_import_ledger"],
+      [10, "010_board_headline_frames"],
+      [11, "011_board_headline_generations"],
+      [13, "013_dossier_enrichment_indexes"],
+      [14, "014_live_state_reports"],
+      [15, "015_workbench_runs"],
+      [16, "016_session_artifacts"],
+      [17, "017_workbench_pipeline"]
+    ] as const) {
+      const [version, name] = migration;
+      db.exec(readFileSync(join(migrationsDir, `${name}.sql`), "utf8"));
+      db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+        version,
+        name,
+        "2026-07-03T01:03:02.688Z"
+      );
+    }
+    db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+      12,
+      "012_session_enrichment_chunks",
+      "2026-07-03T01:03:02.688Z"
+    );
+    expect((db.prepare("PRAGMA table_info(board_headline_frames)").all() as Array<{ name: string }>).map((row) => row.name)).not.toContain(
+      "refresh_key_hash"
+    );
+
+    migrateDatabase(db);
+
+    const frameColumns = db.prepare("PRAGMA table_info(board_headline_frames)").all() as Array<{ name: string }>;
+    const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
+    expect(frameColumns.map((row) => row.name)).toEqual(expect.arrayContaining(["refresh_key_hash"]));
+    expect(indexes.map((row) => row.name)).toEqual(expect.arrayContaining(["idx_board_headline_frames_refresh_key"]));
     db.close();
   });
 

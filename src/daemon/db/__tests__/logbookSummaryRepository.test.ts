@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { getLogbookSummary } from "../logbookSummaryRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
-import { seedSession } from "./sessionTestHelpers.ts";
+import { publishSessionToLogbook, seedSession } from "./sessionTestHelpers.ts";
 
 const tempDirs: string[] = [];
 
@@ -24,6 +24,7 @@ describe("logbook summary repository", () => {
       sessionId: "session-1",
       title: "OAuth callback repair"
     });
+    publishSessionToLogbook(db, "session-1");
     seedSession(db, {
       lifecycle: "running",
       model: "gpt-5.5",
@@ -31,6 +32,7 @@ describe("logbook summary repository", () => {
       sessionId: "session-2",
       title: "Logbook database rebuild"
     });
+    publishSessionToLogbook(db, "session-2");
 
     expect(getLogbookSummary(db)).toMatchObject({
       fileEffects: 2,

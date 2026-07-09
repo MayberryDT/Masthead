@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { upsertSessionEnrichment } from "../enrichmentRepository.ts";
+import { applySessionArtifact } from "../sessionArtifactRepository.ts";
 import { getSessionDossier } from "../sessionDossierRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
-import { seedSession } from "./sessionTestHelpers.ts";
+import { publishSessionToLogbook, seedSession } from "./sessionTestHelpers.ts";
 
 const tempDirs: string[] = [];
 
@@ -164,6 +165,47 @@ describe("session dossier repository", () => {
     expect(dossier?.identity.title).toBe("Session Dossier enrichment exposure");
     expect(dossier?.durableEnrichment?.sessionTitle.text).toBe("Session Dossier enrichment exposure");
     expect(dossier?.durableEnrichment?.sessionDossier.decisions).toContain("Do not reuse Board live headlines as Logbook titles.");
+    db.close();
+  });
+
+  test("includes current Workbench artifact summaries", async () => {
+    const db = await openTestDatabase();
+    seedDossierSession(db, { sessionId: "session-artifact-dossier" });
+
+    applySessionArtifact(db, {
+      artifactKind: "session_dossier",
+      content: { confidence: "medium", title: "Workbench artifact summary" },
+      contentFingerprint: "artifact:fingerprint:1",
+      createdBy: "workbench_cli",
+      evidenceRefs: ["message:session-artifact-dossier:message"],
+      schemaVersion: "session_dossier-v1",
+      sessionId: "session-artifact-dossier",
+      title: "Workbench artifact summary",
+      validation: { ok: true }
+    });
+    applySessionArtifact(db, {
+      artifactKind: "session_dossier",
+      content: { confidence: "high", title: "Current Workbench artifact" },
+      contentFingerprint: "artifact:fingerprint:2",
+      createdBy: "workbench_cli",
+      evidenceRefs: ["message:session-artifact-dossier:message"],
+      schemaVersion: "session_dossier-v1",
+      sessionId: "session-artifact-dossier",
+      title: "Current Workbench artifact",
+      validation: { ok: true }
+    });
+
+    const dossier = getSessionDossier(db, "session-artifact-dossier");
+
+    expect(dossier?.artifacts).toEqual([
+      expect.objectContaining({
+        artifactKind: "session_dossier",
+        confidence: "high",
+        evidenceRefs: ["message:session-artifact-dossier:message"],
+        status: "current",
+        title: "Current Workbench artifact"
+      })
+    ]);
     db.close();
   });
 
@@ -446,6 +488,7 @@ function seedDossierSession(db: MastheadDatabase, options: { sessionId?: string 
     sessionId,
     title: "Build session dossier"
   });
+  publishSessionToLogbook(db, sessionId);
   db.prepare(
     `UPDATE sessions
     SET objective = ?, outcome_label = ?, source_session_id = ?

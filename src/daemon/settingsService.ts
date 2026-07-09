@@ -404,7 +404,12 @@ function harnessCaptureIntegration(
       actionSurface: "settings",
       captureMode: "live_hook",
       configPath: connector.configPath,
-      description: `Live local ${entry.label} events are installed, tested, and removed from this Settings card.`,
+      description:
+        entry.runtime === "codex"
+          ? `Live local ${entry.label} events are installed, tested, and removed from this Settings card. After install or repair, open Codex and run /hooks to review and trust Masthead hooks — untrusted hooks are skipped, including for codex exec.`
+          : entry.runtime === "hermes"
+            ? `Live local ${entry.label} events use a Python plugin under ~/.hermes/plugins/masthead-live and must be listed in plugins.enabled.`
+            : `Live local ${entry.label} events are installed, tested, and removed from this Settings card.`,
       endpoint: connector.endpoint,
       latestState: latestState?.state,
       latestStateReportAt: latestState?.observedAt,
@@ -514,7 +519,9 @@ export async function testRuntimeHooks(
     lastTest = await runLiveConnectorRoundTrip(config, { runtimes: [runtime] });
   }
 
+  // Persist both global (legacy settings UI) and per-runtime (Sources connections).
   writeHookLastTest(db, lastTest);
+  writeHookLastTest(db, lastTest, runtime);
   return getRuntimeHookSettings(db, config, runtime);
 }
 
@@ -553,18 +560,28 @@ function uniqueOptions(values: Array<string | null | undefined>): SettingsOption
   return Array.from(new Set(values.filter((value): value is string => Boolean(value)))).map((value) => ({ label: value, value }));
 }
 
-function writeHookLastTest(db: MastheadDatabase, input: HookLastTestDto): void {
+function writeHookLastTest(db: MastheadDatabase, input: HookLastTestDto, runtime?: string): void {
+  const key = runtime ? `${hookLastTestKey}:${runtime}` : hookLastTestKey;
   db.prepare(
     `INSERT INTO app_settings (setting_key, setting_json, updated_at)
     VALUES (?, ?, ?)
     ON CONFLICT(setting_key) DO UPDATE SET
       setting_json = excluded.setting_json,
       updated_at = excluded.updated_at`
-  ).run(hookLastTestKey, JSON.stringify(input), input.testedAt);
+  ).run(key, JSON.stringify(input), input.testedAt);
 }
 
 function readHookLastTest(db: MastheadDatabase): HookLastTestDto | undefined {
-  const row = db.prepare("SELECT setting_json AS value FROM app_settings WHERE setting_key = ?").get(hookLastTestKey) as
+  return readHookLastTestForKey(db, hookLastTestKey);
+}
+
+/** Per-runtime last live-connector round-trip result for Sources V2. */
+export function readRuntimeHookLastTest(db: MastheadDatabase, runtime: string): HookLastTestDto | undefined {
+  return readHookLastTestForKey(db, `${hookLastTestKey}:${runtime}`);
+}
+
+function readHookLastTestForKey(db: MastheadDatabase, key: string): HookLastTestDto | undefined {
+  const row = db.prepare("SELECT setting_json AS value FROM app_settings WHERE setting_key = ?").get(key) as
     | { value: string }
     | undefined;
   if (!row) return undefined;

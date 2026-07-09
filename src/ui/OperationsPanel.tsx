@@ -2,14 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { invokeDesktopCommand, isDesktopBridgeAvailable } from "../app/desktopBridge";
 import {
   getSettingsState,
-  updateLlmProviderSettings,
   type DataSummary,
-  type SettingsStateDto,
-  type UpdateLlmProviderSettingsInput
+  type SettingsStateDto
 } from "../app/daemonClient";
 import type { MastheadConnectionState } from "../app/connection/MastheadConnectionProvider";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { EnrichmentSettings } from "./settings/EnrichmentSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { McpSettings } from "./settings/McpSettings";
 import { OnboardingSettings } from "./settings/OnboardingSettings";
@@ -62,7 +59,6 @@ type Props = {
   onConfirmScopedDelete?: () => void;
   onRequestDeleteLocalData?: () => void;
   onConfirmDeleteLocalData?: () => void;
-  onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
 };
 
 export function OperationsPanel({
@@ -89,7 +85,6 @@ export function OperationsPanel({
   onRequestDeleteLocalData,
   onRequestPruneLocalData,
   onRequestScopedDelete,
-  onSaveLlmProvider,
   readOnly = false,
   settingsState
 }: Props) {
@@ -143,18 +138,6 @@ export function OperationsPanel({
     }
   };
 
-  const saveLlmProviderSettings = useCallback(async (input: UpdateLlmProviderSettingsInput) => {
-    if (readOnly) throw new Error("Settings are read-only in this connection.");
-    if (onSaveLlmProvider) {
-      await onSaveLlmProvider(input);
-      return;
-    }
-    const nextSettings = await updateLlmProviderSettings(input, baseUrl);
-    setLoadedSettings(nextSettings);
-    setLocalSettingsError(undefined);
-    setLocalSettingsLoadState("ready");
-  }, [baseUrl, onSaveLlmProvider, readOnly]);
-
   const writesDisabled = busy || readOnly;
   const showSettingsSections = Boolean(effectiveSettings) || settingsLoadState !== "error";
   const localOnlyDeletionNote =
@@ -184,15 +167,6 @@ export function OperationsPanel({
               onRequestPrune={onRequestPruneLocalData}
               settings={effectiveSettings}
               writeDisabled={writesDisabled}
-            />
-          </div>
-          <div className="settings-priority-column settings-priority-column-policy">
-            <EnrichmentSettings
-              enrichment={effectiveSettings?.enrichment}
-              llm={effectiveSettings?.llm}
-              onSaveProvider={saveLlmProviderSettings}
-              readOnly={readOnly}
-              settingsBaseUrl={baseUrl}
             />
           </div>
           <div className="settings-priority-column settings-priority-column-session">

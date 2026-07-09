@@ -32,13 +32,14 @@ function isDuplicateDetail(label: string, detail: string): boolean {
 }
 
 function notificationBody(card: SessionCard, transition: SessionNotificationTransition): string {
+  // Idle must stay calm — never pull attention/high-risk evidence into the body.
+  if (transition === "idle") return "Session went quiet";
+
   const label = notificationTransitionLabel(transition);
-  const details = [
-    transition === "ended" ? statusTokenLabel(card) : undefined,
-    card.attentionReason,
-    card.endReason,
-    card.stateLabel
-  ];
+  const details =
+    transition === "blocked"
+      ? [card.attentionReason, card.stateLabel]
+      : [statusTokenLabel(card), card.endReason, card.stateLabel];
   const detail = details
     .map((item) => item?.trim())
     .find((item): item is string => item !== undefined && item.length > 0 && !isDuplicateDetail(label, item));

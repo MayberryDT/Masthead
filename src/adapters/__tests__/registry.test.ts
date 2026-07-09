@@ -16,10 +16,13 @@ describe("adapter registry", () => {
     }
   });
 
-  test("uses the focused supported set for required scan adapters", () => {
-    expect(requiredScanRuntimes()).toEqual(SUPPORTED_RUNTIMES);
+  test("uses catalog scan targets for required scan adapters, including live-only Codex", () => {
+    const scanRuntimes = ["codex", ...SUPPORTED_RUNTIMES] as const;
+    expect(requiredScanRuntimes()).toEqual(scanRuntimes);
     expect(requiredScanRuntimes()).toEqual(scanTargetHarnesses().map((entry) => entry.runtime));
-    expect(scanAdapters.map((adapter) => adapter.runtime)).toEqual(SUPPORTED_RUNTIMES);
+    expect(scanAdapters.map((adapter) => adapter.runtime)).toEqual(scanRuntimes);
     expect(scanAdapters.find((adapter) => adapter.runtime === "grok")).toBeDefined();
+    expect(scanAdapters.find((adapter) => adapter.runtime === "codex")).toBeDefined();
+    expect(adapterForRuntime("codex")).toBeUndefined();
   });
 });

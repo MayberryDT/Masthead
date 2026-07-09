@@ -240,13 +240,9 @@ export type SourcesSetupRunRequest = {
   runtimes?: string[];
   sourceIds?: string[];
   importMetadata?: boolean;
-  importTranscripts?: boolean;
   queueEnrichment?: boolean;
-  transcriptApproved?: boolean;
   enrichmentMode?: "local" | "remote" | "skip";
-  transcriptApprovals?: Array<{ sourceId: string; runtime: string; approved: boolean }>;
   importScope?: ImportScopeDto;
-  runtimeApprovals?: Array<{ runtime: string; approved: boolean }>;
 };
 
 export type SourcesSetupRunInput = SourcesSetupRunRequest;

@@ -3,6 +3,7 @@ import {
   getMastheadCoverageTool,
   getProjectHistoryTool,
   getSessionExcerptTool,
+  getSessionTranscriptTool,
   getSessionTool,
   listProjectSessionsTool,
   searchSessionsTool
@@ -95,6 +96,14 @@ function callTool(db: MastheadDatabase, tool: string, args: Record<string, unkno
       sessionId: requiredString(args.sessionId, "sessionId")
     });
   }
+  if (tool === "get_session_transcript") {
+    return getSessionTranscriptTool(db, {
+      limit: numberArg(args.limit),
+      maxBytes: maxBytesArg(args.maxBytes),
+      role: transcriptRoleArg(args.role),
+      sessionId: requiredString(args.sessionId, "sessionId")
+    });
+  }
   if (tool === "list_project_sessions") {
     return listProjectSessionsTool(db, { limit: numberArg(args.limit), project: requiredString(args.project, "project") });
   }
@@ -135,6 +144,14 @@ export function toolDefinitions() {
       description: "Get a bounded query-relevant historical transcript excerpt labeled as untrusted evidence.",
       inputSchema: objectSchema(
         { limit: { type: "number" }, maxBytes: { type: "number", minimum: 1, maximum: 16000 }, query: { type: "string" }, sessionId: { type: "string", minLength: 1 } },
+        ["sessionId"]
+      )
+    },
+    {
+      name: "get_session_transcript",
+      description: "Get bounded canonical transcript rows for a session.",
+      inputSchema: objectSchema(
+        { limit: { type: "number" }, maxBytes: { type: "number", minimum: 1, maximum: 16000 }, role: { type: "string" }, sessionId: { type: "string", minLength: 1 } },
         ["sessionId"]
       )
     },
@@ -180,4 +197,8 @@ function numberArg(value: unknown): number | undefined {
 function maxBytesArg(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) return undefined;
   return Math.max(1, Math.min(value, 16_000));
+}
+
+function transcriptRoleArg(value: unknown): "user" | "assistant" | "tool" | "all" | undefined {
+  return value === "user" || value === "assistant" || value === "tool" || value === "all" ? value : undefined;
 }

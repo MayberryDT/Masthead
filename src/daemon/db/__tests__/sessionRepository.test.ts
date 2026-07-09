@@ -8,6 +8,7 @@ import type { AdapterRecord } from "../../../adapters/types.ts";
 import { migrateDatabase } from "../schema.ts";
 import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor } from "../sessionRepository.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
+import { readWorkbenchSessionState } from "../workbenchPipelineRepository.ts";
 
 const tempDirs: string[] = [];
 
@@ -79,6 +80,64 @@ describe("session repository", () => {
     expect(db.prepare("SELECT model, output_tokens FROM model_usage").all()).toEqual([
       { model: "gpt-5.5", output_tokens: 32 }
     ]);
+    db.close();
+  });
+
+  test("live upsert auto-enrolls session onto publish_path", async () => {
+    const db = await openMigratedDatabase();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "opencode",
+      runtimeVersion: "codex-test"
+    });
+
+    const sessionId = repository.upsertLiveEvent(
+      liveEvent("start", "session.started", {
+        project: "Masthead",
+        title: "Live capture enrolls to workbench"
+      })
+    );
+    expect(sessionId).toBeDefined();
+
+    const state = readWorkbenchSessionState(db, sessionId!);
+    expect(state).toMatchObject({
+      nextAction: "check_transcript",
+      publicationStatus: "publish_path",
+      sessionId
+    });
+
+    // Idempotent: second live event for same session does not demote or re-create
+    repository.upsertLiveEvent(
+      liveEvent("question", "user.question", { message: "Still on publish path?" })
+    );
+    expect(readWorkbenchSessionState(db, sessionId!)?.publicationStatus).toBe("publish_path");
+    db.close();
+  });
+
+  test("adapter ingest auto-enrolls session onto publish_path", async () => {
+    const db = await openMigratedDatabase();
+    const record = transcriptMessageRecord({
+      content: "Adapter materialize should enroll.",
+      cwd: "/workspace/masthead",
+      role: "user",
+      session_id: "adapter-enroll-session",
+      timestamp: "2026-06-24T12:10:00.000Z"
+    });
+
+    const result = ingestAdapterRecord(db, record, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "opencode",
+      runtimeVersion: "local-jsonl"
+    });
+
+    expect(result.sessionId).toBeDefined();
+    expect(readWorkbenchSessionState(db, result.sessionId!)).toMatchObject({
+      nextAction: "check_transcript",
+      publicationStatus: "publish_path",
+      sessionId: result.sessionId
+    });
     db.close();
   });
 

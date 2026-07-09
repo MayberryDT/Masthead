@@ -163,10 +163,8 @@ export function SourcesImportModal({
     await onRunSetup?.({
       importMetadata: true,
       importScope: scope,
-      importTranscripts: true,
       queueEnrichment: true,
-      runtimes: selectedRuntimes,
-      transcriptApproved: true
+      runtimes: selectedRuntimes
     });
     onClose();
   };
@@ -289,10 +287,8 @@ function buildPreviewInput(choice: ScopeChoice, runtimes: string[]): SourcesSetu
   return {
     importMetadata: true,
     importScope: scopeForChoice(choice),
-    importTranscripts: true,
     queueEnrichment: true,
-    runtimes,
-    transcriptApproved: true
+    runtimes
   };
 }
 

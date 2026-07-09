@@ -55,7 +55,7 @@ describe("Live Board UI", () => {
     expect(html).not.toContain("Recent Errors");
     expect(html).toContain("All Harnesses");
     expect(html).toContain("All Lifecycles");
-    expect(html).toContain("Last 24 hours");
+    expect(html).toContain("Last week");
     expect(html).toContain("10s");
     expect(html).toContain("Priority");
     expect(html).not.toContain("Live ingestion");
@@ -367,8 +367,8 @@ describe("Live Board UI", () => {
     expect(html).not.toContain("Work is active.");
     expect(html).toContain("Worktree");
     expect(html).toContain("auth/callback");
-    expect(html).toContain('role="button"');
-    expect(html).toContain('aria-label="Open Auth work details"');
+    expect(html).not.toContain('role="button"');
+    expect(html).toContain('aria-label="Auth work · Active"');
     expect(html).not.toContain("Acme payroll");
     expect(html).not.toContain("private customer detail");
   });

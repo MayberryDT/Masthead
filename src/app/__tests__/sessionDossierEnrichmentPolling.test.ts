@@ -37,6 +37,7 @@ describe("pollDossierEnrichment", () => {
 function dossier(status: SessionDossierDto["enrichment"]["status"]): SessionDossierDto {
   return {
     attention: [],
+    artifacts: [],
     coverage: {
       level: "partial",
       transcript: {

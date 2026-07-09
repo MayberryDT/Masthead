@@ -101,6 +101,14 @@ function liveCaptureStatus(
   }
   if (integration.status === "needs_repair") return { label: "Needs repair", message: hooks.error, tone: hooks.error ? "danger" : "warning" };
   if (integration.status === "installed") {
+    if (runtime === "codex") {
+      return {
+        label: "Installed",
+        message:
+          "If Now stays empty for real Codex runs, open Codex and run /hooks to re-trust Masthead hooks after install or repair. Untrusted hooks are skipped (including codex exec).",
+        tone: "active"
+      };
+    }
     return { label: "Installed", tone: "active" };
   }
   return { label: "Not installed", message: `${label} live connector is not installed yet.`, tone: "warning" };

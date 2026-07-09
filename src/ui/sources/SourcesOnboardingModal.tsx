@@ -150,16 +150,10 @@ export function SourcesOnboardingModal({
           enrichmentMode,
           importMetadata: true,
           importScope: scopeForHistoryChoice(historyImportScope),
-          importTranscripts: false,
           liveCapture: selectedRuntimeNames.map((runtime) => ({ action: "install", runtime })),
           queueEnrichment: false,
           runtimes: selectedRuntimeNames,
-          sourceIds: selectedSources.map((source) => source.sourceId),
-          transcriptApprovals: selectedSources.map((source) => ({
-            approved: false,
-            runtime: source.runtime,
-            sourceId: source.sourceId
-          }))
+          sourceIds: selectedSources.map((source) => source.sourceId)
         }, {
           onLog: (entry) => setSetupLogs((current) => [...current, entry]),
           runHookAction: async (runtime, action) => {

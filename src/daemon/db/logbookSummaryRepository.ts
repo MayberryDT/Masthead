@@ -1,4 +1,5 @@
 import type { MastheadDatabase } from "./sqlite.ts";
+import { publishedWorkbenchSessionSql } from "./workbenchPublicationSql.ts";
 
 export type LogbookSummaryDto = {
   sessions: number;
@@ -24,7 +25,8 @@ export function getLogbookSummary(db: MastheadDatabase): LogbookSummaryDto {
         MIN(COALESCE(started_at, last_activity_at)) AS earliestActivityAt,
         MAX(last_activity_at) AS latestActivityAt
       FROM sessions
-      WHERE deleted_at IS NULL`
+      WHERE deleted_at IS NULL
+        AND ${publishedWorkbenchSessionSql("sessions")}`
     )
     .get() as { sessions: number; projects: number; earliestActivityAt: string | null; latestActivityAt: string | null };
 
@@ -62,6 +64,7 @@ function groupedCounts<T extends "runtime" | "model" | "lifecycle">(
       `SELECT ${expression} AS ${alias}, COUNT(DISTINCT sessions.session_id) AS count
       FROM ${fromClause}
       WHERE sessions.deleted_at IS NULL
+        AND ${publishedWorkbenchSessionSql("sessions")}
         AND ${expression} IS NOT NULL
         AND trim(${expression}) <> ''
       GROUP BY ${expression}
@@ -76,7 +79,8 @@ function countJoinedRows(db: MastheadDatabase, table: "messages" | "tool_calls" 
       `SELECT COUNT(*) AS count
       FROM ${table}
       JOIN sessions ON sessions.session_id = ${table}.session_id
-      WHERE sessions.deleted_at IS NULL`
+      WHERE sessions.deleted_at IS NULL
+        AND ${publishedWorkbenchSessionSql("sessions")}`
     )
     .get() as { count: number };
   return row.count;

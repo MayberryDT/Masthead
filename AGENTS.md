@@ -9,10 +9,11 @@ manager.
 The product hierarchy is:
 
 1. canonical session database,
-2. Logbook and search,
-3. read-only MCP access,
-4. live Now view,
-5. source/import administration.
+2. Workbench (raw → publish pipeline),
+3. Logbook (published/searchable only),
+4. read-only MCP,
+5. live Now (shallow),
+6. Sources V2 (harness live-connect only; see `docs/reference/sources-v2.md`).
 
 Observability is a view over continuously collected session data.
 
@@ -39,15 +40,16 @@ Read `design.md` before Masthead UI work. It is the single master design source 
 
 `prd.md` remains the product/source-of-scope document. Historical files under `docs/superpowers/plans/` are implementation history, not current visual direction. Do not resurrect the old Raycast-inspired design file or use archived screenshots as the current design contract unless Tyler explicitly asks for that.
 
-Sessions, Logbook, Sources, Agent Access, and Settings share one visual language, but each surface
-must use the information architecture best suited to its job. Do not force all surfaces into the
-live session-card composition.
+Sessions, Workbench, Logbook, Sources, Agent Access, and Settings share one visual language, but
+each surface must use the information architecture best suited to its job. Do not force all
+surfaces into the live session-card composition.
 
 Surface archetypes:
 
 - Now: live cards.
+- Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
 - Logbook: dense table plus inspector.
-- Sources: adapter/settings rows plus import jobs.
+- Sources: harness connector rows plus live enablement (Discover → Enable → Activate → Test); see `docs/reference/sources-v2.md`.
 - Agent Access: setup, permissions, tools, and audit tables.
 - Settings: vertical settings sections and danger zone.
 

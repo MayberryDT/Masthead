@@ -7,7 +7,7 @@ import { indexCanonicalSessionSearch, searchSessions } from "../searchRepository
 import { getSessionDetail, querySessions } from "../sessionQueryRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
-import { seedSession } from "./sessionTestHelpers.ts";
+import { publishSessionToLogbook, seedSession } from "./sessionTestHelpers.ts";
 
 const tempDirs: string[] = [];
 
@@ -26,6 +26,7 @@ describe("enriched session query", () => {
       sessionId: "session-1",
       title: "OpenCode session"
     });
+    publishSessionToLogbook(db, "session-1");
     upsertSessionEnrichment(db, {
       content: {
         candidateDecisions: [],

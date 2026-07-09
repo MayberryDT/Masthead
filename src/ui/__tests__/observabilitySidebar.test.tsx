@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { ObservabilitySidebar } from "../ObservabilitySidebar";
 import { APP_VERSION_LABEL } from "../../app/version";
+import { iconRegistry } from "../icons/icon-registry";
 
 describe("ObservabilitySidebar", () => {
   test("renders Masthead identity and session product nav", () => {
@@ -9,8 +10,8 @@ describe("ObservabilitySidebar", () => {
 
     expect(html).toContain("Masthead");
     expect(html).toContain(APP_VERSION_LABEL);
-    expect(html).toContain("Board");
-    expect(html).not.toContain("Now");
+    expect(html).toContain("Now");
+    expect(html).toContain("Workbench");
     expect(html).toContain("24");
     expect(html).not.toContain("Traces");
     expect(html).not.toContain("Models");
@@ -37,5 +38,9 @@ describe("ObservabilitySidebar", () => {
     expect(html).toContain("brand-sail");
     expect(html).toContain("<button");
     expect(html).not.toContain("href=\"#");
+  });
+
+  test("Workbench and Logbook use distinct registry icons", () => {
+    expect(iconRegistry.workbench).not.toBe(iconRegistry.logbook);
   });
 });

@@ -292,7 +292,7 @@ function toCard(
     sourceSessionId: session.sourceSessionId ?? session.sessionId,
     startedAt,
     lastActivity: session.lastMeaningfulActivityAt,
-    lastActivityLabel: relativeAgeLabel(session.lastMeaningfulActivityAt, events),
+    lastActivityLabel: relativeAgeLabel(session.lastMeaningfulActivityAt, now),
     changedFileCount: session.changedFileCount,
     attentionReason: sessionAttention[0]?.title,
     indicators,
@@ -764,20 +764,17 @@ function labelForOutcome(outcome: SessionOutcomeLabel): string {
     .join(" ");
 }
 
-function relativeAgeLabel(timestamp: string, events: NormalizedEvent[]): string {
+function relativeAgeLabel(timestamp: string, now: Date): string {
   const parsed = Date.parse(timestamp);
   if (Number.isNaN(parsed)) return timestamp;
-  const latest = events
-    .map((event) => Date.parse(event.occurredAt))
-    .filter((value) => !Number.isNaN(value))
-    .toSorted((a, b) => a - b)
-    .at(-1);
-  const base = latest ?? parsed;
+  const base = Number.isNaN(now.getTime()) ? parsed : now.getTime();
   const elapsedSeconds = Math.max(0, Math.round((base - parsed) / 1000));
   if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
   const elapsedMinutes = Math.round(elapsedSeconds / 60);
   if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-  return `${Math.round(elapsedMinutes / 60)}h ago`;
+  const elapsedHours = Math.round(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+  return `${Math.round(elapsedHours / 24)}d ago`;
 }
 
 function groupEventsBySession(events: NormalizedEvent[]): Map<string, NormalizedEvent[]> {

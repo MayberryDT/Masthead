@@ -38,9 +38,12 @@ describe("review disposition projection", () => {
       }
     ).selectedSession;
 
+    // command.finished is not working-proof; without a live-state report the card is Idle.
+    // Stale session dismissals still must not rewrite stateLabel to Dismissed.
     expect(card).toMatchObject({
-      primaryStatus: "reading",
-      lifecycle: "running"
+      primaryStatus: "stalled",
+      lifecycle: "idle",
+      displayState: "idle"
     });
     expect(card?.stateLabel).not.toBe("Dismissed");
     expect(selected?.reviewAnnotations).toContainEqual({
@@ -100,10 +103,17 @@ describe("review disposition projection", () => {
     expect(record.recordType).toBe("review_disposition");
     expect(disposition.reason).toBe("Expected prompt.");
     expect(applied.summary.needsAttention).toBe(0);
-    expect(applied.summary.needsAction).toBe(0);
-    expect(applied.lanes?.find((lane) => lane.laneId === "needs_action")?.sessionIds).toEqual([]);
+    // Dismissing the attention item clears the attention queue/indicators, but a fresh
+    // approval.requested event still proves live Blocked → needs_action.
+    expect(applied.summary.needsAction).toBe(1);
+    expect(applied.lanes?.find((lane) => lane.laneId === "needs_action")?.sessionIds).toEqual(["session-approval"]);
     expect(applied.cards[0]?.indicators).not.toContain("attention");
     expect(applied.cards[0]?.attentionReason).toBeUndefined();
+    expect(applied.cards[0]).toMatchObject({
+      displayState: "blocked",
+      primaryStatus: "blocked",
+      stateLabel: "Blocked"
+    });
     expect(applied.attentionQueue).toEqual([]);
     expect(board.attentionQueue[0]?.evidence).toEqual(item.evidence);
   });
@@ -126,12 +136,16 @@ describe("review disposition projection", () => {
     expect(applied.attentionQueue).toHaveLength(1);
     expect(applied.summary).toMatchObject({
       needsAttention: 1,
-      needsAction: 0
+      needsAction: 1
     });
-    expect(applied.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual(["session-new-attention"]);
-    expect(applied.lanes?.find((lane) => lane.laneId === "needs_action")?.sessionIds).toEqual([]);
+    // Fresh approval.requested projects as Blocked in needs_action, not Running.
+    expect(applied.lanes?.find((lane) => lane.laneId === "running")?.sessionIds).toEqual([]);
+    expect(applied.lanes?.find((lane) => lane.laneId === "needs_action")?.sessionIds).toEqual(["session-new-attention"]);
     expect(applied.cards[0]).toMatchObject({
       lifecycle: "running",
+      displayState: "blocked",
+      primaryStatus: "blocked",
+      stateLabel: "Blocked",
       attentionReason: "Approval requested"
     });
   });

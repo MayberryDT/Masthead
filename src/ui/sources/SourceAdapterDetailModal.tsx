@@ -34,10 +34,8 @@ type Props = {
   settingsBaseUrl?: string;
   onClose: () => void;
   onRuntimeHookAction?: (runtime: string, action: HookAction) => Promise<void> | void;
-  onEnableTranscriptImport?: (runtime: string) => void;
   onExcludePath: (path: string) => void;
   onImportMetadata?: (runtime: string) => void;
-  onImportTranscripts?: (runtime: string) => void;
   onLoadMoreLocations?: () => void;
   onOpenImportJobs?: (runtime: string) => void;
   onSaveLlmProvider?: (input: UpdateLlmProviderSettingsInput) => Promise<void> | void;
@@ -59,10 +57,8 @@ export function SourceAdapterDetailModal({
   settingsBaseUrl,
   onClose,
   onRuntimeHookAction,
-  onEnableTranscriptImport,
   onExcludePath,
   onImportMetadata,
-  onImportTranscripts,
   onLoadMoreLocations,
   onOpenImportJobs,
   onSaveLlmProvider,
@@ -221,20 +217,6 @@ export function SourceAdapterDetailModal({
                   <>
                     <AppButton onClick={() => onImportMetadata?.(view.runtime)} disabled={busy || !onImportMetadata}>
                       Import metadata
-                    </AppButton>
-                    <AppButton
-                      variant="quiet"
-                      disabled={busy || view.policies.transcriptImport || !onEnableTranscriptImport}
-                      onClick={() => onEnableTranscriptImport?.(view.runtime)}
-                    >
-                      Enable transcript import
-                    </AppButton>
-                    <AppButton
-                      variant="quiet"
-                      disabled={busy || !view.policies.transcriptImport || !onImportTranscripts}
-                      onClick={() => onImportTranscripts?.(view.runtime)}
-                    >
-                      Import transcripts
                     </AppButton>
                     <AppButton variant="primary" disabled={busy || !onSyncAdapter} onClick={() => onSyncAdapter?.(view.runtime)}>
                       Sync

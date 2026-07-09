@@ -8,6 +8,7 @@ import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { createSessionRepository } from "../../daemon/db/sessionRepository.ts";
 import { indexCanonicalSessionSearch } from "../../daemon/db/searchRepository.ts";
 import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
+import { publishSessionToLogbook } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { sessionMcpAllowed } from "../policy.ts";
 import { searchSessionsTool } from "../tools.ts";
 
@@ -70,6 +71,7 @@ function seedSession(db: Awaited<ReturnType<typeof openDb>>, suffix: string): st
   });
   const sessionId = repository.upsertLiveEvent(liveEvent(suffix, { message: "OAuth callback work", project: "Pip", title: `OAuth ${suffix}` }));
   if (!sessionId) throw new Error("session was not created");
+  publishSessionToLogbook(db, sessionId);
   indexCanonicalSessionSearch(db, sessionId);
   return sessionId;
 }

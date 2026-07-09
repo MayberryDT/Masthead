@@ -2,10 +2,10 @@ import type { SessionDossierDto } from "../../shared/sessionDossier";
 
 type Props = {
   coverage?: SessionDossierDto["coverage"];
-  onOpenSources?: () => void;
+  onOpenWorkbench?: () => void;
 };
 
-export function DossierCoverageBanner({ coverage, onOpenSources }: Props) {
+export function DossierCoverageBanner({ coverage, onOpenWorkbench }: Props) {
   if (!coverage || (coverage.level === "complete" && coverage.warnings.length === 0)) return null;
   const transcriptWarning = coverage.warnings.find((warning) => warning.code === "transcript_missing");
   return (
@@ -21,8 +21,8 @@ export function DossierCoverageBanner({ coverage, onOpenSources }: Props) {
           ))}
         </ul>
       ) : null}
-      {transcriptWarning && onOpenSources ? (
-        <button type="button" className="dossier-link-button" onClick={onOpenSources}>
+      {transcriptWarning && onOpenWorkbench ? (
+        <button type="button" className="dossier-link-button" onClick={onOpenWorkbench}>
           {transcriptWarning.action?.label ?? "Import transcripts"}
         </button>
       ) : null}

@@ -6,9 +6,33 @@ import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
 import type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest } from "../shared/sourcesSetup";
 import type { ImportCompletionReportDto, ImportJobStatus, ImportManifestSummaryDto, ImportStage, ImportWorkUnitDto, ImportWorkUnitStatus } from "../shared/sourceImport";
+import type {
+  ConnectorActionRequired,
+  ConnectorActivation,
+  ConnectorLive,
+  ConnectorPresence,
+  HarnessConnectorDto,
+  HarnessConnectorsSnapshotDto
+} from "../shared/harnessConnectors";
+import type {
+  WorkbenchActivityResponse,
+  WorkbenchEnrollMissingResponse,
+  WorkbenchMissingSessionsResponse,
+  WorkbenchNotAddedResponse,
+  WorkbenchNotAddedSummaryDto,
+  WorkbenchSessionsResponse
+} from "../shared/workbench";
 
 export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
 export type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest };
+export type {
+  ConnectorActionRequired,
+  ConnectorActivation,
+  ConnectorLive,
+  ConnectorPresence,
+  HarnessConnectorDto,
+  HarnessConnectorsSnapshotDto
+};
 
 export type SessionTranscriptKindFilter = "all" | "user" | "assistant" | "tools" | "checkpoints" | "files" | "signals";
 
@@ -735,9 +759,7 @@ export async function connectSources(
   input: {
     runtimes: string[];
     importMetadata: boolean;
-    importTranscripts: boolean;
     queueEnrichment: boolean;
-    transcriptApproved?: boolean;
   },
   baseUrl = defaultLiveProjectionUrl()
 ): Promise<ConnectSourcesResult> {
@@ -749,18 +771,6 @@ export async function importAdapterMetadata(
   baseUrl = defaultLiveProjectionUrl()
 ): Promise<AdapterImportActionResult> {
   return postAdapterImportAction(runtime, "import-metadata", "metadata import", baseUrl);
-}
-
-
-export async function approveAdapterTranscripts(runtime: string, baseUrl = defaultLiveProjectionUrl()): Promise<void> {
-  await postAdapterImportAction(runtime, "approve-transcripts", "transcript approval", baseUrl);
-}
-
-export async function importAdapterTranscripts(
-  runtime: string,
-  baseUrl = defaultLiveProjectionUrl()
-): Promise<AdapterImportActionResult> {
-  return postAdapterImportAction(runtime, "import-transcripts", "transcript import", baseUrl);
 }
 
 export async function syncAdapter(runtime: string, baseUrl = defaultLiveProjectionUrl()): Promise<AdapterImportActionResult> {
@@ -846,7 +856,7 @@ export async function retryImport(importJobId: string, baseUrl = defaultLiveProj
 
 async function postAdapterImportAction(
   runtime: string,
-  action: "approve-transcripts" | "import-metadata" | "import-transcripts" | "sync",
+  action: "import-metadata" | "sync",
   label: string,
   baseUrl: string
 ): Promise<AdapterImportActionResult> {
@@ -1079,6 +1089,164 @@ export async function getSessionTranscript(
   };
 }
 
+export async function getWorkbenchMissingSessions(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { limit?: number; signal?: AbortSignal } = {}
+): Promise<WorkbenchMissingSessionsResponse> {
+  return getJson<WorkbenchMissingSessionsResponse>(baseUrl, "/workbench/missing-sessions", {
+    label: "workbench missing sessions",
+    query: { limit: options.limit },
+    signal: options.signal
+  });
+}
+
+export async function getWorkbenchSessions(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { limit?: number; offset?: number; scope?: "default"; signal?: AbortSignal } = {}
+): Promise<WorkbenchSessionsResponse> {
+  return getJson<WorkbenchSessionsResponse>(baseUrl, "/workbench/sessions", {
+    label: "workbench sessions",
+    query: { limit: options.limit, offset: options.offset, scope: options.scope },
+    signal: options.signal
+  });
+}
+
+export async function getWorkbenchActivity(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { limit?: number; sessionId?: string; signal?: AbortSignal } = {}
+): Promise<WorkbenchActivityResponse> {
+  return getJson<WorkbenchActivityResponse>(baseUrl, "/workbench/activity", {
+    label: "workbench activity",
+    query: { limit: options.limit, sessionId: options.sessionId },
+    signal: options.signal
+  });
+}
+
+export async function getWorkbenchNotAddedSummary(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<WorkbenchNotAddedSummaryDto> {
+  return getJson<WorkbenchNotAddedSummaryDto>(baseUrl, "/workbench/not-added-summary", {
+    label: "workbench not added summary",
+    signal: options.signal
+  });
+}
+
+export async function getWorkbenchNotAddedSessions(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { limit?: number; signal?: AbortSignal } = {}
+): Promise<WorkbenchNotAddedResponse> {
+  return getJson<WorkbenchNotAddedResponse>(baseUrl, "/workbench/not-added", {
+    label: "workbench not added sessions",
+    query: { includeDetails: true, limit: options.limit },
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchEnrollMissing(
+  baseUrl: string,
+  options: { limit?: number; signal?: AbortSignal } = {}
+): Promise<WorkbenchEnrollMissingResponse> {
+  const body = options.limit === undefined ? undefined : { limit: options.limit };
+  return postJson(baseUrl, "/workbench/enroll-missing", {
+    body,
+    label: "workbench enroll missing",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchCheckTranscript(
+  baseUrl: string,
+  sessionId: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<unknown> {
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/check-transcript`, {
+    label: "workbench check transcript",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchImportTranscriptPreview(
+  baseUrl: string,
+  sessionId: string,
+  options: { sourceId?: string; signal?: AbortSignal } = {}
+): Promise<unknown> {
+  const body = options.sourceId === undefined ? undefined : { sourceId: options.sourceId };
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/import-transcript-preview`, {
+    body,
+    label: "workbench import transcript preview",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchImportTranscript(
+  baseUrl: string,
+  sessionId: string,
+  options: { sourceId?: string; signal?: AbortSignal } = {}
+): Promise<unknown> {
+  const body = options.sourceId === undefined ? undefined : { sourceId: options.sourceId };
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/import-transcript`, {
+    body,
+    label: "workbench import transcript",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchPublish(
+  baseUrl: string,
+  sessionId: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<unknown> {
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/publish`, {
+    label: "workbench publish",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchClaim(
+  baseUrl: string,
+  sessionId: string,
+  options: { claimedBy?: string; ttlSeconds?: number; signal?: AbortSignal } = {}
+): Promise<unknown> {
+  const body: { claimedBy?: string; ttlSeconds?: number } = {};
+  if (options.claimedBy !== undefined) body.claimedBy = options.claimedBy;
+  if (options.ttlSeconds !== undefined) body.ttlSeconds = options.ttlSeconds;
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/claim`, {
+    body: Object.keys(body).length > 0 ? body : undefined,
+    label: "workbench claim",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchReleaseClaim(
+  baseUrl: string,
+  claimId: string,
+  options: { reason?: string; signal?: AbortSignal } = {}
+): Promise<unknown> {
+  const body = options.reason === undefined ? undefined : { reason: options.reason };
+  return postJson(baseUrl, `/workbench/claims/${encodeURIComponent(claimId)}/release`, {
+    body,
+    label: "workbench release claim",
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchQuality(
+  baseUrl: string,
+  sessionId: string,
+  options: { status?: "passed" | "failed"; mode?: "precheck"; reason?: string; signal?: AbortSignal }
+): Promise<unknown> {
+  const body: { status?: "passed" | "failed"; mode?: "precheck"; reason?: string } = {};
+  if (options.status !== undefined) body.status = options.status;
+  if (options.mode !== undefined) body.mode = options.mode;
+  if (options.reason !== undefined) body.reason = options.reason;
+  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/quality`, {
+    body,
+    label: "workbench quality",
+    signal: options.signal
+  });
+}
+
 export async function listProjects(baseUrl = defaultLiveProjectionUrl(), options: { signal?: AbortSignal } = {}): Promise<ProjectOption[]> {
   const url = new URL(baseUrl);
   url.pathname = "/projects";
@@ -1189,6 +1357,97 @@ export async function listLlmProviderModels(
     label: "LLM provider models"
   });
   return body.models;
+}
+
+export async function listHarnessConnectors(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<HarnessConnectorsSnapshotDto> {
+  const body = await getJson<{ ok: true } & HarnessConnectorsSnapshotDto>(baseUrl, "/sources/connectors", {
+    label: "harness connectors request",
+    signal: options.signal
+  });
+  return {
+    generatedAt: body.generatedAt,
+    summary: body.summary,
+    connectors: body.connectors
+  };
+}
+
+export async function discoverHarnessConnectors(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<HarnessConnectorsSnapshotDto> {
+  return postHarnessConnectorAction(baseUrl, "/sources/connectors/discover", "discover harness connectors", options);
+}
+
+export async function enableHarnessConnector(
+  runtime: string,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<HarnessConnectorsSnapshotDto> {
+  return postHarnessConnectorAction(
+    baseUrl,
+    `/sources/connectors/${encodeURIComponent(runtime)}/enable`,
+    `enable ${runtime} harness connector`,
+    options
+  );
+}
+
+export async function testHarnessConnector(
+  runtime: string,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<HarnessConnectorsSnapshotDto> {
+  return postHarnessConnectorAction(
+    baseUrl,
+    `/sources/connectors/${encodeURIComponent(runtime)}/test`,
+    `test ${runtime} harness connector`,
+    options
+  );
+}
+
+export async function uninstallHarnessConnector(
+  runtime: string,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<HarnessConnectorsSnapshotDto> {
+  return postHarnessConnectorAction(
+    baseUrl,
+    `/sources/connectors/${encodeURIComponent(runtime)}/uninstall`,
+    `uninstall ${runtime} harness connector`,
+    options
+  );
+}
+
+export async function confirmHarnessConnectorActivation(
+  runtime: string,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<HarnessConnectorsSnapshotDto> {
+  return postHarnessConnectorAction(
+    baseUrl,
+    `/sources/connectors/${encodeURIComponent(runtime)}/confirm-activation`,
+    `confirm ${runtime} harness connector activation`,
+    options
+  );
+}
+
+async function postHarnessConnectorAction(
+  baseUrl: string,
+  pathname: string,
+  label: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<HarnessConnectorsSnapshotDto> {
+  const body = await postJson<{ ok: true } & HarnessConnectorsSnapshotDto>(baseUrl, pathname, {
+    label,
+    signal: options.signal
+  });
+  return {
+    generatedAt: body.generatedAt,
+    summary: body.summary,
+    connectors: body.connectors
+  };
 }
 
 export async function getLiveHookSettings(
