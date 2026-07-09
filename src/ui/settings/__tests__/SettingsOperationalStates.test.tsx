@@ -156,6 +156,51 @@ env = {"MASTHEAD_DB_PATH":"/tmp/masthead.sqlite"}`);
     );
   });
 
+  test("ignores deferred clipboard results after the selected format changes", async () => {
+    let resolveCopy: (() => void) | undefined;
+    let rejectCopy: ((reason?: unknown) => void) | undefined;
+    const writeText = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise<void>((resolve) => {
+          resolveCopy = resolve;
+        })
+      )
+      .mockImplementationOnce(
+        () => new Promise<void>((_resolve, reject) => {
+          rejectCopy = reject;
+        })
+      );
+    vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => mcpResponse(input)));
+    vi.stubGlobal("navigator", { ...globalThis.navigator, clipboard: { writeText } });
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Agent access");
+    await waitFor(() => buttonNamed("Copy configuration")?.disabled === false);
+
+    await act(async () => {
+      buttonNamed("Copy configuration")?.click();
+    });
+    await act(async () => {
+      buttonNamed("MCP TOML")?.click();
+      resolveCopy?.();
+      await Promise.resolve();
+    });
+    expect(buttonNamed("Copy configuration")).toBeDefined();
+    expect(buttonNamed("Copied")).toBeUndefined();
+
+    await act(async () => {
+      buttonNamed("Copy configuration")?.click();
+    });
+    await act(async () => {
+      buttonNamed("stdio")?.click();
+      rejectCopy?.(new Error("clipboard denied"));
+      await Promise.resolve();
+    });
+    expect(buttonNamed("Copy configuration")).toBeDefined();
+    expect(buttonNamed("Copy failed")).toBeUndefined();
+    expect(container?.textContent).not.toContain("Could not copy configuration.");
+  });
+
   test("shows concise loading and load failure states beside the MCP server row", async () => {
     let rejectStatus: ((reason?: unknown) => void) | undefined;
     vi.stubGlobal(
@@ -231,6 +276,35 @@ env = {"MASTHEAD_DB_PATH":"/tmp/masthead.sqlite"}`);
     await waitFor(() => container?.textContent?.includes("MCP process did not answer.") === true);
     expect(buttonNamed("Test connection")?.disabled).toBe(false);
     expect(container?.querySelectorAll(".settings-mcp-inline-result")).toHaveLength(1);
+  });
+
+  test("replaces a stale MCP load error with the latest connection-test failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const pathname = requestPath(input);
+        if (pathname === "/mcp/status") return Promise.reject(new Error("Initial MCP load failed."));
+        if (pathname === "/mcp/test-connection") {
+          return jsonResponse({
+            ok: true,
+            test: { status: "failed", message: "Latest connection test failed." }
+          });
+        }
+        return mcpResponse(input);
+      })
+    );
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Agent access");
+    await waitFor(() => container?.textContent?.includes("Initial MCP load failed.") === true);
+
+    await act(async () => {
+      buttonNamed("Test connection")?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => buttonNamed("Test connection")?.disabled === false);
+
+    expect(container?.textContent).toContain("Latest connection test failed.");
+    expect(container?.textContent).not.toContain("Initial MCP load failed.");
   });
 
   test("reports clipboard failure inline without exposing configuration text", async () => {

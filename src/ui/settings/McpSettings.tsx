@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { McpStatusDto, SettingsStateDto } from "../../app/daemonClient";
 import { getMcpStatus } from "../../app/daemonClient";
 import {
@@ -37,6 +37,7 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [status, setStatus] = useState<McpStatusDto>();
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const copyRequestRef = useRef(0);
   const [testResult, setTestResult] = useState<McpTestConnectionDto>();
   const [testState, setTestState] = useState<TestState>("idle");
 
@@ -76,19 +77,23 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
 
   async function copyConfig(): Promise<void> {
     if (!canCopy || !activeCode) return;
+    const requestId = ++copyRequestRef.current;
     if (!globalThis.navigator?.clipboard) {
       setCopyState("failed");
       return;
     }
     try {
       await globalThis.navigator.clipboard.writeText(activeCode);
+      if (requestId !== copyRequestRef.current) return;
       setCopyState("copied");
     } catch {
+      if (requestId !== copyRequestRef.current) return;
       setCopyState("failed");
     }
   }
 
   async function runLaunchTest(): Promise<void> {
+    setLoadError(undefined);
     setTestState("testing");
     setTestResult(undefined);
     try {
@@ -154,6 +159,7 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
                   role="tab"
                   aria-selected={tab.kind === activeConfig}
                   onClick={() => {
+                    copyRequestRef.current += 1;
                     setActiveConfig(tab.kind);
                     setCopyState("idle");
                   }}
