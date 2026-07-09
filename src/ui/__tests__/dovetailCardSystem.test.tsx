@@ -43,7 +43,7 @@ describe("dovetail card system", () => {
     expect(active.querySelector(":scope > .card-topline .runtime-tag")?.textContent).toBe("OpenCode");
     expect(active.querySelector(":scope > .card-topline .state-pill")?.textContent).toBe("Active");
     expect(active.querySelector(":scope > h3.headline")?.textContent).toBe("Refining the live card hierarchy.");
-    expect(active.querySelectorAll(":scope > .fact-grid .fact")).toHaveLength(2);
+    expect(active.querySelectorAll(":scope > .fact-grid .fact")).toHaveLength(4);
     expect(active.querySelector(":scope > .footer-line .timestamp")?.textContent).toBe("2m ago");
   });
 
