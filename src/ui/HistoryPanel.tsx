@@ -11,6 +11,7 @@ import type {
 } from "../app/daemonClient";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
 import { LogbookFacets } from "./logbook/LogbookFacets";
+import { LogbookInspector, type LogbookInspectorArtifact } from "./logbook/LogbookInspector";
 import { LogbookTable } from "./logbook/LogbookTable";
 import { LogbookToolbar } from "./logbook/LogbookToolbar";
 import { logbookColumns } from "./logbook/logbookColumns";
@@ -52,6 +53,9 @@ type Props = {
   onToggleBulkSelect?: (sessionId: string) => void;
   selectedSessionId?: string;
   selectedSessionIds?: string[];
+  selectedArtifact?: LogbookInspectorArtifact;
+  detailLoading?: boolean;
+  onCloseDetail?: () => void;
   sources?: SourceStatus[];
   adapters?: AdapterStatus[];
   imports?: ImportJob[];
@@ -155,10 +159,13 @@ export function HistoryPanel({
   records = [],
   bulkConfirmMessage,
   bulkEnrichBusy,
+  detailLoading = false,
   onCancelBulkEnrichFull,
+  onCloseDetail,
   onConfirmBulkEnrichFull,
   onToggleBulkSelect,
   refreshError,
+  selectedArtifact,
   selectedSessionId,
   selectedSessionIds = [],
   sessions,
@@ -277,16 +284,29 @@ export function HistoryPanel({
       ) : tableSessions.length === 0 ? (
         <EmptyPanel {...emptyState} />
       ) : (
-        <LogbookTable
-          animateOnMount={shouldAnimateLoadedPage}
-          density={density}
-          sessions={tableSessions}
-          selectedSessionId={selectedSessionId}
-          selectedSessionIds={selectedSessionIds}
-          updating={isLoading}
-          onSelect={(sessionId) => onSessionSelect?.(sessionId)}
-          onToggleBulkSelect={onToggleBulkSelect}
-        />
+        <div className={`logbook-master-detail${selectedSessionId || detailLoading ? " has-detail" : ""}`.trim()}>
+          <div className="logbook-master-detail-list">
+            <LogbookTable
+              animateOnMount={shouldAnimateLoadedPage}
+              density={density}
+              sessions={tableSessions}
+              selectedSessionId={selectedSessionId}
+              selectedSessionIds={selectedSessionIds}
+              updating={isLoading}
+              onSelect={(sessionId) => onSessionSelect?.(sessionId)}
+              onToggleBulkSelect={onToggleBulkSelect}
+            />
+          </div>
+          {selectedSessionId || detailLoading ? (
+            <div className="logbook-master-detail-inspector">
+              <LogbookInspector
+                artifact={selectedArtifact}
+                loading={detailLoading && !selectedArtifact}
+                onClose={onCloseDetail ?? (() => undefined)}
+              />
+            </div>
+          ) : null}
+        </div>
       )}
 
       {!errorState && (showPagination || isFirstRunLoading) ? (

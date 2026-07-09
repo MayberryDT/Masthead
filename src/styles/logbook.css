@@ -901,12 +901,111 @@
   margin-top: 2px;
 }
 
+.logbook-master-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.logbook-master-detail.has-detail {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 38%);
+}
+
+.logbook-master-detail-list,
+.logbook-master-detail-inspector {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+.logbook-master-detail-inspector {
+  display: grid;
+  align-content: start;
+}
+
 .logbook-inspector {
   display: grid;
   gap: 14px;
   align-self: start;
   border-radius: 5px;
   padding: 16px;
+}
+
+.logbook-inspector-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.logbook-inspector-meta-chip {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.logbook-inspector-body,
+.logbook-inspector-sections {
+  display: grid;
+  gap: 10px;
+}
+
+.logbook-inspector-section,
+.logbook-inspector-join {
+  border: 1px solid rgba(92, 153, 187, 0.13);
+  border-radius: 5px;
+  background: rgba(6, 25, 37, 0.55);
+  padding: 10px;
+}
+
+.logbook-inspector-section ul,
+.logbook-inspector-section ol,
+.logbook-inspector-provenance-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.logbook-inspector-section li,
+.logbook-inspector-provenance-list li {
+  margin: 3px 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.logbook-inspector-timeline time {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.logbook-inspector-json {
+  margin: 0;
+  border: 1px solid rgba(92, 153, 187, 0.13);
+  border-radius: 5px;
+  background: rgba(6, 25, 37, 0.55);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.logbook-inspector-provenance-list code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.logbook-inspector-join {
+  margin-top: 10px;
 }
 
 .logbook-detail-modal {
@@ -1027,6 +1126,13 @@
 .logbook-excerpt strong {
   margin-right: 8px;
   color: var(--ink);
+}
+
+@media (max-width: 1100px) {
+  .logbook-master-detail.has-detail {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(240px, 45%);
+  }
 }
 
 @media (max-width: 1280px) {

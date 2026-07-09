@@ -5,17 +5,14 @@ import type { SessionDossierDto } from "../../shared/sessionDossier";
 import {
   enrichSessionDossier,
   rebuildEnrichments,
+  getLogbookArtifact,
   getLogbookSummary,
-  getLogbookSession,
-  getLogbookSessionExcerpts,
   getSessionDossier,
   getSessionTranscript,
   listProjects,
   searchLogbook,
   type AdapterStatus,
-  type LogbookExcerpt,
   type LogbookSearchResult,
-  type LogbookSessionDetail,
   type LogbookSort,
   type LogbookSummary,
   type SessionTranscriptKindFilter,
@@ -28,6 +25,7 @@ import {
   writeCachedLogbookPage,
   type LogbookPageCacheRequest
 } from "../logbookPageCache";
+import { toLogbookInspectorArtifact, type LogbookInspectorArtifact } from "../../ui/logbook/LogbookInspector";
 
 const LOGBOOK_PAGE_SIZE = 50;
 
@@ -73,8 +71,7 @@ export function useLogbookController({
   const [bulkTarget, setBulkTarget] = useState<LogbookBulkTarget>({ kind: "explicit", sessionIds: [], total: 0 });
   const [bulkConfirm, setBulkConfirm] = useState<{ depth: "full"; target: LogbookBulkTarget } | undefined>();
   const [bulkStatus, setBulkStatus] = useState<string>();
-  const [selectedSession, setSelectedSession] = useState<LogbookSessionDetail>();
-  const [excerpts, setExcerpts] = useState<LogbookExcerpt[]>([]);
+  const [selectedArtifact, setSelectedArtifact] = useState<LogbookInspectorArtifact>();
   const [detailLoading, setDetailLoading] = useState(false);
   const [dossierRetryKey, setDossierRetryKey] = useState(0);
   const [dossier, setDossier] = useState<SessionDossierDto>();
@@ -186,32 +183,28 @@ export function useLogbookController({
 
   useEffect(() => {
     if (activeSurface !== "logbook" || !selectedSessionId) {
-      setSelectedSession(undefined);
-      setExcerpts([]);
+      setSelectedArtifact(undefined);
+      setDetailLoading(false);
       return;
     }
     const controller = new AbortController();
     setDetailLoading(true);
-    void Promise.all([
-      getLogbookSession(selectedSessionId, activeProjectionUrl, { signal: controller.signal }),
-      getLogbookSessionExcerpts(selectedSessionId, { limit: 8, q: query }, activeProjectionUrl, { signal: controller.signal })
-    ])
-      .then(([nextSession, nextExcerpts]) => {
-        setSelectedSession(nextSession);
-        setExcerpts(nextExcerpts);
+    void getLogbookArtifact(selectedSessionId, activeProjectionUrl, { signal: controller.signal })
+      .then((detail) => {
+        if (controller.signal.aborted) return;
+        setSelectedArtifact(toLogbookInspectorArtifact(detail));
       })
       .catch((detailError: unknown) => {
         if (!controller.signal.aborted) {
-          console.error("[masthead] Logbook detail failed", detailError);
-          setSelectedSession(undefined);
-          setExcerpts([]);
+          console.error("[masthead] Logbook artifact detail failed", detailError);
+          setSelectedArtifact(undefined);
         }
       })
       .finally(() => {
         if (!controller.signal.aborted) setDetailLoading(false);
       });
     return () => controller.abort();
-  }, [activeProjectionUrl, activeSurface, selectedSessionId, query]);
+  }, [activeProjectionUrl, activeSurface, selectedSessionId]);
 
   useEffect(() => {
     if (activeSurface !== "logbook" || !selectedSessionId) {
@@ -500,7 +493,6 @@ export function useLogbookController({
     clearBulkSelection,
     confirmBulkEnrichFull,
     enrichDossier,
-    excerpts,
     filterOptions,
     filters,
     loadMoreTranscript,
@@ -513,7 +505,7 @@ export function useLogbookController({
     retryDossier: () => setDossierRetryKey((current) => current + 1),
     retryTranscript: () => setTranscriptRetryKey((current) => current + 1),
     selectSession: setSelectedSessionId,
-    selectedSession,
+    selectedArtifact,
     selectedSessionId,
     selectedSessionIds,
     selectAllMatchingFilter,

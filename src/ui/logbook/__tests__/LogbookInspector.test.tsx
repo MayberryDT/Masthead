@@ -1,90 +1,94 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import type { LogbookExcerpt, LogbookSessionDetail } from "../../../app/daemonClient";
 import { LogbookInspector } from "../LogbookInspector";
 
 describe("LogbookInspector", () => {
-  test("renders session details, provenance, unresolved work, and excerpts", () => {
+  test("renders runbook body and provenance", () => {
     const html = renderToStaticMarkup(
-      <LogbookInspector excerpts={excerpts()} session={session()} onClose={() => undefined} />
+      <LogbookInspector
+        onClose={() => {}}
+        artifact={{
+          kind: "runbook",
+          title: "Fix cache lock",
+          body: {
+            problemSignature: { symptoms: ["EBUSY"], errorStrings: [], affectedScope: "cache" },
+            reproSteps: ["run tests twice"],
+            fixSteps: ["serialize lock"],
+            deadEnds: [],
+            validationChecks: ["npm test"]
+          },
+          provenanceSessionIds: ["session:a", "session:b"],
+          joinRationale: "shared EBUSY signature"
+        }}
+      />
     );
 
-    expect(html).toContain("Session detail");
-    expect(html).toContain("Repair OAuth callback");
-    expect(html).toContain("Masthead");
-    expect(html).toContain("opencode");
-    expect(html).toContain("Lifecycle");
-    expect(html).toContain("Needs Attention");
-    expect(html).toContain("Source provenance");
-    expect(html).toContain("host:test");
-    expect(html).toContain("source-session-1");
-    expect(html).toContain("Repo: /home/tyler/Documents/Masthead");
-    expect(html).toContain("Worktree: /home/tyler/Documents/Masthead");
-    expect(html).toContain("Included");
-    expect(html).toContain("Authoritative");
-    expect(html).not.toContain("Files");
-    expect(html).not.toContain("src/app/App.tsx");
-    expect(html).toContain("npm");
-    expect(html).toContain("verification missing");
-    expect(html).toContain("Relevant excerpts");
-    expect(html).toContain("OAuth route still fails");
+    expect(html).toContain("Fix cache lock");
+    expect(html).toContain("serialize lock");
+    expect(html).toContain("session:a");
+    expect(html).toContain("shared EBUSY signature");
+    expect(html).toContain("Artifact detail");
+    expect(html).toContain('aria-label="Close artifact detail"');
+    expect(html).toContain("Runbook");
+    expect(html).toContain("EBUSY");
+    expect(html).toContain("npm test");
+    expect(html).not.toContain("Session detail");
   });
 
-  test("renders loading state while detail request is in flight", () => {
-    const html = renderToStaticMarkup(<LogbookInspector excerpts={[]} loading onClose={() => undefined} />);
+  test("renders session dossier sections and omits missing fields", () => {
+    const html = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => {}}
+        artifact={{
+          kind: "session_dossier",
+          title: "Repair OAuth callback",
+          confidence: "high",
+          project: "Masthead",
+          body: {
+            problemStatement: "OAuth return path fails",
+            context: "Login callback after provider redirect",
+            approach: ["Trace callback route", "Add state validation"],
+            outcome: "Route still fails in one edge case",
+            verification: ["Manual login flow"]
+          },
+          provenanceSessionIds: ["session:1"],
+          provenanceLabel: "1 session"
+        }}
+      />
+    );
 
-    expect(html).toContain("Loading session");
-    expect(html).toContain("Loading session detail");
+    expect(html).toContain("Repair OAuth callback");
+    expect(html).toContain("OAuth return path fails");
+    expect(html).toContain("Trace callback route");
+    expect(html).toContain("Route still fails in one edge case");
+    expect(html).toContain("session:1");
+    expect(html).not.toContain("Risks");
+    expect(html).toContain("1 session");
+  });
+
+  test("renders loading state while artifact detail request is in flight", () => {
+    const html = renderToStaticMarkup(<LogbookInspector loading onClose={() => undefined} />);
+
+    expect(html).toContain("Artifact detail");
+    expect(html).toContain("Loading artifact");
+    expect(html).toContain("Loading artifact detail");
+  });
+
+  test("pretty-prints unknown body shapes", () => {
+    const html = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => {}}
+        artifact={{
+          kind: "custom_kind",
+          title: "Unknown shape",
+          body: { foo: "bar", nested: { n: 1 } },
+          provenanceSessionIds: []
+        }}
+      />
+    );
+
+    expect(html).toContain("Unknown shape");
+    expect(html).toContain("&quot;foo&quot;");
+    expect(html).toContain("&quot;bar&quot;");
   });
 });
-
-function session(): LogbookSessionDetail {
-  return {
-    branch: "agent/logbook",
-    durationMs: 1_800_000,
-    endedAt: "2026-06-25T23:12:00.000Z",
-    enrichmentStatus: "current",
-    errorCount: 1,
-    fileCount: 2,
-    files: ["src/app/App.tsx", "src/ui/logbook/LogbookInspector.tsx"],
-    hostId: "host:test",
-    lastActivityAt: "2026-06-25T23:12:00.000Z",
-    lifecycle: "needs_attention",
-    mcpIncluded: true,
-    models: ["gpt-5"],
-    objective: "Fix the OAuth return path.",
-    outcome: "OAuth route still fails in one edge case.",
-    project: "Masthead",
-    repoRoot: "/home/tyler/Documents/Masthead",
-    runtime: "opencode",
-    sessionId: "session-1",
-    sourceConfidence: "authoritative",
-    sourceProvenance: {
-      hostId: "host:test",
-      runtime: "opencode",
-      sourceConfidence: "authoritative",
-      sourceSessionId: "source-session-1"
-    },
-    sourceSessionId: "source-session-1",
-    startedAt: "2026-06-25T22:42:00.000Z",
-    title: "Repair OAuth callback",
-    toolCount: 7,
-    tools: ["npm", "vite"],
-    topics: ["auth", "oauth"],
-    unresolved: ["verification missing"],
-    worktreePath: "/home/tyler/Documents/Masthead"
-  };
-}
-
-function excerpts(): LogbookExcerpt[] {
-  return [
-    {
-      excerptId: "excerpt-1",
-      kind: "message",
-      observedAt: "2026-06-25T23:00:00.000Z",
-      role: "assistant",
-      sourceRef: { line: 42 },
-      text: "OAuth route still fails for missing state."
-    }
-  ];
-}

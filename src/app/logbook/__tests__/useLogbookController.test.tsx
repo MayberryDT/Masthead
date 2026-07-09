@@ -15,8 +15,7 @@ import {
 
 const daemonClientMocks = vi.hoisted(() => ({
   enrichSessionDossier: vi.fn(),
-  getLogbookSession: vi.fn(),
-  getLogbookSessionExcerpts: vi.fn(),
+  getLogbookArtifact: vi.fn(),
   getLogbookSummary: vi.fn(),
   getSessionDossier: vi.fn(),
   getSessionTranscript: vi.fn(),
@@ -166,6 +165,7 @@ function LogbookHarness() {
       bulkTargetCount={logbook.bulkTargetCount}
       bulkTargetKind={logbook.bulkTargetKind}
       density="compact"
+      detailLoading={logbook.detailLoading}
       filterOptions={logbook.filterOptions}
       filters={logbook.filters}
       fullEnrichmentAvailable
@@ -174,6 +174,7 @@ function LogbookHarness() {
       pageSize={logbook.pageSize}
       query={logbook.query}
       refreshError={logbook.refreshError}
+      selectedArtifact={logbook.selectedArtifact}
       selectedSessionId={logbook.selectedSessionId}
       selectedSessionIds={logbook.selectedSessionIds}
       sort={logbook.sort}
@@ -182,6 +183,7 @@ function LogbookHarness() {
       onBulkEnrichSummary={() => void logbook.bulkEnrichSummary()}
       onCancelBulkEnrichFull={logbook.cancelBulkEnrichFull}
       onClearBulkSelection={logbook.clearBulkSelection}
+      onCloseDetail={logbook.closeSession}
       onConfirmBulkEnrichFull={() => void logbook.confirmBulkEnrichFull()}
       onFilterChange={logbook.changeFilters}
       onPageChange={logbook.changePage}
