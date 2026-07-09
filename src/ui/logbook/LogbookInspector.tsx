@@ -219,7 +219,7 @@ function TimelineSection({ value }: { value: unknown }) {
       if (!at && !summary) return undefined;
       return { at, summary };
     })
-    .filter((entry): entry is { at?: string; summary?: string } => Boolean(entry));
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
   if (entries.length === 0) return null;
 
   return (

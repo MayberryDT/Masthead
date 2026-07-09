@@ -12,6 +12,8 @@ type Props = {
 export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, session }: Props) {
   const title = session.title || "Untitled artifact";
   const highlight = session.snippet || session.objective;
+  const kind = session.runtime ?? session.lifecycle ?? "artifact";
+  const publishedAt = session.lastActivityAt;
   const style = {
     "--logbook-row-index": Math.min(rowIndex, 12)
   } as CSSProperties & { "--logbook-row-index": number };
@@ -38,7 +40,7 @@ export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, 
       onKeyDown={handleRowKeyDown}
     >
       <td className="logbook-col-kind">
-        <span className="state-token">{kindLabel(session.runtime || session.lifecycle)}</span>
+        <span className="state-token">{kindLabel(kind)}</span>
       </td>
       <td className="logbook-session-cell logbook-col-session">
         <button
@@ -60,8 +62,14 @@ export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, 
       <td className="logbook-col-confidence">{session.models?.[0] ?? "—"}</td>
       <td className="logbook-col-provenance">{session.hostId || `${session.toolCount ?? 0} sessions`}</td>
       <td className="logbook-date logbook-col-date">
-        <time dateTime={session.lastActivityAt}>{formatDate(session.lastActivityAt)}</time>
-        <span>{formatTime(session.lastActivityAt)}</span>
+        {publishedAt ? (
+          <>
+            <time dateTime={publishedAt}>{formatDate(publishedAt)}</time>
+            <span>{formatTime(publishedAt)}</span>
+          </>
+        ) : (
+          <span>—</span>
+        )}
       </td>
     </tr>
   );

@@ -6,7 +6,6 @@ describe("runSourcesSetupPlan", () => {
     const plan: SourcesSetupPlan = {
       enrichmentMode: "skip",
       importMetadata: true,
-      importTranscripts: false,
       liveCapture: [{ action: "install", runtime: "opencode" }],
       queueEnrichment: false,
       sourceIds: ["opencode-source"]
@@ -42,7 +41,6 @@ describe("runSourcesSetupPlan", () => {
       {
         enrichmentMode: "skip",
         importMetadata: true,
-        importTranscripts: false,
         liveCapture: [{ action: "install", runtime: "opencode" }],
         queueEnrichment: false,
         sourceIds: ["opencode-source"]
@@ -66,7 +64,6 @@ describe("runSourcesSetupPlan", () => {
       {
         enrichmentMode: "skip",
         importMetadata: true,
-        importTranscripts: false,
         liveCapture: [
           { action: "install", runtime: "opencode" },
           { action: "install", runtime: "omp" }
@@ -103,16 +100,10 @@ describe("runSourcesSetupPlan", () => {
       {
         enrichmentMode: "skip",
         importMetadata: true,
-        importTranscripts: false,
         liveCapture: [],
         queueEnrichment: false,
         runtimes: ["cursor", "opencode", "hermes"],
-        sourceIds: ["cursor-source", "opencode-source", "hermes-source"],
-        transcriptApprovals: [
-          { approved: false, runtime: "cursor", sourceId: "cursor-source" },
-          { approved: false, runtime: "opencode", sourceId: "opencode-source" },
-          { approved: false, runtime: "hermes", sourceId: "hermes-source" }
-        ]
+        sourceIds: ["cursor-source", "opencode-source", "hermes-source"]
       },
       {
         onLog: () => undefined,
