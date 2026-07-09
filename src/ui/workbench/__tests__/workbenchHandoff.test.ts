@@ -28,6 +28,9 @@ test("builds an agent handoff for automatic artifact completion without CLI reci
     ]
   });
 
+  expect(text.startsWith("Compile and publish artifacts from these sessions into Logbook:")).toBe(true);
+  expect(text).toContain("session package always");
+  expect(text).toContain("Logbook stores published artifacts only");
   expect(text).toContain("Masthead is running locally");
   expect(text).toContain("Automatic completion loop");
   expect(text).toContain("session package");

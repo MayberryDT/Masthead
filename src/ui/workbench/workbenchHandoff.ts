@@ -32,6 +32,7 @@ export function buildWorkbenchHandoff(input: { sessions: WorkbenchQueueSessionDt
     return `- Session: ${title} (id: ${sessionId}; runtime: ${runtime}${project}; lifecycle: ${lifecycle}; last activity: ${lastActivityAt}; next action: ${nextAction}; resolution: ${resolution}; transcript: ${sanitizeWorkbenchVisibleText(session.transcriptStatus)}; quality: ${sanitizeWorkbenchVisibleText(session.qualityStatus)}; enrichment: ${sanitizeWorkbenchVisibleText(session.sessionEnrichmentStatus)}; dossier: ${sanitizeWorkbenchVisibleText(session.sessionDossierStatus)}; runbook: ${sanitizeWorkbenchVisibleText(session.runbookStatus ?? session.bugFixTraceStatus)}; adr: ${sanitizeWorkbenchVisibleText(session.adrStatus ?? "unknown")}; incident timeline: ${sanitizeWorkbenchVisibleText(session.incidentTimelineStatus ?? "unknown")})`;
   });
   return [
+    "Compile and publish artifacts from these sessions into Logbook: session package always; runbook, ADR, and incident timeline when evidence supports them (else N/A). Sessions stay the capture and pipeline unit; Logbook stores published artifacts only.",
     "Masthead is running locally on this machine. The user selected these Workbench sessions for agent processing. Complete the automatic kind set end-to-end with Masthead Workbench tools—claim, gather evidence, validate, apply, and publish—without asking the user to cluster sessions or click publish.",
     "",
     "Automatic completion loop:",
