@@ -725,7 +725,8 @@ export function App() {
           notAddedSummary={workbench.notAddedSummary}
           onClearSelection={workbench.clearSelection}
           onRetry={workbench.retry}
-          onSelectAllVisible={workbench.selectAllVisible}
+          onSelectAll={workbench.selectAll}
+          onSelectPage={workbench.selectPage}
           onToggleSession={workbench.toggleSession}
           page={workbench.page}
           pageSize={workbench.pageSize}

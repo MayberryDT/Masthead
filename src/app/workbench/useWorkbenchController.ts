@@ -64,7 +64,8 @@ export type UseWorkbenchControllerResult = {
   pageSize: number;
   retry: () => void;
   runAction: (kind: WorkbenchActionKind) => Promise<void>;
-  selectAllVisible: () => void;
+  selectAll: () => Promise<void>;
+  selectPage: () => void;
   selectedSessionIds: Set<string>;
   sessions: WorkbenchQueueSessionDto[];
   setNotAddedOpen: (open: boolean) => void;
@@ -328,9 +329,37 @@ export function useWorkbenchController({
     });
   }, []);
 
-  const selectAllVisible = useCallback(() => {
+  const selectPage = useCallback(() => {
     setSelectedSessionIds(new Set(sessions.map((session) => session.sessionId)));
   }, [sessions]);
+
+  const selectAll = useCallback(async () => {
+    if (!isLive || actionBusy) return;
+    setActionBusy(true);
+    setActionError(undefined);
+    try {
+      const ids = new Set<string>();
+      let offset = 0;
+      let queueTotal = Number.POSITIVE_INFINITY;
+      const limit = 500;
+      while (offset < queueTotal) {
+        const response = await getWorkbenchSessions(activeProjectionUrl, { limit, offset });
+        queueTotal = typeof response.total === "number" ? response.total : response.sessions.length;
+        for (const session of response.sessions) ids.add(session.sessionId);
+        if (response.sessions.length === 0) break;
+        offset += response.sessions.length;
+        if (ids.size >= queueTotal) break;
+      }
+      setSelectedSessionIds(ids);
+      setLastActionSummary(
+        ids.size === 0 ? "No publish-path sessions to select" : `Selected all ${ids.size} publish-path sessions`
+      );
+    } catch (selectError) {
+      setActionError(formatActionError(selectError));
+    } finally {
+      setActionBusy(false);
+    }
+  }, [actionBusy, activeProjectionUrl, isLive]);
 
   const clearSelection = useCallback(() => {
     setSelectedSessionIds(new Set());
@@ -357,7 +386,8 @@ export function useWorkbenchController({
     pageSize,
     retry,
     runAction,
-    selectAllVisible,
+    selectAll,
+    selectPage,
     selectedSessionIds,
     sessions,
     setNotAddedOpen,

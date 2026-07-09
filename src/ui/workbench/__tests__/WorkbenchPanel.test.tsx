@@ -32,9 +32,15 @@ const heroCopyFragments = [
   "onboarding"
 ] as const;
 
-const OPS_BUTTON_LABELS = [
-  "Enroll missing",
+const PRIMARY_BUTTON_LABELS = [
   "Copy Agent Prompt",
+  "Select all",
+  "Clear",
+  "Pipeline"
+] as const;
+
+const PIPELINE_LABELS = [
+  "Enroll missing",
   "Check Transcript",
   "Import Transcript",
   "Precheck",
@@ -42,10 +48,7 @@ const OPS_BUTTON_LABELS = [
   "Fail Quality",
   "Publish",
   "Claim",
-  "Release",
-  "Select Visible",
-  "Clear",
-  "Refresh"
+  "Release"
 ] as const;
 
 function allow(...kinds: WorkbenchActionKind[]) {
@@ -73,14 +76,17 @@ describe("WorkbenchPanel", () => {
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );
 
-    for (const label of OPS_BUTTON_LABELS) {
+    for (const label of PRIMARY_BUTTON_LABELS) {
       expect(html).toContain(label);
     }
+    // Pipeline ops are hidden until the menu is open (client-only); labels not required in static markup
+    expect(html).not.toContain("Select Visible");
+    expect(html).not.toContain("Refresh");
     expect(html).toContain("Publish path");
     expect(html).toContain("Selected");
     expect(html).toContain("Ready to publish");
@@ -120,24 +126,24 @@ describe("WorkbenchPanel", () => {
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );
 
     expect(html).toContain("Copy Agent Prompt");
     expect(html).toContain("app-button-primary");
+    expect(html).toContain("workbench-copy-agent");
     expect(html).toContain("Enrichment and dossier work is agent-only");
     expect(html).toContain("Needs enrichment");
     expect(html).toContain("enrich");
+    expect(html).toContain("Pipeline");
     expect(html).not.toContain("textarea");
     expect(html).not.toContain("type=\"text\"");
     expect(html).not.toContain("Enrichment editor");
     expect(html).not.toContain("Apply enrichment");
-    // Accept Quality / Publish remain present but disabled when canRun denies them
-    expect(html).toMatch(/disabled[^>]*>Accept Quality<|>Accept Quality<\/button>/);
-    expect(html).toContain("Accept Quality");
-    expect(html).toContain("Publish");
+    // Pipeline ops stay collapsed until the menu is opened
+    expect(html).not.toContain("Accept Quality");
     for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
       expect(html).not.toContain(forbiddenToken(index));
     }
@@ -162,7 +168,7 @@ describe("WorkbenchPanel", () => {
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );
@@ -172,15 +178,15 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("Selected");
     expect(html).toContain("Raw session needing enrichment");
     expect(html).toContain("check transcript");
-    expect(html).toContain("Check Transcript");
+    expect(html).toContain("Pipeline");
     expect(html).toContain("Workbench Activity");
     expect(html).toContain("Masthead");
     expect(html).toContain("codex");
     expect(html).toContain("ended");
     expect(html).toContain("Copy Agent Prompt");
-    expect(html).toContain("Select Visible");
+    expect(html).toContain("Select all");
     expect(html).toContain("Clear");
-    expect(html).toContain("Refresh");
+    expect(html).not.toContain("Check Transcript");
     expect(html).toContain("observability-toolbar");
     expect(html).toContain("metal-toolbar");
     expect(html).not.toContain("textarea");
@@ -207,14 +213,14 @@ describe("WorkbenchPanel", () => {
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
         setNotAddedOpen={() => undefined}
       />
     );
 
     expect(html).toContain("No publish-path sessions");
-    expect(html).toContain("If Now has captures, use Enroll missing");
+    expect(html).toContain("If Now has captures, open Pipeline → Enroll missing");
     expect(html).toContain("12 not added to Logbook · open review");
     expect(html).toContain("Publish path");
     expect(html).toContain(">0</dd>");
@@ -225,7 +231,8 @@ describe("WorkbenchPanel", () => {
     expect(html).not.toContain("hook_only");
     expect(html).toContain("Enroll missing");
     expect(html).toContain("Copy Agent Prompt");
-    expect(html).toContain("Check Transcript");
+    expect(html).toContain("Pipeline");
+    expect(html).not.toContain("Check Transcript");
     expect(html).toContain("workbench-activity-rail");
     expect(html).not.toContain("workbench-reason-list");
     expect(html).not.toContain("<h1");
@@ -246,36 +253,38 @@ describe("WorkbenchPanel", () => {
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );
 
     expect(html).toContain("No publish-path sessions");
-    expect(html).toContain("If Now has captures, use Enroll missing");
+    expect(html).toContain("If Now has captures, open Pipeline → Enroll missing");
     expect(html).toContain("Enroll missing");
     expect(html).not.toContain("Not Added");
     expect(html).not.toContain("not added to Logbook");
     expect(html).toContain("No activity yet");
   });
 
-  test("toolbar exposes Enroll missing without CLI recipes", () => {
+  test("toolbar exposes primary controls and Pipeline menu without CLI recipes", () => {
     const html = renderToStaticMarkup(
       <WorkbenchPanel
         sessions={[session()]}
-        canRun={allow("enroll_missing")}
+        canRun={allow("enroll_missing", "copy_agent_prompt")}
         runAction={async () => undefined}
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );
 
-    expect(html).toContain("Enroll missing");
-    expect(html).toMatch(/Enroll missing[\s\S]*Copy Agent Prompt/);
-    expect(html).not.toMatch(/disabled[^>]*>Enroll missing|Enroll missing<\/button[^>]*disabled/);
+    expect(html).toContain("Copy Agent Prompt");
+    expect(html).toContain("workbench-copy-agent");
+    expect(html).toContain("Pipeline");
+    expect(html).toContain("Select all");
+    expect(html).toMatch(/Copy Agent Prompt[\s\S]*Select all/);
     for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
       expect(html).not.toContain(forbiddenToken(index));
     }
@@ -314,7 +323,7 @@ describe("WorkbenchPanel", () => {
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );
@@ -354,7 +363,7 @@ describe("WorkbenchPanel", () => {
         setNotAddedOpen={() => undefined}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );
@@ -384,7 +393,7 @@ describe("WorkbenchPanel", () => {
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );
@@ -403,7 +412,7 @@ describe("WorkbenchPanel", () => {
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );
@@ -432,7 +441,7 @@ describe("WorkbenchPanel", () => {
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );
@@ -455,7 +464,7 @@ describe("WorkbenchPanel", () => {
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
-        onSelectAllVisible={() => undefined}
+        onSelectAll={() => undefined}
         onToggleSession={() => undefined}
       />
     );

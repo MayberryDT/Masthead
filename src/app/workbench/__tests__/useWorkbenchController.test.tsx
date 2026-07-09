@@ -123,7 +123,7 @@ describe("useWorkbenchController", () => {
     await waitFor(() => (latest()?.sessions.length ?? 0) === 2);
 
     await act(async () => {
-      latest().selectAllVisible();
+      latest().selectPage();
       await Promise.resolve();
     });
 
@@ -158,7 +158,7 @@ describe("useWorkbenchController", () => {
     expect(latest().handoffText).not.toContain("npm run import review");
 
     await act(async () => {
-      latest().selectAllVisible();
+      latest().selectPage();
       await Promise.resolve();
     });
 
