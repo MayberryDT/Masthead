@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { stableRecordId } from "../identity.ts";
+import { listSessionArtifacts, publishSessionArtifact } from "./sessionArtifactRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type WorkbenchPublicationStatus = "publish_path" | "published" | "not_added_to_logbook";
@@ -315,6 +316,15 @@ export function markWorkbenchPublished(
         updated_at = ?
       WHERE session_id = ?`
     ).run(now, activity.activityId, now, now, input.sessionId);
+    // Session package publish admits the current session dossier into the artifact book.
+    for (const artifact of listSessionArtifacts(db, {
+      artifactKind: "session_dossier",
+      sessionId: input.sessionId
+    })) {
+      if (artifact.status === "current" && artifact.publicationStatus !== "published") {
+        publishSessionArtifact(db, artifact.artifactId);
+      }
+    }
     refreshResolutionAndNextAction(db, input.sessionId, now);
     return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
   });
