@@ -24,7 +24,7 @@ describe("observability session card", () => {
     const referenceSession = session();
     const expectedHeaderTime = new Date(referenceSession.lastActivity).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const html = renderToStaticMarkup(
-      <SessionCard session={referenceSession} onToggle={() => undefined} demoTelemetry={sessionDemoTelemetry("session-1", 0)} />
+      <SessionCard session={referenceSession} demoTelemetry={sessionDemoTelemetry("session-1", 0)} />
     );
 
     expect(html).toContain(`Masthead · ${expectedHeaderTime}`);
@@ -62,7 +62,7 @@ describe("observability session card", () => {
           headline: headlineView("Magnetic slug lock copy")
         })}
         headlineUpdateIndex={2}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -101,7 +101,7 @@ describe("observability session card", () => {
           primaryStatus: "stalled",
           stateLabel: "Idle"
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -123,7 +123,7 @@ describe("observability session card", () => {
           stateLabel: "Idle",
           indicators: ["attention"]
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -136,7 +136,7 @@ describe("observability session card", () => {
     const html = renderToStaticMarkup(
       <SessionCard
         session={session({ lifecycle: "running", primaryStatus: "blocked", stateLabel: "Blocked", indicators: ["attention"] })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -156,7 +156,7 @@ describe("observability session card", () => {
           stateLabel: "Blocked",
           indicators: ["attention"]
         })}
-        onToggle={() => undefined}
+       
       />
     );
     const input = renderToStaticMarkup(
@@ -172,7 +172,7 @@ describe("observability session card", () => {
           }),
           attentionReason: "User input requested"
         }}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -200,7 +200,7 @@ describe("observability session card", () => {
             sourceSignals: ["event:seo"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -223,7 +223,7 @@ describe("observability session card", () => {
             sourceSignals: ["event:seo"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -245,7 +245,7 @@ describe("observability session card", () => {
             sourceSignals: ["path:ui"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -267,7 +267,7 @@ describe("observability session card", () => {
             sourceSignals: ["event:headline"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -288,7 +288,7 @@ describe("observability session card", () => {
             sourceSignals: ["event:narrative"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -307,7 +307,7 @@ describe("observability session card", () => {
           indicators: ["attention"],
           attentionReason: "Timeout waiting for response"
         })}
-        onToggle={() => undefined}
+       
         demoTelemetry={sessionDemoTelemetry("session-blocked", 1)}
       />
     );
@@ -328,7 +328,7 @@ describe("observability session card", () => {
           stateLabel: "Completed",
           indicators: []
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -346,7 +346,7 @@ describe("observability session card", () => {
           stateLabel: "Failed",
           indicators: ["attention"]
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -365,7 +365,7 @@ describe("observability session card", () => {
           indicators: ["attention", "conflict"],
           attentionReason: "Same tracked path changed by 2 active sessions"
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -387,7 +387,7 @@ describe("observability session card", () => {
   });
 
   test("keeps exact mockup class names when a new-card hint is provided", () => {
-    const html = renderToStaticMarkup(<SessionCard session={session()} isNew newCardIndex={2} onToggle={() => undefined} />);
+    const html = renderToStaticMarkup(<SessionCard session={session()} isNew newCardIndex={2} />);
 
     expect(html).toContain("session-card bottom-variant-card dovetail-card is-active tier-live is-new-card");
     expect(html).toContain("--new-card-index:2");
@@ -1276,7 +1276,7 @@ describe("observability session card", () => {
           project: "Masthead",
           title: "Import correctness"
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -1295,7 +1295,7 @@ describe("observability session card", () => {
           stateLabel: "Running",
           indicators: ["attention"]
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -1310,7 +1310,7 @@ describe("observability session card", () => {
 
   test("does not apply demo harness values to live observability cards", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[boardSession({ thinkingLevel: undefined })]} variant="observability" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession({ thinkingLevel: undefined })]} variant="observability" />
     );
 
     expect(html).toContain("OpenCode");
@@ -1329,7 +1329,7 @@ describe("observability session card", () => {
 
   test("applies compact density to the observability card grid", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[boardSession()]} variant="observability" density="compact" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession()]} variant="observability" density="compact" />
     );
 
     expect(html).toContain("observability-card-grid compact");
@@ -1337,7 +1337,7 @@ describe("observability session card", () => {
 
   test("keeps model values off the card face even when present on the session", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[boardSession({ model: "gpt-5.5" })]} variant="observability" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession({ model: "gpt-5.5" })]} variant="observability" />
     );
 
     expect(html).toContain("OpenCode");
@@ -1360,7 +1360,7 @@ describe("observability session card", () => {
             status: "pending"
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -1384,7 +1384,7 @@ describe("observability session card", () => {
             status: "not_configured"
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 
@@ -1397,7 +1397,7 @@ describe("observability session card", () => {
 
   test("does not render captured thinking values as a primary card fact", () => {
     const html = renderToStaticMarkup(
-      <SessionBoard cards={[boardSession({ thinkingLevel: "Extra High" })]} variant="observability" onOpenSession={() => undefined} />
+      <SessionBoard cards={[boardSession({ thinkingLevel: "Extra High" })]} variant="observability" />
     );
 
     expect(html).not.toContain("Extra High");
@@ -1416,7 +1416,7 @@ describe("observability session card", () => {
             sourceSignals: ["path:ui"]
           }
         })}
-        onToggle={() => undefined}
+       
       />
     );
 

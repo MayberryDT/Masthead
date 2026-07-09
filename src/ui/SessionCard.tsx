@@ -7,7 +7,8 @@ import type { DemoSessionTelemetry } from "./observabilityDemo";
 
 type Props = {
   session: SessionCardView;
-  onToggle?: (sessionId: string) => void;
+  /** Clears temporary Done highlight after the user notices the card. */
+  onDoneSeen?: (sessionId: string) => void;
   demoTelemetry?: DemoSessionTelemetry;
   isNew?: boolean;
   newCardIndex?: number;
@@ -22,7 +23,7 @@ const HEADLINE_ANIMATION_CLEANUP_MS = 2_700;
 
 export function SessionCard({
   session,
-  onToggle,
+  onDoneSeen,
   demoTelemetry,
   isNew = false,
   newCardIndex = 0,
@@ -41,6 +42,7 @@ export function SessionCard({
   const sessionName = sessionHeaderName(session);
   const isHeadlineRefreshing = outgoingHeadline !== undefined || (headlineUpdateIndex !== undefined && visibleHeadline !== headline);
   const isRefreshPulsing = refreshPulseIndex !== undefined && !isHeadlineRefreshing;
+  const isDoneHighlight = session.displayState === "done";
   const style = {
     viewTransitionName: `session-card-${viewTransitionNamePart(session.sessionId)}`,
     "--new-card-index": Math.min(newCardIndex, 4),
@@ -90,6 +92,7 @@ export function SessionCard({
         "dovetail-card",
         stateClass,
         tierClass,
+        isDoneHighlight ? "is-done" : "",
         isNew ? "is-new-card" : "",
         isHeadlineRefreshing ? "is-headline-refreshing" : "",
         isRefreshPulsing ? "is-refresh-pulsing" : ""
@@ -98,15 +101,12 @@ export function SessionCard({
         .join(" ")}
       data-session-id={session.sessionId}
       style={style}
-      role="button"
-      aria-label={`Open ${headline} details`}
-      tabIndex={0}
-      onClick={() => onToggle?.(session.sessionId)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onToggle?.(session.sessionId);
-        }
+      aria-label={`${headline} · ${sessionStatePillLabel(session)}`}
+      onMouseEnter={() => {
+        if (isDoneHighlight) onDoneSeen?.(session.sessionId);
+      }}
+      onFocus={() => {
+        if (isDoneHighlight) onDoneSeen?.(session.sessionId);
       }}
     >
       <span className="bottom-signal" aria-hidden="true" />
@@ -159,18 +159,21 @@ function Fact({ label, value }: { label: string; value: string }) {
 
 function sessionStatePillLabel(session: SessionCardView): string {
   if (isBlockedSessionCard(session)) return "Blocked";
+  if (session.displayState === "done") return "Done";
   if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") return "Idle";
   return "Active";
 }
 
-function sessionStateClassName(session: SessionCardView): "is-active" | "is-idle" | "is-blocked" {
+function sessionStateClassName(session: SessionCardView): "is-active" | "is-idle" | "is-blocked" | "is-done" {
   if (isBlockedSessionCard(session)) return "is-blocked";
+  if (session.displayState === "done") return "is-done";
   if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") return "is-idle";
   return "is-active";
 }
 
 function sessionVisualTier(session: SessionCardView): SessionVisualTier {
   if (isBlockedSessionCard(session)) return "action";
+  if (session.displayState === "done") return "quiet";
   if (session.lifecycle === "idle" || session.lifecycle === "ended" || session.primaryStatus === "stalled") {
     return session.primaryStatus === "failed" || session.outcomeLabel === "failed" ? "action" : "quiet";
   }

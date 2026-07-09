@@ -5568,6 +5568,7 @@ body {
   --status-rail: var(--green);
   border-left: 1px solid var(--surface-metal-border);
   padding: 0;
+  cursor: default;
   transition-property: border-color, background-color, box-shadow, transform;
   transition-duration: 180ms;
   transition-timing-function: var(--layout-ease);
@@ -6631,7 +6632,7 @@ body {
 
 .observability-console .session-card:active,
 .masthead-shell .session-card:active {
-  transform: translateY(0) scale(0.96);
+  transform: none;
 }
 
 .observability-console .session-card.is-idle,
@@ -6687,6 +6688,34 @@ body {
 .masthead-shell .session-card.bottom-variant-card.dovetail-card.is-idle {
   --state: var(--blue);
   --state-border: rgba(45, 168, 255, 0.42);
+}
+
+/* Temporary Done highlight after active→idle (clears on hover). Keep idle blue on the bottom signal. */
+.observability-console .session-card.is-done,
+.masthead-shell .session-card.is-done,
+.observability-console .session-card.bottom-variant-card.dovetail-card.is-done,
+.masthead-shell .session-card.bottom-variant-card.dovetail-card.is-done {
+  --state: var(--blue);
+  --state-border: rgba(45, 168, 255, 0.42);
+  --border: rgba(90, 190, 255, 0.48);
+  --border-hover: rgba(120, 205, 255, 0.58);
+  box-shadow:
+    0 0 0 1px rgba(90, 190, 255, 0.34),
+    0 0 0 1px rgba(92, 153, 187, 0.1) inset,
+    0 10px 22px rgba(0, 0, 0, 0.22);
+}
+
+.observability-console .session-card.is-done .state-pill,
+.masthead-shell .session-card.is-done .state-pill {
+  border-color: rgba(90, 190, 255, 0.55);
+  background: rgba(14, 72, 112, 0.72);
+  color: #9fd8ff;
+  box-shadow: 0 0 0 1px rgba(46, 167, 255, 0.16);
+}
+
+.observability-console .session-card.dovetail-card.is-done .bottom-signal,
+.masthead-shell .session-card.dovetail-card.is-done .bottom-signal {
+  --state: var(--blue);
 }
 
 .observability-console .session-card.bottom-variant-card.dovetail-card.is-blocked,

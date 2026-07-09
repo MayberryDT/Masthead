@@ -23,6 +23,11 @@ import {
 } from "../ui/motionPreference";
 import { emitSessionTransitionNotifications } from "./liveSessionEndedNotifications";
 import {
+  applyIdlePresentationToProjection,
+  markIdleDoneSeen,
+  type IdlePresentationTrack
+} from "./sessionIdlePresentation";
+import {
   SessionBoard
 } from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
@@ -117,6 +122,7 @@ export function App() {
   const [selectedSessionSnapshot, setSelectedSessionSnapshot] = useState<SessionDetailView>();
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
   const liveProjectionRef = useRef<LiveBoardProjection | undefined>(undefined);
+  const idlePresentationTracksRef = useRef(new Map<string, IdlePresentationTrack>());
   const notifiedSessionTransitionKeysRef = useRef(new Set<string>());
   const [liveConnection, setLiveConnection] = useState<ConnectionState>({ state: "connecting" });
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
@@ -354,9 +360,10 @@ export function App() {
       if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
       const previousProjection = liveProjectionRef.current;
       const normalized = normalizeLiveBoardProjection(body.projection, selectedSessionId);
-      liveProjectionRef.current = normalized;
-      setLiveProjection(normalized);
-      void emitSessionTransitionNotifications(previousProjection, normalized, {
+      const presented = applyIdlePresentationToProjection(normalized, idlePresentationTracksRef.current);
+      liveProjectionRef.current = presented;
+      setLiveProjection(presented);
+      void emitSessionTransitionNotifications(previousProjection, presented, {
         enabled: sessionEndedNotificationsEnabled,
         notifiedTransitionKeys: notifiedSessionTransitionKeysRef.current
       });
@@ -822,7 +829,22 @@ export function App() {
             variant="observability"
             emptyTitle={emptyBoardTitle({ showDemoData, hasActiveToolbarFilters, liveConnection: effectiveLiveConnection })}
             emptyMessage={emptyBoardMessage({ showDemoData, hasActiveToolbarFilters, liveConnection: effectiveLiveConnection })}
-            onOpenSession={handleOpenSession}
+            onDoneSeen={(sessionId) => {
+              markIdleDoneSeen(idlePresentationTracksRef.current, sessionId);
+              setLiveProjection((current) => {
+                if (!current) return current;
+                const next = {
+                  ...current,
+                  cards: current.cards.map((card) =>
+                    card.sessionId === sessionId && card.displayState === "done"
+                      ? { ...card, displayState: "idle" as const, stateLabel: "Idle" }
+                      : card
+                  )
+                };
+                liveProjectionRef.current = next;
+                return next;
+              });
+            }}
             showDemoTelemetry={showDemoData}
             density={density}
           />

@@ -107,9 +107,9 @@ describe("detectSessionNotificationTransitions", () => {
     ]);
 
     expect(detectSessionNotificationTransitions(previous, next)).toEqual([
-      { sessionId: "idle", transition: "idle", title: "Idle candidate", body: "Idle" },
+      { sessionId: "idle", transition: "idle", title: "Idle candidate", body: "Session went quiet" },
       { sessionId: "approval", transition: "blocked", title: "Approval candidate", body: "Blocked: Approval requested" },
-      { sessionId: "input", transition: "idle", title: "Input candidate", body: "Idle: User input requested" },
+      { sessionId: "input", transition: "idle", title: "Input candidate", body: "Session went quiet" },
       { sessionId: "ended", transition: "ended", title: "Ended candidate", body: "Ended: Completed" }
     ]);
   });
