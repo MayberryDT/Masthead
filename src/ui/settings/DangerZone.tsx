@@ -8,7 +8,6 @@ import type { DeletionScopeKind } from "../OperationsPanel";
 type DangerZoneProps = {
   busy?: boolean;
   databaseId?: string;
-  databasePath?: string;
   deletionScopeKind: DeletionScopeKind;
   deletionScopeTarget: string;
   targets?: {
@@ -32,7 +31,6 @@ const scopeOptions: Array<{ label: string; value: DeletionScopeKind }> = [
 export function DangerZone({
   busy = false,
   databaseId,
-  databasePath,
   deletionScopeKind,
   deletionScopeTarget,
   onDeletionScopeKindChange,
@@ -45,14 +43,10 @@ export function DangerZone({
   return (
     <SettingsSection
       danger
-      description="These actions only mutate Masthead's local database and generated indexes. Original harness files are untouched."
+      description="Deletes only Masthead's local canonical data. Original harness files are never changed."
       title="Danger zone"
     >
-      <SettingsRow
-        description={databasePath ?? "Waiting for the active Masthead database path."}
-        label="Target database"
-        value={databaseId ?? "Loading"}
-      />
+      <SettingsRow label="Database" value={databaseId ?? "Loading"} />
       <SettingsRow
         control={
           <div className="settings-delete-controls">
@@ -96,7 +90,6 @@ export function DangerZone({
             </AppButton>
           </div>
         }
-        description="Project, runtime, and host deletion targets are populated from canonical session data."
         label="Delete scoped records"
       />
       <SettingsRow
@@ -105,7 +98,6 @@ export function DangerZone({
             Delete all Masthead data
           </AppButton>
         }
-        description="Clears Masthead-owned canonical sessions, enrichments, source policies, indexes, and MCP audit rows. Original source harness files are not modified."
         label="Delete all"
       />
     </SettingsSection>

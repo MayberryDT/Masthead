@@ -54,7 +54,7 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Delete raw copies");
     expect(html).toContain("Delete all Masthead data");
     expect(html).not.toContain("Keeps normalized session metadata, summaries, and search records.");
-    expect(html).toContain("Original harness files are untouched.");
+    expect(html).toContain("Original harness files are never changed.");
     expect(html).not.toContain("OpenCode integration");
     expect(html).not.toContain("ops-card");
     expect(html).not.toContain("ghost-pill");
@@ -115,6 +115,94 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Confirm scoped deletion");
     expect(html).toContain("Confirm scoped deletion for project Pip.");
     expect(html).toContain("Cancel");
+  });
+
+  test("keeps compact danger controls gated and wired to their deletion callbacks", async () => {
+    const onDeletionScopeKindChange = vi.fn();
+    const onDeletionScopeTargetChange = vi.fn();
+    const onRequestScopedDelete = vi.fn();
+    const onRequestDeleteLocalData = vi.fn();
+
+    await renderPanel(
+      <OperationsPanel
+        deletionScopeKind="project"
+        deletionScopeTarget=""
+        onDeletionScopeKindChange={onDeletionScopeKindChange}
+        onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+        onRequestDeleteLocalData={onRequestDeleteLocalData}
+        onRequestScopedDelete={onRequestScopedDelete}
+        settingsState={settings}
+      />
+    );
+    await selectCategory("Danger zone");
+
+    const dangerSection = container?.querySelector<HTMLElement>(".settings-section-danger");
+    expect(dangerSection?.querySelector(".settings-section-head p")?.textContent).toBe(
+      "Deletes only Masthead's local canonical data. Original harness files are never changed."
+    );
+    expect(dangerSection?.textContent).toContain("Databasesqlite:test");
+    expect(dangerSection?.textContent).not.toContain("/tmp/masthead/masthead.sqlite");
+    expect(dangerSection?.textContent).not.toContain("generated indexes");
+    expect(dangerSection?.textContent).not.toContain("populated from canonical session data");
+    expect(dangerSection?.textContent).not.toContain("Clears Masthead-owned canonical sessions");
+
+    const scopeTriggers = Array.from(
+      container?.querySelectorAll<HTMLButtonElement>(".settings-delete-controls .filterable-select-trigger") ?? []
+    );
+    const scopedDelete = buttonNamed(container, "Delete selected records");
+    expect(scopedDelete?.disabled).toBe(true);
+
+    await act(async () => {
+      scopeTriggers[0]?.click();
+    });
+    const sessionOption = [...document.body.querySelectorAll<HTMLButtonElement>('button[role="option"]')]
+      .find((button) => button.textContent === "Session");
+    await act(async () => {
+      sessionOption?.click();
+    });
+    expect(onDeletionScopeKindChange).toHaveBeenCalledWith("session");
+
+    await act(async () => {
+      root?.render(
+        <OperationsPanel
+          deletionScopeKind="session"
+          deletionScopeTarget=""
+          onDeletionScopeKindChange={onDeletionScopeKindChange}
+          onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+          onRequestDeleteLocalData={onRequestDeleteLocalData}
+          onRequestScopedDelete={onRequestScopedDelete}
+          settingsState={settings}
+        />
+      );
+    });
+    const targetInput = container?.querySelector<HTMLInputElement>('input[aria-label="Delete target"]');
+    await act(async () => {
+      if (!targetInput) throw new Error("missing session delete target input");
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      valueSetter?.call(targetInput, "session-1");
+      targetInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(onDeletionScopeTargetChange).toHaveBeenCalledWith("session-1");
+
+    await act(async () => {
+      root?.render(
+        <OperationsPanel
+          deletionScopeKind="session"
+          deletionScopeTarget="session-1"
+          onDeletionScopeKindChange={onDeletionScopeKindChange}
+          onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+          onRequestDeleteLocalData={onRequestDeleteLocalData}
+          onRequestScopedDelete={onRequestScopedDelete}
+          settingsState={settings}
+        />
+      );
+    });
+    await act(async () => {
+      buttonNamed(container, "Delete selected records")?.click();
+      buttonNamed(container, "Delete all Masthead data")?.click();
+    });
+    expect(onRequestScopedDelete).toHaveBeenCalledTimes(1);
+    expect(onRequestDeleteLocalData).toHaveBeenCalledTimes(1);
   });
 
   test("renders data summary preview before deletion", async () => {
@@ -338,6 +426,12 @@ describe("OperationsPanel", () => {
     expect(container.textContent).toContain("open failed");
   });
 });
+
+function buttonNamed(container: HTMLElement | undefined, label: string): HTMLButtonElement | undefined {
+  return [...(container?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+    (button) => button.textContent === label
+  );
+}
 
 const settings: SettingsStateDto = {
   apiVersion: 1,

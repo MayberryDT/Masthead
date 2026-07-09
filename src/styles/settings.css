@@ -404,7 +404,7 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  min-height: 36px;
+  min-height: 40px;
   border: 1px solid rgba(92, 153, 187, 0.18);
   border-radius: 3px;
   background: #061925;
@@ -418,7 +418,7 @@
   color: rgba(145, 168, 186, 0.68);
 }
 
-.settings-provider-field input:focus {
+.settings-provider-field input:focus-visible {
   outline: 0;
   box-shadow:
     0 0 0 1px rgba(116, 185, 224, 0.34),
@@ -544,7 +544,7 @@
 }
 
 .settings-delete-controls input {
-  min-height: 36px;
+  min-height: 40px;
   min-width: 0;
   border: 1px solid rgba(92, 153, 187, 0.18);
   border-radius: 3px;
@@ -553,7 +553,7 @@
   padding: 0 10px;
 }
 
-.settings-delete-controls input:focus {
+.settings-delete-controls input:focus-visible {
   outline: 0;
   box-shadow:
     0 0 0 1px rgba(116, 185, 224, 0.34),
@@ -615,7 +615,7 @@
 
 .confirm-dialog-typed input {
   min-width: min(360px, 100%);
-  min-height: 36px;
+  min-height: 40px;
   border: 1px solid rgba(92, 153, 187, 0.22);
   border-radius: 3px;
   background: #061925;
@@ -624,7 +624,7 @@
   padding: 8px 10px;
 }
 
-.confirm-dialog-typed input:focus {
+.confirm-dialog-typed input:focus-visible {
   outline: 0;
   box-shadow:
     0 0 0 1px rgba(116, 185, 224, 0.34),
@@ -656,21 +656,6 @@
     border-right: 0;
   }
 
-  .settings-inline-actions,
-  .confirm-dialog-actions {
-    justify-content: flex-start;
-    justify-self: stretch;
-    max-width: none;
-    text-align: left;
-  }
-
-  .confirm-dialog {
-    align-items: stretch;
-    flex-direction: column;
-  }
-}
-
-@media (max-width: 390px) {
   .settings-row {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
@@ -698,6 +683,21 @@
     text-align: left;
   }
 
+  .settings-inline-actions,
+  .confirm-dialog-actions {
+    justify-content: flex-start;
+    justify-self: stretch;
+    max-width: none;
+    text-align: left;
+  }
+
+  .confirm-dialog {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 390px) {
   .settings-delete-controls {
     grid-template-columns: minmax(0, 1fr);
   }

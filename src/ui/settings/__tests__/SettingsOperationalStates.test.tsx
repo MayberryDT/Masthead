@@ -66,6 +66,48 @@ describe("Settings operational states", () => {
     expect(html.match(/<button[^>]*>Export data<\/button>/)?.[0]).not.toContain("disabled");
   });
 
+  test("keeps delete-all confirmation outside the pane and requires the active database id", async () => {
+    const onConfirmDeleteLocalData = vi.fn();
+    await renderPanel(
+      <OperationsPanel
+        localDataStatus={{ state: "confirm_delete", message: "Confirm deletion." }}
+        onConfirmDeleteLocalData={onConfirmDeleteLocalData}
+        settingsState={settings}
+      />
+    );
+
+    const dialog = container?.querySelector<HTMLElement>('[role="dialog"]');
+    const pane = container?.querySelector<HTMLElement>(".settings-pane");
+    const confirmation = dialog?.querySelector<HTMLInputElement>('input[placeholder="sqlite:test"]');
+    const confirmButton = [...(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      .find((button) => button.textContent === "Delete all Masthead data");
+
+    expect(dialog).not.toBeNull();
+    expect(pane?.contains(dialog ?? null)).toBe(false);
+    expect(confirmButton?.disabled).toBe(true);
+
+    await act(async () => {
+      if (!confirmation) throw new Error("missing database confirmation input");
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      valueSetter?.call(confirmation, "wrong-id");
+      confirmation.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(confirmButton?.disabled).toBe(true);
+
+    await act(async () => {
+      if (!confirmation) throw new Error("missing database confirmation input");
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      valueSetter?.call(confirmation, "sqlite:test");
+      confirmation.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(confirmButton?.disabled).toBe(false);
+
+    await act(async () => {
+      confirmButton?.click();
+    });
+    expect(onConfirmDeleteLocalData).toHaveBeenCalledTimes(1);
+  });
+
   test("does not render connection recovery chrome inside Settings", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel

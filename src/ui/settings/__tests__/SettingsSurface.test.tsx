@@ -302,9 +302,12 @@ describe("Settings surface", () => {
 
     expect(css).toMatch(/\.settings-workspace\s*\{[\s\S]*grid-template-columns: 184px minmax\(0, 760px\);[\s\S]*gap: 18px;/);
     expect(css).toMatch(/\.settings-category-nav,[\s\S]*\.settings-pane\s*\{[\s\S]*box-sizing: border-box;/);
-    expect(css).toMatch(/@media \(max-width: 760px\) \{[\s\S]*\.settings-workspace\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
-    expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*\.settings-row\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[\s\S]*\.settings-workspace\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);[\s\S]*\.settings-category-nav\s*\{[\s\S]*display: flex;[\s\S]*overflow-x: auto;[\s\S]*\.settings-row\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[\s\S]*\.settings-row-copy,[\s\S]*\.settings-row-detail\s*\{[\s\S]*grid-column: 1;/);
+    expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*\.settings-delete-controls\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);[\s\S]*\.settings-row-control > \.app-button,[\s\S]*width: 100%;/);
     expect(css).toMatch(/\.settings-row-detail\s*\{[\s\S]*grid-column: 2;/);
+    expect(css).toMatch(/\.settings-delete-controls input\s*\{[\s\S]*min-height: 40px;/);
+    expect(css).toMatch(/\.confirm-dialog-typed input\s*\{[\s\S]*min-height: 40px;/);
     expect(css).toMatch(/\.settings-toggle > span\s*\{[\s\S]*width: 42px;[\s\S]*height: 24px;/);
     expect(css).toMatch(/\.settings-toggle\.checked > span::after\s*\{[\s\S]*transform: translateX\(20px\);/);
     expect(css).toMatch(/\.settings-mcp-setup\s*\{[\s\S]*display: flex;[\s\S]*flex-wrap: wrap;[\s\S]*gap: 8px;/);
@@ -312,6 +315,8 @@ describe("Settings surface", () => {
     expect(css).toContain(".settings-mcp-inline-result");
     expect(css).not.toContain(".settings-mcp-summary");
     expect(css).not.toContain(".settings-section-mcp .code-block");
+    expect(css).not.toContain(".settings-layout-priority-bay");
+    expect(css).not.toContain(".settings-priority-column");
   });
 
   test("uses shared card entrance motion for settings sections", () => {

@@ -187,7 +187,6 @@ export function OperationsPanel({
               <DangerZone
                 busy={writesDisabled}
                 databaseId={effectiveSettings?.data.databaseId}
-                databasePath={effectiveSettings?.data.databasePath}
                 deletionScopeKind={deletionScopeKind}
                 deletionScopeTarget={deletionScopeTarget}
                 onDeletionScopeKindChange={onDeletionScopeKindChange}
