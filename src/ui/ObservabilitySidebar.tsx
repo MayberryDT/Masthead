@@ -1,17 +1,17 @@
 import type { ReactNode } from "react";
-import type { UsageStatsDto } from "../app/daemonClient";
+import type { KnowledgeFlowSummaryDto } from "../shared/knowledgeFlow";
 import sailLogoUrl from "./assets/masthead-logo-sail.png";
 import { Icon, type IconName } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
-import { SidebarUsageStats } from "./SidebarUsageStats";
+import { SidebarKnowledgeFlow } from "./SidebarKnowledgeFlow";
 
 type Props = {
   version: string;
   activeCount: number;
   activeSurface?: AppSurface;
-  usageStats?: UsageStatsDto;
-  usageLoading?: boolean;
-  usageError?: string;
+  knowledgeFlowSummary?: KnowledgeFlowSummaryDto;
+  knowledgeFlowLoading?: boolean;
+  knowledgeFlowError?: string;
   onSurfaceChange?: (surface: AppSurface) => void;
 };
 
@@ -21,9 +21,9 @@ export function ObservabilitySidebar({
   version,
   activeCount,
   activeSurface = "now",
-  usageStats,
-  usageLoading,
-  usageError,
+  knowledgeFlowSummary,
+  knowledgeFlowLoading,
+  knowledgeFlowError,
   onSurfaceChange
 }: Props) {
   return (
@@ -77,7 +77,11 @@ export function ObservabilitySidebar({
           />
         </SidebarGroup>
       </nav>
-      <SidebarUsageStats stats={usageStats} loading={usageLoading} error={usageError} />
+      <SidebarKnowledgeFlow
+        summary={knowledgeFlowSummary}
+        loading={knowledgeFlowLoading}
+        error={knowledgeFlowError}
+      />
     </div>
   );
 }

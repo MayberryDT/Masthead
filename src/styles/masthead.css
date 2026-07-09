@@ -4527,6 +4527,98 @@ body {
   opacity: 0.72;
 }
 
+.sidebar-knowledge-flow {
+  display: block;
+  min-height: 180px;
+  color: var(--body);
+  padding: 12px;
+}
+
+.sidebar-knowledge-flow-title {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 7px;
+  color: var(--ash);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.sidebar-knowledge-spine {
+  display: grid;
+  gap: 0;
+  margin-top: 11px;
+}
+
+.sidebar-knowledge-spine-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-knowledge-spine-row:not(:last-child)::after {
+  position: absolute;
+  top: 25px;
+  bottom: -9px;
+  left: 8px;
+  width: 1px;
+  content: "";
+  background: rgba(46, 167, 255, 0.28);
+}
+
+.sidebar-knowledge-node {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border: 1px solid rgba(46, 167, 255, 0.42);
+  border-radius: 2px;
+  color: var(--blue);
+  background: #04131f;
+  box-shadow:
+    inset 0 1px 0 rgba(246, 251, 255, 0.045),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.55);
+  font-family: var(--font-mono);
+  font-size: 7px;
+}
+
+.sidebar-knowledge-stage-name {
+  color: var(--mute);
+  font-size: 10px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.sidebar-knowledge-stage-value {
+  color: #d9f4ff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-knowledge-resolved {
+  margin: 8px 0 0;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  color: #afd4e9;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.sidebar-knowledge-flow.unavailable .sidebar-knowledge-resolved {
+  color: var(--ash);
+}
+
 .search-icon {
   width: var(--icon-toolbar);
   height: var(--icon-toolbar);
@@ -6511,7 +6603,8 @@ body {
 }
 
 @media (max-height: 720px) {
-  .sidebar-usage {
+  .sidebar-usage,
+  .sidebar-knowledge-flow {
     display: none;
   }
 }
@@ -7126,6 +7219,8 @@ body {
  */
 .observability-console .sidebar-usage,
 .masthead-shell .sidebar-usage,
+.observability-console .sidebar-knowledge-flow,
+.masthead-shell .sidebar-knowledge-flow,
 .observability-console .usage-summary-strip .usage-metric,
 .masthead-shell .usage-summary-strip .usage-metric,
 .observability-console .import-jobs-summary div,
@@ -7190,6 +7285,8 @@ body {
 
 .observability-console .sidebar-usage::before,
 .masthead-shell .sidebar-usage::before,
+.observability-console .sidebar-knowledge-flow::before,
+.masthead-shell .sidebar-knowledge-flow::before,
 .observability-console .usage-summary-strip .usage-metric::before,
 .masthead-shell .usage-summary-strip .usage-metric::before,
 .observability-console .import-jobs-summary div::before,
@@ -7265,6 +7362,8 @@ body {
 
 .observability-console .sidebar-usage::after,
 .masthead-shell .sidebar-usage::after,
+.observability-console .sidebar-knowledge-flow::after,
+.masthead-shell .sidebar-knowledge-flow::after,
 .observability-console .usage-summary-strip .usage-metric::after,
 .masthead-shell .usage-summary-strip .usage-metric::after,
 .observability-console .import-jobs-summary div::after,
@@ -7295,6 +7394,8 @@ body {
 
 .observability-console .sidebar-usage > *,
 .masthead-shell .sidebar-usage > *,
+.observability-console .sidebar-knowledge-flow > *,
+.masthead-shell .sidebar-knowledge-flow > *,
 .observability-console .usage-summary-strip .usage-metric > *,
 .masthead-shell .usage-summary-strip .usage-metric > *,
 .observability-console .import-jobs-summary div > *,
@@ -7321,7 +7422,9 @@ body {
 }
 
 .observability-console .sidebar-usage,
-.masthead-shell .sidebar-usage {
+.masthead-shell .sidebar-usage,
+.observability-console .sidebar-knowledge-flow,
+.masthead-shell .sidebar-knowledge-flow {
   position: absolute;
   right: 16px;
   bottom: 16px;
@@ -7330,7 +7433,9 @@ body {
 
 @media (max-width: 760px) {
   .observability-console .sidebar-usage,
-  .masthead-shell .sidebar-usage {
+  .masthead-shell .sidebar-usage,
+  .observability-console .sidebar-knowledge-flow,
+  .masthead-shell .sidebar-knowledge-flow {
     position: static;
     margin: 18px 16px 0;
   }
@@ -7991,5 +8096,3 @@ body {
   pointer-events: none;
   border: 1px solid #000;
 }
-
-

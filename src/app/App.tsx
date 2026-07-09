@@ -70,6 +70,7 @@ import { useLogbookController } from "./logbook/useLogbookController";
 import { useSettingsDataController } from "./settings/useSettingsDataController";
 import { useSourcesController } from "./sources/useSourcesController";
 import { useSourcesConnectorsController } from "./sources/useSourcesConnectorsController";
+import { useKnowledgeFlowSummary } from "./sidebar/useKnowledgeFlowSummary";
 import { useUsageStatsController } from "./usage/useUsageStatsController";
 import { useWorkbenchController } from "./workbench/useWorkbenchController";
 import { clearUnsupportedLocationHash } from "./locationHash";
@@ -255,6 +256,11 @@ export function App() {
   }, [connection.state, liveConnection]);
   const usage = useUsageStatsController({
     active: activeSurface === "usage",
+    activeProjectionUrl,
+    isLive: effectiveLiveConnection.state === "live",
+    refreshKey: sourceLibraryRefreshKey
+  });
+  const knowledgeFlow = useKnowledgeFlowSummary({
     activeProjectionUrl,
     isLive: effectiveLiveConnection.state === "live",
     refreshKey: sourceLibraryRefreshKey
@@ -864,9 +870,9 @@ export function App() {
             version={APP_VERSION_LABEL}
             activeCount={observabilitySessionTotal(visibleSummary)}
             activeSurface={activeSurface}
-            usageStats={usage.sidebarStats}
-            usageLoading={usage.sidebarLoading}
-            usageError={usage.sidebarError}
+            knowledgeFlowSummary={knowledgeFlow.summary}
+            knowledgeFlowLoading={knowledgeFlow.loading}
+            knowledgeFlowError={knowledgeFlow.error}
             onSurfaceChange={setActiveSurface}
           />
         }
