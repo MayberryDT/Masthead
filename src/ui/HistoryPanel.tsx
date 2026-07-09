@@ -128,15 +128,6 @@ type SourceImportSummary = {
   metadataRuntime?: string;
 };
 
-type LogbookSummaryItem = {
-  label: string;
-  value: string;
-  tone: "sessions" | "projects" | "runtime" | "messages" | "tools" | "range";
-};
-
-const MIN_REASONABLE_SESSION_DATE = Date.UTC(2020, 0, 1);
-const FUTURE_DATE_TOLERANCE_MS = 24 * 60 * 60 * 1000;
-
 export function HistoryPanel({
   adapters = [],
   connectionState = "live",
@@ -183,9 +174,9 @@ export function HistoryPanel({
   sessions,
   sort = "recent",
   sources = [],
-  summary,
   total
 }: Props) {
+  // `summary` remains on Props for parent compatibility; Task 5 removes the fetch.
   const legacyFilters = filtersFromQuery(query);
   const resolvedLoadState =
     loadState ??
@@ -203,7 +194,6 @@ export function HistoryPanel({
   const legacySessions = result?.sessions ?? [];
   const tableSessions = usesLogbookStore ? canonicalSessions : legacySessions.map(legacyToLogbookSession);
   const visibleTotal = readyState?.total ?? result?.sessions.length ?? tableSessions.length;
-  const recordCount = result?.recordCount ?? visibleTotal;
   const isLoading = loading || loadingState;
   const [optimisticPageIndex, setOptimisticPageIndex] = useState<number>();
   const totalPages = Math.max(1, Math.ceil(visibleTotal / pageSize));
@@ -252,7 +242,6 @@ export function HistoryPanel({
     onRetry,
     sourceSummary
   });
-  const summaryItems = summaryItemsFor(summary, visibleTotal, recordCount);
   const logbookFooterClassName = [
     "logbook-footer",
     "observability-toolbar",
@@ -290,7 +279,6 @@ export function HistoryPanel({
         onSortChange={onSortChange ?? (() => undefined)}
       />
       <LogbookFacets facets={activeFilters} />
-      <LogbookSummaryStrip items={summaryItems} />
 
       {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
       <ConfirmDialog
@@ -482,20 +470,6 @@ function LogbookSkeleton({ mode = "initial" }: { mode?: "initial" | "page" }) {
   );
 }
 
-function LogbookSummaryStrip({ items }: { items: LogbookSummaryItem[] }) {
-  return (
-    <dl className="logbook-summary-strip usage-summary-strip" aria-label="Logbook summary">
-      {items.map((item) => (
-        <div key={item.label} className={`usage-metric ${item.tone}`}>
-          <span className="usage-metric-accent" aria-hidden="true" />
-          <dt>{item.label}</dt>
-          <dd>{item.value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
 function EmptyPanel({ actions = [], message, reason, support, title }: { reason: EmptyReason; title: string; message: string; support?: string; actions?: EmptyAction[] }) {
   return (
     <div className="empty-session-state surface-empty-state logbook-empty-state" role="status" data-empty-reason={reason}>
@@ -659,28 +633,6 @@ function hasActiveImports(imports: ImportJob[]): boolean {
   return imports.some((job) => job.status === "queued" || job.status === "running");
 }
 
-function summaryItemsFor(summary: LogbookSummary | undefined, visibleTotal: number, recordCount: number): LogbookSummaryItem[] {
-  if (!summary) {
-    return [
-      { label: "Sessions", value: formatCount(visibleTotal), tone: "sessions" },
-      { label: "Projects", value: "n/a", tone: "projects" },
-      { label: "Harnesses", value: "n/a", tone: "runtime" },
-      { label: "Messages", value: formatCount(recordCount), tone: "messages" },
-      { label: "Tool calls", value: "n/a", tone: "tools" },
-      { label: "Date range", value: "n/a", tone: "range" }
-    ];
-  }
-
-  return [
-    { label: "Sessions", value: formatCount(summary.sessions), tone: "sessions" },
-    { label: "Projects", value: formatCount(summary.projects), tone: "projects" },
-    { label: "Harnesses", value: formatCount(summary.runtimes.length), tone: "runtime" },
-    { label: "Messages", value: formatCount(summary.messages), tone: "messages" },
-    { label: "Tool calls", value: formatCount(summary.toolCalls), tone: "tools" },
-    { label: "Date range", value: dateRange(summary.earliestActivityAt, summary.latestActivityAt), tone: "range" }
-  ];
-}
-
 function legacyToLogbookSession(session: HistorySession): LogbookSession {
   return {
     errorCount: session.status === "failed" || session.outcome === "failed" ? 1 : 0,
@@ -754,29 +706,6 @@ function historyHeadline(session: HistorySession): string {
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat().format(value);
-}
-
-function dateRange(earliest: string | undefined, latest: string | undefined): string {
-  const start = validActivityDate(earliest);
-  const end = validActivityDate(latest);
-  if (!start || !end) return "n/a";
-  return `${formatMonthDate(start)} - ${formatMonthDate(end)}`;
-}
-
-function validActivityDate(value: string | undefined, now = new Date()): Date | undefined {
-  if (!value) return undefined;
-
-  const date = new Date(value);
-  const time = date.getTime();
-  if (!Number.isFinite(time)) return undefined;
-  if (time <= 0) return undefined;
-  if (time < MIN_REASONABLE_SESSION_DATE) return undefined;
-  if (time > now.getTime() + FUTURE_DATE_TOLERANCE_MS) return undefined;
-  return date;
-}
-
-function formatMonthDate(date: Date): string {
-  return date.toLocaleDateString([], { month: "short", year: "numeric" });
 }
 
 function sortLabel(sort: LogbookSort): string {

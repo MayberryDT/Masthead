@@ -73,13 +73,10 @@ describe("HistoryPanel", () => {
     expect(html).toContain("OpenCode history into");
     expect(html).toContain("<mark>SQLite</mark>");
     expect(html).toContain("&lt;script&gt;");
-    expect(html).toContain("logbook-summary-strip");
-    expect(html).toContain("usage-metric sessions");
-    expect(html).toContain("Messages");
-    expect(html).toContain("Tool calls");
-    expect(html).toContain("Date range");
-    expect(html).not.toContain("Records</dt>");
-    expect((html.match(/class="usage-metric /g) ?? []).length).toBe(6);
+    expect(html).not.toContain("logbook-summary-strip");
+    expect(html).not.toContain(">Sessions</dt>");
+    expect(html).not.toContain(">Messages</dt>");
+    expect(html).not.toContain(">Tool calls</dt>");
     expect(html).not.toContain("stat-strip");
     expect(html).not.toContain('<script>alert("x")</script>');
     expect(html).not.toContain("Showing 1 of 1");
@@ -114,39 +111,7 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("Remove Model filter");
   });
 
-  test("renders invalid summary date ranges as n/a", () => {
-    const html = renderToStaticMarkup(
-      <HistoryPanel
-        loadState={{ state: "ready", sessions: [], total: 0 }}
-        loading={false}
-        query=""
-        summary={summary({ earliestActivityAt: "1969-12-31T23:59:59.000Z", latestActivityAt: "2026-06-24T07:00:00.000Z" })}
-        onQueryChange={() => {}}
-      />
-    );
-
-    expect(html).toContain("<dt>Date range</dt>");
-    expect(html).toContain("<dd>n/a</dd>");
-    expect(html).not.toContain("Dec 1969");
-  });
-
-  test("renders far future summary date ranges as n/a", () => {
-    const html = renderToStaticMarkup(
-      <HistoryPanel
-        loadState={{ state: "ready", sessions: [], total: 0 }}
-        loading={false}
-        query=""
-        summary={summary({ earliestActivityAt: "2026-06-24T07:00:00.000Z", latestActivityAt: "2999-01-01T00:00:00.000Z" })}
-        onQueryChange={() => {}}
-      />
-    );
-
-    expect(html).toContain("<dt>Date range</dt>");
-    expect(html).toContain("<dd>n/a</dd>");
-    expect(html).not.toContain("2999");
-  });
-
-  test("renders valid summary date ranges as month and year", () => {
+  test("does not render session-era summary strip metrics", () => {
     const html = renderToStaticMarkup(
       <HistoryPanel
         loadState={{ state: "ready", sessions: [], total: 0 }}
@@ -157,7 +122,12 @@ describe("HistoryPanel", () => {
       />
     );
 
-    expect(html).toContain("<dd>May 2026 - Jun 2026</dd>");
+    expect(html).not.toContain("logbook-summary-strip");
+    expect(html).not.toContain(">Sessions</dt>");
+    expect(html).not.toContain(">Messages</dt>");
+    expect(html).not.toContain(">Tool calls</dt>");
+    expect(html).not.toContain("<dt>Date range</dt>");
+    expect(html).not.toContain("May 2026 - Jun 2026");
   });
 
   test("renders more than six database-backed sessions and exposes detail actions", () => {
@@ -277,11 +247,13 @@ describe("HistoryPanel", () => {
     expect(html).toContain("KIND");
     expect(html).toContain("PROJECT");
     expect(html).toContain("PROVENANCE");
-    expect(html).toContain("Messages");
-    expect(html).toContain("Tool calls");
-    expect(html).toContain("Date range");
+    expect(html).not.toContain("logbook-summary-strip");
+    expect(html).not.toContain(">Sessions</dt>");
+    expect(html).not.toContain(">Messages</dt>");
+    expect(html).not.toContain(">Tool calls</dt>");
+    expect(html).not.toContain("Date range");
     expect(html).not.toContain("Records</dt>");
-    expect((html.match(/class="usage-metric /g) ?? []).length).toBe(6);
+    expect(html).not.toContain('class="usage-metric ');
     expect(html).toContain("logbook-loading-inspector");
     expect(html).toContain("logbook-footer observability-toolbar metal-toolbar logbook-skeleton-footer");
     expect(html).toContain("logbook-page-button toolbar-icon-button");
@@ -291,12 +263,14 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("Logbook could not read");
   });
 
-  test("renders no-match queries with an explicit zero result count", () => {
+  test("renders no-match queries with an empty state instead of summary metrics", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:Missing" onQueryChange={() => {}} />);
 
     expect(html).toContain("Logbook");
     expect(html).not.toContain("Session library");
-    expect(html).toContain("<dd>0</dd>");
+    expect(html).not.toContain("logbook-summary-strip");
+    expect(html).not.toContain(">Sessions</dt>");
+    expect(html).not.toContain("<dd>0</dd>");
     expect(html).not.toContain("Showing 0 of 0; searching 0 local records");
     expect(html).not.toContain("History case");
   });
