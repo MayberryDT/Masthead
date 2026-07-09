@@ -7,6 +7,8 @@ import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 import {
   claimWorkbenchSessions,
+  enrollMissingWorkbenchSessions,
+  enrollWorkbenchSession,
   ensureWorkbenchSessionState,
   listWorkbenchActivity,
   listWorkbenchQueue,
@@ -395,6 +397,96 @@ describe("workbench pipeline repository", () => {
     expect(after.qualityStatus).toBe("passed");
     expect(after.nonPublicationReason).toBeUndefined();
     expect(after.publishedActivityId).toBe(before.publishedActivityId);
+  });
+
+  test("enrollWorkbenchSession creates publish_path only when missing", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "running",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:enroll-1",
+      title: "Live capture"
+    });
+
+    const first = enrollWorkbenchSession(db, {
+      actor: { kind: "system", id: "live_ingest" },
+      sessionId: "session:enroll-1"
+    });
+    expect(first.enrolled).toBe(true);
+    expect(first.state?.publicationStatus).toBe("publish_path");
+    expect(first.state?.nextAction).toBe("check_transcript");
+
+    const second = enrollWorkbenchSession(db, {
+      actor: { kind: "system", id: "live_ingest" },
+      sessionId: "session:enroll-1"
+    });
+    expect(second.enrolled).toBe(false);
+    expect(second.state?.publicationStatus).toBe("publish_path");
+  });
+
+  test("enrollWorkbenchSession does not demote published or not_added", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:pub",
+      title: "Published"
+    });
+    markWorkbenchPublished(db, {
+      actor: { kind: "system", id: "test" },
+      publishedVia: "test",
+      sessionId: "session:pub"
+    });
+    expect(
+      enrollWorkbenchSession(db, { actor: { kind: "user", id: "workbench_ui" }, sessionId: "session:pub" }).enrolled
+    ).toBe(false);
+    expect(readWorkbenchSessionState(db, "session:pub")?.publicationStatus).toBe("published");
+
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:not-added",
+      title: "Not added"
+    });
+    markWorkbenchNotAdded(db, {
+      actor: { kind: "system", id: "test" },
+      reason: "metadata_only",
+      sessionId: "session:not-added"
+    });
+    expect(
+      enrollWorkbenchSession(db, {
+        actor: { kind: "user", id: "workbench_ui" },
+        sessionId: "session:not-added"
+      }).enrolled
+    ).toBe(false);
+    expect(readWorkbenchSessionState(db, "session:not-added")?.publicationStatus).toBe("not_added_to_logbook");
+  });
+
+  test("enrollMissingWorkbenchSessions only touches sessions without state", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "running", model: "gpt-5", project: "Masthead", sessionId: "session:a", title: "A" });
+    seedSession(db, { lifecycle: "running", model: "gpt-5", project: "Masthead", sessionId: "session:b", title: "B" });
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:c", title: "C" });
+    ensureWorkbenchSessionState(db, "session:b"); // already on path
+    markWorkbenchNotAdded(db, {
+      actor: { kind: "system", id: "test" },
+      reason: "metadata_only",
+      sessionId: "session:c"
+    });
+
+    const result = enrollMissingWorkbenchSessions(db, {
+      actor: { kind: "user", id: "workbench_ui" },
+      limit: 100
+    });
+
+    expect(result.enrolled).toBe(1);
+    expect(result.enrolledSessionIds).toEqual(["session:a"]);
+    expect(result.skippedExisting).toBeGreaterThanOrEqual(2);
+    expect(readWorkbenchSessionState(db, "session:a")?.publicationStatus).toBe("publish_path");
+    expect(readWorkbenchSessionState(db, "session:c")?.publicationStatus).toBe("not_added_to_logbook");
   });
 });
 

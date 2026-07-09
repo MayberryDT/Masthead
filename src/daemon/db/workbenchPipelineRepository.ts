@@ -82,6 +82,19 @@ export type PublishWorkbenchSessionResult =
       state: WorkbenchSessionStateRecord;
     };
 
+export type WorkbenchEnrollResult = {
+  enrolled: boolean;
+  sessionId: string;
+  state?: WorkbenchSessionStateRecord;
+};
+
+export type WorkbenchEnrollMissingResult = {
+  enrolled: number;
+  skippedExisting: number;
+  enrolledSessionIds: string[];
+  limit: number;
+};
+
 type WorkbenchSessionStateRow = {
   sessionId: string;
   publicationStatus: WorkbenchPublicationStatus;
@@ -136,6 +149,90 @@ export function ensureWorkbenchSessionState(db: MastheadDatabase, sessionId: str
     ) VALUES (?, 'publish_path', 'check_transcript', 'unchecked', 'unchecked', 'missing', 'missing', 'unknown', ?, ?)`
   ).run(sessionId, now, now);
   return readWorkbenchSessionState(db, sessionId)!;
+}
+
+/** Create publish_path state only when no workbench_session_state row exists. Never demotes published/not_added. */
+export function enrollWorkbenchSession(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; sessionId: string }
+): WorkbenchEnrollResult {
+  const existing = readWorkbenchSessionState(db, input.sessionId);
+  if (existing) {
+    return { enrolled: false, sessionId: input.sessionId, state: existing };
+  }
+  try {
+    // ensure creates publish_path / check_transcript defaults
+    const state = ensureWorkbenchSessionState(db, input.sessionId);
+    return { enrolled: true, sessionId: input.sessionId, state };
+  } catch (error) {
+    // INSERT race: unique session_id — re-read and report not newly enrolled
+    const raced = readWorkbenchSessionState(db, input.sessionId);
+    if (raced) {
+      return { enrolled: false, sessionId: input.sessionId, state: raced };
+    }
+    throw error;
+  }
+}
+
+/** Enroll non-deleted sessions that have never entered Workbench (no pipeline row). */
+export function enrollMissingWorkbenchSessions(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; limit?: number }
+): WorkbenchEnrollMissingResult {
+  const limit = Math.max(1, Math.min(Math.trunc(input.limit ?? 500), 2000));
+
+  const skippedExisting = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS c
+         FROM sessions s
+         INNER JOIN workbench_session_state w ON w.session_id = s.session_id
+         WHERE s.deleted_at IS NULL`
+      )
+      .get() as { c: number }
+  ).c;
+
+  const missing = db
+    .prepare(
+      `SELECT s.session_id AS sessionId
+       FROM sessions s
+       LEFT JOIN workbench_session_state w ON w.session_id = s.session_id
+       WHERE w.session_id IS NULL
+         AND s.deleted_at IS NULL
+       ORDER BY COALESCE(s.last_activity_at, s.updated_at, s.created_at) DESC, s.session_id DESC
+       LIMIT ?`
+    )
+    .all(limit) as Array<{ sessionId: string }>;
+
+  const enrolledSessionIds: string[] = [];
+  for (const row of missing) {
+    const result = enrollWorkbenchSession(db, { actor: input.actor, sessionId: row.sessionId });
+    if (result.enrolled) enrolledSessionIds.push(row.sessionId);
+  }
+
+  const result: WorkbenchEnrollMissingResult = {
+    enrolled: enrolledSessionIds.length,
+    skippedExisting,
+    enrolledSessionIds,
+    limit
+  };
+
+  if (enrolledSessionIds.length > 0) {
+    recordWorkbenchActivity(db, {
+      actor: input.actor,
+      details: {
+        enrolled: result.enrolled,
+        enrolledSessionIds: enrolledSessionIds.slice(0, 20),
+        limit,
+        skippedExisting
+      },
+      eventType: "enroll_missing_completed",
+      sessionId: enrolledSessionIds[0]!,
+      summary: `Enrolled ${result.enrolled} missing session${result.enrolled === 1 ? "" : "s"} into Workbench`
+    });
+  }
+
+  return result;
 }
 
 export function readWorkbenchSessionState(db: MastheadDatabase, sessionId: string): WorkbenchSessionStateRecord | undefined {
