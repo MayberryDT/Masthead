@@ -14,6 +14,7 @@ import { listSessionArtifacts, type SessionArtifactKind } from "../daemon/db/ses
 import { applyWorkbenchBatch, prepareWorkbenchBatch } from "../workbench/batch.ts";
 import {
   claimWorkbenchSessions,
+  enrollMissingWorkbenchSessions,
   listWorkbenchActivity,
   markWorkbenchQuality,
   publishWorkbenchSession,
@@ -138,6 +139,20 @@ export async function runWorkbenchCli(args: string[], options: WorkbenchCliOptio
         sessionId
       });
       return jsonResult(result, result.ok ? 0 : 1);
+    } finally {
+      db.close();
+    }
+  }
+
+  if (command === "enroll") {
+    if (!args.includes("--missing")) {
+      return errorResult("missing_argument", "Missing required option: --missing", json);
+    }
+    const actor = { kind: "agent" as const, id: optionValue(args, "--by") ?? "mastheadctl" };
+    const limit = numberOption(args, "--limit", 500);
+    const db = await openCliDatabase(args, options.env);
+    try {
+      return jsonResult(enrollMissingWorkbenchSessions(db, { actor, limit }));
     } finally {
       db.close();
     }
@@ -383,6 +398,7 @@ export function workbenchHelp(): string {
     "  mastheadctl workbench validate --kind <kind> --session <id> --file <file> --json",
     "  mastheadctl workbench apply --kind <kind> --session <id> --file <file> --json",
     "  mastheadctl workbench publish --session <id> --json",
+    "  mastheadctl workbench enroll --missing [--limit N] --json",
     "  mastheadctl workbench claim --session <id> --by <agent> --json",
     "  mastheadctl workbench release --claim <id> --json",
     "  mastheadctl workbench activity --session <id> --json",

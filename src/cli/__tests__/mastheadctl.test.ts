@@ -313,6 +313,48 @@ describe("mastheadctl workbench CLI foundation", () => {
     }
   });
 
+  test("workbench enroll --missing enrolls sessions without pipeline state", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-cli-enroll-"));
+    try {
+      const dbPath = join(tempDir, "masthead.sqlite");
+      const db = await openMastheadDatabase(dbPath);
+      migrateDatabase(db);
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId: "session:missing",
+        title: "Missing pipeline"
+      });
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId: "session:existing",
+        title: "Already enrolled"
+      });
+      ensureWorkbenchSessionState(db, "session:existing");
+      db.close();
+
+      const result = await runMastheadCli(["workbench", "enroll", "--missing", "--db", dbPath, "--json"], { env: {} });
+
+      expect(result.exitCode).toBe(0);
+      const body = JSON.parse(result.stdout);
+      expect(body.enrolled).toBe(1);
+      expect(body.enrolledSessionIds).toContain("session:missing");
+      expect(body.skippedExisting).toBeGreaterThanOrEqual(1);
+      expect(body.limit).toBe(500);
+      expect(result.stderr).toBe("");
+
+      const afterDb = await openMastheadDatabase(dbPath);
+      expect(readWorkbenchSessionState(afterDb, "session:missing")?.publicationStatus).toBe("publish_path");
+      expect(readWorkbenchSessionState(afterDb, "session:existing")?.publicationStatus).toBe("publish_path");
+      afterDb.close();
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
   test("publishes a ready Workbench session through the CLI", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-cli-publish-"));
     try {
