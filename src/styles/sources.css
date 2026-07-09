@@ -12,15 +12,20 @@
   justify-self: stretch;
   width: 100%;
   max-width: 100%;
+  min-height: 56px;
   align-items: center;
   justify-content: space-between;
   margin: 0;
-  flex-wrap: wrap;
+  gap: var(--space-xs);
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 
 .sources-action-bar.sources-toolbar .sources-action-group {
   flex: 0 1 auto;
+  flex-wrap: nowrap;
   justify-content: flex-start;
+  gap: var(--space-xs);
 }
 
 .sources-action-bar.sources-toolbar .app-button {
@@ -58,8 +63,8 @@
 
 .sources-action-group {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: var(--space-xs);
   min-width: 0;
 }
 
@@ -73,14 +78,18 @@
 }
 
 .sources-toolbar-facts div {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   min-width: 0;
+  min-height: 40px;
   border: 1px solid rgba(92, 153, 187, 0.14);
   border-radius: 4px;
   background: rgba(3, 16, 25, 0.5);
   box-shadow:
     inset 0 0 0 1px rgba(92, 153, 187, 0.08),
     inset 0 1px 0 rgba(246, 251, 255, 0.035);
-  padding: 8px 10px;
+  padding: 4px 8px;
 }
 
 .sources-toolbar-facts div.is-stale {
@@ -1791,13 +1800,16 @@
 }
 
 @media (max-width: 760px) {
-  .sources-action-bar.sources-toolbar {
+  .sources-action-bar.sources-toolbar,
+  .sources-connections-toolbar.observability-toolbar {
     align-items: stretch;
+    flex-wrap: wrap;
   }
 
   .sources-action-group,
   .sources-action-group .app-button,
   .sources-toolbar-facts,
+  .sources-connections-facts,
   .source-detail-action-buttons,
   .source-detail-action-buttons .app-button {
     box-sizing: border-box;
@@ -1902,18 +1914,20 @@
   justify-self: stretch;
   width: 100%;
   max-width: 100%;
+  min-height: 56px;
   align-items: center;
   justify-content: space-between;
   margin: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-xs);
+  overflow-x: auto;
 }
 
 .sources-connections-toolbar .sources-action-group {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-xs);
   min-width: 0;
 }
 
@@ -1940,14 +1954,16 @@
 .sources-connections-facts > div {
   box-sizing: border-box;
   min-width: 104px;
-  min-height: 52px;
+  min-height: 40px;
   display: grid;
   align-content: center;
+  justify-items: center;
   gap: 2px;
-  padding: 8px 10px;
+  padding: 4px 8px;
   border: 1px solid rgba(92, 153, 187, 0.16);
   border-radius: 5px;
   background: rgba(8, 29, 42, 0.72);
+  text-align: center;
 }
 
 .sources-connections-facts dt {
