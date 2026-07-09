@@ -33,6 +33,7 @@ const heroCopyFragments = [
 ] as const;
 
 const OPS_BUTTON_LABELS = [
+  "Enroll missing",
   "Copy Agent Prompt",
   "Check Transcript",
   "Import Transcript",
@@ -213,6 +214,7 @@ describe("WorkbenchPanel", () => {
     );
 
     expect(html).toContain("No publish-path sessions");
+    expect(html).toContain("If Now has captures, use Enroll missing");
     expect(html).toContain("12 not added to Logbook · open review");
     expect(html).toContain("Publish path");
     expect(html).toContain(">0</dd>");
@@ -221,6 +223,7 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("Not Added");
     expect(html).toContain(">12</");
     expect(html).not.toContain("hook_only");
+    expect(html).toContain("Enroll missing");
     expect(html).toContain("Copy Agent Prompt");
     expect(html).toContain("Check Transcript");
     expect(html).toContain("workbench-activity-rail");
@@ -249,9 +252,36 @@ describe("WorkbenchPanel", () => {
     );
 
     expect(html).toContain("No publish-path sessions");
+    expect(html).toContain("If Now has captures, use Enroll missing");
+    expect(html).toContain("Enroll missing");
     expect(html).not.toContain("Not Added");
     expect(html).not.toContain("not added to Logbook");
     expect(html).toContain("No activity yet");
+  });
+
+  test("toolbar exposes Enroll missing without CLI recipes", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session()]}
+        canRun={allow("enroll_missing")}
+        runAction={async () => undefined}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAllVisible={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Enroll missing");
+    expect(html).toMatch(/Enroll missing[\s\S]*Copy Agent Prompt/);
+    expect(html).not.toMatch(/disabled[^>]*>Enroll missing|Enroll missing<\/button[^>]*disabled/);
+    for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
+      expect(html).not.toContain(forbiddenToken(index));
+    }
+    for (const fragment of heroCopyFragments) {
+      expect(html).not.toContain(fragment);
+    }
   });
 
   test("activity rail renders console rows with tone gutters and sanitized text", () => {

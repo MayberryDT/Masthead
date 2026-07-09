@@ -83,6 +83,9 @@ export function WorkbenchPanel({
     <section className="workbench-panel surface-panel" aria-label="Workbench">
       <div className="workbench-toolbar observability-toolbar metal-toolbar" role="toolbar" aria-label="Workbench actions">
         <div className="workbench-toolbar-actions toolbar-select-row" aria-label="Workbench ops actions">
+          <AppButton onClick={() => run("enroll_missing")} disabled={!canRun("enroll_missing")}>
+            Enroll missing
+          </AppButton>
           <AppButton
             variant={primaryKind === "copy_agent_prompt" ? "primary" : "default"}
             onClick={() => run("copy_agent_prompt")}
@@ -293,6 +296,9 @@ export function WorkbenchPanel({
                 <tr className="workbench-empty-row">
                   <td className="workbench-session-empty" colSpan={8}>
                     <span className="workbench-empty-title">{loading ? "Loading" : "No publish-path sessions"}</span>
+                    {!loading ? (
+                      <span className="workbench-empty-hint">If Now has captures, use Enroll missing</span>
+                    ) : null}
                     {!loading && notAddedTotal != null && notAddedTotal > 0 ? (
                       <button type="button" className="workbench-empty-not-added" onClick={toggleNotAdded}>
                         {notAddedTotal} not added to Logbook · open review
