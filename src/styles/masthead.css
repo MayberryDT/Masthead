@@ -2427,8 +2427,8 @@ main {
   font-size: 11.5px;
 }
 
-/* Cascade out of Pipeline (lightweight; avoids a full CollapsibleSearch-style width machine). */
-@keyframes workbench-pipeline-cascade {
+/* Cascade out of Pipeline, reverse cascade back in on close. */
+@keyframes workbench-pipeline-cascade-in {
   from {
     opacity: 0;
     transform: translateX(-8px);
@@ -2439,41 +2439,99 @@ main {
   }
 }
 
-.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button {
-  animation: workbench-pipeline-cascade 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+@keyframes workbench-pipeline-cascade-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
 }
 
-.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(1) {
+/* Open: left → right (first button first). */
+.workbench-pipeline-rail.is-expanded:not(.is-closing) .workbench-pipeline-actions .app-button {
+  animation: workbench-pipeline-cascade-in 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.workbench-pipeline-rail.is-expanded:not(.is-closing) .workbench-pipeline-actions .app-button:nth-child(1) {
   animation-delay: 0ms;
 }
-.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(2) {
+.workbench-pipeline-rail.is-expanded:not(.is-closing) .workbench-pipeline-actions .app-button:nth-child(2) {
   animation-delay: 20ms;
 }
-.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(3) {
+.workbench-pipeline-rail.is-expanded:not(.is-closing) .workbench-pipeline-actions .app-button:nth-child(3) {
   animation-delay: 40ms;
 }
-.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(4) {
+.workbench-pipeline-rail.is-expanded:not(.is-closing) .workbench-pipeline-actions .app-button:nth-child(4) {
   animation-delay: 55ms;
 }
-.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(5) {
+.workbench-pipeline-rail.is-expanded:not(.is-closing) .workbench-pipeline-actions .app-button:nth-child(5) {
   animation-delay: 70ms;
 }
-.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(6) {
+.workbench-pipeline-rail.is-expanded:not(.is-closing) .workbench-pipeline-actions .app-button:nth-child(6) {
   animation-delay: 85ms;
 }
-.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(7) {
+.workbench-pipeline-rail.is-expanded:not(.is-closing) .workbench-pipeline-actions .app-button:nth-child(7) {
   animation-delay: 100ms;
 }
-.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(8) {
+.workbench-pipeline-rail.is-expanded:not(.is-closing) .workbench-pipeline-actions .app-button:nth-child(8) {
   animation-delay: 115ms;
 }
-.workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button:nth-child(9) {
+.workbench-pipeline-rail.is-expanded:not(.is-closing) .workbench-pipeline-actions .app-button:nth-child(9) {
   animation-delay: 130ms;
+}
+
+/* Close: right → left (last button first), folding back into Pipeline. */
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions {
+  max-width: 100%;
+  opacity: 1;
+  pointer-events: none;
+  transition:
+    max-width 160ms cubic-bezier(0.22, 1, 0.36, 1) 160ms,
+    opacity 120ms ease 180ms;
+}
+
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions .app-button {
+  animation: workbench-pipeline-cascade-out 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions .app-button:nth-child(1) {
+  animation-delay: 130ms;
+}
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions .app-button:nth-child(2) {
+  animation-delay: 115ms;
+}
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions .app-button:nth-child(3) {
+  animation-delay: 100ms;
+}
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions .app-button:nth-child(4) {
+  animation-delay: 85ms;
+}
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions .app-button:nth-child(5) {
+  animation-delay: 70ms;
+}
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions .app-button:nth-child(6) {
+  animation-delay: 55ms;
+}
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions .app-button:nth-child(7) {
+  animation-delay: 40ms;
+}
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions .app-button:nth-child(8) {
+  animation-delay: 20ms;
+}
+.workbench-pipeline-rail.is-closing .workbench-pipeline-actions .app-button:nth-child(9) {
+  animation-delay: 0ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .workbench-pipeline-rail.is-expanded .workbench-pipeline-actions .app-button {
     animation: none;
+  }
+
+  .workbench-pipeline-rail.is-closing .workbench-pipeline-actions {
+    transition-delay: 0ms;
   }
 }
 

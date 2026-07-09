@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
 import { formatWorkbenchActivityTime, workbenchActivityTone } from "./workbenchActivity";
@@ -135,17 +135,56 @@ export function WorkbenchPanel({
   const allPageSelected = pageSessionIds.length > 0 && pageSelectedCount === pageSessionIds.length;
   const somePageSelected = pageSelectedCount > 0 && !allPageSelected;
 
-  const [pipelineOpen, setPipelineOpen] = useState(false);
+  const [pipelineExpanded, setPipelineExpanded] = useState(false);
+  const [pipelineClosing, setPipelineClosing] = useState(false);
+  const pipelineCloseTimerRef = useRef<number | null>(null);
   const pipelineActionsId = useId();
+  /** Keep rail open long enough for reverse cascade + width collapse. */
+  const PIPELINE_CLOSE_MS = 320;
+  const pipelineRailOpen = pipelineExpanded || pipelineClosing;
+
+  const clearPipelineCloseTimer = () => {
+    if (pipelineCloseTimerRef.current === null) return;
+    window.clearTimeout(pipelineCloseTimerRef.current);
+    pipelineCloseTimerRef.current = null;
+  };
+
+  const openPipeline = () => {
+    clearPipelineCloseTimer();
+    setPipelineClosing(false);
+    setPipelineExpanded(true);
+  };
+
+  const closePipeline = () => {
+    if (!pipelineExpanded || pipelineClosing) return;
+    clearPipelineCloseTimer();
+    setPipelineClosing(true);
+    pipelineCloseTimerRef.current = window.setTimeout(() => {
+      setPipelineExpanded(false);
+      setPipelineClosing(false);
+      pipelineCloseTimerRef.current = null;
+    }, PIPELINE_CLOSE_MS);
+  };
+
+  const togglePipeline = () => {
+    if (pipelineClosing) {
+      openPipeline();
+      return;
+    }
+    if (pipelineExpanded) closePipeline();
+    else openPipeline();
+  };
+
+  useEffect(() => () => clearPipelineCloseTimer(), []);
 
   useEffect(() => {
-    if (!pipelineOpen) return;
+    if (!pipelineRailOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPipelineOpen(false);
+      if (event.key === "Escape") closePipeline();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pipelineOpen]);
+  }, [pipelineExpanded, pipelineClosing]);
 
   const run = (kind: WorkbenchActionKind) => {
     if (!canRun(kind) || actionBusy) return;
@@ -207,18 +246,22 @@ export function WorkbenchPanel({
             Clear
           </AppButton>
 
-          <div className={`workbench-pipeline-rail${pipelineOpen ? " is-expanded" : ""}`}>
+          <div
+            className={`workbench-pipeline-rail${pipelineRailOpen ? " is-expanded" : ""}${
+              pipelineClosing ? " is-closing" : ""
+            }`}
+          >
             <AppButton
               className="workbench-pipeline-trigger"
-              aria-expanded={pipelineOpen}
+              aria-expanded={pipelineExpanded && !pipelineClosing}
               aria-controls={pipelineActionsId}
-              onClick={() => setPipelineOpen((open) => !open)}
+              onClick={togglePipeline}
               disabled={actionBusy}
               title={TOOLTIPS.pipeline}
             >
               Pipeline
               <span className="workbench-pipeline-caret" aria-hidden="true">
-                {pipelineOpen ? "‹" : "›"}
+                {pipelineExpanded && !pipelineClosing ? "‹" : "›"}
               </span>
             </AppButton>
             <div
@@ -226,15 +269,15 @@ export function WorkbenchPanel({
               className="workbench-pipeline-actions"
               role="group"
               aria-label="Pipeline operations"
-              aria-hidden={!pipelineOpen}
+              aria-hidden={!pipelineExpanded || pipelineClosing}
             >
               {PIPELINE_ITEMS.map((item) => (
                 <AppButton
                   key={item.kind}
                   variant={item.quiet ? "quiet" : "default"}
-                  disabled={!canRun(item.kind) || actionBusy || !pipelineOpen}
+                  disabled={!canRun(item.kind) || actionBusy || !pipelineExpanded || pipelineClosing}
                   title={item.tooltip}
-                  tabIndex={pipelineOpen ? 0 : -1}
+                  tabIndex={pipelineExpanded && !pipelineClosing ? 0 : -1}
                   onClick={() => run(item.kind)}
                 >
                   {item.label}
