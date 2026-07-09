@@ -73,14 +73,14 @@ describe("collector autostart", () => {
     root.unmount();
   });
 
-  test("keeps first-run sources onboarding open after a scan finds sources", async () => {
+  test("keeps first-run sources onboarding open after connector discovery", async () => {
     window.localStorage.removeItem(mastheadOnboardingDismissedStorageKey);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string | URL | Request) => {
         const requestUrl = String(url);
         const { pathname } = new URL(requestUrl);
-        if (pathname === "/sources/setup") return jsonResponse({ ok: true, setup: detectedSourcesSetup() });
+        if (pathname.startsWith("/sources/connectors")) return jsonResponse({ ok: true, ...detectedHarnessConnectors() });
         return jsonResponse(responseForUrl(requestUrl));
       })
     );
@@ -100,28 +100,22 @@ describe("collector autostart", () => {
       await waitFor(() => container.querySelector(".sources-onboarding-modal") !== null);
     });
 
-    expect(container.textContent).toContain("Sources setup");
-    expect(container.textContent).toContain("Set up sources");
+    expect(container.textContent).toContain("Sources connect");
+    expect(container.textContent).toContain("Connect live harnesses");
     expect(container.textContent).not.toContain("ADAPTERS");
     expect(container.textContent).not.toContain("Import data");
 
     root.unmount();
   });
 
-  test("keeps the sources wizard open after scanning detected-only sources", async () => {
+  test("keeps the sources wizard open while selecting detected connectors", async () => {
     window.localStorage.removeItem(mastheadOnboardingDismissedStorageKey);
-    let scanned = false;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string | URL | Request) => {
         const requestUrl = String(url);
         const { pathname } = new URL(requestUrl);
-        if (pathname === "/sources/setup/scan") {
-          scanned = true;
-          const setup = detectedSourcesSetup("needs_attention");
-          return jsonResponse({ ok: true, setup, scan: setup.scan });
-        }
-        if (pathname === "/sources/setup") return jsonResponse({ ok: true, setup: scanned ? detectedSourcesSetup("needs_attention") : emptySourcesSetup() });
+        if (pathname.startsWith("/sources/connectors")) return jsonResponse({ ok: true, ...detectedHarnessConnectors() });
         return jsonResponse(responseForUrl(requestUrl));
       })
     );
@@ -142,7 +136,7 @@ describe("collector autostart", () => {
     });
 
     await act(async () => {
-      clickButtonByText(container, "Check local sources");
+      clickButtonByText(container, "Continue");
       await flushTimers();
       await flushTimers();
     });
@@ -595,45 +589,6 @@ function emptySourcesSetup() {
   };
 }
 
-function detectedSourcesSetup(status = "detected") {
-  return {
-    ...emptySourcesSetup(),
-    connectedSources: [
-      {
-        discoveredSessions: 0,
-        importedSessions: 0,
-        label: "OpenCode",
-        path: "/home/tyler/.opencode/session_index.jsonl",
-        runtime: "opencode",
-        sourceId: "opencode-sessions",
-        state: "connected"
-      }
-    ],
-    scan: {
-      adapters: [],
-      foundSources: [
-        {
-          discoveredSessions: 0,
-          importable: true,
-          label: "OpenCode sessions",
-          path: "/home/tyler/.opencode/session_index.jsonl",
-          runtime: "opencode",
-          sourceId: "opencode-sessions"
-        }
-      ],
-      generatedAt: "2026-07-04T00:00:00.000Z",
-      scanId: "scan:detected",
-      status: "completed",
-      summary: {
-        detectedHarnesses: 1,
-        foundSources: 1,
-        scannedHarnesses: 1
-      }
-    },
-    status
-  };
-}
-
 function emptyLogbookSummary() {
   return {
     runtimes: [],
@@ -652,6 +607,22 @@ function emptyHarnessConnectors() {
     generatedAt: "2026-07-04T00:00:00.000Z",
     summary: { ready: 0, needsAction: 0, notInstalled: 0, notFound: 0, error: 0 },
     connectors: []
+  };
+}
+
+function detectedHarnessConnectors() {
+  return {
+    generatedAt: "2026-07-04T00:00:00.000Z",
+    summary: { ready: 0, needsAction: 0, notInstalled: 1, notFound: 0, error: 0 },
+    connectors: [
+      {
+        runtime: "opencode",
+        label: "OpenCode",
+        presence: "found",
+        live: "not_installed",
+        supportsActions: true
+      }
+    ]
   };
 }
 

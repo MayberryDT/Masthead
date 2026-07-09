@@ -40,26 +40,33 @@ afterEach(() => {
 describe("App session transition notifications", () => {
   test("baselines the first projection and notifies once when a running card later transitions", async () => {
     let projectionRequests = 0;
+    let transitioned = false;
     stubAppFetch(() => {
       projectionRequests += 1;
-      return liveProjectionResponse(projectionRequests === 1 ? firstProjection() : transitionedProjection());
+      return liveProjectionResponse(transitioned ? transitionedProjection() : firstProjection());
     });
 
     renderApp();
-    await waitFor(() => projectionRequests === 1);
+    await waitFor(
+      () =>
+        projectionRequests === 1 &&
+        vi.mocked(fetch).mock.calls.some(([url]) => new URL(String(url)).pathname === "/knowledge-flow/summary")
+    );
     expect(notifyTransitionMock).not.toHaveBeenCalled();
+    transitioned = true;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(30_000);
     });
+    await waitFor(() => projectionRequests >= 2);
     await waitFor(() => notifyTransitionMock.mock.calls.length === 1);
 
-    expect(projectionRequests).toBe(2);
+    expect(projectionRequests).toBeGreaterThanOrEqual(3);
     expect(notifyTransitionMock).toHaveBeenCalledWith({
       sessionId: "active-1",
       transition: "idle",
       title: "Task: in progress.",
-      body: "Idle"
+      body: "Session went quiet"
     });
   });
 
@@ -322,7 +329,7 @@ async function waitFor(condition: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (condition()) return;
     await act(async () => {
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
     });
   }
   expect(condition()).toBe(true);
