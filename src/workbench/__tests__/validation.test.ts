@@ -139,13 +139,39 @@ describe("validateWorkbenchOutput", () => {
     });
   });
 
-  test("rejects fake not-applicable bug-fix trace artifacts", () => {
-    const result = validateWorkbenchOutput("bug_fix_trace", {
+  test("rejects fake not-applicable runbook artifacts", () => {
+    const result = validateWorkbenchOutput("runbook", {
       notApplicable: true,
       reason: "no bug evidence"
     });
 
     expect(result.ok).toBe(false);
     expect(result.errors).toEqual(expect.arrayContaining([{ code: "unexpected_property", message: "Unexpected field: notApplicable" }]));
+  });
+
+  test("rejects weak multi-session join rationale", () => {
+    const result = validateWorkbenchOutput("runbook", {
+      changedFiles: [],
+      commands: [],
+      confidence: "medium",
+      deadEnds: [],
+      environmentRequirements: [],
+      evidenceRefs: ["message:1", "message:2"],
+      fixSteps: ["restart service"],
+      joinRationale: "same project",
+      missingEvidence: [],
+      preconditions: [],
+      preventionNotes: [],
+      problemSignature: { affectedScope: "svc", errorStrings: ["ECONNRESET"], symptoms: ["timeout"] },
+      provenanceSessionIds: ["session:a", "session:b"],
+      reproSteps: ["hit endpoint"],
+      risksOrGaps: [],
+      rootCause: "",
+      title: "Timeout under load",
+      validationChecks: ["curl health"]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((error) => error.code === "weak_join")).toBe(true);
   });
 });

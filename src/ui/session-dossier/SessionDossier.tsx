@@ -461,7 +461,7 @@ function WorkbenchArtifactsSection({ dossier }: { dossier?: SessionDossierDto })
 }
 
 function artifactKindLabel(kind: SessionDossierDto["artifacts"][number]["artifactKind"]): string {
-  return kind === "bug_fix_trace" ? "Bug-Fix Trace" : "Session Dossier";
+  return kind === "runbook" ? "Runbook" : "Session Dossier";
 }
 
 function artifactContentPreview(content: unknown): string {

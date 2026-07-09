@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
 import type { SessionArtifactKind, SessionArtifactRecord } from "../daemon/db/sessionArtifactRepository.ts";
-import { applySessionArtifact } from "../daemon/db/sessionArtifactRepository.ts";
-import { markWorkbenchArtifactSatisfied } from "../daemon/db/workbenchPipelineRepository.ts";
+import { applySessionArtifact, publishSessionArtifact } from "../daemon/db/sessionArtifactRepository.ts";
+import {
+  markContributionSatisfactionForProvenance,
+  markWorkbenchArtifactSatisfied,
+  type WorkbenchAutomaticKind
+} from "../daemon/db/workbenchPipelineRepository.ts";
 import { stableRecordId } from "../daemon/identity.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 import { buildWorkbenchEvidencePacket } from "./evidencePacket.ts";
+import { isWorkbenchArtifactKind } from "./schemas.ts";
 import type { WorkbenchOutputKind, WorkbenchValidationResult } from "./types.ts";
 import { validateWorkbenchOutput } from "./validation.ts";
 
@@ -14,18 +19,38 @@ export type ApplyArtifactResult = {
   artifactKind: SessionArtifactKind;
   artifactId?: string;
   status?: SessionArtifactRecord["status"];
+  publicationStatus?: SessionArtifactRecord["publicationStatus"];
   title?: string;
   contentFingerprint: string;
   validation: WorkbenchValidationResult;
 };
 
+export type PublishArtifactResult = {
+  ok: boolean;
+  artifactId: string;
+  artifactKind: SessionArtifactKind;
+  publicationStatus: SessionArtifactRecord["publicationStatus"];
+  publishedAt?: string;
+};
+
 export function applyArtifact(
   db: MastheadDatabase,
-  options: { sessionId: string; kind: WorkbenchOutputKind; output: unknown; dryRun?: boolean }
+  options: {
+    sessionId: string;
+    kind: WorkbenchOutputKind;
+    output: unknown;
+    dryRun?: boolean;
+    provenanceSessionIds?: string[];
+  }
 ): ApplyArtifactResult {
-  if (!isArtifactKind(options.kind)) throw new Error(`Workbench kind is not a local artifact: ${options.kind}`);
+  if (!isWorkbenchArtifactKind(options.kind)) throw new Error(`Workbench kind is not a local artifact: ${options.kind}`);
 
-  const evidencePacket = buildWorkbenchEvidencePacket(db, { kind: options.kind, sessionId: options.sessionId });
+  const provenanceSessionIds = provenanceFromOutputOrOptions(options.output, options.sessionId, options.provenanceSessionIds);
+  const evidencePacket = buildWorkbenchEvidencePacket(db, {
+    kind: options.kind,
+    provenanceSessionIds,
+    sessionId: options.sessionId
+  });
   const validation = validateWorkbenchOutput(options.kind, options.output, evidencePacket);
   if (!validation.ok) {
     throw new Error(`Invalid Workbench ${options.kind}: ${validation.errors.map((error) => error.message).join("; ")}`);
@@ -44,14 +69,21 @@ export function applyArtifact(
     };
   }
 
+  const projectLabel = evidencePacket.session.project;
+  const content = isRecord(options.output) ? options.output : {};
   const artifact = applySessionArtifact(db, {
     artifactKind: options.kind,
+    confidence: confidenceFromOutput(options.output),
     content: options.output,
     contentFingerprint: fingerprint,
     createdBy: "workbench_cli",
     evidenceRefs: evidenceRefsFromOutput(options.output),
+    joinRationale: typeof content.joinRationale === "string" ? content.joinRationale : undefined,
+    projectLabel,
+    provenanceSessionIds,
     schemaVersion: `${options.kind}-v1`,
     sessionId: options.sessionId,
+    signatureKey: typeof content.signatureKey === "string" ? content.signatureKey : undefined,
     title,
     validation
   });
@@ -68,14 +100,54 @@ export function applyArtifact(
     contentFingerprint: fingerprint,
     dryRun: false,
     ok: true,
+    publicationStatus: artifact.publicationStatus,
     status: artifact.status,
     title: artifact.title,
     validation
   };
 }
 
-function isArtifactKind(kind: WorkbenchOutputKind): kind is SessionArtifactKind {
-  return kind === "session_dossier" || kind === "bug_fix_trace";
+export function publishArtifact(db: MastheadDatabase, artifactId: string): PublishArtifactResult {
+  const published = publishSessionArtifact(db, artifactId);
+  if (!published) throw new Error(`Artifact not found: ${artifactId}`);
+  if (
+    published.provenanceSessionIds.length > 1 &&
+    (published.artifactKind === "runbook" || published.artifactKind === "adr" || published.artifactKind === "incident_timeline")
+  ) {
+    markContributionSatisfactionForProvenance(db, {
+      actor: { kind: "agent", id: "external_agent" },
+      artifactKind: published.artifactKind as WorkbenchAutomaticKind,
+      provenanceSessionIds: published.provenanceSessionIds,
+      publishedArtifactId: published.artifactId
+    });
+  }
+  return {
+    artifactId: published.artifactId,
+    artifactKind: published.artifactKind,
+    ok: true,
+    publicationStatus: published.publicationStatus,
+    publishedAt: published.publishedAt
+  };
+}
+
+function provenanceFromOutputOrOptions(
+  output: unknown,
+  sessionId: string,
+  provenanceSessionIds?: string[]
+): string[] {
+  if (provenanceSessionIds?.length) return provenanceSessionIds;
+  if (isRecord(output) && Array.isArray(output.provenanceSessionIds)) {
+    const fromOutput = output.provenanceSessionIds.filter((entry): entry is string => typeof entry === "string");
+    if (fromOutput.length > 0) return fromOutput;
+  }
+  return [sessionId];
+}
+
+function confidenceFromOutput(output: unknown): "high" | "medium" | "low" | undefined {
+  if (!isRecord(output)) return undefined;
+  return output.confidence === "high" || output.confidence === "medium" || output.confidence === "low"
+    ? output.confidence
+    : undefined;
 }
 
 function titleFromOutput(output: unknown): string | undefined {

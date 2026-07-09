@@ -16,8 +16,15 @@ export type WorkbenchNextAction =
 export type WorkbenchTranscriptStatus = "unchecked" | "available" | "imported" | "missing" | "permission_needed";
 export type WorkbenchQualityStatus = "unchecked" | "passed" | "failed";
 export type WorkbenchRequirementStatus = "missing" | "satisfied";
-export type WorkbenchBugFixTraceStatus = "unknown" | "required" | "satisfied" | "not_applicable";
+/** Optional automatic kinds: runbook, ADR, incident timeline. */
+export type WorkbenchOptionalKindStatus = "unknown" | "required" | "satisfied" | "not_applicable" | "contributed";
+/** @deprecated Use WorkbenchOptionalKindStatus / runbookStatus. Kept for transitional call sites. */
+export type WorkbenchBugFixTraceStatus = WorkbenchOptionalKindStatus;
+export type WorkbenchSessionPackageStatus = "missing" | "applied" | "published";
+export type WorkbenchResolutionStatus = "in_progress" | "compile_ready" | "automatic_resolved";
 export type WorkbenchActor = { kind: "agent" | "system" | "user"; id?: string };
+export type WorkbenchAutomaticKind = "runbook" | "adr" | "incident_timeline";
+export type WorkbenchArtifactKind = "session_dossier" | WorkbenchAutomaticKind;
 
 export type WorkbenchClaimRecord = {
   claimId: string;
@@ -39,7 +46,13 @@ export type WorkbenchSessionStateRecord = {
   qualityStatus: WorkbenchQualityStatus;
   sessionEnrichmentStatus: WorkbenchRequirementStatus;
   sessionDossierStatus: WorkbenchRequirementStatus;
-  bugFixTraceStatus: WorkbenchBugFixTraceStatus;
+  /** @deprecated Prefer runbookStatus */
+  bugFixTraceStatus: WorkbenchOptionalKindStatus;
+  runbookStatus: WorkbenchOptionalKindStatus;
+  adrStatus: WorkbenchOptionalKindStatus;
+  incidentTimelineStatus: WorkbenchOptionalKindStatus;
+  sessionPackageStatus: WorkbenchSessionPackageStatus;
+  resolutionStatus: WorkbenchResolutionStatus;
   nonPublicationReason?: string;
   publishedAt?: string;
   publishedActivityId?: string;
@@ -67,7 +80,9 @@ export type WorkbenchPublicationGate =
   | "quality"
   | "session_enrichment"
   | "session_dossier"
-  | "bug_fix_trace";
+  | "runbook"
+  | "adr"
+  | "incident_timeline";
 
 export type PublishWorkbenchSessionResult =
   | {
@@ -103,7 +118,12 @@ type WorkbenchSessionStateRow = {
   qualityStatus: WorkbenchQualityStatus;
   sessionEnrichmentStatus: WorkbenchRequirementStatus;
   sessionDossierStatus: WorkbenchRequirementStatus;
-  bugFixTraceStatus: WorkbenchBugFixTraceStatus;
+  bugFixTraceStatus: WorkbenchOptionalKindStatus;
+  runbookStatus: WorkbenchOptionalKindStatus;
+  adrStatus: WorkbenchOptionalKindStatus;
+  incidentTimelineStatus: WorkbenchOptionalKindStatus;
+  sessionPackageStatus: WorkbenchSessionPackageStatus;
+  resolutionStatus: WorkbenchResolutionStatus;
   nonPublicationReason: string | null;
   publishedAt: string | null;
   publishedActivityId: string | null;
@@ -111,6 +131,28 @@ type WorkbenchSessionStateRow = {
   createdAt: string;
   updatedAt: string;
 };
+
+const WORKBENCH_STATE_SELECT = `SELECT
+  session_id AS sessionId,
+  publication_status AS publicationStatus,
+  next_action AS nextAction,
+  transcript_status AS transcriptStatus,
+  quality_status AS qualityStatus,
+  session_enrichment_status AS sessionEnrichmentStatus,
+  session_dossier_status AS sessionDossierStatus,
+  COALESCE(runbook_status, bug_fix_trace_status) AS bugFixTraceStatus,
+  COALESCE(runbook_status, bug_fix_trace_status) AS runbookStatus,
+  COALESCE(adr_status, 'unknown') AS adrStatus,
+  COALESCE(incident_timeline_status, 'unknown') AS incidentTimelineStatus,
+  COALESCE(session_package_status, 'missing') AS sessionPackageStatus,
+  COALESCE(resolution_status, 'in_progress') AS resolutionStatus,
+  non_publication_reason AS nonPublicationReason,
+  published_at AS publishedAt,
+  published_activity_id AS publishedActivityId,
+  last_activity_at AS lastActivityAt,
+  created_at AS createdAt,
+  updated_at AS updatedAt
+FROM workbench_session_state`;
 
 type WorkbenchActivityRow = {
   activityId: string;
@@ -236,27 +278,7 @@ export function enrollMissingWorkbenchSessions(
 }
 
 export function readWorkbenchSessionState(db: MastheadDatabase, sessionId: string): WorkbenchSessionStateRecord | undefined {
-  const row = db
-    .prepare(
-      `SELECT
-        session_id AS sessionId,
-        publication_status AS publicationStatus,
-        next_action AS nextAction,
-        transcript_status AS transcriptStatus,
-        quality_status AS qualityStatus,
-        session_enrichment_status AS sessionEnrichmentStatus,
-        session_dossier_status AS sessionDossierStatus,
-        bug_fix_trace_status AS bugFixTraceStatus,
-        non_publication_reason AS nonPublicationReason,
-        published_at AS publishedAt,
-        published_activity_id AS publishedActivityId,
-        last_activity_at AS lastActivityAt,
-        created_at AS createdAt,
-        updated_at AS updatedAt
-      FROM workbench_session_state
-      WHERE session_id = ?`
-    )
-    .get(sessionId) as WorkbenchSessionStateRow | undefined;
+  const row = db.prepare(`${WORKBENCH_STATE_SELECT} WHERE session_id = ?`).get(sessionId) as WorkbenchSessionStateRow | undefined;
   return row ? stateRowToRecord(db, row) : undefined;
 }
 
@@ -285,7 +307,7 @@ export function markWorkbenchPublished(
     db.prepare(
       `UPDATE workbench_session_state
       SET publication_status = 'published',
-        next_action = 'none',
+        session_package_status = 'published',
         non_publication_reason = NULL,
         published_at = ?,
         published_activity_id = ?,
@@ -293,6 +315,7 @@ export function markWorkbenchPublished(
         updated_at = ?
       WHERE session_id = ?`
     ).run(now, activity.activityId, now, now, input.sessionId);
+    refreshResolutionAndNextAction(db, input.sessionId, now);
     return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
   });
 }
@@ -469,6 +492,10 @@ export function markWorkbenchSessionEnrichmentSatisfied(
     db.prepare(
       `UPDATE workbench_session_state
       SET session_enrichment_status = 'satisfied',
+        session_package_status = CASE
+          WHEN session_dossier_status = 'satisfied' THEN 'applied'
+          ELSE session_package_status
+        END,
         updated_at = ?
       WHERE session_id = ?`
     ).run(now, input.sessionId);
@@ -489,22 +516,28 @@ export function markWorkbenchSessionEnrichmentSatisfied(
 
 export function markWorkbenchArtifactSatisfied(
   db: MastheadDatabase,
-  input: { actor: WorkbenchActor; artifactKind: "bug_fix_trace" | "session_dossier"; sessionId: string }
+  input: { actor: WorkbenchActor; artifactKind: WorkbenchArtifactKind; sessionId: string }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
   const now = new Date().toISOString();
-  const eventType = input.artifactKind === "session_dossier" ? "session_dossier_applied" : "bug_fix_trace_applied";
-  const summary = input.artifactKind === "session_dossier" ? "Session dossier applied" : "Bug-fix trace applied";
+  const eventType = `${input.artifactKind}_applied`;
+  const summary = `${kindLabel(input.artifactKind)} applied`;
   return writeStateTransition(db, () => {
     ensureWorkbenchSessionState(db, input.sessionId);
     if (input.artifactKind === "session_dossier") {
-      db.prepare("UPDATE workbench_session_state SET session_dossier_status = 'satisfied', updated_at = ? WHERE session_id = ?").run(
-        now,
-        input.sessionId
-      );
+      db.prepare(
+        `UPDATE workbench_session_state
+         SET session_dossier_status = 'satisfied',
+             session_package_status = CASE
+               WHEN session_enrichment_status = 'satisfied' THEN 'applied'
+               ELSE session_package_status
+             END,
+             updated_at = ?
+         WHERE session_id = ?`
+      ).run(now, input.sessionId);
     } else {
-      db.prepare("UPDATE workbench_session_state SET bug_fix_trace_status = 'satisfied', updated_at = ? WHERE session_id = ?").run(now, input.sessionId);
+      setOptionalKindStatus(db, input.sessionId, input.artifactKind, "satisfied", now);
     }
-    updateWorkbenchNextAction(db, input.sessionId, now);
+    refreshResolutionAndNextAction(db, input.sessionId, now);
     const activity = insertWorkbenchActivity(db, {
       activityId: stableRecordId("workbench_activity", [input.sessionId, eventType, now]),
       actor: input.actor,
@@ -521,28 +554,61 @@ export function markWorkbenchArtifactSatisfied(
 
 export function setWorkbenchArtifactApplicability(
   db: MastheadDatabase,
-  input: { actor: WorkbenchActor; artifactKind: "bug_fix_trace"; reason: string; sessionId: string; status: "not_applicable" }
+  input: {
+    actor: WorkbenchActor;
+    artifactKind: WorkbenchAutomaticKind;
+    reason: string;
+    sessionId: string;
+    status: "not_applicable" | "contributed";
+  }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
   const now = new Date().toISOString();
+  const eventType = `${input.artifactKind}_${input.status}`;
+  const summary =
+    input.status === "contributed"
+      ? `${kindLabel(input.artifactKind)} satisfied via contribution`
+      : `${kindLabel(input.artifactKind)} marked not applicable`;
   return writeStateTransition(db, () => {
     ensureWorkbenchSessionState(db, input.sessionId);
-    db.prepare("UPDATE workbench_session_state SET bug_fix_trace_status = 'not_applicable', updated_at = ? WHERE session_id = ?").run(
-      now,
-      input.sessionId
-    );
-    updateWorkbenchNextAction(db, input.sessionId, now);
+    setOptionalKindStatus(db, input.sessionId, input.artifactKind, input.status, now);
+    refreshResolutionAndNextAction(db, input.sessionId, now);
     const activity = insertWorkbenchActivity(db, {
-      activityId: stableRecordId("workbench_activity", [input.sessionId, "bug_fix_trace_not_applicable", input.reason]),
+      activityId: stableRecordId("workbench_activity", [input.sessionId, eventType, input.reason]),
       actor: input.actor,
       details: { artifactKind: input.artifactKind, reason: input.reason, status: input.status },
       eventAt: now,
-      eventType: "bug_fix_trace_not_applicable",
+      eventType,
       sessionId: input.sessionId,
-      summary: "Bug-fix trace marked not applicable"
+      summary
     });
     db.prepare("UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?").run(now, now, input.sessionId);
     return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
   });
+}
+
+/** Mark seed sessions contributed when they appear in a published multi-session artifact's provenance. */
+export function markContributionSatisfactionForProvenance(
+  db: MastheadDatabase,
+  input: {
+    actor: WorkbenchActor;
+    artifactKind: WorkbenchAutomaticKind;
+    provenanceSessionIds: string[];
+    publishedArtifactId: string;
+  }
+): void {
+  for (const sessionId of input.provenanceSessionIds) {
+    const state = readWorkbenchSessionState(db, sessionId);
+    if (!state) continue;
+    const status = optionalKindStatus(state, input.artifactKind);
+    if (status === "satisfied" || status === "not_applicable" || status === "contributed") continue;
+    setWorkbenchArtifactApplicability(db, {
+      actor: input.actor,
+      artifactKind: input.artifactKind,
+      reason: `contributed_to:${input.publishedArtifactId}`,
+      sessionId,
+      status: "contributed"
+    });
+  }
 }
 
 export function markWorkbenchTranscriptStatus(
@@ -649,7 +715,12 @@ export function listWorkbenchQueue(
         workbench_session_state.quality_status AS qualityStatus,
         workbench_session_state.session_enrichment_status AS sessionEnrichmentStatus,
         workbench_session_state.session_dossier_status AS sessionDossierStatus,
-        workbench_session_state.bug_fix_trace_status AS bugFixTraceStatus,
+        COALESCE(workbench_session_state.runbook_status, workbench_session_state.bug_fix_trace_status) AS bugFixTraceStatus,
+        COALESCE(workbench_session_state.runbook_status, workbench_session_state.bug_fix_trace_status) AS runbookStatus,
+        COALESCE(workbench_session_state.adr_status, 'unknown') AS adrStatus,
+        COALESCE(workbench_session_state.incident_timeline_status, 'unknown') AS incidentTimelineStatus,
+        COALESCE(workbench_session_state.session_package_status, 'missing') AS sessionPackageStatus,
+        COALESCE(workbench_session_state.resolution_status, 'in_progress') AS resolutionStatus,
         workbench_session_state.non_publication_reason AS nonPublicationReason,
         workbench_session_state.published_at AS publishedAt,
         workbench_session_state.published_activity_id AS publishedActivityId,
@@ -747,31 +818,111 @@ function writeStateTransition<T>(db: MastheadDatabase, callback: () => T): T {
 }
 
 function updateWorkbenchNextAction(db: MastheadDatabase, sessionId: string, updatedAt: string): void {
+  refreshResolutionAndNextAction(db, sessionId, updatedAt);
+}
+
+function refreshResolutionAndNextAction(db: MastheadDatabase, sessionId: string, updatedAt: string): void {
   const state = readWorkbenchSessionState(db, sessionId);
-  if (!state || state.publicationStatus !== "publish_path") return;
-  const nextAction = nextActionForState(state);
-  db.prepare("UPDATE workbench_session_state SET next_action = ?, updated_at = ? WHERE session_id = ?").run(nextAction, updatedAt, sessionId);
+  if (!state) return;
+  const resolutionStatus = resolutionStatusForState(state);
+  const nextAction = nextActionForState({ ...state, resolutionStatus });
+  db.prepare(
+    `UPDATE workbench_session_state
+     SET next_action = ?, resolution_status = ?, updated_at = ?
+     WHERE session_id = ?`
+  ).run(nextAction, resolutionStatus, updatedAt, sessionId);
+}
+
+function resolutionStatusForState(state: WorkbenchSessionStateRecord): WorkbenchResolutionStatus {
+  if (state.publicationStatus === "not_added_to_logbook") return "in_progress";
+  const packageReady =
+    (state.transcriptStatus === "available" || state.transcriptStatus === "imported") &&
+    state.qualityStatus === "passed" &&
+    state.sessionEnrichmentStatus === "satisfied" &&
+    state.sessionDossierStatus === "satisfied";
+  if (!packageReady) return "in_progress";
+  const automaticResolved =
+    state.sessionPackageStatus === "published" &&
+    isOptionalKindResolved(state.runbookStatus) &&
+    isOptionalKindResolved(state.adrStatus) &&
+    isOptionalKindResolved(state.incidentTimelineStatus);
+  if (automaticResolved) return "automatic_resolved";
+  return "compile_ready";
+}
+
+function isOptionalKindResolved(status: WorkbenchOptionalKindStatus): boolean {
+  return status === "satisfied" || status === "not_applicable" || status === "contributed";
 }
 
 function nextActionForState(state: WorkbenchSessionStateRecord): WorkbenchNextAction {
+  if (state.publicationStatus === "not_added_to_logbook") return "none";
+  // Session package already published: remaining work is automatic kinds (or done).
+  if (state.publicationStatus === "published" || state.sessionPackageStatus === "published") {
+    if (
+      isOptionalKindResolved(state.runbookStatus) &&
+      isOptionalKindResolved(state.adrStatus) &&
+      isOptionalKindResolved(state.incidentTimelineStatus)
+    ) {
+      return "none";
+    }
+    return "enrich";
+  }
   if (state.transcriptStatus === "unchecked") return "check_transcript";
   if (state.transcriptStatus === "missing" || state.transcriptStatus === "permission_needed") return "import_transcript";
   if (state.qualityStatus === "unchecked") return "review_quality";
   if (state.qualityStatus === "failed") return "none";
   if (state.sessionEnrichmentStatus === "missing") return "enrich";
   if (state.sessionDossierStatus === "missing") return "create_dossier";
-  if (state.bugFixTraceStatus !== "satisfied" && state.bugFixTraceStatus !== "not_applicable") return "create_dossier";
   return "publish";
 }
 
+/** Session package publish gates (automatic kinds resolve separately). */
 function publicationGateFailures(state: WorkbenchSessionStateRecord): WorkbenchPublicationGate[] {
   const missing: WorkbenchPublicationGate[] = [];
   if (state.transcriptStatus !== "available" && state.transcriptStatus !== "imported") missing.push("transcript");
   if (state.qualityStatus !== "passed") missing.push("quality");
   if (state.sessionEnrichmentStatus !== "satisfied") missing.push("session_enrichment");
   if (state.sessionDossierStatus !== "satisfied") missing.push("session_dossier");
-  if (state.bugFixTraceStatus !== "satisfied" && state.bugFixTraceStatus !== "not_applicable") missing.push("bug_fix_trace");
   return missing;
+}
+
+function setOptionalKindStatus(
+  db: MastheadDatabase,
+  sessionId: string,
+  kind: WorkbenchAutomaticKind,
+  status: WorkbenchOptionalKindStatus,
+  now: string
+): void {
+  if (kind === "runbook") {
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET runbook_status = ?, bug_fix_trace_status = ?, updated_at = ?
+       WHERE session_id = ?`
+    ).run(status, status === "contributed" ? "satisfied" : status, now, sessionId);
+    return;
+  }
+  if (kind === "adr") {
+    db.prepare(`UPDATE workbench_session_state SET adr_status = ?, updated_at = ? WHERE session_id = ?`).run(status, now, sessionId);
+    return;
+  }
+  db.prepare(`UPDATE workbench_session_state SET incident_timeline_status = ?, updated_at = ? WHERE session_id = ?`).run(
+    status,
+    now,
+    sessionId
+  );
+}
+
+function optionalKindStatus(state: WorkbenchSessionStateRecord, kind: WorkbenchAutomaticKind): WorkbenchOptionalKindStatus {
+  if (kind === "runbook") return state.runbookStatus;
+  if (kind === "adr") return state.adrStatus;
+  return state.incidentTimelineStatus;
+}
+
+function kindLabel(kind: WorkbenchArtifactKind): string {
+  if (kind === "session_dossier") return "Session dossier";
+  if (kind === "runbook") return "Runbook";
+  if (kind === "adr") return "ADR";
+  return "Incident timeline";
 }
 
 function insertWorkbenchActivity(
@@ -875,8 +1026,10 @@ function readWorkbenchClaim(db: MastheadDatabase, claimId: string): WorkbenchCla
 function stateRowToRecord(db: MastheadDatabase, row: WorkbenchSessionStateRow): WorkbenchSessionStateRecord {
   return {
     activeClaim: readActiveClaim(db, row.sessionId),
-    bugFixTraceStatus: row.bugFixTraceStatus,
+    adrStatus: row.adrStatus ?? "unknown",
+    bugFixTraceStatus: row.runbookStatus ?? row.bugFixTraceStatus ?? "unknown",
     createdAt: row.createdAt,
+    incidentTimelineStatus: row.incidentTimelineStatus ?? "unknown",
     lastActivityAt: row.lastActivityAt ?? undefined,
     nextAction: row.nextAction,
     nonPublicationReason: row.nonPublicationReason ?? undefined,
@@ -884,9 +1037,12 @@ function stateRowToRecord(db: MastheadDatabase, row: WorkbenchSessionStateRow): 
     publishedActivityId: row.publishedActivityId ?? undefined,
     publishedAt: row.publishedAt ?? undefined,
     qualityStatus: row.qualityStatus,
+    resolutionStatus: row.resolutionStatus ?? "in_progress",
+    runbookStatus: row.runbookStatus ?? row.bugFixTraceStatus ?? "unknown",
     sessionDossierStatus: row.sessionDossierStatus,
     sessionEnrichmentStatus: row.sessionEnrichmentStatus,
     sessionId: row.sessionId,
+    sessionPackageStatus: row.sessionPackageStatus ?? "missing",
     transcriptStatus: row.transcriptStatus,
     updatedAt: row.updatedAt
   };

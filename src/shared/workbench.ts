@@ -45,7 +45,13 @@ export type WorkbenchQueueSessionDto = {
   qualityStatus: string;
   sessionEnrichmentStatus: string;
   sessionDossierStatus: string;
+  /** @deprecated Prefer runbookStatus */
   bugFixTraceStatus: string;
+  runbookStatus?: string;
+  adrStatus?: string;
+  incidentTimelineStatus?: string;
+  sessionPackageStatus?: string;
+  resolutionStatus?: string;
   activeClaim?: { claimId: string; claimedBy: string; expiresAt: string };
   latestActivity?: WorkbenchActivityDto;
 };

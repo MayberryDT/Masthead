@@ -71,6 +71,11 @@ import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDisp
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "./db/searchRepository.ts";
 import { getLogbookSummary } from "./db/logbookSummaryRepository.ts";
+import {
+  getLogbookArtifactDetail,
+  getLogbookArtifactSummary,
+  searchLogbookArtifacts
+} from "./db/logbookArtifactRepository.ts";
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
 import { getOrCreateDatabaseIdentity, hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor, type SessionRepository } from "./db/sessionRepository.ts";
@@ -2136,8 +2141,41 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (request.method === "GET" && url.pathname === "/logbook/summary") {
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
+        artifactSummary: getLogbookArtifactSummary(database),
         summary: getLogbookSummary(database)
       });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/logbook/artifacts") {
+      const kindParam = url.searchParams.get("kind") ?? undefined;
+      const kind =
+        kindParam === "session_dossier" ||
+        kindParam === "runbook" ||
+        kindParam === "adr" ||
+        kindParam === "incident_timeline"
+          ? kindParam
+          : undefined;
+      const result = searchLogbookArtifacts(database, {
+        kind,
+        limit: Number.parseInt(url.searchParams.get("limit") || "50", 10),
+        offset: Number.parseInt(url.searchParams.get("offset") || "0", 10),
+        project: url.searchParams.get("project") ?? undefined,
+        q: url.searchParams.get("q") ?? undefined
+      });
+      sendJson(request, response, config.allowedOrigins, 200, { ok: true, ...result });
+      return;
+    }
+
+    const logbookArtifactMatch = url.pathname.match(/^\/logbook\/artifacts\/([^/]+)$/);
+    if (request.method === "GET" && logbookArtifactMatch) {
+      const artifactId = decodeURIComponent(logbookArtifactMatch[1] ?? "");
+      const artifact = getLogbookArtifactDetail(database, artifactId);
+      if (!artifact) {
+        sendJson(request, response, config.allowedOrigins, 404, { error: "artifact_not_found", ok: false });
+        return;
+      }
+      sendJson(request, response, config.allowedOrigins, 200, { artifact, ok: true });
       return;
     }
 
@@ -4196,7 +4234,9 @@ function workbenchQueueSessionDtos(database: MastheadDatabase, states: Workbench
               expiresAt: state.activeClaim.expiresAt
             }
           : undefined,
-        bugFixTraceStatus: state.bugFixTraceStatus,
+        adrStatus: state.adrStatus,
+        bugFixTraceStatus: state.runbookStatus,
+        incidentTimelineStatus: state.incidentTimelineStatus,
         lastActivityAt: session.lastActivityAt,
         latestActivity: listWorkbenchActivity(database, { limit: 1, sessionId: state.sessionId }).map(workbenchActivityDto)[0],
         lifecycle: session.lifecycle,
@@ -4204,10 +4244,13 @@ function workbenchQueueSessionDtos(database: MastheadDatabase, states: Workbench
         project: session.project ?? undefined,
         publicationStatus: "publish_path",
         qualityStatus: state.qualityStatus,
+        resolutionStatus: state.resolutionStatus,
+        runbookStatus: state.runbookStatus,
         runtime: session.runtime,
         sessionDossierStatus: state.sessionDossierStatus,
         sessionEnrichmentStatus: state.sessionEnrichmentStatus,
         sessionId: state.sessionId,
+        sessionPackageStatus: state.sessionPackageStatus,
         title: session.title ?? state.sessionId,
         transcriptStatus: state.transcriptStatus
       }

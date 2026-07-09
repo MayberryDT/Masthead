@@ -1,6 +1,8 @@
 import { logMcpQuery } from "../daemon/db/mcpAuditRepository.ts";
+import { getLogbookArtifactDetail, searchLogbookArtifacts } from "../daemon/db/logbookArtifactRepository.ts";
 import { getSessionTranscript } from "../daemon/db/sessionTranscriptRepository.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
+import type { SessionArtifactKind } from "../daemon/db/sessionArtifactRepository.ts";
 import { sessionMcpAllowed } from "./policy.ts";
 import {
   coverage,
@@ -23,6 +25,44 @@ export type SearchSessionsArgs = {
   dateTo?: string;
   limit?: number;
 };
+
+export type SearchArtifactsArgs = {
+  query?: string;
+  kind?: SessionArtifactKind;
+  project?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export function searchArtifactsTool(db: MastheadDatabase, args: SearchArtifactsArgs) {
+  const result = searchLogbookArtifacts(db, {
+    kind: args.kind,
+    limit: args.limit ?? 10,
+    offset: args.offset ?? 0,
+    project: args.project,
+    q: args.query
+  });
+  logMcpQuery(db, {
+    requestedAt: new Date().toISOString(),
+    resultCount: result.artifacts.length,
+    sessionIds: result.artifacts.flatMap((artifact) => []),
+    status: "succeeded",
+    toolName: "search_artifacts"
+  });
+  return result;
+}
+
+export function getArtifactTool(db: MastheadDatabase, args: { artifactId: string }) {
+  const artifact = getLogbookArtifactDetail(db, args.artifactId);
+  logMcpQuery(db, {
+    requestedAt: new Date().toISOString(),
+    resultCount: artifact ? 1 : 0,
+    sessionIds: artifact?.provenanceSessionIds ?? [],
+    status: "succeeded",
+    toolName: "get_artifact"
+  });
+  return { artifact };
+}
 
 export function searchSessionsTool(db: MastheadDatabase, args: SearchSessionsArgs) {
   const result = searchMcpSessions(db, { ...args, limit: args.limit ?? 10 });

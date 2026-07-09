@@ -430,7 +430,8 @@ export function WorkbenchPanel({
                   <th scope="col">quality</th>
                   <th scope="col">enrichment</th>
                   <th scope="col">dossier</th>
-                  <th scope="col">bug fix</th>
+                  <th scope="col">runbook</th>
+                  <th scope="col">resolution</th>
                   <th scope="col">claim</th>
                 </tr>
               </thead>
@@ -503,7 +504,10 @@ export function WorkbenchPanel({
                           <StatusToken value={session.sessionDossierStatus} />
                         </td>
                         <td>
-                          <StatusToken value={session.bugFixTraceStatus} />
+                          <StatusToken value={session.runbookStatus ?? session.bugFixTraceStatus} />
+                        </td>
+                        <td>
+                          <StatusToken value={session.resolutionStatus ?? "in_progress"} tone="next" />
                         </td>
                         <td>
                           <span className="workbench-claim">{claim}</span>

@@ -26,6 +26,11 @@ export type WorkbenchQueueItem = {
   sessionEnrichmentStatus: string;
   sessionDossierStatus: string;
   bugFixTraceStatus: string;
+  runbookStatus: string;
+  adrStatus: string;
+  incidentTimelineStatus: string;
+  sessionPackageStatus: string;
+  resolutionStatus: string;
   activeClaim?: { claimedBy: string; expiresAt: string };
   latestActivity?: { eventAt: string; eventType: string; summary: string };
 };
@@ -77,7 +82,9 @@ export function queueWorkbenchSessions(
               expiresAt: state.activeClaim.expiresAt
             }
           : undefined,
-        bugFixTraceStatus: state.bugFixTraceStatus,
+        adrStatus: state.adrStatus,
+        bugFixTraceStatus: state.runbookStatus,
+        incidentTimelineStatus: state.incidentTimelineStatus,
         lastActivityAt: session.lastActivityAt,
         latestActivity: latestActivity
           ? {
@@ -90,10 +97,13 @@ export function queueWorkbenchSessions(
         nextAction: state.nextAction,
         project: session.project ?? undefined,
         qualityStatus: state.qualityStatus,
+        resolutionStatus: state.resolutionStatus,
+        runbookStatus: state.runbookStatus,
         runtime: session.runtime,
         sessionDossierStatus: state.sessionDossierStatus,
         sessionEnrichmentStatus: state.sessionEnrichmentStatus,
         sessionId: state.sessionId,
+        sessionPackageStatus: state.sessionPackageStatus,
         status: statusForKind(options.kind, state),
         title: session.title ?? state.sessionId,
         transcriptStatus: state.transcriptStatus
@@ -132,6 +142,12 @@ function scopeMatches(scope: WorkbenchScope, session: QueueMetadataRow): boolean
 function statusForKind(kind: WorkbenchOutputKind, state: ReturnType<typeof listWorkbenchQueue>[number]): WorkbenchQueueItem["status"] {
   if (kind === "session_enrichment") return state.sessionEnrichmentStatus === "satisfied" ? "current" : "missing";
   if (kind === "session_dossier") return state.sessionDossierStatus === "satisfied" ? "current" : "missing";
-  if (kind === "bug_fix_trace") return state.bugFixTraceStatus === "satisfied" ? "current" : "missing";
+  if (kind === "runbook") return isResolvedOptional(state.runbookStatus) ? "current" : "missing";
+  if (kind === "adr") return isResolvedOptional(state.adrStatus) ? "current" : "missing";
+  if (kind === "incident_timeline") return isResolvedOptional(state.incidentTimelineStatus) ? "current" : "missing";
   return "missing";
+}
+
+function isResolvedOptional(status: string): boolean {
+  return status === "satisfied" || status === "not_applicable" || status === "contributed";
 }

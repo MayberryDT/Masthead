@@ -3,7 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { seedSession } from "./sessionTestHelpers.ts";
-import { applySessionArtifact, listSessionArtifacts } from "../sessionArtifactRepository.ts";
+import {
+  applySessionArtifact,
+  listSessionArtifacts,
+  publishSessionArtifact,
+  searchPublishedArtifactCapsules,
+  wipePublishedArtifactState
+} from "../sessionArtifactRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 
@@ -24,7 +30,7 @@ describe("session artifact repository", () => {
 
     expect(second.artifactId).toBe(first.artifactId);
     expect(listSessionArtifacts(db, { sessionId: "session:abc" })).toEqual([
-      expect.objectContaining({ artifactId: first.artifactId, status: "current", title: "First dossier" })
+      expect.objectContaining({ artifactId: first.artifactId, publicationStatus: "applied", status: "current", title: "First dossier" })
     ]);
   });
 
@@ -40,6 +46,105 @@ describe("session artifact repository", () => {
       expect.objectContaining({ artifactId: second.artifactId, status: "current", title: "Second dossier" }),
       expect.objectContaining({ artifactId: first.artifactId, status: "superseded", title: "First dossier" })
     ]);
+  });
+
+  test("stores multi-session provenance and requires join rationale", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:a", title: "A" });
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:b", title: "B" });
+
+    expect(() =>
+      applySessionArtifact(db, {
+        ...runbookInput("fp-multi", "Shared runbook", "session:a"),
+        provenanceSessionIds: ["session:a", "session:b"]
+      })
+    ).toThrow(/joinRationale/i);
+
+    const artifact = applySessionArtifact(db, {
+      ...runbookInput("fp-multi", "Shared runbook", "session:a"),
+      joinRationale: "shared error signature: ENOENT cache lock",
+      provenanceSessionIds: ["session:a", "session:b"]
+    });
+
+    expect(artifact.provenanceSessionIds).toEqual(["session:a", "session:b"]);
+    expect(artifact.joinRationale).toContain("ENOENT");
+    expect(listSessionArtifacts(db, { sessionId: "session:b" })[0]?.artifactId).toBe(artifact.artifactId);
+  });
+
+  test("rejects multi-session provenance for session_dossier", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:a", title: "A" });
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:b", title: "B" });
+
+    expect(() =>
+      applySessionArtifact(db, {
+        ...artifactInput("fp", "Dossier"),
+        joinRationale: "nope",
+        provenanceSessionIds: ["session:a", "session:b"]
+      })
+    ).toThrow(/exactly one session/i);
+  });
+
+  test("supersedes by signature key across sessions and preserves lineage", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:a", title: "A" });
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:b", title: "B" });
+
+    const first = applySessionArtifact(db, {
+      ...runbookInput("fp-1", "Runbook v1", "session:a"),
+      signatureKey: "sig:cache-lock"
+    });
+    const second = applySessionArtifact(db, {
+      ...runbookInput("fp-2", "Runbook v2", "session:b"),
+      joinRationale: "same failure signature",
+      provenanceSessionIds: ["session:a", "session:b"],
+      signatureKey: "sig:cache-lock"
+    });
+
+    expect(second.lineageId).toBe(first.lineageId);
+    expect(listSessionArtifacts(db, { artifactKind: "runbook" })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ artifactId: second.artifactId, status: "current", title: "Runbook v2" }),
+        expect.objectContaining({ artifactId: first.artifactId, status: "superseded", title: "Runbook v1" })
+      ])
+    );
+  });
+
+  test("publish makes artifact searchable in Logbook capsules only after publish", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Artifact session" });
+
+    const applied = applySessionArtifact(db, {
+      ...runbookInput("fp-pub", "Published runbook"),
+      projectLabel: "Masthead",
+      summary: "Fix cache lock races"
+    });
+    expect(searchPublishedArtifactCapsules(db).total).toBe(0);
+
+    const published = publishSessionArtifact(db, applied.artifactId)!;
+    expect(published.publicationStatus).toBe("published");
+    expect(published.publishedAt).toBeTruthy();
+
+    const search = searchPublishedArtifactCapsules(db, { kind: "runbook", q: "cache" });
+    expect(search.total).toBe(1);
+    expect(search.artifacts[0]).toMatchObject({
+      artifactId: applied.artifactId,
+      kind: "runbook",
+      project: "Masthead",
+      title: "Published runbook"
+    });
+  });
+
+  test("wipe removes artifacts and provenance for dogfood cutover", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Artifact session" });
+    const artifact = applySessionArtifact(db, runbookInput("fp-wipe", "Wipe me"));
+    publishSessionArtifact(db, artifact.artifactId);
+
+    const result = wipePublishedArtifactState(db);
+    expect(result.artifactsDeleted).toBeGreaterThan(0);
+    expect(listSessionArtifacts(db)).toEqual([]);
+    expect(searchPublishedArtifactCapsules(db).total).toBe(0);
   });
 });
 
@@ -57,6 +162,20 @@ function artifactInput(contentFingerprint: string, title: string) {
   };
 }
 
+function runbookInput(contentFingerprint: string, title: string, sessionId = "session:abc") {
+  return {
+    artifactKind: "runbook" as const,
+    content: { title, problemSignature: { symptoms: ["lock busy"], errorStrings: ["EBUSY"], affectedScope: "cache" } },
+    contentFingerprint,
+    createdBy: "workbench_cli",
+    evidenceRefs: [`message:${sessionId}:message`],
+    schemaVersion: "runbook-v1",
+    sessionId,
+    title,
+    validation: { ok: true }
+  };
+}
+
 async function testDb(): Promise<MastheadDatabase> {
   const tempDir = await mkdtemp(join(tmpdir(), "masthead-session-artifact-"));
   tempDirs.push(tempDir);
@@ -64,4 +183,3 @@ async function testDb(): Promise<MastheadDatabase> {
   migrateDatabase(db);
   return db;
 }
-

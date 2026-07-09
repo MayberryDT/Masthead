@@ -138,7 +138,7 @@ export type SessionDossierUsage = {
 
 export type SessionDossierArtifact = {
   artifactId: string;
-  artifactKind: "session_dossier" | "bug_fix_trace";
+  artifactKind: "session_dossier" | "runbook" | "adr" | "incident_timeline";
   status: "current" | "superseded" | "invalid";
   title?: string;
   confidence?: "high" | "medium" | "low";

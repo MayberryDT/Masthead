@@ -167,7 +167,7 @@ describe("workbench API", () => {
     expect(blocked).toMatchObject({
       ok: false,
       code: "publication_gate_failed",
-      missing: ["transcript", "quality", "session_enrichment", "session_dossier", "bug_fix_trace"]
+      missing: ["transcript", "quality", "session_enrichment", "session_dossier"]
     });
 
     ensureWorkbenchSessionState(daemon.database, "session:publish");
@@ -182,7 +182,7 @@ describe("workbench API", () => {
     });
     markWorkbenchArtifactSatisfied(daemon.database, {
       actor: { kind: "agent", id: "codex" },
-      artifactKind: "bug_fix_trace",
+      artifactKind: "runbook",
       sessionId: "session:publish"
     });
 
@@ -431,7 +431,7 @@ describe("workbench API", () => {
              quality_status = 'passed',
              session_enrichment_status = 'satisfied',
              session_dossier_status = 'satisfied',
-             bug_fix_trace_status = 'satisfied'
+             runbook_status = 'satisfied'
          WHERE session_id = ?`
       )
       .run("session:published-quality");

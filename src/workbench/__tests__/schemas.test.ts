@@ -3,7 +3,7 @@ import { getWorkbenchSchema, listWorkbenchSchemaKinds } from "../schemas.ts";
 
 describe("Workbench schemas", () => {
   test("lists the V1 output kinds", () => {
-    expect(listWorkbenchSchemaKinds()).toEqual(["session_enrichment", "session_dossier", "bug_fix_trace"]);
+    expect(listWorkbenchSchemaKinds()).toEqual(["session_enrichment", "session_dossier", "runbook", "adr", "incident_timeline"]);
   });
 
   test("returns a strict session enrichment schema", () => {

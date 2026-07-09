@@ -1139,3 +1139,23 @@
     transition-duration: 0ms;
   }
 }
+
+/* Artifact-first Logbook columns */
+.logbook-col-kind {
+  width: 6.5rem;
+  white-space: nowrap;
+}
+.logbook-col-confidence {
+  width: 4.5rem;
+  white-space: nowrap;
+}
+.logbook-col-provenance {
+  width: 7rem;
+  white-space: nowrap;
+}
+.logbook-col-kind .state-token {
+  border-radius: 1px;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}

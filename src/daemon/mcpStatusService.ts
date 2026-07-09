@@ -81,11 +81,25 @@ export type McpToolDto = {
 
 export const MCP_TOOL_CATALOG: McpToolDto[] = [
   {
+    arguments: "optional query, kind, project, limit, offset",
+    dataReturned: "Published artifact capsules (kind, title, summary, provenance, confidence)",
+    name: "search_artifacts",
+    permission: "Read only",
+    purpose: "Search Logbook knowledge artifacts (primary reuse API)"
+  },
+  {
+    arguments: "artifactId",
+    dataReturned: "Artifact body, provenance sessions, evidence refs, lineage",
+    name: "get_artifact",
+    permission: "Read only",
+    purpose: "Read one published artifact with provenance"
+  },
+  {
     arguments: "query, optional project/runtime/model/host/state/date filters, limit",
     dataReturned: "Session summaries with IDs, titles, projects, models, and snippets",
     name: "search_sessions",
     permission: "Read only",
-    purpose: "Find session records"
+    purpose: "Find sessions for evidence and compile"
   },
   {
     arguments: "sessionId, maxBytes",

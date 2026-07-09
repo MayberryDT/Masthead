@@ -61,7 +61,8 @@ describe("workbench pipeline repository", () => {
     });
 
     expect(result.state.publicationStatus).toBe("published");
-    expect(result.state.nextAction).toBe("none");
+    // Package published; automatic kinds still open → continue compile (enrich), not terminal none.
+    expect(result.state.nextAction).toBe("enrich");
     expect(result.state.publishedAt).toEqual(expect.any(String));
     expect(result.activity.eventType).toBe("published");
     expect(listWorkbenchActivity(db, { sessionId: "session:1", limit: 10 })[0]).toMatchObject({
@@ -237,7 +238,7 @@ describe("workbench pipeline repository", () => {
     expect(result).toEqual({
       ok: false,
       code: "publication_gate_failed",
-      missing: ["transcript", "quality", "session_enrichment", "session_dossier", "bug_fix_trace"],
+      missing: ["transcript", "quality", "session_enrichment", "session_dossier"],
       state: expect.objectContaining({ publicationStatus: "publish_path", sessionId: "session:1" })
     });
   });
@@ -254,7 +255,7 @@ describe("workbench pipeline repository", () => {
     ).run("session:1");
     markWorkbenchSessionEnrichmentSatisfied(db, { actor: { kind: "agent", id: "codex" }, sessionId: "session:1" });
     markWorkbenchArtifactSatisfied(db, { actor: { kind: "agent", id: "codex" }, artifactKind: "session_dossier", sessionId: "session:1" });
-    markWorkbenchArtifactSatisfied(db, { actor: { kind: "agent", id: "codex" }, artifactKind: "bug_fix_trace", sessionId: "session:1" });
+    markWorkbenchArtifactSatisfied(db, { actor: { kind: "agent", id: "codex" }, artifactKind: "runbook", sessionId: "session:1" });
 
     const result = publishWorkbenchSession(db, {
       actor: { kind: "agent", id: "codex" },
@@ -371,7 +372,7 @@ describe("workbench pipeline repository", () => {
            quality_status = 'passed',
            session_enrichment_status = 'satisfied',
            session_dossier_status = 'satisfied',
-           bug_fix_trace_status = 'satisfied'
+           runbook_status = 'satisfied'
        WHERE session_id = ?`
     ).run("session:published");
     markWorkbenchPublished(db, {
