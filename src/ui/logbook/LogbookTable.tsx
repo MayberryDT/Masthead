@@ -9,13 +9,15 @@ type Props = {
   density: "comfortable" | "compact";
   sessions: LogbookSession[];
   selectedSessionId?: string;
+  // Kept for parent compatibility until a later task removes bulk selection wiring.
   selectedSessionIds?: string[];
   updating?: boolean;
   onSelect: (sessionId: string) => void;
+  // Kept for parent compatibility until a later task removes bulk selection wiring.
   onToggleBulkSelect?: (sessionId: string) => void;
 };
 
-export function LogbookTable({ animateOnMount = false, density, onSelect, onToggleBulkSelect, selectedSessionId, selectedSessionIds = [], sessions, updating = false }: Props) {
+export function LogbookTable({ animateOnMount = false, density, onSelect, selectedSessionId, sessions, updating = false }: Props) {
   const incomingSignature = useMemo(() => sessions.map((session) => session.sessionId).join("|"), [sessions]);
   const [displayedSessions, setDisplayedSessions] = useState(sessions);
   const [outgoingSessions, setOutgoingSessions] = useState<LogbookSession[]>();
@@ -83,9 +85,7 @@ export function LogbookTable({ animateOnMount = false, density, onSelect, onTogg
         density={density}
         sessions={displayedSessions}
         selectedSessionId={selectedSessionId}
-        selectedSessionIds={selectedSessionIds}
         onSelect={onSelect}
-        onToggleBulkSelect={onToggleBulkSelect}
       />
     </div>
   );
@@ -96,9 +96,7 @@ function LogbookTableLayer({
   className,
   density,
   onSelect,
-  onToggleBulkSelect,
   selectedSessionId,
-  selectedSessionIds = [],
   sessions
 }: {
   ariaHidden?: boolean;
@@ -106,9 +104,7 @@ function LogbookTableLayer({
   density: "comfortable" | "compact";
   sessions: LogbookSession[];
   selectedSessionId?: string;
-  selectedSessionIds?: string[];
   onSelect: (sessionId: string) => void;
-  onToggleBulkSelect?: (sessionId: string) => void;
 }) {
   return (
     <table aria-hidden={ariaHidden} className={`logbook-table ${density === "compact" ? "compact" : ""} ${className}`.trim()}>
@@ -128,10 +124,8 @@ function LogbookTableLayer({
             density={density}
             rowIndex={rowIndex}
             session={session}
-            bulkSelected={selectedSessionIds.includes(session.sessionId)}
             selected={session.sessionId === selectedSessionId}
             onSelect={onSelect}
-            onToggleBulkSelect={onToggleBulkSelect}
           />
         ))}
       </tbody>
