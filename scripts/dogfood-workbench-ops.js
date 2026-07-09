@@ -3,8 +3,9 @@
  * Dogfood the complete Workbench human-ops publish loop against a temporary SQLite DB.
  * Never touches the real dev database.
  *
- * Pipeline: check transcript → quality pass → enrichment + dossier satisfied →
- * bug_fix not_applicable → publish → assert Logbook-visible published state.
+ * Pipeline: enroll missing (idempotent catch-up) → check transcript → quality pass →
+ * enrichment + dossier satisfied → bug_fix not_applicable → publish →
+ * assert Logbook-visible published state.
  */
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -31,6 +32,7 @@ for (const relativePath of requiredModules) {
 const { migrateDatabase } = await import("../dist/daemon/src/daemon/db/schema.js");
 const { openMastheadDatabase } = await import("../dist/daemon/src/daemon/db/sqlite.js");
 const {
+  enrollMissingWorkbenchSessions,
   markWorkbenchQuality,
   markWorkbenchSessionEnrichmentSatisfied,
   markWorkbenchArtifactSatisfied,
@@ -52,6 +54,42 @@ try {
   const db = await openMastheadDatabase(dbPath);
   migrateDatabase(db);
   seedSession(db, sessionId);
+  // Second session stays unenrolled until bulk enroll; proves catch-up only.
+  seedSession(db, "session:ops-dogfood-missing", {
+    title: "Workbench ops dogfood missing session",
+    objective: "Prove enroll-missing catch-up on a temporary database"
+  });
+
+  // 0. Enroll missing — no pipeline rows yet; both sessions should enroll.
+  const enrollFirst = enrollMissingWorkbenchSessions(db, { actor, limit: 500 });
+  steps.push({
+    name: "enroll_missing",
+    ok: enrollFirst.enrolled === 2 && enrollFirst.enrolledSessionIds.includes(sessionId),
+    enrolled: enrollFirst.enrolled,
+    skippedExisting: enrollFirst.skippedExisting,
+    enrolledSessionIds: enrollFirst.enrolledSessionIds
+  });
+  if (enrollFirst.enrolled !== 2) {
+    throw new Error(`Expected enroll_missing enrolled=2, got ${JSON.stringify(enrollFirst)}`);
+  }
+  const enrolledState = readWorkbenchSessionState(db, sessionId);
+  if (!enrolledState || enrolledState.publicationStatus !== "publish_path") {
+    throw new Error(
+      `Expected publish_path after enroll, got ${enrolledState?.publicationStatus ?? "missing"}`
+    );
+  }
+
+  // 0b. Second enroll is a no-op (idempotent).
+  const enrollSecond = enrollMissingWorkbenchSessions(db, { actor, limit: 500 });
+  steps.push({
+    name: "enroll_missing_idempotent",
+    ok: enrollSecond.enrolled === 0 && enrollSecond.skippedExisting === 2,
+    enrolled: enrollSecond.enrolled,
+    skippedExisting: enrollSecond.skippedExisting
+  });
+  if (enrollSecond.enrolled !== 0) {
+    throw new Error(`Expected second enroll enrolled=0, got ${JSON.stringify(enrollSecond)}`);
+  }
 
   // 1. Check transcript — seeded messages should yield imported/usable coverage.
   const transcript = checkWorkbenchTranscript(db, { actor, sessionId });
@@ -147,11 +185,14 @@ try {
   }
 }
 
-function seedSession(db, id) {
+function seedSession(db, id, overrides = {}) {
   const now = "2026-07-08T16:00:00.000Z";
-  const sourceId = "source:ops-dogfood";
+  const sourceId = `source:${id}`;
   const hostId = "host:ops-dogfood";
   const runtimeId = "runtime:ops-dogfood";
+  const title = overrides.title ?? "Workbench ops dogfood session";
+  const objective =
+    overrides.objective ?? "Prove check → quality → enrich → publish on a temporary database";
 
   db.prepare("INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
     hostId,
@@ -173,13 +214,13 @@ function seedSession(db, id) {
     id,
     hostId,
     runtimeId,
-    "source-session-ops-dogfood",
+    `source-session-${id}`,
     "Masthead",
     repoRoot,
     repoRoot,
     "main",
-    "Workbench ops dogfood session",
-    "Prove check → quality → enrich → publish on a temporary database",
+    title,
+    objective,
     "ended",
     "completed",
     now,

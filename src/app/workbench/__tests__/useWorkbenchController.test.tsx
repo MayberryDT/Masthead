@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { WorkbenchQueueSessionDto } from "../../../shared/workbench";
+import type { WorkbenchEnrollMissingResponse, WorkbenchQueueSessionDto } from "../../../shared/workbench";
 import {
   useWorkbenchController,
   type UseWorkbenchControllerResult,
@@ -598,10 +598,10 @@ describe("useWorkbenchController", () => {
 
   test("enroll_missing reports zero enrollments and busy disables double-run", async () => {
     mockWorkbenchResponse([]);
-    let resolveEnroll: ((value: unknown) => void) | undefined;
+    let resolveEnroll: ((value: WorkbenchEnrollMissingResponse) => void) | undefined;
     vi.mocked(postWorkbenchEnrollMissing).mockImplementation(
       () =>
-        new Promise((resolve) => {
+        new Promise<WorkbenchEnrollMissingResponse>((resolve) => {
           resolveEnroll = resolve;
         })
     );
