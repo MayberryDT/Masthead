@@ -25,7 +25,7 @@ import {
   writeCachedLogbookPage,
   type LogbookPageCacheRequest
 } from "../logbookPageCache";
-import { toLogbookInspectorArtifact, type LogbookInspectorArtifact } from "../../ui/logbook/LogbookInspector";
+import { toLogbookInspectorArtifact, type LogbookInspectorArtifact } from "./logbookInspectorModel";
 
 const LOGBOOK_PAGE_SIZE = 50;
 
@@ -73,6 +73,7 @@ export function useLogbookController({
   const [bulkStatus, setBulkStatus] = useState<string>();
   const [selectedArtifact, setSelectedArtifact] = useState<LogbookInspectorArtifact>();
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string>();
   const [dossierRetryKey, setDossierRetryKey] = useState(0);
   const [dossier, setDossier] = useState<SessionDossierDto>();
   const [dossierLoading, setDossierLoading] = useState(false);
@@ -184,20 +185,26 @@ export function useLogbookController({
   useEffect(() => {
     if (activeSurface !== "logbook" || !selectedSessionId) {
       setSelectedArtifact(undefined);
+      setDetailError(undefined);
       setDetailLoading(false);
       return;
     }
     const controller = new AbortController();
+    // Clear previous body immediately so the inspector never shows stale content under a new selection.
+    setSelectedArtifact(undefined);
+    setDetailError(undefined);
     setDetailLoading(true);
     void getLogbookArtifact(selectedSessionId, activeProjectionUrl, { signal: controller.signal })
       .then((detail) => {
         if (controller.signal.aborted) return;
         setSelectedArtifact(toLogbookInspectorArtifact(detail));
+        setDetailError(undefined);
       })
-      .catch((detailError: unknown) => {
+      .catch((loadError: unknown) => {
         if (!controller.signal.aborted) {
-          console.error("[masthead] Logbook artifact detail failed", detailError);
+          console.error("[masthead] Logbook artifact detail failed", loadError);
           setSelectedArtifact(undefined);
+          setDetailError("Could not load artifact");
         }
       })
       .finally(() => {
@@ -474,6 +481,7 @@ export function useLogbookController({
     changeQuery,
     changeSort,
     closeSession: () => setSelectedSessionId(undefined),
+    detailError,
     detailLoading,
     dossier,
     dossierEnrichmentBusy,

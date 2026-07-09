@@ -1,53 +1,30 @@
 import type { ReactNode } from "react";
-import type { LogbookArtifactDetail } from "../../app/daemonClient";
+import type { LogbookInspectorArtifact } from "../../app/logbook/logbookInspectorModel";
 import { Icon } from "../icons/Icon";
 import { iconWeights } from "../icons/icon-tokens";
 import { StatusBadge } from "../primitives/StatusBadge";
 
-export type LogbookInspectorArtifact = {
-  kind: string;
-  title: string;
-  confidence?: string;
-  project?: string;
-  publishedAt?: string;
-  provenanceSessionIds: string[];
-  provenanceLabel?: string;
-  joinRationale?: string;
-  body: unknown;
-  evidenceRefs?: string[];
-};
+export type { LogbookInspectorArtifact };
 
 type Props = {
   loading?: boolean;
+  error?: string;
   artifact?: LogbookInspectorArtifact;
   onClose: () => void;
 };
 
-/** Map daemon artifact detail into inspector props. */
-export function toLogbookInspectorArtifact(detail: LogbookArtifactDetail): LogbookInspectorArtifact {
-  return {
-    body: detail.body,
-    confidence: detail.confidence ?? detail.capsule.confidence,
-    evidenceRefs: detail.evidenceRefs,
-    joinRationale: detail.joinRationale,
-    kind: detail.capsule.kind,
-    project: detail.capsule.project,
-    provenanceLabel: detail.capsule.provenanceLabel,
-    provenanceSessionIds: detail.provenanceSessionIds,
-    publishedAt: detail.capsule.publishedAt,
-    title: detail.capsule.title
-  };
-}
+export function LogbookInspector({ artifact, error, loading = false, onClose }: Props) {
+  if (!artifact && !loading && !error) return null;
 
-export function LogbookInspector({ artifact, loading = false, onClose }: Props) {
-  if (!artifact && !loading) return null;
+  const title = artifact?.title ?? (loading ? "Loading artifact" : error ? "Could not load artifact" : "Artifact detail");
+  const label = artifact ? kindLabel(artifact.kind) : "Artifact detail";
 
   return (
     <aside className="logbook-inspector metal-surface" aria-label="Artifact detail">
       <header>
         <div>
-          <p className="mono-label">{artifact ? kindLabel(artifact.kind) : "Artifact detail"}</p>
-          <h2>{artifact?.title ?? "Loading artifact"}</h2>
+          <p className="mono-label">{label}</p>
+          <h2>{title}</h2>
           {artifact ? <ArtifactMeta artifact={artifact} /> : null}
         </div>
         <button type="button" className="surface-inline-action logbook-inspector-close" aria-label="Close artifact detail" onClick={onClose}>
@@ -64,9 +41,13 @@ export function LogbookInspector({ artifact, loading = false, onClose }: Props) 
             provenanceSessionIds={artifact.provenanceSessionIds}
           />
         </>
-      ) : (
+      ) : loading ? (
         <p className="surface-status">Loading artifact detail...</p>
-      )}
+      ) : error ? (
+        <p className="surface-status" role="alert">
+          {error}
+        </p>
+      ) : null}
     </aside>
   );
 }

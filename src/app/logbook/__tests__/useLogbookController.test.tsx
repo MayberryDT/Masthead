@@ -6,10 +6,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { HistoryPanel } from "../../../ui/HistoryPanel";
 import { useLogbookController } from "../useLogbookController";
 import {
+  getLogbookArtifact,
   getLogbookSummary,
   listProjects,
   rebuildEnrichments,
   searchLogbook,
+  type LogbookArtifactDetail,
   type LogbookSession
 } from "../../daemonClient";
 
@@ -41,6 +43,72 @@ afterEach(async () => {
   container = undefined;
   latestController = undefined;
   vi.clearAllMocks();
+});
+
+describe("useLogbookController artifact detail", () => {
+  test("clears previous artifact body immediately when selection changes", async () => {
+    mockLogbookSearch([session("session-a", "First"), session("session-b", "Second")], 2);
+    let resolveB: ((value: LogbookArtifactDetail) => void) | undefined;
+    vi.mocked(getLogbookArtifact)
+      .mockResolvedValueOnce(artifactDetail("session-a", "First body"))
+      .mockImplementationOnce(
+        () =>
+          new Promise<LogbookArtifactDetail>((resolve) => {
+            resolveB = resolve;
+          })
+      );
+    mockDetailSideLoads();
+    await renderHarness();
+
+    await act(async () => {
+      latestController?.selectSession("session-a");
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(latestController?.selectedArtifact?.title).toBe("First");
+    expect(container?.textContent).toContain("First body");
+    expect(latestController?.detailLoading).toBe(false);
+
+    await act(async () => {
+      latestController?.selectSession("session-b");
+      await Promise.resolve();
+    });
+
+    expect(latestController?.selectedSessionId).toBe("session-b");
+    expect(latestController?.selectedArtifact).toBeUndefined();
+    expect(latestController?.detailLoading).toBe(true);
+    expect(container?.textContent).not.toContain("First body");
+    expect(container?.textContent).toContain("Loading artifact");
+
+    await act(async () => {
+      resolveB?.(artifactDetail("session-b", "Second body"));
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(latestController?.selectedArtifact?.title).toBe("Second");
+    expect(container?.textContent).toContain("Second body");
+    expect(container?.textContent).not.toContain("First body");
+  });
+
+  test("surfaces a user-visible error when artifact detail fails to load", async () => {
+    mockLogbookSearch([session("session-err", "Broken artifact")], 1);
+    vi.mocked(getLogbookArtifact).mockRejectedValueOnce(new Error("network down"));
+    mockDetailSideLoads();
+    await renderHarness();
+
+    await act(async () => {
+      latestController?.selectSession("session-err");
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(latestController?.detailLoading).toBe(false);
+    expect(latestController?.selectedArtifact).toBeUndefined();
+    expect(latestController?.detailError).toBe("Could not load artifact");
+    expect(container?.textContent).toContain("Could not load artifact");
+  });
 });
 
 describe("useLogbookController bulk enrichment", () => {
@@ -165,6 +233,7 @@ function LogbookHarness() {
       bulkTargetCount={logbook.bulkTargetCount}
       bulkTargetKind={logbook.bulkTargetKind}
       density="compact"
+      detailError={logbook.detailError}
       detailLoading={logbook.detailLoading}
       filterOptions={logbook.filterOptions}
       filters={logbook.filters}
@@ -205,6 +274,40 @@ function mockLogbookSearch(sessions: LogbookSession[], total: number): void {
 function mockMetadata(): void {
   vi.mocked(getLogbookSummary).mockResolvedValue({ fileEffects: 0, lifecycles: [], messages: 0, models: [], projects: 0, runtimes: [], sessions: 0, toolCalls: 0 });
   vi.mocked(listProjects).mockResolvedValue([]);
+}
+
+function mockDetailSideLoads(): void {
+  daemonClientMocks.getSessionDossier.mockResolvedValue({ sessionId: "unused" });
+  daemonClientMocks.getSessionTranscript.mockResolvedValue({ items: [], nextCursor: undefined });
+}
+
+function artifactDetail(sessionId: string, problemStatement: string): LogbookArtifactDetail {
+  const title = sessionId === "session-a" ? "First" : sessionId === "session-b" ? "Second" : "Artifact";
+  return {
+    body: { problemStatement },
+    capsule: {
+      artifactId: sessionId,
+      confidence: "high",
+      kind: "session_dossier",
+      project: "Masthead",
+      provenanceLabel: "1 session",
+      provenanceSize: 1,
+      publishedAt: "2026-07-01T10:00:00.000Z",
+      status: "published",
+      summary: problemStatement,
+      title
+    },
+    confidence: "high",
+    contentFingerprint: `fp-${sessionId}`,
+    createdAt: "2026-07-01T10:00:00.000Z",
+    evidenceRefs: [],
+    lineageId: `lineage-${sessionId}`,
+    provenanceSessionIds: [sessionId],
+    publicationStatus: "published",
+    schemaVersion: "1",
+    status: "ready",
+    updatedAt: "2026-07-01T10:00:00.000Z"
+  };
 }
 
 function session(sessionId: string, title: string): LogbookSession {

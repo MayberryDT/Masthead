@@ -691,6 +691,7 @@ export function App() {
             records={showDemoData ? historyRecords : undefined}
             adapters={adapters}
             connectionState={connection.state.state === "offline" ? "offline" : connection.state.state === "incompatible" ? "incompatible" : effectiveLiveConnection.state === "live" ? "live" : "connecting"}
+            detailError={logbook.detailError}
             detailLoading={logbook.detailLoading}
             filterOptions={logbook.filterOptions}
             filters={logbook.filters}

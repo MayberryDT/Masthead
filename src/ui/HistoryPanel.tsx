@@ -11,7 +11,8 @@ import type {
 } from "../app/daemonClient";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
 import { LogbookFacets } from "./logbook/LogbookFacets";
-import { LogbookInspector, type LogbookInspectorArtifact } from "./logbook/LogbookInspector";
+import type { LogbookInspectorArtifact } from "../app/logbook/logbookInspectorModel";
+import { LogbookInspector } from "./logbook/LogbookInspector";
 import { LogbookTable } from "./logbook/LogbookTable";
 import { LogbookToolbar } from "./logbook/LogbookToolbar";
 import { logbookColumns } from "./logbook/logbookColumns";
@@ -54,6 +55,7 @@ type Props = {
   selectedSessionId?: string;
   selectedSessionIds?: string[];
   selectedArtifact?: LogbookInspectorArtifact;
+  detailError?: string;
   detailLoading?: boolean;
   onCloseDetail?: () => void;
   sources?: SourceStatus[];
@@ -159,6 +161,7 @@ export function HistoryPanel({
   records = [],
   bulkConfirmMessage,
   bulkEnrichBusy,
+  detailError,
   detailLoading = false,
   onCancelBulkEnrichFull,
   onCloseDetail,
@@ -297,11 +300,12 @@ export function HistoryPanel({
               onToggleBulkSelect={onToggleBulkSelect}
             />
           </div>
-          {selectedSessionId || detailLoading ? (
+          {selectedSessionId || detailLoading || detailError ? (
             <div className="logbook-master-detail-inspector">
               <LogbookInspector
                 artifact={selectedArtifact}
-                loading={detailLoading && !selectedArtifact}
+                error={detailError}
+                loading={detailLoading}
                 onClose={onCloseDetail ?? (() => undefined)}
               />
             </div>

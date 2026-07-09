@@ -74,6 +74,17 @@ describe("LogbookInspector", () => {
     expect(html).toContain("Loading artifact detail");
   });
 
+  test("renders error state when artifact detail fails to load", () => {
+    const html = renderToStaticMarkup(
+      <LogbookInspector error="Could not load artifact" onClose={() => undefined} />
+    );
+
+    expect(html).toContain("Artifact detail");
+    expect(html).toContain("Could not load artifact");
+    expect(html).toContain('role="alert"');
+    expect(html).not.toContain("Loading artifact detail");
+  });
+
   test("pretty-prints unknown body shapes", () => {
     const html = renderToStaticMarkup(
       <LogbookInspector
