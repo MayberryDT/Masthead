@@ -75,15 +75,8 @@ describe("collector autostart", () => {
 
   test("keeps first-run sources onboarding open after connector discovery", async () => {
     window.localStorage.removeItem(mastheadOnboardingDismissedStorageKey);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL | Request) => {
-        const requestUrl = String(url);
-        const { pathname } = new URL(requestUrl);
-        if (pathname.startsWith("/sources/connectors")) return jsonResponse({ ok: true, ...detectedHarnessConnectors() });
-        return jsonResponse(responseForUrl(requestUrl));
-      })
-    );
+    const connectorFetch = createDetectedConnectorFetch();
+    vi.stubGlobal("fetch", connectorFetch.fetch);
 
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -104,21 +97,16 @@ describe("collector autostart", () => {
     expect(container.textContent).toContain("Connect live harnesses");
     expect(container.textContent).not.toContain("ADAPTERS");
     expect(container.textContent).not.toContain("Import data");
+    expect(connectorFetch.requests).toContainEqual({ method: "GET", pathname: "/sources/connectors" });
+    expect(connectorFetch.requests).toContainEqual({ method: "POST", pathname: "/sources/connectors/discover" });
 
     root.unmount();
   });
 
   test("keeps the sources wizard open while selecting detected connectors", async () => {
     window.localStorage.removeItem(mastheadOnboardingDismissedStorageKey);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL | Request) => {
-        const requestUrl = String(url);
-        const { pathname } = new URL(requestUrl);
-        if (pathname.startsWith("/sources/connectors")) return jsonResponse({ ok: true, ...detectedHarnessConnectors() });
-        return jsonResponse(responseForUrl(requestUrl));
-      })
-    );
+    const connectorFetch = createDetectedConnectorFetch();
+    vi.stubGlobal("fetch", connectorFetch.fetch);
 
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -150,6 +138,8 @@ describe("collector autostart", () => {
     expect(container.textContent).toContain("Continue");
     expect(container.textContent).not.toContain("ADAPTERS");
     expect(container.textContent).not.toContain("Import data");
+    expect(connectorFetch.requests).toContainEqual({ method: "GET", pathname: "/sources/connectors" });
+    expect(connectorFetch.requests).toContainEqual({ method: "POST", pathname: "/sources/connectors/discover" });
 
     root.unmount();
   });
@@ -441,6 +431,27 @@ function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 }
 
+function createDetectedConnectorFetch() {
+  const requests: Array<{ method: string; pathname: string }> = [];
+  const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const requestUrl = String(input);
+    const { pathname } = new URL(requestUrl);
+    const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+
+    if (method === "GET" && pathname === "/sources/connectors") {
+      requests.push({ method, pathname });
+      return jsonResponse({ ok: true, ...listedHarnessConnectors() });
+    }
+    if (method === "POST" && pathname === "/sources/connectors/discover") {
+      requests.push({ method, pathname });
+      return jsonResponse({ ok: true, ...discoveredHarnessConnectors() });
+    }
+    return jsonResponse(responseForUrl(requestUrl));
+  });
+
+  return { fetch, requests };
+}
+
 function flushTimers(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -610,9 +621,17 @@ function emptyHarnessConnectors() {
   };
 }
 
-function detectedHarnessConnectors() {
+function listedHarnessConnectors() {
+  return detectedHarnessConnectors("2026-07-04T00:00:00.000Z");
+}
+
+function discoveredHarnessConnectors() {
+  return detectedHarnessConnectors("2026-07-04T00:00:01.000Z");
+}
+
+function detectedHarnessConnectors(generatedAt: string) {
   return {
-    generatedAt: "2026-07-04T00:00:00.000Z",
+    generatedAt,
     summary: { ready: 0, needsAction: 0, notInstalled: 1, notFound: 0, error: 0 },
     connectors: [
       {

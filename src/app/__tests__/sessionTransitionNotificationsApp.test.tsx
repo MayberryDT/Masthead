@@ -56,12 +56,24 @@ describe("App session transition notifications", () => {
     transitioned = true;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(10_000);
     });
-    await waitFor(() => projectionRequests >= 2);
+    await waitFor(() => projectionRequests === 2);
+    expect(notifyTransitionMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await waitFor(() => projectionRequests === 3);
+    expect(notifyTransitionMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await waitFor(() => projectionRequests === 4);
     await waitFor(() => notifyTransitionMock.mock.calls.length === 1);
 
-    expect(projectionRequests).toBeGreaterThanOrEqual(3);
+    expect(notifyTransitionMock).toHaveBeenCalledTimes(1);
     expect(notifyTransitionMock).toHaveBeenCalledWith({
       sessionId: "active-1",
       transition: "idle",

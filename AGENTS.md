@@ -49,7 +49,7 @@ Read `design.md` before Masthead UI work. It is the single master design source 
 
 `prd.md` remains the product/source-of-scope document. Historical files under `docs/superpowers/plans/` are implementation history, not current visual direction. Do not resurrect the old Raycast-inspired design file or use archived screenshots as the current design contract unless Tyler explicitly asks for that.
 
-Sessions, Workbench, Logbook, Sources, Agent Access, and Settings share one visual language, but
+Sessions, Workbench, Logbook, Sources, and Settings share one visual language, but
 each surface must use the information architecture best suited to its job. Do not force all
 surfaces into the live session-card composition.
 
@@ -59,8 +59,10 @@ Surface archetypes:
 - Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
 - Logbook: dense **artifact** capsule table plus body/provenance inspector (no bulk/checkboxes/summary strip).
 - Sources: harness connector rows plus live enablement (Discover → Enable → Activate → Test); see `docs/reference/sources-v2.md`.
-- Agent Access: setup, permissions, tools, and audit tables.
-- Settings: vertical settings sections and danger zone.
+- Settings: category rail plus a focused settings pane/ledger for General, Data, Agent access,
+  Advanced, and Danger zone.
+- Agent access is a compact MCP information/setup category inside Settings, not a standalone
+  surface.
 
 Shared visual language does not permit reusing fixed live-card DOM or CSS on every surface.
 Before finishing UI work, run the surface contract check and use the in-app Browser to inspect the
