@@ -308,6 +308,7 @@ describe("Settings surface", () => {
     expect(css).toMatch(/\.settings-toggle > span\s*\{[\s\S]*width: 42px;[\s\S]*height: 24px;/);
     expect(css).toMatch(/\.settings-toggle\.checked > span::after\s*\{[\s\S]*transform: translateX\(20px\);/);
     expect(css).toMatch(/\.settings-mcp-setup\s*\{[\s\S]*display: flex;[\s\S]*flex-wrap: wrap;[\s\S]*gap: 8px;/);
+    expect(css).toMatch(/\.settings-mcp-tabs button\s*\{[\s\S]*min-height: 40px;/);
     expect(css).toContain(".settings-mcp-inline-result");
     expect(css).not.toContain(".settings-mcp-summary");
     expect(css).not.toContain(".settings-section-mcp .code-block");
