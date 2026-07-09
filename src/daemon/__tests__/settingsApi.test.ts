@@ -9,7 +9,8 @@ import type { DaemonConfig } from "../config.ts";
 import { upsertSessionEnrichment } from "../db/enrichmentRepository.ts";
 import { getSessionDossier } from "../db/sessionDossierRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
-import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
+import { publishSessionToLogbook, seedSession } from "../db/__tests__/sessionTestHelpers.ts";
+import { markWorkbenchNotAdded } from "../db/workbenchPipelineRepository.ts";
 import { resolveLiveConnectorCommandPaths } from "../liveConnectorSettings.ts";
 
 const LIVE_CONNECTOR_RUNTIME_EXPECTATIONS = [
@@ -43,6 +44,7 @@ describe("settings API", () => {
   test("reports effective settings and enumerable deletion targets", async () => {
     const { daemon, databasePath, storePath } = await createTestHarness();
     seedSession(daemon.database, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:settings", title: "Settings API" });
+    publishSessionToLogbook(daemon.database, "session:settings");
     seedWeakSessionWithoutEffects(daemon.database);
     seedUnsupportedLegacyRuntime(daemon.database);
     const baseUrl = await listen(daemon);
@@ -329,6 +331,7 @@ describe("settings API", () => {
       sessionId: "session:dossier-read-only",
       title: "Cached dossier"
     });
+    publishSessionToLogbook(daemon.database, "session:dossier-read-only");
     daemon.database.prepare("DELETE FROM session_enrichments WHERE session_id = ?").run("session:dossier-read-only");
     const baseUrl = await listen(daemon);
 
@@ -345,6 +348,40 @@ describe("settings API", () => {
 
     expect(dossier.dossier.enrichment.status).toBe("not_enriched");
     expect(providerCalls).toBe(0);
+  });
+
+  test("session dossier and transcript GET hide unpublished and Not Added sessions", async () => {
+    const { daemon } = await createTestHarness();
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:hidden",
+      title: "Hidden raw session"
+    });
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:not-added",
+      title: "Not Added session"
+    });
+    markWorkbenchNotAdded(daemon.database, {
+      actor: { kind: "system", id: "quality" },
+      reason: "metadata_only",
+      sessionId: "session:not-added"
+    });
+    const baseUrl = await listen(daemon);
+
+    for (const path of [
+      `/sessions/${encodeURIComponent("session:hidden")}/dossier`,
+      `/sessions/${encodeURIComponent("session:hidden")}/transcript`,
+      `/sessions/${encodeURIComponent("session:not-added")}/dossier`,
+      `/sessions/${encodeURIComponent("session:not-added")}/transcript`
+    ]) {
+      const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" } });
+      expect(response.status).toBe(404);
+    }
   });
 
   test("manual Dossier enrichment retries old failed sessions in the background", async () => {
@@ -381,6 +418,7 @@ describe("settings API", () => {
       sessionId: "session:manual-dossier-enrich",
       title: "Old failed enrichment"
     });
+    publishSessionToLogbook(daemon.database, "session:manual-dossier-enrich");
     daemon.database.prepare("DELETE FROM session_enrichments WHERE session_id = ?").run("session:manual-dossier-enrich");
     upsertSessionEnrichment(daemon.database, {
       contentFingerprint: "manual-dossier:fingerprint:failed:timeout",
@@ -424,6 +462,7 @@ describe("settings API", () => {
       sessionId,
       title: "Large old Dossier"
     });
+    publishSessionToLogbook(daemon.database, sessionId);
     seedLargeToolHistory(daemon.database, sessionId, 180);
     const baseUrl = await listen(daemon);
 
@@ -555,7 +594,9 @@ describe("settings API", () => {
     const ompPath = join(tempDir, ".omp", "agent", "extensions", "masthead-live.js");
     const opencodePath = join(tempDir, ".config", "opencode", "plugins", "masthead-live.js");
     const piPath = join(tempDir, ".pi", "agent", "extensions", "masthead-live.js");
-    const hermesPath = join(tempDir, ".hermes", "plugins", "masthead-live", "index.js");
+    const hermesPath = join(tempDir, ".hermes", "plugins", "masthead-live", "plugin.yaml");
+    const hermesInitPath = join(tempDir, ".hermes", "plugins", "masthead-live", "__init__.py");
+    const hermesConfigPath = join(tempDir, ".hermes", "config.yaml");
 
     const before = await getJson(baseUrl, "/settings/hooks");
     expect(before.hooks).toMatchObject({
@@ -617,8 +658,11 @@ describe("settings API", () => {
     expect(await readFile(piPath, "utf8")).toContain("runtime=pi");
     expect(await readFile(piPath, "utf8")).toContain("/live/state");
     expect(await readFile(hermesPath, "utf8")).toContain("masthead-live-connector");
-    expect(await readFile(hermesPath, "utf8")).toContain("runtime=hermes");
-    expect(await readFile(hermesPath, "utf8")).toContain("/live/state");
+    expect(await readFile(hermesPath, "utf8")).toContain("name: masthead-live");
+    expect(await readFile(hermesInitPath, "utf8")).toContain("runtime=hermes");
+    expect(await readFile(hermesInitPath, "utf8")).toContain("/live/state");
+    expect(await readFile(hermesInitPath, "utf8")).toContain("on_session_start");
+    expect(await readFile(hermesConfigPath, "utf8")).toMatch(/enabled:[\s\S]*masthead-live/);
     expect(installed.hooks.integrations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ configPath: codexPath, runtime: "codex", status: "installed" }),
@@ -669,6 +713,7 @@ describe("settings API", () => {
     await expect(readFile(opencodePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(piPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(hermesPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(hermesInitPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("supports runtime-specific live connector settings actions", async () => {

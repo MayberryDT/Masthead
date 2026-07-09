@@ -136,6 +136,18 @@ export type SessionDossierUsage = {
   usageRows: number;
 };
 
+export type SessionDossierArtifact = {
+  artifactId: string;
+  artifactKind: "session_dossier" | "bug_fix_trace";
+  status: "current" | "superseded" | "invalid";
+  title?: string;
+  confidence?: "high" | "medium" | "low";
+  content: unknown;
+  createdAt: string;
+  updatedAt: string;
+  evidenceRefs: string[];
+};
+
 export type SessionDossierCoverageLevel = "complete" | "partial" | "hook_only" | "metadata_only";
 
 export type SessionDossierCoverageWarning = {
@@ -149,7 +161,7 @@ export type SessionDossierCoverageWarning = {
   message: string;
   action?: {
     label: string;
-    target: "sources" | "logbook" | "settings";
+    target: "logbook" | "settings" | "sources" | "workbench";
   };
 };
 
@@ -188,4 +200,5 @@ export type SessionDossierDto = {
   timeline: SessionDossierTimelineEvent[];
   reuse: SessionDossierReuse;
   usage: SessionDossierUsage;
+  artifacts: SessionDossierArtifact[];
 };

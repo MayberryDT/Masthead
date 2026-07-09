@@ -2,13 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppSurface } from "../../ui/ObservabilitySidebar";
 import {
   addSourceExclusion,
-  approveAdapterTranscripts,
   cancelImport,
   connectSources,
   getLiveHookSettings,
   getSourcesSetup,
   importAdapterMetadata,
-  importAdapterTranscripts,
   installRuntimeHooks,
   listAdapters,
   listAdapterSources,
@@ -280,34 +278,6 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     }
   }, [activeProjectionUrl, refreshAfterImportAction]);
 
-  const enableTranscriptImport = useCallback(async (runtime: string) => {
-    setBusy(true);
-    setStatus(`Enabling ${runtime} transcript import...`);
-    try {
-      await approveAdapterTranscripts(runtime, activeProjectionUrl);
-      setStatus("Transcript import enabled. Review exclusions before importing raw transcripts.");
-      await refreshAfterImportAction();
-    } catch (error) {
-      setStatus(`Transcript import approval failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  }, [activeProjectionUrl, refreshAfterImportAction]);
-
-  const importTranscripts = useCallback(async (runtime: string) => {
-    setBusy(true);
-    setStatus(`Importing ${runtime} transcripts...`);
-    try {
-      const result = await importAdapterTranscripts(runtime, activeProjectionUrl);
-      setStatus(importActionStatus("Transcript import", result));
-      await refreshAfterImportAction();
-    } catch (error) {
-      setStatus(`Transcript import failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  }, [activeProjectionUrl, refreshAfterImportAction]);
-
   const syncRuntime = useCallback(async (runtime: string) => {
     setBusy(true);
     setStatus(`Syncing ${runtime} source data...`);
@@ -329,7 +299,6 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
       const result = await connectSources(
         {
           importMetadata: true,
-          importTranscripts: false,
           queueEnrichment: true,
           runtimes
         },
@@ -463,14 +432,12 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     cancel,
     clearImportJobsFilter,
     connectSelected,
-    enableTranscriptImport,
     excludePath,
     hookActionBusy,
     hooks,
     importFilterRuntime,
     importMetadata,
     importPage,
-    importTranscripts,
     imports,
     lastRefreshAt,
     loadAdapterSources,

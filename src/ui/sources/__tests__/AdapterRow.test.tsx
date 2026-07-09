@@ -188,10 +188,8 @@ describe("SourceAdapterDetailModal", () => {
     expect(html).toContain("Test live connectors");
   });
 
-  test("invokes OpenCode metadata, transcript, approval, and sync callbacks", async () => {
+  test("invokes OpenCode metadata and sync callbacks without transcript import controls", async () => {
     const onImportMetadata = vi.fn();
-    const onImportTranscripts = vi.fn();
-    const onEnableTranscriptImport = vi.fn();
     const onSyncAdapter = vi.fn();
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -202,10 +200,8 @@ describe("SourceAdapterDetailModal", () => {
           adapter={opencodeAdapter({ transcriptImport: true })}
           busy={false}
           onClose={noop}
-          onEnableTranscriptImport={onEnableTranscriptImport}
           onExcludePath={noop}
           onImportMetadata={onImportMetadata}
-          onImportTranscripts={onImportTranscripts}
           onSyncAdapter={onSyncAdapter}
         />
       );
@@ -213,31 +209,13 @@ describe("SourceAdapterDetailModal", () => {
 
     await act(async () => {
       buttonByText(container, "Import metadata").click();
-      buttonByText(container, "Import transcripts").click();
       buttonByText(container, "Sync").click();
     });
 
     expect(onImportMetadata).toHaveBeenCalledWith("opencode");
-    expect(onImportTranscripts).toHaveBeenCalledWith("opencode");
     expect(onSyncAdapter).toHaveBeenCalledWith("opencode");
-
-    await act(async () => {
-      root.render(
-        <SourceAdapterDetailModal
-          adapter={opencodeAdapter({ transcriptImport: false })}
-          busy={false}
-          onClose={noop}
-          onEnableTranscriptImport={onEnableTranscriptImport}
-          onExcludePath={noop}
-        />
-      );
-    });
-
-    await act(async () => {
-      buttonByText(container, "Enable transcript import").click();
-    });
-
-    expect(onEnableTranscriptImport).toHaveBeenCalledWith("opencode");
+    expect(container.textContent).not.toContain("Import transcripts");
+    expect(container.textContent).not.toContain("Enable transcript import");
 
     await act(async () => root.unmount());
   });

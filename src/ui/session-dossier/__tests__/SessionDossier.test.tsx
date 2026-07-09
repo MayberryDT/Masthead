@@ -136,6 +136,31 @@ describe("SessionDossier", () => {
     expect(html).toContain("Run the full Dossier verification suite.");
   });
 
+  test("renders current Workbench artifacts in the enrichment summary", () => {
+    const currentDossier = dossier();
+    currentDossier.artifacts = [
+      {
+        artifactId: "artifact-1",
+        artifactKind: "session_dossier",
+        confidence: "medium",
+        content: { outcome: "Workbench artifacts persist locally.", title: "Persist Workbench dossier" },
+        createdAt: "2026-06-25T23:15:00.000Z",
+        evidenceRefs: ["message:canonical-session-1:message"],
+        status: "current",
+        title: "Persist Workbench dossier",
+        updatedAt: "2026-06-25T23:15:00.000Z"
+      }
+    ];
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
+
+    expect(html).toContain("Workbench artifacts");
+    expect(html).toContain("Persist Workbench dossier");
+    expect(html).toContain("Session Dossier");
+    expect(html).toContain("1 refs");
+    expect(html).toContain("Workbench artifacts persist locally.");
+  });
+
   test("renders durable memory as paragraphs instead of summary fact cards", () => {
     const currentDossier = dossier();
     currentDossier.durableEnrichment = {
@@ -265,28 +290,32 @@ describe("SessionDossier", () => {
     root.unmount();
   });
 
-  test("renders manual Dossier enrichment status and action", () => {
+  test("renders Dossier enrichment status without a native enrich action", () => {
     const currentDossier = dossier();
     currentDossier.enrichment = { status: "not_enriched" };
-    const onEnrich = vi.fn();
 
-    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} onEnrichDossier={onEnrich} />);
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
 
     expect(html).toContain("Not enriched");
-    expect(html).toContain("Enrich data");
+    expect(html).toContain("Workbench");
+    expect(html).toContain("Use Workbench to prepare an agent handoff for this session.");
+    expect(html).not.toContain("mastheadctl workbench");
+    expect(html).not.toContain("--kind");
+    expect(html).not.toContain("Enrich data");
+    expect(html).not.toContain("dossier-enrich-button");
     expect(html).not.toContain("session-capsule-v4");
   });
 
-  test("disables the Enrich data action while enrichment is running", async () => {
+  test("shows enrichment running as status text only", async () => {
     const host = document.createElement("div");
     const root = createRoot(host);
 
     await act(async () => {
-      root.render(<SessionDossier dossier={dossier()} dossierEnrichmentBusy onEnrichDossier={() => undefined} />);
+      root.render(<SessionDossier dossier={dossier()} dossierEnrichmentBusy />);
     });
 
     expect(host.textContent).toContain("Enriching");
-    expect(host.querySelector(".dossier-enrich-button")?.getAttribute("disabled")).not.toBeNull();
+    expect(host.querySelector(".dossier-enrich-button")).toBeNull();
     root.unmount();
   });
 
@@ -294,10 +323,40 @@ describe("SessionDossier", () => {
     const html = renderToStaticMarkup(<SessionDossier loading />);
 
     expect(html).toContain("Loading");
-    expect(html).toContain("Enrich data");
-    expect(html).toContain("disabled");
+    expect(html).not.toContain("Enrich data");
     expect(html).not.toContain("dossier-loading-state");
     expect(html).not.toContain("Loading canonical session dossier");
+  });
+
+  test("sanitizes forbidden Workbench artifact preview strings from rendered output", () => {
+    const currentDossier = dossier();
+    currentDossier.artifacts = [
+      {
+        artifactId: "artifact-forbidden-preview",
+        artifactKind: "bug_fix_trace",
+        confidence: "high",
+        content: {
+          command: "mastheadctl workbench",
+          files: ["output.json", "schema.json", "apply.sh"],
+          notes: "Run npm run workbench before reviewing output.json."
+        },
+        createdAt: "2026-06-25T23:15:00.000Z",
+        evidenceRefs: [],
+        status: "current",
+        title: "Forbidden preview strings",
+        updatedAt: "2026-06-25T23:15:00.000Z"
+      }
+    ];
+
+    const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
+
+    expect(html).toContain("Workbench artifacts");
+    expect(html).toContain("Forbidden preview strings");
+    expect(html).not.toContain("mastheadctl");
+    expect(html).not.toContain("npm run");
+    expect(html).not.toContain("output.json");
+    expect(html).not.toContain("schema.json");
+    expect(html).not.toContain("apply.sh");
   });
 
   test("does not render legacy capsule copy as current enrichment", () => {
@@ -675,7 +734,7 @@ describe("SessionDossier", () => {
       },
       warnings: [
         {
-          action: { label: "Import transcripts in Sources", target: "sources" },
+          action: { label: "Open Workbench", target: "workbench" },
           code: "transcript_missing",
           message: "Full transcript messages are not available for this session."
         }
@@ -1022,6 +1081,7 @@ function dossier(): SessionDossierDto {
         title: "Verification not captured"
       }
     ],
+    artifacts: [],
     coverage: {
       level: "complete",
       transcript: {

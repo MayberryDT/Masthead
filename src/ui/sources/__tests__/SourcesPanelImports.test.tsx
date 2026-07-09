@@ -645,11 +645,9 @@ describe("SourcesPanel import controls", () => {
         enrichmentMode: "skip",
         importMetadata: true,
         importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
-        importTranscripts: false,
         queueEnrichment: false,
         runtimes: ["opencode"],
-        sourceIds: ["opencode-sessions"],
-        transcriptApprovals: [{ approved: false, runtime: "opencode", sourceId: "opencode-sessions" }]
+        sourceIds: ["opencode-sessions"]
       })
     );
     expect(onRunSetup).toHaveBeenNthCalledWith(2,
@@ -657,11 +655,9 @@ describe("SourcesPanel import controls", () => {
         enrichmentMode: "skip",
         importMetadata: true,
         importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
-        importTranscripts: false,
         queueEnrichment: false,
         runtimes: ["omp"],
-        sourceIds: ["omp-sessions"],
-        transcriptApprovals: [{ approved: false, runtime: "omp", sourceId: "omp-sessions" }]
+        sourceIds: ["omp-sessions"]
       })
     );
     expect(container.querySelector(".sources-onboarding-modal")).toBeNull();
@@ -760,11 +756,9 @@ describe("SourcesPanel import controls", () => {
       enrichmentMode: "skip",
       importMetadata: true,
       importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
-      importTranscripts: false,
       queueEnrichment: false,
       runtimes: ["opencode"],
-      sourceIds: ["opencode-sessions"],
-      transcriptApprovals: [{ approved: false, runtime: "opencode", sourceId: "opencode-sessions" }]
+      sourceIds: ["opencode-sessions"]
     }));
     await act(async () => root.unmount());
   });
@@ -810,7 +804,6 @@ describe("SourcesPanel import controls", () => {
     expect(onRunSetup).toHaveBeenCalledWith(expect.objectContaining({
       importMetadata: true,
       importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
-      importTranscripts: false,
       queueEnrichment: false,
       runtimes: ["opencode"],
       sourceIds: ["opencode-sessions"]

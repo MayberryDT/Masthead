@@ -486,6 +486,61 @@
   margin-top: 8px;
 }
 
+.session-dossier .workbench-artifact-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-dossier .workbench-artifact-list details {
+  border: 1px solid rgba(194, 221, 241, 0.12);
+  border-radius: 4px;
+  background: rgba(6, 25, 37, 0.54);
+}
+
+.session-dossier .workbench-artifact-list summary {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 3px 10px;
+  min-width: 0;
+  cursor: pointer;
+  padding: 9px;
+}
+
+.session-dossier .workbench-artifact-list summary span,
+.session-dossier .workbench-artifact-list summary em {
+  color: var(--mute);
+  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 10.5px;
+  font-style: normal;
+}
+
+.session-dossier .workbench-artifact-list summary strong {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.session-dossier .workbench-artifact-list summary em {
+  grid-column: 2;
+}
+
+.session-dossier .workbench-artifact-list pre {
+  margin: 0;
+  border-top: 1px solid rgba(194, 221, 241, 0.1);
+  padding: 9px;
+  color: var(--body);
+  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 10.5px;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .session-dossier .dossier-loading-spinner {
   width: 15px;
   height: 15px;

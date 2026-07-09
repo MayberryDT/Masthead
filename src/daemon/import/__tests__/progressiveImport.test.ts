@@ -5,6 +5,8 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../../config.ts";
 import { createImportJob, getImportJob, type ImportJobDto } from "../../db/importJobRepository.ts";
+import { setSourcePolicy } from "../../db/sourcePolicyRepository.ts";
+import { markWorkbenchPublished } from "../../db/workbenchPipelineRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../../server.ts";
 
 const daemons: MastheadDaemon[] = [];
@@ -77,10 +79,9 @@ describe("progressive OpenCode imports", () => {
     ]);
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
-    const first = await postJson(baseUrl, "/adapters/opencode/import-transcripts");
+    const first = await queueTranscriptImport(baseUrl, daemon, opencodeRoot);
 
-    expect(first).toMatchObject({ ok: true, queued: 1, sources: 1 });
+    expect(first).toMatchObject({ ok: true, job: { importKind: "transcript" } });
     await waitFor(() => getImportJob(daemon.database, first.jobs[0].importJobId)?.status === "succeeded");
     expect(getImportJob(daemon.database, first.jobs[0].importJobId)).toMatchObject({
       discoveredCount: 2,
@@ -91,7 +92,7 @@ describe("progressive OpenCode imports", () => {
     expect(countRows(daemon.database, "sessions")).toBe(1);
     expect(countRows(daemon.database, "messages")).toBe(1);
 
-    const second = await postJson(baseUrl, "/adapters/opencode/import-transcripts");
+    const second = await queueTranscriptImport(baseUrl, daemon, opencodeRoot);
     await waitFor(() => getImportJob(daemon.database, second.jobs[0].importJobId)?.status === "succeeded");
 
     expect(countRows(daemon.database, "sessions")).toBe(1);
@@ -133,8 +134,7 @@ describe("progressive OpenCode imports", () => {
       timestamp: "2026-06-25T12:00:00.000Z"
     });
 
-    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
-    const imported = await postJson(baseUrl, "/adapters/opencode/import-transcripts");
+    const imported = await queueTranscriptImport(baseUrl, daemon, opencodeRoot);
 
     await waitFor(() => getImportJob(daemon.database, imported.jobs[0].importJobId)?.status === "succeeded");
     expect(countRows(daemon.database, "sessions")).toBe(1);
@@ -179,7 +179,7 @@ describe("progressive OpenCode imports", () => {
     expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
 
     const sessionId = sessionIdFor(daemon.database, "unapproved-token-session");
-    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
+    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`, 404);
     await yieldToEventLoop();
     expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
@@ -204,7 +204,6 @@ describe("progressive OpenCode imports", () => {
     ]);
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
     await ingestHook(baseUrl, {
       event: "session_started",
       model: "gpt-5",
@@ -217,7 +216,7 @@ describe("progressive OpenCode imports", () => {
     expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     const sessionId = sessionIdFor(daemon.database, "disabled-catchup-session");
 
-    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`);
+    await getJson(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/transcript?limit=20`, 404);
     await yieldToEventLoop();
     expect(tokenTotals(daemon.database)).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     expect(countWhere(daemon.database, "model_usage", "session_id = ?", sessionId)).toBe(0);
@@ -228,7 +227,6 @@ describe("progressive OpenCode imports", () => {
     const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "missing-token-session.jsonl");
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
     await ingestHook(baseUrl, {
       event: "session_started",
       model: "gpt-5",
@@ -245,7 +243,6 @@ describe("progressive OpenCode imports", () => {
     const { daemon } = await createTestHarness();
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
     await ingestHook(baseUrl, {
       event: "session_started",
       model: "gpt-5",
@@ -280,7 +277,6 @@ describe("progressive OpenCode imports", () => {
     await symlink(outsideTranscriptPath, transcriptPath);
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
     await ingestHook(baseUrl, {
       event: "session_started",
       model: "gpt-5",
@@ -368,11 +364,15 @@ describe("progressive OpenCode imports", () => {
     ]);
     const baseUrl = await listen(daemon);
 
-    await postJson(baseUrl, "/adapters/opencode/approve-transcripts");
-    const imported = await postJson(baseUrl, "/adapters/opencode/import-transcripts");
+    const imported = await queueTranscriptImport(baseUrl, daemon, opencodeRoot);
 
     await waitFor(() => getImportJob(daemon.database, imported.jobs[0].importJobId)?.status === "succeeded");
     const sessionId = sessionIdFor(daemon.database, "useful-session");
+    markWorkbenchPublished(daemon.database, {
+      actor: { kind: "agent", id: "test" },
+      publishedVia: "legacy_backfill",
+      sessionId
+    });
     expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'user'", sessionId)).toBeGreaterThan(0);
     expect(countWhere(daemon.database, "messages", "session_id = ? AND role = 'assistant'", sessionId)).toBeGreaterThan(0);
     expect(countWhere(daemon.database, "tool_calls", "session_id = ?", sessionId)).toBeGreaterThan(0);
@@ -521,11 +521,48 @@ function listen(daemon: MastheadDaemon): Promise<string> {
   });
 }
 
-async function postJson(baseUrl: string, path: string): Promise<ImportActionResponse> {
-  const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" }, method: "POST" });
+async function postJson(baseUrl: string, path: string, body?: Record<string, unknown>): Promise<ImportActionResponse> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    body: body ? JSON.stringify(body) : undefined,
+    headers: body ? { accept: "application/json", "content-type": "application/json" } : { accept: "application/json" },
+    method: "POST"
+  });
   expect(response.status).toBe(202);
-  const body = (await response.json()) as Record<string, unknown>;
-  return { ...body, jobs: Array.isArray(body.jobs) ? (body.jobs as ImportJobDto[]) : [] };
+  const responseBody = (await response.json()) as Record<string, unknown>;
+  return { ...responseBody, jobs: Array.isArray(responseBody.jobs) ? (responseBody.jobs as ImportJobDto[]) : [] };
+}
+
+async function queueTranscriptImport(baseUrl: string, daemon: MastheadDaemon, opencodeRoot: string): Promise<ImportActionResponse> {
+  const sourceId = await approveTranscriptSource(baseUrl, daemon, opencodeRoot);
+  const response = await postJson(baseUrl, "/imports", { kind: "transcript", sourceId });
+  return { ...response, jobs: response.job ? [response.job] : response.jobs };
+}
+
+async function approveTranscriptSource(baseUrl: string, daemon: MastheadDaemon, opencodeRoot: string): Promise<string> {
+  const now = "2026-06-25T12:00:00.000Z";
+  const scan = await fetch(`${baseUrl}/sources/scan`, { headers: { accept: "application/json" }, method: "POST" });
+  expect(scan.status).toBe(202);
+  const sessionsRoot = join(opencodeRoot, "sessions");
+  const row = daemon.database
+    .prepare(
+      `SELECT source_id AS sourceId
+      FROM ingest_sources
+      WHERE adapter = 'opencode'
+        AND source_path LIKE ?
+      ORDER BY length(source_path) ASC, source_id ASC
+      LIMIT 1`
+    )
+    .get(`${sessionsRoot}%`) as { sourceId: string } | undefined;
+  expect(row).toBeDefined();
+  const sourceId = row?.sourceId ?? "";
+  setSourcePolicy(daemon.database, {
+    decidedAt: now,
+    enabled: true,
+    policyKind: "transcript_import",
+    reason: "Workbench transcript import requested for this source.",
+    sourceId
+  });
+  return sourceId;
 }
 
 async function ingestHook(baseUrl: string, body: Record<string, unknown>): Promise<void> {
@@ -570,9 +607,9 @@ function sessionIdFor(database: MastheadDaemon["database"], sourceSessionId: str
   return row?.sessionId ?? "";
 }
 
-async function getJson(baseUrl: string, path: string): Promise<{ ok?: boolean; coverage?: Record<string, unknown>; items: Array<{ text: string }> }> {
+async function getJson(baseUrl: string, path: string, expectedStatus = 200): Promise<{ ok?: boolean; coverage?: Record<string, unknown>; items: Array<{ text: string }> }> {
   const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" } });
-  expect(response.status).toBe(200);
+  expect(response.status).toBe(expectedStatus);
   return (await response.json()) as { ok?: boolean; coverage?: Record<string, unknown>; items: Array<{ text: string }> };
 }
 

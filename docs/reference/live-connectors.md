@@ -55,11 +55,15 @@ Cursor uses `~/.cursor/hooks.json` with `version: 1` and flat command entries pe
 
 OpenCode uses a generated plugin file at `~/.config/opencode/plugins/masthead-live.js`. Masthead uninstalls only that generated plugin file after verifying its marker.
 
-Oh My Pi, Pi, and Hermes use generated extension/plugin files. Each posts bounded lifecycle, input-summary, approval, tool, and stop metadata to Masthead, plus explicit state reports derived from a small local state machine. Masthead uninstalls only generated files after verifying their markers.
+Oh My Pi and Pi use generated extension/plugin files. Each posts bounded lifecycle, input-summary, approval, tool, and stop metadata to Masthead, plus explicit state reports derived from a small local state machine. Masthead uninstalls only generated files after verifying their markers.
+
+Hermes uses a generated Python plugin at `~/.hermes/plugins/masthead-live/` (`plugin.yaml` + `__init__.py`) and enables it in `~/.hermes/config.yaml` under `plugins.enabled`. Hermes does not load bare JavaScript plugin files; the Python plugin registers CLI/gateway lifecycle hooks and posts the same fail-open ingest + live-state signals.
+
+Codex non-managed command hooks must be reviewed and trusted in Codex (`/hooks`) after install or repair. Untrusted hooks are skipped, including for `codex exec`.
 
 ## Privacy
 
-The live hook helper redacts known secret-like values before forwarding payloads. Full transcript import remains governed by Sources transcript approval. Live events may create canonical sessions and low-volume runtime signals before transcript import is approved.
+The live hook helper redacts known secret-like values before forwarding payloads. Full transcript import remains governed by exact source-scoped permission and Workbench transcript actions. Live events may create canonical sessions and low-volume runtime signals before transcript import is approved.
 
 ## Verification
 

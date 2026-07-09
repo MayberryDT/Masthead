@@ -19,7 +19,7 @@ describe("live state repository", () => {
     const db = await openTestDatabase();
     const report = reportAt("2026-07-07T12:00:00.000Z", { seq: 1, state: "working" });
 
-    expect(upsertLiveStateReport(db, report)).toMatchObject({ status: "accepted" });
+    expect(upsertTestLiveStateReport(db, report)).toMatchObject({ status: "accepted" });
     expect(latestLiveStateForSourceSession(db, { runtime: "codex", sourceSessionId: "source-1" })).toMatchObject({
       reportId: report.reportId,
       state: "working"
@@ -31,16 +31,18 @@ describe("live state repository", () => {
     const first = reportAt("2026-07-07T12:00:00.000Z", { seq: 2, state: "working" });
     const stale = reportAt("2026-07-07T12:00:01.000Z", { seq: 2, state: "idle" });
 
-    expect(upsertLiveStateReport(db, first)).toMatchObject({ status: "accepted" });
-    expect(upsertLiveStateReport(db, stale)).toMatchObject({ status: "ignored_stale", previous: expect.objectContaining({ reportId: first.reportId }) });
+    expect(upsertTestLiveStateReport(db, first)).toMatchObject({ status: "accepted" });
+    expect(upsertTestLiveStateReport(db, stale)).toMatchObject({ status: "ignored_stale", previous: expect.objectContaining({ reportId: first.reportId }) });
     expect(latestLiveStateForSourceSession(db, { runtime: "codex", sourceSessionId: "source-1" })?.state).toBe("working");
   });
 
   test("accepts higher seq and newer observedAt without seq", async () => {
     const db = await openTestDatabase();
-    expect(upsertLiveStateReport(db, reportAt("2026-07-07T12:00:00.000Z", { seq: 1, state: "working" }))).toMatchObject({ status: "accepted" });
-    expect(upsertLiveStateReport(db, reportAt("2026-07-07T12:00:01.000Z", { seq: 2, state: "idle" }))).toMatchObject({ status: "accepted" });
-    expect(upsertLiveStateReport(db, reportAt("2026-07-07T12:00:02.000Z", { seq: undefined, state: "blocked" }))).toMatchObject({ status: "accepted" });
+    expect(upsertTestLiveStateReport(db, reportAt("2026-07-07T12:00:00.000Z", { seq: 1, state: "working" }))).toMatchObject({ status: "accepted" });
+    expect(upsertTestLiveStateReport(db, reportAt("2026-07-07T12:00:01.000Z", { seq: 2, state: "idle" }))).toMatchObject({ status: "accepted" });
+    expect(upsertTestLiveStateReport(db, reportAt("2026-07-07T12:00:02.000Z", { seq: undefined, state: "blocked" }))).toMatchObject({
+      status: "accepted"
+    });
     expect(latestLiveStateForSourceSession(db, { runtime: "codex", sourceSessionId: "source-1" })?.state).toBe("blocked");
   });
 
@@ -59,7 +61,7 @@ describe("live state repository", () => {
   test("filters by session before applying the result limit", async () => {
     const db = await openTestDatabase();
     for (let index = 0; index < 8; index += 1) {
-      upsertLiveStateReport(
+      upsertTestLiveStateReport(
         db,
         normalizeLiveStateReport({
           runtime: "codex",
@@ -71,7 +73,7 @@ describe("live state repository", () => {
       );
     }
     const target = reportAt("2026-07-07T11:59:00.000Z", { sourceSessionId: "target-session", source: "target" });
-    upsertLiveStateReport(db, target);
+    upsertTestLiveStateReport(db, target);
 
     expect(latestLiveStateReports(db, { sourceSessionIds: new Set(["target-session"]), limit: 1 })).toEqual([
       expect.objectContaining({ reportId: target.reportId })
@@ -85,7 +87,7 @@ describe("live state repository", () => {
       sourceSessionId: undefined,
       source: "canonical-source"
     });
-    upsertLiveStateReport(db, report);
+    upsertTestLiveStateReport(db, report);
 
     expect(latestLiveStateReports(db, { canonicalSessionIds: new Set(["canonical-session"]) })).toEqual([
       expect.objectContaining({ reportId: report.reportId })
@@ -113,4 +115,8 @@ function reportAt(
     observedAt,
     ...overrides
   });
+}
+
+function upsertTestLiveStateReport(db: MastheadDatabase, report: ReturnType<typeof normalizeLiveStateReport>): ReturnType<typeof upsertLiveStateReport> {
+  return upsertLiveStateReport(db, report, { now: new Date(report.observedAt) });
 }

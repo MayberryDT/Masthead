@@ -1,5 +1,6 @@
 import { upsertSessionEnrichment } from "../enrichmentRepository.ts";
 import type { MastheadDatabase } from "../sqlite.ts";
+import { markWorkbenchPublished } from "../workbenchPipelineRepository.ts";
 
 export function seedSession(
   db: MastheadDatabase,
@@ -117,5 +118,13 @@ export function seedSession(
     sessionId: options.sessionId,
     sourceRefs: [],
     status: "current"
+  });
+}
+
+export function publishSessionToLogbook(db: MastheadDatabase, sessionId: string): void {
+  markWorkbenchPublished(db, {
+    actor: { kind: "system", id: "test" },
+    publishedVia: "test",
+    sessionId
   });
 }

@@ -25,6 +25,11 @@ Live Now is a view over collected session data, not the product category.
   usage, and provenance.
 - Read-only local MCP access for search, bounded session retrieval, project
   history, and coverage counts.
+- Workbench as the user-facing raw-to-published operations surface with
+  pipeline state, Activity, transcript checks/import intent, quality cleanup,
+  artifacts, publication, and disposable handoffs for coding agents.
+- Agent-facing CLI Workbench guidance so coding agents can consistently validate
+  and apply session enrichment, session dossiers, and bug-fix traces.
 - `npm run dev` launcher that starts either a writable daemon or a read-only
   worktree bridge as needed.
 - `npm run dev:desktop` Electron/Chromium desktop shell for app-menu and
@@ -36,10 +41,9 @@ Live Now is a view over collected session data, not the product category.
 - Deeper schema coverage for additional source adapters beyond the initial
   bounded scanners.
 - Transcript import breadth and exclusion policy tuning.
-- Optional remote enrichment. It is off by default and must stay scoped,
-  redacted, previewable, strict, and auditable when enabled. Remote provider
-  failures are surfaced in diagnostics and dossier provenance instead of being
-  silently replaced by local copy.
+- Legacy/dev native remote enrichment hooks. Masthead V1 launch enrichment uses
+  user-facing Workbench handoffs plus an agent-facing CLI write path; no native
+  remote model key is required.
 - Longer packaged desktop release-smoke automation.
 
 ## Install
@@ -132,7 +136,7 @@ See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md).
 - Daemon API reference: [docs/reference/daemon-api.md](docs/reference/daemon-api.md)
 - Sources reference: [docs/reference/sources.md](docs/reference/sources.md)
 - Adapter reference: [docs/reference/adapters.md](docs/reference/adapters.md)
-- Enrichment reference: [docs/reference/enrichment.md](docs/reference/enrichment.md)
+- Workbench enrichment reference: [docs/reference/enrichment.md](docs/reference/enrichment.md)
 - Session dossier reference: [docs/reference/session-dossier.md](docs/reference/session-dossier.md)
 - Configuration reference: [docs/reference/configuration.md](docs/reference/configuration.md)
 - Release gates: [docs/release-gates.md](docs/release-gates.md)

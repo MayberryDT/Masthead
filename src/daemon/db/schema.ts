@@ -75,6 +75,21 @@ const migrations = [
     version: 14,
     name: "014_live_state_reports",
     path: resolve(currentDir, "migrations/014_live_state_reports.sql")
+  },
+  {
+    version: 15,
+    name: "015_workbench_runs",
+    path: resolve(currentDir, "migrations/015_workbench_runs.sql")
+  },
+  {
+    version: 16,
+    name: "016_session_artifacts",
+    path: resolve(currentDir, "migrations/016_session_artifacts.sql")
+  },
+  {
+    version: 17,
+    name: "017_workbench_pipeline",
+    path: resolve(currentDir, "migrations/017_workbench_pipeline.sql")
   }
 ];
 
@@ -105,7 +120,12 @@ const criticalTables = [
   "legacy_migrations",
   "board_headline_frames",
   "board_headline_generations",
-  "live_state_reports"
+  "live_state_reports",
+  "workbench_runs",
+  "session_artifacts",
+  "workbench_session_state",
+  "workbench_activity",
+  "workbench_claims"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {
@@ -131,6 +151,7 @@ export function migrateDatabase(db: MastheadDatabase): void {
       throw error;
     }
   }
+  repairHistoricalSchemaDrift(db);
   validateCriticalTables(db);
 }
 
@@ -194,4 +215,28 @@ function validateCriticalTables(db: MastheadDatabase): void {
   if (missing.length > 0) {
     throw new Error(`Database schema is missing critical tables: ${missing.join(", ")}`);
   }
+}
+
+function repairHistoricalSchemaDrift(db: MastheadDatabase): void {
+  if (!tableExists(db, "board_headline_frames")) return;
+
+  if (!tableHasColumn(db, "board_headline_frames", "refresh_key_hash")) {
+    db.exec("ALTER TABLE board_headline_frames ADD COLUMN refresh_key_hash TEXT;");
+  }
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_board_headline_frames_refresh_key
+    ON board_headline_frames(source_session_id, refresh_key_hash, generated_at DESC);`
+  );
+}
+
+function tableExists(db: MastheadDatabase, tableName: string): boolean {
+  const row = db.prepare("SELECT 1 AS found FROM sqlite_master WHERE type IN ('table', 'virtual') AND name = ?").get(tableName) as
+    | { found: number }
+    | undefined;
+  return Boolean(row);
+}
+
+function tableHasColumn(db: MastheadDatabase, tableName: string, columnName: string): boolean {
+  const columns = db.prepare(`PRAGMA table_info(${tableName});`).all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === columnName);
 }

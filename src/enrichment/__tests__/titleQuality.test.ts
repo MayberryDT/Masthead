@@ -7,6 +7,7 @@ import { projectLiveEvents } from "../../core/liveProjection.ts";
 import { querySessions } from "../../daemon/db/sessionQueryRepository.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../daemon/db/sqlite.ts";
+import { markWorkbenchPublished } from "../../daemon/db/workbenchPipelineRepository.ts";
 import { createEnrichmentCoordinator } from "../enrichmentCoordinator.ts";
 import { deterministicCapsuleFromFacts, type SessionFacts } from "../sessionCompiler.ts";
 import type { SessionCapsule } from "../types.ts";
@@ -138,6 +139,7 @@ describe("session title quality", () => {
       sessionId: "session-logbook-title",
       title: "Masthead session"
     });
+    publishSession(db, "session-logbook-title");
     db.prepare(
       `INSERT INTO session_enrichments (
         enrichment_id, session_id, enrichment_kind, status, content_fingerprint, prompt_version,
@@ -184,6 +186,7 @@ describe("session title quality", () => {
       sessionId: "session-logbook-durable-title",
       title: "Masthead session"
     });
+    publishSession(db, "session-logbook-durable-title");
     db.prepare(
       `INSERT INTO session_enrichments (
         enrichment_id, session_id, enrichment_kind, status, content_fingerprint, prompt_version,
@@ -237,6 +240,7 @@ describe("session title quality", () => {
       sessionId: "session-logbook-review-template",
       title: "Masthead session"
     });
+    publishSession(db, "session-logbook-review-template");
     db.prepare(
       `INSERT INTO session_enrichments (
         enrichment_id, session_id, enrichment_kind, status, content_fingerprint, prompt_version,
@@ -331,6 +335,14 @@ function seedSession(
       message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(`${options.sessionId}:message`, options.sessionId, "user", "Repair title quality.", `${options.sessionId}:hash`, now, "{}", "authoritative");
+}
+
+function publishSession(db: MastheadDatabase, sessionId: string): void {
+  markWorkbenchPublished(db, {
+    actor: { kind: "system", id: "test" },
+    publishedVia: "test",
+    sessionId
+  });
 }
 
 function normalizeSupportedHookPayload(input: unknown, options: Omit<LiveHookNormalizeOptions, "runtime">) {

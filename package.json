@@ -6,6 +6,9 @@
   "license": "MIT",
   "type": "module",
   "main": ".vite/build/main.cjs",
+  "bin": {
+    "mastheadctl": "dist/daemon/src/cli/mastheadctl.js"
+  },
   "engines": {
     "node": ">=24.15.0"
   },

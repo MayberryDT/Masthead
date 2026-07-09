@@ -4,7 +4,7 @@ Masthead uses Codex lifecycle hooks for passive observation. Hook installation i
 
 Codex supports hooks from `~/.codex/hooks.json` and inline `[hooks]` tables in `~/.codex/config.toml`. The Masthead admin tool writes `hooks.json` because Codex warns when one layer contains both representations.
 
-After installing a non-managed hook, open `/hooks` in Codex to review and trust the hook definition before expecting it to run.
+After installing a non-managed hook, open `/hooks` in Codex to review and trust the hook definition before expecting it to run. Changing the Masthead hook command (reinstall/repair) invalidates prior trust hashes; Codex silently skips untrusted hooks, including under `codex exec`. For one-off automation only, `codex exec --dangerously-bypass-hook-trust` runs hooks without persisted trust.
 
 ## Start the Live Local App
 

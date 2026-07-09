@@ -13,20 +13,20 @@ Masthead is not primarily a chat client or task manager. The product hierarchy i
 3. Logbook (published/searchable only),
 4. read-only MCP,
 5. live Now (shallow),
-6. Sources (capture + source-scoped transcript permissions).
+6. Sources V2 (harness live-connect only).
 
 Ownership in one line each:
 
 - **Workbench** owns transcript import, cleanup, enrichment, and publication into Logbook.
 - **Logbook** is published sessions only — search/browse/dossier, not the raw import or publish pipeline.
-- **Sources** owns harness capture, health, and source-scoped transcript permissions — not per-session import work.
+- **Sources** owns discovering local harnesses and enabling live connectors (hooks/plugins) — not import jobs or per-session Workbench work. Contract: [sources.md](sources.md) → `docs/reference/sources-v2.md`.
 
 That ordering is reflected in the runtime split between renderer, daemon, core logic, workbench, enrichment, MCP, and Electron shell.
 
 ## Major domains
 
 - [Architecture](architecture.md) — how `src/app`, `src/daemon`, `src/core`, `src/enrichment`, `src/mcp`, and `src/electron` fit together.
-- [Sources and onboarding](sources.md) — discovery, setup, capture permissions, and first-run onboarding.
+- [Sources V2](sources.md) — discover harnesses, enable live connectors, activation, first-run connect.
 - [Data and integrations](data-and-integrations.md) — canonical storage, data paths, MCP boundary, and enrichment outputs.
 
 ## Where to go for Workbench code
@@ -46,7 +46,8 @@ These are the main existing docs this wiki synthesizes:
 - `docs/architecture/data-paths.md` — runtime data directory and store ownership.
 - `docs/explanation/session-graph.md` — canonical session graph model.
 - `docs/reference/daemon-api.md` — daemon HTTP API.
-- `docs/reference/sources.md` — source setup and import behavior.
+- `docs/reference/sources-v2.md` — Sources V2 live-connect contract (current).
+- `docs/reference/sources.md` — legacy Sources/import reference (historical; import UX moved to Workbench).
 
 ## Run and verify
 
@@ -64,7 +65,7 @@ Useful scripts from `package.json`:
 
 - Changing app state, navigation, or UI orchestration: [Architecture](architecture.md)
 - Changing Workbench raw→publish pipeline: `src/workbench/`, `src/ui/workbench/`, `src/app/workbench/`, `src/cli/`
-- Changing source setup, capture permissions, or onboarding: [Sources and onboarding](sources.md)
+- Changing harness discovery, live connectors, or connect onboarding: [Sources V2](sources.md)
 - Changing persistence, MCP, or enrichment behavior: [Data and integrations](data-and-integrations.md)
 
 ## Notes for future agents

@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { Readable } from "node:stream";
 import { afterEach, describe, expect, test } from "vitest";
+import { setSourcePolicy } from "../../daemon/db/sourcePolicyRepository.ts";
+import { markWorkbenchPublished } from "../../daemon/db/workbenchPipelineRepository.ts";
 
 const projectRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const serverScript = fileURLToPath(new URL("../../../dist/daemon/src/daemon/main.js", import.meta.url));
@@ -337,8 +339,6 @@ describe("ingest server live projection", () => {
 
     await postJson(server.baseUrl, "/ingest", liveApprovalPayload("server-canonical"));
     await getJson(server.baseUrl, "/projection?expandedSessionId=server-live");
-    const logbook = await getJson(server.baseUrl, "/logbook/search?q=Server");
-    const blankLogbook = await getJson(server.baseUrl, "/logbook/search?q=");
 
     const db = new DatabaseSync(databasePath);
     try {
@@ -349,17 +349,21 @@ describe("ingest server live projection", () => {
         { severity: "warning", signal_kind: "approval.requested" }
       ]);
       expect(db.prepare("SELECT projection_json FROM board_sessions").all()).toEqual([]);
-      expect(logbook).toMatchObject({
-        ok: true,
-        sessions: [expect.objectContaining({ title: "Server live projection" })]
-      });
-      expect(blankLogbook).toMatchObject({
-        ok: true,
-        sessions: [expect.objectContaining({ title: "Server live projection" })]
-      });
+      publishSourceSession(db, "server-live");
     } finally {
       db.close();
     }
+
+    const logbook = await getJson(server.baseUrl, "/logbook/search?q=Server");
+    const blankLogbook = await getJson(server.baseUrl, "/logbook/search?q=");
+    expect(logbook).toMatchObject({
+      ok: true,
+      sessions: [expect.objectContaining({ title: "Server live projection" })]
+    });
+    expect(blankLogbook).toMatchObject({
+      ok: true,
+      sessions: [expect.objectContaining({ title: "Server live projection" })]
+    });
   });
 
   test("defers successful PostToolUse events out of immediate projection while preserving high-value turns", async () => {
@@ -700,11 +704,6 @@ describe("ingest server live projection", () => {
     const imported = await postJson(server.baseUrl, "/adapters/opencode/import-metadata", {});
     expect(imported).toMatchObject({ ok: true, queued: 1, sources: 1 });
     await waitForImportJobs(server.baseUrl, jobIds(imported));
-    const search = await getJson(server.baseUrl, "/logbook/search?q=Historical");
-    expect(search).toMatchObject({
-      ok: true,
-      sessions: [expect.objectContaining({ title: "Historical OpenCode metadata" })]
-    });
 
     const db = new DatabaseSync(databasePath);
     try {
@@ -713,9 +712,16 @@ describe("ingest server live projection", () => {
           source_session_id: "historical-session"
         }
       ]);
+      publishSourceSession(db, "historical-session");
     } finally {
       db.close();
     }
+
+    const search = await getJson(server.baseUrl, "/logbook/search?q=Historical");
+    expect(search).toMatchObject({
+      ok: true,
+      sessions: [expect.objectContaining({ title: "Historical OpenCode metadata" })]
+    });
   });
 
   test("runs metadata import through the generic import job endpoint", async () => {
@@ -783,16 +789,32 @@ describe("ingest server live projection", () => {
     const server = await startServer(storePath, { MASTHEAD_CODEX_HOME: homeDir, MASTHEAD_DB_PATH: databasePath });
     servers.push(server.child);
 
-    const unapproved = await fetch(`${server.baseUrl}/adapters/opencode/import-transcripts`, {
-      body: "{}",
+    const sources = await postJson(server.baseUrl, "/sources/discover", {});
+    const sourceId = (sources.sources as Array<{ runtime?: string; sourceId?: string }>).find((source) => source.runtime === "opencode")
+      ?.sourceId;
+    expect(sourceId).toBeTruthy();
+
+    const unapproved = await fetch(`${server.baseUrl}/imports`, {
+      body: JSON.stringify({ kind: "transcript", sourceId }),
       headers: { "content-type": "application/json" },
       method: "POST"
     });
     expect(unapproved.status).toBe(409);
 
-    expect(await postJson(server.baseUrl, "/adapters/opencode/approve-transcripts", {})).toMatchObject({ ok: true });
-    const firstImport = await postJson(server.baseUrl, "/adapters/opencode/import-transcripts", {});
-    expect(firstImport).toMatchObject({ ok: true, queued: 1 });
+    const policyDb = new DatabaseSync(databasePath);
+    try {
+      setSourcePolicy(policyDb, {
+        decidedAt: "2026-07-08T12:00:00.000Z",
+        enabled: true,
+        policyKind: "transcript_import",
+        sourceId: sourceId as string
+      });
+    } finally {
+      policyDb.close();
+    }
+
+    const firstImport = await postJson(server.baseUrl, "/imports", { kind: "transcript", sourceId });
+    expect(firstImport).toMatchObject({ ok: true, job: { status: "queued" } });
     await waitForImportJobs(server.baseUrl, jobIds(firstImport));
     await appendFile(
       transcriptPath,
@@ -804,8 +826,8 @@ describe("ingest server live projection", () => {
       })}\n`,
       "utf8"
     );
-    const secondImport = await postJson(server.baseUrl, "/adapters/opencode/import-transcripts", {});
-    expect(secondImport).toMatchObject({ ok: true, queued: 1 });
+    const secondImport = await postJson(server.baseUrl, "/imports", { kind: "transcript", sourceId });
+    expect(secondImport).toMatchObject({ ok: true, job: { status: "queued" } });
     await waitForImportJobs(server.baseUrl, jobIds(secondImport));
 
     const db = new DatabaseSync(databasePath);
@@ -815,7 +837,7 @@ describe("ingest server live projection", () => {
         { role: "assistant", text_redacted: "Second transcript message" }
       ]);
       expect(db.prepare("SELECT byte_offset FROM ingest_cursors WHERE source_path = ?").get(transcriptPath)).toMatchObject({
-        byte_offset: 2
+        byte_offset: Buffer.byteLength(await readFile(transcriptPath, "utf8"))
       });
     } finally {
       db.close();
@@ -1213,7 +1235,21 @@ function delay(ms: number): Promise<void> {
 }
 
 function jobIds(response: Record<string, any>): string[] {
+  if (response.job?.importJobId) return [response.job.importJobId];
+  if (response.importJobId) return [response.importJobId];
   return (response.jobs ?? []).map((job: { importJobId: string }) => job.importJobId);
+}
+
+function publishSourceSession(db: DatabaseSync, sourceSessionId: string): void {
+  const row = db
+    .prepare("SELECT session_id AS sessionId FROM sessions WHERE source_session_id = ? AND deleted_at IS NULL")
+    .get(sourceSessionId) as { sessionId: string } | undefined;
+  expect(row?.sessionId).toBeTruthy();
+  markWorkbenchPublished(db, {
+    actor: { kind: "system", id: "test" },
+    publishedVia: "test",
+    sessionId: row!.sessionId
+  });
 }
 
 function liveApprovalPayload(providerEventId: string): Record<string, unknown> {

@@ -13,6 +13,6 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["src/core/**/*.ts", "src/daemon/**/*.ts", "src/mcp/**/*.ts"],
+  "include": ["src/core/**/*.ts", "src/daemon/**/*.ts", "src/mcp/**/*.ts", "src/cli/**/*.ts", "src/workbench/**/*.ts"],
   "exclude": ["**/__tests__/**"]
 }

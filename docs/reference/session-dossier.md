@@ -42,7 +42,7 @@ Transcript items are role/type filterable and paginated. Hook-only sessions show
 
 ## Transcript import
 
-If the transcript is missing, use Sources to enable transcript import and sync supported harness history. The detail view only routes to Sources; it does not automatically import transcripts or open source applications.
+If the transcript is missing, use Workbench to check transcript availability and request transcript import for the specific session/source. The detail view does not automatically import transcripts or open source applications.
 
 ## Enrichment Provenance
 

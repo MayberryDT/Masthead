@@ -9,6 +9,7 @@ import { indexCanonicalSessionSearch, searchSessions } from "../../db/searchRepo
 import { migrateDatabase } from "../../db/schema.ts";
 import { ingestAdapterRecord } from "../../db/sessionRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
+import { markWorkbenchPublished } from "../../db/workbenchPipelineRepository.ts";
 
 const tempDirs: string[] = [];
 
@@ -31,7 +32,14 @@ describe("multi-adapter import", () => {
           hostname: "masthead-test",
           runtimeKind: source.runtime
         });
-        if (sessionId) indexCanonicalSessionSearch(db, sessionId);
+        if (sessionId) {
+          markWorkbenchPublished(db, {
+            actor: { kind: "system", id: "test" },
+            publishedVia: "test",
+            sessionId
+          });
+          indexCanonicalSessionSearch(db, sessionId);
+        }
       }
     }
 

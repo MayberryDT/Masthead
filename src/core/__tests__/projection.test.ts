@@ -97,6 +97,22 @@ describe("Live Board projection", () => {
     });
   });
 
+  test("labels last activity against projection time instead of the newest event", () => {
+    const board = projectFixture(
+      {
+        events: [
+          event("stale-start", "stale-session", "session.started", "2026-07-05T12:00:00.000Z", {
+            title: "Stale but visible work"
+          })
+        ],
+        gitSnapshots: []
+      },
+      { now: new Date("2026-07-08T12:00:00.000Z") }
+    );
+
+    expect(board.cards[0]?.lastActivityLabel).toBe("3d ago");
+  });
+
   test("projects numeric payload metadata by event timestamp instead of arrival order", () => {
     const board = projectFixture(
       {

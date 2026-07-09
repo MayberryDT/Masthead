@@ -7,6 +7,7 @@ import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { createSessionRepository } from "../../daemon/db/sessionRepository.ts";
 import { indexCanonicalSessionSearch } from "../../daemon/db/searchRepository.ts";
 import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
+import { publishSessionToLogbook } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { getMcpProjectHistory, getMcpSessionExcerpt, searchMcpSessions } from "../sessionRetrieval.ts";
 
 const tempDirs: string[] = [];
@@ -97,6 +98,7 @@ function seedSession(db: Awaited<ReturnType<typeof openDb>>, suffix = "retrieval
     "{}"
   );
   indexCanonicalSessionSearch(db, sessionId);
+  publishSessionToLogbook(db, sessionId);
   return sessionId;
 }
 

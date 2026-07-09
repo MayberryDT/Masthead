@@ -6,6 +6,7 @@ import { upsertSessionEnrichment } from "../enrichmentRepository.ts";
 import { indexCanonicalSessionSearch, searchSessions } from "../searchRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
+import { publishSessionToLogbook } from "./sessionTestHelpers.ts";
 
 const tempDirs: string[] = [];
 
@@ -34,6 +35,7 @@ describe("enrichment search", () => {
         last_activity_at, source_confidence, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run("session-1", "host:test", "runtime:opencode", "source-session-1", "Pip", "Callback work", "ended", now, "authoritative", now, now);
+    publishSessionToLogbook(db, "session-1");
     upsertSessionEnrichment(db, {
       content: {
         candidateDecisions: [],

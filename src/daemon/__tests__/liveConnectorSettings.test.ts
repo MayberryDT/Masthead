@@ -1,10 +1,18 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../config";
-import { installLiveConnector, liveConnectorCommand } from "../liveConnectorSettings";
+import {
+  disableHermesPluginInConfig,
+  enableHermesPluginInConfig,
+  getLiveConnectorSetting,
+  installLiveConnector,
+  isHermesPluginEnabledInConfig,
+  liveConnectorCommand,
+  uninstallLiveConnector
+} from "../liveConnectorSettings";
 
 type OmpSessionManager = {
   getCwd?: () => string;
@@ -37,6 +45,42 @@ describe("live connector settings", () => {
       expect(command).toContain(`/ingest?runtime=${runtime}`);
       expect(command).toContain("MASTHEAD_STATE_URL=");
     }
+  });
+
+  test("Hermes install writes a Python plugin and enables it in config.yaml", async () => {
+    const tempDir = await makeTempDir();
+    const config = configFor(tempDir);
+    await mkdir(join(tempDir, ".hermes"), { recursive: true });
+    await writeFile(join(tempDir, ".hermes", "config.yaml"), "model: test\nplugins:\n  enabled: []\n", "utf8");
+
+    await installLiveConnector(config, "hermes");
+    const setting = await getLiveConnectorSetting(config, "hermes");
+    expect(setting.installed).toBe(true);
+    expect(setting.configPath).toContain("plugin.yaml");
+
+    const pluginYaml = await readFile(join(tempDir, ".hermes", "plugins", "masthead-live", "plugin.yaml"), "utf8");
+    const initPy = await readFile(join(tempDir, ".hermes", "plugins", "masthead-live", "__init__.py"), "utf8");
+    const hermesConfig = await readFile(join(tempDir, ".hermes", "config.yaml"), "utf8");
+    expect(pluginYaml).toContain("name: masthead-live");
+    expect(initPy).toContain("on_session_start");
+    expect(initPy).toContain("runtime=hermes");
+    expect(isHermesPluginEnabledInConfig(hermesConfig, "masthead-live")).toBe(true);
+
+    await uninstallLiveConnector(config, "hermes");
+    const after = await getLiveConnectorSetting(config, "hermes");
+    expect(after.installed).toBe(false);
+    expect(isHermesPluginEnabledInConfig(await readFile(join(tempDir, ".hermes", "config.yaml"), "utf8"), "masthead-live")).toBe(false);
+  });
+
+  test("enable/disable Hermes plugin config helpers preserve other plugins", () => {
+    const empty = "plugins:\n  enabled: []\n";
+    const enabled = enableHermesPluginInConfig(empty, "masthead-live");
+    expect(enabled).toContain("- masthead-live");
+    const withOther = enableHermesPluginInConfig("plugins:\n  enabled:\n    - disk-cleanup\n", "masthead-live");
+    expect(withOther).toContain("- disk-cleanup");
+    expect(withOther).toContain("- masthead-live");
+    expect(disableHermesPluginInConfig(withOther, "masthead-live")).toContain("- disk-cleanup");
+    expect(disableHermesPluginInConfig(withOther, "masthead-live")).not.toContain("masthead-live");
   });
 
   test("generated OpenCode plugin does not post blocked state for questions or needs_input", async () => {
