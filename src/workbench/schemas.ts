@@ -13,40 +13,135 @@ const confidence = { enum: ["high", "medium", "low"] };
 const stringArray = { type: "array", items: { type: "string" } };
 const stringField = { type: "string" };
 
+const mastheadEnvelope = {
+  title: stringField,
+  confidence,
+  evidenceRefs: stringArray,
+  missingEvidence: stringArray,
+  provenanceSessionIds: stringArray,
+  joinRationale: stringField,
+  signatureKey: stringField
+};
+
 const schemas: Record<WorkbenchOutputKind, WorkbenchJsonSchema> = {
-  bug_fix_trace: {
+  runbook: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     additionalProperties: false,
     properties: {
-      affectedStack: stringArray,
-      confidence,
-      evidenceRefs: stringArray,
-      failedHypotheses: stringArray,
-      fixSummary: stringField,
-      missingEvidence: stringArray,
-      patchShape: stringArray,
-      preventionNotes: stringArray,
-      reproduction: stringField,
-      risksOrGaps: stringArray,
+      ...mastheadEnvelope,
+      problemSignature: {
+        type: "object",
+        additionalProperties: false,
+        required: ["symptoms", "errorStrings", "affectedScope"],
+        properties: {
+          symptoms: stringArray,
+          errorStrings: stringArray,
+          affectedScope: stringField
+        }
+      },
+      preconditions: stringArray,
+      reproSteps: stringArray,
+      deadEnds: stringArray,
+      fixSteps: stringArray,
+      commands: stringArray,
+      changedFiles: stringArray,
+      validationChecks: stringArray,
+      environmentRequirements: stringArray,
       rootCause: stringField,
-      symptom: stringField,
-      title: stringField,
-      verification: stringArray
+      preventionNotes: stringArray,
+      risksOrGaps: stringArray
     },
     required: [
       "title",
-      "symptom",
-      "affectedStack",
-      "failedHypotheses",
-      "fixSummary",
-      "patchShape",
-      "verification",
-      "preventionNotes",
-      "evidenceRefs",
       "confidence",
-      "missingEvidence"
+      "evidenceRefs",
+      "missingEvidence",
+      "provenanceSessionIds",
+      "problemSignature",
+      "preconditions",
+      "reproSteps",
+      "deadEnds",
+      "fixSteps",
+      "commands",
+      "changedFiles",
+      "validationChecks",
+      "environmentRequirements",
+      "rootCause",
+      "preventionNotes",
+      "risksOrGaps"
     ],
-    title: "BugFixTraceArtifact",
+    title: "RunbookArtifact",
+    type: "object"
+  },
+  adr: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    additionalProperties: false,
+    properties: {
+      ...mastheadEnvelope,
+      status: stringField,
+      context: stringField,
+      decision: stringField,
+      alternatives: stringArray,
+      consequences: stringArray,
+      affectedPaths: stringArray,
+      supersedes: stringArray
+    },
+    required: [
+      "title",
+      "confidence",
+      "evidenceRefs",
+      "missingEvidence",
+      "provenanceSessionIds",
+      "status",
+      "context",
+      "decision",
+      "alternatives",
+      "consequences"
+    ],
+    title: "AdrArtifact",
+    type: "object"
+  },
+  incident_timeline: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    additionalProperties: false,
+    properties: {
+      ...mastheadEnvelope,
+      symptom: stringField,
+      impact: stringField,
+      timeline: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["at", "summary", "evidenceRefs"],
+          properties: {
+            at: stringField,
+            summary: stringField,
+            evidenceRefs: stringArray
+          }
+        }
+      },
+      rootCause: stringField,
+      contributingFactors: stringArray,
+      remediation: stringArray,
+      prevention: stringArray,
+      status: stringField
+    },
+    required: [
+      "title",
+      "confidence",
+      "evidenceRefs",
+      "missingEvidence",
+      "provenanceSessionIds",
+      "symptom",
+      "impact",
+      "timeline",
+      "contributingFactors",
+      "remediation",
+      "prevention",
+      "status"
+    ],
+    title: "IncidentTimelineArtifact",
     type: "object"
   },
   session_dossier: {
@@ -135,7 +230,7 @@ const schemas: Record<WorkbenchOutputKind, WorkbenchJsonSchema> = {
 };
 
 export function listWorkbenchSchemaKinds(): WorkbenchOutputKind[] {
-  return ["session_enrichment", "session_dossier", "bug_fix_trace"];
+  return ["session_enrichment", "session_dossier", "runbook", "adr", "incident_timeline"];
 }
 
 export function getWorkbenchSchema(kind: WorkbenchOutputKind): WorkbenchJsonSchema {
@@ -145,5 +240,19 @@ export function getWorkbenchSchema(kind: WorkbenchOutputKind): WorkbenchJsonSche
 }
 
 export function isWorkbenchOutputKind(value: string | undefined): value is WorkbenchOutputKind {
-  return value === "session_enrichment" || value === "session_dossier" || value === "bug_fix_trace";
+  return (
+    value === "session_enrichment" ||
+    value === "session_dossier" ||
+    value === "runbook" ||
+    value === "adr" ||
+    value === "incident_timeline"
+  );
+}
+
+export function isWorkbenchArtifactKind(value: string | undefined): value is Exclude<WorkbenchOutputKind, "session_enrichment"> {
+  return value === "session_dossier" || value === "runbook" || value === "adr" || value === "incident_timeline";
+}
+
+export function isMultiSessionCapableKind(kind: WorkbenchOutputKind): boolean {
+  return kind === "runbook" || kind === "adr" || kind === "incident_timeline";
 }

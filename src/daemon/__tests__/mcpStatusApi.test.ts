@@ -35,7 +35,7 @@ describe("MCP status API", () => {
         queryCount: 1,
         readOnly: true,
         ready: true,
-        toolCount: 6
+        toolCount: 8
       }
     });
     expect(status.status.launchConfig).toBeUndefined();
@@ -115,9 +115,17 @@ describe("MCP status API", () => {
     expect(tools.tools).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          name: "search_artifacts",
+          permission: "Read only"
+        }),
+        expect.objectContaining({
+          name: "get_artifact",
+          permission: "Read only"
+        }),
+        expect.objectContaining({
           name: "search_sessions",
           permission: "Read only",
-          purpose: "Find session records"
+          purpose: "Find sessions for evidence and compile"
         }),
         expect.objectContaining({
           name: "get_session_excerpt",

@@ -8,10 +8,11 @@ describe("workbenchInstructions", () => {
     expect(instructions).toContain("Agent guidance contract");
     expect(instructions).toContain("Evidence rules");
     expect(instructions).toContain("Confidence rubric");
+    expect(instructions).toContain("Automatic handoff completion");
     expect(instructions).toContain("Field rules for session_enrichment");
     expect(instructions).toContain("title: use the dominant concrete work");
     expect(instructions).toContain("searchPhrases: include phrases a future agent would search for");
-    expect(instructions).toContain("Validate with --session before applying");
+    expect(instructions).toContain("Validate with evidence");
   });
 
   test("returns first-class guidance for session dossier artifacts", () => {
@@ -23,12 +24,12 @@ describe("workbenchInstructions", () => {
     expect(instructions).toContain("lessonsLearned: include reusable takeaways");
   });
 
-  test("returns first-class guidance for bug-fix trace artifacts", () => {
-    const instructions = workbenchInstructions({ kind: "bug_fix_trace", scope: "candidates" });
+  test("returns first-class guidance for runbook artifacts", () => {
+    const instructions = workbenchInstructions({ kind: "runbook", scope: "candidates" });
 
-    expect(instructions).toContain("Field rules for bug_fix_trace");
-    expect(instructions).toContain("symptom: state the observed failure");
-    expect(instructions).toContain("rootCause: explain the cause only when the evidence supports it");
-    expect(instructions).toContain("failedHypotheses: preserve investigated paths that were ruled out");
+    expect(instructions).toContain("Field rules for runbook");
+    expect(instructions).toContain("problemSignature");
+    expect(instructions).toContain("deadEnds");
+    expect(instructions).toContain("Signature-bounded expansion");
   });
 });

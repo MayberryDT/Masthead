@@ -48,7 +48,8 @@ describe("mastheadctl workbench CLI foundation", () => {
       expect(result.stdout).toContain(command);
     }
     expect(result.stdout).toContain("Agent loop:");
-    expect(result.stdout).toContain("Use next for a complete packet, write schema JSON, validate with --session, then apply.");
+    expect(result.stdout).toContain("Use next for a complete packet, write schema JSON, validate with --session,");
+    expect(result.stdout).toContain("runbook, adr, incident_timeline");
     expect(result.stderr).toBe("");
   });
 
@@ -108,9 +109,11 @@ describe("mastheadctl workbench CLI foundation", () => {
 
   test("prints agent instructions for every Workbench output kind", async () => {
     const expectedRules = {
-      bug_fix_trace: "Field rules for bug_fix_trace",
+      runbook: "Field rules for runbook",
       session_dossier: "Field rules for session_dossier",
-      session_enrichment: "Field rules for session_enrichment"
+      session_enrichment: "Field rules for session_enrichment",
+      adr: "Field rules for adr",
+      incident_timeline: "Field rules for incident_timeline"
     };
 
     for (const [kind, fieldRule] of Object.entries(expectedRules)) {
@@ -369,7 +372,7 @@ describe("mastheadctl workbench CLI foundation", () => {
       expect(JSON.parse(blocked.stdout)).toMatchObject({
         ok: false,
         code: "publication_gate_failed",
-        missing: ["transcript", "quality", "session_enrichment", "session_dossier", "bug_fix_trace"]
+        missing: ["transcript", "quality", "session_enrichment", "session_dossier"]
       });
 
       const readyDb = await openMastheadDatabase(dbPath);
@@ -379,7 +382,7 @@ describe("mastheadctl workbench CLI foundation", () => {
         .run("session:abc");
       markWorkbenchSessionEnrichmentSatisfied(readyDb, { actor: { kind: "agent", id: "codex" }, sessionId: "session:abc" });
       markWorkbenchArtifactSatisfied(readyDb, { actor: { kind: "agent", id: "codex" }, artifactKind: "session_dossier", sessionId: "session:abc" });
-      markWorkbenchArtifactSatisfied(readyDb, { actor: { kind: "agent", id: "codex" }, artifactKind: "bug_fix_trace", sessionId: "session:abc" });
+      markWorkbenchArtifactSatisfied(readyDb, { actor: { kind: "agent", id: "codex" }, artifactKind: "runbook", sessionId: "session:abc" });
       readyDb.close();
 
       const published = await runMastheadCli(["workbench", "publish", "--session", "session:abc", "--db", dbPath, "--json"], { env: {} });
@@ -477,7 +480,7 @@ describe("mastheadctl workbench CLI foundation", () => {
             quality_status = 'passed',
             session_enrichment_status = 'satisfied',
             session_dossier_status = 'satisfied',
-            bug_fix_trace_status = 'satisfied'
+            runbook_status = 'satisfied'
         WHERE session_id = ?`
       ).run("session:published");
       markWorkbenchPublished(db, {

@@ -1,11 +1,13 @@
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 import {
+  getArtifactTool,
   getMastheadCoverageTool,
   getProjectHistoryTool,
   getSessionExcerptTool,
   getSessionTranscriptTool,
   getSessionTool,
   listProjectSessionsTool,
+  searchArtifactsTool,
   searchSessionsTool
 } from "./tools.ts";
 
@@ -72,6 +74,18 @@ function handleJsonRpc(db: MastheadDatabase, request: JsonRpcRequest) {
 }
 
 function callTool(db: MastheadDatabase, tool: string, args: Record<string, unknown>): unknown {
+  if (tool === "search_artifacts") {
+    return searchArtifactsTool(db, {
+      kind: artifactKindArg(args.kind),
+      limit: numberArg(args.limit),
+      offset: numberArg(args.offset),
+      project: optionalString(args.project),
+      query: optionalString(args.query)
+    });
+  }
+  if (tool === "get_artifact") {
+    return getArtifactTool(db, { artifactId: requiredString(args.artifactId, "artifactId") });
+  }
   if (tool === "search_sessions") {
     return searchSessionsTool(db, {
       dateFrom: optionalString(args.dateFrom),
@@ -117,8 +131,28 @@ function callTool(db: MastheadDatabase, tool: string, args: Record<string, unkno
 export function toolDefinitions() {
   return [
     {
+      name: "search_artifacts",
+      description:
+        "Search published Logbook knowledge artifacts (session dossiers, runbooks, ADRs, incident timelines). Prefer this for reuse.",
+      inputSchema: objectSchema(
+        {
+          kind: { type: "string", enum: ["session_dossier", "runbook", "adr", "incident_timeline"] },
+          limit: { type: "number" },
+          offset: { type: "number" },
+          project: { type: "string" },
+          query: { type: "string" }
+        },
+        []
+      )
+    },
+    {
+      name: "get_artifact",
+      description: "Get one published artifact body with provenance and evidence refs.",
+      inputSchema: objectSchema({ artifactId: { type: "string", minLength: 1 } }, ["artifactId"])
+    },
+    {
       name: "search_sessions",
-      description: "Search Masthead session capsules and indexed metadata.",
+      description: "Search Masthead sessions for evidence and compile (not the primary knowledge reuse API).",
       inputSchema: objectSchema(
         {
           dateFrom: { type: "string" },
@@ -173,8 +207,16 @@ export function toolDefinitions() {
   ];
 }
 
-function objectSchema(properties: Record<string, { type: string; minLength?: number; minimum?: number; maximum?: number }>, required: string[] = []) {
+function objectSchema(
+  properties: Record<string, { type: string; minLength?: number; minimum?: number; maximum?: number; enum?: string[] }>,
+  required: string[] = []
+) {
   return { additionalProperties: false, properties, required, type: "object" };
+}
+
+function artifactKindArg(value: unknown): "session_dossier" | "runbook" | "adr" | "incident_timeline" | undefined {
+  if (value === "session_dossier" || value === "runbook" || value === "adr" || value === "incident_timeline") return value;
+  return undefined;
 }
 
 function requiredString(value: unknown, name: string): string {

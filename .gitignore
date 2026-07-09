@@ -8,3 +8,5 @@ out/
 .env.local
 .env.*.local
 .masthead/
+
+.worktrees/

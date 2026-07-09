@@ -1,8 +1,17 @@
 import { redactText } from "../core/redaction.ts";
-import { getWorkbenchSchema, isWorkbenchOutputKind } from "./schemas.ts";
+import { getWorkbenchSchema, isMultiSessionCapableKind, isWorkbenchOutputKind } from "./schemas.ts";
 import type { WorkbenchEvidencePacket, WorkbenchOutputKind, WorkbenchValidationIssue, WorkbenchValidationResult } from "./types.ts";
 
 const GENERIC_TITLES = new Set(["updated files", "session work", "recent activity", "codex hook event", "masthead session", "work completed", "done"]);
+
+const WEAK_JOIN_PATTERNS = [
+  /^same project$/i,
+  /^same topics?$/i,
+  /^same time window$/i,
+  /^generic file overlap$/i,
+  /^semantic summary/i,
+  /^similar vibe/i
+];
 
 export function validateWorkbenchOutput(
   kind: WorkbenchOutputKind,
@@ -49,6 +58,64 @@ export function validateWorkbenchOutput(
       warnings.push({
         code: "thin_evidence",
         message: "High-confidence output should cite more than one evidence ref when packet coverage is partial."
+      });
+    }
+  }
+
+  // Nested timeline evidence refs for incident_timeline
+  if (kind === "incident_timeline" && evidencePacket && Array.isArray(output.timeline)) {
+    const knownRefs = evidenceRefsForPacket(evidencePacket);
+    for (const [index, entry] of output.timeline.entries()) {
+      if (!isRecord(entry) || !Array.isArray(entry.evidenceRefs)) continue;
+      for (const ref of entry.evidenceRefs) {
+        if (typeof ref === "string" && !knownRefs.has(ref)) {
+          errors.push({
+            code: "unknown_evidence_ref",
+            message: `Timeline entry ${index} evidence ref is not present in the packet: ${ref}`
+          });
+        }
+      }
+    }
+  }
+
+  if (isMultiSessionCapableKind(kind)) {
+    const provenance = stringArrayField(output, "provenanceSessionIds") ?? [];
+    if (provenance.length === 0) {
+      errors.push({ code: "missing_provenance", message: "provenanceSessionIds is required for multi-session-capable kinds." });
+    }
+    if (provenance.length > 1) {
+      const joinRationale = stringField(output, "joinRationale");
+      if (!joinRationale?.trim()) {
+        errors.push({
+          code: "missing_join_rationale",
+          message: "joinRationale is required when provenance includes more than one session."
+        });
+      } else if (WEAK_JOIN_PATTERNS.some((pattern) => pattern.test(joinRationale.trim()))) {
+        errors.push({
+          code: "weak_join",
+          message: "joinRationale is too weak for multi-session merge; use a strong join key or fall back to single-session / N/A."
+        });
+      }
+    }
+    if (evidencePacket?.provenanceSessionIds?.length) {
+      const allowed = new Set(evidencePacket.provenanceSessionIds);
+      for (const sessionId of provenance) {
+        if (!allowed.has(sessionId)) {
+          errors.push({
+            code: "provenance_outside_packet",
+            message: `Provenance session is outside the declared evidence packet: ${sessionId}`
+          });
+        }
+      }
+    }
+  }
+
+  if (kind === "runbook" && output.confidence === "high") {
+    const checks = stringArrayField(output, "validationChecks") ?? [];
+    if (checks.length === 0) {
+      errors.push({
+        code: "missing_verification",
+        message: "High-confidence runbooks must include validationChecks when claiming a strong fix."
       });
     }
   }

@@ -53,12 +53,12 @@ describe("live projection", () => {
     const card = envelope.projection.cards[0];
 
     expect(defaultEnvelope.projection.cards[0]?.headline).toEqual({
-      headline: "Generating headline...",
+      headline: "Updating session status...",
       source: "pending",
       status: "pending"
     });
     expect(card?.headline).toEqual({
-      headline: "Generating headline...",
+      headline: "Updating session status...",
       source: "pending",
       status: "pending"
     });
@@ -348,7 +348,7 @@ describe("live projection", () => {
     });
 
     expect(envelope.projection.cards[0]?.headline).toEqual({
-      headline: "Generating headline...",
+      headline: "Updating session status...",
       source: "pending",
       status: "pending"
     });

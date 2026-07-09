@@ -69,6 +69,7 @@ describe("daemon database schema", () => {
         "live_state_reports",
         "workbench_runs",
         "session_artifacts",
+        "session_artifact_provenance",
         "workbench_session_state",
         "workbench_activity",
         "workbench_claims"
@@ -92,7 +93,8 @@ describe("daemon database schema", () => {
       { version: 14, name: "014_live_state_reports" },
       { version: 15, name: "015_workbench_runs" },
       { version: 16, name: "016_session_artifacts" },
-      { version: 17, name: "017_workbench_pipeline" }
+      { version: 17, name: "017_workbench_pipeline" },
+      { version: 18, name: "018_artifact_first_logbook" }
     ]);
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
     expect(indexes.map((row) => row.name)).toEqual(
@@ -158,7 +160,8 @@ describe("daemon database schema", () => {
       [14, "014_live_state_reports"],
       [15, "015_workbench_runs"],
       [16, "016_session_artifacts"],
-      [17, "017_workbench_pipeline"]
+      [17, "017_workbench_pipeline"],
+      [18, "018_artifact_first_logbook"]
     ] as const) {
       const [version, name] = migration;
       db.exec(readFileSync(join(migrationsDir, `${name}.sql`), "utf8"));

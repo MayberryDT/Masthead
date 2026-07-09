@@ -154,7 +154,9 @@ describe("useWorkbenchController", () => {
     expect(latest().handoffText).toContain("session:abc");
     expect(latest().handoffText).not.toContain("session:def");
     expect(latest().handoffText).not.toContain("Second session");
-    expect(latest().handoffText).toContain("node dist/daemon/src/cli/mastheadctl.js workbench status --json");
+    expect(latest().handoffText).toContain("Automatic completion loop");
+    expect(latest().handoffText).toContain("runbook");
+    expect(latest().handoffText).not.toMatch(/mastheadctl/i);
     expect(latest().handoffText).not.toContain("npm run import review");
 
     await act(async () => {

@@ -126,7 +126,7 @@ describe("session title quality", () => {
       source: "offline",
       status: "ready"
     });
-    expect(envelope.projection.cards[0]?.headline.headline).not.toBe("Generating headline...");
+    expect(envelope.projection.cards[0]?.headline.headline).not.toBe("Updating session status...");
     expect(
       (envelope.projection.cards[0]?.headlineInput as { dispositionHints?: string[] } | undefined)?.dispositionHints
     ).toContain("Title quality fallback uses the provider summary.");

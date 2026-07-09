@@ -48,7 +48,7 @@ describe("useLogbookController bulk enrichment", () => {
     vi.mocked(rebuildEnrichments).mockResolvedValue({ failed: 0, requested: 1, sessions: [{ sessionId: "session-1", status: "succeeded" }], succeeded: 1 });
     await renderHarness();
 
-    await clickCheckbox("Select Repair OAuth callback for bulk enrich");
+    await clickCheckbox("Select Repair OAuth callback");
     await clickButton("Enrich summaries");
 
     expect(rebuildEnrichments).toHaveBeenCalledWith(
@@ -71,7 +71,7 @@ describe("useLogbookController bulk enrichment", () => {
     vi.mocked(rebuildEnrichments).mockResolvedValue({ failed: 0, requested: 51, sessions: [], succeeded: 51 });
     await renderHarness();
 
-    await clickCheckbox("Select Session 1 for bulk enrich");
+    await clickCheckbox("Select Session 1");
     await clickButton("Select page");
     await clickButton("Enrich full sessions");
 
@@ -105,7 +105,7 @@ describe("useLogbookController bulk enrichment", () => {
     mockMetadata();
     await renderHarness();
 
-    await clickCheckbox("Select Visible page session for bulk enrich");
+    await clickCheckbox("Select Visible page session");
     await clickButton("Select all matching filter");
 
     expect(searchLogbook).toHaveBeenLastCalledWith(

@@ -90,6 +90,11 @@ const migrations = [
     version: 17,
     name: "017_workbench_pipeline",
     path: resolve(currentDir, "migrations/017_workbench_pipeline.sql")
+  },
+  {
+    version: 18,
+    name: "018_artifact_first_logbook",
+    path: resolve(currentDir, "migrations/018_artifact_first_logbook.sql")
   }
 ];
 
@@ -123,6 +128,7 @@ const criticalTables = [
   "live_state_reports",
   "workbench_runs",
   "session_artifacts",
+  "session_artifact_provenance",
   "workbench_session_state",
   "workbench_activity",
   "workbench_claims"

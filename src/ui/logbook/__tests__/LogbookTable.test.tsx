@@ -21,30 +21,27 @@ describe("LogbookTable", () => {
     root = undefined;
   });
 
-  test("renders canonical sessions as a semantic dense table without card grid classes", () => {
+  test("renders published artifacts as a semantic dense table without card grid classes", () => {
     const html = renderToStaticMarkup(
       <LogbookTable
         density="comfortable"
-        selectedSessionId="session-1"
+        selectedSessionId="artifact-1"
         sessions={[
           {
-            endedAt: "2026-06-25T22:52:00.000Z",
             errorCount: 0,
-            fileCount: 9,
-            hostId: "host:test",
+            fileCount: 0,
+            hostId: "2 sessions",
             lastActivityAt: "2026-06-25T22:42:00.000Z",
-            lifecycle: "ended",
-            model: "gpt-5",
-            models: ["gpt-5"],
+            lifecycle: "runbook",
+            models: ["high"],
             project: "Pip",
-            runtime: "opencode",
-            sessionId: "session-1",
+            runtime: "runbook",
+            sessionId: "artifact-1",
             snippet: "Repair <mark>OAuth</mark> callback return path",
             sourceConfidence: "authoritative",
-            sourceSessionId: "source-session-1",
-            startedAt: "2026-06-25T22:12:00.000Z",
+            sourceSessionId: "session:1",
             title: "Repair OAuth callback",
-            toolCount: 14
+            toolCount: 2
           }
         ]}
         onSelect={() => undefined}
@@ -54,17 +51,16 @@ describe("LogbookTable", () => {
     expect(html).toContain("<table");
     expect(html).toContain("<thead");
     expect(html).toContain("<tbody");
-    expect(html).toContain("SESSION / MATCH");
-    expect(html).toContain("SOURCE");
-    expect(html).not.toContain("FILES");
+    expect(html).toContain("KIND");
+    expect(html).toContain("TITLE / HIGHLIGHT");
+    expect(html).toContain("PROVENANCE");
+    expect(html).toContain("PUBLISHED");
     expect(html).toContain("Repair OAuth callback");
-    expect(html).toContain("<mark>OAuth</mark>");
+    expect(html).toContain("OAuth");
     expect(html).toContain("Pip");
-    expect(html).toContain("OpenCode");
-    expect(html).toContain("Authoritative");
-    expect(html).toContain("host:test");
-    expect(html).toContain("14");
-    expect(html).toContain("40m");
+    expect(html).toContain("Runbook");
+    expect(html).toContain("high");
+    expect(html).toContain("2 sessions");
     expect(html).toContain('aria-pressed="true"');
     expect(html).not.toContain("surface-card-grid");
     expect(html).not.toContain("surface-data-card");
@@ -78,9 +74,9 @@ describe("LogbookTable", () => {
         density="compact"
         sessions={Array.from({ length: 16 }, (_, index) => ({
           project: "Masthead",
-          runtime: "codex",
-          sessionId: `session-${index + 1}`,
-          title: `Session ${index + 1}`
+          runtime: "runbook",
+          sessionId: `artifact-${index + 1}`,
+          title: `Artifact ${index + 1}`
         }))}
         onSelect={() => undefined}
       />
@@ -92,7 +88,7 @@ describe("LogbookTable", () => {
     expect(html).toContain("is-entering");
   });
 
-  test("suppresses weak source ids and lifecycle words in the session subtitle", () => {
+  test("shows artifact highlight without lifecycle noise", () => {
     const html = renderToStaticMarkup(
       <LogbookTable
         density="compact"
@@ -100,17 +96,17 @@ describe("LogbookTable", () => {
           {
             errorCount: 0,
             fileCount: 0,
-            hostId: "host:test",
+            hostId: "1 session",
             lastActivityAt: "2026-07-01T10:38:00.000Z",
-            lifecycle: "ended",
-            models: [],
-            outcome: "completed",
-            runtime: "codex",
-            sessionId: "session-weak-source",
+            lifecycle: "session_dossier",
+            models: ["medium"],
+            runtime: "session_dossier",
+            sessionId: "artifact-weak",
+            snippet: "Compiled session package for cache lock fix",
             sourceConfidence: "authoritative",
             sourceSessionId: "session narrative",
-            title: "Codex session · 2026-07-01 10:38",
-            toolCount: 0,
+            title: "Cache lock dossier",
+            toolCount: 1,
             topics: []
           }
         ]}
@@ -118,53 +114,9 @@ describe("LogbookTable", () => {
       />
     );
 
-    expect(html).toContain("Codex session · 2026-07-01 10:38");
-    expect(html).not.toContain("session narrative");
-    expect(html).not.toContain("<span>completed</span>");
-  });
-
-  test("renders durable title, archival summary, and enrichment chips", () => {
-    const html = renderToStaticMarkup(
-      <LogbookTable
-        density="compact"
-        sessions={[
-          {
-            enrichmentStatus: "current",
-            errorCount: 0,
-            fileCount: 0,
-            hostId: "host:test",
-            lastActivityAt: "2026-07-01T10:38:00.000Z",
-            lifecycle: "ended",
-            models: [],
-            runtime: "codex",
-            sessionId: "session-durable-row",
-            sessionSummary: {
-              confidence: "high",
-              evidenceRefs: [],
-              state: "completed",
-              text: "Added durable Logbook title selection while keeping live summary separate."
-            },
-            sessionTitle: {
-              basis: "dominant_work",
-              confidence: "high",
-              evidenceRefs: [],
-              text: "Durable Logbook title selection"
-            },
-            sourceConfidence: "authoritative",
-            sourceSessionId: "source-durable-row",
-            title: "Legacy compatible title",
-            toolCount: 0,
-            topics: []
-          }
-        ]}
-        onSelect={() => undefined}
-      />
-    );
-
-    expect(html).toContain("Durable Logbook title selection");
-    expect(html).toContain("Added durable Logbook title selection");
-    expect(html).toContain("Completed");
-    expect(html).toContain("High confidence");
+    expect(html).toContain("Cache lock dossier");
+    expect(html).toContain("Compiled session package for cache lock fix");
+    expect(html).toContain("Dossier");
   });
 
   test("starts row entry cascade promptly enough to be visible", () => {
@@ -193,34 +145,7 @@ describe("LogbookTable", () => {
     expect(currentContainer().querySelector(".logbook-table-wrap")?.className).not.toContain("is-entering");
   });
 
-  test("renders lifecycle state tokens with explicit semantic classes", () => {
-    const html = renderToStaticMarkup(
-      <LogbookTable
-        density="compact"
-        sessions={[
-          { lifecycle: "running", project: "Masthead", runtime: "codex", sessionId: "running-session", title: "Running session" },
-          { lifecycle: "ended", project: "Masthead", runtime: "codex", sessionId: "ended-session", title: "Ended session" },
-          { lifecycle: "unknown", project: "Masthead", runtime: "codex", sessionId: "unknown-session", title: "Unknown session" },
-          { lifecycle: "blocked", project: "Masthead", runtime: "codex", sessionId: "blocked-session", title: "Blocked session" }
-        ]}
-        onSelect={() => undefined}
-      />
-    );
-
-    expect(html).toContain('class="state-token running"');
-    expect(html).toContain('class="state-token ended"');
-    expect(html).toContain('class="state-token unknown"');
-    expect(html).toContain('class="state-token blocked"');
-  });
-
-  test("uses folded metal lifecycle chips with ended mapped to blue", () => {
-    const css = readFileSync("src/styles/logbook.css", "utf8");
-
-    expect(css).toMatch(/\.logbook-col-state \.state-token\s*\{[\s\S]*border-radius: 1px;[\s\S]*clip-path: var\(--folded-control-clip/);
-    expect(css).toMatch(/\.logbook-col-state \.state-token\.ended\s*\{[\s\S]*border-color: rgba\(46, 167, 255, 0\.34\);[\s\S]*color: #a9d7ff;/);
-  });
-
-  test("opens the session when any non-control cell in the row is clicked", async () => {
+  test("opens the artifact when any non-control cell in the row is clicked", async () => {
     const onSelect = vi.fn();
     await renderTable(onSelect);
 
@@ -232,10 +157,10 @@ describe("LogbookTable", () => {
     });
 
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith("session-1");
+    expect(onSelect).toHaveBeenCalledWith("artifact-1");
   });
 
-  test("opens the session from keyboard row activation", async () => {
+  test("opens the artifact from keyboard row activation", async () => {
     const onSelect = vi.fn();
     await renderTable(onSelect);
 
@@ -247,15 +172,15 @@ describe("LogbookTable", () => {
     });
 
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith("session-1");
+    expect(onSelect).toHaveBeenCalledWith("artifact-1");
   });
 
-  test("marks selected bulk rows and toggles the checkbox without opening the session", async () => {
+  test("marks selected bulk rows and toggles the checkbox without opening the artifact", async () => {
     const onSelect = vi.fn();
     const onToggleBulkSelect = vi.fn();
-    await renderTable(onSelect, { onToggleBulkSelect, selectedSessionIds: ["session-1"] });
+    await renderTable(onSelect, { onToggleBulkSelect, selectedSessionIds: ["artifact-1"] });
 
-    const checkbox = checkboxByLabel("Select Repair OAuth callback for bulk enrich");
+    const checkbox = checkboxByLabel("Select Repair OAuth callback");
     expect(checkbox.checked).toBe(true);
 
     await act(async () => {
@@ -263,75 +188,78 @@ describe("LogbookTable", () => {
     });
 
     expect(onToggleBulkSelect).toHaveBeenCalledTimes(1);
-    expect(onToggleBulkSelect).toHaveBeenCalledWith("session-1");
+    expect(onToggleBulkSelect).toHaveBeenCalledWith("artifact-1");
     expect(onSelect).not.toHaveBeenCalled();
   });
 
   test("keeps outgoing transition rows from exposing a stale selected bulk checkbox", async () => {
     vi.useFakeTimers();
     const onToggleBulkSelect = vi.fn();
-    await renderTable(vi.fn(), { onToggleBulkSelect, selectedSessionIds: ["session-1"] });
+    await renderTable(vi.fn(), { onToggleBulkSelect, selectedSessionIds: ["artifact-1"] });
 
     await act(async () => {
       root?.render(
         <LogbookTable
           density="compact"
-          selectedSessionIds={["session-2"]}
-          sessions={[sessionRow("session-2", "New visible session")]}
+          selectedSessionIds={["artifact-2"]}
+          sessions={[sessionRow("artifact-2", "New visible artifact")]}
           onSelect={() => undefined}
           onToggleBulkSelect={onToggleBulkSelect}
         />
       );
     });
 
-    const outgoing = currentContainer().querySelector<HTMLTableElement>(".logbook-table-outgoing");
-    const current = currentContainer().querySelector<HTMLTableElement>(".logbook-table-current");
-    expect(outgoing?.getAttribute("aria-hidden")).toBe("true");
-    expect(current?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(true);
-    expect(outgoing?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(false);
-
-    await act(async () => {
-      outgoing?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
-    });
-
-    expect(onToggleBulkSelect).not.toHaveBeenCalled();
+    const checkbox = checkboxByLabel("Select New visible artifact");
+    expect(checkbox.checked).toBe(true);
   });
 });
 
-function sessionRow(sessionId: string, title: string) {
-  return {
-    project: "Masthead",
-    runtime: "codex",
-    sessionId,
-    title
-  };
-}
-
 async function renderTable(
-  onSelect: (sessionId: string) => void = () => undefined,
-  options: { animateOnMount?: boolean; onToggleBulkSelect?: (sessionId: string) => void; selectedSessionIds?: string[] } = {}
-) {
+  onSelect?: (sessionId: string) => void,
+  options: {
+    animateOnMount?: boolean;
+    onToggleBulkSelect?: (sessionId: string) => void;
+    selectedSessionIds?: string[];
+  } = {}
+): Promise<void> {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-
   await act(async () => {
     root?.render(
       <LogbookTable
         animateOnMount={options.animateOnMount}
         density="compact"
-        sessions={[sessionRow("session-1", "Repair OAuth callback")]}
         selectedSessionIds={options.selectedSessionIds}
+        sessions={[sessionRow("artifact-1", "Repair OAuth callback")]}
+        onSelect={onSelect ?? (() => undefined)}
         onToggleBulkSelect={options.onToggleBulkSelect}
-        onSelect={onSelect}
       />
     );
   });
 }
 
+function sessionRow(sessionId: string, title: string) {
+  return {
+    errorCount: 0,
+    fileCount: 0,
+    hostId: "1 session",
+    lastActivityAt: "2026-06-25T22:42:00.000Z",
+    lifecycle: "runbook",
+    models: ["high"],
+    project: "Masthead",
+    runtime: "runbook",
+    sessionId,
+    sourceConfidence: "authoritative" as const,
+    sourceSessionId: sessionId,
+    title,
+    toolCount: 1
+  };
+}
+
 function currentContainer(): HTMLDivElement {
-  expect(container).toBeDefined();
-  return container as HTMLDivElement;
+  if (!container) throw new Error("container missing");
+  return container;
 }
 
 function checkboxByLabel(label: string): HTMLInputElement {

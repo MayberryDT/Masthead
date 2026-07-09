@@ -877,6 +877,44 @@ export async function addSourceExclusion(input: SourceExclusionInput, baseUrl = 
   await postJson<unknown>(baseUrl, "/sources/exclusions", { body: input, label: "source exclusion" });
 }
 
+export type LogbookArtifactCapsule = {
+  artifactId: string;
+  kind: string;
+  title: string;
+  summary: string;
+  project?: string;
+  confidence?: string;
+  publishedAt?: string;
+  signatureKey?: string;
+  provenanceSize: number;
+  provenanceLabel: string;
+  highlight?: string;
+  status: string;
+};
+
+export type LogbookArtifactSearchResult = {
+  artifacts: LogbookArtifactCapsule[];
+  total: number;
+};
+
+export type LogbookArtifactDetail = {
+  capsule: LogbookArtifactCapsule;
+  body: unknown;
+  provenanceSessionIds: string[];
+  joinRationale?: string;
+  evidenceRefs: string[];
+  confidence?: string;
+  signatureKey?: string;
+  lineageId: string;
+  status: string;
+  publicationStatus: string;
+  schemaVersion: string;
+  contentFingerprint: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Artifact-first Logbook search (published knowledge artifacts). */
 export async function searchLogbook(
   input: string | LogbookSearchFilters,
   baseUrl = defaultLiveProjectionUrl(),
@@ -885,7 +923,7 @@ export async function searchLogbook(
   const filters: LogbookSearchFilters = typeof input === "string" ? { q: input } : input;
   const expandedFilters = expandLogbookMultiValueFilters(filters);
   if (expandedFilters.length === 1) {
-    return getJson<LogbookSearchResult>(baseUrl, "/sessions", { label: "logbook search", query: expandedFilters[0], signal: options.signal });
+    return fetchArtifactLogbookPage(expandedFilters[0]!, baseUrl, options);
   }
 
   const offset = logbookSearchOffset(filters);
@@ -893,14 +931,79 @@ export async function searchLogbook(
   const requestLimit = Math.min(100, offset + limit);
   const results = await Promise.all(
     expandedFilters.map((expandedFilter) =>
-      getJson<LogbookSearchResult>(baseUrl, "/sessions", {
-        label: "logbook search",
-        query: { ...expandedFilter, cursor: undefined, limit: requestLimit, offset: 0 },
-        signal: options.signal
-      })
+      fetchArtifactLogbookPage(
+        { ...expandedFilter, cursor: undefined, limit: requestLimit, offset: 0 },
+        baseUrl,
+        options
+      )
     )
   );
   return mergeLogbookSearchResults(results, filters.sort, offset, limit);
+}
+
+async function fetchArtifactLogbookPage(
+  filters: LogbookSearchFilters,
+  baseUrl: string,
+  options: { signal?: AbortSignal }
+): Promise<LogbookSearchResult> {
+  const kind = typeof filters.state === "string" && isArtifactKindFilter(filters.state) ? filters.state : undefined;
+  const project = Array.isArray(filters.project) ? filters.project[0] : filters.project;
+  const result = await getJson<LogbookArtifactSearchResult>(baseUrl, "/logbook/artifacts", {
+    label: "logbook artifact search",
+    query: {
+      kind,
+      limit: logbookSearchLimit(filters),
+      offset: logbookSearchOffset(filters),
+      project,
+      q: filters.q
+    },
+    signal: options.signal
+  });
+  return {
+    nextCursor: undefined,
+    sessions: result.artifacts.map(artifactCapsuleToLogbookSession),
+    total: result.total
+  };
+}
+
+export async function getLogbookArtifact(
+  artifactId: string,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<LogbookArtifactDetail> {
+  const body = await getJson<{ ok: true; artifact: LogbookArtifactDetail }>(
+    baseUrl,
+    `/logbook/artifacts/${encodeURIComponent(artifactId)}`,
+    { label: "logbook artifact detail", signal: options.signal }
+  );
+  return body.artifact;
+}
+
+function isArtifactKindFilter(value: string): value is "session_dossier" | "runbook" | "adr" | "incident_timeline" {
+  return value === "session_dossier" || value === "runbook" || value === "adr" || value === "incident_timeline";
+}
+
+function artifactCapsuleToLogbookSession(capsule: LogbookArtifactCapsule): LogbookSession {
+  return {
+    enrichmentStatus: "current",
+    errorCount: 0,
+    fileCount: 0,
+    hostId: capsule.provenanceLabel,
+    lastActivityAt: capsule.publishedAt ?? new Date(0).toISOString(),
+    lifecycle: capsule.kind,
+    models: capsule.confidence ? [capsule.confidence] : [],
+    objective: capsule.highlight ?? capsule.summary,
+    project: capsule.project,
+    runtime: capsule.kind,
+    sessionId: capsule.artifactId,
+    snippet: capsule.highlight ?? capsule.summary,
+    sourceConfidence: "authoritative",
+    sourceSessionId: capsule.artifactId,
+    title: capsule.title,
+    toolCount: capsule.provenanceSize,
+    topics: [capsule.kind],
+    unresolved: []
+  };
 }
 
 type MultiValueLogbookFilterKey = "runtime" | "project" | "model";
@@ -1015,11 +1118,34 @@ export async function getLogbookSession(
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
 ): Promise<LogbookSessionDetail> {
-  const body = await getJson<{ ok: true; session: LogbookSessionDetail }>(baseUrl, `/sessions/${encodeURIComponent(sessionId)}`, {
-    label: "session detail",
-    signal: options.signal
-  });
-  return body.session;
+  try {
+    const artifact = await getLogbookArtifact(sessionId, baseUrl, options);
+    const capsule = artifact.capsule;
+    const bodyText =
+      typeof artifact.body === "object" && artifact.body
+        ? JSON.stringify(artifact.body, null, 2)
+        : String(artifact.body ?? "");
+    return {
+      ...artifactCapsuleToLogbookSession(capsule),
+      durationMs: undefined,
+      files: artifact.provenanceSessionIds,
+      mcpIncluded: true,
+      outcome: bodyText.slice(0, 4000),
+      sourceProvenance: {
+        hostId: capsule.provenanceLabel,
+        runtime: capsule.kind,
+        sourceConfidence: "authoritative",
+        sourceSessionId: artifact.provenanceSessionIds[0] ?? sessionId
+      },
+      tools: artifact.evidenceRefs.slice(0, 40)
+    };
+  } catch {
+    const body = await getJson<{ ok: true; session: LogbookSessionDetail }>(baseUrl, `/sessions/${encodeURIComponent(sessionId)}`, {
+      label: "session detail",
+      signal: options.signal
+    });
+    return body.session;
+  }
 }
 
 export async function getLogbookSessionExcerpts(
@@ -1028,6 +1154,31 @@ export async function getLogbookSessionExcerpts(
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
 ): Promise<LogbookExcerpt[]> {
+  try {
+    const artifact = await getLogbookArtifact(sessionId, baseUrl, options);
+    const excerpts: LogbookExcerpt[] = [];
+    if (artifact.joinRationale) {
+      excerpts.push({
+        excerptId: `${sessionId}:join`,
+        kind: "checkpoint",
+        observedAt: artifact.updatedAt,
+        sourceRef: { kind: "joinRationale" },
+        text: artifact.joinRationale
+      });
+    }
+    for (const [index, ref] of artifact.evidenceRefs.slice(0, input.limit ?? 8).entries()) {
+      excerpts.push({
+        excerptId: `${sessionId}:ref:${index}`,
+        kind: "message",
+        observedAt: artifact.updatedAt,
+        sourceRef: { ref },
+        text: ref
+      });
+    }
+    if (excerpts.length > 0) return excerpts;
+  } catch {
+    // fall through to session excerpts
+  }
   const body = await getJson<{ ok: true; excerpts: LogbookExcerpt[] }>(baseUrl, `/sessions/${encodeURIComponent(sessionId)}/excerpts`, {
     label: "session excerpts",
     query: input,

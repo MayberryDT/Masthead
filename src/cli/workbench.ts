@@ -5,12 +5,15 @@ import { getWorkbenchSchema, isWorkbenchOutputKind } from "../workbench/schemas.
 import { validateWorkbenchOutput } from "../workbench/validation.ts";
 import { workbenchInstructions } from "../workbench/instructions.ts";
 import { queueWorkbenchSessions } from "../workbench/queueRepository.ts";
-import { buildWorkbenchEvidencePacket } from "../workbench/evidencePacket.ts";
 import { openMastheadDatabase } from "../daemon/db/sqlite.ts";
 import { migrateDatabase } from "../daemon/db/schema.ts";
 import { applySessionEnrichment } from "../workbench/applySessionEnrichment.ts";
-import { applyArtifact } from "../workbench/applyArtifact.ts";
-import { listSessionArtifacts, type SessionArtifactKind } from "../daemon/db/sessionArtifactRepository.ts";
+import { applyArtifact, publishArtifact } from "../workbench/applyArtifact.ts";
+import {
+  listSessionArtifacts,
+  wipePublishedArtifactState,
+  type SessionArtifactKind
+} from "../daemon/db/sessionArtifactRepository.ts";
 import { applyWorkbenchBatch, prepareWorkbenchBatch } from "../workbench/batch.ts";
 import {
   claimWorkbenchSessions,
@@ -18,8 +21,11 @@ import {
   listWorkbenchActivity,
   markWorkbenchQuality,
   publishWorkbenchSession,
-  releaseWorkbenchClaim
+  releaseWorkbenchClaim,
+  setWorkbenchArtifactApplicability,
+  type WorkbenchAutomaticKind
 } from "../daemon/db/workbenchPipelineRepository.ts";
+import { buildWorkbenchEvidencePacket, listProvenanceCandidateSummaries } from "../workbench/evidencePacket.ts";
 import { runCaptureQualityPrecheck } from "../workbench/qualityPrecheck.ts";
 import {
   checkWorkbenchTranscript,
@@ -70,6 +76,7 @@ export async function runWorkbenchCli(args: string[], options: WorkbenchCliOptio
     const file = optionValue(args, "--file");
     if (!file) return errorResult("missing_argument", "Missing required option: --file", json);
     const sessionId = optionValue(args, "--session");
+    const provenanceSessionIds = provenanceOption(args);
     try {
       const output = JSON.parse(await readFile(file, "utf8")) as unknown;
       if (!sessionId) {
@@ -78,7 +85,11 @@ export async function runWorkbenchCli(args: string[], options: WorkbenchCliOptio
       }
       const db = await openCliDatabase(args, options.env);
       try {
-        const result = validateWorkbenchOutput(kind, output, buildWorkbenchEvidencePacket(db, { kind, sessionId }));
+        const result = validateWorkbenchOutput(
+          kind,
+          output,
+          buildWorkbenchEvidencePacket(db, { kind, provenanceSessionIds, sessionId })
+        );
         return jsonResult(result, result.ok ? 0 : 1);
       } finally {
         db.close();
@@ -96,6 +107,7 @@ export async function runWorkbenchCli(args: string[], options: WorkbenchCliOptio
     if (!sessionId) return errorResult("missing_argument", "Missing required option: --session", json);
     const file = optionValue(args, "--file");
     if (!file) return errorResult("missing_argument", "Missing required option: --file", json);
+    const provenanceSessionIds = provenanceOption(args);
     try {
       const output = JSON.parse(await readFile(file, "utf8")) as unknown;
       const db = await openCliDatabase(args, options.env);
@@ -103,7 +115,9 @@ export async function runWorkbenchCli(args: string[], options: WorkbenchCliOptio
         if (kind === "session_enrichment") {
           return jsonResult(applySessionEnrichment(db, { dryRun: args.includes("--dry-run"), output: output as never, sessionId }));
         }
-        return jsonResult(applyArtifact(db, { dryRun: args.includes("--dry-run"), kind, output, sessionId }));
+        return jsonResult(
+          applyArtifact(db, { dryRun: args.includes("--dry-run"), kind, output, provenanceSessionIds, sessionId })
+        );
       } finally {
         db.close();
       }
@@ -130,8 +144,17 @@ export async function runWorkbenchCli(args: string[], options: WorkbenchCliOptio
   }
 
   if (command === "publish") {
+    const artifactId = optionValue(args, "--artifact");
+    if (artifactId) {
+      const db = await openCliDatabase(args, options.env);
+      try {
+        return jsonResult(publishArtifact(db, artifactId));
+      } finally {
+        db.close();
+      }
+    }
     const sessionId = optionValue(args, "--session");
-    if (!sessionId) return errorResult("missing_argument", "Missing required option: --session", json);
+    if (!sessionId) return errorResult("missing_argument", "Missing required option: --session or --artifact", json);
     const db = await openCliDatabase(args, options.env);
     try {
       const result = publishWorkbenchSession(db, {
@@ -139,6 +162,56 @@ export async function runWorkbenchCli(args: string[], options: WorkbenchCliOptio
         sessionId
       });
       return jsonResult(result, result.ok ? 0 : 1);
+    } finally {
+      db.close();
+    }
+  }
+
+  if (command === "na" || command === "not-applicable") {
+    const kind = optionValue(args, "--kind");
+    const sessionId = optionValue(args, "--session");
+    const reason = optionValue(args, "--reason") ?? "not_applicable";
+    if (!isAutomaticKind(kind)) return errorResult("unknown_schema", `Unknown automatic kind: ${kind ?? ""}`.trim(), json);
+    if (!sessionId) return errorResult("missing_argument", "Missing required option: --session", json);
+    const db = await openCliDatabase(args, options.env);
+    try {
+      return jsonResult(
+        setWorkbenchArtifactApplicability(db, {
+          actor: { kind: "agent", id: "mastheadctl" },
+          artifactKind: kind,
+          reason,
+          sessionId,
+          status: "not_applicable"
+        })
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  if (command === "wipe-published") {
+    if (!args.includes("--confirm")) {
+      return errorResult("missing_argument", "Pass --confirm to wipe published Logbook/artifact state", json);
+    }
+    const db = await openCliDatabase(args, options.env);
+    try {
+      return jsonResult({ ok: true, ...wipePublishedArtifactState(db) });
+    } finally {
+      db.close();
+    }
+  }
+
+  if (command === "provenance-candidates") {
+    const sessionId = optionValue(args, "--session");
+    if (!sessionId) return errorResult("missing_argument", "Missing required option: --session", json);
+    const project = optionValue(args, "--project");
+    const limit = numberOption(args, "--limit", 25);
+    const db = await openCliDatabase(args, options.env);
+    try {
+      return jsonResult({
+        ok: true,
+        candidates: listProvenanceCandidateSummaries(db, { limit, project, seedSessionId: sessionId })
+      });
     } finally {
       db.close();
     }
@@ -347,9 +420,10 @@ export async function runWorkbenchCli(args: string[], options: WorkbenchCliOptio
     if (!isWorkbenchOutputKind(kind)) return errorResult("unknown_schema", `Unknown Workbench schema kind: ${kind ?? ""}`.trim(), json);
     const sessionId = optionValue(args, "--session");
     if (!sessionId) return errorResult("missing_argument", "Missing required option: --session", json);
+    const provenanceSessionIds = provenanceOption(args);
     const db = await openCliDatabase(args, options.env);
     try {
-      return jsonResult(buildWorkbenchEvidencePacket(db, { kind, sessionId }));
+      return jsonResult(buildWorkbenchEvidencePacket(db, { kind, provenanceSessionIds, sessionId }));
     } finally {
       db.close();
     }
@@ -415,10 +489,11 @@ export function workbenchHelp(): string {
     "  mastheadctl workbench batch apply <dir> --json",
     "",
     "Kinds:",
-    "  session_enrichment, session_dossier, bug_fix_trace",
+    "  session_enrichment, session_dossier, runbook, adr, incident_timeline",
     "",
     "Agent loop:",
-    "  Use next for a complete packet, write schema JSON, validate with --session, then apply.",
+    "  Use next for a complete packet, write schema JSON, validate with --session,",
+    "  apply, then publish artifacts. Multi-session kinds accept --provenance id,id.",
     "",
     "Options:",
     "  --db <path>  Use an explicit Masthead SQLite database path",
@@ -525,9 +600,23 @@ function isCannotFailQualityOnPublishedError(error: unknown): error is Error {
 }
 
 function isArtifactKind(value: string): value is SessionArtifactKind {
-  return value === "session_dossier" || value === "bug_fix_trace";
+  return value === "session_dossier" || value === "runbook" || value === "adr" || value === "incident_timeline";
 }
 
 function parseArtifactKind(value: string): SessionArtifactKind | undefined {
   return isArtifactKind(value) ? value : undefined;
+}
+
+function isAutomaticKind(value: string | undefined): value is WorkbenchAutomaticKind {
+  return value === "runbook" || value === "adr" || value === "incident_timeline";
+}
+
+function provenanceOption(args: string[]): string[] | undefined {
+  const raw = optionValue(args, "--provenance");
+  if (!raw) return undefined;
+  const ids = raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return ids.length > 0 ? ids : undefined;
 }

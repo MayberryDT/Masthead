@@ -30,7 +30,8 @@ describe("HistoryPanel", () => {
     expect(html).toContain("Search all session history");
     expect(html).not.toContain("Session library");
     expect(html).not.toContain("Search and inspect durable agent-session history.");
-    expect(html).toContain("SESSION / MATCH");
+    expect(html).toContain("TITLE / HIGHLIGHT");
+    expect(html).toContain("KIND");
     expect(html).toContain("Session needs review");
     expect(html).not.toContain("Showing 1 of 1; searching");
     expect(html).not.toContain("searching 1 local records");
@@ -272,8 +273,10 @@ describe("HistoryPanel", () => {
     expect(html).toContain('aria-label="Loading Logbook session records"');
     expect(html).toContain("Loading session records");
     expect(html).toContain("<table");
-    expect(html).toContain("SESSION / MATCH");
+    expect(html).toContain("TITLE / HIGHLIGHT");
+    expect(html).toContain("KIND");
     expect(html).toContain("PROJECT");
+    expect(html).toContain("PROVENANCE");
     expect(html).toContain("Messages");
     expect(html).toContain("Tool calls");
     expect(html).toContain("Date range");

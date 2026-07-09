@@ -696,7 +696,7 @@ describe("Live Board projection", () => {
 
     expect(board.cards[0]).toMatchObject({
       headline: {
-        headline: "Generating headline...",
+        headline: "Updating session status...",
         source: "pending",
         status: "pending"
       },

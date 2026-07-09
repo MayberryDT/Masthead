@@ -1,7 +1,4 @@
 import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
-import { harnessForRuntime } from "../../adapters/harnessCatalog";
-import type { RuntimeKind } from "../../adapters/types";
-import { cleanSessionText, isUsefulSessionTitle, isWeakLiveSummary } from "../../shared/sessionTextQuality";
 import type { LogbookSession } from "../HistoryPanel";
 
 type Props = {
@@ -15,11 +12,8 @@ type Props = {
 };
 
 export function LogbookRow({ bulkSelected = false, density, onSelect, onToggleBulkSelect, rowIndex = 0, selected = false, session }: Props) {
-  const primaryModel = session.models?.[0] ?? session.model ?? "Not captured";
-  const lifecycle = session.lifecycle ?? session.state ?? "indexed";
-  const title = session.sessionTitle?.text || sessionTitle(session);
-  const subtitle = sessionSubtitle(session, title);
-  const chips = enrichmentChips(session);
+  const title = session.title || "Untitled artifact";
+  const highlight = session.snippet || session.objective;
   const style = {
     "--logbook-row-index": Math.min(rowIndex, 12)
   } as CSSProperties & { "--logbook-row-index": number };
@@ -39,7 +33,7 @@ export function LogbookRow({ bulkSelected = false, density, onSelect, onToggleBu
     <tr
       className={`logbook-row ${density === "compact" ? "compact" : ""} ${selected ? "selected" : ""}`.trim()}
       tabIndex={0}
-      aria-label={`Open session: ${title}`}
+      aria-label={`Open artifact: ${title}`}
       aria-selected={selected}
       style={style}
       onClick={handleRowClick}
@@ -48,15 +42,14 @@ export function LogbookRow({ bulkSelected = false, density, onSelect, onToggleBu
       <td className="logbook-col-select" data-logbook-row-stop>
         <input
           type="checkbox"
-          aria-label={`Select ${title} for bulk enrich`}
+          aria-label={`Select ${title}`}
           checked={bulkSelected}
           onChange={() => onToggleBulkSelect?.(session.sessionId)}
           onClick={(event) => event.stopPropagation()}
         />
       </td>
-      <td className="logbook-date logbook-col-date">
-        <time dateTime={session.lastActivityAt}>{formatDate(session.lastActivityAt)}</time>
-        <span>{formatTime(session.lastActivityAt)}</span>
+      <td className="logbook-col-kind">
+        <span className="state-token">{kindLabel(session.runtime || session.lifecycle)}</span>
       </td>
       <td className="logbook-session-cell logbook-col-session">
         <button
@@ -69,35 +62,32 @@ export function LogbookRow({ bulkSelected = false, density, onSelect, onToggleBu
           aria-pressed={selected}
         >
           <strong>{title}</strong>
-          {session.snippet ? <HighlightedSnippet snippet={session.snippet} /> : subtitle ? <span>{subtitle}</span> : null}
-          {chips.length > 0 ? (
-            <span className="logbook-enrichment-chips" aria-label="Enrichment details">
-              {chips.map((chip) => (
-                <span key={chip}>{chip}</span>
-              ))}
-            </span>
-          ) : null}
+          {highlight ? <HighlightedSnippet snippet={highlight} /> : null}
         </button>
       </td>
-      <td className="logbook-col-project" title={session.project ?? ""}>{session.project ?? "Not captured"}</td>
-      <td className="logbook-col-runtime">{runtimeLabel(session.runtime)}</td>
-      <td className="logbook-col-model" title={primaryModel}>{primaryModel}</td>
-      <td className="logbook-col-state">
-        <span className={`state-token ${stateToneClass(lifecycle)}`.trim()}>{statusLabel(lifecycle)}</span>
+      <td className="logbook-col-project" title={session.project ?? ""}>
+        {session.project ?? "—"}
       </td>
-      <td className="logbook-col-source logbook-desktop-column">
-        <span className="logbook-source-confidence">{statusLabel(session.sourceConfidence ?? "inferred")}</span>
-        <span>{session.hostId ?? session.host ?? session.sourceSessionId ?? "Source pending"}</span>
+      <td className="logbook-col-confidence">{session.models?.[0] ?? "—"}</td>
+      <td className="logbook-col-provenance">{session.hostId || `${session.toolCount ?? 0} sessions`}</td>
+      <td className="logbook-date logbook-col-date">
+        <time dateTime={session.lastActivityAt}>{formatDate(session.lastActivityAt)}</time>
+        <span>{formatTime(session.lastActivityAt)}</span>
       </td>
-      <td className="logbook-number logbook-col-count">{session.toolCount ?? 0}</td>
-      <td className={`logbook-number logbook-col-count ${(session.errorCount ?? 0) > 0 ? "attention" : ""}`.trim()}>{session.errorCount ?? 0}</td>
-      <td className="logbook-col-duration logbook-desktop-column">{durationLabel(session.startedAt, session.endedAt)}</td>
     </tr>
   );
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest("a, button, input, select, textarea, [data-logbook-row-stop]"));
+}
+
+function kindLabel(kind: string): string {
+  if (kind === "session_dossier") return "Dossier";
+  if (kind === "runbook") return "Runbook";
+  if (kind === "adr") return "ADR";
+  if (kind === "incident_timeline") return "Timeline";
+  return kind || "Artifact";
 }
 
 function HighlightedSnippet({ snippet }: { snippet: string }) {
@@ -122,102 +112,14 @@ function HighlightedSnippet({ snippet }: { snippet: string }) {
   );
 }
 
-function sessionTitle(session: LogbookSession): string {
-  return session.title || session.objective || session.project || `${runtimeLabel(session.runtime)} session`;
-}
-
-function sessionSubtitle(session: LogbookSession, title: string): string | undefined {
-  const context = {
-    project: session.project,
-    sessionId: session.sessionId,
-    sourceSessionId: session.sourceSessionId
-  };
-  for (const candidate of [session.sessionSummary?.text, session.objective, session.outcome]) {
-    const cleaned = cleanSessionText(candidate, 120);
-    if (!cleaned || sameText(cleaned, title) || isLifecycleLabel(cleaned) || isWeakLiveSummary(cleaned)) continue;
-    return cleaned;
-  }
-  const sourceSessionId = cleanSessionText(session.sourceSessionId, 120);
-  if (sourceSessionId && !sameText(sourceSessionId, title) && isUsefulSessionTitle(sourceSessionId, context)) return sourceSessionId;
-  return undefined;
-}
-
-function enrichmentChips(session: LogbookSession): string[] {
-  const chips: string[] = [];
-  if (session.sessionSummary?.state) chips.push(statusLabel(session.sessionSummary.state));
-  if (session.sessionTitle?.confidence) chips.push(`${statusLabel(session.sessionTitle.confidence)} confidence`);
-  if (!session.sessionTitle && session.enrichmentStatus === "missing") chips.push("Pending enrichment");
-  return chips;
-}
-
-function sameText(left: string, right: string): boolean {
-  return left.trim().toLowerCase() === right.trim().toLowerCase();
-}
-
-function isLifecycleLabel(value: string): boolean {
-  return /^(completed|complete|running|ended|indexed|active|idle|blocked|unknown|not captured)$/i.test(value.trim());
-}
-
-function formatDate(value: string | undefined): string {
-  if (!value) return "Unknown";
+function formatDate(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString([], { day: "2-digit", month: "short" });
+  if (Number.isNaN(date.getTime()) || date.getTime() === 0) return "—";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function formatTime(value: string | undefined): string {
-  if (!value) return "";
+function formatTime(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function durationLabel(startedAt: string | undefined, endedAt: string | undefined): string {
-  if (!startedAt || !endedAt) return "n/a";
-  const started = Date.parse(startedAt);
-  const ended = Date.parse(endedAt);
-  if (Number.isNaN(started) || Number.isNaN(ended) || ended < started) return "n/a";
-  const seconds = Math.round((ended - started) / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.round(minutes / 60)}h`;
-}
-
-function runtimeLabel(runtime: string | undefined): string {
-  if (!runtime) return "Unknown";
-  return harnessForRuntime(runtime as RuntimeKind)?.label ?? runtime;
-}
-
-function statusLabel(value: string): string {
-  return value
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part[0].toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function stateToneClass(value: string | undefined): string {
-  const normalized = value?.toLowerCase() ?? "";
-  if (
-    normalized.includes("fail") ||
-    normalized.includes("attention") ||
-    normalized.includes("blocked") ||
-    normalized.includes("approval")
-  ) {
-    return "blocked";
-  }
-  if (normalized.includes("running") || normalized.includes("active") || normalized.includes("importing") || normalized.includes("editing")) {
-    return "running";
-  }
-  if (
-    normalized.includes("ended") ||
-    normalized.includes("complete") ||
-    normalized.includes("success") ||
-    normalized.includes("indexed")
-  ) {
-    return "ended";
-  }
-  if (normalized.includes("unknown") || normalized.includes("pending")) return "unknown";
-  return "unknown";
+  if (Number.isNaN(date.getTime()) || date.getTime() === 0) return "";
+  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }

@@ -59,65 +59,72 @@ describe("applyArtifact", () => {
     ]);
   });
 
-  test("applies a bug-fix trace artifact", async () => {
+  test("applies a runbook artifact", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Bug fix session" });
 
     const result = applyArtifact(db, {
-      kind: "bug_fix_trace",
+      kind: "runbook",
       output: {
-        affectedStack: ["CLI Workbench"],
+        changedFiles: ["src/workbench/applyArtifact.ts"],
+        commands: ["npm test"],
         confidence: "medium",
+        deadEnds: [],
+        environmentRequirements: [],
         evidenceRefs: ["message:session:abc:message"],
-        failedHypotheses: [],
-        fixSummary: "Guarded artifact apply with schema validation.",
+        fixSteps: ["Guard artifact apply with schema validation"],
         missingEvidence: [],
-        patchShape: ["Added applyArtifact tests"],
+        preconditions: [],
         preventionNotes: ["Keep artifact schema tests in the focused Workbench suite."],
-        reproduction: "Apply a valid bug-fix trace output file.",
+        problemSignature: {
+          affectedScope: "Workbench apply path",
+          errorStrings: [],
+          symptoms: ["V1 artifact acceptance could pass with dossier-only coverage."]
+        },
+        provenanceSessionIds: ["session:abc"],
+        reproSteps: ["Apply a valid runbook output file."],
         risksOrGaps: [],
-        rootCause: "Bug-fix traces were not covered by an apply-path regression.",
-        symptom: "V1 artifact acceptance could pass with dossier-only coverage.",
-        title: "Cover bug-fix trace apply",
-        verification: ["npm test"]
+        rootCause: "Runbooks were not covered by an apply-path regression.",
+        title: "Cover runbook apply",
+        validationChecks: ["npm test"]
       },
       sessionId: "session:abc"
     });
 
-    expect(result).toMatchObject({ artifactKind: "bug_fix_trace", dryRun: false, ok: true });
+    expect(result).toMatchObject({ artifactKind: "runbook", dryRun: false, ok: true, publicationStatus: "applied" });
     expect(listSessionArtifacts(db, { sessionId: "session:abc" })).toEqual([
-      expect.objectContaining({ artifactKind: "bug_fix_trace", status: "current", title: "Cover bug-fix trace apply" })
+      expect.objectContaining({ artifactKind: "runbook", status: "current", title: "Cover runbook apply" })
     ]);
     expect(readWorkbenchSessionState(db, "session:abc")).toMatchObject({
-      bugFixTraceStatus: "satisfied",
-      publicationStatus: "publish_path"
+      publicationStatus: "publish_path",
+      runbookStatus: "satisfied"
     });
     expect(listWorkbenchActivity(db, { limit: 10, sessionId: "session:abc" })).toEqual([
-      expect.objectContaining({ eventType: "bug_fix_trace_applied", summary: "Bug-fix trace applied" })
+      expect.objectContaining({ eventType: "runbook_applied", summary: "Runbook applied" })
     ]);
   });
 
-  test("marks bug-fix trace as not applicable without writing a fake artifact", async () => {
+  test("marks runbook as not applicable without writing a fake artifact", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "No bug session" });
 
     const result = setWorkbenchArtifactApplicability(db, {
       actor: { kind: "agent", id: "codex" },
-      artifactKind: "bug_fix_trace",
-      reason: "no_bug_fix_evidence",
+      artifactKind: "runbook",
+      reason: "no_runbook_evidence",
       sessionId: "session:abc",
       status: "not_applicable"
     });
 
     expect(result.state).toMatchObject({
-      bugFixTraceStatus: "not_applicable",
-      publicationStatus: "publish_path"
+      publicationStatus: "publish_path",
+      runbookStatus: "not_applicable"
     });
     expect(listSessionArtifacts(db, { sessionId: "session:abc" })).toEqual([]);
     expect(listWorkbenchActivity(db, { limit: 10, sessionId: "session:abc" })).toEqual([
       expect.objectContaining({
-        details: expect.objectContaining({ reason: "no_bug_fix_evidence", status: "not_applicable" }),
-        eventType: "bug_fix_trace_not_applicable"
+        details: expect.objectContaining({ reason: "no_runbook_evidence", status: "not_applicable" }),
+        eventType: "runbook_not_applicable"
       })
     ]);
   });
