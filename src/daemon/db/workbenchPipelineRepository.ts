@@ -615,12 +615,30 @@ export function listWorkbenchActivity(db: MastheadDatabase, options: { limit: nu
   return rows.map(activityRowToRecord);
 }
 
+export function countWorkbenchQueue(
+  db: MastheadDatabase,
+  options: { publicationStatus?: WorkbenchPublicationStatus } = {}
+): number {
+  const publicationStatus = options.publicationStatus ?? "publish_path";
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+      FROM workbench_session_state
+      JOIN sessions ON sessions.session_id = workbench_session_state.session_id
+      WHERE workbench_session_state.publication_status = ?
+        AND sessions.deleted_at IS NULL`
+    )
+    .get(publicationStatus) as { count: number };
+  return Number(row?.count ?? 0);
+}
+
 export function listWorkbenchQueue(
   db: MastheadDatabase,
-  options: { limit: number; publicationStatus?: WorkbenchPublicationStatus }
+  options: { limit: number; offset?: number; publicationStatus?: WorkbenchPublicationStatus }
 ): WorkbenchSessionStateRecord[] {
   const publicationStatus = options.publicationStatus ?? "publish_path";
-  const limit = Math.max(1, Math.min(Math.trunc(options.limit), 100));
+  const limit = Math.max(1, Math.min(Math.trunc(options.limit), 500));
+  const offset = Math.max(0, Math.trunc(options.offset ?? 0));
   const rows = db
     .prepare(
       `SELECT
@@ -644,9 +662,9 @@ export function listWorkbenchQueue(
         AND sessions.deleted_at IS NULL
       ORDER BY COALESCE(workbench_session_state.last_activity_at, sessions.last_activity_at, workbench_session_state.updated_at) DESC,
         workbench_session_state.session_id DESC
-      LIMIT ?`
+      LIMIT ? OFFSET ?`
     )
-    .all(publicationStatus, limit) as WorkbenchSessionStateRow[];
+    .all(publicationStatus, limit, offset) as WorkbenchSessionStateRow[];
   return rows.map((row) => stateRowToRecord(db, row));
 }
 

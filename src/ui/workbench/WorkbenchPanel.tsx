@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
 import { formatWorkbenchActivityTime, workbenchActivityTone } from "./workbenchActivity";
@@ -10,6 +11,7 @@ type WorkbenchPanelProps = Partial<
     | "actionError"
     | "activity"
     | "canRun"
+    | "clearActionFeedback"
     | "error"
     | "handoffText"
     | "lastActionSummary"
@@ -17,10 +19,14 @@ type WorkbenchPanelProps = Partial<
     | "notAddedOpen"
     | "notAddedSessions"
     | "notAddedSummary"
+    | "page"
+    | "pageSize"
     | "runAction"
     | "selectedSessionIds"
     | "sessions"
     | "setNotAddedOpen"
+    | "setPage"
+    | "total"
   >
 > & {
   onClearSelection?: () => void;
@@ -41,6 +47,7 @@ export function WorkbenchPanel({
   actionError,
   activity = EMPTY_ACTIVITY,
   canRun = defaultCanRun,
+  clearActionFeedback,
   error,
   handoffText = "",
   lastActionSummary,
@@ -52,20 +59,35 @@ export function WorkbenchPanel({
   onRetry,
   onSelectAllVisible,
   onToggleSession,
+  page = 0,
+  pageSize = 100,
   runAction,
   selectedSessionIds = EMPTY_SELECTION,
   sessions = EMPTY_SESSIONS,
-  setNotAddedOpen
+  setNotAddedOpen,
+  setPage,
+  total
 }: WorkbenchPanelProps) {
   const selectionCount = selectedSessionIds.size;
   const selectedSessions = sessions.filter((session) => selectedSessionIds.has(session.sessionId));
-  const publishPathLabel = loading ? "…" : String(sessions.length);
+  const queueTotal = typeof total === "number" ? total : sessions.length;
+  const publishPathLabel = loading ? "…" : String(queueTotal);
   const notAddedTotal = notAddedSummary?.total;
   const notAddedLabel = notAddedTotal != null ? String(notAddedTotal) : undefined;
   const primaryKind = resolvePrimaryAction(selectedSessions, canRun);
   const showAgentPromptEmphasis = selectedSessions.some(
     (session) => session.nextAction === "enrich" || session.nextAction === "create_dossier"
   );
+  const pageCount = Math.max(1, Math.ceil(queueTotal / Math.max(1, pageSize)));
+  const safePage = Math.min(page, pageCount - 1);
+  const rangeStart = queueTotal === 0 ? 0 : safePage * pageSize + 1;
+  const rangeEnd = Math.min(queueTotal, (safePage + 1) * pageSize);
+  const toastMessage = actionError
+    ? sanitizeWorkbenchVisibleText(actionError)
+    : lastActionSummary
+      ? sanitizeWorkbenchVisibleText(lastActionSummary)
+      : undefined;
+  const toastTone = actionError ? "error" : "ok";
 
   const run = (kind: WorkbenchActionKind) => {
     if (!canRun(kind) || actionBusy) return;
@@ -78,6 +100,12 @@ export function WorkbenchPanel({
   const toggleNotAdded = () => {
     setNotAddedOpen?.(!notAddedOpen);
   };
+
+  useEffect(() => {
+    if (!toastMessage || !clearActionFeedback) return;
+    const timer = window.setTimeout(() => clearActionFeedback(), actionError ? 8000 : 4000);
+    return () => window.clearTimeout(timer);
+  }, [actionError, clearActionFeedback, toastMessage]);
 
   return (
     <section className="workbench-panel surface-panel" aria-label="Workbench">
@@ -180,25 +208,32 @@ export function WorkbenchPanel({
         </dl>
       </div>
 
-      {actionError ? (
-        <section className="workbench-error surface-status" aria-live="polite">
-          <div>
-            <p className="mono-label">Action failed</p>
-            <p>{sanitizeWorkbenchVisibleText(actionError)}</p>
-          </div>
-        </section>
-      ) : null}
-
-      {lastActionSummary && !actionError ? (
-        <p className="workbench-action-summary" aria-live="polite">
-          {sanitizeWorkbenchVisibleText(lastActionSummary)}
-        </p>
-      ) : null}
-
       {showAgentPromptEmphasis ? (
         <p className="workbench-agent-hint" aria-live="polite">
           Enrichment and dossier work is agent-only — use Copy Agent Prompt
         </p>
+      ) : null}
+
+      {toastMessage ? (
+        <div
+          className={`workbench-toast is-${toastTone}`}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <div className="workbench-toast-body">
+            <p className="mono-label">{actionError ? "Action failed" : "Workbench"}</p>
+            <p>{toastMessage}</p>
+          </div>
+          <button
+            type="button"
+            className="workbench-toast-dismiss"
+            onClick={() => clearActionFeedback?.()}
+            aria-label="Dismiss notification"
+          >
+            ×
+          </button>
+        </div>
       ) : null}
 
       {error ? (
@@ -277,68 +312,69 @@ export function WorkbenchPanel({
       ) : null}
 
       <section className="workbench-layout">
-        <div className="workbench-table-wrap">
-          <table className="workbench-session-table">
-            <thead>
-              <tr>
-                <th scope="col">session</th>
-                <th scope="col">next</th>
-                <th scope="col">transcript</th>
-                <th scope="col">quality</th>
-                <th scope="col">enrichment</th>
-                <th scope="col">dossier</th>
-                <th scope="col">bug fix</th>
-                <th scope="col">claim</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.length === 0 ? (
-                <tr className="workbench-empty-row">
-                  <td className="workbench-session-empty" colSpan={8}>
-                    <span className="workbench-empty-title">{loading ? "Loading" : "No publish-path sessions"}</span>
-                    {!loading ? (
-                      <span className="workbench-empty-hint">If Now has captures, use Enroll missing</span>
-                    ) : null}
-                    {!loading && notAddedTotal != null && notAddedTotal > 0 ? (
-                      <button type="button" className="workbench-empty-not-added" onClick={toggleNotAdded}>
-                        {notAddedTotal} not added to Logbook · open review
-                      </button>
-                    ) : null}
-                  </td>
+        <div className="workbench-queue-column">
+          <div className="workbench-table-wrap">
+            <table className="workbench-session-table">
+              <thead>
+                <tr>
+                  <th scope="col">session</th>
+                  <th scope="col">next</th>
+                  <th scope="col">transcript</th>
+                  <th scope="col">quality</th>
+                  <th scope="col">enrichment</th>
+                  <th scope="col">dossier</th>
+                  <th scope="col">bug fix</th>
+                  <th scope="col">claim</th>
                 </tr>
-              ) : (
-                sessions.map((session) => {
-                  const selected = selectedSessionIds.has(session.sessionId);
-                  const safeTitle = sanitizeWorkbenchVisibleText(session.title);
-                  const safeSessionId = sanitizeWorkbenchVisibleText(session.sessionId);
-                  const safeProject = session.project ? sanitizeWorkbenchVisibleText(session.project) : "-";
-                  const safeRuntime = sanitizeWorkbenchVisibleText(session.runtime);
-                  const safeLifecycle = sanitizeWorkbenchVisibleText(session.lifecycle);
-                  const safeLastActivity = sanitizeWorkbenchVisibleText(session.lastActivityAt);
-                  const latestSummary = session.latestActivity?.summary
-                    ? sanitizeWorkbenchVisibleText(session.latestActivity.summary)
-                    : safeLastActivity;
-                  const claim = session.activeClaim ? sanitizeWorkbenchVisibleText(session.activeClaim.claimedBy) : "-";
+              </thead>
+              <tbody>
+                {sessions.length === 0 ? (
+                  <tr className="workbench-empty-row">
+                    <td className="workbench-session-empty" colSpan={8}>
+                      <span className="workbench-empty-title">{loading ? "Loading" : "No publish-path sessions"}</span>
+                      {!loading ? (
+                        <span className="workbench-empty-hint">If Now has captures, use Enroll missing</span>
+                      ) : null}
+                      {!loading && notAddedTotal != null && notAddedTotal > 0 ? (
+                        <button type="button" className="workbench-empty-not-added" onClick={toggleNotAdded}>
+                          {notAddedTotal} not added to Logbook · open review
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ) : (
+                  sessions.map((session) => {
+                    const selected = selectedSessionIds.has(session.sessionId);
+                    const safeTitle = sanitizeWorkbenchVisibleText(session.title);
+                    const safeSessionId = sanitizeWorkbenchVisibleText(session.sessionId);
+                    const safeProject = session.project ? sanitizeWorkbenchVisibleText(session.project) : "-";
+                    const safeRuntime = sanitizeWorkbenchVisibleText(session.runtime);
+                    const safeLifecycle = sanitizeWorkbenchVisibleText(session.lifecycle);
+                    const safeLastActivity = sanitizeWorkbenchVisibleText(session.lastActivityAt);
+                    const latestSummary = session.latestActivity?.summary
+                      ? sanitizeWorkbenchVisibleText(session.latestActivity.summary)
+                      : safeLastActivity;
+                    const claim = session.activeClaim ? sanitizeWorkbenchVisibleText(session.activeClaim.claimedBy) : "-";
 
-                  return (
-                    <tr key={session.sessionId} className={selected ? "is-selected" : undefined}>
-                      <td>
-                        <label className="workbench-session-main">
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={() => onToggleSession?.(session.sessionId)}
-                            aria-label={`Select ${safeTitle}`}
-                          />
-                          <span className="workbench-session-meta">
-                            <strong>{safeTitle}</strong>
-                            <span>
-                              {safeProject} / {safeRuntime} / {safeLifecycle}
+                    return (
+                      <tr key={session.sessionId} className={selected ? "is-selected" : undefined}>
+                        <td>
+                          <label className="workbench-session-main">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => onToggleSession?.(session.sessionId)}
+                              aria-label={`Select ${safeTitle}`}
+                            />
+                            <span className="workbench-session-meta">
+                              <strong>{safeTitle}</strong>
+                              <span>
+                                {safeProject} / {safeRuntime} / {safeLifecycle}
+                              </span>
+                              <span>{safeSessionId}</span>
                             </span>
-                            <span>{safeSessionId}</span>
-                          </span>
-                        </label>
-                      </td>
+                          </label>
+                        </td>
                       <td>
                         <StatusToken value={session.nextAction} tone="next" />
                       </td>
@@ -367,6 +403,33 @@ export function WorkbenchPanel({
               )}
             </tbody>
           </table>
+          </div>
+          <div className="workbench-pagination" aria-label="Workbench pagination">
+            <span className="workbench-pagination-range">
+              {queueTotal === 0
+                ? "0 sessions"
+                : `Showing ${rangeStart}–${rangeEnd} of ${queueTotal}`}
+            </span>
+            <div className="workbench-pagination-actions">
+              <AppButton
+                variant="quiet"
+                onClick={() => setPage?.(Math.max(0, safePage - 1))}
+                disabled={loading || safePage <= 0}
+              >
+                Previous
+              </AppButton>
+              <span className="workbench-pagination-page">
+                Page {safePage + 1} / {pageCount}
+              </span>
+              <AppButton
+                variant="quiet"
+                onClick={() => setPage?.(safePage + 1)}
+                disabled={loading || safePage >= pageCount - 1}
+              >
+                Next
+              </AppButton>
+            </div>
+          </div>
         </div>
 
         <aside className="workbench-activity-rail" aria-label="Workbench Activity">

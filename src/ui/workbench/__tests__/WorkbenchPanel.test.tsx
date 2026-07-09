@@ -390,6 +390,8 @@ describe("WorkbenchPanel", () => {
     );
     expect(withError).toContain("Action failed");
     expect(withError).toContain("Transcript import needs source permission");
+    expect(withError).toContain("workbench-toast");
+    expect(withError).toContain("is-error");
     expect(withError).not.toContain("Should hide behind error");
 
     const withSummary = renderToStaticMarkup(
@@ -406,7 +408,9 @@ describe("WorkbenchPanel", () => {
       />
     );
     expect(withSummary).toContain("Checked transcript for 1 session");
-    expect(withSummary).toContain("workbench-action-summary");
+    expect(withSummary).toContain("workbench-toast");
+    expect(withSummary).toContain("is-ok");
+    expect(withSummary).not.toContain("workbench-action-summary");
   });
 
   test("sanitizes forbidden session metadata before rendering the panel", () => {

@@ -54,6 +54,7 @@ import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import {
   claimWorkbenchSessions,
+  countWorkbenchQueue,
   enrollMissingWorkbenchSessions,
   listWorkbenchActivity,
   listWorkbenchQueue,
@@ -2274,16 +2275,20 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "GET" && url.pathname === "/workbench/sessions") {
       const limit = readWorkbenchLimit(url.searchParams.get("limit"));
+      const offset = readWorkbenchOffset(url.searchParams.get("offset"));
       const scope = url.searchParams.get("scope") ?? "default";
       if (scope !== "default") {
         sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: `unsupported Workbench scope: ${scope}` });
         return;
       }
-      const states = listWorkbenchQueue(database, { limit, publicationStatus: "publish_path" });
+      const total = countWorkbenchQueue(database, { publicationStatus: "publish_path" });
+      const states = listWorkbenchQueue(database, { limit, offset, publicationStatus: "publish_path" });
       const body: WorkbenchSessionsResponse = {
         ok: true,
         generatedAt: new Date().toISOString(),
         limit,
+        offset,
+        total,
         scope: "default",
         sessions: workbenchQueueSessionDtos(database, states)
       };
@@ -4148,9 +4153,15 @@ function parseBoundedInteger(
 }
 
 function readWorkbenchLimit(raw: string | null): number {
-  const parsed = raw ? Number(raw) : 50;
-  if (!Number.isFinite(parsed)) return 50;
-  return Math.max(1, Math.min(Math.trunc(parsed), 100));
+  const parsed = raw ? Number(raw) : 100;
+  if (!Number.isFinite(parsed)) return 100;
+  return Math.max(1, Math.min(Math.trunc(parsed), 500));
+}
+
+function readWorkbenchOffset(raw: string | null): number {
+  const parsed = raw ? Number(raw) : 0;
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.trunc(parsed));
 }
 
 type WorkbenchSessionMetadataRow = {

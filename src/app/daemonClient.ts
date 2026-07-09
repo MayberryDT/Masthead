@@ -1102,11 +1102,11 @@ export async function getWorkbenchMissingSessions(
 
 export async function getWorkbenchSessions(
   baseUrl = defaultLiveProjectionUrl(),
-  options: { limit?: number; scope?: "default"; signal?: AbortSignal } = {}
+  options: { limit?: number; offset?: number; scope?: "default"; signal?: AbortSignal } = {}
 ): Promise<WorkbenchSessionsResponse> {
   return getJson<WorkbenchSessionsResponse>(baseUrl, "/workbench/sessions", {
     label: "workbench sessions",
-    query: { limit: options.limit, scope: options.scope },
+    query: { limit: options.limit, offset: options.offset, scope: options.scope },
     signal: options.signal
   });
 }

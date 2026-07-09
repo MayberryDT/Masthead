@@ -91,7 +91,7 @@ describe("useWorkbenchController", () => {
 
     await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
 
-    expect(getWorkbenchSessions).toHaveBeenCalledWith(baseUrl, expect.objectContaining({ limit: 50 }));
+    expect(getWorkbenchSessions).toHaveBeenCalledWith(baseUrl, expect.objectContaining({ limit: 100, offset: 0 }));
     expect(latest().sessions).toEqual([session("session:abc", "Workbench import review")]);
     expect(latest().activity).toEqual([]);
     expect(latest().notAddedSummary).toMatchObject({ total: 0 });
@@ -692,7 +692,9 @@ function session(sessionId: string, title: string, overrides: Partial<WorkbenchQ
 function response(sessions: WorkbenchQueueSessionDto[]) {
   return {
     generatedAt: "2026-07-07T12:00:00.000Z",
-    limit: 50,
+    limit: 100,
+    offset: 0,
+    total: sessions.length,
     ok: true as const,
     scope: "default" as const,
     sessions

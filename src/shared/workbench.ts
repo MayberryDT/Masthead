@@ -54,6 +54,8 @@ export type WorkbenchSessionsResponse = {
   ok: true;
   generatedAt: string;
   limit: number;
+  offset: number;
+  total: number;
   scope: "default";
   sessions: WorkbenchQueueSessionDto[];
 };

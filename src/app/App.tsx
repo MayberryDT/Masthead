@@ -715,6 +715,7 @@ export function App() {
           actionError={workbench.actionError}
           activity={workbench.activity}
           canRun={workbench.canRun}
+          clearActionFeedback={workbench.clearActionFeedback}
           error={workbench.error}
           handoffText={workbench.handoffText}
           lastActionSummary={workbench.lastActionSummary}
@@ -726,10 +727,14 @@ export function App() {
           onRetry={workbench.retry}
           onSelectAllVisible={workbench.selectAllVisible}
           onToggleSession={workbench.toggleSession}
+          page={workbench.page}
+          pageSize={workbench.pageSize}
           runAction={workbench.runAction}
           selectedSessionIds={workbench.selectedSessionIds}
           sessions={workbench.sessions}
           setNotAddedOpen={workbench.setNotAddedOpen}
+          setPage={workbench.setPage}
+          total={workbench.total}
         />
       </WorkbenchSurface>
     ) : activeSurface === "usage" ? (

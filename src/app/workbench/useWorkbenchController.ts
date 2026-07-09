@@ -23,6 +23,9 @@ import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
 const TRANSCRIPT_PERMISSION_ERROR =
   "Transcript import needs source permission for this session's source. Grant it under Sources, then retry Import.";
 
+/** Page size for the publish-path table. Large libraries paginate; never load thousands at once. */
+export const WORKBENCH_PAGE_SIZE = 100;
+
 type UseWorkbenchControllerOptions = {
   activeProjectionUrl: string;
   active: boolean;
@@ -47,6 +50,7 @@ export type UseWorkbenchControllerResult = {
   actionError?: string;
   activity: WorkbenchActivityDto[];
   canRun: (kind: WorkbenchActionKind) => boolean;
+  clearActionFeedback: () => void;
   clearSelection: () => void;
   error?: string;
   handoffText: string;
@@ -56,12 +60,16 @@ export type UseWorkbenchControllerResult = {
   notAddedOpen: boolean;
   notAddedSessions: WorkbenchNotAddedSessionDto[];
   notAddedSummary?: WorkbenchNotAddedSummaryDto;
+  page: number;
+  pageSize: number;
   retry: () => void;
   runAction: (kind: WorkbenchActionKind) => Promise<void>;
   selectAllVisible: () => void;
   selectedSessionIds: Set<string>;
   sessions: WorkbenchQueueSessionDto[];
   setNotAddedOpen: (open: boolean) => void;
+  setPage: (page: number) => void;
+  total: number;
   toggleSession: (sessionId: string) => void;
 };
 
@@ -82,17 +90,26 @@ export function useWorkbenchController({
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string>();
   const [lastActionSummary, setLastActionSummary] = useState<string>();
+  const [page, setPageState] = useState(0);
+  const [total, setTotal] = useState(0);
+  const pageSize = WORKBENCH_PAGE_SIZE;
 
-  const load = useCallback(async (options: { signal?: AbortSignal } = {}) => {
+  const load = useCallback(async (options: { signal?: AbortSignal; page?: number } = {}) => {
+    const pageIndex = options.page ?? page;
     setLoading(true);
     setError(undefined);
     try {
       const [response, activityResponse, notAdded] = await Promise.all([
-        getWorkbenchSessions(activeProjectionUrl, { limit: 50, signal: options.signal }),
+        getWorkbenchSessions(activeProjectionUrl, {
+          limit: pageSize,
+          offset: pageIndex * pageSize,
+          signal: options.signal
+        }),
         getWorkbenchActivity(activeProjectionUrl, { limit: 30, signal: options.signal }),
         getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal })
       ]);
       setSessions(response.sessions);
+      setTotal(typeof response.total === "number" ? response.total : response.sessions.length);
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
       setSelectedSessionIds((current) => {
@@ -106,7 +123,22 @@ export function useWorkbenchController({
     } finally {
       if (!options.signal?.aborted) setLoading(false);
     }
-  }, [activeProjectionUrl]);
+  }, [activeProjectionUrl, page, pageSize]);
+
+  const setPage = useCallback(
+    (nextPage: number) => {
+      const safe = Math.max(0, Math.trunc(nextPage));
+      setPageState(safe);
+      setSelectedSessionIds(new Set());
+      void load({ page: safe });
+    },
+    [load]
+  );
+
+  const clearActionFeedback = useCallback(() => {
+    setActionError(undefined);
+    setLastActionSummary(undefined);
+  }, []);
 
   const loadNotAdded = useCallback(async () => {
     try {
@@ -309,6 +341,7 @@ export function useWorkbenchController({
     actionError,
     activity,
     canRun,
+    clearActionFeedback,
     clearSelection,
     error,
     handoffText,
@@ -320,12 +353,16 @@ export function useWorkbenchController({
     notAddedOpen,
     notAddedSessions,
     notAddedSummary,
+    page,
+    pageSize,
     retry,
     runAction,
     selectAllVisible,
     selectedSessionIds,
     sessions,
     setNotAddedOpen,
+    setPage,
+    total,
     toggleSession
   };
 }
@@ -334,6 +371,9 @@ function formatActionError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("transcript_permission_required")) {
     return TRANSCRIPT_PERMISSION_ERROR;
+  }
+  if (/enroll missing failed:\s*404/i.test(message) || /not found/i.test(message) && /enroll/i.test(message)) {
+    return "Enroll is unavailable until the Masthead daemon is restarted with the latest build.";
   }
   return message;
 }
