@@ -139,8 +139,8 @@ export function WorkbenchPanel({
   const [pipelineClosing, setPipelineClosing] = useState(false);
   const pipelineCloseTimerRef = useRef<number | null>(null);
   const pipelineActionsId = useId();
-  /** Keep rail open long enough for reverse cascade + width collapse. */
-  const PIPELINE_CLOSE_MS = 320;
+  /** Keep rail open long enough for reverse cascade (~250ms) + width collapse (~140ms). */
+  const PIPELINE_CLOSE_MS = 380;
   const pipelineRailOpen = pipelineExpanded || pipelineClosing;
 
   const clearPipelineCloseTimer = () => {
