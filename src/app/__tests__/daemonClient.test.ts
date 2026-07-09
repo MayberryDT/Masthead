@@ -17,6 +17,7 @@ import {
   listReviewDispositions,
   postWorkbenchCheckTranscript,
   postWorkbenchClaim,
+  postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
   postWorkbenchImportTranscriptPreview,
   postWorkbenchPublish,
@@ -260,6 +261,7 @@ describe("daemon client review dispositions", () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true })));
 
     const base = "http://127.0.0.1:17373/projection";
+    await postWorkbenchEnrollMissing(base, { limit: 500 });
     await postWorkbenchCheckTranscript(base, "session:1");
     await postWorkbenchImportTranscriptPreview(base, "session:1", { sourceId: "source:allowed" });
     await postWorkbenchImportTranscript(base, "session:1", { sourceId: "source:allowed" });
@@ -270,53 +272,59 @@ describe("daemon client review dispositions", () => {
     await postWorkbenchQuality(base, "session:1", { status: "failed", reason: "hook_only_noise" });
     await postWorkbenchQuality(base, "session:1", { mode: "precheck" });
 
-    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:17373/workbench/sessions/session%3A1/check-transcript", {
+    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:17373/workbench/enroll-missing", {
+      body: JSON.stringify({ limit: 500 }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined
+    });
+    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:17373/workbench/sessions/session%3A1/check-transcript", {
       headers: { accept: "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:17373/workbench/sessions/session%3A1/import-transcript-preview", {
+    expect(fetch).toHaveBeenNthCalledWith(3, "http://127.0.0.1:17373/workbench/sessions/session%3A1/import-transcript-preview", {
       body: JSON.stringify({ sourceId: "source:allowed" }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(3, "http://127.0.0.1:17373/workbench/sessions/session%3A1/import-transcript", {
+    expect(fetch).toHaveBeenNthCalledWith(4, "http://127.0.0.1:17373/workbench/sessions/session%3A1/import-transcript", {
       body: JSON.stringify({ sourceId: "source:allowed" }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(4, "http://127.0.0.1:17373/workbench/sessions/session%3A1/publish", {
+    expect(fetch).toHaveBeenNthCalledWith(5, "http://127.0.0.1:17373/workbench/sessions/session%3A1/publish", {
       headers: { accept: "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(5, "http://127.0.0.1:17373/workbench/sessions/session%3A1/claim", {
+    expect(fetch).toHaveBeenNthCalledWith(6, "http://127.0.0.1:17373/workbench/sessions/session%3A1/claim", {
       body: JSON.stringify({ claimedBy: "ui-user", ttlSeconds: 300 }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(6, "http://127.0.0.1:17373/workbench/claims/claim%3Aabc/release", {
+    expect(fetch).toHaveBeenNthCalledWith(7, "http://127.0.0.1:17373/workbench/claims/claim%3Aabc/release", {
       body: JSON.stringify({ reason: "done" }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(7, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
+    expect(fetch).toHaveBeenNthCalledWith(8, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
       body: JSON.stringify({ status: "passed" }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(8, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
+    expect(fetch).toHaveBeenNthCalledWith(9, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
       body: JSON.stringify({ status: "failed", reason: "hook_only_noise" }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(9, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
+    expect(fetch).toHaveBeenNthCalledWith(10, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
       body: JSON.stringify({ mode: "precheck" }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",

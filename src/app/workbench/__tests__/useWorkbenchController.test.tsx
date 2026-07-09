@@ -16,6 +16,7 @@ import {
   getWorkbenchSessions,
   postWorkbenchCheckTranscript,
   postWorkbenchClaim,
+  postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
   postWorkbenchPublish,
   postWorkbenchQuality,
@@ -29,6 +30,7 @@ const daemonClientMocks = vi.hoisted(() => ({
   getWorkbenchSessions: vi.fn(),
   postWorkbenchCheckTranscript: vi.fn(),
   postWorkbenchClaim: vi.fn(),
+  postWorkbenchEnrollMissing: vi.fn(),
   postWorkbenchImportTranscript: vi.fn(),
   postWorkbenchPublish: vi.fn(),
   postWorkbenchQuality: vi.fn(),
@@ -59,6 +61,7 @@ let latestResult: UseWorkbenchControllerResult | undefined;
 const baseUrl = "http://127.0.0.1:17373/projection";
 
 const ALL_ACTIONS: WorkbenchActionKind[] = [
+  "enroll_missing",
   "check_transcript",
   "import_transcript",
   "quality_pass",
@@ -69,6 +72,8 @@ const ALL_ACTIONS: WorkbenchActionKind[] = [
   "release",
   "copy_agent_prompt"
 ];
+
+const SELECTION_ACTIONS: WorkbenchActionKind[] = ALL_ACTIONS.filter((kind) => kind !== "enroll_missing");
 
 afterEach(async () => {
   latestResult = undefined;
@@ -255,11 +260,13 @@ describe("useWorkbenchController", () => {
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
     await waitFor(() => (latest()?.sessions.length ?? 0) === 6);
 
-    for (const kind of ALL_ACTIONS) {
+    expect(latest().canRun("enroll_missing")).toBe(true);
+    for (const kind of SELECTION_ACTIONS) {
       expect(latest().canRun(kind)).toBe(false);
     }
 
     await select("session:check");
+    expect(latest().canRun("enroll_missing")).toBe(true);
     expect(latest().canRun("check_transcript")).toBe(true);
     expect(latest().canRun("import_transcript")).toBe(false);
     expect(latest().canRun("quality_pass")).toBe(false);
@@ -302,6 +309,7 @@ describe("useWorkbenchController", () => {
       await Promise.resolve();
     });
     expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    expect(latest().canRun("enroll_missing")).toBe(true);
   });
 
   test("disables mutations while offline", async () => {
@@ -540,6 +548,7 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("check_transcript")).toBe(false);
     expect(latest().canRun("copy_agent_prompt")).toBe(false);
     expect(latest().canRun("claim")).toBe(false);
+    expect(latest().canRun("enroll_missing")).toBe(false);
 
     await act(async () => {
       resolveCheck?.({ ok: true });
@@ -548,6 +557,83 @@ describe("useWorkbenchController", () => {
 
     await waitFor(() => latest()?.actionBusy === false);
     expect(latest().canRun("check_transcript")).toBe(true);
+    expect(latest().canRun("enroll_missing")).toBe(true);
+  });
+
+  test("enroll_missing posts, reloads queue, and reports summary", async () => {
+    const enrolled = session("session:enrolled", "Newly enrolled", {
+      nextAction: "check_transcript",
+      transcriptStatus: "unchecked"
+    });
+    vi.mocked(getWorkbenchSessions)
+      .mockResolvedValueOnce(response([]))
+      .mockResolvedValueOnce(response([enrolled]));
+    vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
+    vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(postWorkbenchEnrollMissing).mockResolvedValue({
+      ok: true,
+      enrolled: 2,
+      skippedExisting: 1,
+      enrolledSessionIds: ["session:enrolled", "session:other"],
+      limit: 500,
+      generatedAt: "2026-07-08T00:00:00.000Z"
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest()?.loading === false);
+
+    expect(latest().canRun("enroll_missing")).toBe(true);
+
+    await act(async () => {
+      await latest().runAction("enroll_missing");
+    });
+
+    expect(postWorkbenchEnrollMissing).toHaveBeenCalledWith(baseUrl, { limit: 500 });
+    expect(getWorkbenchSessions).toHaveBeenCalledTimes(2);
+    expect(latest().sessions).toEqual([enrolled]);
+    expect(latest().lastActionSummary).toBe("Enrolled 2 sessions");
+    expect(latest().actionBusy).toBe(false);
+    expect(latest().actionError).toBeUndefined();
+  });
+
+  test("enroll_missing reports zero enrollments and busy disables double-run", async () => {
+    mockWorkbenchResponse([]);
+    let resolveEnroll: ((value: unknown) => void) | undefined;
+    vi.mocked(postWorkbenchEnrollMissing).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveEnroll = resolve;
+        })
+    );
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest()?.loading === false);
+
+    let actionPromise: Promise<void> | undefined;
+    await act(async () => {
+      actionPromise = latest().runAction("enroll_missing");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => latest()?.actionBusy === true);
+    expect(latest().canRun("enroll_missing")).toBe(false);
+
+    await act(async () => {
+      resolveEnroll?.({
+        ok: true,
+        enrolled: 0,
+        skippedExisting: 3,
+        enrolledSessionIds: [],
+        limit: 500,
+        generatedAt: "2026-07-08T00:00:00.000Z"
+      });
+      await actionPromise;
+    });
+
+    await waitFor(() => latest()?.actionBusy === false);
+    expect(postWorkbenchEnrollMissing).toHaveBeenCalledWith(baseUrl, { limit: 500 });
+    expect(latest().lastActionSummary).toBe("No missing sessions to enroll");
+    expect(latest().canRun("enroll_missing")).toBe(true);
   });
 });
 

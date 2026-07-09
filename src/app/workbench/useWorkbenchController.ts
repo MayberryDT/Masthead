@@ -6,6 +6,7 @@ import {
   getWorkbenchSessions,
   postWorkbenchCheckTranscript,
   postWorkbenchClaim,
+  postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
   postWorkbenchPublish,
   postWorkbenchQuality,
@@ -30,6 +31,7 @@ type UseWorkbenchControllerOptions = {
 };
 
 export type WorkbenchActionKind =
+  | "enroll_missing"
   | "check_transcript"
   | "import_transcript"
   | "quality_pass"
@@ -143,6 +145,7 @@ export function useWorkbenchController({
   const canRun = useCallback(
     (kind: WorkbenchActionKind): boolean => {
       if (!isLive || actionBusy) return false;
+      if (kind === "enroll_missing") return true;
       if (selectedSessions.length === 0) return false;
 
       switch (kind) {
@@ -196,6 +199,17 @@ export function useWorkbenchController({
       setActionBusy(true);
       setActionError(undefined);
       try {
+        if (kind === "enroll_missing") {
+          const result = await postWorkbenchEnrollMissing(activeProjectionUrl, { limit: 500 });
+          setLastActionSummary(
+            result.enrolled === 0
+              ? "No missing sessions to enroll"
+              : `Enrolled ${result.enrolled} session${result.enrolled === 1 ? "" : "s"}`
+          );
+          await load();
+          return;
+        }
+
         const ids = Array.from(selectedSessionIds);
         let acted = 0;
 

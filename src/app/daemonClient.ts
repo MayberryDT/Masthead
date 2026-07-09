@@ -16,6 +16,7 @@ import type {
 } from "../shared/harnessConnectors";
 import type {
   WorkbenchActivityResponse,
+  WorkbenchEnrollMissingResponse,
   WorkbenchMissingSessionsResponse,
   WorkbenchNotAddedResponse,
   WorkbenchNotAddedSummaryDto,
@@ -1138,6 +1139,18 @@ export async function getWorkbenchNotAddedSessions(
   return getJson<WorkbenchNotAddedResponse>(baseUrl, "/workbench/not-added", {
     label: "workbench not added sessions",
     query: { includeDetails: true, limit: options.limit },
+    signal: options.signal
+  });
+}
+
+export async function postWorkbenchEnrollMissing(
+  baseUrl: string,
+  options: { limit?: number; signal?: AbortSignal } = {}
+): Promise<WorkbenchEnrollMissingResponse> {
+  const body = options.limit === undefined ? undefined : { limit: options.limit };
+  return postJson(baseUrl, "/workbench/enroll-missing", {
+    body,
+    label: "workbench enroll missing",
     signal: options.signal
   });
 }
