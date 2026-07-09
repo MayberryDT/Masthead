@@ -10,7 +10,7 @@ import { SettingsSurface } from "../../../app/surfaces/SettingsSurface";
 import { OperationsPanel } from "../../OperationsPanel";
 
 describe("Settings surface", () => {
-  test("renders real settings rows and shared controls instead of the old card grid", () => {
+  test("renders the focused Settings shell with General selected", () => {
     const html = renderToStaticMarkup(
       <SettingsSurface>
         <OperationsPanel
@@ -24,9 +24,14 @@ describe("Settings surface", () => {
       </SettingsSurface>
     );
 
-    expect(html).toContain("settings-layout");
-    expect(html).toContain("settings-section-wide");
-    expect(html).toContain("settings-section-danger");
+    expect(html).toContain("settings-workspace");
+    expect(html).toContain('aria-label="Settings categories"');
+    expect(html).toContain('data-settings-category="general"');
+    expect(html).toContain('aria-current="page"');
+    expect(html).toContain("Preferences");
+    expect(html).toContain("settings-row-detail");
+    expect(html).not.toContain("settings-layout-priority-bay");
+    expect(html).not.toContain("settings-priority-column");
     expect(html).not.toContain("Remote enrichment");
     expect(html).not.toContain("Provider connection");
     expect(html).not.toContain("Use remote LLM enrichment");
@@ -45,19 +50,17 @@ describe("Settings surface", () => {
     expect(html).not.toContain("Test hooks");
     expect(html).not.toContain("Uninstall hooks");
     expect(html).not.toContain("Supported harnesses");
-    expect(html).toContain("Onboarding");
-    expect(html).toContain("Run onboarding again");
-    expect(html).toContain("Setup wizard");
-    expect(html).toContain("MCP access");
-    expect(html).toContain("MCP server");
-    expect(html).toContain("Refresh MCP");
-    expect(html).toContain("MCP TOML");
-    expect(html).toContain("MCP JSON");
-    expect(html).toContain("stdio");
-    expect(html).toContain("Test MCP launch");
-    expect(html).toContain("/home/tyler/.local/share/masthead/masthead.sqlite");
-    expect(html).toContain("Export data");
-    expect(html).toContain("Preferences");
+    expect(html).not.toContain("Onboarding");
+    expect(html).not.toContain("Run onboarding again");
+    expect(html).not.toContain("Setup wizard");
+    expect(html).not.toContain("MCP access");
+    expect(html).not.toContain("MCP server");
+    expect(html).not.toContain("Refresh MCP");
+    expect(html).not.toContain("MCP TOML");
+    expect(html).not.toContain("MCP JSON");
+    expect(html).not.toContain("Test MCP launch");
+    expect(html).not.toContain("/home/tyler/.local/share/masthead/masthead.sqlite");
+    expect(html).not.toContain("Export data");
     expect(html).toContain("Motion");
     expect(html).toContain("Enable motion");
     expect(html).toContain("settings-toggle checked");
@@ -104,6 +107,33 @@ describe("Settings surface", () => {
     host.remove();
   });
 
+  test("switches to the compact Advanced identity pane", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(<OperationsPanel settingsState={settings} />);
+    });
+
+    const advancedButton = [...host.querySelectorAll("button")].find((button) => button.textContent === "Advanced");
+    await act(async () => {
+      advancedButton?.click();
+    });
+
+    const pane = host.querySelector<HTMLElement>(".settings-pane");
+    expect(pane?.dataset.settingsCategory).toBe("advanced");
+    expect(pane?.textContent).toContain("Database ID");
+    expect(pane?.textContent).toContain("/home/tyler/.local/share/masthead/masthead.sqlite");
+    expect(pane?.textContent).toContain("127.0.0.1:17373");
+    expect(pane?.textContent).toContain("API 1 / schema 5");
+    expect(pane?.textContent).not.toContain("Delete all Masthead data");
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
   test("renders a separate confirmation dialog for destructive actions", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel
@@ -119,7 +149,6 @@ describe("Settings surface", () => {
     expect(html).toContain("Danger zone");
     expect(html).toContain("Confirm delete all Masthead data");
     expect(html).toContain("sqlite:test");
-    expect(html).toContain("API 1 / schema 5");
     expect(html).toContain("31 sessions");
     expect(html).toContain("7,657 raw source copies");
     expect(html).toContain("Cancel");
@@ -163,10 +192,14 @@ describe("Settings surface", () => {
     expect(html).toContain("disabled=\"\"");
   });
 
-  test("keeps Priority Bay fluid with real toggle styling", () => {
+  test("uses a responsive focused workspace with real toggle styling", () => {
     const css = readFileSync("src/styles/settings.css", "utf8");
 
-    expect(css).toMatch(/\.settings-layout-priority-bay\s*\{[\s\S]*max-width: none;/);
+    expect(css).toMatch(/\.settings-workspace\s*\{[\s\S]*grid-template-columns: 184px minmax\(0, 760px\);[\s\S]*gap: 18px;/);
+    expect(css).toMatch(/\.settings-category-nav,[\s\S]*\.settings-pane\s*\{[\s\S]*box-sizing: border-box;/);
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[\s\S]*\.settings-workspace\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*\.settings-row\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(css).toMatch(/\.settings-row-detail\s*\{[\s\S]*grid-column: 2;/);
     expect(css).toMatch(/\.settings-toggle > span\s*\{[\s\S]*width: 42px;[\s\S]*height: 24px;/);
     expect(css).toMatch(/\.settings-toggle\.checked > span::after\s*\{[\s\S]*transform: translateX\(20px\);/);
   });

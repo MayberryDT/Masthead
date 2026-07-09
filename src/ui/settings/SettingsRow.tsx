@@ -14,8 +14,12 @@ export function SettingsRow({ control, description, label, value }: SettingsRowP
         <span>{label}</span>
         {description ? <p>{description}</p> : null}
       </div>
-      {value ? <div className="settings-row-value">{value}</div> : null}
-      {control ? <div className="settings-row-control">{control}</div> : null}
+      {value || control ? (
+        <div className="settings-row-detail">
+          {value ? <div className="settings-row-value">{value}</div> : null}
+          {control ? <div className="settings-row-control">{control}</div> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -6,119 +6,96 @@
   min-width: 0;
 }
 
-.settings-layout {
+.settings-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 184px minmax(0, 760px);
   align-items: start;
-  gap: 12px;
+  gap: 18px;
   min-width: 0;
 }
 
-.settings-layout-priority-bay {
-  width: 100%;
-  grid-template-columns: minmax(190px, 0.82fr) minmax(220px, 1fr) minmax(270px, 1.16fr) minmax(220px, 1fr) minmax(190px, 0.82fr);
-  max-width: none;
+.settings-category-nav,
+.settings-pane {
+  box-sizing: border-box;
 }
 
-.settings-priority-column {
+.settings-category-nav {
   display: grid;
   align-content: start;
-  gap: 12px;
-  min-width: 0;
-}
-
-.settings-layout-priority-bay .settings-section {
   width: 100%;
   min-width: 0;
-  max-width: none;
+  overflow: hidden;
+  border: 1px solid rgba(92, 153, 187, 0.14);
+  background: #071b28;
+  box-shadow: inset 0 1px 0 rgba(190, 225, 245, 0.035);
+  padding: 4px;
 }
 
-.settings-layout-priority-bay .settings-section,
-.settings-layout-priority-bay .settings-section-wide,
-.settings-layout-priority-bay .settings-section-mcp,
-.settings-layout-priority-bay .settings-section-danger {
-  grid-column: auto;
-}
-
-.settings-layout-priority-bay .settings-row,
-.settings-layout-priority-bay .settings-mcp-summary,
-.settings-layout-priority-bay .settings-mcp-access,
-.settings-layout-priority-bay .settings-mcp-tab-meta {
-  grid-template-columns: minmax(0, 1fr);
-  align-items: stretch;
-}
-
-.settings-layout-priority-bay .settings-row-value,
-.settings-layout-priority-bay .settings-row-control,
-.settings-layout-priority-bay .settings-mcp-actions,
-.settings-layout-priority-bay .settings-inline-actions,
-.settings-layout-priority-bay .settings-delete-controls {
-  grid-column: 1;
-  justify-self: stretch;
-  justify-content: flex-start;
-  max-width: none;
+.settings-category-nav button {
+  position: relative;
+  min-height: 40px;
+  border: 0;
+  border-bottom: 1px solid rgba(194, 221, 241, 0.08);
+  border-radius: 0;
+  background: transparent;
+  color: var(--mute, #91a8ba);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
   text-align: left;
+  padding: 0 11px;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
 }
 
-.settings-layout-priority-bay .settings-row-control > .app-button,
-.settings-layout-priority-bay .settings-inline-actions .app-button {
-  width: fit-content;
-  max-width: 100%;
+.settings-category-nav button:last-child {
+  border-bottom: 0;
 }
 
-.settings-layout-priority-bay .settings-mcp-actions {
+.settings-category-nav button:hover,
+.settings-category-nav button:focus-visible {
+  background: #082130;
+  color: var(--ink, #f6fbff);
+  outline: 0;
+}
+
+.settings-category-nav button:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(46, 167, 255, 0.42);
+}
+
+.settings-category-nav button.active {
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%);
+  background-color: #092231;
+  background-image:
+    linear-gradient(180deg, rgba(246, 251, 255, 0.04), transparent),
+    var(--folded-control-texture, repeating-linear-gradient(135deg, rgba(196, 226, 248, 0.012) 0 1px, transparent 1px 18px));
+  box-shadow: inset 2px 0 0 var(--blue, #2ea7ff);
+  color: var(--ink, #f6fbff);
+}
+
+.settings-pane {
   display: grid;
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
-  align-items: center;
-  justify-content: start;
-  gap: 8px;
-}
-
-.settings-layout-priority-bay .settings-mcp-refresh-button,
-.settings-layout-priority-bay .settings-mcp-test-button {
-  justify-self: start;
-  width: fit-content;
-  max-width: 100%;
-}
-
-.settings-layout-priority-bay .settings-mcp-status {
-  justify-self: start;
-  max-width: 100%;
-}
-
-.settings-layout-priority-bay .settings-mcp-test-button {
-  grid-column: 1;
-}
-
-.settings-layout-priority-bay .settings-mcp-tabs {
   width: 100%;
-}
-
-.settings-layout-priority-bay .settings-mcp-tabs button {
-  flex: 1 1 auto;
-}
-
-.settings-layout-priority-bay .settings-mcp-tab-meta {
-  display: grid;
-}
-
-.settings-layout-priority-bay .settings-section-mcp .code-block pre {
-  max-height: 176px;
+  max-width: 760px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(92, 153, 187, 0.14);
+  background: #071b28;
+  box-shadow: inset 0 1px 0 rgba(190, 225, 245, 0.035);
 }
 
 .settings-section {
-  position: relative;
   display: grid;
   align-content: start;
-  gap: 10px;
   min-width: 0;
-  overflow: hidden;
-  border-radius: 5px;
-  background: #081d2b;
-  box-shadow:
-    0 0 0 1px rgba(92, 153, 187, 0.14),
-    inset 0 1px 0 rgba(190, 225, 245, 0.035);
-  padding: 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 15px 16px 7px;
 }
 
 .settings-section-wide {
@@ -126,27 +103,11 @@
 }
 
 .settings-section-danger {
-  grid-column: auto;
-  box-shadow:
-    0 0 0 1px rgba(255, 97, 97, 0.22),
-    inset 0 1px 0 rgba(255, 210, 210, 0.04);
-}
-
-.settings-section::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 2px;
-  background: var(--blue, #2ea7ff);
-  opacity: 0.72;
-}
-
-.settings-section-danger::before {
-  background: var(--red, #ff483e);
+  box-shadow: inset 2px 0 0 rgba(255, 72, 62, 0.72);
 }
 
 .settings-section-head h2 {
-  margin: 2px 0 0;
+  margin: 0;
   color: var(--ink, #f6fbff);
   font-size: 15px;
   font-weight: 600;
@@ -155,32 +116,28 @@
 
 .settings-section-head p {
   max-width: 680px;
-  margin: 4px 0 0;
+  margin: 5px 0 0;
   color: var(--mute, #91a8ba);
   font-size: 12px;
   line-height: 1.35;
 }
 
-.settings-section-head .mono-label {
-  margin: 0;
-  text-transform: uppercase;
-}
-
 .settings-section-body {
   display: grid;
+  margin-top: 9px;
 }
 
 .settings-section-mcp {
-  grid-column: span 8;
+  grid-column: auto;
 }
 
 .settings-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 360px);
+  align-items: center;
   gap: 8px 12px;
-  border-bottom: 1px solid rgba(194, 221, 241, 0.08);
-  padding: 8px 0;
+  border-top: 1px solid rgba(194, 221, 241, 0.1);
+  padding: 9px 0;
 }
 
 .settings-row-copy {
@@ -203,21 +160,28 @@
   overflow-wrap: anywhere;
 }
 
-.settings-row-value {
+.settings-row-detail {
   grid-column: 2;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-row-value {
   min-width: 0;
   max-width: min(100%, 280px);
   color: var(--body, #d6e4ef);
+  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
   font-size: 12px;
-  justify-self: end;
   text-align: right;
   overflow-wrap: anywhere;
 }
 
 .settings-row-control {
-  grid-column: 1 / -1;
   min-width: 0;
-  justify-self: stretch;
 }
 
 .settings-inline-actions,
@@ -748,77 +712,84 @@
     0 0 0 3px rgba(46, 167, 255, 0.12);
 }
 
-@media (max-width: 860px) {
-  .settings-layout {
-    grid-template-columns: 1fr;
+@media (max-width: 760px) {
+  .settings-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
   }
 
-  .settings-section,
-  .settings-section-wide,
-  .settings-section-mcp,
-  .settings-section-danger {
-    grid-column: 1;
+  .settings-category-nav {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+    padding: 3px;
   }
 
-  .settings-row,
-  .confirm-dialog {
+  .settings-category-nav button {
+    flex: 0 0 auto;
+    min-width: max-content;
+    border-right: 1px solid rgba(194, 221, 241, 0.08);
+    border-bottom: 0;
+  }
+
+  .settings-category-nav button:last-child {
+    border-right: 0;
+  }
+
+  .settings-mcp-summary,
+  .settings-mcp-access,
+  .settings-mcp-tab-meta {
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
-    grid-template-columns: 1fr;
-    flex-direction: column;
   }
 
-  .settings-row-copy,
-  .settings-row-control,
-  .settings-row-value,
   .settings-mcp-actions,
   .settings-inline-actions,
-  .settings-delete-controls,
   .confirm-dialog-actions {
-    grid-column: 1;
     justify-content: flex-start;
     justify-self: stretch;
     max-width: none;
     text-align: left;
   }
 
-  .settings-mcp-summary,
-  .settings-mcp-access,
-  .settings-mcp-tab-meta {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
-
   .settings-mcp-tab-meta {
     display: grid;
   }
 
-}
-@media (min-width: 861px) and (max-width: 1180px) {
-  .settings-layout-priority-bay {
-    grid-template-columns: repeat(2, minmax(260px, 1fr));
-    max-width: none;
-  }
-
-  .settings-layout:not(.settings-layout-priority-bay) .settings-section,
-  .settings-layout:not(.settings-layout-priority-bay) .settings-section-wide,
-  .settings-layout:not(.settings-layout-priority-bay) .settings-section-mcp,
-  .settings-layout:not(.settings-layout-priority-bay) .settings-section-danger {
-    grid-column: span 6;
+  .confirm-dialog {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
-@media (max-width: 700px) {
-  .settings-layout-priority-bay {
+@media (max-width: 390px) {
+  .settings-row {
     grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .settings-row-copy,
+  .settings-row-detail {
+    grid-column: 1;
+    justify-self: stretch;
     max-width: none;
   }
 
-  .settings-layout-priority-bay .settings-delete-controls {
+  .settings-row-detail {
+    justify-content: flex-start;
+  }
+
+  .settings-row-value {
+    text-align: left;
+  }
+
+  .settings-delete-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .settings-layout-priority-bay .settings-row-control > .app-button,
-  .settings-layout-priority-bay .settings-inline-actions .app-button {
+  .settings-row-control > .app-button,
+  .settings-inline-actions .app-button {
     width: 100%;
   }
 }

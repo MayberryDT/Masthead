@@ -7,10 +7,11 @@ import {
 } from "../app/daemonClient";
 import type { MastheadConnectionState } from "../app/connection/MastheadConnectionProvider";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { AdvancedSettings } from "./settings/AdvancedSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { McpSettings } from "./settings/McpSettings";
-import { OnboardingSettings } from "./settings/OnboardingSettings";
 import { PreferencesSettings } from "./settings/PreferencesSettings";
+import { SettingsCategoryNav, type SettingsCategory } from "./settings/SettingsCategoryNav";
 import { StorageSettings } from "./settings/StorageSettings";
 import { AppButton } from "./primitives/AppButton";
 
@@ -80,7 +81,6 @@ export function OperationsPanel({
   onDeletionScopeTargetChange,
   onExportLocalData,
   onMotionDisabledChange,
-  onOpenOnboarding,
   onReloadSettings,
   onRequestDeleteLocalData,
   onRequestPruneLocalData,
@@ -88,6 +88,7 @@ export function OperationsPanel({
   readOnly = false,
   settingsState
 }: Props) {
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
   const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
   const [localSettingsError, setLocalSettingsError] = useState<string>();
   const [localSettingsLoadState, setLocalSettingsLoadState] = useState<"loading" | "ready" | "error">(settingsState ? "ready" : "loading");
@@ -157,38 +158,46 @@ export function OperationsPanel({
       ) : null}
 
       {showSettingsSections ? (
-        <div className="settings-layout settings-layout-priority-bay">
-          <div className="settings-priority-column settings-priority-column-storage">
-            <StorageSettings
-              busy={busy}
-              dataSummary={effectiveSummary}
-              onOpenDataDirectory={openDataDirectory}
-              onExport={onExportLocalData}
-              onRequestPrune={onRequestPruneLocalData}
-              settings={effectiveSettings}
-              writeDisabled={writesDisabled}
-            />
-          </div>
-          <div className="settings-priority-column settings-priority-column-session">
-            <OnboardingSettings onOpenOnboarding={onOpenOnboarding} readOnly={readOnly} />
-            <PreferencesSettings motionDisabled={motionDisabled} onMotionDisabledChange={onMotionDisabledChange} sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled} onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange} />
-          </div>
-          <div className="settings-priority-column settings-priority-column-mcp">
-            <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
-          </div>
-          <div className="settings-priority-column settings-priority-column-danger">
-            <DangerZone
-              busy={writesDisabled}
-              databaseId={effectiveSettings?.data.databaseId}
-              databasePath={effectiveSettings?.data.databasePath}
-              deletionScopeKind={deletionScopeKind}
-              deletionScopeTarget={deletionScopeTarget}
-              onDeletionScopeKindChange={onDeletionScopeKindChange}
-              onDeletionScopeTargetChange={onDeletionScopeTargetChange}
-              onRequestDeleteAll={onRequestDeleteLocalData}
-              onRequestScopedDelete={onRequestScopedDelete}
-              targets={effectiveSettings?.deletionTargets}
-            />
+        <div className="settings-workspace">
+          <SettingsCategoryNav active={activeCategory} onChange={setActiveCategory} />
+          <div className="settings-pane" data-settings-category={activeCategory}>
+            {activeCategory === "general" ? (
+              <PreferencesSettings
+                motionDisabled={motionDisabled}
+                onMotionDisabledChange={onMotionDisabledChange}
+                sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled}
+                onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange}
+              />
+            ) : null}
+            {activeCategory === "data" ? (
+              <StorageSettings
+                busy={busy}
+                dataSummary={effectiveSummary}
+                onOpenDataDirectory={openDataDirectory}
+                onExport={onExportLocalData}
+                onRequestPrune={onRequestPruneLocalData}
+                settings={effectiveSettings}
+                writeDisabled={writesDisabled}
+              />
+            ) : null}
+            {activeCategory === "agent-access" ? (
+              <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
+            ) : null}
+            {activeCategory === "advanced" ? <AdvancedSettings settings={effectiveSettings} /> : null}
+            {activeCategory === "danger" ? (
+              <DangerZone
+                busy={writesDisabled}
+                databaseId={effectiveSettings?.data.databaseId}
+                databasePath={effectiveSettings?.data.databasePath}
+                deletionScopeKind={deletionScopeKind}
+                deletionScopeTarget={deletionScopeTarget}
+                onDeletionScopeKindChange={onDeletionScopeKindChange}
+                onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+                onRequestDeleteAll={onRequestDeleteLocalData}
+                onRequestScopedDelete={onRequestScopedDelete}
+                targets={effectiveSettings?.deletionTargets}
+              />
+            ) : null}
           </div>
         </div>
       ) : null}

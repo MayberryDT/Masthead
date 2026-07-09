@@ -9,16 +9,13 @@ type SettingsSectionProps = {
   danger?: boolean;
 };
 
-export function SettingsSection({ children, className = "", danger = false, description, eyebrow, title }: SettingsSectionProps) {
+export function SettingsSection({ children, className = "", danger = false, description, title }: SettingsSectionProps) {
   const sectionClassName = ["settings-section", danger ? "settings-section-danger" : "", className].filter(Boolean).join(" ");
   return (
     <section className={sectionClassName} aria-labelledby={sectionId(title)}>
       <header className="settings-section-head">
-        <div>
-          <p className="mono-label">{eyebrow}</p>
-          <h2 id={sectionId(title)}>{title}</h2>
-          {description ? <p>{description}</p> : null}
-        </div>
+        <h2 id={sectionId(title)}>{title}</h2>
+        {description ? <p>{description}</p> : null}
       </header>
       <div className="settings-section-body">{children}</div>
     </section>
