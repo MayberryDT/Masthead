@@ -17,6 +17,7 @@ The selected direction is option 1, **Stamped Steel Spine**: three numbered stag
 - Remove the Usage item from the primary navigation and remove the Usage surface from normal app routing/rendering.
 - Replace `SidebarUsageStats` and its Today data-loading path with a `SidebarKnowledgeFlow` card.
 - Add one read-only summary response that returns the four counts needed by the card.
+- Do not replace Usage with an Agent Access navigation item. Agent access remains a compact section inside Settings.
 - Preserve the existing Usage data repository and daemon API unless removing a caller makes a small piece of UI-only code unambiguously orphaned. Historical usage capture and storage are not part of this change.
 - Keep the card informational. It has no links, buttons, hover actions, progress animation, or drill-down behavior.
 
@@ -97,7 +98,7 @@ The production component should reproduce the selected prototype rather than imp
 
 Remove UI code made obsolete by deleting the Usage surface and Today card, including navigation typing, surface selection branches, Usage-only controller wiring, and tests that assert those surfaces exist. Keep daemon-side usage collection and summary capability intact because this change removes a product surface, not the underlying canonical evidence.
 
-Do not rename or redesign Now, Workbench, Logbook, Sources, Agent Access, or Settings as part of this work.
+Do not rename or redesign Now, Workbench, Logbook, Sources, or Settings as part of this work.
 
 ## Verification
 
