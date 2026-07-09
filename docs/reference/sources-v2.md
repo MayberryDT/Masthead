@@ -57,7 +57,7 @@ Now: live cards
         ↓
 Workbench: deepen selected sessions (transcript/metadata when allowed) → publish
         ↓
-Logbook: published only
+Logbook: published artifacts only
 ```
 
 Rules:
