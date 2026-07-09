@@ -52,7 +52,7 @@ type UseLogbookControllerInput = {
 export function useLogbookController({
   activeProjectionUrl,
   activeSurface,
-  adapters,
+  adapters: _adapters,
   externalRefreshKey,
   isLive
 }: UseLogbookControllerInput) {
@@ -108,16 +108,9 @@ export function useLogbookController({
 
   const filterOptions = useMemo(
     () => ({
-      models: Array.from(new Set(summary?.models.map((item) => item.model).filter(Boolean) ?? [])),
-      projects: projectOptions,
-      runtimes: Array.from(
-        new Set([
-          ...(summary?.runtimes.map((item) => item.runtime).filter(Boolean) ?? []),
-          ...adapters.map((adapter) => adapter.runtime).filter(Boolean)
-        ])
-      )
+      projects: projectOptions
     }),
-    [adapters, projectOptions, summary]
+    [projectOptions]
   );
 
   const pageRequest = useMemo<LogbookPageCacheRequest>(

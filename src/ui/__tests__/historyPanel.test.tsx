@@ -27,7 +27,7 @@ describe("HistoryPanel", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:App" onQueryChange={() => {}} />);
 
     expect(html).toContain("Logbook");
-    expect(html).toContain("Search all session history");
+    expect(html).toContain("Search published artifacts");
     expect(html).not.toContain("Session library");
     expect(html).not.toContain("Search and inspect durable agent-session history.");
     expect(html).toContain("TITLE / HIGHLIGHT");
@@ -87,9 +87,8 @@ describe("HistoryPanel", () => {
       <HistoryPanel
         filters={{
           dateFrom: "2026-06-01",
-          model: "gpt-5",
-          project: "Masthead",
-          runtime: "opencode"
+          kind: "runbook",
+          project: "Masthead"
         }}
         loadState={{ state: "ready", sessions: [], total: 1 }}
         loading={false}
@@ -104,11 +103,12 @@ describe("HistoryPanel", () => {
     expect(html).toContain("From: 2026-06-01");
     expect(html).toContain("Remove From filter");
     expect(html).not.toContain("Project: Masthead");
-    expect(html).not.toContain("Runtime: opencode");
-    expect(html).not.toContain("Model: gpt-5");
+    expect(html).not.toContain("Kind: runbook");
     expect(html).not.toContain("Remove Project filter");
-    expect(html).not.toContain("Remove Runtime filter");
-    expect(html).not.toContain("Remove Model filter");
+    expect(html).not.toContain("Remove Kind filter");
+    expect(html).not.toContain("Runtime filter");
+    expect(html).not.toContain("Model filter");
+    expect(html).not.toContain("Enrich summaries");
   });
 
   test("does not render session-era summary strip metrics", () => {

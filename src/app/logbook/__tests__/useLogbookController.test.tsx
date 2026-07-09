@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from "react";
+import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { HistoryPanel } from "../../../ui/HistoryPanel";
@@ -31,6 +31,7 @@ vi.mock("../../daemonClient", () => daemonClientMocks);
 
 let container: HTMLDivElement | undefined;
 let root: Root | undefined;
+let latestController: ReturnType<typeof useLogbookController> | undefined;
 
 const baseUrl = "http://127.0.0.1:17373/projection";
 
@@ -39,17 +40,24 @@ afterEach(async () => {
   root = undefined;
   container?.remove();
   container = undefined;
+  latestController = undefined;
   vi.clearAllMocks();
 });
 
 describe("useLogbookController bulk enrichment", () => {
+  // Bulk toolbar UI is removed (Task 3); controller methods remain until Task 5 strips them.
   test("sends summary and full rebuilds with the selected session ids and requested depth", async () => {
     mockLogbookSearch([session("session-1", "Repair OAuth callback")], 1);
     vi.mocked(rebuildEnrichments).mockResolvedValue({ failed: 0, requested: 1, sessions: [{ sessionId: "session-1", status: "succeeded" }], succeeded: 1 });
     await renderHarness();
 
-    await clickCheckbox("Select Repair OAuth callback");
-    await clickButton("Enrich summaries");
+    await act(async () => {
+      latestController?.toggleBulkSelection("session-1");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await latestController?.bulkEnrichSummary();
+    });
 
     expect(rebuildEnrichments).toHaveBeenCalledWith(
       { depth: "summary", limit: 1, scope: "sessionIds", sessionIds: ["session-1"] },
@@ -57,7 +65,9 @@ describe("useLogbookController bulk enrichment", () => {
     );
 
     vi.mocked(rebuildEnrichments).mockClear();
-    await clickButton("Enrich full sessions");
+    await act(async () => {
+      await latestController?.bulkEnrichFull();
+    });
 
     expect(rebuildEnrichments).toHaveBeenCalledWith(
       { depth: "full", limit: 1, scope: "sessionIds", sessionIds: ["session-1"] },
@@ -71,9 +81,13 @@ describe("useLogbookController bulk enrichment", () => {
     vi.mocked(rebuildEnrichments).mockResolvedValue({ failed: 0, requested: 51, sessions: [], succeeded: 51 });
     await renderHarness();
 
-    await clickCheckbox("Select Session 1");
-    await clickButton("Select page");
-    await clickButton("Enrich full sessions");
+    await act(async () => {
+      latestController?.selectCurrentPage();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await latestController?.bulkEnrichFull();
+    });
 
     expect(container?.textContent).toContain("Full enrichment can call the configured remote provider for 51 sessions. Type ENRICH to continue.");
     expect(rebuildEnrichments).not.toHaveBeenCalled();
@@ -105,15 +119,17 @@ describe("useLogbookController bulk enrichment", () => {
     mockMetadata();
     await renderHarness();
 
-    await clickCheckbox("Select Visible page session");
-    await clickButton("Select all matching filter");
+    await act(async () => {
+      await latestController?.selectAllMatchingFilter();
+    });
 
     expect(searchLogbook).toHaveBeenLastCalledWith(
       { limit: 500, offset: 0, q: "", sort: "recent" },
       baseUrl
     );
-    expect(container?.textContent).toContain("500 selected");
-    expect(container?.textContent).toContain("First 500 matching sessions selected.");
+    expect(latestController?.bulkTargetCount).toBe(500);
+    expect(latestController?.bulkTargetCapped).toBe(true);
+    expect(latestController?.bulkTargetKind).toBe("filtered");
   });
 });
 
@@ -136,6 +152,9 @@ function LogbookHarness() {
     adapters: [],
     externalRefreshKey: 0,
     isLive: true
+  });
+  useEffect(() => {
+    latestController = logbook;
   });
   return (
     <HistoryPanel
@@ -204,34 +223,6 @@ function session(sessionId: string, title: string): LogbookSession {
     topics: [],
     unresolved: []
   };
-}
-
-async function clickButton(label: string): Promise<void> {
-  await act(async () => {
-    buttonByText(label).click();
-    await Promise.resolve();
-  });
-}
-
-async function clickCheckbox(label: string): Promise<void> {
-  await act(async () => {
-    checkboxByLabel(label).click();
-    await Promise.resolve();
-  });
-}
-
-function buttonByText(label: string): HTMLButtonElement {
-  const button = Array.from(currentContainer().querySelectorAll("button")).find((candidate) => candidate.textContent?.trim() === label);
-  expect(button).toBeDefined();
-  return button as HTMLButtonElement;
-}
-
-function checkboxByLabel(label: string): HTMLInputElement {
-  const checkbox = Array.from(currentContainer().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(
-    (candidate) => candidate.getAttribute("aria-label") === label
-  );
-  expect(checkbox).toBeDefined();
-  return checkbox as HTMLInputElement;
 }
 
 function typedConfirmationInput(): HTMLInputElement {

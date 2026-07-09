@@ -79,6 +79,46 @@ describe("daemon client review dispositions", () => {
     });
   });
 
+  test("passes explicit kind into artifact logbook search and ignores state-as-kind", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = new URL(String(url));
+      expect(requestUrl.pathname).toContain("/logbook/artifacts");
+      expect(requestUrl.searchParams.get("kind")).toBe("adr");
+      return response({
+        artifacts: [
+          {
+            artifactId: "artifact-adr",
+            confidence: "high",
+            kind: "adr",
+            project: "Masthead",
+            provenanceLabel: "1 session",
+            provenanceSize: 1,
+            publishedAt: "2026-07-03T10:00:00.000Z",
+            status: "current",
+            summary: "ADR summary",
+            title: "ADR title"
+          }
+        ],
+        total: 1
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      searchLogbook(
+        { kind: "adr", limit: 50, offset: 0, q: "decision", sort: "recent", state: "runbook" },
+        "http://127.0.0.1:17373/projection"
+      )
+    ).resolves.toMatchObject({
+      sessions: [{ sessionId: "artifact-adr", title: "ADR title" }],
+      total: 1
+    });
+
+    const requested = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requested.searchParams.get("kind")).toBe("adr");
+    expect(requested.searchParams.get("q")).toBe("decision");
+  });
+
   test("loads sources setup state from the daemon", async () => {
     vi.stubGlobal(
       "fetch",

@@ -4,7 +4,6 @@ import type { StoreRecord } from "../core/store";
 import type {
   AdapterStatus,
   ImportJob,
-  LogbookSearchFilters,
   LogbookSort,
   LogbookSummary,
   SettingsStateDto,
@@ -104,11 +103,14 @@ export type LogbookSession = {
   sourceConfidence?: "authoritative" | "inferred" | "heuristic";
 };
 
-export type LogbookFilterState = Pick<LogbookSearchFilters, "runtime" | "project" | "model" | "state" | "dateFrom" | "dateTo" | "file">;
+export type LogbookFilterState = {
+  kind?: string | string[];
+  project?: string | string[];
+  dateFrom?: string;
+  dateTo?: string;
+};
 
 export type LogbookFilterOptions = {
-  runtimes?: string[];
-  models?: string[];
   projects?: string[];
 };
 
@@ -153,20 +155,8 @@ export function HistoryPanel({
   records = [],
   bulkConfirmMessage,
   bulkEnrichBusy,
-  bulkEnrichError,
-  bulkStatus,
-  bulkTargetCapped,
-  bulkTargetCount,
-  bulkTargetKind,
-  enrichment,
-  fullEnrichmentAvailable,
-  onBulkEnrichFull,
-  onBulkEnrichSummary,
   onCancelBulkEnrichFull,
-  onClearBulkSelection,
   onConfirmBulkEnrichFull,
-  onSelectBulkFiltered,
-  onSelectBulkPage,
   onToggleBulkSelect,
   refreshError,
   selectedSessionId,
@@ -256,26 +246,12 @@ export function HistoryPanel({
     <section id="history" className="history-panel logbook-panel surface-panel" aria-label="Logbook">
 
       <LogbookToolbar
-        bulkEnrichBusy={bulkEnrichBusy}
-        bulkEnrichError={bulkEnrichError}
-        bulkSelectionCount={selectedSessionIds.length}
-        bulkStatus={bulkStatus}
-        bulkTargetCapped={bulkTargetCapped}
-        bulkTargetCount={bulkTargetCount}
-        bulkTargetKind={bulkTargetKind}
-        enrichment={enrichment}
         filters={filters}
         filterOptions={filterOptions}
-        fullEnrichmentAvailable={fullEnrichmentAvailable ?? enrichment?.remoteModelEnabled === true}
         query={query}
         sort={sort}
-        onBulkEnrichFull={onBulkEnrichFull}
-        onBulkEnrichSummary={onBulkEnrichSummary}
-        onClearBulkSelection={onClearBulkSelection}
         onFilterChange={onFilterChange ?? (() => undefined)}
         onQueryChange={onQueryChange}
-        onSelectBulkFiltered={onSelectBulkFiltered}
-        onSelectBulkPage={onSelectBulkPage}
         onSortChange={onSortChange ?? (() => undefined)}
       />
       <LogbookFacets facets={activeFilters} />
@@ -598,14 +574,21 @@ function activeFilterFacets(
 ) {
   const facets: Array<{ label: string; value: string; onRemove?: () => void }> = [];
   if (query) facets.push({ label: "Query", value: query, onRemove: () => onQueryChange("") });
-  const addFilterFacet = (key: keyof LogbookFilterState, label: string) => {
-    const value = filters[key];
-    if (!value || Array.isArray(value)) return;
-    facets.push({ label, value, onRemove: () => onFilterChange?.({ ...filters, [key]: undefined }) });
-  };
-  addFilterFacet("dateFrom", "From");
-  addFilterFacet("dateTo", "To");
-  addFilterFacet("file", "File");
+  // Kind / Project stay in dropdown multi-select UI; facet strip surfaces Query + Date only.
+  if (filters.dateFrom) {
+    facets.push({
+      label: "From",
+      value: filters.dateFrom,
+      onRemove: () => onFilterChange?.({ ...filters, dateFrom: undefined })
+    });
+  }
+  if (filters.dateTo) {
+    facets.push({
+      label: "To",
+      value: filters.dateTo,
+      onRemove: () => onFilterChange?.({ ...filters, dateTo: undefined })
+    });
+  }
   if (sort !== "recent") facets.push({ label: "Sort", value: sortLabel(sort), onRemove: () => onSortChange?.("recent") });
   return facets;
 }

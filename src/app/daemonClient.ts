@@ -347,15 +347,18 @@ export type LogbookExcerpt = {
 
 export type LogbookSearchFilters = {
   q?: string;
-  runtime?: string | string[];
+  kind?: string | string[];
   project?: string | string[];
-  model?: string | string[];
   host?: string;
   state?: string;
   lifecycle?: string;
   file?: string;
   dateFrom?: string;
   dateTo?: string;
+  /** @deprecated session-era; prefer kind */
+  runtime?: string | string[];
+  /** @deprecated session-era; not used by artifact Logbook */
+  model?: string | string[];
   limit?: number;
   cursor?: string;
   offset?: number;
@@ -946,7 +949,8 @@ async function fetchArtifactLogbookPage(
   baseUrl: string,
   options: { signal?: AbortSignal }
 ): Promise<LogbookSearchResult> {
-  const kind = typeof filters.state === "string" && isArtifactKindFilter(filters.state) ? filters.state : undefined;
+  const kindValue = Array.isArray(filters.kind) ? filters.kind[0] : filters.kind;
+  const kind = typeof kindValue === "string" && isArtifactKindFilter(kindValue) ? kindValue : undefined;
   const project = Array.isArray(filters.project) ? filters.project[0] : filters.project;
   const result = await getJson<LogbookArtifactSearchResult>(baseUrl, "/logbook/artifacts", {
     label: "logbook artifact search",
@@ -1006,9 +1010,9 @@ function artifactCapsuleToLogbookSession(capsule: LogbookArtifactCapsule): Logbo
   };
 }
 
-type MultiValueLogbookFilterKey = "runtime" | "project" | "model";
+type MultiValueLogbookFilterKey = "kind" | "project";
 
-const multiValueLogbookFilterKeys: MultiValueLogbookFilterKey[] = ["runtime", "project", "model"];
+const multiValueLogbookFilterKeys: MultiValueLogbookFilterKey[] = ["kind", "project"];
 
 function expandLogbookMultiValueFilters(filters: LogbookSearchFilters): LogbookSearchFilters[] {
   const groups = multiValueLogbookFilterKeys.map((key) => ({ key, values: logbookFilterValues(filters[key]) }));
