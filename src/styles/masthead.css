@@ -2497,9 +2497,76 @@ main {
   vertical-align: middle;
 }
 
-.workbench-select-col input {
+/* Metal checkbox: raised control surface + blue selected fill (design.md). */
+.workbench-select-col input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 15px;
+  height: 15px;
   margin: 0;
+  border: 1px solid rgba(92, 153, 187, 0.28);
+  border-radius: 3px;
+  background:
+    linear-gradient(180deg, rgba(205, 232, 246, 0.05), transparent 42%),
+    var(--control-raised, #081d2a);
+  box-shadow:
+    inset 0 1px 0 rgba(205, 232, 246, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.42),
+    0 1px 1px rgba(0, 0, 0, 0.18);
+  color: #eaf7ff;
   cursor: pointer;
+  vertical-align: middle;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.workbench-select-col input[type="checkbox"]:hover:not(:disabled) {
+  border-color: rgba(112, 173, 205, 0.4);
+  background:
+    linear-gradient(180deg, rgba(205, 232, 246, 0.07), transparent 42%),
+    var(--control-raised-hover, #092231);
+}
+
+.workbench-select-col input[type="checkbox"]:focus-visible {
+  outline: 0;
+  box-shadow:
+    0 0 0 1px rgba(116, 185, 224, 0.4),
+    0 0 0 3px rgba(46, 167, 255, 0.14),
+    inset 0 1px 0 rgba(205, 232, 246, 0.06);
+}
+
+.workbench-select-col input[type="checkbox"]:checked {
+  border-color: rgba(90, 190, 255, 0.55);
+  background-color: #0a314b;
+  background-image:
+    linear-gradient(180deg, rgba(205, 232, 246, 0.1), transparent 50%),
+    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23eaf7ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M2.4 6.2 4.8 8.6 9.6 3.4'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 11px 11px;
+  box-shadow:
+    0 0 0 1px rgba(46, 167, 255, 0.18),
+    inset 0 1px 0 rgba(205, 232, 246, 0.1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.workbench-select-col input[type="checkbox"]:indeterminate {
+  border-color: rgba(90, 190, 255, 0.5);
+  background-color: #0a314b;
+  background-image:
+    linear-gradient(180deg, rgba(205, 232, 246, 0.1), transparent 50%),
+    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23eaf7ff' stroke-width='1.8' stroke-linecap='round' d='M2.6 6h6.8'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 11px 11px;
+}
+
+.workbench-select-col input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .workbench-session-table tbody tr {
