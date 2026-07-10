@@ -344,7 +344,7 @@ function atomicFileMutexOwnership(
 }
 
 async function reclaimExactMutexInode(lockPath: string, device: number, inode: number): Promise<void> {
-  const claimPath = `${lockPath}.reclaim`;
+  const claimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
   try {
     await link(lockPath, claimPath);
   } catch (error) {

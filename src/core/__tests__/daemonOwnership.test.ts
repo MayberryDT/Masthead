@@ -1,4 +1,4 @@
-import { lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -95,6 +95,22 @@ describe("database writer lock", () => {
     resume.resolve(undefined);
 
     await expect(firstAttempt).rejects.toThrow("already owned");
+  });
+
+  test("an abandoned hard-link claim cannot wedge later stale mutex recovery", async () => {
+    const tempDir = await createTempDir("masthead-abandoned-reclaim-");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const coordinationPath = `${databasePath}.lock.winner`;
+    await writeFile(coordinationPath, JSON.stringify({
+      createdAt: "2026-01-01T00:00:00.000Z",
+      pid: 2_147_483_647,
+      token: "stale-coordinator"
+    }), "utf8");
+    await link(coordinationPath, `${coordinationPath}.reclaim`);
+
+    const recovered = await acquireDatabaseWriterLock(databasePath);
+    locks.push(recovered);
+    expect(recovered.lockPath).toBe(`${databasePath}.lock`);
   });
 });
 
