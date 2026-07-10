@@ -2,14 +2,15 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 
 describe("Masthead Dev launcher template", () => {
-  test("does not rebuild the daemon when an existing daemon is healthy", async () => {
+  test("builds the current checkout before replacing or starting a daemon", async () => {
     const source = await readFile("scripts/install-electron-dev-launcher.js", "utf8");
 
-    const healthCheckIndex = source.indexOf('if daemon_is_compatible "$port"; then');
+    const sameDataIndex = source.indexOf('if daemon_data_matches "$port"; then');
     const buildIndex = source.indexOf("Building Masthead daemon...");
 
-    expect(healthCheckIndex).toBeGreaterThan(-1);
-    expect(buildIndex).toBeGreaterThan(healthCheckIndex);
+    expect(buildIndex).toBeGreaterThan(-1);
+    expect(sameDataIndex).toBeGreaterThan(buildIndex);
+    expect(source).toContain("Restarting the same-data Masthead daemon with the current checkout");
     expect(source).not.toContain('"$NPM_BIN" run dev:electron');
     expect(source).toContain('CANONICAL_RENDERER_URL="http://127.0.0.1:5173"');
     expect(source).toContain('MASTHEAD_ELECTRON_RENDERER_URL="$CANONICAL_RENDERER_URL"');
@@ -62,6 +63,8 @@ describe("Masthead Dev launcher template", () => {
     expect(source).toContain("MASTHEAD_DAEMON_URL");
     expect(source).toContain("daemon_authoring_is_compatible");
     expect(source).toContain("stop_stale_authoring_daemon");
+    expect(source).toContain("await access(cliEntry, constants.R_OK)");
+    expect(source).toContain('spawnSync(npmBin, ["run", "build:daemon"]');
     expect(source.indexOf("await installCliLauncher()")).toBeLessThan(source.indexOf("await writeFile(launcherPath"));
   });
 });

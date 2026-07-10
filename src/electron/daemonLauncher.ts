@@ -2,6 +2,10 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
+import {
+  isAbsoluteAuthoringCommand,
+  isWorkbenchAuthoringCapabilitiesDto
+} from "../shared/workbenchAuthoring";
 import { packagedDaemonPaths } from "./pathPolicy";
 
 const DEFAULT_CONNECTOR_PORT = 17373;
@@ -76,6 +80,10 @@ export type ResolveDaemonLaunchTargetInput = {
   userDataDir: string;
 };
 
+export type StartLiveConnectorOptions = {
+  prepareAuthoringLauncher?: (input: { baseUrl: string; port: number }) => Promise<void>;
+};
+
 export function connectorBaseUrl(port: number): string {
   return `http://127.0.0.1:${port}`;
 }
@@ -117,6 +125,7 @@ export function resolveDaemonLaunchTarget(input: ResolveDaemonLaunchTargetInput)
 
 export function buildDaemonEnv(input: {
   allowedOrigins: string[];
+  cliCommand: string;
   dataDirectory: string;
   databasePath: string;
   hookScript?: string;
@@ -127,6 +136,7 @@ export function buildDaemonEnv(input: {
 }): Record<string, string> {
   return {
     MASTHEAD_ALLOWED_ORIGINS: input.allowedOrigins.join(","),
+    MASTHEAD_CLI_COMMAND: input.cliCommand,
     MASTHEAD_DATA_DIR: input.dataDirectory,
     MASTHEAD_DB_PATH: input.databasePath,
     MASTHEAD_HOST: "127.0.0.1",
@@ -161,11 +171,26 @@ export function parseCompatibleHealth(value: unknown): MastheadHealthSummary | u
   };
 }
 
-export async function startLiveConnector(input: ResolveDaemonLaunchTargetInput, allowedOrigins: string[], ownedChildren: Set<ChildProcess>): Promise<StartLiveConnectorResult> {
+export async function startLiveConnector(
+  input: ResolveDaemonLaunchTargetInput,
+  allowedOrigins: string[],
+  ownedChildren: Set<ChildProcess>,
+  options: StartLiveConnectorOptions = {}
+): Promise<StartLiveConnectorResult> {
   const target = resolveDaemonLaunchTarget(input);
-  const initialProbe = await probeCollector(target.port, target.dataDirectory);
+  const cliCommand = input.env.MASTHEAD_CLI_COMMAND?.trim();
+  if (!cliCommand || !isAbsoluteAuthoringCommand(cliCommand)) {
+    throw new Error("Masthead connector requires an absolute installed MASTHEAD_CLI_COMMAND");
+  }
+  const initialProbe = await probeCollector(target.port, target.dataDirectory, cliCommand);
+  if (initialProbe.state === "same_database_authoring_incompatible") {
+    throw new Error(
+      `A Masthead collector for the same database is running at ${connectorBaseUrl(target.port)} without the expected daemon-owned authoring contract; stop or restart that collector before retrying.`
+    );
+  }
   if (initialProbe.state === "compatible") {
     const baseUrl = connectorBaseUrl(target.port);
+    await options.prepareAuthoringLauncher?.({ baseUrl, port: target.port });
     await warmProjection(baseUrl);
     return connectorStartResult(false, baseUrl, "Local Masthead collector is already running.", initialProbe.health);
   }
@@ -176,8 +201,10 @@ export async function startLiveConnector(input: ResolveDaemonLaunchTargetInput, 
 
   const port = initialProbe.state === "incompatible" ? await findAvailablePort(target.port + 1) : target.port;
   const baseUrl = connectorBaseUrl(port);
+  await options.prepareAuthoringLauncher?.({ baseUrl, port });
   const env = buildDaemonEnv({
     allowedOrigins,
+    cliCommand,
     dataDirectory: target.dataDirectory,
     databasePath: target.databasePath,
     hookScript: target.hookScript,
@@ -188,7 +215,7 @@ export async function startLiveConnector(input: ResolveDaemonLaunchTargetInput, 
   });
   const child = spawn(target.nodePath, [target.entryPath], {
     cwd: target.cwd,
-    env: { ...process.env, ...env },
+    env: { ...process.env, ...input.env, ...env },
     stdio: "ignore"
   });
   ownedChildren.add(child);
@@ -196,7 +223,7 @@ export async function startLiveConnector(input: ResolveDaemonLaunchTargetInput, 
     ownedChildren.delete(child);
   });
 
-  const health = await waitForCompatibleCollector(port, target.dataDirectory);
+  const health = await waitForCompatibleCollector(port, target.dataDirectory, cliCommand);
   await warmProjection(baseUrl);
   return connectorStartResult(true, baseUrl, "Started local Masthead collector.", health);
 }
@@ -257,15 +284,41 @@ function connectorStartResult(started: boolean, baseUrl: string, message: string
   };
 }
 
-async function probeCollector(port: number, expectedDataDirectory: string): Promise<{ state: "compatible"; health: MastheadHealthSummary } | { state: "incompatible" | "offline" }> {
+async function probeCollector(
+  port: number,
+  expectedDataDirectory: string,
+  expectedCliCommand: string
+): Promise<
+  | { state: "compatible"; health: MastheadHealthSummary }
+  | { state: "incompatible" | "offline" | "same_database_authoring_incompatible" }
+> {
+  let healthBody: unknown;
   try {
     const response = await fetch(`${connectorBaseUrl(port)}/health`, { signal: AbortSignal.timeout(500) });
     if (!response.ok) return { state: "incompatible" };
-    const health = parseCompatibleHealth(await response.json());
-    if (!health || health.dataDirectory !== expectedDataDirectory) return { state: "incompatible" };
-    return { state: "compatible", health };
+    healthBody = await response.json();
   } catch {
     return { state: "offline" };
+  }
+
+  const observedDataDirectory = observedMastheadDataDirectory(healthBody);
+  const health = parseCompatibleHealth(healthBody);
+  if (observedDataDirectory === expectedDataDirectory && !health) {
+    return { state: "same_database_authoring_incompatible" };
+  }
+  if (!health || health.dataDirectory !== expectedDataDirectory) return { state: "incompatible" };
+
+  try {
+    const capabilitiesResponse = await fetch(`${connectorBaseUrl(port)}/workbench/authoring/capabilities`, {
+      signal: AbortSignal.timeout(500)
+    });
+    const capabilities = capabilitiesResponse.ok ? await capabilitiesResponse.json() : undefined;
+    if (!isWorkbenchAuthoringCapabilitiesDto(capabilities, { expectedCommand: expectedCliCommand })) {
+      return { state: "same_database_authoring_incompatible" };
+    }
+    return { state: "compatible", health };
+  } catch {
+    return { state: "same_database_authoring_incompatible" };
   }
 }
 
@@ -278,14 +331,24 @@ async function warmProjection(baseUrl: string): Promise<void> {
   }
 }
 
-async function waitForCompatibleCollector(port: number, expectedDataDirectory: string): Promise<MastheadHealthSummary> {
+async function waitForCompatibleCollector(
+  port: number,
+  expectedDataDirectory: string,
+  expectedCliCommand: string
+): Promise<MastheadHealthSummary> {
   const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
-    const probe = await probeCollector(port, expectedDataDirectory);
+    const probe = await probeCollector(port, expectedDataDirectory, expectedCliCommand);
     if (probe.state === "compatible") return probe.health;
     await delay(200);
   }
   throw new Error(`Started Masthead collector but it did not become compatible at ${connectorBaseUrl(port)}/health`);
+}
+
+function observedMastheadDataDirectory(value: unknown): string | undefined {
+  const record = objectField(value);
+  if (record?.ok !== true || record.product !== "masthead") return undefined;
+  return stringField(objectField(record.data)?.dataDirectory);
 }
 
 async function findAvailablePort(startPort: number): Promise<number> {

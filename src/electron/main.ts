@@ -105,7 +105,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
-async function configureCliLauncher(daemonUrl?: string): Promise<void> {
+async function configureCliLauncher(daemonUrl?: string, required = false): Promise<void> {
   try {
     const target = resolveMastheadCliLaunchTarget({
       devNodePath:
@@ -120,9 +120,11 @@ async function configureCliLauncher(daemonUrl?: string): Promise<void> {
     await installMastheadCliLauncher(target, { daemonUrl: activeDaemonUrl });
     process.env.MASTHEAD_CLI_COMMAND = target.launcherPath;
   } catch (error) {
+    delete process.env.MASTHEAD_CLI_COMMAND;
     console.error(
       `Masthead CLI launcher installation failed: ${error instanceof Error ? error.message : String(error)}`
     );
+    if (required) throw error;
   }
 }
 
@@ -162,10 +164,12 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
                 userDataDir: app.getPath("userData")
               },
               rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }),
-              ownedDaemonChildren
+              ownedDaemonChildren,
+              {
+                prepareAuthoringLauncher: ({ baseUrl }) => configureCliLauncher(baseUrl, true)
+              }
             )
           : unsupportedSmokeMode(smokeMode);
-    await configureCliLauncher(connector.baseUrl);
     const renderer = await window.webContents.executeJavaScript(`
       (async () => {
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -354,8 +358,14 @@ function registerDesktopIpc(): void {
     {
       [ELECTRON_CHANNELS.startLiveConnector]: async () => {
         try {
-          const result = await startLiveConnector(targetInput(), rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }), ownedDaemonChildren);
-          await configureCliLauncher(result.baseUrl);
+          const result = await startLiveConnector(
+            targetInput(),
+            rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }),
+            ownedDaemonChildren,
+            {
+              prepareAuthoringLauncher: ({ baseUrl }) => configureCliLauncher(baseUrl, true)
+            }
+          );
           if (process.env.MASTHEAD_ELECTRON_SMOKE === "1" && process.env.MASTHEAD_ELECTRON_SMOKE_MODE === "renderer-autostart") {
             recordRendererStartedConnector(result);
           }

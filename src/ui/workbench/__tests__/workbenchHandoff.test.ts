@@ -18,6 +18,7 @@ test("builds an agent handoff for automatic artifact completion without CLI reci
   const text = buildWorkbenchHandoff({
     authoringCommand: "/home/test/.local/bin/mastheadctl",
     databaseId: "database:test",
+    sessionIds: ["session:abc"],
     sessions: [
       session({
         lifecycle: "ended",
@@ -60,6 +61,7 @@ test("sanitizes forbidden substrings from selected session metadata in handoff t
   const text = buildWorkbenchHandoff({
     authoringCommand: "/home/test/.local/bin/mastheadctl",
     databaseId: "database:test",
+    sessionIds: [`session:${forbiddenToken(0)}-${forbiddenToken(2)}`],
     sessions: [
       session({
         lifecycle: "ended",
@@ -72,10 +74,10 @@ test("sanitizes forbidden substrings from selected session metadata in handoff t
     ]
   });
 
-  expect(text).toContain("Selected sessions:");
+  expect(text).toContain("Selected session metadata available on the current Workbench page");
   expect(text).toContain("Session:");
   expect(text).toContain("project:");
-  const selectedSection = text.slice(text.indexOf("Selected sessions:"));
+  const selectedSection = text.slice(text.indexOf("Selected session metadata"));
   expect(selectedSection).not.toContain(forbiddenToken(1));
   expect(selectedSection).not.toContain(forbiddenToken(2));
   expect(selectedSection).not.toContain(forbiddenToken(3));
@@ -86,6 +88,7 @@ test("sanitizes forbidden substrings case-insensitively", () => {
   const text = buildWorkbenchHandoff({
     authoringCommand: "/home/test/.local/bin/mastheadctl",
     databaseId: "database:test",
+    sessionIds: ["session:abc"],
     sessions: [
       session({
         lifecycle: "ended",
@@ -97,8 +100,60 @@ test("sanitizes forbidden substrings case-insensitively", () => {
       })
     ]
   });
-  const selectedSection = text.slice(text.indexOf("Selected sessions:"));
+  const selectedSection = text.slice(text.indexOf("Selected session metadata"));
   expect(selectedSection).not.toMatch(new RegExp(forbiddenToken(1), "i"));
+});
+
+test("uses sorted deduplicated authoritative IDs when metadata covers only some selections", () => {
+  const text = buildWorkbenchHandoff({
+    authoringCommand: "/home/test/.local/bin/mastheadctl",
+    databaseId: "database:test",
+    sessionIds: ["session:z", "session:a", "session:z"],
+    sessions: [
+      session({
+        lifecycle: "ended",
+        lastActivityAt: "2026-07-08T12:00:00.000Z",
+        runtime: "codex",
+        sessionId: "session:a",
+        title: "Visible metadata"
+      })
+    ]
+  });
+
+  expect(text).toContain('"sessionIds":["session:a","session:z"]');
+  expect(text).toContain("machine request sessionIds is authoritative");
+  expect(text).toContain("Visible metadata");
+  expect(text).not.toContain("Session: session:z");
+});
+
+test("omits stale or duplicate metadata rows outside the authoritative selection", () => {
+  const selected = session({
+    lifecycle: "ended",
+    lastActivityAt: "2026-07-08T12:00:00.000Z",
+    runtime: "codex",
+    sessionId: "session:b",
+    title: "Current selection"
+  });
+  const text = buildWorkbenchHandoff({
+    authoringCommand: "/home/test/.local/bin/mastheadctl",
+    databaseId: "database:test",
+    sessionIds: ["session:b"],
+    sessions: [
+      session({
+        lifecycle: "ended",
+        lastActivityAt: "2026-07-08T12:00:00.000Z",
+        runtime: "codex",
+        sessionId: "session:a",
+        title: "Stale deferred selection"
+      }),
+      selected,
+      selected
+    ]
+  });
+
+  const metadata = text.slice(text.indexOf("Selected session metadata"));
+  expect(metadata).not.toContain("Stale deferred selection");
+  expect(metadata.match(/Current selection/g)).toHaveLength(1);
 });
 
 function session(input: Partial<WorkbenchQueueSessionDto> & Pick<WorkbenchQueueSessionDto, "sessionId" | "title" | "runtime" | "lifecycle" | "lastActivityAt">): WorkbenchQueueSessionDto {

@@ -20,6 +20,44 @@ export type WorkbenchAuthoringCapabilitiesDto = {
   evidencePolicy: "all_canonical_redacted_evidence";
 };
 
+export const WORKBENCH_AUTHORING_OPERATIONS = ["open", "status", "evidence", "submit", "finish"] as const;
+
+export function isWorkbenchAuthoringCapabilitiesDto(
+  value: unknown,
+  options: { expectedCommand?: string } = {}
+): value is WorkbenchAuthoringCapabilitiesDto {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const capabilities = value as Record<string, unknown>;
+  const command = typeof capabilities.command === "string" ? capabilities.command.trim() : "";
+  return (
+    capabilities.capability === "artifact_authoring" &&
+    capabilities.protocol === "masthead.workbench.authoring/v1" &&
+    capabilities.transport === "daemon_http" &&
+    capabilities.bundleVersion === "workbench-authoring-v1" &&
+    capabilities.evidencePolicy === "all_canonical_redacted_evidence" &&
+    typeof capabilities.databaseId === "string" &&
+    Boolean(capabilities.databaseId.trim()) &&
+    capabilities.databaseId === capabilities.databaseId.trim() &&
+    capabilities.command === command &&
+    isAbsoluteAuthoringCommand(command) &&
+    (!options.expectedCommand || command === options.expectedCommand) &&
+    hasExactAuthoringOperations(capabilities.operations)
+  );
+}
+
+export function isAbsoluteAuthoringCommand(command: string | undefined): boolean {
+  const value = command?.trim() ?? "";
+  return value.startsWith("/") || /^(?:[A-Za-z]:[\\/]|\\\\)/.test(value);
+}
+
+function hasExactAuthoringOperations(operations: unknown): boolean {
+  return (
+    Array.isArray(operations) &&
+    operations.length === WORKBENCH_AUTHORING_OPERATIONS.length &&
+    WORKBENCH_AUTHORING_OPERATIONS.every((operation, index) => operations[index] === operation)
+  );
+}
+
 export type WorkbenchAuthoringEvidenceManifest = {
   evidenceRevision: string;
   sessions: Array<{

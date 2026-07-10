@@ -203,16 +203,20 @@ export function useWorkbenchController({
         ? buildWorkbenchHandoff({
             authoringCommand: authoringCapabilities.command,
             databaseId: authoringCapabilities.databaseId,
+            sessionIds: Array.from(selectedSessionIds),
             sessions: handoffSessions
           })
         : "",
-    [authoringCapabilities, handoffSessions]
+    [authoringCapabilities, handoffSessions, selectedSessionIds]
   );
 
   const canRun = useCallback(
     (kind: WorkbenchActionKind): boolean => {
       if (!isLive || actionBusy) return false;
       if (kind === "enroll_missing") return true;
+      if (kind === "copy_agent_prompt") {
+        return Boolean(authoringCapabilities) && selectedSessionIds.size > 0;
+      }
       if (selectedSessions.length === 0) return false;
 
       switch (kind) {
@@ -244,13 +248,11 @@ export function useWorkbenchController({
           return selectedSessions.some((session) => !session.activeClaim);
         case "release":
           return selectedSessions.some((session) => Boolean(session.activeClaim));
-        case "copy_agent_prompt":
-          return handoffText.trim().length > 0;
         default:
           return false;
       }
     },
-    [actionBusy, handoffText, isLive, selectedSessions]
+    [actionBusy, authoringCapabilities, isLive, selectedSessionIds, selectedSessions]
   );
 
   const runAction = useCallback(

@@ -412,6 +412,41 @@ describe("daemon client review dispositions", () => {
     ).rejects.toThrow("absolute installed command");
   });
 
+  test.each([
+    ["capability", { capability: "other" }],
+    ["protocol", { protocol: "masthead.workbench.authoring/v0" }],
+    ["transport", { transport: "direct_sqlite" }],
+    ["bundleVersion", { bundleVersion: "workbench-authoring-v0" }],
+    ["evidencePolicy", { evidencePolicy: "preview" }],
+    ["databaseId", { databaseId: "   " }],
+    ["padded databaseId", { databaseId: " database:test " }],
+    ["padded command", { command: " /home/test/.local/bin/mastheadctl " }],
+    ["operations missing", { operations: ["open", "status", "evidence", "submit"] }],
+    ["operations extra", { operations: ["open", "status", "evidence", "submit", "finish", "apply"] }],
+    ["operations order", { operations: ["status", "open", "evidence", "submit", "finish"] }]
+  ])("rejects a mismatched authoring %s contract", async (_label, override) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          bundleVersion: "workbench-authoring-v1",
+          capability: "artifact_authoring",
+          command: "/home/test/.local/bin/mastheadctl",
+          databaseId: "database:test",
+          evidencePolicy: "all_canonical_redacted_evidence",
+          operations: ["open", "status", "evidence", "submit", "finish"],
+          protocol: "masthead.workbench.authoring/v1",
+          transport: "daemon_http",
+          ...override
+        })
+      )
+    );
+
+    await expect(
+      getWorkbenchAuthoringCapabilities("http://127.0.0.1:17373/projection")
+    ).rejects.toThrow("complete daemon-owned contract");
+  });
+
   test("posts Workbench pipeline write actions to the daemon", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true })));
 

@@ -179,6 +179,54 @@ describe("useWorkbenchController", () => {
     expect(Array.from(latest().selectedSessionIds)).toEqual([]);
   });
 
+  test("updates authoritative handoff IDs immediately across rapid selection changes", async () => {
+    mockWorkbenchResponse([
+      session("session:a", "First session"),
+      session("session:b", "Second session")
+    ]);
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 2);
+
+    await act(async () => {
+      latest().toggleSession("session:a");
+      await Promise.resolve();
+    });
+    expect(machineRequest().sessionIds).toEqual(["session:a"]);
+
+    await act(async () => {
+      latest().toggleSession("session:a");
+      latest().toggleSession("session:b");
+      await Promise.resolve();
+    });
+
+    expect(machineRequest().sessionIds).toEqual(["session:b"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+  });
+
+  test("selectAll includes off-page session IDs in the authoritative handoff", async () => {
+    vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
+      authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
+    );
+    vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
+    vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
+      if (options.limit === 500) {
+        return { ...response([session("session:a", "First page"), session("session:b", "Second page")]), limit: 500 };
+      }
+      return { ...response([session("session:a", "First page")]), total: 2 };
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
+    await act(async () => {
+      await latest().selectAll();
+    });
+
+    expect(Array.from(latest().selectedSessionIds).sort()).toEqual(["session:a", "session:b"]);
+    expect(machineRequest().sessionIds).toEqual(["session:a", "session:b"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+  });
+
   test("retries after a failed load", async () => {
     vi.mocked(getWorkbenchSessions)
       .mockRejectedValueOnce(new Error("temporary failure"))
@@ -767,6 +815,12 @@ function authoringCapabilities(databaseId: string, command: string): WorkbenchAu
     protocol: "masthead.workbench.authoring/v1" as const,
     transport: "daemon_http" as const
   };
+}
+
+function machineRequest(): { sessionIds: string[] } {
+  const line = latest().handoffText.split("\n").find((value) => value.startsWith('{"protocol"'));
+  expect(line).toBeDefined();
+  return JSON.parse(line ?? "{}") as { sessionIds: string[] };
 }
 
 async function waitFor(condition: () => boolean, timeoutMs = 1000): Promise<void> {

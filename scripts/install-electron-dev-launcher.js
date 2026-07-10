@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -30,6 +31,7 @@ function devAllowedOrigins() {
 }
 
 async function installCliLauncher() {
+  await access(cliEntry, constants.R_OK);
   const temporaryPath = `${cliLauncherPath}.${process.pid}.${randomUUID()}.tmp`;
   const body = process.platform === "win32"
     ? `@echo off\r\n@setlocal DisableDelayedExpansion\r\n"${nodeBin.replace(/%/g, "%%")}" "${cliEntry.replace(/%/g, "%%")}" %*\r\n`
@@ -158,7 +160,7 @@ daemon_data_matches() {
 daemon_authoring_is_compatible() {
   local port="$1" capabilities
   capabilities="$(curl -fsS --max-time 5 "http://127.0.0.1:$port/workbench/authoring/capabilities" 2>/dev/null)" || return 1
-  EXPECTED_CLI="$CLI_LAUNCHER" "$NODE_BIN" -e 'let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { try { const j = JSON.parse(input); process.exit(j?.capability === "artifact_authoring" && j?.command === process.env.EXPECTED_CLI ? 0 : 1); } catch { process.exit(1); } });' <<<"$capabilities"
+  EXPECTED_CLI="$CLI_LAUNCHER" "$NODE_BIN" -e 'let input = ""; const expected = ["open", "status", "evidence", "submit", "finish"]; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { try { const j = JSON.parse(input); const valid = j?.capability === "artifact_authoring" && j?.protocol === "masthead.workbench.authoring/v1" && j?.transport === "daemon_http" && j?.bundleVersion === "workbench-authoring-v1" && j?.evidencePolicy === "all_canonical_redacted_evidence" && typeof j?.databaseId === "string" && j.databaseId === j.databaseId.trim() && j.databaseId.length > 0 && j?.command === process.env.EXPECTED_CLI && Array.isArray(j?.operations) && j.operations.length === expected.length && expected.every((operation, index) => j.operations[index] === operation); process.exit(valid ? 0 : 1); } catch { process.exit(1); } });' <<<"$capabilities"
 }
 
 daemon_is_compatible() {
@@ -306,14 +308,22 @@ build_electron_dev_bundles() {
 
 start_dev_daemon() {
   local port="17373"
-  if daemon_is_compatible "$port"; then
-    set_active_daemon "$port"
-    log "Masthead daemon already healthy at $ACTIVE_DAEMON_BASE_URL"
-    return 0
+
+  log "Building Masthead daemon..."
+  if (cd "$APP_DIR" && "$NPM_BIN" run build:daemon) >>"$LOG_FILE" 2>&1; then
+    log "Masthead daemon build complete."
+  else
+    local build_status=$?
+    log "Masthead daemon build failed with exit status $build_status."
+    return "$build_status"
+  fi
+  if [[ ! -r "$CLI_ENTRY" ]]; then
+    log "Current checkout authoring CLI is missing after build: $CLI_ENTRY"
+    return 1
   fi
 
   if daemon_data_matches "$port"; then
-    log "Masthead daemon at port $port has stale authoring CLI capabilities; restarting it."
+    log "Restarting the same-data Masthead daemon with the current checkout."
     if ! stop_stale_authoring_daemon "$port"; then
       log "Could not safely stop the stale Masthead authoring daemon at port $port."
       return 1
@@ -325,15 +335,6 @@ start_dev_daemon() {
     port="$(find_available_daemon_port 17374)"
   else
     wait_for_port_to_close "$port" || log "Port 17373 stayed occupied by an unhealthy process; daemon start may fail."
-  fi
-
-  log "Building Masthead daemon..."
-  if (cd "$APP_DIR" && "$NPM_BIN" run build:daemon) >>"$LOG_FILE" 2>&1; then
-    log "Masthead daemon build complete."
-  else
-    local build_status=$?
-    log "Masthead daemon build failed with exit status $build_status."
-    return "$build_status"
   fi
 
   log "Starting Masthead daemon at http://127.0.0.1:$port"
@@ -444,6 +445,10 @@ await mkdir(binDir, { recursive: true });
 await mkdir(applicationsDir, { recursive: true });
 await mkdir(systemdUserDir, { recursive: true });
 await mkdir(stateDir, { recursive: true });
+const daemonBuild = spawnSync(npmBin, ["run", "build:daemon"], { cwd: repo, stdio: "inherit" });
+if (daemonBuild.status !== 0) {
+  throw new Error(`Could not build the current checkout authoring CLI (exit ${daemonBuild.status ?? "unknown"})`);
+}
 await installCliLauncher();
 await writeFile(launcherPath, launcher, "utf8");
 await chmod(launcherPath, 0o755);

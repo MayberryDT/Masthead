@@ -22,9 +22,17 @@ function escapeRegExp(value: string): string {
 export function buildWorkbenchHandoff(input: {
   authoringCommand: string;
   databaseId: string;
+  sessionIds: string[];
   sessions: WorkbenchQueueSessionDto[];
 }): string {
-  const rows = input.sessions.map((session) => {
+  const sessionIds = [...new Set(input.sessionIds)].sort();
+  const authoritativeIds = new Set(sessionIds);
+  const metadataIds = new Set<string>();
+  const rows = input.sessions.filter((session) => {
+    if (!authoritativeIds.has(session.sessionId) || metadataIds.has(session.sessionId)) return false;
+    metadataIds.add(session.sessionId);
+    return true;
+  }).map((session) => {
     const title = sanitizeWorkbenchVisibleText(session.title);
     const sessionId = sanitizeWorkbenchVisibleText(session.sessionId);
     const runtime = sanitizeWorkbenchVisibleText(session.runtime);
@@ -45,7 +53,7 @@ export function buildWorkbenchHandoff(input: {
       command: input.authoringCommand,
       capability: "artifact_authoring"
     },
-    sessionIds: input.sessions.map((session) => session.sessionId)
+    sessionIds
   };
 
   return [
@@ -74,7 +82,7 @@ export function buildWorkbenchHandoff(input: {
     "- Expand beyond the selected sessions only with a strong join key; record the join rationale for every multi-session artifact.",
     "- A session package is resolved only after publication; runbook, ADR, and incident timeline each resolve through publication, N/A, or an existing published contribution.",
     "",
-    "Selected sessions:",
+    "Selected session metadata available on the current Workbench page (machine request sessionIds is authoritative):",
     ...rows
   ].join("\n");
 }

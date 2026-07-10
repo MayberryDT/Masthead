@@ -23,7 +23,10 @@ import type {
   WorkbenchNotAddedSummaryDto,
   WorkbenchSessionsResponse
 } from "../shared/workbench";
-import type { WorkbenchAuthoringCapabilitiesDto } from "../shared/workbenchAuthoring";
+import {
+  isWorkbenchAuthoringCapabilitiesDto,
+  type WorkbenchAuthoringCapabilitiesDto
+} from "../shared/workbenchAuthoring";
 
 export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
 export type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest };
@@ -1289,20 +1292,12 @@ export async function getWorkbenchAuthoringCapabilities(
     label: "workbench authoring capabilities",
     signal: options.signal
   });
-  if (
-    capabilities.capability !== "artifact_authoring" ||
-    capabilities.protocol !== "masthead.workbench.authoring/v1" ||
-    !capabilities.databaseId?.trim() ||
-    !isAbsoluteAuthoringCommand(capabilities.command)
-  ) {
-    throw new Error("Workbench authoring capabilities require an absolute installed command and database identity");
+  if (!isWorkbenchAuthoringCapabilitiesDto(capabilities)) {
+    throw new Error(
+      "Workbench authoring capabilities require the complete daemon-owned contract and an absolute installed command"
+    );
   }
   return capabilities;
-}
-
-function isAbsoluteAuthoringCommand(command: string | undefined): boolean {
-  const value = command?.trim() ?? "";
-  return value.startsWith("/") || /^(?:[A-Za-z]:[\\/]|\\\\)/.test(value);
 }
 
 export async function getWorkbenchActivity(

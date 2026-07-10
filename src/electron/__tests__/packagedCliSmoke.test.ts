@@ -12,11 +12,23 @@ describe("packaged authoring CLI smoke coverage", () => {
   test("packaged smoke invokes the capability-reported launcher from an isolated home", async () => {
     const source = await readFile("scripts/masthead-electron-packaged-smoke.js", "utf8");
 
-    expect(source).toContain('const homeDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-home-"))');
+    expect(source).toContain('homeDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-home-"))');
     expect(source).toContain("HOME: homeDir");
     expect(source).toContain('fetch(`${baseUrl}/workbench/authoring/capabilities`');
     expect(source).toContain("capabilities.command");
     expect(source).toContain('["workbench", "capabilities", "--json"]');
     expect(source).not.toContain("MASTHEAD_DAEMON_URL: baseUrl");
+    expect(source).toContain("buildPackagedCliInvocation");
+    expect(source).not.toContain("shell: process.platform");
+    expect(source).toContain("finally {");
+    expect(source).toContain("await terminateChild");
+    expect(source).toContain('child.kill("SIGKILL")');
+    expect(source).toContain("processGroupMayRemain");
+    expect(source).toContain('"taskkill.exe"');
+    expect(source).toContain("verificationAbort.abort()");
+    expect(source).toContain("const electronTimeout = new Promise");
+    expect(source).toContain("let settled = false");
+    expect(source).toContain("await rm(dataDir");
+    expect(source).toContain("await rm(homeDir");
   });
 });
