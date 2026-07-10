@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, open, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, open, rm, symlink, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -68,19 +68,22 @@ describe("canonical store ownership", () => {
     await expect(
       createTestDaemon(tempDir, databasePath, join(dataDirectory, "events.ndjson"), dataDirectory)
     ).rejects.toThrow("Move the database into that data directory");
+    await expect(access(dataDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(dirname(databasePath))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(access(`${databasePath}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(access(join(dataDirectory, "runtime", "database.lock"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  test("allows writable daemons for different databases in the same data directory", async () => {
+  test("rejects different writable databases in the same canonical data directory", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-distinct-writer-locks-"));
     tempDirs.push(tempDir);
     const firstDaemon = await createTestDaemon(tempDir, join(tempDir, "first.sqlite"), join(tempDir, "first.ndjson"));
-    const secondDaemon = await createTestDaemon(tempDir, join(tempDir, "second.sqlite"), join(tempDir, "second.ndjson"));
-    daemons.push(firstDaemon, secondDaemon);
+    daemons.push(firstDaemon);
 
     expect(firstDaemon.database).toBeDefined();
-    expect(secondDaemon.database).toBeDefined();
+    await expect(
+      createTestDaemon(tempDir, join(tempDir, "second.sqlite"), join(tempDir, "second.ndjson"))
+    ).rejects.toThrow("already owns canonical data directory");
   });
 
   test("blocks an old data-directory writer before starting a canonical-path writer", async () => {
@@ -95,7 +98,7 @@ describe("canonical store ownership", () => {
 
     await expect(
       createTestDaemon(tempDir, join(tempDir, "masthead.sqlite"), join(tempDir, "events.ndjson"))
-    ).rejects.toThrow("legacy data-directory writer");
+    ).rejects.toThrow("already owns canonical data directory");
   });
 
   test("publishes an old-format guard while a canonical-path writer is active", async () => {
@@ -105,31 +108,6 @@ describe("canonical store ownership", () => {
     daemons.push(daemon);
 
     await expect(open(join(tempDir, "runtime", "database.lock"), "wx")).rejects.toMatchObject({ code: "EEXIST" });
-  });
-
-  test("keeps an old-readable live guardian while any shared-data-directory owner remains", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-shared-legacy-guardian-"));
-    tempDirs.push(tempDir);
-    const first = await createTestDaemon(tempDir, join(tempDir, "first.sqlite"), join(tempDir, "first.ndjson"));
-    const second = await createTestDaemon(tempDir, join(tempDir, "second.sqlite"), join(tempDir, "second.ndjson"));
-    daemons.push(first, second);
-    const sentinelPath = join(tempDir, "runtime", "database.lock");
-    const firstSentinel = JSON.parse(await readFile(sentinelPath, "utf8")) as { guardian: boolean; pid: number };
-    expect(firstSentinel.guardian).toBe(true);
-    expect(firstSentinel.pid).not.toBe(process.pid);
-
-    process.kill(firstSentinel.pid, "SIGKILL");
-    await waitForPidToStop(firstSentinel.pid);
-    const replacement = await waitForReplacementGuardian(sentinelPath, firstSentinel.pid);
-    expect(replacement.guardian).toBe(true);
-    expect(replacement.pid).not.toBe(firstSentinel.pid);
-    expect(processIsAlive(replacement.pid)).toBe(true);
-
-    await first.close();
-    await expect(open(sentinelPath, "wx")).rejects.toMatchObject({ code: "EEXIST" });
-    await second.close();
-    await waitForPidToStop(replacement.pid);
-    await expect(access(sentinelPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("accepted live ingest writes canonical rows without appending new NDJSON product records", async () => {
@@ -333,35 +311,4 @@ type MigrationMarkerRow = {
 function migrationMarkerDetails(db: MastheadDatabase): Record<string, unknown> {
   const row = db.prepare("SELECT details_json FROM legacy_migrations WHERE migration_key = ?").get("legacy-events-ndjson-v1") as MigrationMarkerRow;
   return JSON.parse(row.details_json) as Record<string, unknown>;
-}
-
-async function waitForPidToStop(pid: number): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    if (!processIsAlive(pid)) return;
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
-  }
-  throw new Error(`PID ${pid} did not stop.`);
-}
-
-async function waitForReplacementGuardian(
-  sentinelPath: string,
-  previousPid: number
-): Promise<{ guardian: boolean; pid: number }> {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const sentinel = await readFile(sentinelPath, "utf8")
-      .then((value) => JSON.parse(value) as { guardian: boolean; pid: number })
-      .catch(() => undefined);
-    if (sentinel?.guardian && sentinel.pid !== previousPid && processIsAlive(sentinel.pid)) return sentinel;
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
-  }
-  throw new Error(`Guardian PID ${previousPid} was not replaced.`);
-}
-
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }

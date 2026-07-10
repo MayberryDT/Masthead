@@ -1,10 +1,10 @@
-import { access, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   acquireDatabaseWriterLock,
-  acquireLegacyDataDirectoryGuard,
+  assertWritableDatabaseLocation,
   type DatabaseWriterLock
 } from "../daemonOwnership.ts";
 
@@ -26,6 +26,18 @@ describe("database writer lock", () => {
     locks.push(targetLock);
 
     await expect(acquireDatabaseWriterLock(aliasPath)).rejects.toThrow("already owned");
+  });
+
+  test.skipIf(process.platform === "win32")("validates a dangling database symlink without creating target directories", async () => {
+    const tempDir = await createTempDir("masthead-read-only-db-location-");
+    const aliasPath = join(tempDir, "alias.sqlite");
+    const targetDirectory = join(tempDir, "missing-target");
+    const dataDirectory = join(tempDir, "missing-data");
+    await symlink(join("missing-target", "masthead.sqlite"), aliasPath, "file");
+
+    await expect(assertWritableDatabaseLocation(aliasPath, dataDirectory)).rejects.toThrow("is outside");
+    await expect(accessPath(targetDirectory)).resolves.toBe(false);
+    await expect(accessPath(dataDirectory)).resolves.toBe(false);
   });
 
   test("elects exactly one owner when concurrent contenders reclaim stale ownership", async () => {
@@ -62,21 +74,27 @@ describe("database writer lock", () => {
     await expect(acquireDatabaseWriterLock(databasePath)).rejects.toThrow("already owned");
   });
 
-  test("the legacy guardian exits and removes its sentinel after all owners disappear", async () => {
-    const tempDir = await createTempDir("masthead-legacy-guardian-crash-");
-    const first = await acquireLegacyDataDirectoryGuard(tempDir);
-    const second = await acquireLegacyDataDirectoryGuard(tempDir);
-    const ownersPath = join(tempDir, "runtime", "database.lock.canonical-owners");
-    const sentinelPath = join(tempDir, "runtime", "database.lock");
-    const sentinel = JSON.parse(await readFile(sentinelPath, "utf8")) as { guardian: boolean; pid: number };
-    expect(sentinel.guardian).toBe(true);
+  test("a paused mutex initializer cannot overwrite the successor that reclaimed its inode", async () => {
+    const tempDir = await createTempDir("masthead-paused-coordination-");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const opened = deferred<void>();
+    const resume = deferred<void>();
+    let hookCalls = 0;
+    const firstAttempt = acquireDatabaseWriterLock(databasePath, {
+      coordinationAfterOpen: async () => {
+        if (hookCalls > 0) return;
+        hookCalls += 1;
+        opened.resolve(undefined);
+        await resume.promise;
+      },
+      coordinationBlankReclaimMs: 25
+    });
+    await opened.promise;
+    const successor = await acquireDatabaseWriterLock(databasePath, { coordinationBlankReclaimMs: 25 });
+    locks.push(successor);
+    resume.resolve(undefined);
 
-    for (const owner of await readdir(ownersPath)) await rm(join(ownersPath, owner), { force: true });
-    await waitForMissingPath(sentinelPath);
-    await waitForPidToStop(sentinel.pid);
-    expect(processIsAlive(sentinel.pid)).toBe(false);
-    await first.release();
-    await second.release();
+    await expect(firstAttempt).rejects.toThrow("already owned");
   });
 });
 
@@ -86,27 +104,14 @@ async function createTempDir(prefix: string): Promise<string> {
   return path;
 }
 
-async function waitForMissingPath(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    if (!(await access(path).then(() => true).catch(() => false))) return;
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
-  }
-  throw new Error(`Path remained after guardian cleanup: ${path}`);
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolvePromise!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return { promise, resolve: resolvePromise };
 }
 
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForPidToStop(pid: number): Promise<void> {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    if (!processIsAlive(pid)) return;
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
-  }
-  throw new Error(`Guardian PID ${pid} remained alive.`);
+function accessPath(path: string): Promise<boolean> {
+  return lstat(path).then(() => true).catch(() => false);
 }
