@@ -45,7 +45,7 @@ describe("SessionLibraryDetail", () => {
     expect(css).toContain("--modal-open-dur: 400ms;");
     expect(css).toContain("--modal-close-dur: 400ms;");
     expect(openRule).toContain("transform: translateY(0) scale(1);");
-    expect(openRule).toContain("animation: usage-card-enter var(--modal-open-dur) cubic-bezier(0.17, 0.78, 0.13, 1) both;");
+    expect(openRule).toContain("animation: surface-card-enter var(--modal-open-dur) cubic-bezier(0.17, 0.78, 0.13, 1) both;");
     expect(closingRule).toContain("transform: translateY(9px) scale(var(--modal-scale-close));");
     expect(closingRule).toContain("animation: session-dossier-card-exit var(--modal-close-dur) cubic-bezier(0.17, 0.78, 0.13, 1) both;");
     expect(backdropRule).toContain("animation: none;");

@@ -9,10 +9,9 @@ import {
 
 function card(overrides: Partial<SessionCardView> & { sessionId: string }): SessionCardView {
   return {
-    sessionId: overrides.sessionId,
     project: "Masthead",
     title: "Session",
-    headline: { headline: "Session", source: "fallback", confidence: "low" },
+    headline: { headline: "Session", source: "offline", status: "ready" },
     stateLabel: "Active",
     primaryStatus: "reading",
     lifecycle: "running",
@@ -22,7 +21,7 @@ function card(overrides: Partial<SessionCardView> & { sessionId: string }): Sess
     lastActivityLabel: "now",
     changedFileCount: 0,
     indicators: [],
-    identityConfidence: "high",
+    identityConfidence: "direct",
     safeActions: [],
     isExpanded: false,
     ...overrides

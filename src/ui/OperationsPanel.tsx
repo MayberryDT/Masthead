@@ -7,16 +7,19 @@ import {
 } from "../app/daemonClient";
 import type { MastheadConnectionState } from "../app/connection/MastheadConnectionProvider";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { AdvancedSettings } from "./settings/AdvancedSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { McpSettings } from "./settings/McpSettings";
-import { OnboardingSettings } from "./settings/OnboardingSettings";
-import { PreferencesSettings } from "./settings/PreferencesSettings";
+import type { SettingsFeedback } from "./settings/SettingsActionFeedback";
+import { SettingsSpineCard, type SettingsSpineDetail } from "./settings/SettingsSpineCard";
 import { StorageSettings } from "./settings/StorageSettings";
 import { AppButton } from "./primitives/AppButton";
 
 export type DeletionScopeKind = "project" | "session" | "runtime" | "host";
+export type LocalDataAction = "none" | "export" | "raw_copies" | "scoped_delete" | "delete_all";
 
 export type LocalDataStatus = {
+  action: LocalDataAction;
   state:
     | "idle"
     | "confirm_delete"
@@ -51,7 +54,6 @@ type Props = {
   onDeletionScopeTargetChange?: (target: string) => void;
   onExportLocalData?: () => void;
   onMotionDisabledChange?: (disabled: boolean) => void;
-  onOpenOnboarding?: () => void;
   onReloadSettings?: () => void;
   onRequestPruneLocalData?: () => void;
   onConfirmPruneLocalData?: () => void;
@@ -66,7 +68,7 @@ export function OperationsPanel({
   dataSummary,
   deletionScopeKind = "project",
   deletionScopeTarget = "",
-  localDataStatus = { state: "idle" },
+  localDataStatus = { action: "none", state: "idle" },
   motionDisabled,
   sessionEndedNotificationsEnabled,
   onSessionEndedNotificationsEnabledChange,
@@ -80,7 +82,6 @@ export function OperationsPanel({
   onDeletionScopeTargetChange,
   onExportLocalData,
   onMotionDisabledChange,
-  onOpenOnboarding,
   onReloadSettings,
   onRequestDeleteLocalData,
   onRequestPruneLocalData,
@@ -88,9 +89,11 @@ export function OperationsPanel({
   readOnly = false,
   settingsState
 }: Props) {
+  const [activeDetail, setActiveDetail] = useState<SettingsSpineDetail>();
   const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
   const [localSettingsError, setLocalSettingsError] = useState<string>();
   const [localSettingsLoadState, setLocalSettingsLoadState] = useState<"loading" | "ready" | "error">(settingsState ? "ready" : "loading");
+  const [openDataDirectoryFeedback, setOpenDataDirectoryFeedback] = useState<SettingsFeedback>();
   const settingsError = controlledSettingsError ?? localSettingsError;
   const settingsLoadState = controlledSettingsLoadState ?? localSettingsLoadState;
   const effectiveSettings = loadedSettings ?? settingsState;
@@ -127,14 +130,18 @@ export function OperationsPanel({
   const openDataDirectory = async () => {
     const dataDirectory = effectiveSettings?.storage.dataDirectory ?? effectiveSettings?.data.dataDirectory;
     if (!dataDirectory) return;
+    setOpenDataDirectoryFeedback({ message: "Opening data folder…" });
     try {
       if (!isDesktopBridgeAvailable()) {
         throw new Error("Opening the data directory requires the Masthead desktop app.");
       }
       await invokeDesktopCommand<void>("open_data_directory_command", { path: dataDirectory });
-      setLocalSettingsError(undefined);
+      setOpenDataDirectoryFeedback({ message: "Opened data folder.", tone: "success" });
     } catch (error) {
-      setLocalSettingsError(error instanceof Error ? error.message : String(error));
+      setOpenDataDirectoryFeedback({
+        message: error instanceof Error ? error.message : String(error),
+        tone: "error"
+      });
     }
   };
 
@@ -142,6 +149,10 @@ export function OperationsPanel({
   const showSettingsSections = Boolean(effectiveSettings) || settingsLoadState !== "error";
   const localOnlyDeletionNote =
     "Deletes Masthead's local canonical data only. Original source harness files are not modified.";
+  const exportFeedback = actionFeedback(localDataStatus, "export");
+  const rawCopiesFeedback = actionFeedback(localDataStatus, "raw_copies");
+  const scopedDeleteFeedback = actionFeedback(localDataStatus, "scoped_delete");
+  const deleteAllFeedback = actionFeedback(localDataStatus, "delete_all");
 
   return (
     <section id="settings" className="settings-panel" aria-label="Settings">
@@ -157,39 +168,49 @@ export function OperationsPanel({
       ) : null}
 
       {showSettingsSections ? (
-        <div className="settings-layout settings-layout-priority-bay">
-          <div className="settings-priority-column settings-priority-column-storage">
-            <StorageSettings
-              busy={busy}
-              dataSummary={effectiveSummary}
-              onOpenDataDirectory={openDataDirectory}
-              onExport={onExportLocalData}
-              onRequestPrune={onRequestPruneLocalData}
-              settings={effectiveSettings}
-              writeDisabled={writesDisabled}
-            />
-          </div>
-          <div className="settings-priority-column settings-priority-column-session">
-            <OnboardingSettings onOpenOnboarding={onOpenOnboarding} readOnly={readOnly} />
-            <PreferencesSettings motionDisabled={motionDisabled} onMotionDisabledChange={onMotionDisabledChange} sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled} onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange} />
-          </div>
-          <div className="settings-priority-column settings-priority-column-mcp">
-            <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
-          </div>
-          <div className="settings-priority-column settings-priority-column-danger">
-            <DangerZone
-              busy={writesDisabled}
-              databaseId={effectiveSettings?.data.databaseId}
-              databasePath={effectiveSettings?.data.databasePath}
-              deletionScopeKind={deletionScopeKind}
-              deletionScopeTarget={deletionScopeTarget}
-              onDeletionScopeKindChange={onDeletionScopeKindChange}
-              onDeletionScopeTargetChange={onDeletionScopeTargetChange}
-              onRequestDeleteAll={onRequestDeleteLocalData}
-              onRequestScopedDelete={onRequestScopedDelete}
-              targets={effectiveSettings?.deletionTargets}
-            />
-          </div>
+        <div className="settings-workspace">
+          <SettingsSpineCard
+            activeDetail={activeDetail}
+            motionDisabled={motionDisabled}
+            onDetailChange={setActiveDetail}
+            onMotionDisabledChange={onMotionDisabledChange}
+            onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange}
+            sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled}
+          >
+            {activeDetail === "data" ? (
+              <StorageSettings
+                busy={busy}
+                dataSummary={effectiveSummary}
+                onOpenDataDirectory={openDataDirectory}
+                onExport={onExportLocalData}
+                onRequestPrune={onRequestPruneLocalData}
+                exportFeedback={exportFeedback}
+                openDataDirectoryFeedback={openDataDirectoryFeedback}
+                rawCopiesFeedback={rawCopiesFeedback}
+                settings={effectiveSettings}
+                writeDisabled={writesDisabled}
+              />
+            ) : null}
+            {activeDetail === "agent-access" ? (
+              <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
+            ) : null}
+            {activeDetail === "advanced" ? <AdvancedSettings settings={effectiveSettings} /> : null}
+            {activeDetail === "danger" ? (
+              <DangerZone
+                busy={writesDisabled}
+                databaseId={effectiveSettings?.data.databaseId}
+                deletionScopeKind={deletionScopeKind}
+                deletionScopeTarget={deletionScopeTarget}
+                onDeletionScopeKindChange={onDeletionScopeKindChange}
+                onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+                onRequestDeleteAll={onRequestDeleteLocalData}
+                onRequestScopedDelete={onRequestScopedDelete}
+                deleteAllFeedback={deleteAllFeedback}
+                scopedDeleteFeedback={scopedDeleteFeedback}
+                targets={effectiveSettings?.deletionTargets}
+              />
+            ) : null}
+          </SettingsSpineCard>
         </div>
       ) : null}
 
@@ -229,9 +250,23 @@ export function OperationsPanel({
         tone="danger"
       />
 
-      {localDataStatus.message && !localDataStatus.state.startsWith("confirm") ? (
-        <p className={`settings-status ${localDataStatus.state === "error" ? "error" : ""}`}>{localDataStatus.message}</p>
-      ) : null}
     </section>
   );
+}
+
+function actionFeedback(
+  status: LocalDataStatus,
+  action: Exclude<LocalDataAction, "none">
+): SettingsFeedback | undefined {
+  if (!status.message || status.state.startsWith("confirm")) return undefined;
+  if (status.action !== action) return undefined;
+  return {
+    message: status.message,
+    tone:
+      status.state === "error"
+        ? "error"
+        : status.state === "exported" || status.state === "pruned" || status.state === "deleted"
+          ? "success"
+          : undefined
+  };
 }

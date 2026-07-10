@@ -333,7 +333,7 @@ describe("SessionDossier", () => {
     currentDossier.artifacts = [
       {
         artifactId: "artifact-forbidden-preview",
-        artifactKind: "bug_fix_trace",
+        artifactKind: "runbook",
         confidence: "high",
         content: {
           command: "mastheadctl workbench",

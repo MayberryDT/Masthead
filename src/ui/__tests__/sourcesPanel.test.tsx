@@ -125,7 +125,9 @@ describe("SourcesPanel", () => {
     expect(html).toContain("Queued");
     expect(html).toContain("14");
     expect(html).toContain("sources-summary-strip");
-    expect(html).toContain("usage-metric");
+    expect(html).toContain("summary-metric");
+    expect(html).not.toContain("usage-summary-strip");
+    expect(html).not.toContain("usage-metric");
     expect(html).not.toContain("sources-action-summary");
     expect(html).not.toContain("Inventory");
     expect(html).not.toContain("source families indexed");
@@ -388,7 +390,7 @@ describe("SourcesPanel", () => {
 
     expect(openingRule).toContain("transform: translateY(9px) scale(var(--modal-scale));");
     expect(openRule).toContain("transform: none;");
-    expect(openRule).toContain("animation: usage-card-enter var(--modal-open-dur) cubic-bezier(0.17, 0.78, 0.13, 1);");
+    expect(openRule).toContain("animation: surface-card-enter var(--modal-open-dur) cubic-bezier(0.17, 0.78, 0.13, 1);");
     expect(openRule).not.toContain("both");
     expect(settledRule).toContain("transform: none;");
     expect(settledRule).toContain("animation: none;");
@@ -398,7 +400,7 @@ describe("SourcesPanel", () => {
   test("uses shared card entrance motion for source inventory cards", () => {
     const css = readFileSync("src/styles/masthead.css", "utf8");
 
-    expect(css).toMatch(/\.usage-summary-strip \.usage-metric,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: usage-card-enter 400ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;[\s\S]*transform-origin: 50% 100%;/);
+    expect(css).toMatch(/\.summary-strip \.summary-metric,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: surface-card-enter 400ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;[\s\S]*transform-origin: 50% 100%;/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: none/);
   });
 });

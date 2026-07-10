@@ -141,6 +141,7 @@ describe("Masthead worktree connector planning", () => {
     "/adapters",
     "/imports",
     "/data/summary",
+    "/knowledge-flow/summary",
     "/logbook/summary",
     "/mcp/status",
     "/mcp/launch-config",

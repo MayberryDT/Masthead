@@ -39,7 +39,10 @@ source files / hooks / local scans
 - wires Sources, Workbench, Logbook, and settings controllers,
 - manages first-run onboarding visibility,
 - handles collector autostart state and startup log entries,
-- consumes live projection, logbook artifacts, usage, and session detail data.
+- consumes live projection, logbook artifacts, and session detail data.
+
+The renderer Usage tab and sidebar Today statistics are retired. The daemon usage endpoint may
+remain for compatibility or internal consumers, but it is not a primary renderer surface.
 
 Surface modules (do not force Now card DOM onto every surface):
 

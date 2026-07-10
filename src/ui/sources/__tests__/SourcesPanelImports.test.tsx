@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { act } from "react";
+import { readFileSync } from "node:fs";
 import { createRoot } from "react-dom/client";
 import { describe, expect, test, vi } from "vitest";
 import type { AdapterStatus, ImportJob, SourcesImportPreview } from "../../../app/daemonClient";
@@ -729,6 +730,22 @@ describe("SourcesPanel import controls", () => {
     expect(container.textContent).toContain("Configure provider settings now if you want.");
     expect(container.textContent).toContain("Remote enrichment");
     expect(container.textContent).toContain("Save provider");
+    expect(
+      [...container.querySelectorAll(".settings-section-head .mono-label")].map((node) => node.textContent)
+    ).toEqual(["Enrichment", "Enrichment"]);
+    expect(container.querySelectorAll(".settings-section-head > div")).toHaveLength(2);
+
+    const css = readFileSync("src/styles/settings.css", "utf8");
+    expect(css).toMatch(/\.settings-section\s*\{[\s\S]*gap: 10px;[\s\S]*overflow: hidden;[\s\S]*border-radius: 5px;[\s\S]*background: #081d2b;[\s\S]*padding: 14px;/);
+    expect(css).toMatch(/\.settings-section::before\s*\{[\s\S]*height: 2px;[\s\S]*background: var\(--blue, #2ea7ff\);/);
+    expect(css).toMatch(/\.settings-section-head h2\s*\{[\s\S]*margin: 2px 0 0;/);
+    expect(css).toMatch(/\.settings-section-head \.mono-label\s*\{[\s\S]*margin: 0;[\s\S]*text-transform: uppercase;/);
+    expect(css).toMatch(/\.settings-section-body\s*\{[\s\S]*display: grid;\s*\}/);
+    expect(css).toMatch(/\.settings-row\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto;[\s\S]*align-items: start;[\s\S]*border-bottom: 1px solid rgba\(194, 221, 241, 0\.08\);[\s\S]*padding: 8px 0;/);
+    expect(css).toMatch(/\.settings-panel \.settings-spine-detail \.settings-row\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(180px, 360px\);/);
+    expect(css).toMatch(/\.settings-provider-field input\s*\{[\s\S]*min-height: 36px;/);
+    expect(css).toContain(".settings-provider-field input:focus {");
+    expect(css).not.toContain(".settings-provider-field input:focus-visible {");
     await act(async () => root.unmount());
   });
 

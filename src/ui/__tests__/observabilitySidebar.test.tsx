@@ -18,8 +18,9 @@ describe("ObservabilitySidebar", () => {
     expect(html).not.toContain("Alerts");
     expect(html).toContain("Logbook");
     expect(html).toContain("Sources");
-    expect(html).toContain("Usage");
+    expect(html).not.toContain("Usage");
     expect(html).not.toContain("Agent Access");
+    expect(html).toContain("Knowledge flow");
     expect(html).not.toContain("Workspace");
     expect(html).not.toContain("Overview");
     expect(html).not.toContain("Analysis");
@@ -42,5 +43,25 @@ describe("ObservabilitySidebar", () => {
 
   test("Workbench and Logbook use distinct registry icons", () => {
     expect(iconRegistry.workbench).not.toBe(iconRegistry.logbook);
+  });
+
+  test("renders knowledge flow at the bottom of the sidebar", () => {
+    const html = renderToStaticMarkup(
+      <ObservabilitySidebar
+        version={APP_VERSION_LABEL}
+        activeCount={24}
+        knowledgeFlowSummary={{
+          capturedSessions: 17,
+          workbenchSessions: 6,
+          publishedArtifacts: 11,
+          automaticallyResolvedSessions: 4
+        }}
+      />
+    );
+
+    expect(html).toContain('aria-label="Knowledge flow"');
+    expect(html).toContain("Captured sessions");
+    expect(html).toContain("4 automatically resolved");
+    expect(html.indexOf('aria-label="Knowledge flow"')).toBeGreaterThan(html.indexOf('aria-label="Masthead sections"'));
   });
 });

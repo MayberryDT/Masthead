@@ -59,9 +59,7 @@ import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
 import { SettingsSurface } from "./surfaces/SettingsSurface";
 import { SourcesSurface } from "./surfaces/SourcesSurface";
-import { UsageSurface } from "./surfaces/UsageSurface";
 import { WorkbenchSurface } from "./surfaces/WorkbenchSurface";
-import { UsagePanel } from "../ui/usage/UsagePanel";
 import { WorkbenchPanel } from "../ui/workbench/WorkbenchPanel";
 import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
@@ -70,7 +68,7 @@ import { useLogbookController } from "./logbook/useLogbookController";
 import { useSettingsDataController } from "./settings/useSettingsDataController";
 import { useSourcesController } from "./sources/useSourcesController";
 import { useSourcesConnectorsController } from "./sources/useSourcesConnectorsController";
-import { useUsageStatsController } from "./usage/useUsageStatsController";
+import { useKnowledgeFlowSummary } from "./sidebar/useKnowledgeFlowSummary";
 import { useWorkbenchController } from "./workbench/useWorkbenchController";
 import { clearUnsupportedLocationHash } from "./locationHash";
 
@@ -253,8 +251,7 @@ export function App() {
     if (connection.state.state === "probing") return { state: "connecting" };
     return liveConnection;
   }, [connection.state, liveConnection]);
-  const usage = useUsageStatsController({
-    active: activeSurface === "usage",
+  const knowledgeFlow = useKnowledgeFlowSummary({
     activeProjectionUrl,
     isLive: effectiveLiveConnection.state === "live",
     refreshKey: sourceLibraryRefreshKey
@@ -307,11 +304,6 @@ export function App() {
     onReviewDispositionsChanged: handleReviewDispositionsChanged,
     writable: connection.writable
   });
-  const reopenOnboarding = useCallback(() => {
-    setActiveSurface("sources");
-    sourcesConnectors.openOnboarding();
-  }, [sourcesConnectors.openOnboarding]);
-
   useEffect(() => {
     if (
       sourcesConnectors.onboardingOpen &&
@@ -666,7 +658,7 @@ export function App() {
           onImportMetadata={handleImportMetadata}
           onLoadAdapterSources={handleLoadAdapterSources}
           onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
-          onOpenOnboarding={reopenOnboarding}
+          onOpenOnboarding={sourcesConnectors.openOnboarding}
           onPollImports={handlePollActiveImports}
           onPreviewImport={sourcesController.previewImport}
           onRepairSources={handleRepairSources}
@@ -749,21 +741,6 @@ export function App() {
           total={workbench.total}
         />
       </WorkbenchSurface>
-    ) : activeSurface === "usage" ? (
-      <UsageSurface>
-        {needsRecoveryPanel ? (
-          recoveryPanel
-        ) : (
-          <UsagePanel
-            stats={usage.stats}
-            window={usage.window}
-            loading={usage.loading}
-            error={usage.error}
-            onWindowChange={usage.setWindow}
-            onRetry={usage.retry}
-          />
-        )}
-      </UsageSurface>
     ) : activeSurface === "settings" ? (
       <SettingsSurface>
         {needsRecoveryPanel ? (
@@ -789,7 +766,6 @@ export function App() {
             onDeletionScopeTargetChange={settingsData.changeDeletionScopeTarget}
             onExportLocalData={settingsData.exportLocalData}
             onMotionDisabledChange={handleMotionDisabledChange}
-            onOpenOnboarding={reopenOnboarding}
             onReloadSettings={() => void settingsData.loadSettingsState()}
             onRequestPruneLocalData={settingsData.requestPruneLocalData}
             onConfirmPruneLocalData={settingsData.confirmPruneLocalData}
@@ -864,9 +840,9 @@ export function App() {
             version={APP_VERSION_LABEL}
             activeCount={observabilitySessionTotal(visibleSummary)}
             activeSurface={activeSurface}
-            usageStats={usage.sidebarStats}
-            usageLoading={usage.sidebarLoading}
-            usageError={usage.sidebarError}
+            knowledgeFlowSummary={knowledgeFlow.summary}
+            knowledgeFlowLoading={knowledgeFlow.loading}
+            knowledgeFlowError={knowledgeFlow.error}
             onSurfaceChange={setActiveSurface}
           />
         }

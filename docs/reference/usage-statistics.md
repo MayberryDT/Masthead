@@ -50,9 +50,11 @@ The response shape is:
 
 ## UI
 
-- The left sidebar shows compact Today stats for sessions, tokens, tool calls, and MCP queries.
-- The Usage tab exposes the full statistics view with window controls, summary metrics, breakdown tables, activity buckets, and data coverage.
-- Empty states distinguish between no indexed sessions and sessions that exist without imported token rows.
+The renderer Usage tab and the sidebar Today statistics were retired from the primary interface.
+Usage is not a navigation destination, and the sidebar does not show token or activity totals.
+
+The daemon endpoint may remain for compatibility and internal consumers. Its presence does not
+reintroduce a renderer Usage surface.
 
 ## Source Tables
 

@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: Masthead
-description: Local-first session data product for importing, searching, enriching, and reusing AI-agent session history. The UI is a dense developer console that keeps live work, historical records, sources, and agent access evidence-forward.
+description: Local-first session data product for importing, searching, enriching, and reusing AI-agent session history. The UI is a dense developer console that keeps live work, historical records, sources, and local settings evidence-forward.
 colors:
   primary: "#031019"
   secondary: "#071b28"
@@ -218,8 +218,8 @@ Product requirements live in `prd.md`. Historical implementation plans under `do
 ## Overview
 
 Masthead is a local-first session data product for people who use multiple AI-agent harnesses.
-The interface makes one private session graph useful in four ways: live awareness, historical
-retrieval, source management, and agent access.
+The interface makes one private session graph useful through live awareness, historical retrieval,
+source management, and read-only agent reuse.
 
 The visual system remains a dense, calm developer console. Shared chrome, typography, color,
 spacing, and evidence patterns unify the application; individual surfaces may use different
@@ -230,7 +230,7 @@ The UI helps the developer answer what is happening now, what happened before, w
 from, and what an existing agent can safely retrieve. It is not a marketing site, KPI dashboard,
 analytics product, task manager, employee monitor, chat client, or token-spend console.
 
-The center workspace is the product. Now, Workbench, Logbook, Sources, Agent Access, and Settings
+The center workspace is the product. Now, Workbench, Logbook, Sources, and Settings
 must share one visual language: a headed surface, compact controls, restrained stats when useful,
 and evidence-forward records. Healthy background work should stay visually quiet. Attention,
 conflicts, failed verification, stale data, and inferred states should be prominent only when they
@@ -283,9 +283,10 @@ recur across views, but each surface may use the structure that fits its job:
 - Now may use cards and state lanes.
 - Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
 - Logbook should optimize scanning, filtering, and opening historical records.
-- Sources should optimize harness discovery and live-connector enablement (not session import jobs).
-- Agent Access should optimize setup, permission boundaries, and auditability.
-- Settings should optimize exact blast-radius controls and local data policy.
+- Sources owns onboarding and should optimize harness discovery and live-connector enablement (not
+  session import jobs).
+- Settings should optimize direct controls, exact blast-radius controls, local data policy, and
+  compact MCP setup and access evidence.
 - The right rail is optional and must be contextual to the active surface.
 
 ## Surface Archetypes
@@ -297,8 +298,9 @@ recur across views, but each surface may use the structure that fits its job:
   requested via Copy Agent Prompt, never via an in-app enrichment editor.
 - Logbook: dense table plus inspector.
 - Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
-- Agent Access: setup, permissions, tools, and audit tables.
-- Settings: vertical settings sections and danger zone.
+- Settings: one centered compact steel card with direct controls for everyday preferences and one
+  inline detail section at a time for Data, Agent access, Advanced, or Danger zone.
+- Agent access is a compact MCP information/setup section inside Settings, not a primary surface.
 
 Shared visual language does not permit reusing fixed live-card DOM or CSS on every surface.
 
@@ -379,7 +381,17 @@ Sources is the harness connection control plane for live capture, not an import 
 
 It should look like a connector inventory: one row per live-capable harness, with presence, live status, and a clear Enable / Repair / Test action. Detail drawers show managed paths, endpoints, activation steps (for example Codex hook trust), and diagnostics. Do not center import job tables, transcript bulk import, or Workbench pipeline progress on Sources.
 
-Each connector row should answer: is this harness on the machine, is Masthead wired for live capture, what human activation remains, and did the last test or live event prove it. Deeper session processing belongs in Workbench; published history belongs in Logbook.
+Sources owns onboarding. Each connector row should answer: is this harness on the machine, is
+Masthead wired for live capture, what human activation remains, and did the last test or live event
+prove it. Deeper session processing belongs in Workbench; published history belongs in Logbook.
+
+### Settings
+
+Settings uses one centered compact steel card. Everyday preferences are direct controls; Data,
+Agent access, Advanced, and Danger zone open one inline detail section at a time. Rows should prefer
+direct controls with no explanatory paragraph unless safety or ambiguity requires one. Agent access
+stays compact and evidence-forward: show MCP status, setup, format selection, testing, and copy
+actions without turning the section into a code wall.
 
 ### Toolbar, Filters, And Dropdowns
 
@@ -452,7 +464,7 @@ Do not animate evidence values just because they changed. Do not run full headli
 Do:
 
 - Read this file before UI work.
-- Use shared surface chrome, typography, controls, and evidence patterns across Now, Logbook, Sources, Agent Access, and Settings.
+- Use shared surface chrome, typography, controls, and evidence patterns across Now, Logbook, Sources, and Settings.
 - Keep Masthead dense, local, evidence-forward, and state-first.
 - Make healthy work quiet and attention states unmistakable.
 - Keep routine refresh motion quiet and reserve richer motion for user-invoked or semantic changes.
@@ -466,7 +478,7 @@ Don't:
 
 - Recreate the deleted Raycast-inspired design file.
 - Treat archived plan files or old screenshots as current design authority.
-- Force Logbook, Sources, Agent Access, or Settings into the live session-card composition.
+- Force Logbook, Sources, or Settings into the live session-card composition.
 - Use generic SaaS analytics patterns, hero sections, decorative KPI cards, token dashboards, or marketing copy.
 - Add cards inside cards or floating page-section cards.
 - Add decorative blobs, one-note purple gradients, beige productivity palettes, or bright dashboard themes.
@@ -487,4 +499,4 @@ Any UI change that touches the visual system should pass these gates before bein
 5. Confirm no `No live connection` state appears when a healthy connector or bridge is expected.
 6. Confirm dropdowns, layout changes, card hover/press states, and modals visibly transition.
 7. Confirm all text fits, wraps, clamps, or ellipsizes inside its container.
-8. Confirm Logbook, Sources, Agent Access, and Settings use the shared visual language without being forced into the Now card composition.
+8. Confirm Logbook, Sources, and Settings use the shared visual language without being forced into the Now card composition.

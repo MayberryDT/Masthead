@@ -6,104 +6,107 @@
   min-width: 0;
 }
 
-.settings-layout {
+.settings-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-  gap: 12px;
-  min-width: 0;
-}
-
-.settings-layout-priority-bay {
   width: 100%;
-  grid-template-columns: minmax(190px, 0.82fr) minmax(220px, 1fr) minmax(270px, 1.16fr) minmax(220px, 1fr) minmax(190px, 0.82fr);
-  max-width: none;
-}
-
-.settings-priority-column {
-  display: grid;
-  align-content: start;
-  gap: 12px;
+  min-height: min(720px, calc(100vh - 180px));
+  place-items: start center;
   min-width: 0;
+  padding: clamp(18px, 5vh, 56px) 18px 28px;
 }
 
-.settings-layout-priority-bay .settings-section {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
+.settings-spine-card {
+  width: min(100%, 680px);
+  padding: 14px;
 }
 
-.settings-layout-priority-bay .settings-section,
-.settings-layout-priority-bay .settings-section-wide,
-.settings-layout-priority-bay .settings-section-mcp,
-.settings-layout-priority-bay .settings-section-danger {
-  grid-column: auto;
-}
-
-.settings-layout-priority-bay .settings-row,
-.settings-layout-priority-bay .settings-mcp-summary,
-.settings-layout-priority-bay .settings-mcp-access,
-.settings-layout-priority-bay .settings-mcp-tab-meta {
-  grid-template-columns: minmax(0, 1fr);
-  align-items: stretch;
-}
-
-.settings-layout-priority-bay .settings-row-value,
-.settings-layout-priority-bay .settings-row-control,
-.settings-layout-priority-bay .settings-mcp-actions,
-.settings-layout-priority-bay .settings-inline-actions,
-.settings-layout-priority-bay .settings-delete-controls {
-  grid-column: 1;
-  justify-self: stretch;
-  justify-content: flex-start;
-  max-width: none;
-  text-align: left;
-}
-
-.settings-layout-priority-bay .settings-row-control > .app-button,
-.settings-layout-priority-bay .settings-inline-actions .app-button {
-  width: fit-content;
-  max-width: 100%;
-}
-
-.settings-layout-priority-bay .settings-mcp-actions {
-  display: grid;
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+.settings-spine-header {
+  display: flex;
+  min-height: 28px;
   align-items: center;
-  justify-content: start;
-  gap: 8px;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line, rgba(194, 221, 241, 0.13));
+  padding-bottom: 8px;
 }
 
-.settings-layout-priority-bay .settings-mcp-refresh-button,
-.settings-layout-priority-bay .settings-mcp-test-button {
-  justify-self: start;
-  width: fit-content;
-  max-width: 100%;
+.settings-spine-header h2 {
+  margin: 0;
+  color: var(--ash, #61798e);
+  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
 }
 
-.settings-layout-priority-bay .settings-mcp-status {
-  justify-self: start;
-  max-width: 100%;
+.settings-spine-header span {
+  color: var(--mute, #91a8ba);
+  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 9px;
+  text-transform: uppercase;
 }
 
-.settings-layout-priority-bay .settings-mcp-test-button {
-  grid-column: 1;
-}
-
-.settings-layout-priority-bay .settings-mcp-tabs {
-  width: 100%;
-}
-
-.settings-layout-priority-bay .settings-mcp-tabs button {
-  flex: 1 1 auto;
-}
-
-.settings-layout-priority-bay .settings-mcp-tab-meta {
+.settings-spine-list {
   display: grid;
+  margin-top: 8px;
 }
 
-.settings-layout-priority-bay .settings-section-mcp .code-block pre {
-  max-height: 176px;
+.settings-spine-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 46px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid rgba(194, 221, 241, 0.08);
+}
+
+.settings-spine-copy {
+  min-width: 0;
+}
+
+.settings-spine-copy strong {
+  display: block;
+  color: var(--ink, #f6fbff);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.settings-spine-row.danger .settings-spine-copy strong {
+  color: #ffb5b0;
+}
+
+.settings-spine-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.settings-spine-control > .app-button {
+  min-width: 72px;
+}
+
+.settings-spine-card .settings-toggle {
+  flex-direction: row-reverse;
+}
+
+.settings-spine-detail {
+  margin-top: 10px;
+  border-top: 1px solid var(--line, rgba(194, 221, 241, 0.13));
+  padding-top: 10px;
+  transform-origin: top center;
+  animation: forged-plate-in var(--dropdown-open-dur) var(--dropdown-weight-ease) both;
+}
+
+.settings-spine-note {
+  margin: 10px 0 0;
+  border-top: 1px solid var(--line, rgba(194, 221, 241, 0.13));
+  padding-top: 9px;
+  color: var(--green, #36d869);
+  font-size: 9px;
+  line-height: 1.4;
 }
 
 .settings-section {
@@ -119,6 +122,43 @@
     0 0 0 1px rgba(92, 153, 187, 0.14),
     inset 0 1px 0 rgba(190, 225, 245, 0.035);
   padding: 14px;
+}
+
+.settings-panel .settings-spine-detail > .settings-section {
+  position: relative;
+  isolation: auto;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  gap: 0;
+  padding: 15px 16px 7px;
+  animation: none;
+  transform: none;
+  transition: none;
+}
+
+.settings-panel .settings-spine-detail > .settings-section:hover {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.settings-panel .settings-spine-detail > .settings-section::before,
+.settings-panel .settings-spine-detail > .settings-section::after {
+  content: none;
+  display: none;
+}
+
+.settings-panel .settings-spine-detail > .settings-section > * {
+  position: static;
+  z-index: auto;
+}
+
+.settings-panel .settings-spine-detail > .settings-section-danger {
+  box-shadow: inset 2px 0 0 rgba(255, 72, 62, 0.72);
 }
 
 .settings-section-wide {
@@ -153,6 +193,11 @@
   line-height: 1.2;
 }
 
+.settings-section-head .mono-label {
+  margin: 0;
+  text-transform: uppercase;
+}
+
 .settings-section-head p {
   max-width: 680px;
   margin: 4px 0 0;
@@ -161,17 +206,25 @@
   line-height: 1.35;
 }
 
-.settings-section-head .mono-label {
-  margin: 0;
-  text-transform: uppercase;
-}
-
 .settings-section-body {
   display: grid;
 }
 
-.settings-section-mcp {
-  grid-column: span 8;
+.settings-panel .settings-spine-detail .settings-section-head h2 {
+  margin: 0;
+}
+
+.settings-panel .settings-spine-detail .settings-section-head .mono-label {
+  margin: 0 0 4px;
+  text-transform: none;
+}
+
+.settings-panel .settings-spine-detail .settings-section-head p {
+  margin: 5px 0 0;
+}
+
+.settings-panel .settings-spine-detail .settings-section-body {
+  margin-top: 9px;
 }
 
 .settings-row {
@@ -181,6 +234,14 @@
   gap: 8px 12px;
   border-bottom: 1px solid rgba(194, 221, 241, 0.08);
   padding: 8px 0;
+}
+
+.settings-panel .settings-spine-detail .settings-row {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 360px);
+  align-items: center;
+  border-top: 1px solid rgba(194, 221, 241, 0.1);
+  border-bottom: 0;
+  padding: 9px 0;
 }
 
 .settings-row-copy {
@@ -203,6 +264,20 @@
   overflow-wrap: anywhere;
 }
 
+.settings-row-detail {
+  display: contents;
+}
+
+.settings-panel .settings-spine-detail .settings-row-detail {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
 .settings-row-value {
   grid-column: 2;
   min-width: 0;
@@ -214,10 +289,20 @@
   overflow-wrap: anywhere;
 }
 
+.settings-panel .settings-spine-detail .settings-row-value {
+  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  justify-self: auto;
+}
+
 .settings-row-control {
   grid-column: 1 / -1;
   min-width: 0;
   justify-self: stretch;
+}
+
+.settings-panel .settings-spine-detail .settings-row-control {
+  grid-column: auto;
+  justify-self: auto;
 }
 
 .settings-inline-actions,
@@ -228,6 +313,23 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.settings-inline-feedback {
+  max-width: 240px;
+  color: var(--mute, #91a8ba);
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.settings-inline-feedback.success {
+  color: #9df2b8;
+}
+
+.settings-inline-feedback.error {
+  color: #ffaaa5;
 }
 
 .settings-row-control > .app-button,
@@ -509,46 +611,13 @@
   color: #ffaaa5;
 }
 
-.settings-mcp-summary,
-.settings-mcp-access {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px 14px;
-  min-width: 0;
-  border-bottom: 1px solid rgba(194, 221, 241, 0.08);
-  padding: 8px 0;
-}
-
-.settings-mcp-label {
-  display: block;
-  color: var(--ink, #f6fbff);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.settings-mcp-summary p,
-.settings-mcp-access p,
-.settings-mcp-tab-meta p {
-  margin: 3px 0 0;
-  color: var(--mute, #91a8ba);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.settings-mcp-actions {
+.settings-mcp-setup {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.settings-mcp-config {
-  display: grid;
-  gap: 10px;
   min-width: 0;
-  padding-top: 10px;
 }
 
 .settings-mcp-tabs {
@@ -564,7 +633,7 @@
 }
 
 .settings-mcp-tabs button {
-  min-height: 30px;
+  min-height: 40px;
   border: 0;
   border-radius: 2px;
   background: transparent;
@@ -578,7 +647,6 @@
 .settings-mcp-tabs button:hover,
 .settings-mcp-tabs button:focus-visible {
   color: var(--ink, #f6fbff);
-  outline: 0;
 }
 
 .settings-mcp-tabs button.active {
@@ -587,62 +655,25 @@
   color: var(--ink, #f6fbff);
 }
 
-.settings-mcp-tab-panel {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
+.settings-mcp-tabs button:focus-visible {
+  outline: 0;
+  box-shadow:
+    0 0 0 1px rgba(116, 185, 224, 0.34),
+    0 0 0 3px rgba(46, 167, 255, 0.12);
 }
 
-.settings-mcp-tab-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-}
-
-.settings-section-mcp .code-block {
-  min-width: 0;
-  margin: 0;
-}
-
-.settings-section-mcp .code-block pre {
-  max-height: 150px;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-.settings-section-mcp .code-block code {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.settings-mcp-secondary {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
-.settings-mcp-secondary summary {
-  cursor: pointer;
-  color: var(--body, #d6e4ef);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.settings-mcp-result {
-  display: grid;
-  gap: 6px;
-  border-top: 1px solid rgba(194, 221, 241, 0.08);
-  margin-top: 10px;
-  padding-top: 10px;
-}
-
-.settings-mcp-result p {
-  margin: 0;
+.settings-mcp-inline-result {
+  justify-self: end;
+  width: min(360px, 100%);
+  margin: -4px 0 8px;
   color: var(--mute, #91a8ba);
   font-size: 12px;
   line-height: 1.35;
+  text-align: right;
+}
+
+.settings-mcp-inline-result.error {
+  color: #ffaaa5;
 }
 
 .settings-delete-controls {
@@ -660,8 +691,21 @@
   min-width: 0;
 }
 
+.settings-panel .settings-delete-controls .toolbar-select-trigger {
+  grid-template-columns: var(--icon-toolbar) minmax(0, 1fr) 27px;
+  justify-content: normal;
+  gap: 7px;
+  padding: 0 0 0 var(--space-sm);
+  text-align: left;
+}
+
+.settings-panel .settings-delete-controls .toolbar-select-trigger > span,
+.settings-panel .settings-delete-controls .toolbar-select-chevron {
+  display: block;
+}
+
 .settings-delete-controls input {
-  min-height: 36px;
+  min-height: 40px;
   min-width: 0;
   border: 1px solid rgba(92, 153, 187, 0.18);
   border-radius: 3px;
@@ -670,7 +714,7 @@
   padding: 0 10px;
 }
 
-.settings-delete-controls input:focus {
+.settings-delete-controls input:focus-visible {
   outline: 0;
   box-shadow:
     0 0 0 1px rgba(116, 185, 224, 0.34),
@@ -678,7 +722,6 @@
 }
 
 .settings-error,
-.settings-status,
 .confirm-dialog {
   border: 1px solid rgba(92, 153, 187, 0.16);
   border-radius: 6px;
@@ -692,7 +735,6 @@
 }
 
 .settings-error,
-.settings-status.error,
 .confirm-dialog-danger {
   border-color: rgba(255, 97, 97, 0.25);
   background: rgba(255, 97, 97, 0.08);
@@ -732,7 +774,7 @@
 
 .confirm-dialog-typed input {
   min-width: min(360px, 100%);
-  min-height: 36px;
+  min-height: 40px;
   border: 1px solid rgba(92, 153, 187, 0.22);
   border-radius: 3px;
   background: #061925;
@@ -741,7 +783,7 @@
   padding: 8px 10px;
 }
 
-.confirm-dialog-typed input:focus {
+.confirm-dialog-typed input:focus-visible {
   outline: 0;
   box-shadow:
     0 0 0 1px rgba(116, 185, 224, 0.34),
@@ -749,76 +791,93 @@
 }
 
 @media (max-width: 860px) {
-  .settings-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .settings-section,
-  .settings-section-wide,
-  .settings-section-mcp,
-  .settings-section-danger {
-    grid-column: 1;
-  }
-
-  .settings-row,
-  .confirm-dialog {
+  .sources-onboarding-step-content .settings-row,
+  .source-detail-enrichment .settings-row {
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
-    grid-template-columns: 1fr;
-    flex-direction: column;
   }
 
-  .settings-row-copy,
-  .settings-row-control,
-  .settings-row-value,
-  .settings-mcp-actions,
-  .settings-inline-actions,
-  .settings-delete-controls,
-  .confirm-dialog-actions {
+  .sources-onboarding-step-content .settings-row-copy,
+  .sources-onboarding-step-content .settings-row-control,
+  .sources-onboarding-step-content .settings-row-value,
+  .sources-onboarding-step-content .settings-inline-actions,
+  .source-detail-enrichment .settings-row-copy,
+  .source-detail-enrichment .settings-row-control,
+  .source-detail-enrichment .settings-row-value,
+  .source-detail-enrichment .settings-inline-actions {
     grid-column: 1;
+    justify-self: stretch;
+    justify-content: flex-start;
+    max-width: none;
+    text-align: left;
+  }
+}
+
+@media (max-width: 760px) {
+  .settings-workspace {
+    min-height: 0;
+    padding: 12px;
+  }
+
+  .settings-panel .settings-spine-detail .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .settings-panel .settings-spine-detail .settings-row-copy,
+  .settings-panel .settings-spine-detail .settings-row-detail {
+    grid-column: 1;
+    justify-self: stretch;
+    max-width: none;
+  }
+
+  .settings-panel .settings-spine-detail .settings-row-detail {
+    justify-content: flex-start;
+  }
+
+  .settings-panel .settings-spine-detail .settings-row-value {
+    text-align: left;
+  }
+
+  .settings-mcp-setup,
+  .settings-mcp-inline-result {
+    justify-self: stretch;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .settings-panel .settings-spine-detail .settings-inline-actions,
+  .confirm-dialog-actions {
     justify-content: flex-start;
     justify-self: stretch;
     max-width: none;
     text-align: left;
   }
 
-  .settings-mcp-summary,
-  .settings-mcp-access,
-  .settings-mcp-tab-meta {
-    grid-template-columns: 1fr;
+  .settings-panel .settings-spine-detail .settings-inline-feedback {
+    max-width: none;
+    text-align: left;
+  }
+
+  .confirm-dialog {
     align-items: stretch;
-  }
-
-  .settings-mcp-tab-meta {
-    display: grid;
-  }
-
-}
-@media (min-width: 861px) and (max-width: 1180px) {
-  .settings-layout-priority-bay {
-    grid-template-columns: repeat(2, minmax(260px, 1fr));
-    max-width: none;
-  }
-
-  .settings-layout:not(.settings-layout-priority-bay) .settings-section,
-  .settings-layout:not(.settings-layout-priority-bay) .settings-section-wide,
-  .settings-layout:not(.settings-layout-priority-bay) .settings-section-mcp,
-  .settings-layout:not(.settings-layout-priority-bay) .settings-section-danger {
-    grid-column: span 6;
+    flex-direction: column;
   }
 }
 
-@media (max-width: 700px) {
-  .settings-layout-priority-bay {
-    grid-template-columns: minmax(0, 1fr);
-    max-width: none;
-  }
-
-  .settings-layout-priority-bay .settings-delete-controls {
+@media (max-width: 390px) {
+  .settings-panel .settings-spine-detail .settings-delete-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .settings-layout-priority-bay .settings-row-control > .app-button,
-  .settings-layout-priority-bay .settings-inline-actions .app-button {
+  .settings-panel .settings-spine-detail .settings-row-control > .app-button,
+  .settings-panel .settings-spine-detail .settings-inline-actions .app-button {
     width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-spine-detail {
+    animation: none;
   }
 }

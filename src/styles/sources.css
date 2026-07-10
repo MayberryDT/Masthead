@@ -150,7 +150,7 @@
   min-width: 0;
 }
 
-.sources-connected-dashboard > .sources-summary-strip .usage-metric.enriched .usage-metric-accent {
+.sources-connected-dashboard > .sources-summary-strip .summary-metric.enriched .summary-metric-accent {
   background: var(--green);
 }
 
@@ -558,7 +558,7 @@
 .session-detail-modal.sources-import-modal.t-modal.is-open {
   transform: none;
   opacity: 1;
-  animation: usage-card-enter var(--modal-open-dur) cubic-bezier(0.17, 0.78, 0.13, 1);
+  animation: surface-card-enter var(--modal-open-dur) cubic-bezier(0.17, 0.78, 0.13, 1);
 }
 
 .session-detail-modal.sources-import-modal.t-modal.is-open.is-settled {

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -25,14 +25,43 @@ describe("OperationsPanel", () => {
     vi.unstubAllGlobals();
   });
 
-  test("renders local export and delete controls", () => {
-    const html = renderToStaticMarkup(<OperationsPanel />);
+  async function renderPanel(panel: ReactNode) {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(panel);
+    });
+  }
+
+  async function selectCategory(label: string) {
+    const row = [...(container?.querySelectorAll<HTMLElement>(".settings-spine-row") ?? [])]
+      .find((candidate) => candidate.querySelector(".settings-spine-copy strong")?.textContent === label);
+    const button = row?.querySelector<HTMLButtonElement>(".settings-spine-control > .app-button");
+    expect(button).toBeDefined();
+    await act(async () => {
+      button?.click();
+    });
+  }
+
+  function rowNamed(label: string): HTMLElement | undefined {
+    return [...(container?.querySelectorAll<HTMLElement>(".settings-row") ?? [])].find(
+      (row) => row.querySelector(".settings-row-copy > span")?.textContent === label
+    );
+  }
+
+  test("renders local export and delete controls", async () => {
+    await renderPanel(<OperationsPanel settingsLoadState="loading" />);
+    await selectCategory("Data");
+    const dataHtml = container?.innerHTML ?? "";
+    await selectCategory("Danger zone");
+    const html = `${dataHtml}${container?.innerHTML ?? ""}`;
 
     expect(html).toContain("Export data");
     expect(html).toContain("Delete raw copies");
     expect(html).toContain("Delete all Masthead data");
-    expect(html).toContain("Keeps normalized session metadata, summaries, and search records.");
-    expect(html).toContain("Original harness files are untouched.");
+    expect(html).not.toContain("Keeps normalized session metadata, summaries, and search records.");
+    expect(html).toContain("Original harness files are never changed.");
     expect(html).not.toContain("OpenCode integration");
     expect(html).not.toContain("ops-card");
     expect(html).not.toContain("ghost-pill");
@@ -46,6 +75,7 @@ describe("OperationsPanel", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel
         localDataStatus={{
+          action: "delete_all",
           state: "confirm_delete",
           message: "Confirm delete all Masthead data. Original harness files remain untouched."
         }}
@@ -61,6 +91,7 @@ describe("OperationsPanel", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel
         localDataStatus={{
+          action: "raw_copies",
           state: "confirm_prune",
           message: "Confirm deletion of 4 raw source copies. Normalized session metadata, summaries, and search records stay available."
         }}
@@ -72,17 +103,21 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Confirm deletion of 4 raw source copies.");
   });
 
-  test("renders selective deletion controls for scoped records", () => {
-    const html = renderToStaticMarkup(
+  test("renders selective deletion controls for scoped records", async () => {
+    await renderPanel(
       <OperationsPanel
         deletionScopeKind="project"
         deletionScopeTarget="Pip"
         localDataStatus={{
+          action: "scoped_delete",
           state: "confirm_scoped_delete",
           message: "Confirm scoped deletion for project Pip."
         }}
+        settingsLoadState="loading"
       />
     );
+    await selectCategory("Danger zone");
+    const html = container?.innerHTML ?? "";
 
     expect(html).toContain("Delete scoped records");
     expect(html).toContain("Project");
@@ -92,8 +127,96 @@ describe("OperationsPanel", () => {
     expect(html).toContain("Cancel");
   });
 
-  test("renders data summary preview before deletion", () => {
-    const html = renderToStaticMarkup(
+  test("keeps compact danger controls gated and wired to their deletion callbacks", async () => {
+    const onDeletionScopeKindChange = vi.fn();
+    const onDeletionScopeTargetChange = vi.fn();
+    const onRequestScopedDelete = vi.fn();
+    const onRequestDeleteLocalData = vi.fn();
+
+    await renderPanel(
+      <OperationsPanel
+        deletionScopeKind="project"
+        deletionScopeTarget=""
+        onDeletionScopeKindChange={onDeletionScopeKindChange}
+        onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+        onRequestDeleteLocalData={onRequestDeleteLocalData}
+        onRequestScopedDelete={onRequestScopedDelete}
+        settingsState={settings}
+      />
+    );
+    await selectCategory("Danger zone");
+
+    const dangerSection = container?.querySelector<HTMLElement>(".settings-section-danger");
+    expect(dangerSection?.querySelector(".settings-section-head p")?.textContent).toBe(
+      "Deletes only Masthead's local canonical data. Original harness files are never changed."
+    );
+    expect(dangerSection?.textContent).toContain("Databasesqlite:test");
+    expect(dangerSection?.textContent).not.toContain("/tmp/masthead/masthead.sqlite");
+    expect(dangerSection?.textContent).not.toContain("generated indexes");
+    expect(dangerSection?.textContent).not.toContain("populated from canonical session data");
+    expect(dangerSection?.textContent).not.toContain("Clears Masthead-owned canonical sessions");
+
+    const scopeTriggers = Array.from(
+      container?.querySelectorAll<HTMLButtonElement>(".settings-delete-controls .filterable-select-trigger") ?? []
+    );
+    const scopedDelete = buttonNamed(container, "Delete selected records");
+    expect(scopedDelete?.disabled).toBe(true);
+
+    await act(async () => {
+      scopeTriggers[0]?.click();
+    });
+    const sessionOption = [...document.body.querySelectorAll<HTMLButtonElement>('button[role="option"]')]
+      .find((button) => button.textContent === "Session");
+    await act(async () => {
+      sessionOption?.click();
+    });
+    expect(onDeletionScopeKindChange).toHaveBeenCalledWith("session");
+
+    await act(async () => {
+      root?.render(
+        <OperationsPanel
+          deletionScopeKind="session"
+          deletionScopeTarget=""
+          onDeletionScopeKindChange={onDeletionScopeKindChange}
+          onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+          onRequestDeleteLocalData={onRequestDeleteLocalData}
+          onRequestScopedDelete={onRequestScopedDelete}
+          settingsState={settings}
+        />
+      );
+    });
+    const targetInput = container?.querySelector<HTMLInputElement>('input[aria-label="Delete target"]');
+    await act(async () => {
+      if (!targetInput) throw new Error("missing session delete target input");
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      valueSetter?.call(targetInput, "session-1");
+      targetInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(onDeletionScopeTargetChange).toHaveBeenCalledWith("session-1");
+
+    await act(async () => {
+      root?.render(
+        <OperationsPanel
+          deletionScopeKind="session"
+          deletionScopeTarget="session-1"
+          onDeletionScopeKindChange={onDeletionScopeKindChange}
+          onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+          onRequestDeleteLocalData={onRequestDeleteLocalData}
+          onRequestScopedDelete={onRequestScopedDelete}
+          settingsState={settings}
+        />
+      );
+    });
+    await act(async () => {
+      buttonNamed(container, "Delete selected records")?.click();
+      buttonNamed(container, "Delete all Masthead data")?.click();
+    });
+    expect(onRequestScopedDelete).toHaveBeenCalledTimes(1);
+    expect(onRequestDeleteLocalData).toHaveBeenCalledTimes(1);
+  });
+
+  test("renders data summary preview before deletion", async () => {
+    await renderPanel(
       <OperationsPanel
         dataSummary={{
           auditRows: 2,
@@ -117,24 +240,138 @@ describe("OperationsPanel", () => {
             sessions: 5
           }
         }}
+        settingsLoadState="loading"
       />
     );
+    await selectCategory("Data");
+    const html = container?.innerHTML ?? "";
 
     expect(html).toContain("Storage");
-    expect(html).toContain("Source copies");
+    expect(html).toContain("Raw source copies");
     expect(html).toContain("4");
     expect(html).not.toContain("Sessions");
     expect(html).not.toContain("Retention classes");
   });
 
-  test("renders local action errors without changing action labels", () => {
-    const html = renderToStaticMarkup(
-      <OperationsPanel localDataStatus={{ state: "error", message: "Export failed: unavailable" }} />
+  test("renders local action errors without changing action labels", async () => {
+    await renderPanel(
+      <OperationsPanel
+        localDataStatus={{ action: "export", state: "error", message: "Export failed: unavailable" }}
+        settingsLoadState="loading"
+      />
     );
+    await selectCategory("Data");
+    const exportRow = rowNamed("Export");
+    const dataHtml = container?.innerHTML ?? "";
+    await selectCategory("Danger zone");
+    const html = `${dataHtml}${container?.innerHTML ?? ""}`;
 
-    expect(html).toContain("Export failed: unavailable");
+    expect(exportRow?.textContent).toContain("Export failed: unavailable");
     expect(html).toContain("Export data");
     expect(html).toContain("Delete all Masthead data");
+    expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
+  });
+
+  test("shows open-folder success beside the initiating Data row", async () => {
+    const invoke = vi.fn(async () => undefined);
+    window.mastheadDesktop = { invoke: invoke as NonNullable<Window["mastheadDesktop"]>["invoke"] };
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Data");
+
+    await act(async () => {
+      [...(rowNamed("Database")?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+        .find((button) => button.textContent === "Open folder")
+        ?.click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith("open_data_directory_command", { path: settings.storage.dataDirectory });
+    expect(rowNamed("Database")?.textContent).toContain("Opened data folder.");
+    expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
+  });
+
+  test("shows raw-copy success beside the initiating Data row", async () => {
+    await renderPanel(
+      <OperationsPanel
+        localDataStatus={{ action: "raw_copies", state: "pruned", message: "Deleted 4 raw source copies." }}
+        settingsState={settings}
+      />
+    );
+    await selectCategory("Data");
+
+    expect(rowNamed("Raw source copies")?.textContent).toContain("Deleted 4 raw source copies.");
+    expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
+  });
+
+  test("shows scoped-delete failure beside the initiating Danger row", async () => {
+    await renderPanel(
+      <OperationsPanel
+        localDataStatus={{ action: "scoped_delete", state: "error", message: "Scoped delete failed: unavailable" }}
+        settingsState={settings}
+      />
+    );
+    await selectCategory("Danger zone");
+
+    const feedback = rowNamed("Delete scoped records")?.querySelector<HTMLElement>(".settings-inline-feedback.error");
+    expect(feedback?.textContent).toBe("Scoped delete failed: unavailable");
+    expect(feedback?.getAttribute("role")).toBe("status");
+    expect(feedback?.getAttribute("aria-live")).toBe("polite");
+    expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
+  });
+
+  test("shows delete-all success beside the initiating Danger row", async () => {
+    await renderPanel(
+      <OperationsPanel
+        localDataStatus={{ action: "delete_all", state: "deleted", message: "Deleted 31 sessions." }}
+        settingsState={settings}
+      />
+    );
+    await selectCategory("Danger zone");
+
+    const feedback = rowNamed("Delete all")?.querySelector<HTMLElement>(".settings-inline-feedback.success");
+    expect(feedback?.textContent).toBe("Deleted 31 sessions.");
+    expect(feedback?.getAttribute("role")).toBe("status");
+    expect(feedback?.getAttribute("aria-live")).toBe("polite");
+    expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
+  });
+
+  test("keeps preference, export, and raw-copy callbacks wired", async () => {
+    const onMotionDisabledChange = vi.fn();
+    const onSessionEndedNotificationsEnabledChange = vi.fn();
+    const onExportLocalData = vi.fn();
+    const onRequestPruneLocalData = vi.fn();
+    await renderPanel(
+      <OperationsPanel
+        motionDisabled={false}
+        onExportLocalData={onExportLocalData}
+        onMotionDisabledChange={onMotionDisabledChange}
+        onRequestPruneLocalData={onRequestPruneLocalData}
+        onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange}
+        sessionEndedNotificationsEnabled
+        settingsState={settings}
+      />
+    );
+
+    const motion = container?.querySelector<HTMLInputElement>('input[aria-label="Enable motion"]');
+    const notifications = container?.querySelector<HTMLInputElement>('input[aria-label="Session transition notifications"]');
+    await act(async () => {
+      motion?.click();
+      notifications?.click();
+    });
+    expect(onMotionDisabledChange).toHaveBeenCalledWith(true);
+    expect(onSessionEndedNotificationsEnabledChange).toHaveBeenCalledWith(false);
+
+    await selectCategory("Data");
+    const exportButton = [...(container?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      .find((button) => button.textContent === "Export data");
+    const pruneButton = [...(container?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      .find((button) => button.textContent === "Delete raw copies");
+    await act(async () => {
+      exportButton?.click();
+      pruneButton?.click();
+    });
+    expect(onExportLocalData).toHaveBeenCalledTimes(1);
+    expect(onRequestPruneLocalData).toHaveBeenCalledTimes(1);
   });
 
   test("uses searchable scrolling dropdowns for populated danger-zone delete targets", async () => {
@@ -163,6 +400,7 @@ describe("OperationsPanel", () => {
         />
       );
     });
+    await selectCategory("Danger zone");
 
     const triggers = Array.from(container.querySelectorAll<HTMLButtonElement>(".settings-delete-controls .filterable-select-trigger"));
     expect(triggers).toHaveLength(2);
@@ -201,6 +439,7 @@ describe("OperationsPanel", () => {
     await act(async () => {
       root?.render(<OperationsPanel deletionScopeKind="project" deletionScopeTarget="" settingsState={settings} />);
     });
+    await selectCategory("Danger zone");
 
     const triggers = Array.from(container.querySelectorAll<HTMLButtonElement>(".settings-delete-controls .filterable-select-trigger"));
     expect(triggers).toHaveLength(2);
@@ -228,6 +467,7 @@ describe("OperationsPanel", () => {
     await act(async () => {
       root?.render(<OperationsPanel settingsState={settings} />);
     });
+    await selectCategory("Data");
     const openButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Open folder");
 
     await act(async () => {
@@ -251,6 +491,7 @@ describe("OperationsPanel", () => {
     await act(async () => {
       root?.render(<OperationsPanel settingsState={settings} />);
     });
+    await selectCategory("Data");
     const openButton = [...container.querySelectorAll("button")].find((button) => button.textContent === "Open folder");
 
     await act(async () => {
@@ -260,6 +501,12 @@ describe("OperationsPanel", () => {
     expect(container.textContent).toContain("open failed");
   });
 });
+
+function buttonNamed(container: HTMLElement | undefined, label: string): HTMLButtonElement | undefined {
+  return [...(container?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+    (button) => button.textContent === label
+  );
+}
 
 const settings: SettingsStateDto = {
   apiVersion: 1,

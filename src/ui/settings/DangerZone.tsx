@@ -1,6 +1,7 @@
 import type { SettingsOptionDto } from "../../app/daemonClient";
 import { AppButton } from "../primitives/AppButton";
 import { FilterableSelect } from "../primitives/FilterableSelect";
+import { SettingsActionFeedback, type SettingsFeedback } from "./SettingsActionFeedback";
 import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 import type { DeletionScopeKind } from "../OperationsPanel";
@@ -8,7 +9,6 @@ import type { DeletionScopeKind } from "../OperationsPanel";
 type DangerZoneProps = {
   busy?: boolean;
   databaseId?: string;
-  databasePath?: string;
   deletionScopeKind: DeletionScopeKind;
   deletionScopeTarget: string;
   targets?: {
@@ -20,6 +20,8 @@ type DangerZoneProps = {
   onDeletionScopeTargetChange?: (target: string) => void;
   onRequestScopedDelete?: () => void;
   onRequestDeleteAll?: () => void;
+  scopedDeleteFeedback?: SettingsFeedback;
+  deleteAllFeedback?: SettingsFeedback;
 };
 
 const scopeOptions: Array<{ label: string; value: DeletionScopeKind }> = [
@@ -32,28 +34,24 @@ const scopeOptions: Array<{ label: string; value: DeletionScopeKind }> = [
 export function DangerZone({
   busy = false,
   databaseId,
-  databasePath,
   deletionScopeKind,
   deletionScopeTarget,
   onDeletionScopeKindChange,
   onDeletionScopeTargetChange,
   onRequestDeleteAll,
   onRequestScopedDelete,
+  scopedDeleteFeedback,
+  deleteAllFeedback,
   targets
 }: DangerZoneProps) {
   const targetOptions = optionsForScope(deletionScopeKind, targets);
   return (
     <SettingsSection
       danger
-      description="These actions only mutate Masthead's local database and generated indexes. Original harness files are untouched."
-      eyebrow="Danger zone"
+      description="Deletes only Masthead's local canonical data. Original harness files are never changed."
       title="Danger zone"
     >
-      <SettingsRow
-        description={databasePath ?? "Waiting for the active Masthead database path."}
-        label="Target database"
-        value={databaseId ?? "Loading"}
-      />
+      <SettingsRow label="Database" value={databaseId ?? "Loading"} />
       <SettingsRow
         control={
           <div className="settings-delete-controls">
@@ -95,18 +93,20 @@ export function DangerZone({
             <AppButton disabled={busy || deletionScopeTarget.trim().length === 0} onClick={onRequestScopedDelete} variant="danger">
               Delete selected records
             </AppButton>
+            <SettingsActionFeedback feedback={scopedDeleteFeedback} />
           </div>
         }
-        description="Project, runtime, and host deletion targets are populated from canonical session data."
         label="Delete scoped records"
       />
       <SettingsRow
         control={
-          <AppButton disabled={busy} onClick={onRequestDeleteAll} variant="danger">
-            Delete all Masthead data
-          </AppButton>
+          <div className="settings-inline-actions">
+            <AppButton disabled={busy} onClick={onRequestDeleteAll} variant="danger">
+              Delete all Masthead data
+            </AppButton>
+            <SettingsActionFeedback feedback={deleteAllFeedback} />
+          </div>
         }
-        description="Clears Masthead-owned canonical sessions, enrichments, source policies, indexes, and MCP audit rows. Original source harness files are not modified."
         label="Delete all"
       />
     </SettingsSection>
