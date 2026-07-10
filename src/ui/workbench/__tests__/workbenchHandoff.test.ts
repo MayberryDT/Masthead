@@ -16,6 +16,8 @@ function forbiddenToken(index: number): string {
 
 test("builds an agent handoff for automatic artifact completion without CLI recipes", () => {
   const text = buildWorkbenchHandoff({
+    authoringCommand: "/home/test/.local/bin/mastheadctl",
+    databaseId: "database:test",
     sessions: [
       session({
         lifecycle: "ended",
@@ -28,11 +30,18 @@ test("builds an agent handoff for automatic artifact completion without CLI reci
     ]
   });
 
-  expect(text.startsWith("Compile and publish artifacts from these sessions into Logbook:")).toBe(true);
+  expect(text.startsWith("Complete this Masthead Workbench authoring request end to end")).toBe(true);
+  expect(text).toContain("masthead.workbench.authoring/v1");
+  expect(text).toContain("complete this request end to end without pausing for routine approval");
+  expect(text).toContain("use all available canonical redacted session evidence");
+  expect(text).toContain("produce the strongest justified artifacts");
+  expect(text).toContain('"sessionIds":["session:abc"]');
+  expect(text).toContain('"databaseId":"database:test"');
+  expect(text).toContain('"command":"/home/test/.local/bin/mastheadctl"');
   expect(text).toContain("session package always");
   expect(text).toContain("Logbook stores published artifacts only");
   expect(text).toContain("Masthead is running locally");
-  expect(text).toContain("Automatic completion loop");
+  expect(text).toContain("report results only after completion");
   expect(text).toContain("session package");
   expect(text).toContain("runbook");
   expect(text).toContain("adr");
@@ -41,12 +50,16 @@ test("builds an agent handoff for automatic artifact completion without CLI reci
   expect(text).toContain("session:abc");
   expect(text).toContain("Raw import session");
   expect(text).toContain("Apply is not publish");
-  expect(text).not.toMatch(/mastheadctl/i);
+  expect(text).not.toMatch(/permission/i);
+  expect(text).not.toContain("be conservative");
+  expect(text).not.toContain("--db");
   expect(text).not.toContain("node dist/daemon");
 });
 
 test("sanitizes forbidden substrings from selected session metadata in handoff text", () => {
   const text = buildWorkbenchHandoff({
+    authoringCommand: "/home/test/.local/bin/mastheadctl",
+    databaseId: "database:test",
     sessions: [
       session({
         lifecycle: "ended",
@@ -71,6 +84,8 @@ test("sanitizes forbidden substrings from selected session metadata in handoff t
 
 test("sanitizes forbidden substrings case-insensitively", () => {
   const text = buildWorkbenchHandoff({
+    authoringCommand: "/home/test/.local/bin/mastheadctl",
+    databaseId: "database:test",
     sessions: [
       session({
         lifecycle: "ended",

@@ -5,6 +5,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
+import { installMastheadCliLauncher, resolveMastheadCliLaunchTarget } from "./cliLauncher";
 import { resolveMastheadAppIconPath } from "./icon";
 import { ELECTRON_CHANNELS, isAllowedIpcSender, registerMastheadIpc } from "./ipc";
 import { showSessionTransitionNotification } from "./notifications";
@@ -64,6 +65,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
     registerRendererProtocol();
+    await configureCliLauncher();
     registerDesktopIpc();
     const appIconPath = mastheadAppIconPath();
     mainWindow = await createMainWindow(appIconPath);
@@ -103,6 +105,38 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+async function configureCliLauncher(daemonUrl?: string): Promise<void> {
+  try {
+    const target = resolveMastheadCliLaunchTarget({
+      devNodePath:
+        process.env.MASTHEAD_NODE_PATH || process.env.npm_node_execpath || process.env.NODE || process.execPath,
+      devProjectDir: process.env.MASTHEAD_PROJECT_DIR || process.cwd(),
+      homeDir: app.getPath("home"),
+      isPackaged: app.isPackaged,
+      platform: process.platform,
+      resourcesPath: process.resourcesPath
+    });
+    const activeDaemonUrl = daemonUrl ?? configuredDaemonBaseUrl();
+    await installMastheadCliLauncher(target, { daemonUrl: activeDaemonUrl });
+    process.env.MASTHEAD_CLI_COMMAND = target.launcherPath;
+  } catch (error) {
+    console.error(
+      `Masthead CLI launcher installation failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+function configuredDaemonBaseUrl(): string {
+  const target = resolveDaemonLaunchTarget({
+    currentDir: process.cwd(),
+    defaultDataDir: isElectronDevMode() ? electronDevDataDirectory() : undefined,
+    env: electronDaemonEnv(),
+    resourcesPath: process.resourcesPath,
+    userDataDir: app.getPath("userData")
+  });
+  return connectorBaseUrl(target.port);
+}
+
 function mastheadAppIconPath(): string {
   return resolveMastheadAppIconPath({
     appPath: app.getAppPath(),
@@ -131,6 +165,7 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
               ownedDaemonChildren
             )
           : unsupportedSmokeMode(smokeMode);
+    await configureCliLauncher(connector.baseUrl);
     const renderer = await window.webContents.executeJavaScript(`
       (async () => {
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -171,6 +206,10 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
         renderer
       })
     );
+    const smokeHoldMs = Number(process.env.MASTHEAD_ELECTRON_SMOKE_HOLD_MS || 0);
+    if (Number.isFinite(smokeHoldMs) && smokeHoldMs > 0) {
+      await delay(Math.min(smokeHoldMs, 15_000));
+    }
     await stopSmokeDaemons();
     app.exit(0);
   } catch (error) {
@@ -316,6 +355,7 @@ function registerDesktopIpc(): void {
       [ELECTRON_CHANNELS.startLiveConnector]: async () => {
         try {
           const result = await startLiveConnector(targetInput(), rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }), ownedDaemonChildren);
+          await configureCliLauncher(result.baseUrl);
           if (process.env.MASTHEAD_ELECTRON_SMOKE === "1" && process.env.MASTHEAD_ELECTRON_SMOKE_MODE === "renderer-autostart") {
             recordRendererStartedConnector(result);
           }

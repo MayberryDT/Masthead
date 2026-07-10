@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   getWorkbenchMissingSessions,
+  getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
@@ -365,6 +366,50 @@ describe("daemon client review dispositions", () => {
       "http://127.0.0.1:17373/workbench/not-added?includeDetails=true&limit=10",
       expect.objectContaining({ headers: { accept: "application/json" } })
     );
+  });
+
+  test("loads authoring capabilities relative to the active connector", async () => {
+    const capabilities = {
+      bundleVersion: "workbench-authoring-v1",
+      capability: "artifact_authoring",
+      command: "/home/test/.local/bin/mastheadctl",
+      databaseId: "database:test",
+      evidencePolicy: "all_canonical_redacted_evidence",
+      operations: ["open", "status", "evidence", "submit", "finish"],
+      protocol: "masthead.workbench.authoring/v1",
+      transport: "daemon_http"
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => response(capabilities)));
+
+    await expect(
+      getWorkbenchAuthoringCapabilities("http://127.0.0.1:17374/projection?stale=true")
+    ).resolves.toEqual(capabilities);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:17374/workbench/authoring/capabilities",
+      expect.objectContaining({ headers: { accept: "application/json" } })
+    );
+  });
+
+  test("rejects authoring capabilities that do not identify an absolute installed command", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          bundleVersion: "workbench-authoring-v1",
+          capability: "artifact_authoring",
+          command: "mastheadctl",
+          databaseId: "database:test",
+          evidencePolicy: "all_canonical_redacted_evidence",
+          operations: ["open", "status", "evidence", "submit", "finish"],
+          protocol: "masthead.workbench.authoring/v1",
+          transport: "daemon_http"
+        })
+      )
+    );
+
+    await expect(
+      getWorkbenchAuthoringCapabilities("http://127.0.0.1:17373/projection")
+    ).rejects.toThrow("absolute installed command");
   });
 
   test("posts Workbench pipeline write actions to the daemon", async () => {

@@ -4,12 +4,14 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchEnrollMissingResponse, WorkbenchQueueSessionDto } from "../../../shared/workbench";
+import type { WorkbenchAuthoringCapabilitiesDto } from "../../../shared/workbenchAuthoring";
 import {
   useWorkbenchController,
   type UseWorkbenchControllerResult,
   type WorkbenchActionKind
 } from "../useWorkbenchController";
 import {
+  getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
@@ -24,6 +26,7 @@ import {
 } from "../../daemonClient";
 
 const daemonClientMocks = vi.hoisted(() => ({
+  getWorkbenchAuthoringCapabilities: vi.fn(),
   getWorkbenchActivity: vi.fn(),
   getWorkbenchNotAddedSessions: vi.fn(),
   getWorkbenchNotAddedSummary: vi.fn(),
@@ -92,6 +95,7 @@ describe("useWorkbenchController", () => {
     await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
 
     expect(getWorkbenchSessions).toHaveBeenCalledWith(baseUrl, expect.objectContaining({ limit: 100, offset: 0 }));
+    expect(getWorkbenchAuthoringCapabilities).toHaveBeenCalledWith(baseUrl, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(latest().sessions).toEqual([session("session:abc", "Workbench import review")]);
     expect(latest().activity).toEqual([]);
     expect(latest().notAddedSummary).toMatchObject({ total: 0 });
@@ -154,9 +158,9 @@ describe("useWorkbenchController", () => {
     expect(latest().handoffText).toContain("session:abc");
     expect(latest().handoffText).not.toContain("session:def");
     expect(latest().handoffText).not.toContain("Second session");
-    expect(latest().handoffText).toContain("Automatic completion loop");
+    expect(latest().handoffText).toContain("masthead.workbench.authoring/v1");
     expect(latest().handoffText).toContain("runbook");
-    expect(latest().handoffText).not.toMatch(/mastheadctl/i);
+    expect(latest().handoffText).toContain('"command":"/home/test/.local/bin/mastheadctl"');
     expect(latest().handoffText).not.toContain("npm run import review");
 
     await act(async () => {
@@ -312,6 +316,38 @@ describe("useWorkbenchController", () => {
     });
     expect(latest().canRun("copy_agent_prompt")).toBe(false);
     expect(latest().canRun("enroll_missing")).toBe(true);
+  });
+
+  test("does not generate a copied handoff when daemon authoring capabilities are unavailable", async () => {
+    mockWorkbenchResponse([session("session:abc", "Copy session")]);
+    vi.mocked(getWorkbenchAuthoringCapabilities).mockRejectedValue(new Error("not available"));
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
+    await select("session:abc");
+
+    expect(latest().handoffText).toBe("");
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+  });
+
+  test("rebinds copied handoff after capabilities change without retaining the old database", async () => {
+    mockWorkbenchResponse([session("session:abc", "Copy session")]);
+    vi.mocked(getWorkbenchAuthoringCapabilities)
+      .mockResolvedValueOnce(authoringCapabilities("database:first", "/first/mastheadctl"))
+      .mockResolvedValueOnce(authoringCapabilities("database:second", "/second/mastheadctl"));
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
+    await select("session:abc");
+    await waitFor(() => latest()?.handoffText.includes("database:first") === true);
+    expect(latest().handoffText).toContain("database:first");
+
+    await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 2 });
+    await waitFor(() => latest()?.handoffText.includes("database:second") === true);
+
+    expect(latest().handoffText).toContain("/second/mastheadctl");
+    expect(latest().handoffText).not.toContain("database:first");
+    expect(latest().handoffText).not.toContain("/first/mastheadctl");
   });
 
   test("disables mutations while offline", async () => {
@@ -712,9 +748,25 @@ function notAddedSummary() {
 }
 
 function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
+  vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
+    authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
+  );
   vi.mocked(getWorkbenchSessions).mockResolvedValue(response(sessions));
   vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
   vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+}
+
+function authoringCapabilities(databaseId: string, command: string): WorkbenchAuthoringCapabilitiesDto {
+  return {
+    bundleVersion: "workbench-authoring-v1" as const,
+    capability: "artifact_authoring" as const,
+    command,
+    databaseId,
+    evidencePolicy: "all_canonical_redacted_evidence" as const,
+    operations: ["open", "status", "evidence", "submit", "finish"],
+    protocol: "masthead.workbench.authoring/v1" as const,
+    transport: "daemon_http" as const
+  };
 }
 
 async function waitFor(condition: () => boolean, timeoutMs = 1000): Promise<void> {

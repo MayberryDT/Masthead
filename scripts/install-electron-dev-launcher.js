@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -14,6 +15,8 @@ const applicationsDir = join(home, ".local", "share", "applications");
 const systemdUserDir = join(home, ".config", "systemd", "user");
 const stateDir = join(home, ".local", "state", "masthead");
 const launcherPath = join(binDir, "masthead-dev-desktop");
+const cliLauncherPath = join(binDir, process.platform === "win32" ? "mastheadctl.cmd" : "mastheadctl");
+const cliEntry = join(repo, "dist", "daemon", "src", "cli", "mastheadctl.js");
 const desktopPath = join(applicationsDir, "ai.animas.masthead-dev.desktop");
 const servicePath = join(systemdUserDir, "masthead-dev-electron.service");
 const iconPath = join(repo, "public", "assets", "masthead-logo-sail-dev.svg");
@@ -26,6 +29,21 @@ function devAllowedOrigins() {
   return ["masthead://app", "http://127.0.0.1:5173", "http://localhost:5173"].join(",");
 }
 
+async function installCliLauncher() {
+  const temporaryPath = `${cliLauncherPath}.${process.pid}.${randomUUID()}.tmp`;
+  const body = process.platform === "win32"
+    ? `@echo off\r\n@setlocal DisableDelayedExpansion\r\n"${nodeBin.replace(/%/g, "%%")}" "${cliEntry.replace(/%/g, "%%")}" %*\r\n`
+    : `#!/bin/sh\nexec ${shellQuote(nodeBin)} ${shellQuote(cliEntry)} "$@"\n`;
+  try {
+    await writeFile(temporaryPath, body, { encoding: "utf8", mode: process.platform === "win32" ? undefined : 0o755 });
+    if (process.platform !== "win32") await chmod(temporaryPath, 0o755);
+    await rename(temporaryPath, cliLauncherPath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
 const launcher = `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -34,6 +52,8 @@ LOG_DIR=${shellQuote(stateDir)}
 LOG_FILE="$LOG_DIR/dev-desktop.log"
 NODE_BIN=${shellQuote(nodeBin)}
 NPM_BIN=${shellQuote(npmBin)}
+CLI_LAUNCHER=${shellQuote(cliLauncherPath)}
+CLI_ENTRY="$APP_DIR/dist/daemon/src/cli/mastheadctl.js"
 DATA_DIR="$HOME/.local/share/masthead-dev"
 DB_PATH="$DATA_DIR/masthead.sqlite"
 STORE_PATH="$DATA_DIR/legacy/events.ndjson"
@@ -129,10 +149,42 @@ daemon_is_healthy() {
   curl -fsS --max-time 5 "http://127.0.0.1:$port/health" >/dev/null 2>&1
 }
 
-daemon_is_compatible() {
+daemon_data_matches() {
   local port="$1" health
   health="$(curl -fsS --max-time 5 "http://127.0.0.1:$port/health" 2>/dev/null)" || return 1
   EXPECTED_DATA_DIR="$DATA_DIR" "$NODE_BIN" -e 'let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { try { const j = JSON.parse(input); process.exit(j?.data?.dataDirectory === process.env.EXPECTED_DATA_DIR ? 0 : 1); } catch { process.exit(1); } });' <<<"$health"
+}
+
+daemon_authoring_is_compatible() {
+  local port="$1" capabilities
+  capabilities="$(curl -fsS --max-time 5 "http://127.0.0.1:$port/workbench/authoring/capabilities" 2>/dev/null)" || return 1
+  EXPECTED_CLI="$CLI_LAUNCHER" "$NODE_BIN" -e 'let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { try { const j = JSON.parse(input); process.exit(j?.capability === "artifact_authoring" && j?.command === process.env.EXPECTED_CLI ? 0 : 1); } catch { process.exit(1); } });' <<<"$capabilities"
+}
+
+daemon_is_compatible() {
+  daemon_data_matches "$1" && daemon_authoring_is_compatible "$1"
+}
+
+stop_stale_authoring_daemon() {
+  local port="$1" pid cmd
+  pid="$(ss -ltnp "( sport = :$port )" 2>/dev/null | sed -n 's/.*pid=\\([0-9]\\+\\).*/\\1/p' | head -n 1)"
+  [[ -n "$pid" ]] || return 1
+  cmd="$(read_cmdline "$pid")"
+  case "$cmd" in
+    *"dist/daemon/src/daemon/main.js"*) ;;
+    *) return 1 ;;
+  esac
+  log "Stopping stale Masthead authoring daemon $pid on port $port: $cmd"
+  kill "$pid" 2>/dev/null || return 1
+  wait_for_port_to_close "$port"
+}
+
+install_active_cli_launcher() {
+  local temporary_path="\${CLI_LAUNCHER}.tmp.$$"
+  printf '#!/bin/sh\\nexec env MASTHEAD_DAEMON_URL=%q %q %q "$@"\\n' \\
+    "$ACTIVE_DAEMON_BASE_URL" "$NODE_BIN" "$CLI_ENTRY" >"$temporary_path"
+  chmod 0755 "$temporary_path"
+  mv -f "$temporary_path" "$CLI_LAUNCHER"
 }
 
 set_active_daemon() {
@@ -140,6 +192,7 @@ set_active_daemon() {
   ACTIVE_DAEMON_PORT="$port"
   ACTIVE_DAEMON_BASE_URL="http://127.0.0.1:$port"
   ACTIVE_PROJECTION_URL="$ACTIVE_DAEMON_BASE_URL/projection"
+  install_active_cli_launcher
 }
 
 port_is_listening() {
@@ -259,6 +312,14 @@ start_dev_daemon() {
     return 0
   fi
 
+  if daemon_data_matches "$port"; then
+    log "Masthead daemon at port $port has stale authoring CLI capabilities; restarting it."
+    if ! stop_stale_authoring_daemon "$port"; then
+      log "Could not safely stop the stale Masthead authoring daemon at port $port."
+      return 1
+    fi
+  fi
+
   if daemon_is_healthy "$port" || port_is_listening "$port"; then
     log "Port 17373 is occupied by a Masthead daemon with a different data directory; using an isolated dev daemon port."
     port="$(find_available_daemon_port 17374)"
@@ -284,6 +345,7 @@ start_dev_daemon() {
       MASTHEAD_DB_PATH="$DB_PATH" \\
       MASTHEAD_HOST="127.0.0.1" \\
       MASTHEAD_HOOK_TRANSCRIPT_CATCHUP="1" \\
+      MASTHEAD_CLI_COMMAND="$CLI_LAUNCHER" \\
       MASTHEAD_MCP_COMMAND="$NODE_BIN" \\
       MASTHEAD_MCP_ENTRY="$MCP_ENTRY" \\
       MASTHEAD_PORT="$port" \\
@@ -338,6 +400,7 @@ exec env \\
   MASTHEAD_ALLOWED_ORIGINS="$ALLOWED_ORIGINS" \\
   MASTHEAD_DATA_DIR="$DATA_DIR" \\
   MASTHEAD_DB_PATH="$DB_PATH" \\
+  MASTHEAD_CLI_COMMAND="$CLI_LAUNCHER" \\
   MASTHEAD_MCP_ENTRY="$MCP_ENTRY" \\
   MASTHEAD_NODE_PATH="$NODE_BIN" \\
   MASTHEAD_PORT="$ACTIVE_DAEMON_PORT" \\
@@ -381,6 +444,7 @@ await mkdir(binDir, { recursive: true });
 await mkdir(applicationsDir, { recursive: true });
 await mkdir(systemdUserDir, { recursive: true });
 await mkdir(stateDir, { recursive: true });
+await installCliLauncher();
 await writeFile(launcherPath, launcher, "utf8");
 await chmod(launcherPath, 0o755);
 await writeFile(desktopPath, desktopEntry, { mode: 0o755 });
@@ -390,6 +454,7 @@ spawnSync("systemctl", ["--user", "daemon-reload"], { stdio: "inherit" });
 spawnSync("update-desktop-database", [applicationsDir], { stdio: "ignore" });
 
 console.log(`Installed ${launcherPath}`);
+console.log(`Installed ${cliLauncherPath}`);
 console.log(`Installed ${servicePath}`);
 console.log(`Installed ${desktopPath}`);
 console.log(`Logs: ${join(stateDir, "dev-desktop.log")}`);

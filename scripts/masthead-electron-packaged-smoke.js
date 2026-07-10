@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:net";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 
@@ -56,20 +56,29 @@ assertFuse(fuseWire, FuseV1Options.OnlyLoadAppFromAsar, true, "OnlyLoadAppFromAs
 assertFuse(fuseWire, FuseV1Options.GrantFileProtocolExtraPrivileges, false, "GrantFileProtocolExtraPrivileges");
 
 const dataDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-smoke-"));
+const homeDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-home-"));
 const smokePort = await availablePort();
+const baseUrl = `http://127.0.0.1:${smokePort}`;
 const disableSandboxForCi = process.env.CI ? { ELECTRON_DISABLE_SANDBOX: "1" } : {};
 const child = spawn(binary, [], {
   env: {
     ...process.env,
     ...disableSandboxForCi,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
     MASTHEAD_DATA_DIR: dataDir,
     MASTHEAD_ELECTRON_SMOKE: "1",
+    MASTHEAD_ELECTRON_SMOKE_HOLD_MS: "10000",
     MASTHEAD_ELECTRON_SMOKE_MODE: "renderer-autostart",
     MASTHEAD_PORT: String(smokePort),
     MASTHEAD_GIT_REFRESH_MS: "0"
   },
   stdio: ["ignore", "pipe", "pipe"]
 });
+const cliVerification = verifyPackagedAuthoringCli(baseUrl, homeDir, child).then(
+  (value) => ({ value }),
+  (error) => ({ error })
+);
 
 let stdout = "";
 let stderr = "";
@@ -83,12 +92,16 @@ child.stderr.on("data", (chunk) => {
 });
 
 const timeout = setTimeout(() => child.kill("SIGTERM"), 45_000);
-const [code] = await once(child, "exit");
+const [[code], cliCheck] = await Promise.all([once(child, "exit"), cliVerification]);
 clearTimeout(timeout);
 
 const jsonLine = stdout.split(/\r?\n/).find((line) => line.includes('"smoke":"electron"'));
 if (code !== 0 || !jsonLine) {
   console.error(stderr || stdout || `Packaged Electron smoke exited with ${code}`);
+  process.exit(1);
+}
+if ("error" in cliCheck) {
+  console.error(cliCheck.error instanceof Error ? cliCheck.error.message : String(cliCheck.error));
   process.exit(1);
 }
 
@@ -120,8 +133,81 @@ if (
 
 await assertSmokeConnectorStopped(dataDir);
 await rm(dataDir, { force: true, recursive: true });
+await rm(homeDir, { force: true, recursive: true });
 
 console.log(`Packaged Electron smoke passed. ${binary}`);
+
+async function verifyPackagedAuthoringCli(baseUrl, homeDir, child) {
+  let capabilities;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (child.exitCode !== null) throw new Error("Packaged Electron exited before CLI capabilities were available.");
+    capabilities = await fetch(`${baseUrl}/workbench/authoring/capabilities`, {
+      signal: AbortSignal.timeout(500)
+    })
+      .then((response) => (response.ok ? response.json() : undefined))
+      .catch(() => undefined);
+    if (capabilities?.capability === "artifact_authoring" && capabilities?.command) break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  if (!capabilities?.command || !isAbsolute(capabilities.command)) {
+    throw new Error(`Packaged daemon did not report an absolute authoring CLI command: ${JSON.stringify(capabilities)}`);
+  }
+  const commandRelativeToHome = relative(homeDir, capabilities.command);
+  if (commandRelativeToHome.startsWith("..") || isAbsolute(commandRelativeToHome)) {
+    throw new Error(`Packaged authoring CLI was installed outside the smoke HOME: ${capabilities.command}`);
+  }
+  await access(capabilities.command, process.platform === "win32" ? constants.R_OK : constants.X_OK);
+
+  const result = await runCommand(capabilities.command, ["workbench", "capabilities", "--json"], {
+    ...process.env,
+    HOME: homeDir,
+    USERPROFILE: homeDir
+  });
+  if (result.code !== 0) {
+    throw new Error(`Packaged authoring CLI failed: ${result.stderr || result.stdout}`);
+  }
+  const cliCapabilities = JSON.parse(result.stdout);
+  if (
+    cliCapabilities.capability !== "artifact_authoring" ||
+    cliCapabilities.databaseId !== capabilities.databaseId ||
+    cliCapabilities.command !== capabilities.command
+  ) {
+    throw new Error(`Packaged authoring CLI reached the wrong daemon: ${result.stdout}`);
+  }
+  return cliCapabilities;
+}
+
+function runCommand(command, args, env) {
+  return new Promise((resolve, reject) => {
+    const commandChild = spawn(command, args, {
+      env,
+      shell: process.platform === "win32",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => {
+      commandChild.kill("SIGTERM");
+      reject(new Error(`Timed out invoking packaged authoring CLI: ${command}`));
+    }, 10_000);
+    commandChild.stdout.setEncoding("utf8");
+    commandChild.stderr.setEncoding("utf8");
+    commandChild.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    commandChild.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    commandChild.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    commandChild.once("exit", (code) => {
+      clearTimeout(timeout);
+      resolve({ code, stderr, stdout });
+    });
+  });
+}
 
 function assertFuse(fuseWire, option, expected, name) {
   const enabled = fuseWire[option] === 49 || fuseWire[option] === "1";

@@ -1,5 +1,6 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
+  getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
@@ -18,6 +19,7 @@ import type {
   WorkbenchNotAddedSummaryDto,
   WorkbenchQueueSessionDto
 } from "../../shared/workbench";
+import type { WorkbenchAuthoringCapabilitiesDto } from "../../shared/workbenchAuthoring";
 import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
 
 const TRANSCRIPT_PERMISSION_ERROR =
@@ -84,6 +86,7 @@ export function useWorkbenchController({
   const [activity, setActivity] = useState<WorkbenchActivityDto[]>([]);
   const [notAddedSummary, setNotAddedSummary] = useState<WorkbenchNotAddedSummaryDto>();
   const [notAddedSessions, setNotAddedSessions] = useState<WorkbenchNotAddedSessionDto[]>([]);
+  const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringCapabilitiesDto>();
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState(() => new Set<string>());
   const [loading, setLoading] = useState(false);
@@ -94,35 +97,44 @@ export function useWorkbenchController({
   const [page, setPageState] = useState(0);
   const [total, setTotal] = useState(0);
   const pageSize = WORKBENCH_PAGE_SIZE;
+  const loadRequestId = useRef(0);
 
   const load = useCallback(async (options: { signal?: AbortSignal; page?: number } = {}) => {
+    const requestId = ++loadRequestId.current;
     const pageIndex = options.page ?? page;
     setLoading(true);
     setError(undefined);
+    setAuthoringCapabilities(undefined);
     try {
-      const [response, activityResponse, notAdded] = await Promise.all([
+      const capabilitiesPromise = getWorkbenchAuthoringCapabilities(activeProjectionUrl, {
+        signal: options.signal
+      }).catch(() => undefined);
+      const [response, activityResponse, notAdded, capabilities] = await Promise.all([
         getWorkbenchSessions(activeProjectionUrl, {
           limit: pageSize,
           offset: pageIndex * pageSize,
           signal: options.signal
         }),
         getWorkbenchActivity(activeProjectionUrl, { limit: 30, signal: options.signal }),
-        getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal })
+        getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal }),
+        capabilitiesPromise
       ]);
+      if (options.signal?.aborted || requestId !== loadRequestId.current) return;
       setSessions(response.sessions);
       setTotal(typeof response.total === "number" ? response.total : response.sessions.length);
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
+      setAuthoringCapabilities(capabilities);
       setSelectedSessionIds((current) => {
         const visibleIds = new Set(response.sessions.map((session) => session.sessionId));
         return new Set(Array.from(current).filter((sessionId) => visibleIds.has(sessionId)));
       });
     } catch (loadError) {
-      if (!options.signal?.aborted) {
+      if (!options.signal?.aborted && requestId === loadRequestId.current) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
     } finally {
-      if (!options.signal?.aborted) setLoading(false);
+      if (!options.signal?.aborted && requestId === loadRequestId.current) setLoading(false);
     }
   }, [activeProjectionUrl, page, pageSize]);
 
@@ -159,7 +171,11 @@ export function useWorkbenchController({
   );
 
   useEffect(() => {
-    if (!active || !isLive) return;
+    if (!active || !isLive) {
+      loadRequestId.current += 1;
+      setAuthoringCapabilities(undefined);
+      return;
+    }
     const controller = new AbortController();
     void load({ signal: controller.signal });
     return () => controller.abort();
@@ -182,8 +198,15 @@ export function useWorkbenchController({
   );
 
   const handoffText = useMemo(
-    () => buildWorkbenchHandoff({ sessions: handoffSessions }),
-    [handoffSessions]
+    () =>
+      authoringCapabilities
+        ? buildWorkbenchHandoff({
+            authoringCommand: authoringCapabilities.command,
+            databaseId: authoringCapabilities.databaseId,
+            sessions: handoffSessions
+          })
+        : "",
+    [authoringCapabilities, handoffSessions]
   );
 
   const canRun = useCallback(

@@ -23,6 +23,7 @@ import type {
   WorkbenchNotAddedSummaryDto,
   WorkbenchSessionsResponse
 } from "../shared/workbench";
+import type { WorkbenchAuthoringCapabilitiesDto } from "../shared/workbenchAuthoring";
 
 export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
 export type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest };
@@ -1278,6 +1279,30 @@ export async function getWorkbenchSessions(
     query: { limit: options.limit, offset: options.offset, scope: options.scope },
     signal: options.signal
   });
+}
+
+export async function getWorkbenchAuthoringCapabilities(
+  activeProjectionUrl: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<WorkbenchAuthoringCapabilitiesDto> {
+  const capabilities = await getJson<WorkbenchAuthoringCapabilitiesDto>(activeProjectionUrl, "/workbench/authoring/capabilities", {
+    label: "workbench authoring capabilities",
+    signal: options.signal
+  });
+  if (
+    capabilities.capability !== "artifact_authoring" ||
+    capabilities.protocol !== "masthead.workbench.authoring/v1" ||
+    !capabilities.databaseId?.trim() ||
+    !isAbsoluteAuthoringCommand(capabilities.command)
+  ) {
+    throw new Error("Workbench authoring capabilities require an absolute installed command and database identity");
+  }
+  return capabilities;
+}
+
+function isAbsoluteAuthoringCommand(command: string | undefined): boolean {
+  const value = command?.trim() ?? "";
+  return value.startsWith("/") || /^(?:[A-Za-z]:[\\/]|\\\\)/.test(value);
 }
 
 export async function getWorkbenchActivity(

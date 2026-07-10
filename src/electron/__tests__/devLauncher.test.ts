@@ -50,4 +50,18 @@ describe("Masthead Dev launcher template", () => {
     expect(source).toContain('VITE_MASTHEAD_PROJECTION_URL="$ACTIVE_PROJECTION_URL"');
     expect(source).toContain('MASTHEAD_PORT="$ACTIVE_DAEMON_PORT"');
   });
+
+  test("installs and advertises the current checkout authoring CLI before starting the daemon", async () => {
+    const source = await readFile("scripts/install-electron-dev-launcher.js", "utf8");
+
+    expect(source).toContain('const cliLauncherPath = join(binDir, process.platform === "win32" ? "mastheadctl.cmd" : "mastheadctl");');
+    expect(source).toContain('const cliEntry = join(repo, "dist", "daemon", "src", "cli", "mastheadctl.js");');
+    expect(source).toContain('CLI_LAUNCHER=${shellQuote(cliLauncherPath)}');
+    expect(source).toContain('MASTHEAD_CLI_COMMAND="$CLI_LAUNCHER"');
+    expect(source).toContain("install_active_cli_launcher");
+    expect(source).toContain("MASTHEAD_DAEMON_URL");
+    expect(source).toContain("daemon_authoring_is_compatible");
+    expect(source).toContain("stop_stale_authoring_daemon");
+    expect(source.indexOf("await installCliLauncher()")).toBeLessThan(source.indexOf("await writeFile(launcherPath"));
+  });
 });

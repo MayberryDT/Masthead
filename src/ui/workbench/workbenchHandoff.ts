@@ -19,7 +19,11 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function buildWorkbenchHandoff(input: { sessions: WorkbenchQueueSessionDto[] }): string {
+export function buildWorkbenchHandoff(input: {
+  authoringCommand: string;
+  databaseId: string;
+  sessions: WorkbenchQueueSessionDto[];
+}): string {
   const rows = input.sessions.map((session) => {
     const title = sanitizeWorkbenchVisibleText(session.title);
     const sessionId = sanitizeWorkbenchVisibleText(session.sessionId);
@@ -31,19 +35,28 @@ export function buildWorkbenchHandoff(input: { sessions: WorkbenchQueueSessionDt
     const resolution = sanitizeWorkbenchVisibleText(session.resolutionStatus ?? "in_progress");
     return `- Session: ${title} (id: ${sessionId}; runtime: ${runtime}${project}; lifecycle: ${lifecycle}; last activity: ${lastActivityAt}; next action: ${nextAction}; resolution: ${resolution}; transcript: ${sanitizeWorkbenchVisibleText(session.transcriptStatus)}; quality: ${sanitizeWorkbenchVisibleText(session.qualityStatus)}; enrichment: ${sanitizeWorkbenchVisibleText(session.sessionEnrichmentStatus)}; dossier: ${sanitizeWorkbenchVisibleText(session.sessionDossierStatus)}; runbook: ${sanitizeWorkbenchVisibleText(session.runbookStatus ?? session.bugFixTraceStatus)}; adr: ${sanitizeWorkbenchVisibleText(session.adrStatus ?? "unknown")}; incident timeline: ${sanitizeWorkbenchVisibleText(session.incidentTimelineStatus ?? "unknown")})`;
   });
+  const request = {
+    protocol: "masthead.workbench.authoring/v1",
+    databaseId: input.databaseId,
+    completion: "publish_and_resolve",
+    evidencePolicy: "all_canonical_redacted_evidence",
+    authoringTool: {
+      kind: "cli",
+      command: input.authoringCommand,
+      capability: "artifact_authoring"
+    },
+    sessionIds: input.sessions.map((session) => session.sessionId)
+  };
+
   return [
-    "Compile and publish artifacts from these sessions into Logbook: session package always; runbook, ADR, and incident timeline when evidence supports them (else N/A). Sessions stay the capture and pipeline unit; Logbook stores published artifacts only.",
-    "Masthead is running locally on this machine. The user selected these Workbench sessions for agent processing. Complete the automatic kind set end-to-end with Masthead Workbench tools—claim, gather evidence, validate, apply, and publish—without asking the user to cluster sessions or click publish.",
+    "Complete this Masthead Workbench authoring request end to end. This is an unattended automatic handoff: complete this request end to end without pausing for routine approval or asking the user to perform intermediate steps.",
+    "Masthead is running locally. Use the installed Masthead Workbench authoring interface identified below and verify its artifact_authoring capability and exact database identity before opening the selected sessions.",
+    "For this request, use all available canonical redacted session evidence, gather as many evidence pages as needed, and produce the strongest justified artifacts while keeping every existing evidence, schema, provenance, and publication quality gate intact.",
+    "Resolve deterministic validation findings yourself: revise and resubmit until the bundle is ready, then finish publication and resolve every automatic artifact kind; report results only after completion.",
+    "The session package always resolves through publication. Publish runbook, ADR, and incident timeline when evidence supports them; otherwise resolve them as N/A or an existing published contribution. Sessions stay the capture and pipeline unit; Logbook stores published artifacts only.",
     "",
-    "Automatic completion loop:",
-    "1. Claim only the selected seed sessions before working.",
-    "2. Check transcript availability; import only when permission already exists or the user explicitly approves.",
-    "3. Ensure quality is passed (or stop if quality fails).",
-    "4. Apply session enrichment (session capsule listing fields) and a session dossier body for each seed session—this is the required session package.",
-    "5. Publish the session package when validation and package gates pass.",
-    "6. For runbook, ADR, and incident timeline: publish when evidence supports them; otherwise mark N/A (session-relative only, never a Logbook row). If the seed session is already in provenance of a published multi-session artifact of that kind, mark contributed instead of duplicating.",
-    "7. Expand beyond the seed set only with a strong join key (shared failure/error signature; near-duplicate repro + failing check; same decision object; shared environment-plus-symptom fingerprint). Weak joins (same project/topics/time window, file overlap, summary vibes) stay single-session or N/A. Store join rationale on multi-session artifacts.",
-    "8. Automatic work is resolved when the session package is published and runbook, ADR, and incident timeline are each published, N/A, or satisfied via contribution.",
+    "Machine request:",
+    JSON.stringify(request),
     "",
     "Artifact kinds:",
     "- session package: enrichment capsule fields + session dossier (exactly one session provenance).",
@@ -58,6 +71,8 @@ export function buildWorkbenchHandoff(input: { sessions: WorkbenchQueueSessionDt
     "- Do not copy secrets into artifact bodies.",
     "- High-confidence runbook fix claims need supporting validation checks.",
     "- Prefer strong single-session artifacts over weak multi-session merges.",
+    "- Expand beyond the selected sessions only with a strong join key; record the join rationale for every multi-session artifact.",
+    "- A session package is resolved only after publication; runbook, ADR, and incident timeline each resolve through publication, N/A, or an existing published contribution.",
     "",
     "Selected sessions:",
     ...rows
