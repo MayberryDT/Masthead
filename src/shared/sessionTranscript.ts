@@ -24,6 +24,7 @@ export type SessionTranscriptItem = {
   toolName?: string;
   argumentsRedacted?: unknown;
   details?: unknown;
+  filePath?: string;
   staged?: boolean;
   additions?: number;
   deletions?: number;

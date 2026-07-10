@@ -120,9 +120,9 @@ function buildSingleSessionPacket(
       userMessages: transcript.coverage.userMessages
     },
     files: fileItems.map((item) => ({
-      displayPath: item.text,
+      displayPath: item.filePath ?? item.text,
       effectKind: item.label,
-      path: item.text,
+      path: item.filePath ?? item.text,
       ref: item.itemId,
       sessionId: options.sessionId
     })),

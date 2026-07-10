@@ -113,6 +113,7 @@ describe("session transcript repository", () => {
     expect(fileEffect).toMatchObject({
       additions: 41,
       deletions: 3,
+      filePath: "src/daemon/db/sessionTranscriptRepository.ts",
       staged: true,
       text: expect.stringMatching(/staged.*41 additions.*3 deletions/)
     });

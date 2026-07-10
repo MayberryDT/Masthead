@@ -373,6 +373,7 @@ function normalizeTranscriptItem(row: TranscriptRow, preserveFullText = false): 
     ...(row.deletions === null ? {} : { deletions: row.deletions }),
     ...(row.detailsJson === null ? {} : { details: parseJson(row.detailsJson) }),
     exitCode: row.exitCode ?? undefined,
+    ...(row.kind === "file_effect" ? { filePath: baseText } : {}),
     itemId: `${itemPrefix(row.kind)}:${row.itemId}`,
     kind: row.kind,
     label: row.label ?? labelForKind(row.kind),
