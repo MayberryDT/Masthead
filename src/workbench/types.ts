@@ -1,3 +1,11 @@
+import type { SessionArtifactRecord } from "../daemon/db/sessionArtifactRepository.ts";
+import type { SessionTranscriptItem } from "../shared/sessionTranscript.ts";
+import type {
+  WorkbenchAuthoringBundle,
+  WorkbenchAuthoringFinding,
+  WorkbenchClaimEvidence
+} from "../shared/workbenchAuthoring.ts";
+
 export type WorkbenchOutputKind =
   | "session_enrichment"
   | "session_dossier"
@@ -22,6 +30,78 @@ export type SessionEnrichmentOutput = {
   confidence: WorkbenchConfidence;
   missingEvidence: string[];
   evidenceRefs: string[];
+};
+
+export type WorkbenchGroundedOutput = {
+  title: string;
+  confidence: WorkbenchConfidence;
+  evidenceRefs: string[];
+  claimEvidence: WorkbenchClaimEvidence[];
+  missingEvidence: string[];
+};
+
+export type SessionEnrichmentOutputV2 = SessionEnrichmentOutput & WorkbenchGroundedOutput;
+
+export type WorkbenchAuthoringOutputV2 = Record<string, unknown> & WorkbenchGroundedOutput;
+
+export type WorkbenchValidationEvidence = {
+  sessionId: string;
+  kind: SessionTranscriptItem["kind"];
+  status?: string;
+  exitCode?: number;
+};
+
+export type WorkbenchAuthoringValidationInput = {
+  bundle: WorkbenchAuthoringBundle;
+  selectedSessionIds: string[];
+  evidenceByRef: Map<string, WorkbenchValidationEvidence>;
+  coverageWarningsBySession: Map<string, string[]>;
+  publishedArtifacts: SessionArtifactRecord[];
+};
+
+export type WorkbenchAuthoringFindingCode =
+  | "claim_evidence_outside_declared_evidence"
+  | "duplicate_automatic_kind_resolution"
+  | "duplicate_session_package"
+  | "duplicate_title_summary"
+  | "empty_claim_array"
+  | "evidence_outside_declared_evidence"
+  | "evidence_outside_provenance"
+  | "generic_title"
+  | "high_confidence_with_sparse_coverage"
+  | "high_confidence_without_support"
+  | "insufficient_specificity"
+  | "invalid_bundle"
+  | "invalid_claim_path"
+  | "invalid_contribution"
+  | "invalid_type"
+  | "mismatched_output_provenance"
+  | "missing_claim_evidence"
+  | "missing_join_rationale"
+  | "missing_passed_verification"
+  | "missing_required"
+  | "missing_session_package"
+  | "missing_sparse_evidence_note"
+  | "not_applicable_without_evidence"
+  | "provenance_session_not_selected"
+  | "seed_missing_from_provenance"
+  | "secret_detected"
+  | "sparse_evidence_coverage"
+  | "unexpected_automatic_resolution"
+  | "unexpected_property"
+  | "unexpected_session_package"
+  | "unknown_evidence_ref"
+  | "unresolved_automatic_kind"
+  | "weak_join"
+  | "weak_not_applicable_reason";
+
+export type WorkbenchAuthoringFindingV2 = Omit<WorkbenchAuthoringFinding, "code"> & {
+  code: WorkbenchAuthoringFindingCode;
+};
+
+export type WorkbenchAuthoringValidationResult = {
+  ok: boolean;
+  findings: WorkbenchAuthoringFindingV2[];
 };
 
 export type WorkbenchEvidencePacket = {
