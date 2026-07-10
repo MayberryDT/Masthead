@@ -743,6 +743,9 @@ describe("SourcesPanel import controls", () => {
     expect(css).toMatch(/\.settings-section-body\s*\{[\s\S]*display: grid;\s*\}/);
     expect(css).toMatch(/\.settings-row\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto;[\s\S]*align-items: start;[\s\S]*border-bottom: 1px solid rgba\(194, 221, 241, 0\.08\);[\s\S]*padding: 8px 0;/);
     expect(css).toMatch(/\.settings-panel \.settings-pane \.settings-row\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(180px, 360px\);/);
+    expect(css).toMatch(/\.settings-provider-field input\s*\{[\s\S]*min-height: 36px;/);
+    expect(css).toContain(".settings-provider-field input:focus {");
+    expect(css).not.toContain(".settings-provider-field input:focus-visible {");
     await act(async () => root.unmount());
   });
 

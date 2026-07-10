@@ -524,7 +524,7 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  min-height: 40px;
+  min-height: 36px;
   border: 1px solid rgba(92, 153, 187, 0.18);
   border-radius: 3px;
   background: #061925;
@@ -538,7 +538,7 @@
   color: rgba(145, 168, 186, 0.68);
 }
 
-.settings-provider-field input:focus-visible {
+.settings-provider-field input:focus {
   outline: 0;
   box-shadow:
     0 0 0 1px rgba(116, 185, 224, 0.34),
