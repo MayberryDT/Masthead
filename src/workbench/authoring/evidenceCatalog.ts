@@ -66,6 +66,10 @@ export function authoringEvidenceRevision(db: MastheadDatabase, sessionIds: stri
     for (const item of iterateSessionTranscriptItems(db, { order: "asc", sessionId })) {
       hash.update(
         `${JSON.stringify({
+          additions: item.additions,
+          argumentsRedacted: item.argumentsRedacted,
+          deletions: item.deletions,
+          details: item.details,
           exitCode: item.exitCode,
           itemId: item.itemId,
           kind: item.kind,
@@ -73,6 +77,7 @@ export function authoringEvidenceRevision(db: MastheadDatabase, sessionIds: stri
           observedAt: item.observedAt,
           role: item.role,
           sourceRef: item.sourceRef,
+          staged: item.staged,
           status: item.status,
           text: item.text,
           toolName: item.toolName

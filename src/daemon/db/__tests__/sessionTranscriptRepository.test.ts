@@ -97,6 +97,34 @@ describe("session transcript repository", () => {
     db.close();
   });
 
+  test("exposes complete redacted tool, runtime-signal, and file-effect content without splitting canonical rows", async () => {
+    const db = await openTestDatabase();
+    seedTranscriptSession(db);
+
+    const result = getSessionTranscript(db, { sessionId: "session-transcript", limit: 20 });
+    const toolCall = result.items.find((item) => item.kind === "tool_call");
+    const fileEffect = result.items.find((item) => item.kind === "file_effect");
+    const runtimeSignal = result.items.find((item) => item.kind === "runtime_signal");
+
+    expect(toolCall).toMatchObject({
+      argumentsRedacted: { command: "npm test -- --run transcript" },
+      text: expect.stringContaining("npm test -- --run transcript")
+    });
+    expect(fileEffect).toMatchObject({
+      additions: 41,
+      deletions: 3,
+      staged: true,
+      text: expect.stringMatching(/staged.*41 additions.*3 deletions/)
+    });
+    expect(runtimeSignal).toMatchObject({
+      details: { phase: "verification", testsPassed: 12 },
+      text: expect.stringContaining("testsPassed")
+    });
+    expect(result.items).toHaveLength(8);
+    expect(result.total).toBe(8);
+    db.close();
+  });
+
   test("filters by q across canonical text", async () => {
     const db = await openTestDatabase();
     seedTranscriptSession(db);
@@ -242,10 +270,13 @@ function seedTranscriptSession(db: MastheadDatabase): void {
   insertMessage(db, "session-transcript", "m2", "user", "Search for sqlite pagination.", "2026-06-26T12:01:00.000Z");
   insertMessage(db, "session-transcript", "m1", "user", "Implement transcript detail v2.", "2026-06-26T12:00:00.000Z");
   insertMessage(db, "session-transcript", "m3", "assistant", "Added the canonical transcript repository.", "2026-06-26T12:06:00.000Z");
-  db.prepare("INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, ?, ?, ?)").run(
+  db.prepare(
+    "INSERT INTO tool_calls (tool_call_id, session_id, tool_name, arguments_redacted_json, started_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(
     "session-transcript:tool-a",
     "session-transcript",
     "shell",
+    JSON.stringify({ command: "npm test -- --run transcript" }),
     "2026-06-26T12:02:00.000Z",
     "{}"
   );
@@ -272,11 +303,16 @@ function seedTranscriptSession(db: MastheadDatabase): void {
     "2026-06-26T12:04:00.000Z",
     "{}"
   );
-  db.prepare("INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)").run(
+  db.prepare(
+    "INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, staged, additions, deletions, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
     "session-transcript:file",
     "session-transcript",
     "src/daemon/db/sessionTranscriptRepository.ts",
     "created",
+    1,
+    41,
+    3,
     "2026-06-26T12:05:00.000Z",
     "{}"
   );
@@ -286,7 +322,7 @@ function seedTranscriptSession(db: MastheadDatabase): void {
     "progress",
     "info",
     "Runtime signal",
-    "{}",
+    JSON.stringify({ phase: "verification", testsPassed: 12 }),
     "2026-06-26T12:05:00.000Z",
     "{}"
   );

@@ -751,6 +751,44 @@ export function markContributionSatisfactionForProvenanceInTransaction(
   }
 }
 
+export function reconcileWorkbenchArtifactSatisfactionInTransaction(
+  db: MastheadDatabase,
+  input: { artifactKind: WorkbenchAutomaticKind; sessionIds: string[] }
+): void {
+  const now = new Date().toISOString();
+  for (const sessionId of [...new Set(input.sessionIds)]) {
+    const state = readWorkbenchSessionState(db, sessionId);
+    if (!state) continue;
+    const existingStatus = optionalKindStatus(state, input.artifactKind);
+    if (existingStatus === "not_applicable") continue;
+
+    const currentArtifact = db
+      .prepare(
+        `SELECT artifacts.session_id AS seedSessionId
+         FROM session_artifacts AS artifacts
+         LEFT JOIN session_artifact_provenance AS provenance
+           ON provenance.artifact_id = artifacts.artifact_id
+         WHERE artifacts.artifact_kind = ?
+           AND artifacts.status = 'current'
+           AND artifacts.publication_status = 'published'
+           AND (artifacts.session_id = ? OR provenance.session_id = ?)
+         ORDER BY CASE WHEN artifacts.session_id = ? THEN 0 ELSE 1 END, artifacts.updated_at DESC, artifacts.artifact_id
+         LIMIT 1`
+      )
+      .get(input.artifactKind, sessionId, sessionId, sessionId) as { seedSessionId: string } | undefined;
+    const reconciledStatus = currentArtifact
+      ? currentArtifact.seedSessionId === sessionId
+        ? "published"
+        : "contributed"
+      : existingStatus === "published" || existingStatus === "contributed"
+        ? "applied"
+        : existingStatus;
+    if (reconciledStatus === existingStatus) continue;
+    setOptionalKindStatus(db, sessionId, input.artifactKind, reconciledStatus, now);
+    refreshResolutionAndNextAction(db, sessionId, now);
+  }
+}
+
 export function markWorkbenchTranscriptStatus(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; details?: Record<string, unknown>; eventType: string; sessionId: string; status: WorkbenchTranscriptStatus; summary: string }
@@ -1144,6 +1182,15 @@ function setOptionalKindStatus(
     now,
     sessionId
   );
+}
+
+function optionalKindStatus(
+  state: WorkbenchSessionStateRecord,
+  kind: WorkbenchAutomaticKind
+): WorkbenchOptionalKindStatus {
+  if (kind === "runbook") return state.runbookStatus;
+  if (kind === "adr") return state.adrStatus;
+  return state.incidentTimelineStatus;
 }
 
 export function legacyBugFixTraceStatusForOptionalStatus(

@@ -31,6 +31,11 @@ type TranscriptRow = {
   status: string | null;
   exitCode: number | null;
   toolName: string | null;
+  argumentsRedactedJson: string | null;
+  detailsJson: string | null;
+  staged: number | null;
+  additions: number | null;
+  deletions: number | null;
 };
 
 type CountRow = {
@@ -120,7 +125,8 @@ export function* iterateSessionTranscriptItems(
   const direction = query.order === "desc" ? "DESC" : "ASC";
   const rows = db
     .prepare(
-      `SELECT itemId, sessionId, kind, role, label, text, observedAt, sourceRefJson, status, exitCode, toolName
+      `SELECT itemId, sessionId, kind, role, label, text, observedAt, sourceRefJson, status, exitCode, toolName,
+        argumentsRedactedJson, detailsJson, staged, additions, deletions
       FROM (${parts.map((part) => part.sql).join(" UNION ALL ")})
       ORDER BY observedAt ${direction}, itemId ${direction}`
     )
@@ -140,7 +146,8 @@ function getTranscriptItems(
   const direction = query.order === "desc" ? "DESC" : "ASC";
   const rows = db
     .prepare(
-      `SELECT itemId, sessionId, kind, role, label, text, observedAt, sourceRefJson, status, exitCode, toolName
+      `SELECT itemId, sessionId, kind, role, label, text, observedAt, sourceRefJson, status, exitCode, toolName,
+        argumentsRedactedJson, detailsJson, staged, additions, deletions
       FROM (${parts.map((part) => part.sql).join(" UNION ALL ")})
       ORDER BY observedAt ${direction}, itemId ${direction}
       LIMIT ? OFFSET ?`
@@ -200,7 +207,12 @@ function messageSelectPart(sessionId: string, kind: string, query?: string): Tra
         source_ref_json AS sourceRefJson,
         NULL AS status,
         NULL AS exitCode,
-        NULL AS toolName
+        NULL AS toolName,
+        NULL AS argumentsRedactedJson,
+        NULL AS detailsJson,
+        NULL AS staged,
+        NULL AS additions,
+        NULL AS deletions
       FROM messages
       WHERE ${clauses.join(" AND ")}`
   };
@@ -209,7 +221,7 @@ function messageSelectPart(sessionId: string, kind: string, query?: string): Tra
 function toolCallSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
   const params: Array<number | string> = [sessionId];
-  addTextQuery(clauses, params, query, "tool_name");
+  addTextQuery(clauses, params, query, "COALESCE(tool_name, '') || ' ' || COALESCE(arguments_redacted_json, '')");
   return {
     params,
     sql: `SELECT tool_call_id AS itemId,
@@ -222,7 +234,12 @@ function toolCallSelectPart(sessionId: string, query?: string): TranscriptSelect
         source_ref_json AS sourceRefJson,
         NULL AS status,
         NULL AS exitCode,
-        tool_name AS toolName
+        tool_name AS toolName,
+        arguments_redacted_json AS argumentsRedactedJson,
+        NULL AS detailsJson,
+        NULL AS staged,
+        NULL AS additions,
+        NULL AS deletions
       FROM tool_calls
       WHERE ${clauses.join(" AND ")}`
   };
@@ -244,7 +261,12 @@ function toolResultSelectPart(sessionId: string, query?: string, preserveFullTex
         source_ref_json AS sourceRefJson,
         status,
         exit_code AS exitCode,
-        NULL AS toolName
+        NULL AS toolName,
+        NULL AS argumentsRedactedJson,
+        NULL AS detailsJson,
+        NULL AS staged,
+        NULL AS additions,
+        NULL AS deletions
       FROM tool_results
       WHERE ${clauses.join(" AND ")}`
   };
@@ -266,7 +288,12 @@ function checkpointSelectPart(sessionId: string, query?: string): TranscriptSele
         source_ref_json AS sourceRefJson,
         NULL AS status,
         NULL AS exitCode,
-        NULL AS toolName
+        NULL AS toolName,
+        NULL AS argumentsRedactedJson,
+        NULL AS detailsJson,
+        NULL AS staged,
+        NULL AS additions,
+        NULL AS deletions
       FROM checkpoints
       WHERE ${clauses.join(" AND ")}`
   };
@@ -275,7 +302,7 @@ function checkpointSelectPart(sessionId: string, query?: string): TranscriptSele
 function runtimeSignalSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
   const params: Array<number | string> = [sessionId];
-  addTextQuery(clauses, params, query, "title");
+  addTextQuery(clauses, params, query, "COALESCE(title, '') || ' ' || COALESCE(details_json, '')");
   return {
     params,
     sql: `SELECT signal_id AS itemId,
@@ -288,7 +315,12 @@ function runtimeSignalSelectPart(sessionId: string, query?: string): TranscriptS
         source_ref_json AS sourceRefJson,
         severity AS status,
         NULL AS exitCode,
-        NULL AS toolName
+        NULL AS toolName,
+        NULL AS argumentsRedactedJson,
+        details_json AS detailsJson,
+        NULL AS staged,
+        NULL AS additions,
+        NULL AS deletions
       FROM runtime_signals
       WHERE ${clauses.join(" AND ")}`
   };
@@ -297,7 +329,15 @@ function runtimeSignalSelectPart(sessionId: string, query?: string): TranscriptS
 function fileEffectSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
   const params: Array<number | string> = [sessionId];
-  addTextQuery(clauses, params, query, "path");
+  addTextQuery(
+    clauses,
+    params,
+    query,
+    `COALESCE(path, '') || ' ' || COALESCE(effect_kind, '') || ' ' ||
+      CASE staged WHEN 1 THEN 'staged' ELSE 'unstaged' END || ' ' ||
+      COALESCE(CAST(additions AS TEXT) || ' additions', '') || ' ' ||
+      COALESCE(CAST(deletions AS TEXT) || ' deletions', '')`
+  );
   return {
     params,
     sql: `SELECT file_effect_id AS itemId,
@@ -310,17 +350,28 @@ function fileEffectSelectPart(sessionId: string, query?: string): TranscriptSele
         source_ref_json AS sourceRefJson,
         NULL AS status,
         NULL AS exitCode,
-        NULL AS toolName
+        NULL AS toolName,
+        NULL AS argumentsRedactedJson,
+        NULL AS detailsJson,
+        staged,
+        additions,
+        deletions
       FROM file_effects
       WHERE ${clauses.join(" AND ")}`
   };
 }
 
 function normalizeTranscriptItem(row: TranscriptRow, preserveFullText = false): SessionTranscriptItem {
-  const text = preserveFullText ? (row.text ?? row.label ?? "") : preview(row.text ?? row.label ?? "");
-  const lowValue = isLowValueText(text) || isLowValueText(row.label ?? "");
+  const baseText = row.text ?? row.label ?? "";
+  const completeText = completeCanonicalText(row, baseText);
+  const text = preserveFullText ? completeText : preview(completeText);
+  const lowValue = isLowValueText(baseText) || isLowValueText(row.label ?? "");
   return {
+    ...(row.additions === null ? {} : { additions: row.additions }),
+    ...(row.argumentsRedactedJson === null ? {} : { argumentsRedacted: parseJson(row.argumentsRedactedJson) }),
     collapsedByDefault: row.kind === "tool_result" && text.length > 240 ? true : undefined,
+    ...(row.deletions === null ? {} : { deletions: row.deletions }),
+    ...(row.detailsJson === null ? {} : { details: parseJson(row.detailsJson) }),
     exitCode: row.exitCode ?? undefined,
     itemId: `${itemPrefix(row.kind)}:${row.itemId}`,
     kind: row.kind,
@@ -330,10 +381,28 @@ function normalizeTranscriptItem(row: TranscriptRow, preserveFullText = false): 
     role: normalizeRole(row.role),
     sessionId: row.sessionId,
     sourceRef: parseJson(row.sourceRefJson),
+    ...(row.staged === null ? {} : { staged: row.staged !== 0 }),
     status: row.status ?? undefined,
     text,
     toolName: row.toolName ?? undefined
   };
+}
+
+function completeCanonicalText(row: TranscriptRow, baseText: string): string {
+  if (row.kind === "tool_call" && row.argumentsRedactedJson !== null) {
+    return `${baseText}\nArguments: ${row.argumentsRedactedJson}`;
+  }
+  if (row.kind === "runtime_signal" && row.detailsJson !== null) {
+    return `${baseText}\nDetails: ${row.detailsJson}`;
+  }
+  if (row.kind === "file_effect") {
+    const changeCounts = [
+      row.additions === null ? undefined : `${row.additions} additions`,
+      row.deletions === null ? undefined : `${row.deletions} deletions`
+    ].filter((value): value is string => value !== undefined);
+    return `${baseText}\n${row.staged === 1 ? "staged" : "unstaged"}${changeCounts.length ? `; ${changeCounts.join("; ")}` : ""}`;
+  }
+  return baseText;
 }
 
 function addTextQuery(clauses: string[], params: Array<number | string>, query: string | undefined, column: string): void {

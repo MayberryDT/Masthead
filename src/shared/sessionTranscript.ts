@@ -22,6 +22,11 @@ export type SessionTranscriptItem = {
   status?: string;
   exitCode?: number;
   toolName?: string;
+  argumentsRedacted?: unknown;
+  details?: unknown;
+  staged?: boolean;
+  additions?: number;
+  deletions?: number;
   collapsedByDefault?: boolean;
   lowValue?: boolean;
 };

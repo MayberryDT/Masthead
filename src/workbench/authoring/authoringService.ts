@@ -39,6 +39,7 @@ import {
   markWorkbenchTranscriptAvailableInTransaction,
   publishWorkbenchSessionInTransaction,
   readWorkbenchSessionState,
+  reconcileWorkbenchArtifactSatisfactionInTransaction,
   recordWorkbenchActivity,
   releaseWorkbenchClaimInTransaction,
   renewOrReacquireAuthoringClaimsInTransaction,
@@ -119,7 +120,14 @@ export function openAuthoringRun(
     }
     assertSessionsOnPublishPath(db, sessionIds);
     assertCanonicalEvidence(db, evidence);
-    if (reusable?.evidenceRevision === evidence.evidenceRevision) return openResult(db, reusable, evidence);
+    if (reusable?.evidenceRevision === evidence.evidenceRevision) {
+      const run = renewOrReacquireAuthoringClaimsInTransaction(db, {
+        actorId: input.actorId,
+        expiresAt: authoringLeaseExpiry(),
+        runId: reusable.runId
+      });
+      return openResult(db, run, evidence);
+    }
     if (reusable) {
       resetWorkbenchAuthoringRunEvidence(db, {
         evidenceRevision: evidence.evidenceRevision,
@@ -244,7 +252,7 @@ export function finishAuthoringRun(
   db: MastheadDatabase,
   input: { runId: string; verifyPublished?: (artifactId: string) => boolean }
 ): WorkbenchAuthoringReceipt {
-  const result = withImmediateTransaction<WorkbenchAuthoringReceipt | "duplicate_artifact_signature">(db, () => {
+  return withImmediateTransaction(db, () => {
     const existing = requireAuthoringRun(db, input.runId);
     if (existing.receipt) return existing.receipt;
     if (existing.status !== "ready_to_finish") {
@@ -256,17 +264,7 @@ export function finishAuthoringRun(
       (finding) => finding.code === "duplicate_artifact_signature"
     );
     if (signatureCollisions.length > 0) {
-      saveWorkbenchAuthoringSubmission(db, {
-        bundle: existing.bundle,
-        evidenceRevision: existing.evidenceRevision,
-        findings: [
-          ...existing.findings.filter((finding) => finding.code !== "duplicate_artifact_signature"),
-          ...signatureCollisions
-        ],
-        runId: existing.runId,
-        status: "needs_revision"
-      });
-      return "duplicate_artifact_signature";
+      throw new Error("authoring_run_needs_revision:duplicate_artifact_signature");
     }
 
     const run = renewOrReacquireAuthoringClaimsInTransaction(db, {
@@ -283,10 +281,6 @@ export function finishAuthoringRun(
     completeWorkbenchAuthoringRun(db, { receipt, runId: run.runId });
     return receipt;
   });
-  if (result === "duplicate_artifact_signature") {
-    throw new Error("authoring_run_needs_revision:duplicate_artifact_signature");
-  }
-  return result;
 }
 
 function finishInsideTransaction(
@@ -302,6 +296,7 @@ function finishInsideTransaction(
     kind: SessionArtifactRecord["artifactKind"];
     provenanceSessionIds: string[];
     seedSessionId: string;
+    supersededProvenanceSessionIds: string[];
   }> = [];
 
   for (const sessionPackage of run.bundle.sessionPackages) {
@@ -325,11 +320,17 @@ function finishInsideTransaction(
       artifact: dossier,
       kind: "session_dossier",
       provenanceSessionIds: [sessionPackage.sessionId],
-      seedSessionId: sessionPackage.sessionId
+      seedSessionId: sessionPackage.sessionId,
+      supersededProvenanceSessionIds: []
     });
   }
 
   for (const artifactDraft of run.bundle.artifacts) {
+    const supersededProvenanceSessionIds = currentPublishedSignatureProvenanceSessionIds(
+      db,
+      artifactDraft.kind,
+      normalizeSessionArtifactSignatureKey(artifactDraft.output.signatureKey)
+    );
     const artifact = applyAuthoringArtifactInTransaction(db, {
       actorId: run.actorId,
       kind: artifactDraft.kind,
@@ -346,7 +347,8 @@ function finishInsideTransaction(
       artifact,
       kind: artifactDraft.kind,
       provenanceSessionIds: artifactDraft.provenanceSessionIds,
-      seedSessionId: artifactDraft.seedSessionId
+      seedSessionId: artifactDraft.seedSessionId,
+      supersededProvenanceSessionIds
     });
   }
 
@@ -403,6 +405,14 @@ function finishInsideTransaction(
       artifactId: decision.publishedArtifactId,
       kind: decision.kind,
       sessionId: decision.sessionId
+    });
+  }
+
+  for (const applied of appliedArtifacts) {
+    if (applied.kind === "session_dossier" || applied.supersededProvenanceSessionIds.length === 0) continue;
+    reconcileWorkbenchArtifactSatisfactionInTransaction(db, {
+      artifactKind: applied.kind,
+      sessionIds: applied.supersededProvenanceSessionIds
     });
   }
 
@@ -583,6 +593,37 @@ function currentArtifacts(db: MastheadDatabase, sessionIds: string[]): SessionAr
     }
   }
   return [...artifacts.values()].sort((left, right) => left.artifactId.localeCompare(right.artifactId));
+}
+
+function currentPublishedSignatureProvenanceSessionIds(
+  db: MastheadDatabase,
+  artifactKind: SessionArtifactRecord["artifactKind"],
+  signatureKey: string | undefined
+): string[] {
+  if (!signatureKey || artifactKind === "session_dossier") return [];
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT sessionId
+       FROM (
+         SELECT provenance.session_id AS sessionId
+         FROM session_artifacts AS artifacts
+         JOIN session_artifact_provenance AS provenance ON provenance.artifact_id = artifacts.artifact_id
+         WHERE artifacts.artifact_kind = ?
+           AND artifacts.signature_key = ?
+           AND artifacts.status = 'current'
+           AND artifacts.publication_status = 'published'
+         UNION
+         SELECT artifacts.session_id AS sessionId
+         FROM session_artifacts AS artifacts
+         WHERE artifacts.artifact_kind = ?
+           AND artifacts.signature_key = ?
+           AND artifacts.status = 'current'
+           AND artifacts.publication_status = 'published'
+       )
+       ORDER BY sessionId`
+    )
+    .all(artifactKind, signatureKey, artifactKind, signatureKey) as Array<{ sessionId: string }>;
+  return rows.map((row) => row.sessionId);
 }
 
 function applyAuthoringArtifactInTransaction(

@@ -186,6 +186,58 @@ describe("authoring evidence catalog", () => {
     expect(authoringEvidenceRevision(db, ["session:source-revision"])).not.toBe(initial);
     db.close();
   });
+
+  test("exposes every redacted canonical content field and revises for each field change", async () => {
+    const db = await testDb();
+    seedMixedSession(db, "session:complete-canonical-fields");
+
+    const page = getAuthoringEvidencePage(db, { sessionId: "session:complete-canonical-fields" });
+    expect(page.total).toBe(7);
+    expect(page.items.find((item) => item.kind === "tool_call")).toMatchObject({
+      argumentsRedacted: { command: "npm run focused-test" },
+      label: "shell",
+      text: expect.stringContaining("npm run focused-test")
+    });
+    expect(page.items.find((item) => item.kind === "runtime_signal")).toMatchObject({
+      details: { phase: "finish", receipt: "stored" },
+      label: "completed",
+      text: expect.stringContaining("receipt")
+    });
+    expect(page.items.find((item) => item.kind === "file_effect")).toMatchObject({
+      additions: 20,
+      deletions: 4,
+      label: "modified",
+      staged: true,
+      text: expect.stringMatching(/staged.*20 additions.*4 deletions/)
+    });
+
+    const revisions = [authoringEvidenceRevision(db, ["session:complete-canonical-fields"])];
+    db.prepare("UPDATE tool_calls SET arguments_redacted_json = ? WHERE session_id = ?").run(
+      JSON.stringify({ command: "npm run changed-test" }),
+      "session:complete-canonical-fields"
+    );
+    revisions.push(authoringEvidenceRevision(db, ["session:complete-canonical-fields"]));
+    db.prepare("UPDATE runtime_signals SET details_json = ? WHERE session_id = ?").run(
+      JSON.stringify({ phase: "finish", receipt: "changed" }),
+      "session:complete-canonical-fields"
+    );
+    revisions.push(authoringEvidenceRevision(db, ["session:complete-canonical-fields"]));
+    db.prepare("UPDATE file_effects SET staged = 0 WHERE session_id = ?").run("session:complete-canonical-fields");
+    revisions.push(authoringEvidenceRevision(db, ["session:complete-canonical-fields"]));
+    db.prepare("UPDATE file_effects SET additions = 21 WHERE session_id = ?").run("session:complete-canonical-fields");
+    revisions.push(authoringEvidenceRevision(db, ["session:complete-canonical-fields"]));
+    db.prepare("UPDATE file_effects SET deletions = 5 WHERE session_id = ?").run("session:complete-canonical-fields");
+    revisions.push(authoringEvidenceRevision(db, ["session:complete-canonical-fields"]));
+
+    expect(new Set(revisions).size).toBe(revisions.length);
+    expect(
+      getAuthoringEvidencePage(db, {
+        query: "changed-test",
+        sessionId: "session:complete-canonical-fields"
+      }).items.map((item) => item.kind)
+    ).toEqual(["tool_call"]);
+    db.close();
+  });
 });
 
 async function testDb(): Promise<MastheadDatabase> {
@@ -231,10 +283,13 @@ function seedLongSession(db: MastheadDatabase, sessionId: string, itemCount: num
 function seedMixedSession(db: MastheadDatabase, sessionId: string): void {
   seedOneMessageSession(db, sessionId);
   insertMessage(db, sessionId, "assistant", "assistant", "Implementation complete.", "2026-07-10T13:01:00.000Z");
-  db.prepare("INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, ?, ?, ?)").run(
+  db.prepare(
+    "INSERT INTO tool_calls (tool_call_id, session_id, tool_name, arguments_redacted_json, started_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(
     `${sessionId}:tool`,
     sessionId,
     "shell",
+    JSON.stringify({ command: "npm run focused-test" }),
     "2026-07-10T13:02:00.000Z",
     "{}"
   );
@@ -253,11 +308,16 @@ function seedMixedSession(db: MastheadDatabase, sessionId: string): void {
     "2026-07-10T13:03:00.000Z",
     "{}"
   );
-  db.prepare("INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)").run(
+  db.prepare(
+    "INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, staged, additions, deletions, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
     `${sessionId}:file`,
     sessionId,
     "src/example.ts",
     "modified",
+    1,
+    20,
+    4,
     "2026-07-10T13:04:00.000Z",
     "{}"
   );
@@ -275,7 +335,7 @@ function seedMixedSession(db: MastheadDatabase, sessionId: string): void {
     "completed",
     "info",
     "Run completed",
-    "{}",
+    JSON.stringify({ phase: "finish", receipt: "stored" }),
     "2026-07-10T13:06:00.000Z",
     "{}"
   );

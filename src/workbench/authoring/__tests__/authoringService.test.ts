@@ -12,6 +12,7 @@ import {
 } from "../../../daemon/db/sessionArtifactRepository.ts";
 import {
   claimWorkbenchSessions,
+  markContributionSatisfactionForProvenance,
   markWorkbenchNotAdded,
   readWorkbenchSessionState,
   setWorkbenchArtifactApplicability
@@ -110,6 +111,49 @@ describe("Workbench authoring service", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_claims WHERE released_at IS NULL").get()).toEqual({
       count: 1
     });
+    db.close();
+  });
+
+  test("repeat open reacquires an expired current-revision claim before returning the reusable run", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
+    const db = await readyAuthoringDb();
+    const input = {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    };
+    const opened = openAuthoringRun(db, input);
+    const expiredClaimId = opened.run.claimIds[0];
+    expireAuthoringClaims(db, opened.run.runId);
+
+    const reopened = openAuthoringRun(db, input);
+
+    expect(reopened.run.runId).toBe(opened.run.runId);
+    expect(reopened.run.claimIds[0]).not.toBe(expiredClaimId);
+    expect(Date.parse(reopened.run.claimsExpireAt)).toBeGreaterThan(Date.now());
+    db.close();
+  });
+
+  test("repeat open reports a stable conflict when another actor owns the expired run session", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
+    const db = await readyAuthoringDb();
+    const input = {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    };
+    const opened = openAuthoringRun(db, input);
+    expireAuthoringClaims(db, opened.run.runId);
+    claimWorkbenchSessions(db, {
+      claimedBy: "other-agent",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      sessionIds: ["session:a"]
+    });
+
+    expect(() => openAuthoringRun(db, input)).toThrow("authoring_claim_conflict:session:a");
+    expect(getAuthoringRunStatus(db, opened.run.runId).run.claimIds).toEqual(opened.run.claimIds);
     db.close();
   });
 
@@ -498,7 +542,7 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
-  test("downgrades a historical ready run with canonical signature collisions before finish writes", async () => {
+  test("rolls back a historical duplicate-signature finish without changing the durable run", async () => {
     const db = await readyAuthoringDb();
     seedSessionWithRedactedEvidence(db, "session:b");
     const opened = openAuthoringRun(db, {
@@ -526,6 +570,7 @@ describe("Workbench authoring service", () => {
        WHERE run_id = ?`
     ).run(JSON.stringify(historicalBundle), opened.run.runId);
     expireAuthoringClaims(db, opened.run.runId);
+    const runBeforeFinish = getAuthoringRunStatus(db, opened.run.runId).run;
     const claimsBeforeFinish = runClaimRows(db, opened.run.runId);
     const outputsBeforeFinish = authoringOutputCounts(db);
 
@@ -533,17 +578,7 @@ describe("Workbench authoring service", () => {
       "authoring_run_needs_revision:duplicate_artifact_signature"
     );
 
-    expect(getAuthoringRunStatus(db, opened.run.runId).run).toMatchObject({
-      findings: [
-        expect.objectContaining({
-          artifactKind: "runbook",
-          code: "duplicate_artifact_signature",
-          path: "artifacts[1].output.signatureKey",
-          sessionId: "session:b"
-        })
-      ],
-      status: "needs_revision"
-    });
+    expect(getAuthoringRunStatus(db, opened.run.runId).run).toEqual(runBeforeFinish);
     expect(runClaimRows(db, opened.run.runId)).toEqual(claimsBeforeFinish);
     expect(authoringOutputCounts(db)).toEqual(outputsBeforeFinish);
 
@@ -659,6 +694,125 @@ describe("Workbench authoring service", () => {
       artifactId: runbookId,
       kind: "runbook",
       sessionId: "session:b"
+    });
+    db.close();
+  });
+
+  test("reopens an old session when a later session supersedes its only published signature", async () => {
+    const db = await readyAuthoringDb();
+    const firstOpened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    const firstBundle = validBundle(firstOpened.run.runId, firstOpened.run.evidenceRevision, "session:a");
+    firstBundle.notApplicable = firstBundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    const firstRunbook = validRunbookDraft("session:a");
+    firstRunbook.output.signatureKey = "signature:shared-runtime-failure";
+    firstBundle.artifacts = [firstRunbook];
+    expect(submitAuthoringBundle(db, { bundle: firstBundle, runId: firstOpened.run.runId }).accepted).toBe(true);
+    const firstReceipt = finishAuthoringRun(db, { runId: firstOpened.run.runId });
+    const oldRunbookId = firstReceipt.publishedArtifactIds.find(
+      (artifactId) => getLogbookArtifactDetail(db, artifactId)?.capsule.kind === "runbook"
+    )!;
+
+    seedSessionWithRedactedEvidence(db, "session:b");
+    const secondOpened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:b"]
+    });
+    const secondBundle = validBundle(secondOpened.run.runId, secondOpened.run.evidenceRevision, "session:b");
+    secondBundle.notApplicable = secondBundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    const replacementRunbook = validRunbookDraft("session:b");
+    replacementRunbook.output.signatureKey = "signature:shared-runtime-failure";
+    secondBundle.artifacts = [replacementRunbook];
+    expect(submitAuthoringBundle(db, { bundle: secondBundle, runId: secondOpened.run.runId }).accepted).toBe(true);
+
+    finishAuthoringRun(db, { runId: secondOpened.run.runId });
+
+    expect(listSessionArtifacts(db).find((artifact) => artifact.artifactId === oldRunbookId)?.status).toBe("superseded");
+    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
+      adrStatus: "not_applicable",
+      incidentTimelineStatus: "not_applicable",
+      nextAction: "enrich",
+      publicationStatus: "published",
+      resolutionStatus: "compile_ready",
+      runbookStatus: "applied",
+      sessionPackageStatus: "published"
+    });
+    expect(readWorkbenchSessionState(db, "session:b")).toMatchObject({
+      resolutionStatus: "automatic_resolved",
+      runbookStatus: "published"
+    });
+    db.close();
+  });
+
+  test("preserves an old session's legitimate contribution when another current artifact still satisfies the kind", async () => {
+    const db = await readyAuthoringDb();
+    const firstOpened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    const firstBundle = validBundle(firstOpened.run.runId, firstOpened.run.evidenceRevision, "session:a");
+    firstBundle.notApplicable = firstBundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    const firstRunbook = validRunbookDraft("session:a");
+    firstRunbook.output.signatureKey = "signature:shared-runtime-failure";
+    firstBundle.artifacts = [firstRunbook];
+    expect(submitAuthoringBundle(db, { bundle: firstBundle, runId: firstOpened.run.runId }).accepted).toBe(true);
+    const firstReceipt = finishAuthoringRun(db, { runId: firstOpened.run.runId });
+    const supersededRunbookId = firstReceipt.publishedArtifactIds.find(
+      (artifactId) => getLogbookArtifactDetail(db, artifactId)?.capsule.kind === "runbook"
+    )!;
+
+    seedSessionWithRedactedEvidence(db, "session:b");
+    const supportingRunbook = applySessionArtifact(db, {
+      artifactKind: "runbook",
+      content: { title: "A separate current runbook still includes session A" },
+      contentFingerprint: "supporting-current-runbook",
+      createdBy: "test",
+      evidenceRefs: ["message:session:a:message"],
+      joinRationale: "Both sessions exhibit the same separately retained setup requirement.",
+      provenanceSessionIds: ["session:b", "session:a"],
+      schemaVersion: "runbook-v2",
+      sessionId: "session:b",
+      signatureKey: "signature:separate-current-satisfaction",
+      title: "A separate current runbook still includes session A",
+      validation: { ok: true }
+    });
+    publishSessionArtifact(db, supportingRunbook.artifactId);
+    markContributionSatisfactionForProvenance(db, {
+      actor: { id: "test", kind: "agent" },
+      artifactKind: "runbook",
+      provenanceSessionIds: ["session:b", "session:a"],
+      publishedArtifactId: supportingRunbook.artifactId,
+      seedSessionId: "session:b"
+    });
+
+    const secondOpened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:b"]
+    });
+    const secondBundle = validBundle(secondOpened.run.runId, secondOpened.run.evidenceRevision, "session:b");
+    secondBundle.notApplicable = secondBundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    const replacementRunbook = validRunbookDraft("session:b");
+    replacementRunbook.output.signatureKey = "signature:shared-runtime-failure";
+    secondBundle.artifacts = [replacementRunbook];
+    expect(submitAuthoringBundle(db, { bundle: secondBundle, runId: secondOpened.run.runId }).accepted).toBe(true);
+
+    finishAuthoringRun(db, { runId: secondOpened.run.runId });
+
+    expect(listSessionArtifacts(db).find((artifact) => artifact.artifactId === supersededRunbookId)?.status).toBe(
+      "superseded"
+    );
+    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
+      adrStatus: "not_applicable",
+      incidentTimelineStatus: "not_applicable",
+      nextAction: "none",
+      resolutionStatus: "automatic_resolved",
+      runbookStatus: "contributed"
     });
     db.close();
   });
