@@ -136,10 +136,14 @@ export function applySessionArtifactInTransaction(
   db: MastheadDatabase,
   input: SessionArtifactInput
 ): SessionArtifactRecord {
-  const provenanceSessionIds = normalizeProvenance(input);
-  validateProvenanceRules(input.artifactKind, provenanceSessionIds, input.joinRationale);
+  const artifactInput = {
+    ...input,
+    signatureKey: normalizeSessionArtifactSignatureKey(input.signatureKey)
+  };
+  const provenanceSessionIds = normalizeProvenance(artifactInput);
+  validateProvenanceRules(artifactInput.artifactKind, provenanceSessionIds, artifactInput.joinRationale);
 
-  const existing = readArtifactByFingerprint(db, input);
+  const existing = readArtifactByFingerprint(db, artifactInput);
   if (existing) {
     makeCurrentInTransaction(db, existing);
     return readArtifactById(db, existing.artifactId)!;
@@ -147,15 +151,15 @@ export function applySessionArtifactInTransaction(
 
   const now = new Date().toISOString();
   const artifactId = stableRecordId("session_artifact", [
-    input.sessionId,
-    input.artifactKind,
-    input.schemaVersion,
-    input.contentFingerprint
+    artifactInput.sessionId,
+    artifactInput.artifactKind,
+    artifactInput.schemaVersion,
+    artifactInput.contentFingerprint
   ]);
-  const lineageId = resolveLineageId(db, input, artifactId);
-  const capsule = capsuleFieldsFromInput(input);
+  const lineageId = resolveLineageId(db, artifactInput, artifactId);
+  const capsule = capsuleFieldsFromInput(artifactInput);
 
-  supersedeForApply(db, input, lineageId);
+  supersedeForApply(db, artifactInput, lineageId);
   db.prepare(
     `INSERT INTO session_artifacts (
       artifact_id, session_id, artifact_kind, status, content_fingerprint, created_at, updated_at,
@@ -165,28 +169,33 @@ export function applySessionArtifactInTransaction(
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'applied', ?, ?, ?, ?, ?, ?, ?, NULL)`
   ).run(
     artifactId,
-    input.sessionId,
-    input.artifactKind,
+    artifactInput.sessionId,
+    artifactInput.artifactKind,
     "current",
-    input.contentFingerprint,
+    artifactInput.contentFingerprint,
     now,
     now,
-    input.createdBy,
-    input.schemaVersion,
+    artifactInput.createdBy,
+    artifactInput.schemaVersion,
     capsule.title,
-    JSON.stringify(input.content),
-    JSON.stringify(input.evidenceRefs),
-    JSON.stringify(input.validation),
-    input.signatureKey ?? null,
+    JSON.stringify(artifactInput.content),
+    JSON.stringify(artifactInput.evidenceRefs),
+    JSON.stringify(artifactInput.validation),
+    artifactInput.signatureKey ?? null,
     lineageId,
     capsule.summary,
     capsule.highlight,
     capsule.confidence,
     capsule.projectLabel,
-    input.joinRationale ?? null
+    artifactInput.joinRationale ?? null
   );
   replaceProvenance(db, artifactId, provenanceSessionIds);
   return readArtifactById(db, artifactId)!;
+}
+
+export function normalizeSessionArtifactSignatureKey(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.trim() || undefined;
 }
 
 export function publishSessionArtifact(

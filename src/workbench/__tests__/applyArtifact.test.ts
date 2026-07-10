@@ -85,6 +85,7 @@ describe("applyArtifact", () => {
         reproSteps: ["Apply a valid runbook output file."],
         risksOrGaps: [],
         rootCause: "Runbooks were not covered by an apply-path regression.",
+        signatureKey: " \t ",
         title: "Cover runbook apply",
         validationChecks: ["npm test"]
       },
@@ -93,7 +94,12 @@ describe("applyArtifact", () => {
 
     expect(result).toMatchObject({ artifactKind: "runbook", dryRun: false, ok: true, publicationStatus: "applied" });
     expect(listSessionArtifacts(db, { sessionId: "session:abc" })).toEqual([
-      expect.objectContaining({ artifactKind: "runbook", status: "current", title: "Cover runbook apply" })
+      expect.objectContaining({
+        artifactKind: "runbook",
+        signatureKey: undefined,
+        status: "current",
+        title: "Cover runbook apply"
+      })
     ]);
     expect(readWorkbenchSessionState(db, "session:abc")).toMatchObject({
       publicationStatus: "publish_path",

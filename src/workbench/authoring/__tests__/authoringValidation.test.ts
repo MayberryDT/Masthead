@@ -135,7 +135,7 @@ describe("validateAuthoringBundle", () => {
     const first = validRunbookDraft(["session:a"]);
     const second = validRunbookDraft(["session:b"]);
     first.output.signatureKey = "signature:oauth-callback";
-    second.output.signatureKey = "signature:oauth-callback";
+    second.output.signatureKey = "  signature:oauth-callback  ";
     bundle.artifacts = [first, second];
 
     const result = validateAuthoringBundle(validValidationInput(bundle, ["session:a", "session:b"]));
@@ -152,6 +152,26 @@ describe("validateAuthoringBundle", () => {
     expect(
       result.findings.find((finding) => finding.code === "duplicate_artifact_signature")?.message
     ).toContain("one combined-provenance multi-session artifact");
+  });
+
+  test("rejects a present blank artifact signature", () => {
+    const bundle = validAuthoringBundle();
+    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    const runbook = validRunbookDraft();
+    runbook.output.signatureKey = " \t ";
+    bundle.artifacts = [runbook];
+
+    const result = validateAuthoringBundle(validValidationInput(bundle));
+
+    expect(result).toMatchObject({ ok: false });
+    expect(result.findings).toContainEqual(
+      expect.objectContaining({
+        artifactKind: "runbook",
+        code: "blank_artifact_signature",
+        path: "artifacts[0].output.signatureKey",
+        sessionId: "session:a"
+      })
+    );
   });
 
   test("allows disjoint automatic drafts without explicit signatures", () => {

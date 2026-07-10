@@ -169,6 +169,20 @@ describe("daemon database schema", () => {
         db.prepare("UPDATE workbench_session_state SET bug_fix_trace_status = 'satisfied' WHERE session_id = ?").run(sessionId);
       }
     }
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET transcript_status = 'imported',
+           quality_status = 'passed',
+           session_enrichment_status = 'satisfied',
+           session_dossier_status = 'satisfied',
+           session_package_status = 'published',
+           publication_status = 'published',
+           adr_status = 'not_applicable',
+           incident_timeline_status = 'not_applicable',
+           resolution_status = 'automatic_resolved',
+           next_action = 'none'
+       WHERE session_id = 'session:runbook:published'`
+    ).run();
 
     seedSession(db, {
       lifecycle: "ended",
@@ -180,11 +194,44 @@ describe("daemon database schema", () => {
     ensureWorkbenchSessionState(db, "session:no-published-artifacts");
     db.prepare(
       `UPDATE workbench_session_state
-       SET runbook_status = 'satisfied',
+       SET transcript_status = 'imported',
+           quality_status = 'passed',
+           session_enrichment_status = 'satisfied',
+           session_dossier_status = 'satisfied',
+           session_package_status = 'published',
+           publication_status = 'published',
+           runbook_status = 'satisfied',
            adr_status = 'satisfied',
            incident_timeline_status = 'satisfied',
-           bug_fix_trace_status = 'satisfied'
+           bug_fix_trace_status = 'satisfied',
+           resolution_status = 'automatic_resolved',
+           next_action = 'none'
        WHERE session_id = 'session:no-published-artifacts'`
+    ).run();
+
+    for (const sessionId of ["session:not-added", "session:not-ready"]) {
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId,
+        title: sessionId
+      });
+      ensureWorkbenchSessionState(db, sessionId);
+      db.prepare(
+        `UPDATE workbench_session_state
+         SET runbook_status = 'satisfied',
+             adr_status = 'satisfied',
+             incident_timeline_status = 'satisfied',
+             resolution_status = 'automatic_resolved',
+             next_action = 'enrich'
+         WHERE session_id = ?`
+      ).run(sessionId);
+    }
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET publication_status = 'not_added_to_logbook'
+       WHERE session_id = 'session:not-added'`
     ).run();
 
     migrateDatabase(db);
@@ -197,6 +244,12 @@ describe("daemon database schema", () => {
                 incident_timeline_status AS incidentTimelineStatus,
                 bug_fix_trace_status AS bugFixTraceStatus
          FROM workbench_session_state
+         WHERE session_id IN (
+           'session:adr:published',
+           'session:incident_timeline:published',
+           'session:no-published-artifacts',
+           'session:runbook:published'
+         )
          ORDER BY session_id`
       ).all()
     ).toEqual([
@@ -222,9 +275,9 @@ describe("daemon database schema", () => {
         sessionId: "session:no-published-artifacts"
       },
       {
-        adrStatus: "unknown",
+        adrStatus: "not_applicable",
         bugFixTraceStatus: "satisfied",
-        incidentTimelineStatus: "unknown",
+        incidentTimelineStatus: "not_applicable",
         runbookStatus: "published",
         sessionId: "session:runbook:published"
       }
@@ -233,6 +286,42 @@ describe("daemon database schema", () => {
       name: "020_normalize_workbench_optional_statuses",
       version: 20
     });
+    expect(
+      db.prepare(
+        `SELECT session_id AS sessionId,
+                resolution_status AS resolutionStatus,
+                next_action AS nextAction
+         FROM workbench_session_state
+         WHERE session_id IN (
+           'session:no-published-artifacts',
+           'session:not-added',
+           'session:not-ready',
+           'session:runbook:published'
+         )
+         ORDER BY session_id`
+      ).all()
+    ).toEqual([
+      {
+        nextAction: "enrich",
+        resolutionStatus: "compile_ready",
+        sessionId: "session:no-published-artifacts"
+      },
+      {
+        nextAction: "none",
+        resolutionStatus: "in_progress",
+        sessionId: "session:not-added"
+      },
+      {
+        nextAction: "check_transcript",
+        resolutionStatus: "in_progress",
+        sessionId: "session:not-ready"
+      },
+      {
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
+        sessionId: "session:runbook:published"
+      }
+    ]);
     db.close();
   });
 

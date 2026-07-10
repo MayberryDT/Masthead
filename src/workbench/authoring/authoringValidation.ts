@@ -1,5 +1,6 @@
 import type { WorkbenchAutomaticArtifactKind, WorkbenchClaimEvidence } from "../../shared/workbenchAuthoring.ts";
 import { redactText } from "../../core/redaction.ts";
+import { normalizeSessionArtifactSignatureKey } from "../../daemon/db/sessionArtifactRepository.ts";
 import { getAuthoringBundleSchema, getWorkbenchAuthoringOutputSchema } from "./authoringSchemas.ts";
 import type {
   WorkbenchAuthoringFindingCode,
@@ -53,7 +54,7 @@ export function validateAuthoringBundle(
   artifacts.forEach((artifact, index) => {
     if (isRecord(artifact)) validateArtifact(artifact, index, selectedSessions, input, findings);
   });
-  validateUniqueArtifactSignatures(artifacts, findings);
+  validateArtifactSignatures(artifacts, findings);
   notApplicable.forEach((decision, index) => {
     if (isRecord(decision)) validateNotApplicable(decision, index, selectedSessions, input, findings);
   });
@@ -648,7 +649,7 @@ function validateAutomaticKindResolution(
   }
 }
 
-function validateUniqueArtifactSignatures(
+function validateArtifactSignatures(
   artifacts: unknown[],
   findings: WorkbenchAuthoringFindingV2[]
 ): void {
@@ -657,8 +658,19 @@ function validateUniqueArtifactSignatures(
     if (!isRecord(artifact) || !isRecord(artifact.output)) return;
     const kind = automaticKind(artifact.kind);
     const signatureKey = stringValue(artifact.output.signatureKey);
-    if (!kind || !signatureKey?.trim()) return;
-    const key = `${kind}\u0000${signatureKey}`;
+    if (!kind || signatureKey === undefined) return;
+    const canonicalSignatureKey = normalizeSessionArtifactSignatureKey(signatureKey);
+    if (!canonicalSignatureKey) {
+      addFinding(findings, {
+        artifactKind: kind,
+        code: "blank_artifact_signature",
+        message: "Artifact signatureKey must contain non-whitespace characters when present.",
+        path: `artifacts[${index}].output.signatureKey`,
+        sessionId: stringValue(artifact.seedSessionId)
+      });
+      return;
+    }
+    const key = `${kind}\u0000${canonicalSignatureKey}`;
     if (seenSignatures.has(key)) {
       addFinding(findings, {
         artifactKind: kind,

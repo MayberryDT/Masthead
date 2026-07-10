@@ -13,6 +13,7 @@ import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepos
 import {
   applySessionArtifactInTransaction,
   listSessionArtifacts,
+  normalizeSessionArtifactSignatureKey,
   publishSessionArtifactInTransaction
 } from "../../daemon/db/sessionArtifactRepository.ts";
 import { getLogbookArtifactDetail } from "../../daemon/db/logbookArtifactRepository.ts";
@@ -582,7 +583,7 @@ function applyAuthoringArtifactInTransaction(
     provenanceSessionIds: input.provenanceSessionIds,
     schemaVersion: `${input.kind}-v2`,
     sessionId: input.seedSessionId,
-    signatureKey: stringFromOutput(input.output.signatureKey),
+    signatureKey: normalizeSessionArtifactSignatureKey(input.output.signatureKey),
     title: stringFromOutput(input.output.title),
     validation: { contract: "workbench-authoring-v1", ok: true, schemaVersion: `${input.kind}-v2` }
   });

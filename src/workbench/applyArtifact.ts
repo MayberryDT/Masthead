@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { SessionArtifactKind, SessionArtifactRecord } from "../daemon/db/sessionArtifactRepository.ts";
 import {
   applySessionArtifactInTransaction,
+  normalizeSessionArtifactSignatureKey,
   publishSessionArtifactInTransaction
 } from "../daemon/db/sessionArtifactRepository.ts";
 import {
@@ -89,7 +90,7 @@ export function applyArtifact(
       provenanceSessionIds,
       schemaVersion: `${artifactKind}-v1`,
       sessionId: options.sessionId,
-      signatureKey: typeof content.signatureKey === "string" ? content.signatureKey : undefined,
+      signatureKey: normalizeSessionArtifactSignatureKey(content.signatureKey),
       title,
       validation
     });

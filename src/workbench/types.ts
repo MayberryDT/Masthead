@@ -60,6 +60,7 @@ export type WorkbenchAuthoringValidationInput = {
 };
 
 export type WorkbenchAuthoringFindingCode =
+  | "blank_artifact_signature"
   | "claim_evidence_outside_declared_evidence"
   | "duplicate_automatic_kind_resolution"
   | "duplicate_artifact_signature"

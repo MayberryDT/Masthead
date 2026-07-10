@@ -421,7 +421,7 @@ describe("Workbench authoring service", () => {
     const firstRunbook = validRunbookDraft("session:a");
     const secondRunbook = validRunbookDraft("session:b");
     firstRunbook.output.signatureKey = "signature:oauth-callback";
-    secondRunbook.output.signatureKey = "signature:oauth-callback";
+    secondRunbook.output.signatureKey = " signature:oauth-callback ";
     const bundle: WorkbenchAuthoringBundle = {
       ...first,
       artifacts: [firstRunbook, secondRunbook],
@@ -446,6 +446,55 @@ describe("Workbench authoring service", () => {
       })
     );
     expect(authoringOutputCounts(db)).toEqual(before);
+    db.close();
+  });
+
+  test("rejects a blank explicit artifact signature before finish", async () => {
+    const db = await readyAuthoringDb();
+    const opened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    const bundle = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
+    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    const runbook = validRunbookDraft("session:a");
+    runbook.output.signatureKey = " \n ";
+    bundle.artifacts = [runbook];
+
+    const result = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
+
+    expect(result).toMatchObject({ accepted: false, run: { status: "needs_revision" } });
+    expect(result.findings).toContainEqual(
+      expect.objectContaining({
+        code: "blank_artifact_signature",
+        path: "artifacts[0].output.signatureKey",
+        sessionId: "session:a"
+      })
+    );
+    expect(authoringOutputCounts(db)).toEqual({ session_artifacts: 0, session_enrichments: 1 });
+    db.close();
+  });
+
+  test("persists the canonical trimmed artifact signature", async () => {
+    const db = await readyAuthoringDb();
+    const opened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    const bundle = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
+    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    const runbook = validRunbookDraft("session:a");
+    runbook.output.signatureKey = "  signature:atomic-finish  ";
+    bundle.artifacts = [runbook];
+    expect(submitAuthoringBundle(db, { bundle, runId: opened.run.runId }).accepted).toBe(true);
+
+    finishAuthoringRun(db, { runId: opened.run.runId });
+
+    expect(listSessionArtifacts(db, { artifactKind: "runbook", sessionId: "session:a" })[0]?.signatureKey).toBe(
+      "signature:atomic-finish"
+    );
     db.close();
   });
 

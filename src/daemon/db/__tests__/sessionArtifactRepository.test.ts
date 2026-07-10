@@ -54,6 +54,29 @@ describe("session artifact repository", () => {
     expect(listSessionArtifacts(db, { sessionId: "session:abc" })).toEqual([]);
   });
 
+  test("normalizes signature keys at the repository persistence boundary", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:abc",
+      title: "Signature normalization"
+    });
+
+    const signed = applySessionArtifact(db, {
+      ...runbookInput("signature-normalized", "Normalized signature"),
+      signatureKey: "  signature:cache-lock  "
+    });
+    const unsigned = applySessionArtifact(db, {
+      ...runbookInput("signature-blank", "Blank signature"),
+      signatureKey: " \t "
+    });
+
+    expect(signed.signatureKey).toBe("signature:cache-lock");
+    expect(unsigned.signatureKey).toBeUndefined();
+  });
+
   test("supersedes prior current artifact for the same session and kind", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Artifact session" });
