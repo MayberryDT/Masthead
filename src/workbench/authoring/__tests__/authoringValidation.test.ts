@@ -129,6 +129,42 @@ describe("validateAuthoringBundle", () => {
     );
   });
 
+  test("rejects disjoint automatic drafts with the same explicit signature", () => {
+    const bundle = validAuthoringBundle(["session:a", "session:b"]);
+    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    const first = validRunbookDraft(["session:a"]);
+    const second = validRunbookDraft(["session:b"]);
+    first.output.signatureKey = "signature:oauth-callback";
+    second.output.signatureKey = "signature:oauth-callback";
+    bundle.artifacts = [first, second];
+
+    const result = validateAuthoringBundle(validValidationInput(bundle, ["session:a", "session:b"]));
+
+    expect(result).toMatchObject({ ok: false });
+    expect(result.findings).toContainEqual(
+      expect.objectContaining({
+        artifactKind: "runbook",
+        code: "duplicate_artifact_signature",
+        path: "artifacts[1].output.signatureKey",
+        sessionId: "session:b"
+      })
+    );
+    expect(
+      result.findings.find((finding) => finding.code === "duplicate_artifact_signature")?.message
+    ).toContain("one combined-provenance multi-session artifact");
+  });
+
+  test("allows disjoint automatic drafts without explicit signatures", () => {
+    const bundle = validAuthoringBundle(["session:a", "session:b"]);
+    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    bundle.artifacts = [validRunbookDraft(["session:a"]), validRunbookDraft(["session:b"])];
+
+    expect(validateAuthoringBundle(validValidationInput(bundle, ["session:a", "session:b"]))).toEqual({
+      findings: [],
+      ok: true
+    });
+  });
+
   test("points duplicate session packages at the second original package index", () => {
     const bundle = validAuthoringBundle();
     const duplicate = bundle.sessionPackages[0]!;
@@ -499,20 +535,21 @@ function validAuthoringBundle(sessionIds: string[] = ["session:a"]): WorkbenchAu
 }
 
 function validRunbookDraft(provenanceSessionIds: string[] = ["session:a"]): WorkbenchAuthoringBundle["artifacts"][number] {
+  const seedSessionId = provenanceSessionIds[0] ?? "session:a";
   return {
     kind: "runbook",
     output: {
       changedFiles: ["src/workbench/authoring/authoringValidation.ts"],
       claimEvidence: [
-        { evidenceRefs: ["message:a:1"], path: "fixSteps[0]" },
-        { evidenceRefs: ["message:a:1"], path: "rootCause" },
-        { evidenceRefs: ["tool_result:a:2"], path: "validationChecks[0]" }
+        { evidenceRefs: [messageRef(seedSessionId)], path: "fixSteps[0]" },
+        { evidenceRefs: [messageRef(seedSessionId)], path: "rootCause" },
+        { evidenceRefs: [toolRef(seedSessionId)], path: "validationChecks[0]" }
       ],
       commands: ["npm test"],
       confidence: "high",
       deadEnds: [],
       environmentRequirements: ["Node.js 24"],
-      evidenceRefs: ["message:a:1", "tool_result:a:2"],
+      evidenceRefs: [messageRef(seedSessionId), toolRef(seedSessionId)],
       fixSteps: ["Validate the V2 bundle before applying artifacts."],
       ...(provenanceSessionIds.length > 1
         ? { joinRationale: "Shared failing validation and the same authored fix revision." }
@@ -533,7 +570,7 @@ function validRunbookDraft(provenanceSessionIds: string[] = ["session:a"]): Work
       validationChecks: ["Focused authoring validation tests pass."]
     },
     provenanceSessionIds,
-    seedSessionId: "session:a"
+    seedSessionId
   };
 }
 

@@ -100,6 +100,11 @@ const migrations = [
     version: 19,
     name: "019_workbench_authoring_runs",
     path: resolve(currentDir, "migrations/019_workbench_authoring_runs.sql")
+  },
+  {
+    version: 20,
+    name: "020_normalize_workbench_optional_statuses",
+    path: resolve(currentDir, "migrations/020_normalize_workbench_optional_statuses.sql")
   }
 ];
 

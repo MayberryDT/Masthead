@@ -11,7 +11,7 @@ import {
   readWorkbenchSessionState,
   setWorkbenchArtifactApplicability
 } from "../../daemon/db/workbenchPipelineRepository.ts";
-import { applyArtifact } from "../applyArtifact.ts";
+import { applyArtifact, publishArtifact } from "../applyArtifact.ts";
 
 const tempDirs: string[] = [];
 
@@ -102,6 +102,24 @@ describe("applyArtifact", () => {
     expect(listWorkbenchActivity(db, { limit: 10, sessionId: "session:abc" })).toEqual([
       expect.objectContaining({ eventType: "runbook_applied", summary: "Runbook applied" })
     ]);
+
+    publishArtifact(db, result.artifactId!);
+    expect(readWorkbenchSessionState(db, "session:abc")?.runbookStatus).toBe("published");
+    expect(
+      db.prepare(
+        `SELECT runbook_status AS runbookStatus,
+                adr_status AS adrStatus,
+                incident_timeline_status AS incidentTimelineStatus,
+                bug_fix_trace_status AS bugFixTraceStatus
+         FROM workbench_session_state
+         WHERE session_id = 'session:abc'`
+      ).get()
+    ).toEqual({
+      adrStatus: "unknown",
+      bugFixTraceStatus: "satisfied",
+      incidentTimelineStatus: "unknown",
+      runbookStatus: "published"
+    });
   });
 
   test("marks runbook as not applicable without writing a fake artifact", async () => {

@@ -53,6 +53,7 @@ export function validateAuthoringBundle(
   artifacts.forEach((artifact, index) => {
     if (isRecord(artifact)) validateArtifact(artifact, index, selectedSessions, input, findings);
   });
+  validateUniqueArtifactSignatures(artifacts, findings);
   notApplicable.forEach((decision, index) => {
     if (isRecord(decision)) validateNotApplicable(decision, index, selectedSessions, input, findings);
   });
@@ -645,6 +646,32 @@ function validateAutomaticKindResolution(
       }
     }
   }
+}
+
+function validateUniqueArtifactSignatures(
+  artifacts: unknown[],
+  findings: WorkbenchAuthoringFindingV2[]
+): void {
+  const seenSignatures = new Set<string>();
+  artifacts.forEach((artifact, index) => {
+    if (!isRecord(artifact) || !isRecord(artifact.output)) return;
+    const kind = automaticKind(artifact.kind);
+    const signatureKey = stringValue(artifact.output.signatureKey);
+    if (!kind || !signatureKey?.trim()) return;
+    const key = `${kind}\u0000${signatureKey}`;
+    if (seenSignatures.has(key)) {
+      addFinding(findings, {
+        artifactKind: kind,
+        code: "duplicate_artifact_signature",
+        message:
+          "Automatic drafts with the same kind and signatureKey must be authored as one combined-provenance multi-session artifact.",
+        path: `artifacts[${index}].output.signatureKey`,
+        sessionId: stringValue(artifact.seedSessionId)
+      });
+      return;
+    }
+    seenSignatures.add(key);
+  });
 }
 
 function validateEvidenceRefs(

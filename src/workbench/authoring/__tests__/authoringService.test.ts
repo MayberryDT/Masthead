@@ -408,6 +408,47 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
+  test("rejects conflicting explicit artifact signatures before finish", async () => {
+    const db = await readyAuthoringDb();
+    seedSessionWithRedactedEvidence(db, "session:b");
+    const opened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a", "session:b"]
+    });
+    const first = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
+    const second = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:b");
+    const firstRunbook = validRunbookDraft("session:a");
+    const secondRunbook = validRunbookDraft("session:b");
+    firstRunbook.output.signatureKey = "signature:oauth-callback";
+    secondRunbook.output.signatureKey = "signature:oauth-callback";
+    const bundle: WorkbenchAuthoringBundle = {
+      ...first,
+      artifacts: [firstRunbook, secondRunbook],
+      notApplicable: [...first.notApplicable, ...second.notApplicable].filter(
+        (decision) => decision.kind !== "runbook"
+      ),
+      sessionPackages: [...first.sessionPackages, ...second.sessionPackages]
+    };
+    const before = authoringOutputCounts(db);
+
+    const result = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
+
+    expect(result).toMatchObject({
+      accepted: false,
+      run: { status: "needs_revision" }
+    });
+    expect(result.findings).toContainEqual(
+      expect.objectContaining({
+        code: "duplicate_artifact_signature",
+        path: "artifacts[1].output.signatureKey",
+        sessionId: "session:b"
+      })
+    );
+    expect(authoringOutputCounts(db)).toEqual(before);
+    db.close();
+  });
+
   test("finishes once and publishes the complete bundle atomically", async () => {
     const { db, runId } = await submittedAuthoringDb();
 

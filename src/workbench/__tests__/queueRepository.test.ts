@@ -100,6 +100,40 @@ describe("queueWorkbenchSessions", () => {
       expect.objectContaining({ sessionId: "session:abc", status: "current" })
     ]);
   });
+
+  test("treats published optional artifacts as current and applied artifacts as unfinished", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:optional-state",
+      title: "Optional artifact state"
+    });
+    ensureWorkbenchSessionState(db, "session:optional-state");
+    db.prepare("UPDATE workbench_session_state SET runbook_status = 'published' WHERE session_id = ?").run(
+      "session:optional-state"
+    );
+
+    expect(
+      queueWorkbenchSessions(db, {
+        kind: "runbook",
+        limit: 10,
+        scope: "session:session:optional-state"
+      })
+    ).toEqual([expect.objectContaining({ sessionId: "session:optional-state", status: "current" })]);
+
+    db.prepare("UPDATE workbench_session_state SET runbook_status = 'applied' WHERE session_id = ?").run(
+      "session:optional-state"
+    );
+    expect(
+      queueWorkbenchSessions(db, {
+        kind: "runbook",
+        limit: 10,
+        scope: "session:session:optional-state"
+      })
+    ).toEqual([expect.objectContaining({ sessionId: "session:optional-state", status: "missing" })]);
+  });
 });
 
 async function testDb(): Promise<MastheadDatabase> {

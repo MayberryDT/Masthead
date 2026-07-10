@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
-import { migrateDatabase } from "../schema.ts";
+import { seedSession } from "./sessionTestHelpers.ts";
+import { applySessionArtifact, publishSessionArtifact } from "../sessionArtifactRepository.ts";
+import { CURRENT_SCHEMA_VERSION, migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
+import { ensureWorkbenchSessionState } from "../workbenchPipelineRepository.ts";
 
 const tempDirs: string[] = [];
 const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
@@ -23,6 +26,8 @@ describe("daemon database schema", () => {
 
     migrateDatabase(db);
     migrateDatabase(db);
+
+    expect(CURRENT_SCHEMA_VERSION).toBe(20);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -97,7 +102,8 @@ describe("daemon database schema", () => {
       { version: 16, name: "016_session_artifacts" },
       { version: 17, name: "017_workbench_pipeline" },
       { version: 18, name: "018_artifact_first_logbook" },
-      { version: 19, name: "019_workbench_authoring_runs" }
+      { version: 19, name: "019_workbench_authoring_runs" },
+      { version: 20, name: "020_normalize_workbench_optional_statuses" }
     ]);
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
     expect(indexes.map((row) => row.name)).toEqual(
@@ -122,6 +128,111 @@ describe("daemon database schema", () => {
     expect(db.prepare("SELECT session_id FROM session_search WHERE session_search MATCH ?").all("historical")).toEqual([
       { session_id: "session-1" }
     ]);
+    db.close();
+  });
+
+  test("normalizes optional satisfied rows written after migration 019", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v19-optional-statuses-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    db.prepare("DELETE FROM schema_migrations WHERE version = 20").run();
+    expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 19 });
+
+    const publishedKinds = ["runbook", "adr", "incident_timeline"] as const;
+    for (const kind of publishedKinds) {
+      const sessionId = `session:${kind}:published`;
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId,
+        title: `${kind} published`
+      });
+      ensureWorkbenchSessionState(db, sessionId);
+      const artifact = applySessionArtifact(db, {
+        artifactKind: kind,
+        content: { title: `${kind} published artifact` },
+        contentFingerprint: `${kind}:published:fingerprint`,
+        createdBy: "legacy-v1",
+        evidenceRefs: [`message:${sessionId}:message`],
+        provenanceSessionIds: [sessionId],
+        schemaVersion: `${kind}-v1`,
+        sessionId,
+        title: `${kind} published artifact`,
+        validation: { ok: true }
+      });
+      publishSessionArtifact(db, artifact.artifactId);
+      const column = kind === "runbook" ? "runbook_status" : kind === "adr" ? "adr_status" : "incident_timeline_status";
+      db.prepare(`UPDATE workbench_session_state SET ${column} = 'satisfied' WHERE session_id = ?`).run(sessionId);
+      if (kind === "runbook") {
+        db.prepare("UPDATE workbench_session_state SET bug_fix_trace_status = 'satisfied' WHERE session_id = ?").run(sessionId);
+      }
+    }
+
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:no-published-artifacts",
+      title: "No published artifacts"
+    });
+    ensureWorkbenchSessionState(db, "session:no-published-artifacts");
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET runbook_status = 'satisfied',
+           adr_status = 'satisfied',
+           incident_timeline_status = 'satisfied',
+           bug_fix_trace_status = 'satisfied'
+       WHERE session_id = 'session:no-published-artifacts'`
+    ).run();
+
+    migrateDatabase(db);
+
+    expect(
+      db.prepare(
+        `SELECT session_id AS sessionId,
+                runbook_status AS runbookStatus,
+                adr_status AS adrStatus,
+                incident_timeline_status AS incidentTimelineStatus,
+                bug_fix_trace_status AS bugFixTraceStatus
+         FROM workbench_session_state
+         ORDER BY session_id`
+      ).all()
+    ).toEqual([
+      {
+        adrStatus: "published",
+        bugFixTraceStatus: "unknown",
+        incidentTimelineStatus: "unknown",
+        runbookStatus: "unknown",
+        sessionId: "session:adr:published"
+      },
+      {
+        adrStatus: "unknown",
+        bugFixTraceStatus: "unknown",
+        incidentTimelineStatus: "published",
+        runbookStatus: "unknown",
+        sessionId: "session:incident_timeline:published"
+      },
+      {
+        adrStatus: "applied",
+        bugFixTraceStatus: "required",
+        incidentTimelineStatus: "applied",
+        runbookStatus: "applied",
+        sessionId: "session:no-published-artifacts"
+      },
+      {
+        adrStatus: "unknown",
+        bugFixTraceStatus: "satisfied",
+        incidentTimelineStatus: "unknown",
+        runbookStatus: "published",
+        sessionId: "session:runbook:published"
+      }
+    ]);
+    expect(db.prepare("SELECT version, name FROM schema_migrations WHERE version = 20").get()).toEqual({
+      name: "020_normalize_workbench_optional_statuses",
+      version: 20
+    });
     db.close();
   });
 
