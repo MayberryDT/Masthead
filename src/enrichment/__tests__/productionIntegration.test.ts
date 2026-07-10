@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../../daemon/config.ts";
+import { applySessionArtifact, publishSessionArtifact } from "../../daemon/db/sessionArtifactRepository.ts";
 import { markWorkbenchPublished } from "../../daemon/db/workbenchPipelineRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../../daemon/server.ts";
 
@@ -18,7 +19,7 @@ afterEach(async () => {
 });
 
 describe("production enrichment integration", () => {
-  test("live ingestion persists reusable enrichment and reindexes the session", async () => {
+  test("live ingestion persists reusable enrichment while Logbook search returns only a published artifact", async () => {
     const { daemon } = await createTestHarness();
     const baseUrl = await listen(daemon);
 
@@ -36,13 +37,11 @@ describe("production enrichment integration", () => {
         { kind: "session_capsule", status: "current" }
       ]);
     });
-    publishSourceSession(daemon, "production-enrichment");
+    publishSourceSession(daemon, "production-enrichment", "OAuth callback routing");
 
     const logbook = await getJson(baseUrl, "/logbook/search?q=OAuth");
-    expect(logbook.sessions[0]).toMatchObject({
-      enrichmentStatus: "current",
-      title: "Claude Code hook event"
-    });
+    expect(logbook.artifacts[0]).toMatchObject({ kind: "session_dossier", title: "OAuth callback routing" });
+    expect(logbook).not.toHaveProperty("sessions");
 
     const projection = await getJson(baseUrl, "/projection?expandedSessionId=production-enrichment");
     expect(projection.projection.cards[0].headlineInput.facts.recentTranscriptMessages).toEqual(
@@ -83,7 +82,7 @@ describe("production enrichment integration", () => {
   });
 });
 
-function publishSourceSession(daemon: MastheadDaemon, sourceSessionId: string): void {
+function publishSourceSession(daemon: MastheadDaemon, sourceSessionId: string, title: string): void {
   const row = daemon.database
     .prepare("SELECT session_id AS sessionId FROM sessions WHERE source_session_id = ? AND deleted_at IS NULL")
     .get(sourceSessionId) as { sessionId: string } | undefined;
@@ -93,6 +92,21 @@ function publishSourceSession(daemon: MastheadDaemon, sourceSessionId: string): 
     publishedVia: "test",
     sessionId: row!.sessionId
   });
+  const artifact = applySessionArtifact(daemon.database, {
+    artifactKind: "session_dossier",
+    confidence: "high",
+    content: { problemStatement: title },
+    contentFingerprint: `test:${sourceSessionId}`,
+    createdBy: "test",
+    evidenceRefs: [],
+    projectLabel: "Masthead",
+    schemaVersion: "session-dossier-v1",
+    sessionId: row!.sessionId,
+    summary: title,
+    title,
+    validation: { ok: true }
+  });
+  publishSessionArtifact(daemon.database, artifact.artifactId);
 }
 
 async function createTestHarness(): Promise<{ daemon: MastheadDaemon; databasePath: string; storePath: string; tempDir: string }> {

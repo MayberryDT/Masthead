@@ -59,7 +59,7 @@ export function buildWorkbenchHandoff(input: {
   return [
     "Complete this Masthead Workbench authoring request end to end. This is an unattended automatic handoff: complete this request end to end without pausing for routine approval or asking the user to perform intermediate steps.",
     "Masthead is running locally. Use the installed Masthead Workbench authoring interface identified below and verify its artifact_authoring capability and exact database identity before opening the selected sessions.",
-    "For this request, use all available canonical redacted session evidence, gather as many evidence pages as needed, and produce the strongest justified artifacts while keeping every existing evidence, schema, provenance, and publication quality gate intact.",
+    "For this request, use all available canonical redacted session evidence by reading every item named by every session evidence manifest through complete cursor pagination in either order, then produce the strongest justified artifacts while keeping every existing evidence, schema, provenance, and publication quality gate intact.",
     "Resolve deterministic validation findings yourself: revise and resubmit until the bundle is ready, then finish publication and resolve every automatic artifact kind; report results only after completion.",
     "The session package always resolves through publication. Publish runbook, ADR, and incident timeline when evidence supports them; otherwise resolve them as N/A or an existing published contribution. Sessions stay the capture and pipeline unit; Logbook stores published artifacts only.",
     "",
@@ -74,7 +74,7 @@ export function buildWorkbenchHandoff(input: {
     "",
     "Rules:",
     "- Apply is not publish. Fail closed on invalid schema, unknown evidence refs, or weak multi-session joins.",
-    "- Cite only evidence from the declared provenance evidence packet.",
+    "- Cite only evidence named by the authoring run's evidence manifests.",
     "- Do not invent files, commands, outcomes, or root causes.",
     "- Do not copy secrets into artifact bodies.",
     "- High-confidence runbook fix claims need supporting validation checks.",

@@ -2164,7 +2164,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/logbook/artifacts") {
+    if (
+      request.method === "GET" &&
+      (url.pathname === "/logbook/artifacts" || url.pathname === "/logbook/search")
+    ) {
       const kindParam = url.searchParams.get("kind") ?? undefined;
       const kind =
         kindParam === "session_dossier" ||
@@ -2203,12 +2206,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         ok: true,
         usage: getUsageStats(database, usageWindowFromUrl(url))
       });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/logbook/search") {
-      const result = querySessions(database, sessionQueryFromUrl(url));
-      sendJson(request, response, config.allowedOrigins, 200, { ok: true, ...result });
       return;
     }
 

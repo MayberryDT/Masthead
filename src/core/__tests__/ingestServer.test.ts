@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { Readable } from "node:stream";
 import { afterEach, describe, expect, test } from "vitest";
+import { applySessionArtifact, publishSessionArtifact } from "../../daemon/db/sessionArtifactRepository.ts";
 import { setSourcePolicy } from "../../daemon/db/sourcePolicyRepository.ts";
 import { markWorkbenchPublished } from "../../daemon/db/workbenchPipelineRepository.ts";
 
@@ -349,7 +350,7 @@ describe("ingest server live projection", () => {
         { severity: "warning", signal_kind: "approval.requested" }
       ]);
       expect(db.prepare("SELECT projection_json FROM board_sessions").all()).toEqual([]);
-      publishSourceSession(db, "server-live");
+      publishSourceSession(db, "server-live", "Server live projection");
     } finally {
       db.close();
     }
@@ -358,12 +359,14 @@ describe("ingest server live projection", () => {
     const blankLogbook = await getJson(server.baseUrl, "/logbook/search?q=");
     expect(logbook).toMatchObject({
       ok: true,
-      sessions: [expect.objectContaining({ title: "Server live projection" })]
+      artifacts: [expect.objectContaining({ title: "Server live projection" })]
     });
+    expect(logbook).not.toHaveProperty("sessions");
     expect(blankLogbook).toMatchObject({
       ok: true,
-      sessions: [expect.objectContaining({ title: "Server live projection" })]
+      artifacts: [expect.objectContaining({ title: "Server live projection" })]
     });
+    expect(blankLogbook).not.toHaveProperty("sessions");
   });
 
   test("defers successful PostToolUse events out of immediate projection while preserving high-value turns", async () => {
@@ -712,7 +715,7 @@ describe("ingest server live projection", () => {
           source_session_id: "historical-session"
         }
       ]);
-      publishSourceSession(db, "historical-session");
+      publishSourceSession(db, "historical-session", "Historical OpenCode metadata");
     } finally {
       db.close();
     }
@@ -720,8 +723,9 @@ describe("ingest server live projection", () => {
     const search = await getJson(server.baseUrl, "/logbook/search?q=Historical");
     expect(search).toMatchObject({
       ok: true,
-      sessions: [expect.objectContaining({ title: "Historical OpenCode metadata" })]
+      artifacts: [expect.objectContaining({ title: "Historical OpenCode metadata" })]
     });
+    expect(search).not.toHaveProperty("sessions");
   });
 
   test("runs metadata import through the generic import job endpoint", async () => {
@@ -1240,16 +1244,35 @@ function jobIds(response: Record<string, any>): string[] {
   return (response.jobs ?? []).map((job: { importJobId: string }) => job.importJobId);
 }
 
-function publishSourceSession(db: DatabaseSync, sourceSessionId: string): void {
+function publishSourceSession(db: DatabaseSync, sourceSessionId: string, artifactTitle: string): void {
   const row = db
-    .prepare("SELECT session_id AS sessionId FROM sessions WHERE source_session_id = ? AND deleted_at IS NULL")
-    .get(sourceSessionId) as { sessionId: string } | undefined;
+    .prepare(
+      `SELECT session_id AS sessionId, project_label AS project
+       FROM sessions
+       WHERE source_session_id = ? AND deleted_at IS NULL`
+    )
+    .get(sourceSessionId) as { project: string | null; sessionId: string } | undefined;
   expect(row?.sessionId).toBeTruthy();
   markWorkbenchPublished(db, {
     actor: { kind: "system", id: "test" },
     publishedVia: "test",
     sessionId: row!.sessionId
   });
+  const artifact = applySessionArtifact(db, {
+    artifactKind: "session_dossier",
+    confidence: "high",
+    content: { problemStatement: artifactTitle },
+    contentFingerprint: `test:${sourceSessionId}`,
+    createdBy: "test",
+    evidenceRefs: [],
+    projectLabel: row!.project ?? undefined,
+    schemaVersion: "session-dossier-v1",
+    sessionId: row!.sessionId,
+    summary: artifactTitle,
+    title: artifactTitle,
+    validation: { ok: true }
+  });
+  publishSessionArtifact(db, artifact.artifactId);
 }
 
 function liveApprovalPayload(providerEventId: string): Record<string, unknown> {

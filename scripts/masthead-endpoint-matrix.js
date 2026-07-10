@@ -57,7 +57,7 @@ export const READ_ONLY_ENDPOINTS = [
     allowNotFound: true
   },
   { method: "GET", path: "/logbook/summary", label: "logbook summary" },
-  { method: "GET", path: "/logbook/search?q=Bridge", label: "logbook search" }
+  { method: "GET", path: "/logbook/artifacts?q=Bridge", label: "logbook artifact search" }
 ];
 
 export const READ_ONLY_POST_ENDPOINTS = [

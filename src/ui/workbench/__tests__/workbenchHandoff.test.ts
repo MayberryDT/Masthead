@@ -35,6 +35,9 @@ test("builds an agent handoff for automatic artifact completion without CLI reci
   expect(text).toContain("masthead.workbench.authoring/v1");
   expect(text).toContain("complete this request end to end without pausing for routine approval");
   expect(text).toContain("use all available canonical redacted session evidence");
+  expect(text).toContain("evidence manifest");
+  expect(text).toContain("complete cursor pagination");
+  expect(text).not.toContain("evidence packet");
   expect(text).toContain("produce the strongest justified artifacts");
   expect(text).toContain('"sessionIds":["session:abc"]');
   expect(text).toContain('"databaseId":"database:test"');

@@ -27,6 +27,7 @@ Important contracts:
 - `GET /projection` serves the live Now projection.
 - **`GET /logbook/artifacts`** searches published artifact capsules (`q`, `kind`, `project`, `dateFrom`, `dateTo`, `limit`, `offset`). This is the Logbook primary read path.
 - **`GET /logbook/artifacts/:artifactId`** returns one artifact body, provenance session ids, join rationale, and evidence refs.
+- **`GET /logbook/search`** is an artifact-only compatibility alias. It returns `artifacts`, never session rows.
 - `GET /sessions` and session detail routes remain for evidence, Workbench, and compile — not the primary Logbook listing.
 - `GET /workbench/sessions` (and related Workbench reads) expose package-path pipeline state.
 - `GET /sources/connectors` and hook routes support Sources V2 live connect.
@@ -70,6 +71,6 @@ Published multi-kind artifacts (dossier / runbook / ADR / timeline) are authored
 
 - Keep the writable daemon and read-only MCP roles separate in docs and code changes.
 - Don’t treat enrichment as raw storage; it is derived data that depends on canonical facts.
-- Don’t document Logbook as reading only session search; primary path is `/logbook/artifacts`.
+- Don’t document any Logbook route as session search; the primary path is `/logbook/artifacts`, and the compatibility alias is artifact-only.
 - Keep the data-path docs consistent with `MASTHEAD_DATA_DIR` and `MASTHEAD_DB_PATH`.
 - If you change what is persisted, check data lifecycle and retention before assuming long-lived storage.

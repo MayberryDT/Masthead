@@ -143,6 +143,9 @@ describe("Masthead worktree connector planning", () => {
     "/data/summary",
     "/knowledge-flow/summary",
     "/logbook/summary",
+    "/logbook/artifacts",
+    "/logbook/artifacts/artifact-1",
+    "/logbook/search",
     "/mcp/status",
     "/mcp/launch-config",
     "/mcp/tools",
@@ -215,9 +218,12 @@ describe("Masthead worktree connector planning", () => {
         return;
       }
 
-      if (request.url === "/logbook/search?q=Server") {
+      if (
+        request.url === "/logbook/artifacts?q=Server" ||
+        request.url === "/logbook/search?q=Server"
+      ) {
         sendJson(response, 200, {
-          sessions: [{ sessionId: "session-1", title: "Server logbook session" }],
+          artifacts: [{ artifactId: "artifact-1", kind: "runbook", title: "Server logbook artifact" }],
           total: 1
         });
         return;
@@ -282,13 +288,23 @@ describe("Masthead worktree connector planning", () => {
       sources: [expect.objectContaining({ sourceId: "codex-sessions" })]
     });
 
-    const logbookResponse = await fetch(`${bridge.baseUrl}/logbook/search?q=Server`, {
+    const logbookResponse = await fetch(`${bridge.baseUrl}/logbook/artifacts?q=Server`, {
       headers: { origin: "http://127.0.0.1:5180" }
     });
     await expect(logbookResponse.json()).resolves.toMatchObject({
-      sessions: [expect.objectContaining({ title: "Server logbook session" })],
+      artifacts: [expect.objectContaining({ title: "Server logbook artifact" })],
       total: 1
     });
+
+    const compatibilityLogbookResponse = await fetch(`${bridge.baseUrl}/logbook/search?q=Server`, {
+      headers: { origin: "http://127.0.0.1:5180" }
+    });
+    const compatibilityLogbook = await compatibilityLogbookResponse.json();
+    expect(compatibilityLogbook).toMatchObject({
+      artifacts: [expect.objectContaining({ title: "Server logbook artifact" })],
+      total: 1
+    });
+    expect(compatibilityLogbook).not.toHaveProperty("sessions");
 
     const excerptResponse = await fetch(`${bridge.baseUrl}/sessions/session-1/excerpts?limit=8`, {
       headers: { origin: "http://127.0.0.1:5180" }

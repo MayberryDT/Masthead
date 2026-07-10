@@ -24,6 +24,7 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /diagnostics/runtime` returns runtime diagnostics, import queue state, and a small active import page for Advanced diagnostics.
 - `GET /logbook/artifacts` searches **published Logbook artifacts** (primary Logbook path). Query `q` searches capsule fields plus the complete first-class artifact body. Other params include `kind` (`session_dossier` \| `runbook` \| `adr` \| `incident_timeline`), `project`, `dateFrom`, `dateTo`, `limit`, `offset`. Bridge-safe read.
 - `GET /logbook/artifacts/:artifactId` returns one published artifact detail: body, provenance session ids, join rationale, confidence, evidence refs. Bridge-safe read.
+- `GET /logbook/search` is a compatibility alias for artifact capsule search. It returns the same `artifacts` shape as `/logbook/artifacts`, never session rows. New clients should use `/logbook/artifacts`.
 - `GET /sessions` searches canonical sessions (evidence / Workbench / compile — not the primary Logbook listing). Query params include `q`, `project`, `runtime`, `host`, `model`, `state`, date filters, and `limit`.
 - `GET /sessions/:sessionId` returns one session detail.
 - `GET /sessions/:sessionId/excerpts` returns bounded excerpts, with optional `q` and `limit`.

@@ -123,7 +123,9 @@ function responseBodyForGet(url) {
   if (url.pathname === "/mcp/audit") return { ok: true, audit: [] };
   if (url.pathname === "/settings") return { ok: true, settings: { runtime: { collector: { status: "ready" } } } };
   if (url.pathname === "/settings/hooks/codex") return { ok: true, hooks: { installed: true } };
-  if (url.pathname === "/logbook/search") return { ok: true, sessions: [{ sessionId: "session-1" }], total: 1 };
+  if (url.pathname === "/logbook/artifacts") {
+    return { ok: true, artifacts: [{ artifactId: "artifact-1", kind: "runbook" }], total: 1 };
+  }
   return { ok: true, endpoint: url.pathname };
 }
 

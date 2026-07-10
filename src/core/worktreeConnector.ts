@@ -80,6 +80,7 @@ const staticReadOnlyBridgePaths = new Set([
   "/workbench/not-added-summary",
   "/workbench/not-added",
   "/logbook/summary",
+  "/logbook/artifacts",
   "/logbook/search"
 ]);
 
@@ -97,6 +98,7 @@ export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathn
     pathname === "/workbench/authoring/capabilities" ||
     /^\/workbench\/authoring\/runs\/[^/]+(?:\/evidence)?$/.test(pathname) ||
     /^\/settings\/hooks\/[^/]+$/.test(pathname) ||
+    /^\/logbook\/artifacts\/[^/]+$/.test(pathname) ||
     /^\/sessions\/[^/]+(?:\/excerpts|\/dossier|\/transcript)?$/.test(pathname) ||
     /^\/imports\/[^/]+$/.test(pathname)
   );

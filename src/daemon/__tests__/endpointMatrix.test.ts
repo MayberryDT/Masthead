@@ -35,6 +35,13 @@ describe("endpoint matrix probe pass policy", () => {
     expect(reads).toContain("GET /workbench/authoring/runs/run-1/evidence?sessionId=session-1");
   });
 
+  test("probes the artifact-only Logbook endpoint", () => {
+    const reads = new Set(READ_ONLY_ENDPOINTS.map((entry) => `${entry.method} ${entry.path}`));
+
+    expect(reads).toContain("GET /logbook/artifacts?q=Bridge");
+    expect(reads).not.toContain("GET /logbook/search?q=Bridge");
+  });
+
   test("classifies every authoring write as a primary-daemon mutation", () => {
     const mutations = new Set(BLOCKED_MUTATION_ENDPOINTS.map((entry) => `${entry.method} ${entry.path}`));
 

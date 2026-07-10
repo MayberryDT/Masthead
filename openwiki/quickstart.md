@@ -39,7 +39,7 @@ Vocabulary and cutover: `CONTEXT.md`, [ADR 0011](../docs/adr/0011-artifact-first
 - `src/ui/workbench/`, `src/app/workbench/`, `src/workbench/` — Workbench UI, controller, pipeline.
 - `src/cli/` — agent-facing CLI (`mastheadctl`, workbench commands).
 - `src/daemon/db/sessionArtifactRepository.ts`, `logbookArtifactRepository.ts` — published artifact store.
-- `GET /logbook/artifacts`, `GET /logbook/artifacts/:id` — Logbook read path (not session `/logbook/search` as primary).
+- `GET /logbook/artifacts`, `GET /logbook/artifacts/:id` — canonical Logbook read path. The legacy `/logbook/search` alias also returns artifact capsules, never session rows.
 
 ## Canonical source docs
 

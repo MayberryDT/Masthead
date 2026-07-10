@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -237,6 +237,102 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     }
   });
 
+  test.each([
+    "db-path",
+    "schema",
+    "instructions",
+    "validate",
+    "apply",
+    "artifacts",
+    "publish",
+    "na",
+    "not-applicable",
+    "provenance-candidates",
+    "enroll",
+    "claim",
+    "release",
+    "activity",
+    "not-added",
+    "transcript",
+    "quality",
+    "batch",
+    "queue",
+    "next"
+  ])("rejects removed direct-database command %s before opening SQLite", async (command) => {
+    const tempDir = await makeTempDir("masthead-cli-removed-");
+    const databasePath = join(tempDir, "must-not-be-created.sqlite");
+
+    const result = await runMastheadCli(
+      ["workbench", command, "--db", databasePath, "--json"],
+      { env: {} }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: { code: "unknown_command", message: `Unknown workbench command: ${command}` },
+      ok: false
+    });
+    await expect(stat(databasePath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("does not import the legacy direct-SQLite Workbench stack", async () => {
+    const sourceRoot = join(process.cwd(), "src", "cli");
+    const source = await readFile(join(sourceRoot, "workbench.ts"), "utf8");
+    expect(source).not.toContain("workbenchLegacy");
+    await expect(stat(join(sourceRoot, "workbenchLegacy.ts"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("cannot mutate SQLite through removed apply, publish, or not-applicable commands", async () => {
+    const tempDir = await makeTempDir("masthead-cli-no-direct-writes-");
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const outputPath = join(tempDir, "enrichment.json");
+    const db = await openMastheadDatabase(databasePath);
+    migrateDatabase(db);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:boundary",
+      title: "Authoring boundary"
+    });
+    const before = authoringOutputCounts(db);
+    db.close();
+    await writeFile(
+      outputPath,
+      JSON.stringify({
+        confidence: "medium",
+        evidenceRefs: ["message:session:boundary:message"],
+        missingEvidence: [],
+        searchPhrases: ["authoring boundary"],
+        summary: "This must not be written directly.",
+        technologies: ["TypeScript"],
+        title: "Forbidden direct authoring",
+        topics: ["Workbench"]
+      }),
+      "utf8"
+    );
+
+    const removedCommands = [
+      ["apply", "--kind", "session_enrichment", "--session", "session:boundary", "--file", outputPath],
+      ["publish", "--session", "session:boundary"],
+      ["not-applicable", "--kind", "runbook", "--session", "session:boundary", "--reason", "not_needed"]
+    ];
+    for (const command of removedCommands) {
+      const result = await runMastheadCli(
+        ["workbench", ...command, "--db", databasePath, "--json"],
+        { env: {} }
+      );
+      expect(JSON.parse(result.stderr)).toMatchObject({
+        error: { code: "unknown_command" },
+        ok: false
+      });
+    }
+
+    const afterDb = await openMastheadDatabase(databasePath);
+    expect(authoringOutputCounts(afterDb)).toEqual(before);
+    afterDb.close();
+  });
+
   test("preserves wipe-published as an explicit direct-database maintenance command", async () => {
     const tempDir = await makeTempDir("masthead-cli-wipe-");
     const dbPath = join(tempDir, "masthead.sqlite");
@@ -288,4 +384,15 @@ async function makeTempDir(prefix: string): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), prefix));
   tempDirs.push(path);
   return path;
+}
+
+function authoringOutputCounts(db: Awaited<ReturnType<typeof openMastheadDatabase>>) {
+  const count = (table: string) =>
+    (db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
+  return {
+    artifacts: count("session_artifacts"),
+    authoringRuns: count("workbench_authoring_runs"),
+    enrichments: count("session_enrichments"),
+    pipelineRows: count("workbench_session_state")
+  };
 }
