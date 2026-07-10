@@ -1,9 +1,12 @@
-import { link, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { lstat, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   acquireDatabaseWriterLock,
+  acquireLegacyDataDirectoryGuard,
   assertWritableDatabaseLocation,
   type DatabaseWriterLock
 } from "../daemonOwnership.ts";
@@ -25,7 +28,7 @@ describe("database writer lock", () => {
     const targetLock = await acquireDatabaseWriterLock(targetPath);
     locks.push(targetLock);
 
-    await expect(acquireDatabaseWriterLock(aliasPath)).rejects.toThrow("already owned");
+    await expect(acquireDatabaseWriterLock(aliasPath)).rejects.toThrow("already leased");
   });
 
   test.skipIf(process.platform === "win32")("validates a dangling database symlink without creating target directories", async () => {
@@ -40,18 +43,9 @@ describe("database writer lock", () => {
     await expect(accessPath(dataDirectory)).resolves.toBe(false);
   });
 
-  test("elects exactly one owner when concurrent contenders reclaim stale ownership", async () => {
-    const tempDir = await createTempDir("masthead-stale-db-lock-");
+  test("elects exactly one SQLite lease owner across concurrent contenders", async () => {
+    const tempDir = await createTempDir("masthead-concurrent-db-lease-");
     const databasePath = join(tempDir, "masthead.sqlite");
-    const lockPath = `${databasePath}.lock`;
-    await mkdir(lockPath, { recursive: true });
-    await writeFile(join(lockPath, "stale.json"), JSON.stringify({
-      createdAt: "2026-01-01T00:00:00.000Z",
-      databasePath,
-      pid: 2_147_483_647,
-      state: "acquired",
-      token: "stale"
-    }), "utf8");
 
     const results = await Promise.allSettled(
       Array.from({ length: 20 }, () => acquireDatabaseWriterLock(databasePath))
@@ -62,55 +56,56 @@ describe("database writer lock", () => {
     locks.push(winners[0].value);
   });
 
-  test("an obsolete owner cannot release a successor's lock", async () => {
-    const tempDir = await createTempDir("masthead-token-db-lock-");
+  test("release rolls back the lease and allows a successor", async () => {
+    const tempDir = await createTempDir("masthead-released-db-lease-");
     const databasePath = join(tempDir, "masthead.sqlite");
     const first = await acquireDatabaseWriterLock(databasePath);
-    await rm(first.ownerPath, { force: true });
+    await expect(acquireDatabaseWriterLock(databasePath)).rejects.toThrow("already leased");
+    await first.release();
     const successor = await acquireDatabaseWriterLock(databasePath);
     locks.push(successor);
-
-    await first.release();
-    await expect(acquireDatabaseWriterLock(databasePath)).rejects.toThrow("already owned");
   });
 
-  test("a paused mutex initializer cannot overwrite the successor that reclaimed its inode", async () => {
-    const tempDir = await createTempDir("masthead-paused-coordination-");
-    const databasePath = join(tempDir, "masthead.sqlite");
-    const opened = deferred<void>();
-    const resume = deferred<void>();
-    let hookCalls = 0;
-    const firstAttempt = acquireDatabaseWriterLock(databasePath, {
-      coordinationAfterOpen: async () => {
-        if (hookCalls > 0) return;
-        hookCalls += 1;
-        opened.resolve(undefined);
-        await resume.promise;
-      },
-      coordinationBlankReclaimMs: 25
-    });
-    await opened.promise;
-    const successor = await acquireDatabaseWriterLock(databasePath, { coordinationBlankReclaimMs: 25 });
+  test("serializes concurrent data-directory guard acquisition and release", async () => {
+    const dataDirectory = await createTempDir("masthead-concurrent-data-lease-");
+    const results = await Promise.allSettled(
+      Array.from({ length: 20 }, () => acquireLegacyDataDirectoryGuard(dataDirectory))
+    );
+    const winners = results.filter((result) => result.status === "fulfilled");
+    expect(winners).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(19);
+
+    await winners[0].value.release();
+    const successor = await acquireLegacyDataDirectoryGuard(dataDirectory);
     locks.push(successor);
-    resume.resolve(undefined);
-
-    await expect(firstAttempt).rejects.toThrow("already owned");
   });
 
-  test("an abandoned hard-link claim cannot wedge later stale mutex recovery", async () => {
-    const tempDir = await createTempDir("masthead-abandoned-reclaim-");
+  test("a crashed process automatically releases its SQLite lease", async () => {
+    const tempDir = await createTempDir("masthead-crashed-db-lease-");
     const databasePath = join(tempDir, "masthead.sqlite");
-    const coordinationPath = `${databasePath}.lock.winner`;
-    await writeFile(coordinationPath, JSON.stringify({
-      createdAt: "2026-01-01T00:00:00.000Z",
-      pid: 2_147_483_647,
-      token: "stale-coordinator"
-    }), "utf8");
-    await link(coordinationPath, `${coordinationPath}.reclaim`);
+    const leasePath = `${databasePath}.lease.sqlite`;
+    const child = spawn(process.execPath, [
+      "--input-type=module",
+      "-e",
+      "import { DatabaseSync } from 'node:sqlite'; const db = new DatabaseSync(process.argv[1]); db.exec('PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;'); console.log('ready'); setInterval(() => {}, 1000);",
+      leasePath
+    ], { stdio: ["ignore", "pipe", "ignore"] });
+    const childExit = once(child, "exit");
+    try {
+      await once(child.stdout!, "data");
+      await expect(acquireDatabaseWriterLock(databasePath)).rejects.toThrow("already leased");
+      child.kill("SIGKILL");
+      await childExit;
 
-    const recovered = await acquireDatabaseWriterLock(databasePath);
-    locks.push(recovered);
-    expect(recovered.lockPath).toBe(`${databasePath}.lock`);
+      const recovered = await acquireDatabaseWriterLock(databasePath);
+      locks.push(recovered);
+      expect(recovered.lockPath).toBe(leasePath);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        await childExit;
+      }
+    }
   });
 });
 
@@ -118,14 +113,6 @@ async function createTempDir(prefix: string): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), prefix));
   tempDirs.push(path);
   return path;
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-  let resolvePromise!: (value: T) => void;
-  const promise = new Promise<T>((resolve) => {
-    resolvePromise = resolve;
-  });
-  return { promise, resolve: resolvePromise };
 }
 
 function accessPath(path: string): Promise<boolean> {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { lstat, link, mkdir, open, readFile, readdir, readlink, realpath, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readlink, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 export type DaemonOwnershipMetadata = {
   daemonInstanceId: string;
@@ -54,23 +55,16 @@ export async function readDaemonOwnershipMetadata(dataDirectory: string): Promis
 
 export type DatabaseWriterLock = {
   lockPath: string;
-  ownerPath: string;
   release: () => Promise<void>;
-  token: string;
 };
 
-export type DatabaseWriterLockOptions = {
-  coordinationAfterOpen?: () => Promise<void>;
-  coordinationBlankReclaimMs?: number;
-};
-
-export async function acquireDatabaseWriterLock(
-  databasePath: string,
-  options: DatabaseWriterLockOptions = {}
-): Promise<DatabaseWriterLock> {
+export async function acquireDatabaseWriterLock(databasePath: string): Promise<DatabaseWriterLock> {
   const canonicalDatabasePath = await canonicalWriterDatabasePath(databasePath);
-  const lockPath = `${canonicalDatabasePath}.lock`;
-  return acquireOwnerDirectoryLock(lockPath, canonicalDatabasePath, options);
+  const lockPath = `${canonicalDatabasePath}.lease.sqlite`;
+  return acquireSqliteLease(
+    lockPath,
+    `Masthead database is already leased by another writable daemon at ${lockPath}; the lease protects the same canonical database.`
+  );
 }
 
 export async function assertWritableDatabaseLocation(databasePath: string, dataDirectory: string): Promise<void> {
@@ -92,16 +86,27 @@ export async function acquireLegacyDataDirectoryGuard(dataDirectory: string): Pr
   const runtimeDirectory = join(dataDirectory, "runtime");
   await mkdir(runtimeDirectory, { recursive: true });
   const lockPath = join(runtimeDirectory, "database.lock");
-  const ownership = await acquireAtomicFileMutex(lockPath, {
-    failWhenLive: true,
-    liveError: (metadata) =>
-      new Error(`A writable daemon already owns canonical data directory ${dataDirectory} at ${lockPath}${lockDetail(metadata)}.`),
-    metadata: { protocol: "canonical-data-directory-lock-v3" }
-  });
-  return {
-    lockPath,
-    release: ownership.release
-  };
+  const leasePath = join(runtimeDirectory, "database.lease.sqlite");
+  const lease = acquireSqliteLease(
+    leasePath,
+    `A writable daemon already owns canonical data directory ${dataDirectory} through ${leasePath}.`
+  );
+  try {
+    const sentinel = await acquireCompatibilitySentinel(lockPath, dataDirectory);
+    return {
+      lockPath,
+      release: async () => {
+        try {
+          await sentinel.release();
+        } finally {
+          await lease.release();
+        }
+      }
+    };
+  } catch (error) {
+    await lease.release();
+    throw error;
+  }
 }
 
 async function canonicalWriterDatabasePath(databasePath: string, seen = new Set<string>()): Promise<string> {
@@ -130,247 +135,94 @@ async function canonicalPathReadOnly(path: string, seen = new Set<string>()): Pr
   return join(canonicalDirectory, basename(absolutePath));
 }
 
-type OwnerRecord = {
-  createdAt: string;
-  databasePath: string;
-  ownerPath: string;
-  pid: number;
-  state: "acquired" | "pending";
-  token: string;
+type Lease = {
+  lockPath: string;
+  release: () => Promise<void>;
 };
 
-async function acquireOwnerDirectoryLock(
-  lockPath: string,
-  databasePath: string,
-  options: DatabaseWriterLockOptions
-): Promise<DatabaseWriterLock> {
-  const winnerCoordination = await acquireAtomicFileMutex(`${lockPath}.winner`, {
-    afterOpen: options.coordinationAfterOpen,
-    blankReclaimMs: options.coordinationBlankReclaimMs,
-    failWhenLive: false,
-    metadata: { purpose: "canonical-writer-election" }
-  });
-  let ownerPath: string | undefined;
+function acquireSqliteLease(lockPath: string, busyMessage: string): Lease {
+  const database = new DatabaseSync(lockPath);
   try {
-    await ensureOwnerDirectory(lockPath);
-    const token = randomUUID();
-    ownerPath = join(lockPath, `${token}.json`);
-    const pending: OwnerRecord = {
-      createdAt: new Date().toISOString(),
-      databasePath,
-      ownerPath,
-      pid: process.pid,
-      state: "pending",
-      token
-    };
-    await writeFile(ownerPath, JSON.stringify(pending, null, 2), { encoding: "utf8", flag: "wx" });
-    const owners = await liveOwnerRecords(lockPath);
-    const acquired = owners.find((owner) => owner.token !== token && owner.state === "acquired");
-    if (acquired) throw ownershipError(lockPath, acquired);
-    const pendingOwners = owners
-      .filter((owner) => owner.state === "pending")
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.token.localeCompare(right.token));
-    if (pendingOwners[0]?.token !== token) throw ownershipError(lockPath, pendingOwners[0]);
-    const acquiredRecord = { ...pending, state: "acquired" as const };
-    await writeJsonAtomic(ownerPath, acquiredRecord);
-    const identity = await stat(ownerPath);
-    const acquiredOwnerPath = ownerPath;
-    return {
-      lockPath,
-      ownerPath: acquiredOwnerPath,
-      token,
-      release: () => releaseOwnedPath(acquiredOwnerPath, token, identity.dev, identity.ino)
-    };
+    database.exec("PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;");
   } catch (error) {
-    if (ownerPath) await rm(ownerPath, { force: true });
+    database.close();
+    if (isSqliteBusy(error)) throw new Error(busyMessage, { cause: error });
     throw error;
-  } finally {
-    await winnerCoordination.release();
   }
-}
-
-async function ensureOwnerDirectory(lockPath: string): Promise<void> {
-  try {
-    await mkdir(lockPath);
-  } catch (error) {
-    if (!isErrno(error, "EEXIST")) throw error;
-    const pathStat = await stat(lockPath);
-    if (pathStat.isDirectory()) return;
-    const legacy = await readLockJson(lockPath);
-    const pid = numberField(legacy?.pid);
-    if (pid && processIsAlive(pid)) throw ownershipError(lockPath, ownerRecordFromLegacy(lockPath, legacy));
-    await rm(lockPath, { force: true });
-    await mkdir(lockPath);
-  }
-}
-
-async function liveOwnerRecords(lockPath: string): Promise<OwnerRecord[]> {
-  const records: OwnerRecord[] = [];
-  for (const entry of await readdir(lockPath, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-    const ownerPath = join(lockPath, entry.name);
-    const record = ownerRecord(await readLockJson(ownerPath), ownerPath);
-    if (!record) throw new Error(`Masthead database ownership record is unreadable at ${ownerPath}.`);
-    if (!processIsAlive(record.pid)) {
-      await rm(ownerPath, { force: true });
-      continue;
-    }
-    records.push(record);
-  }
-  return records;
-}
-
-function ownerRecord(value: Record<string, unknown> | undefined, ownerPath: string): OwnerRecord | undefined {
-  const state = value?.state;
-  const pid = numberField(value?.pid);
-  if (
-    !pid ||
-    (state !== "pending" && state !== "acquired") ||
-    typeof value?.createdAt !== "string" ||
-    typeof value.databasePath !== "string" ||
-    typeof value.token !== "string"
-  ) return undefined;
-  return { createdAt: value.createdAt, databasePath: value.databasePath, ownerPath, pid, state, token: value.token };
-}
-
-function ownerRecordFromLegacy(lockPath: string, value: Record<string, unknown> | undefined): OwnerRecord | undefined {
-  const pid = numberField(value?.pid);
-  if (!pid) return undefined;
+  let released = false;
   return {
-    createdAt: typeof value?.createdAt === "string" ? value.createdAt : "unknown",
-    databasePath: lockPath.replace(/\.lock$/u, ""),
-    ownerPath: lockPath,
-    pid,
-    state: "acquired",
-    token: "legacy"
+    lockPath,
+    release: async () => {
+      if (released) return;
+      released = true;
+      try {
+        database.exec("ROLLBACK;");
+      } finally {
+        database.close();
+      }
+    }
   };
 }
 
-function ownershipError(lockPath: string, owner: OwnerRecord | undefined): Error {
-  const detail = owner ? ` (pid ${owner.pid}, created ${owner.createdAt}, token ${owner.token})` : "";
-  return new Error(
-    `Masthead database is already owned by another writable daemon at ${lockPath}${detail}; the lock protects the same canonical database.`
-  );
+type CompatibilitySentinel = {
+  release: () => Promise<void>;
+};
+
+async function acquireCompatibilitySentinel(lockPath: string, dataDirectory: string): Promise<CompatibilitySentinel> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const token = randomUUID();
+    try {
+      const handle = await open(lockPath, "wx");
+      try {
+        await handle.writeFile(JSON.stringify({
+          createdAt: new Date().toISOString(),
+          pid: process.pid,
+          protocol: "canonical-data-directory-lock-v4",
+          token
+        }, null, 2), "utf8");
+        const identity = await handle.stat();
+        return {
+          release: () => releaseCompatibilitySentinel(lockPath, token, identity.dev, identity.ino)
+        };
+      } finally {
+        await handle.close();
+      }
+    } catch (error) {
+      if (!isErrno(error, "EEXIST")) throw error;
+      const [existing, identity] = await Promise.all([readLockJson(lockPath), stat(lockPath).catch(() => undefined)]);
+      if (!identity) continue;
+      const pid = numberField(existing?.pid);
+      if (pid && processIsAlive(pid)) {
+        throw new Error(
+          `A writable daemon already owns canonical data directory ${dataDirectory} at ${lockPath}${lockDetail(existing || {})}.`
+        );
+      }
+      if (!pid && Date.now() - identity.mtimeMs < 1_000) {
+        await delay(20);
+        continue;
+      }
+      await rm(lockPath, { force: true });
+    }
+  }
+  throw new Error(`Timed out acquiring compatibility sentinel at ${lockPath}.`);
 }
 
-async function releaseOwnedPath(ownerPath: string, token: string, device: number, inode: number): Promise<void> {
+async function releaseCompatibilitySentinel(
+  lockPath: string,
+  token: string,
+  device: number,
+  inode: number
+): Promise<void> {
   try {
-    const [currentStat, current] = await Promise.all([stat(ownerPath), readLockJson(ownerPath)]);
-    if (currentStat.dev !== device || currentStat.ino !== inode || current?.token !== token) return;
-    await rm(ownerPath);
+    const [identity, current] = await Promise.all([stat(lockPath), readLockJson(lockPath)]);
+    if (identity.dev === device && identity.ino === inode && current?.token === token) await rm(lockPath);
   } catch (error) {
     if (!isErrno(error, "ENOENT")) throw error;
   }
 }
 
-type AtomicFileMutex = {
-  release: () => Promise<void>;
-};
-
-type AtomicFileMutexOptions = {
-  afterOpen?: () => Promise<void>;
-  blankReclaimMs?: number;
-  failWhenLive: boolean;
-  liveError?: (metadata: Record<string, unknown>) => Error;
-  metadata: Record<string, unknown>;
-};
-
-async function acquireAtomicFileMutex(lockPath: string, options: AtomicFileMutexOptions): Promise<AtomicFileMutex> {
-  const blankReclaimMs = options.blankReclaimMs ?? 1_000;
-  for (let attempt = 0; attempt < 500; attempt += 1) {
-    const token = randomUUID();
-    let handle: FileHandle | undefined;
-    try {
-      handle = await open(lockPath, "wx");
-      await options.afterOpen?.();
-      const metadata = { ...options.metadata, createdAt: new Date().toISOString(), pid: process.pid, token };
-      await handle.writeFile(JSON.stringify(metadata, null, 2), "utf8");
-      const [handleStat, pathStat] = await Promise.all([handle.stat(), stat(lockPath).catch(() => undefined)]);
-      if (!pathStat || !sameInode(handleStat, pathStat)) {
-        await handle.close();
-        handle = undefined;
-        continue;
-      }
-      return atomicFileMutexOwnership(lockPath, handle, token, handleStat.dev, handleStat.ino);
-    } catch (error) {
-      if (handle) await handle.close().catch(() => undefined);
-      if (!isErrno(error, "EEXIST")) throw error;
-      const existingHandle = await open(lockPath, "r").catch(() => undefined);
-      if (!existingHandle) continue;
-      try {
-        const existingStat = await existingHandle.stat();
-        const existing = await readJsonHandle(existingHandle);
-        const existingPid = numberField(existing?.pid);
-        if (existingPid && processIsAlive(existingPid)) {
-          if (options.failWhenLive) throw options.liveError?.(existing || {}) ?? new Error(`Lock is already owned at ${lockPath}.`);
-          await delay(20);
-          continue;
-        }
-        if (!existingPid && Date.now() - existingStat.mtimeMs < blankReclaimMs) {
-          await delay(20);
-          continue;
-        }
-        await reclaimExactMutexInode(lockPath, existingStat.dev, existingStat.ino);
-      } finally {
-        await existingHandle.close();
-      }
-    }
-  }
-  throw new Error(`Timed out acquiring filesystem coordination at ${lockPath}.`);
-}
-
-function atomicFileMutexOwnership(
-  lockPath: string,
-  handle: FileHandle,
-  token: string,
-  device: number,
-  inode: number
-): AtomicFileMutex {
-  let released = false;
-  return {
-    release: async () => {
-      if (released) return;
-      released = true;
-      try {
-        const [pathStat, current] = await Promise.all([stat(lockPath), readLockJson(lockPath)]);
-        if (pathStat.dev === device && pathStat.ino === inode && current?.token === token) await rm(lockPath);
-      } catch (error) {
-        if (!isErrno(error, "ENOENT")) throw error;
-      } finally {
-        await handle.close();
-      }
-    }
-  };
-}
-
-async function reclaimExactMutexInode(lockPath: string, device: number, inode: number): Promise<void> {
-  const claimPath = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
-  try {
-    await link(lockPath, claimPath);
-  } catch (error) {
-    if (isErrno(error, "EEXIST") || isErrno(error, "ENOENT")) return;
-    throw error;
-  }
-  try {
-    const [claimStat, pathStat] = await Promise.all([stat(claimPath), stat(lockPath).catch(() => undefined)]);
-    if (claimStat.dev !== device || claimStat.ino !== inode) return;
-    if (pathStat && sameInode(claimStat, pathStat)) await rm(lockPath);
-  } finally {
-    await rm(claimPath, { force: true });
-  }
-}
-
-async function readJsonHandle(handle: FileHandle): Promise<Record<string, unknown> | undefined> {
-  try {
-    const parsed = JSON.parse(await handle.readFile("utf8")) as unknown;
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function sameInode(left: { dev: number; ino: number }, right: { dev: number; ino: number }): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
+function isSqliteBusy(error: unknown): boolean {
+  return error instanceof Error && /database is (?:busy|locked)/iu.test(error.message);
 }
 
 function lockDetail(metadata: Record<string, unknown>): string {
@@ -378,17 +230,6 @@ function lockDetail(metadata: Record<string, unknown>): string {
   const createdAt = typeof metadata.createdAt === "string" ? metadata.createdAt : undefined;
   const values = [pid ? `pid ${pid}` : undefined, createdAt ? `created ${createdAt}` : undefined].filter(Boolean);
   return values.length > 0 ? ` (${values.join(", ")})` : "";
-}
-
-async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
-  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporaryPath, JSON.stringify(value, null, 2), { encoding: "utf8", flag: "wx" });
-    await rename(temporaryPath, path);
-  } catch (error) {
-    await rm(temporaryPath, { force: true });
-    throw error;
-  }
 }
 
 function numberField(value: unknown): number | undefined {

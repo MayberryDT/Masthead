@@ -73,7 +73,7 @@ describe("Masthead health API", () => {
     const harness = await createTestDaemon();
     await listen(harness.daemon);
 
-    await expect(createMastheadDaemon(harness.config)).rejects.toThrow("database is already owned by another writable daemon");
+    await expect(createMastheadDaemon(harness.config)).rejects.toThrow("database is already leased by another writable daemon");
   });
 });
 

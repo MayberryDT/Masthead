@@ -70,7 +70,8 @@ describe("canonical store ownership", () => {
     ).rejects.toThrow("Move the database into that data directory");
     await expect(access(dataDirectory)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(access(dirname(databasePath))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(`${databasePath}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(`${databasePath}.lease.sqlite`)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(dataDirectory, "runtime", "database.lease.sqlite"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(access(join(dataDirectory, "runtime", "database.lock"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
