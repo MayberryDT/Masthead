@@ -46,6 +46,9 @@ describe("packaged process cleanup", () => {
       { creationTime: "root", pid: 10 },
       { creationTime: "20260710120000.000000-000", pid: 11 }
     ])).toBe(true);
+    expect(windowsProcessBelongsToTree(snapshot, { creationTime: "20260710120000.000000-000", pid: 11 }, [
+      { creationTime: "root", pid: 10 }
+    ])).toBe(false);
     const replacementSnapshot = snapshot.map((processRecord) =>
       processRecord.pid === 13
         ? { ...processRecord, creationTime: "replacement", parentPid: 1 }

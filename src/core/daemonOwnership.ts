@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -65,6 +66,17 @@ export async function acquireDatabaseWriterLock(databasePath: string): Promise<D
   return acquireOwnerDirectoryLock(lockPath, canonicalDatabasePath);
 }
 
+export async function assertWritableDatabaseLocation(databasePath: string, dataDirectory: string): Promise<void> {
+  const canonicalDatabasePath = await canonicalWriterDatabasePath(databasePath);
+  await mkdir(resolve(dataDirectory), { recursive: true });
+  const canonicalDataDirectory = await realpath(resolve(dataDirectory));
+  if (dirname(canonicalDatabasePath) !== canonicalDataDirectory) {
+    throw new Error(
+      `Writable Masthead database overrides must stay inside the canonical data directory during the legacy-lock transition: ${canonicalDatabasePath} is outside ${canonicalDataDirectory}. Move the database into that data directory or stop all legacy daemons before changing the layout.`
+    );
+  }
+}
+
 export type LegacyDataDirectoryGuard = {
   lockPath: string;
   release: () => Promise<void>;
@@ -94,7 +106,7 @@ export async function acquireLegacyDataDirectoryGuard(dataDirectory: string): Pr
     const ownerStat = await stat(ownerPath);
     ownerIdentity = { device: ownerStat.dev, inode: ownerStat.ino };
     const owners = await liveLegacyGuardOwners(ownersPath);
-    await writeLegacySentinel(lockPath, owners[0]?.pid ?? process.pid);
+    await ensureLegacySentinel(lockPath, ownersPath, owners);
   } catch (error) {
     await rm(ownerPath, { force: true });
     throw error;
@@ -102,15 +114,37 @@ export async function acquireLegacyDataDirectoryGuard(dataDirectory: string): Pr
     await coordinationLock.release();
   }
 
+  let released = false;
+  let repairPending = false;
+  const repairTimer = setInterval(() => {
+    if (repairPending) return;
+    repairPending = true;
+    void repairLegacySentinel(lockPath, coordinationPath, ownersPath)
+      .catch((error) => {
+        console.error(`[masthead] Could not repair legacy ownership guardian at ${lockPath}`, error);
+      })
+      .finally(() => {
+        repairPending = false;
+      });
+  }, 100).unref();
+
   return {
     lockPath,
     release: async () => {
+      if (released) return;
+      released = true;
+      clearInterval(repairTimer);
       const releaseCoordination = await acquireCoordinationLock(coordinationPath);
       try {
         if (ownerIdentity) await releaseOwnedPath(ownerPath, token, ownerIdentity.device, ownerIdentity.inode);
         const owners = await liveLegacyGuardOwners(ownersPath);
-        if (owners.length > 0) await writeLegacySentinel(lockPath, owners[0].pid);
-        else if ((await readLockJson(lockPath))?.protocol === "canonical-database-lock-v2") await rm(lockPath, { force: true });
+        if (owners.length > 0) await ensureLegacySentinel(lockPath, ownersPath, owners);
+        else {
+          const sentinel = await readLockJson(lockPath);
+          const guardianPid = sentinel?.guardian === true ? numberField(sentinel.pid) : undefined;
+          if (guardianPid && processIsAlive(guardianPid)) process.kill(guardianPid, "SIGTERM");
+          if (sentinel?.protocol === "canonical-database-lock-v2") await rm(lockPath, { force: true });
+        }
       } finally {
         await releaseCoordination.release();
       }
@@ -148,19 +182,21 @@ type OwnerRecord = {
 };
 
 async function acquireOwnerDirectoryLock(lockPath: string, databasePath: string): Promise<DatabaseWriterLock> {
-  await ensureOwnerDirectory(lockPath);
-  const token = randomUUID();
-  const ownerPath = join(lockPath, `${token}.json`);
-  const pending: OwnerRecord = {
-    createdAt: new Date().toISOString(),
-    databasePath,
-    ownerPath,
-    pid: process.pid,
-    state: "pending",
-    token
-  };
-  await writeFile(ownerPath, JSON.stringify(pending, null, 2), { encoding: "utf8", flag: "wx" });
+  const winnerCoordination = await acquireCoordinationLock(`${lockPath}.winner`);
+  let ownerPath: string | undefined;
   try {
+    await ensureOwnerDirectory(lockPath);
+    const token = randomUUID();
+    ownerPath = join(lockPath, `${token}.json`);
+    const pending: OwnerRecord = {
+      createdAt: new Date().toISOString(),
+      databasePath,
+      ownerPath,
+      pid: process.pid,
+      state: "pending",
+      token
+    };
+    await writeFile(ownerPath, JSON.stringify(pending, null, 2), { encoding: "utf8", flag: "wx" });
     const owners = await liveOwnerRecords(lockPath);
     const acquired = owners.find((owner) => owner.token !== token && owner.state === "acquired");
     if (acquired) throw ownershipError(lockPath, acquired);
@@ -171,15 +207,18 @@ async function acquireOwnerDirectoryLock(lockPath: string, databasePath: string)
     const acquiredRecord = { ...pending, state: "acquired" as const };
     await writeJsonAtomic(ownerPath, acquiredRecord);
     const identity = await stat(ownerPath);
+    const acquiredOwnerPath = ownerPath;
     return {
       lockPath,
-      ownerPath,
+      ownerPath: acquiredOwnerPath,
       token,
-      release: () => releaseOwnedPath(ownerPath, token, identity.dev, identity.ino)
+      release: () => releaseOwnedPath(acquiredOwnerPath, token, identity.dev, identity.ino)
     };
   } catch (error) {
-    await rm(ownerPath, { force: true });
+    if (ownerPath) await rm(ownerPath, { force: true });
     throw error;
+  } finally {
+    await winnerCoordination.release();
   }
 }
 
@@ -259,14 +298,53 @@ async function releaseOwnedPath(ownerPath: string, token: string, device: number
 
 async function acquireCoordinationLock(lockPath: string): Promise<DatabaseWriterLock> {
   for (let attempt = 0; attempt < 250; attempt += 1) {
+    const token = randomUUID();
+    const ownerPath = join(lockPath, "owner.json");
     try {
-      return await acquireOwnerDirectoryLock(lockPath, lockPath);
+      await mkdir(lockPath);
+      await writeFile(ownerPath, JSON.stringify({ createdAt: new Date().toISOString(), pid: process.pid, token }), "utf8");
+      const identity = await stat(ownerPath);
+      return {
+        lockPath,
+        ownerPath,
+        token,
+        release: () => releaseOwnedDirectory(lockPath, ownerPath, token, identity.dev, identity.ino)
+      };
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes("already owned")) throw error;
+      if (!isErrno(error, "EEXIST")) throw error;
+      const existing = await readLockJson(ownerPath);
+      const existingPid = numberField(existing?.pid);
+      const lockAgeMs = await stat(lockPath).then((lockStat) => Date.now() - lockStat.mtimeMs).catch(() => 0);
+      const initializedOwnerIsStale = existingPid ? !processIsAlive(existingPid) : lockAgeMs >= 1_000;
+      if (initializedOwnerIsStale) {
+        const quarantinePath = `${lockPath}.stale-${randomUUID()}`;
+        try {
+          await rename(lockPath, quarantinePath);
+          await rm(quarantinePath, { force: true, recursive: true });
+        } catch (reclaimError) {
+          if (!isErrno(reclaimError, "ENOENT")) throw reclaimError;
+        }
+      }
       await delay(20);
     }
   }
   throw new Error(`Timed out coordinating legacy database ownership at ${lockPath}.`);
+}
+
+async function releaseOwnedDirectory(
+  lockPath: string,
+  ownerPath: string,
+  token: string,
+  device: number,
+  inode: number
+): Promise<void> {
+  try {
+    const [currentStat, current] = await Promise.all([stat(ownerPath), readLockJson(ownerPath)]);
+    if (currentStat.dev !== device || currentStat.ino !== inode || current?.token !== token) return;
+    await rm(lockPath, { recursive: true });
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) throw error;
+  }
 }
 
 async function liveLegacyGuardOwners(ownersPath: string): Promise<Array<{ ownerPath: string; pid: number; token: string }>> {
@@ -286,9 +364,52 @@ async function liveLegacyGuardOwners(ownersPath: string): Promise<Array<{ ownerP
   return owners;
 }
 
-async function writeLegacySentinel(lockPath: string, pid: number): Promise<void> {
+async function ensureLegacySentinel(
+  lockPath: string,
+  ownersPath: string,
+  owners: Array<{ ownerPath: string; pid: number; token: string }>
+): Promise<void> {
+  const existing = await readLockJson(lockPath);
+  const existingGuardianPid = existing?.guardian === true ? numberField(existing.pid) : undefined;
+  if (existingGuardianPid && processIsAlive(existingGuardianPid)) {
+    await writeLegacySentinel(lockPath, existingGuardianPid, true, String(existing?.guardianToken || ""));
+    return;
+  }
+  if (owners.length > 1 || existing?.guardian === true) {
+    const guardianToken = randomUUID();
+    const guardian = spawn(
+      process.execPath,
+      ["--input-type=commonjs", "-e", LEGACY_GUARDIAN_SCRIPT, lockPath, ownersPath, guardianToken],
+      { detached: true, stdio: "ignore" }
+    );
+    guardian.unref();
+    if (!guardian.pid) throw new Error(`Could not start the legacy ownership guardian for ${lockPath}.`);
+    await writeLegacySentinel(lockPath, guardian.pid, true, guardianToken);
+    return;
+  }
+  await writeLegacySentinel(lockPath, owners[0]?.pid ?? process.pid, false, "");
+}
+
+async function repairLegacySentinel(lockPath: string, coordinationPath: string, ownersPath: string): Promise<void> {
+  const coordination = await acquireCoordinationLock(coordinationPath);
+  try {
+    const owners = await liveLegacyGuardOwners(ownersPath);
+    if (owners.length > 0) await ensureLegacySentinel(lockPath, ownersPath, owners);
+  } finally {
+    await coordination.release();
+  }
+}
+
+async function writeLegacySentinel(
+  lockPath: string,
+  pid: number,
+  guardian: boolean,
+  guardianToken: string
+): Promise<void> {
   const metadata = {
     createdAt: new Date().toISOString(),
+    guardian,
+    guardianToken,
     pid,
     protocol: "canonical-database-lock-v2"
   };
@@ -309,6 +430,36 @@ async function writeLegacySentinel(lockPath: string, pid: number): Promise<void>
     await writeJsonAtomic(lockPath, metadata);
   }
 }
+
+const LEGACY_GUARDIAN_SCRIPT = String.raw`
+const fs = require("node:fs");
+const path = require("node:path");
+const [lockPath, ownersPath, guardianToken] = process.argv.slice(1);
+function alive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error && error.code === "EPERM"; }
+}
+function tick() {
+  let liveOwners = 0;
+  for (const name of fs.readdirSync(ownersPath, { withFileTypes: true })) {
+    if (!name.isFile() || !name.name.endsWith(".json")) continue;
+    const ownerPath = path.join(ownersPath, name.name);
+    try {
+      const owner = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
+      if (Number.isInteger(owner.pid) && alive(owner.pid)) liveOwners += 1;
+      else fs.rmSync(ownerPath, { force: true });
+    } catch { fs.rmSync(ownerPath, { force: true }); }
+  }
+  if (liveOwners > 0) return;
+  try {
+    const sentinel = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+    if (sentinel.guardianToken === guardianToken) fs.rmSync(lockPath, { force: true });
+  } catch {}
+  process.exit(0);
+}
+setInterval(tick, 250);
+tick();
+`;
 
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;

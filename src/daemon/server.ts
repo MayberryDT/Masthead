@@ -16,6 +16,7 @@ import { deriveLiveBlockers } from "../core/liveBlockers.ts";
 import {
   acquireDatabaseWriterLock,
   acquireLegacyDataDirectoryGuard,
+  assertWritableDatabaseLocation,
   type DatabaseWriterLock,
   type LegacyDataDirectoryGuard
 } from "../core/daemonOwnership.ts";
@@ -186,6 +187,8 @@ type TranscriptImportOptions = {
 };
 
 export async function createMastheadDaemon(config: DaemonConfig): Promise<MastheadDaemon> {
+  const writableDataDirectory = config.dataDirectory ?? dirname(config.databasePath);
+  await assertWritableDatabaseLocation(config.databasePath, writableDataDirectory);
   await mkdir(dirname(config.storePath), { recursive: true });
   const writerLock = await acquireDatabaseWriterLock(config.databasePath);
   let legacyDataDirectoryGuard: LegacyDataDirectoryGuard | undefined;
@@ -194,7 +197,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   const disabledHookTranscriptCatchupDiagnostics = new Set<string>();
 
   try {
-    legacyDataDirectoryGuard = await acquireLegacyDataDirectoryGuard(config.dataDirectory ?? dirname(config.databasePath));
+    legacyDataDirectoryGuard = await acquireLegacyDataDirectoryGuard(writableDataDirectory);
     // Legacy compatibility store. Do not add new product writes here.
     // Canonical session data must be written to SQLite/raw_events/session graph.
     const store = await createFileBackedStore(config.storePath);

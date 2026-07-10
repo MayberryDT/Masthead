@@ -1,8 +1,12 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../daemonOwnership.ts";
+import {
+  acquireDatabaseWriterLock,
+  acquireLegacyDataDirectoryGuard,
+  type DatabaseWriterLock
+} from "../daemonOwnership.ts";
 
 const tempDirs: string[] = [];
 const locks: DatabaseWriterLock[] = [];
@@ -37,13 +41,12 @@ describe("database writer lock", () => {
       token: "stale"
     }), "utf8");
 
-    const results = await Promise.allSettled([
-      acquireDatabaseWriterLock(databasePath),
-      acquireDatabaseWriterLock(databasePath)
-    ]);
+    const results = await Promise.allSettled(
+      Array.from({ length: 20 }, () => acquireDatabaseWriterLock(databasePath))
+    );
     const winners = results.filter((result): result is PromiseFulfilledResult<DatabaseWriterLock> => result.status === "fulfilled");
     expect(winners).toHaveLength(1);
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(19);
     locks.push(winners[0].value);
   });
 
@@ -58,10 +61,52 @@ describe("database writer lock", () => {
     await first.release();
     await expect(acquireDatabaseWriterLock(databasePath)).rejects.toThrow("already owned");
   });
+
+  test("the legacy guardian exits and removes its sentinel after all owners disappear", async () => {
+    const tempDir = await createTempDir("masthead-legacy-guardian-crash-");
+    const first = await acquireLegacyDataDirectoryGuard(tempDir);
+    const second = await acquireLegacyDataDirectoryGuard(tempDir);
+    const ownersPath = join(tempDir, "runtime", "database.lock.canonical-owners");
+    const sentinelPath = join(tempDir, "runtime", "database.lock");
+    const sentinel = JSON.parse(await readFile(sentinelPath, "utf8")) as { guardian: boolean; pid: number };
+    expect(sentinel.guardian).toBe(true);
+
+    for (const owner of await readdir(ownersPath)) await rm(join(ownersPath, owner), { force: true });
+    await waitForMissingPath(sentinelPath);
+    await waitForPidToStop(sentinel.pid);
+    expect(processIsAlive(sentinel.pid)).toBe(false);
+    await first.release();
+    await second.release();
+  });
 });
 
 async function createTempDir(prefix: string): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), prefix));
   tempDirs.push(path);
   return path;
+}
+
+async function waitForMissingPath(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (!(await access(path).then(() => true).catch(() => false))) return;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+  }
+  throw new Error(`Path remained after guardian cleanup: ${path}`);
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPidToStop(pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (!processIsAlive(pid)) return;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+  }
+  throw new Error(`Guardian PID ${pid} remained alive.`);
 }

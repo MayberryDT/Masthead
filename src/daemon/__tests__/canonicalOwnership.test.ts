@@ -1,8 +1,8 @@
-import { access, mkdir, mkdtemp, open, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, open, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { StoreRecord } from "../../core/store.ts";
 import type { DaemonConfig } from "../config.ts";
@@ -34,15 +34,14 @@ describe("canonical store ownership", () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-canonical-writer-lock-"));
     tempDirs.push(tempDir);
     const databasePath = join(tempDir, "database", "masthead.sqlite");
-    const firstDataDirectory = join(tempDir, "first-data");
     const secondDataDirectory = join(tempDir, "second-data");
     const databaseDirectory = join(tempDir, "database");
     await mkdir(databaseDirectory, { recursive: true });
 
     const firstDaemon = await createTestDaemon(
-      firstDataDirectory,
+      databaseDirectory,
       databasePath,
-      join(firstDataDirectory, "legacy", "events.ndjson")
+      join(databaseDirectory, "legacy", "events.ndjson")
     );
     daemons.push(firstDaemon);
     const aliasedDatabasePath = process.platform === "win32"
@@ -54,9 +53,23 @@ describe("canonical store ownership", () => {
       createTestDaemon(
         secondDataDirectory,
         aliasedDatabasePath,
-        join(secondDataDirectory, "legacy", "events.ndjson")
+        join(secondDataDirectory, "legacy", "events.ndjson"),
+        secondDataDirectory
       )
-    ).rejects.toThrow(/same canonical database|already owned.*masthead\.sqlite/u);
+    ).rejects.toThrow("must stay inside the canonical data directory");
+  });
+
+  test("rejects cross-directory database overrides before publishing ownership state", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-cross-directory-override-"));
+    tempDirs.push(tempDir);
+    const dataDirectory = join(tempDir, "data");
+    const databasePath = join(tempDir, "elsewhere", "masthead.sqlite");
+
+    await expect(
+      createTestDaemon(tempDir, databasePath, join(dataDirectory, "events.ndjson"), dataDirectory)
+    ).rejects.toThrow("Move the database into that data directory");
+    await expect(access(`${databasePath}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(dataDirectory, "runtime", "database.lock"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("allows writable daemons for different databases in the same data directory", async () => {
@@ -92,6 +105,31 @@ describe("canonical store ownership", () => {
     daemons.push(daemon);
 
     await expect(open(join(tempDir, "runtime", "database.lock"), "wx")).rejects.toMatchObject({ code: "EEXIST" });
+  });
+
+  test("keeps an old-readable live guardian while any shared-data-directory owner remains", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-shared-legacy-guardian-"));
+    tempDirs.push(tempDir);
+    const first = await createTestDaemon(tempDir, join(tempDir, "first.sqlite"), join(tempDir, "first.ndjson"));
+    const second = await createTestDaemon(tempDir, join(tempDir, "second.sqlite"), join(tempDir, "second.ndjson"));
+    daemons.push(first, second);
+    const sentinelPath = join(tempDir, "runtime", "database.lock");
+    const firstSentinel = JSON.parse(await readFile(sentinelPath, "utf8")) as { guardian: boolean; pid: number };
+    expect(firstSentinel.guardian).toBe(true);
+    expect(firstSentinel.pid).not.toBe(process.pid);
+
+    process.kill(firstSentinel.pid, "SIGKILL");
+    await waitForPidToStop(firstSentinel.pid);
+    const replacement = await waitForReplacementGuardian(sentinelPath, firstSentinel.pid);
+    expect(replacement.guardian).toBe(true);
+    expect(replacement.pid).not.toBe(firstSentinel.pid);
+    expect(processIsAlive(replacement.pid)).toBe(true);
+
+    await first.close();
+    await expect(open(sentinelPath, "wx")).rejects.toMatchObject({ code: "EEXIST" });
+    await second.close();
+    await waitForPidToStop(replacement.pid);
+    await expect(access(sentinelPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("accepted live ingest writes canonical rows without appending new NDJSON product records", async () => {
@@ -162,11 +200,16 @@ async function createTestHarness(prefix: string): Promise<{ daemon: MastheadDaem
   return { daemon, databasePath, storePath, tempDir };
 }
 
-async function createTestDaemon(tempDir: string, databasePath: string, storePath: string): Promise<MastheadDaemon> {
+async function createTestDaemon(
+  tempDir: string,
+  databasePath: string,
+  storePath: string,
+  dataDirectory = dirname(databasePath)
+): Promise<MastheadDaemon> {
   return createMastheadDaemon({
     allowedOrigins: ["http://127.0.0.1:5173"],
     codexHomeDir: tempDir,
-    dataDirectory: tempDir,
+    dataDirectory,
     databasePath,
     fixturePath: join(tempDir, "fixture.json"),
     gitRefreshMs: 0,
@@ -290,4 +333,35 @@ type MigrationMarkerRow = {
 function migrationMarkerDetails(db: MastheadDatabase): Record<string, unknown> {
   const row = db.prepare("SELECT details_json FROM legacy_migrations WHERE migration_key = ?").get("legacy-events-ndjson-v1") as MigrationMarkerRow;
   return JSON.parse(row.details_json) as Record<string, unknown>;
+}
+
+async function waitForPidToStop(pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (!processIsAlive(pid)) return;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+  }
+  throw new Error(`PID ${pid} did not stop.`);
+}
+
+async function waitForReplacementGuardian(
+  sentinelPath: string,
+  previousPid: number
+): Promise<{ guardian: boolean; pid: number }> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const sentinel = await readFile(sentinelPath, "utf8")
+      .then((value) => JSON.parse(value) as { guardian: boolean; pid: number })
+      .catch(() => undefined);
+    if (sentinel?.guardian && sentinel.pid !== previousPid && processIsAlive(sentinel.pid)) return sentinel;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+  }
+  throw new Error(`Guardian PID ${previousPid} was not replaced.`);
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }

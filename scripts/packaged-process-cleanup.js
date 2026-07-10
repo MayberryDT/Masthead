@@ -74,9 +74,17 @@ export function windowsProcessBelongsToTree(snapshot, processIdentity, attribute
   if (attributed.some((process) => process.pid === processIdentity.pid && process.creationTime === processIdentity.creationTime)) {
     return true;
   }
-  const roots = attributed.flatMap((process) => {
-    const currentProcess = snapshot.find((candidate) => candidate.pid === process.pid);
-    return !currentProcess || currentProcess.creationTime === process.creationTime ? [process.pid] : [];
-  });
-  return collectWindowsDescendantPids(snapshot, roots).includes(processIdentity.pid);
+  const byPid = new Map(snapshot.map((process) => [process.pid, process]));
+  const visited = new Set([current.pid]);
+  let child = current;
+  while (child.parentPid > 0 && !visited.has(child.parentPid)) {
+    const parent = byPid.get(child.parentPid);
+    if (!parent) return false;
+    if (attributed.some((process) => process.pid === parent.pid && process.creationTime === parent.creationTime)) {
+      return true;
+    }
+    visited.add(parent.pid);
+    child = parent;
+  }
+  return false;
 }
