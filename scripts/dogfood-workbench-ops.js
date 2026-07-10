@@ -1,11 +1,7 @@
 #!/usr/bin/env node
 /**
- * Dogfood the complete Workbench human-ops publish loop against a temporary SQLite DB.
- * Never touches the real dev database.
- *
- * Pipeline: enroll missing (idempotent catch-up) → check transcript → quality pass →
- * enrichment + dossier applied → runbook not_applicable → publish →
- * assert Logbook-visible published artifact state.
+ * Prove the durable and operational invariants of daemon-owned authoring.
+ * Never touches the developer database.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -15,12 +11,11 @@ import { join, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const requiredModules = [
-  "dist/daemon/src/daemon/db/sessionArtifactRepository.js",
-  "dist/daemon/src/daemon/db/workbenchPipelineRepository.js",
   "dist/daemon/src/daemon/server.js",
-  "dist/daemon/src/workbench/transcriptWorkflow.js",
-  "dist/daemon/src/workbench/qualityPrecheck.js"
+  "dist/daemon/src/daemon/db/workbenchPipelineRepository.js",
+  "dist/daemon/src/mcp/server.js"
 ];
+const BODY_ONLY_PHRASE = "cobalt-orbit durable authoring sentinel";
 
 for (const relativePath of requiredModules) {
   if (!existsSync(resolve(repoRoot, relativePath))) {
@@ -29,19 +24,16 @@ for (const relativePath of requiredModules) {
   }
 }
 
-const { applySessionArtifact } = await import("../dist/daemon/src/daemon/db/sessionArtifactRepository.js");
+const { createMastheadDaemon } = await import("../dist/daemon/src/daemon/server.js");
 const {
-  enrollMissingWorkbenchSessions,
+  markWorkbenchArtifactSatisfied,
   markWorkbenchQuality,
   markWorkbenchSessionEnrichmentSatisfied,
-  markWorkbenchArtifactSatisfied,
-  setWorkbenchArtifactApplicability,
+  markWorkbenchTranscriptStatus,
   publishWorkbenchSession,
-  readWorkbenchSessionState
+  readWorkbenchSessionState,
+  setWorkbenchArtifactApplicability
 } = await import("../dist/daemon/src/daemon/db/workbenchPipelineRepository.js");
-const { checkWorkbenchTranscript } = await import("../dist/daemon/src/workbench/transcriptWorkflow.js");
-const { runCaptureQualityPrecheck } = await import("../dist/daemon/src/workbench/qualityPrecheck.js");
-const { createMastheadDaemon } = await import("../dist/daemon/src/daemon/server.js");
 
 const actor = { kind: "agent", id: "dogfood-ops" };
 const steps = [];
@@ -51,216 +43,141 @@ let restartedDaemon;
 let sessionId;
 
 try {
-  const dbPath = join(tempDir, "masthead.sqlite");
-  const storePath = join(tempDir, "events.ndjson");
-  const config = daemonConfig(dbPath, storePath);
+  const databasePath = join(tempDir, "masthead.sqlite");
+  const config = daemonConfig(databasePath);
   daemon = await createMastheadDaemon(config);
   const baseUrl = await listen(daemon);
-  const sourceSessionId = "source-session-ops-dogfood";
-  const accepted = await postJson(baseUrl, "/ingest?runtime=opencode", livePayload(sourceSessionId));
-  const projection = await getJson(baseUrl, `/projection?expandedSessionId=${encodeURIComponent(sourceSessionId)}`);
-  const liveCard = projection.projection?.cards?.find((card) => card.sourceSessionId === sourceSessionId);
-  sessionId = liveCard?.canonicalSessionId;
-  if (accepted.status !== "accepted" || !sessionId) throw new Error("Live source did not reach the Now projection with canonical identity");
-  steps.push({
-    name: "live_source_to_now",
-    ok: true,
-    ingestStatus: accepted.status,
-    runtime: liveCard.runtime,
-    canonicalSessionId: sessionId
+  sessionId = "session:authoring-ops";
+  const appliedSessionId = "session:authoring-applied-only";
+  seedSession(daemon.database, sessionId, "Durable authoring operations");
+  seedSession(daemon.database, appliedSessionId, "Applied optional artifact state");
+
+  const capabilities = await getJson(baseUrl, "/workbench/authoring/capabilities");
+  const opened = await postJson(baseUrl, "/workbench/authoring/runs", {
+    actorId: actor.id,
+    databaseId: capabilities.databaseId,
+    sessionIds: [sessionId]
   });
+  const runId = opened.run?.runId;
+  assert(typeof runId === "string", "authoring open did not return a run");
+  steps.push({ name: "open", ok: true, runId, databaseId: opened.run.databaseId });
 
-  const db = daemon.database;
-  seedSessionEvidence(db, sessionId);
-  // Second session stays unenrolled until bulk enroll; proves catch-up only.
-  seedSession(db, "session:ops-dogfood-missing", {
-    title: "Workbench ops dogfood missing session",
-    objective: "Prove enroll-missing catch-up on a temporary database"
+  const firstOpenCounts = authoringCounts(daemon.database, runId);
+  const reopened = await postJson(baseUrl, "/workbench/authoring/runs", {
+    actorId: actor.id,
+    databaseId: capabilities.databaseId,
+    sessionIds: [sessionId]
   });
+  const secondOpenCounts = authoringCounts(daemon.database, runId);
+  const openIdempotent = reopened.run?.runId === runId && sameCounts(firstOpenCounts, secondOpenCounts);
+  assert(openIdempotent, "repeat open created another run or live claim");
+  steps.push({ name: "open_idempotent", ok: true, counts: secondOpenCounts });
 
-  // 0. Enroll missing — the live session is already enrolled, so only the seeded catch-up session should enroll.
-  const enrollFirst = enrollMissingWorkbenchSessions(db, { actor, limit: 500 });
-  steps.push({
-    name: "enroll_missing",
-    ok: enrollFirst.enrolled === 1 && enrollFirst.enrolledSessionIds.includes("session:ops-dogfood-missing"),
-    enrolled: enrollFirst.enrolled,
-    skippedExisting: enrollFirst.skippedExisting,
-    enrolledSessionIds: enrollFirst.enrolledSessionIds
-  });
-  if (enrollFirst.enrolled !== 1) {
-    throw new Error(`Expected enroll_missing enrolled=1, got ${JSON.stringify(enrollFirst)}`);
-  }
-  const enrolledState = readWorkbenchSessionState(db, sessionId);
-  if (!enrolledState || enrolledState.publicationStatus !== "publish_path") {
-    throw new Error(
-      `Expected publish_path after enroll, got ${enrolledState?.publicationStatus ?? "missing"}`
-    );
-  }
+  const evidence = await getJson(
+    baseUrl,
+    `/workbench/authoring/runs/${encodeURIComponent(runId)}/evidence?sessionId=${encodeURIComponent(sessionId)}&order=asc&limit=50`
+  );
+  const outcomeRef = evidence.items.find((item) => item.role === "assistant")?.itemId;
+  const verificationRef = evidence.items.find((item) => item.kind === "tool_result")?.itemId;
+  assert(outcomeRef && verificationRef, "canonical outcome and verification evidence were not readable");
 
-  // 0b. Second enroll is a no-op (idempotent).
-  const enrollSecond = enrollMissingWorkbenchSessions(db, { actor, limit: 500 });
-  steps.push({
-    name: "enroll_missing_idempotent",
-    ok: enrollSecond.enrolled === 0 && enrollSecond.skippedExisting === 2,
-    enrolled: enrollSecond.enrolled,
-    skippedExisting: enrollSecond.skippedExisting
-  });
-  if (enrollSecond.enrolled !== 0) {
-    throw new Error(`Expected second enroll enrolled=0, got ${JSON.stringify(enrollSecond)}`);
-  }
-
-  // 1. Check transcript — seeded messages should yield imported/usable coverage.
-  const transcript = checkWorkbenchTranscript(db, { actor, sessionId });
-  steps.push({ name: "check_transcript", ok: transcript.ok === true, result: transcript });
-  if (!transcript.ok) throw new Error(`check_transcript failed: ${JSON.stringify(transcript)}`);
-  if (transcript.transcriptStatus !== "imported" && transcript.transcriptStatus !== "available") {
-    throw new Error(`Expected usable transcript status, got ${transcript.transcriptStatus}`);
-  }
-
-  // 2. Precheck quality (informational) then mark quality pass.
-  const precheck = runCaptureQualityPrecheck(db, sessionId);
-  steps.push({ name: "quality_precheck", ok: precheck.ok === true, result: precheck });
-  if (!precheck.ok) throw new Error(`quality_precheck failed: ${JSON.stringify(precheck)}`);
-
-  const quality = markWorkbenchQuality(db, { actor, sessionId, status: "passed" });
-  steps.push({
-    name: "quality_pass",
-    ok: quality.state.qualityStatus === "passed",
-    qualityStatus: quality.state.qualityStatus,
-    activityType: quality.activity.eventType
-  });
-  if (quality.state.qualityStatus !== "passed") {
-    throw new Error(`Expected quality_status passed, got ${quality.state.qualityStatus}`);
-  }
-
-  // 3. Mark enrichment satisfied, apply a real dossier, and mark runbook not applicable.
-  const enrichment = markWorkbenchSessionEnrichmentSatisfied(db, { actor, sessionId });
-  steps.push({
-    name: "session_enrichment_satisfied",
-    ok: enrichment.state.sessionEnrichmentStatus === "satisfied",
-    sessionEnrichmentStatus: enrichment.state.sessionEnrichmentStatus
-  });
-
-  const dossierArtifact = applySessionArtifact(db, {
-    artifactKind: "session_dossier",
-    confidence: "high",
-    content: {
-      outcome: "Workbench ops dogfood completed against a temporary SQLite database.",
-      verification: ["node scripts/dogfood-workbench-ops.js"]
-    },
-    contentFingerprint: "workbench-ops-dogfood-dossier-v1",
-    createdBy: "dogfood-ops",
-    evidenceRefs: [`${sessionId}:message:user`, `${sessionId}:message:assistant`],
-    highlight: "Completed the full Workbench publish path.",
-    projectLabel: "Masthead",
-    schemaVersion: "session-dossier-v1",
+  const bundle = authoringBundle({
+    evidenceRevision: opened.run.evidenceRevision,
+    outcomeRef,
+    runId,
     sessionId,
-    summary: "Verifies Workbench gates, artifact publication, and Logbook visibility.",
-    title: "Workbench ops dogfood dossier",
-    validation: { valid: true }
+    verificationRef
   });
-  const dossier = markWorkbenchArtifactSatisfied(db, {
-    actor,
-    artifactKind: "session_dossier",
-    sessionId
-  });
-  steps.push({
-    name: "session_dossier_satisfied",
-    ok: dossier.state.sessionDossierStatus === "satisfied",
-    sessionDossierStatus: dossier.state.sessionDossierStatus
-  });
+  const rowsBeforeSubmit = persistedOutputCounts(daemon.database);
+  const submitted = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`, bundle);
+  const rowsAfterSubmit = persistedOutputCounts(daemon.database);
+  assert(submitted.accepted === true, `submission was rejected: ${JSON.stringify(submitted.findings)}`);
+  assert(sameCounts(rowsBeforeSubmit, rowsAfterSubmit), "submit created artifact or enrichment rows");
+  steps.push({ name: "submit_is_non_mutating", ok: true, counts: rowsAfterSubmit });
 
-  const runbook = setWorkbenchArtifactApplicability(db, {
-    actor,
-    artifactKind: "runbook",
-    reason: "ops_dogfood_no_runbook_evidence",
-    sessionId,
-    status: "not_applicable"
-  });
+  proveAppliedIsNotResolved(daemon.database, appliedSessionId);
   steps.push({
-    name: "runbook_not_applicable",
-    ok: runbook.state.runbookStatus === "not_applicable",
-    runbookStatus: runbook.state.runbookStatus
-  });
-
-  // 4. Publish when gates pass.
-  const published = publishWorkbenchSession(db, { actor, sessionId });
-  if (!published.ok) {
-    steps.push({ name: "publish", ok: false, result: published });
-    throw new Error(`publish failed: missing=${JSON.stringify(published.missing)}`);
-  }
-  steps.push({
-    name: "publish",
+    name: "applied_optional_not_resolved",
     ok: true,
-    publicationStatus: published.state.publicationStatus,
-    activityType: published.activity.eventType
+    state: pickState(readWorkbenchSessionState(daemon.database, appliedSessionId))
   });
 
-  const state = readWorkbenchSessionState(db, sessionId);
-  if (!state || state.publicationStatus !== "published") {
-    throw new Error(`Expected publication_status published, got ${state?.publicationStatus ?? "missing"}`);
+  const finished = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`, {});
+  const receipt = finished.receipt;
+  assert(receipt?.publishedArtifactIds?.length === 2, "finish did not create dossier and runbook");
+  const created = daemon.database
+    .prepare(
+      `SELECT artifact_id AS artifactId, publication_status AS publicationStatus
+       FROM session_artifacts
+       WHERE created_by = ?
+       ORDER BY artifact_id`
+    )
+    .all(`workbench_authoring:${actor.id}`);
+  assert(created.length === receipt.publishedArtifactIds.length, "finish created artifacts outside its receipt");
+  assert(created.every((artifact) => artifact.publicationStatus === "published"), "finish left an applied artifact unpublished");
+  steps.push({ name: "finish_publishes_every_created_artifact", ok: true, artifactIds: receipt.publishedArtifactIds });
+
+  for (const artifactId of receipt.publishedArtifactIds) {
+    const detail = await getJson(baseUrl, `/logbook/artifacts/${encodeURIComponent(artifactId)}`);
+    assert(detail.artifact?.capsule?.artifactId === artifactId, `receipt artifact ${artifactId} is missing from Logbook detail`);
+    assert(detail.artifact?.publicationStatus === "published", `receipt artifact ${artifactId} is not published`);
   }
+  steps.push({ name: "receipt_artifacts_visible", ok: true, visible: receipt.publishedArtifactIds.length });
 
-  // 5. Logbook-visible through the product API, not merely a published session flag.
-  const logbook = await getJson(baseUrl, "/logbook/artifacts?q=Workbench%20ops%20dogfood&limit=10");
-  const logbookArtifact = logbook.artifacts?.find((artifact) => artifact.artifactId === dossierArtifact.artifactId);
-  const detail = await getJson(baseUrl, `/logbook/artifacts/${encodeURIComponent(dossierArtifact.artifactId)}`);
-  const logbookVisible = Boolean(logbookArtifact && detail.artifact?.provenanceSessionIds?.includes(sessionId));
-  steps.push({
-    name: "published_artifact_visible",
-    ok: logbookVisible,
-    artifactId: dossierArtifact.artifactId,
-    publicationStatus: logbookArtifact ? "published" : "missing"
-  });
-  if (!logbookVisible) throw new Error("Published dossier was not visible in artifact-first Logbook");
+  const bodySearch = await getJson(baseUrl, `/logbook/artifacts?q=${encodeURIComponent(BODY_ONLY_PHRASE)}&limit=10`);
+  const runbookId = bodySearch.artifacts?.find((artifact) => artifact.kind === "runbook")?.artifactId;
+  assert(receipt.publishedArtifactIds.includes(runbookId), "Logbook did not find a body-only phrase");
+  steps.push({ name: "logbook_body_search", ok: true, artifactId: runbookId });
 
-  // 6. Restart the daemon and prove the canonical session and published artifact remain singular.
-  const beforeRestart = persistenceCounts(db);
+  const mcpSearch = searchArtifactsThroughMcp(databasePath, BODY_ONLY_PHRASE, runbookId);
+  assert(mcpSearch.ok, `search_artifacts did not find the body-only phrase: ${mcpSearch.error ?? "unknown error"}`);
+  steps.push({ name: "mcp_search_artifacts_body_only", ok: true, artifactId: runbookId });
+
+  const beforeRestart = durableCounts(daemon.database, runId);
   await daemon.close();
   daemon = undefined;
   restartedDaemon = await createMastheadDaemon(config);
   const restartedBaseUrl = await listen(restartedDaemon);
-  const afterRestart = persistenceCounts(restartedDaemon.database);
-  const restartedLogbook = await getJson(restartedBaseUrl, "/logbook/artifacts?q=Workbench%20ops%20dogfood&limit=10");
-  const restartStable =
-    afterRestart.sessions === beforeRestart.sessions &&
-    afterRestart.publishedArtifacts === beforeRestart.publishedArtifacts &&
-    restartedLogbook.artifacts?.some((artifact) => artifact.artifactId === dossierArtifact.artifactId);
-  steps.push({
-    name: "restart_persistence",
-    ok: Boolean(restartStable),
-    before: beforeRestart,
-    after: afterRestart
-  });
-  if (!restartStable) throw new Error("Daemon restart changed session or published artifact counts");
+  const afterRestart = durableCounts(restartedDaemon.database, runId);
+  assert(beforeRestart.completedRuns === 1 && afterRestart.completedRuns === 1, "restart did not preserve exactly one completed run receipt");
+  assert(beforeRestart.lineages === beforeRestart.currentLineages, "finish produced multiple current artifacts per lineage");
+  assert(sameCounts(beforeRestart, afterRestart), "restart changed authoring run or lineage counts");
 
-  // 7. Read the same published artifact through the real MCP stdio protocol.
-  const mcp = verifyArtifactThroughMcp(dbPath, dossierArtifact.artifactId);
-  steps.push({ name: "artifact_primary_mcp", ok: mcp.ok, searchResults: mcp.searchResults, artifactRead: mcp.artifactRead });
-  if (!mcp.ok) throw new Error("Artifact-primary MCP did not return the published dossier");
+  const restartedStatus = await getJson(restartedBaseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}`);
+  const restartedRetry = await postJson(
+    restartedBaseUrl,
+    `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`,
+    {}
+  );
+  assert(restartedStatus.run?.status === "completed", "completed run status did not survive restart");
+  assert(JSON.stringify(restartedRetry.receipt) === JSON.stringify(receipt), "finish retry after restart returned a different receipt");
+  for (const artifactId of receipt.publishedArtifactIds) {
+    await getJson(restartedBaseUrl, `/logbook/artifacts/${encodeURIComponent(artifactId)}`);
+  }
+  steps.push({ name: "restart_persistence", ok: true, before: beforeRestart, after: afterRestart });
 
   const failedSteps = steps.filter((step) => !step.ok);
-  if (failedSteps.length > 0) throw new Error(`Dogfood receipt contains failed steps: ${failedSteps.map((step) => step.name).join(", ")}`);
-
-  const receipt = { ok: true, sessionId, steps, dbPath };
-  console.log(JSON.stringify(receipt, null, 2));
-  process.exitCode = 0;
+  assert(failedSteps.length === 0, `failed steps: ${failedSteps.map((step) => step.name).join(", ")}`);
+  console.log(JSON.stringify({ ok: true, sessionId, runId, receipt, steps }, null, 2));
 } catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  console.log(JSON.stringify({ ok: false, sessionId, steps, error: message }, null, 2));
+  console.log(
+    JSON.stringify(
+      { ok: false, sessionId, steps, error: error instanceof Error ? error.message : String(error) },
+      null,
+      2
+    )
+  );
   process.exitCode = 1;
 } finally {
   if (daemon) await daemon.close();
   if (restartedDaemon) await restartedDaemon.close();
-  if (!process.env.MASTHEAD_KEEP_DOGFOOD_DB) {
-    await rm(tempDir, { force: true, recursive: true });
-  }
+  if (!process.env.MASTHEAD_KEEP_DOGFOOD_DB) await rm(tempDir, { force: true, recursive: true });
 }
 
-function daemonConfig(databasePath, storePath) {
+function daemonConfig(databasePath) {
   return {
-    allowedOrigins: ["http://127.0.0.1:5173"],
-    codexHomeDir: tempDir,
+    allowedOrigins: ["http://127.0.0.1:5180"],
+    codexHomeDir: join(tempDir, "codex-home"),
     databasePath,
     fixturePath: join(tempDir, "fixture.json"),
     gitRefreshMs: 0,
@@ -268,111 +185,207 @@ function daemonConfig(databasePath, storePath) {
     hookTranscriptCatchupEnabled: false,
     llmCopyEnabled: false,
     port: 0,
-    storePath
-  };
-}
-
-function livePayload(sourceSessionId) {
-  return {
-    content: "Start the Workbench golden-path dogfood.",
-    directory: repoRoot,
-    project: "Masthead",
-    repo_root: repoRoot,
-    sessionID: sourceSessionId,
-    summary: "Workbench golden-path dogfood",
-    time: "2026-07-09T12:00:00.000Z",
-    timestamp: "2026-07-09T12:00:00.000Z",
-    title: "Workbench ops dogfood session",
-    type: "session.created"
+    storePath: join(tempDir, "legacy", "events.ndjson")
   };
 }
 
 function listen(instance) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    instance.server.once("error", onError);
     instance.server.listen(0, "127.0.0.1", () => {
+      instance.server.off("error", onError);
       const address = instance.server.address();
       resolve(`http://127.0.0.1:${address.port}`);
     });
   });
 }
 
-async function getJson(baseUrl, path) {
-  const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`${path} returned ${response.status}: ${await response.text()}`);
+async function getJson(baseUrl, pathname) {
+  const response = await fetch(`${baseUrl}${pathname}`, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`${pathname} returned ${response.status}: ${await response.text()}`);
   return response.json();
 }
 
-async function postJson(baseUrl, path, body) {
-  const response = await fetch(`${baseUrl}${path}`, {
+async function postJson(baseUrl, pathname, body) {
+  const response = await fetch(`${baseUrl}${pathname}`, {
     body: JSON.stringify(body),
     headers: { accept: "application/json", "content-type": "application/json" },
     method: "POST"
   });
-  if (!response.ok) throw new Error(`${path} returned ${response.status}: ${await response.text()}`);
+  if (!response.ok) throw new Error(`${pathname} returned ${response.status}: ${await response.text()}`);
   return response.json();
 }
 
-function persistenceCounts(db) {
-  return {
-    publishedArtifacts: db
-      .prepare("SELECT COUNT(*) AS count FROM session_artifacts WHERE publication_status = 'published' AND status = 'current'")
-      .get().count,
-    sessions: db.prepare("SELECT COUNT(*) AS count FROM sessions").get().count
-  };
-}
-
-function verifyArtifactThroughMcp(databasePath, artifactId) {
+function searchArtifactsThroughMcp(databasePath, query, artifactId) {
   try {
-    const requests = [
-      {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: "search_artifacts", arguments: { query: "Workbench ops dogfood", limit: 5 } }
-      },
-      {
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: { name: "get_artifact", arguments: { artifactId } }
-      }
-    ];
-    const child = spawnSync(process.execPath, ["dist/daemon/src/mcp/server.js"], {
+    const request = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "search_artifacts", arguments: { query, limit: 10 } }
+    };
+    const child = spawnSync(process.execPath, [resolve(repoRoot, "dist/daemon/src/mcp/server.js")], {
       cwd: repoRoot,
       encoding: "utf8",
       env: { ...process.env, MASTHEAD_DB_PATH: databasePath },
-      input: `${requests.map((request) => JSON.stringify(request)).join("\n")}\n`
+      input: `${JSON.stringify(request)}\n`,
+      maxBuffer: 10 * 1024 * 1024
     });
     if (child.status !== 0) throw new Error(child.stderr || `MCP exited ${child.status}`);
-    const replies = child.stdout.trim().split(/\n/).map((line) => JSON.parse(line));
-    const search = JSON.parse(replies[0]?.result?.content?.[0]?.text ?? "{}");
-    const detail = JSON.parse(replies[1]?.result?.content?.[0]?.text ?? "{}");
-    const artifactRead = detail.artifact?.capsule?.artifactId === artifactId;
-    return { artifactRead, ok: search.total === 1 && artifactRead, searchResults: search.total ?? 0 };
+    const reply = JSON.parse(child.stdout.trim());
+    const result = JSON.parse(reply.result?.content?.[0]?.text ?? "{}");
+    return { ok: result.artifacts?.some((artifact) => artifact.artifactId === artifactId) === true };
   } catch (error) {
-    return { artifactRead: false, error: error instanceof Error ? error.message : String(error), ok: false, searchResults: 0 };
+    return { error: error instanceof Error ? error.message : String(error), ok: false };
   }
 }
 
-function seedSession(db, id, overrides = {}) {
-  const now = "2026-07-08T16:00:00.000Z";
-  const sourceId = `source:${id}`;
-  const hostId = "host:ops-dogfood";
-  const runtimeId = "runtime:ops-dogfood";
-  const title = overrides.title ?? "Workbench ops dogfood session";
-  const objective =
-    overrides.objective ?? "Prove check → quality → enrich → publish on a temporary database";
+function proveAppliedIsNotResolved(db, appliedSessionId) {
+  markWorkbenchTranscriptStatus(db, {
+    actor,
+    eventType: "dogfood_transcript_available",
+    sessionId: appliedSessionId,
+    status: "available",
+    summary: "Dogfood transcript available"
+  });
+  markWorkbenchQuality(db, { actor, sessionId: appliedSessionId, status: "passed" });
+  markWorkbenchSessionEnrichmentSatisfied(db, { actor, sessionId: appliedSessionId });
+  markWorkbenchArtifactSatisfied(db, { actor, artifactKind: "session_dossier", sessionId: appliedSessionId });
+  setWorkbenchArtifactApplicability(db, {
+    actor,
+    artifactKind: "adr",
+    reason: "Applied-status dogfood has no durable architecture decision.",
+    sessionId: appliedSessionId,
+    status: "not_applicable"
+  });
+  setWorkbenchArtifactApplicability(db, {
+    actor,
+    artifactKind: "incident_timeline",
+    reason: "Applied-status dogfood has no incident timeline.",
+    sessionId: appliedSessionId,
+    status: "not_applicable"
+  });
+  const published = publishWorkbenchSession(db, { actor, sessionId: appliedSessionId });
+  assert(published.ok, "applied-status session package did not publish");
+  const applied = markWorkbenchArtifactSatisfied(db, {
+    actor,
+    artifactKind: "runbook",
+    sessionId: appliedSessionId
+  });
+  assert(applied.state.runbookStatus === "applied", "runbook did not reach applied status");
+  assert(applied.state.resolutionStatus === "compile_ready", "applied runbook incorrectly counted as automatic resolution");
+}
 
+function authoringBundle({ evidenceRevision, outcomeRef, runId, sessionId, verificationRef }) {
+  const refs = [outcomeRef, verificationRef];
+  return {
+    artifacts: [
+      {
+        kind: "runbook",
+        output: {
+          changedFiles: ["scripts/dogfood-workbench-ops.js"],
+          claimEvidence: [
+            { evidenceRefs: [outcomeRef], path: "fixSteps[0]" },
+            { evidenceRefs: [outcomeRef], path: "rootCause" },
+            { evidenceRefs: [verificationRef], path: "validationChecks[0]" }
+          ],
+          commands: ["node scripts/dogfood-workbench-ops.js"],
+          confidence: "high",
+          deadEnds: [],
+          environmentRequirements: ["A temporary Masthead daemon"],
+          evidenceRefs: refs,
+          fixSteps: ["Submit without output writes, then finish every output in one transaction."],
+          missingEvidence: [],
+          preconditions: ["A grounded bundle is ready to finish."],
+          preventionNotes: [`Keep the ${BODY_ONLY_PHRASE} indexed across daemon restarts.`],
+          problemSignature: {
+            affectedScope: "Durable authoring publication",
+            errorStrings: ["authoring_finish_visibility_failed"],
+            symptoms: ["A receipt or current artifact disappears after restart"]
+          },
+          provenanceSessionIds: [sessionId],
+          reproSteps: ["Finish a bundle, restart the daemon, and query the same run and artifact lineages."],
+          risksOrGaps: [],
+          rootCause: "Durable acceptance requires the receipt and all current artifact lineages to commit together.",
+          signatureKey: "durable-authoring-ops",
+          title: "Preserve atomic authoring receipts",
+          validationChecks: ["The passed tool result verifies one durable receipt and one current artifact per lineage."]
+        },
+        provenanceSessionIds: [sessionId],
+        seedSessionId: sessionId
+      }
+    ],
+    bundleVersion: "workbench-authoring-v1",
+    contributions: [],
+    evidenceRevision,
+    notApplicable: [
+      {
+        evidenceRefs: [outcomeRef],
+        kind: "adr",
+        reason: "The reviewed operations evidence does not record a durable architecture decision.",
+        sessionId
+      },
+      {
+        evidenceRefs: [outcomeRef],
+        kind: "incident_timeline",
+        reason: "The reviewed operations evidence does not describe a production incident timeline.",
+        sessionId
+      }
+    ],
+    runId,
+    sessionPackages: [
+      {
+        dossier: {
+          approach: ["Submitted a grounded bundle", "Finished it atomically", "Restarted the daemon"],
+          claimEvidence: [
+            { evidenceRefs: [outcomeRef], path: "keyDecisions[0]" },
+            { evidenceRefs: refs, path: "outcome" },
+            { evidenceRefs: [verificationRef], path: "verification[0]" }
+          ],
+          commandsAndTools: [{ label: "authoring HTTP API", purpose: "Exercise durable operations", status: "passed" }],
+          confidence: "high",
+          context: "A temporary daemon isolates durability checks from developer data.",
+          evidenceRefs: refs,
+          filesTouched: [{ label: "scripts/dogfood-workbench-ops.js", role: "operations acceptance" }],
+          keyDecisions: ["Treat applied optional artifacts as compile-ready until publication."],
+          lessonsLearned: ["Restart verification must inspect both receipts and artifact lineages."],
+          missingEvidence: [],
+          outcome: "One submission produced no outputs; one finish published every created artifact and one durable receipt.",
+          problemStatement: "Prove atomic and restart-safe daemon-owned authoring operations.",
+          risksOrGaps: [],
+          title: "Durable authoring operations dossier",
+          verification: ["The passed tool result verifies durable artifact reuse after restart."]
+        },
+        enrichment: {
+          claimEvidence: [{ evidenceRefs: refs, path: "outcome" }],
+          confidence: "high",
+          evidenceRefs: refs,
+          missingEvidence: [],
+          outcome: "The daemon preserved one completion receipt and one current artifact per lineage.",
+          searchPhrases: ["durable authoring receipt", "atomic artifact publication"],
+          summary: "The operations dogfood proves non-mutating submission, atomic publication, idempotent retry, and restart-safe artifact reuse.",
+          technologies: ["TypeScript", "SQLite", "HTTP"],
+          title: "Prove durable authoring operations",
+          topics: ["Workbench", "durability", "Logbook"]
+        },
+        sessionId
+      }
+    ]
+  };
+}
+
+function seedSession(db, sessionId, title) {
+  const now = "2026-07-10T16:00:00.000Z";
   db.prepare("INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
-    hostId,
-    "ops-dogfood-host",
+    "host:authoring-ops",
+    "authoring-ops-host",
     now,
     now
   );
   db.prepare(
     "INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)"
-  ).run(runtimeId, "codex", "ops-dogfood", now, now);
-
+  ).run("runtime:authoring-ops", "codex", "dogfood", now, now);
   db.prepare(
     `INSERT INTO sessions (
       session_id, host_id, runtime_id, source_session_id, project_label, repo_root, worktree_path,
@@ -380,16 +393,16 @@ function seedSession(db, id, overrides = {}) {
       source_confidence, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    id,
-    hostId,
-    runtimeId,
-    `source-session-${id}`,
+    sessionId,
+    "host:authoring-ops",
+    "runtime:authoring-ops",
+    `source:${sessionId}`,
     "Masthead",
     repoRoot,
     repoRoot,
     "main",
     title,
-    objective,
+    "Prove daemon-owned authoring operations",
     "ended",
     "completed",
     now,
@@ -399,67 +412,115 @@ function seedSession(db, id, overrides = {}) {
     now,
     now
   );
-
-  db.prepare(
-    `INSERT INTO ingest_sources (
-      source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(sourceId, "codex", "jsonl", `/tmp/${sourceId}.jsonl`, "authoritative", now, now);
-
-  db.prepare(
-    `INSERT INTO session_sources (session_id, source_id, first_seen_at, last_seen_at, imported_record_count)
-    VALUES (?, ?, ?, ?, ?)`
-  ).run(id, sourceId, now, now, 3);
-
-  seedSessionEvidence(db, id, now);
-}
-
-function seedSessionEvidence(db, id, now = "2026-07-08T16:00:00.000Z") {
-  // Meaningful user + assistant messages so transcript coverage is usable and quality precheck passes.
-  db.prepare(
-    `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    `${id}:message:user`,
-    id,
+  const insertMessage = db.prepare(
+    `INSERT INTO messages (
+      message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  insertMessage.run(
+    `${sessionId}:message-user`,
+    sessionId,
     "user",
-    "Walk the full Workbench ops loop: check transcript, accept quality, satisfy enrichment and dossier, then publish to Logbook.",
-    `${id}:message:user-hash`,
+    "Prove non-mutating submit, atomic finish, and restart-safe artifact reuse.",
+    `${sessionId}:message-user-hash`,
     now,
-    JSON.stringify({ source: "ops-dogfood", id: `${id}:message:user` }),
+    "{}",
     "authoritative"
   );
-  db.prepare(
-    `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    `${id}:message:assistant`,
-    id,
+  insertMessage.run(
+    `${sessionId}:message-assistant`,
+    sessionId,
     "assistant",
-    "Completed the Workbench ops dogfood against a temporary SQLite database and published the session.",
-    `${id}:message:assistant-hash`,
-    now,
-    JSON.stringify({ source: "ops-dogfood", id: `${id}:message:assistant` }),
+    "Completed daemon-owned authoring operations with a durable receipt and published artifacts.",
+    `${sessionId}:message-assistant-hash`,
+    "2026-07-10T16:00:01.000Z",
+    "{}",
     "authoritative"
   );
-
-  db.prepare(
-    "INSERT INTO file_effects (file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(`${id}:file`, id, "scripts/dogfood-workbench-ops.js", "modified", now, "{}");
-
   db.prepare("INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, ?, ?, ?)").run(
-    `${id}:tool`,
-    id,
+    `${sessionId}:tool-call`,
+    sessionId,
     "node scripts/dogfood-workbench-ops.js",
-    now,
+    "2026-07-10T16:00:02.000Z",
     "{}"
   );
   db.prepare(
-    `INSERT INTO tool_results (tool_result_id, tool_call_id, session_id, status, completed_at, output_redacted, source_ref_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(`${id}:tool-result`, `${id}:tool`, id, "succeeded", now, "ok:true", "{}");
+    `INSERT INTO tool_results (
+      tool_result_id, tool_call_id, session_id, status, exit_code, completed_at, output_redacted, source_ref_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    `${sessionId}:tool-result`,
+    `${sessionId}:tool-call`,
+    sessionId,
+    "succeeded",
+    0,
+    "2026-07-10T16:00:03.000Z",
+    "Durable authoring operations passed.",
+    "{}"
+  );
+}
 
-  db.prepare(
-    "INSERT INTO model_usage (usage_id, session_id, model, provider, observed_at, source_ref_json) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(`${id}:usage`, id, "gpt-5", "openai", now, "{}");
+function persistedOutputCounts(db) {
+  return {
+    artifacts: countRows(db, "session_artifacts"),
+    enrichments: countRows(db, "session_enrichments")
+  };
+}
+
+function authoringCounts(db, runId) {
+  return {
+    activeClaims: db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM workbench_claims
+         WHERE released_at IS NULL AND session_id IN (
+           SELECT session_id FROM workbench_authoring_run_sessions WHERE run_id = ?
+         )`
+      )
+      .get(runId).count,
+    runs: db.prepare("SELECT COUNT(*) AS count FROM workbench_authoring_runs WHERE run_id = ?").get(runId).count
+  };
+}
+
+function durableCounts(db, runId) {
+  const lineages = db
+    .prepare(
+      `SELECT lineage_id AS lineageId,
+        SUM(CASE WHEN status = 'current' THEN 1 ELSE 0 END) AS currentArtifacts
+       FROM session_artifacts
+       WHERE created_by = ?
+       GROUP BY lineage_id`
+    )
+    .all(`workbench_authoring:${actor.id}`);
+  return {
+    completedRuns: db
+      .prepare("SELECT COUNT(*) AS count FROM workbench_authoring_runs WHERE run_id = ? AND status = 'completed' AND receipt_json IS NOT NULL")
+      .get(runId).count,
+    currentLineages: lineages.filter((lineage) => lineage.currentArtifacts === 1).length,
+    lineages: lineages.length,
+    publishedArtifacts: db
+      .prepare("SELECT COUNT(*) AS count FROM session_artifacts WHERE created_by = ? AND status = 'current' AND publication_status = 'published'")
+      .get(`workbench_authoring:${actor.id}`).count
+  };
+}
+
+function pickState(state) {
+  return {
+    publicationStatus: state?.publicationStatus,
+    runbookStatus: state?.runbookStatus,
+    resolutionStatus: state?.resolutionStatus,
+    sessionPackageStatus: state?.sessionPackageStatus
+  };
+}
+
+function countRows(db, table) {
+  return db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
+}
+
+function sameCounts(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
 }

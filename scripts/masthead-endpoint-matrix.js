@@ -12,7 +12,8 @@ const REQUIRED_CAPABILITIES = [
   "mcp_status",
   "usage_stats",
   "settings",
-  "data_lifecycle"
+  "data_lifecycle",
+  "artifact_authoring"
 ];
 
 export const READ_ONLY_ENDPOINTS = [
@@ -47,6 +48,14 @@ export const READ_ONLY_ENDPOINTS = [
   { method: "GET", path: "/workbench/activity?limit=10", label: "workbench activity" },
   { method: "GET", path: "/workbench/not-added-summary", label: "workbench not added summary" },
   { method: "GET", path: "/workbench/not-added?includeDetails=true&limit=10", label: "workbench not added explicit details" },
+  { method: "GET", path: "/workbench/authoring/capabilities", label: "authoring capabilities" },
+  { method: "GET", path: "/workbench/authoring/runs/run-1", label: "authoring run status", allowNotFound: true },
+  {
+    method: "GET",
+    path: "/workbench/authoring/runs/run-1/evidence?sessionId=session-1",
+    label: "authoring run evidence",
+    allowNotFound: true
+  },
   { method: "GET", path: "/logbook/summary", label: "logbook summary" },
   { method: "GET", path: "/logbook/search?q=Bridge", label: "logbook search" }
 ];
@@ -72,6 +81,9 @@ export const BLOCKED_MUTATION_ENDPOINTS = [
   { method: "POST", path: "/settings/hooks/codex/uninstall", label: "uninstall hooks" },
   { method: "POST", path: "/settings/hooks/codex/test", label: "test hooks" },
   { method: "POST", path: "/review-dispositions", label: "write review disposition" },
+  { method: "POST", path: "/workbench/authoring/runs", label: "open authoring run" },
+  { method: "POST", path: "/workbench/authoring/runs/run-1/submit", label: "submit authoring bundle" },
+  { method: "POST", path: "/workbench/authoring/runs/run-1/finish", label: "finish authoring run" },
   { method: "POST", path: "/retention", label: "retention prune" },
   { method: "POST", path: "/data/delete", label: "delete data" },
   { method: "POST", path: "/data/retention/default", label: "default retention" },

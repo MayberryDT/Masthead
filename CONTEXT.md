@@ -34,7 +34,8 @@ _Avoid_: Published session, automatic work resolved, Logbook-ready session
 **Automatic work resolved**:
 Session-level state meaning the default automatic kind set is settled for that seed session: the
 session package is published, and runbook, ADR, and incident timeline are each either published or
-explicitly not applicable. This is the disposable-handoff exit criterion for that session.
+explicitly not applicable or satisfied by contribution. This is the disposable-handoff exit
+criterion for that session. An applied-but-unpublished optional artifact does not qualify.
 _Avoid_: Compile-ready only, partial apply without N/A, Logbook session row
 
 **Publication transition**:
@@ -172,12 +173,12 @@ _Avoid_: Live dossier, task card, enrichment card, artifact library
 
 **Post-apply audit**:
 Review of enrichment, artifacts, validation results, and run history after the agent-facing
-Workbench CLI has written them to the canonical database.
+Workbench adapter has asked the daemon to finish them in the canonical database.
 _Avoid_: Pending approval queue, draft editor
 
 **Queue/evidence inspection**:
-Triage of sessions that need memory work, paired with the bounded evidence packet that explains
-why each session is in the queue and what the user's agent should inspect next. This is the first
+Triage of sessions that need memory work, paired with the evidence manifest and paged catalog that
+explain why each session is in the queue and what the user's agent should inspect next. This is the first
 useful Workbench V1 UI slice; audit history supports it at session scope but does not drive the
 surface.
 _Avoid_: Task board, live monitoring dashboard
@@ -197,9 +198,48 @@ as a Masthead object in V1.
 _Avoid_: Work item, request record, assignment
 
 **Agent-facing machinery**:
-The CLI, schemas, validation, and apply paths that a coding agent can use to perform Workbench
-work, hidden behind the user-facing Workbench collaboration surface.
+The installed thin CLI adapter and daemon-owned schemas, evidence, validation, and atomic finish
+paths that a coding agent uses to perform Workbench work, hidden behind the user-facing Workbench
+collaboration surface. The CLI transports requests; it does not open SQLite or own authoring rules.
 _Avoid_: User workflow, visible controls
+
+**Authoring module**:
+The daemon-owned Workbench domain module that controls authoring runs, complete canonical redacted
+evidence access, grounded bundle validation, atomic publication, optional-kind resolution, claims,
+and idempotent completion receipts. It is reached through daemon HTTP; the CLI is only an adapter.
+_Avoid_: CLI implementation, direct database script, MCP writer, native model service
+
+**Authoring run**:
+One durable daemon-owned attempt by an actor to author an exact selected session set against an
+exact database identity and evidence revision. It owns the selected-session claims, latest bundle,
+structured findings, state, and eventual completion report. Reopening the same exact set for the
+same actor reuses the run.
+_Avoid_: Workbench Activity row, agent chat, shell process, disposable handoff
+
+**Artifact bundle**:
+The complete grounded submission for an authoring run: exactly one enrichment plus session dossier
+package per selected session, zero or more automatic artifacts, and exactly one published/N/A/
+contributed resolution path for every runbook, ADR, and incident-timeline obligation. Submit stores
+and validates the bundle without creating output rows; finish applies it atomically.
+_Avoid_: Individual output file, partial draft, command batch, ungrounded JSON
+
+**Authoring finding**:
+A structured, deterministic error or warning produced while validating an artifact bundle. A
+finding identifies its code, severity, message, and when available the output path, session, and
+artifact kind so an agent can revise and resubmit without guessing.
+_Avoid_: Runtime exception, prose-only critique, partial output write
+
+**Evidence manifest**:
+The authoring run’s per-session inventory of every canonical redacted evidence item, including
+total and kind counts, coverage, time bounds, warnings, and a revision fingerprint. Cursor pages in
+either order must expose the complete catalog named by the manifest; it is not a bounded preview.
+_Avoid_: Transcript excerpt, first page, raw harness file, privacy approval prompt
+
+**Automatic completion report**:
+The immutable receipt stored when atomic finish succeeds. It records the run, completion time,
+published artifact ids, resolved sessions, N/A decisions, and contributions. A finish retry returns
+the same report and creates no duplicate outputs.
+_Avoid_: Draft summary, Activity-only event, best-effort publish list
 
 **Workbench action parity**:
 The invariant that user-facing Workbench controls and agent-facing tools operate on the same
@@ -215,7 +255,7 @@ including their session IDs and details.
 _Avoid_: Full Workbench queue, suppressed-session review, Logbook
 
 **Agent guidance contract**:
-The agent-facing CLI instructions, schema, evidence packet, validation, and apply behavior that
+The agent-facing protocol, bundle schema, evidence manifest, validation, and atomic finish behavior that
 together make enrichment and artifact compile repeatable. This contract must be clear enough that a
 coding agent can finish the automatic handoff path without the user knowing CLI details. V1
 first-class guidance targets are the session package plus runbook, ADR, and incident timeline
@@ -229,7 +269,7 @@ _Avoid_: Priority, assignment
 
 **Memory kind**:
 The type of durable session memory being inspected or produced, such as session enrichment,
-session dossier, or bug-fix trace.
+session dossier, runbook, ADR, or incident timeline.
 _Avoid_: Command, workflow
 
 **Evidence coverage**:
@@ -247,7 +287,8 @@ superseded artifacts shown in support of queue/evidence inspection.
 _Avoid_: Analytics dashboard, history page
 
 **Agent-authored enrichment**:
-Derived session memory written by an existing coding agent from bounded Masthead evidence. It is
+Derived session memory written by an existing coding agent from Masthead’s complete canonical
+redacted evidence catalog for the selected sessions. It is
 evidence-backed local memory, not a native Masthead model run.
 _Avoid_: Native enrichment, automatic summary
 
@@ -256,7 +297,9 @@ A bounded set of session facts, transcript excerpts, file effects, tool activity
 timeline entries, and source references used to author or validate Workbench output. Single-session
 packets support the session package; multi-session packets cover a declared provenance set and are
 the only legal evidence universe for that multi-session apply/publish.
-_Avoid_: Prompt dump, full transcript, raw context, evidence outside the declared provenance set
+This is legacy compatibility vocabulary for the earlier per-kind CLI. Current daemon-owned
+authoring uses an evidence manifest plus complete cursor pagination instead of a bounded packet.
+_Avoid_: Current authoring universe, prompt dump, raw harness file, evidence outside the declared provenance set
 
 **Provenance candidate summary**:
 A compact multi-session discovery view (titles, signatures, coverage, project, timing) used to
@@ -373,8 +416,8 @@ _Avoid_: Human publish click as default, partial handoff that only drafts, silen
 **Default automatic kind set**:
 The kinds the disposable-handoff path always attempts: session capsule plus session dossier
 (required session package), and when evidence supports them, runbook, ADR, and incident timeline
-(each publish or mark not applicable). Environment recipes and eval packs are out of the default
-automatic set until a later phase.
+(each publish, mark not applicable, or satisfy through a published contribution). Environment
+recipes and eval packs are out of the default automatic set until a later phase.
 _Avoid_: Attempt every research kind, session package only, settings-only kind sets as V1 default
 
 **Runbook**:
@@ -466,7 +509,7 @@ turning sessions into assigned tasks or adding noisy context to default agent pr
 _Avoid_: Assignment, task ownership, project management
 
 **Applied enrichment**:
-The Workbench apply path that writes agent-authored memory. For the session kind this updates the
+Intermediate Workbench state after the daemon has written agent-authored memory. For the session kind this updates the
 session capsule (listing) and/or session dossier (body) according to the output kind; it does not
 by itself publish into Logbook.
 _Avoid_: Draft, pending proposal, Logbook hit, publish

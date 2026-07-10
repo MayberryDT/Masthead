@@ -1,112 +1,90 @@
-# Workbench V1 Acceptance Evidence
+# Workbench Authoring Acceptance Evidence
 
-Workbench V1 now has a split product surface:
+Masthead’s live V1 authoring path is daemon-owned. Workbench gives the user a
+plain-language handoff; the installed CLI transports agent requests to the
+active daemon; one durable run owns complete evidence, bundle validation,
+atomic publication, and the completion report.
 
-- UI: show publish-path pipeline sessions in a dense table, visualize Workbench
-  Activity, summarize Not Added to Logbook, and create disposable,
-  plain-language agent handoffs.
-- CLI: remain agent-facing and concrete enough for coding agents to validate and
-  apply `session_enrichment`, `session_dossier`, and `bug_fix_trace` outputs,
-  check/request transcript work, claim sessions, and explicitly publish.
+## Contract evidence
 
-## 2026-07-08 Pipeline Update
+| Requirement | Authoritative evidence |
+| --- | --- |
+| CLI does not open SQLite for normal authoring | `src/cli/authoringClient.ts` implements daemon HTTP; `src/cli/workbenchAuthoring.ts` routes capabilities/open/status/evidence/submit/finish through that client. Direct database access remains only in explicit `wipe-published` maintenance. |
+| Database identity is checked before work | Capabilities and open API/CLI tests reject a different identity before claims or artifact rows. The real dogfood passes the capabilities identity to open and reports `databaseIdentityMatched: true`. |
+| One run and claim set | Authoring service/repository tests and the ops dogfood repeat open for the same actor/exact session set and observe one run plus one live claim. |
+| Complete redacted evidence | Evidence catalog tests cover manifest counts, full text, query, ascending/descending pagination, and revision changes. The real dogfood reads 500/500 unique items in both orders and observes decisive evidence after item 480. |
+| Grounded bundle validation | `src/workbench/authoring/__tests__/authoringValidation.test.ts` covers schema, provenance, claim evidence, confidence, N/A, contribution, automatic-kind resolution, secrets, and signatures. |
+| Submit is non-mutating | Service/API tests and both dogfoods assert zero new `session_enrichments` and `session_artifacts` rows after submit. |
+| Finish is atomic and idempotent | Authoring service tests inject invariant failures and assert full rollback; repeat finish returns the stored receipt. The dogfoods prove the same receipt after immediate retry and daemon restart. |
+| Publication is artifact-first | Every receipt artifact is fetched from `GET /logbook/artifacts/:id`; the receipt contains a dossier and runbook, while ADR and incident timeline are N/A. No session row is used as a Logbook hit. |
+| Full-body reuse | Both dogfoods search a phrase present only in a runbook body. The long-session dogfood also reads that artifact through real MCP stdio. |
+| MCP stays read-only | MCP tool catalog tests and Doctor reject mutation tools; authoring remains daemon HTTP only. |
 
-- Pipeline-state APIs now use `/workbench/sessions`, `/workbench/activity`,
-  `/workbench/not-added-summary`, and explicit Workbench transcript/publish
-  actions. `/workbench/missing-sessions` remains a compatibility read route.
-- Transcript import is Workbench-owned and exact-source scoped. Sources no
-  longer exposes runtime-wide transcript approval/import actions.
-- Focused verification for the pipeline update:
-  - `npm test -- --run src/daemon/__tests__/workbenchApi.test.ts src/cli/__tests__/mastheadctl.test.ts src/ui/sources/__tests__/AdapterRow.test.tsx src/ui/sources/__tests__/SourcesImportModal.test.tsx src/ui/sources/__tests__/SourcesPanelImports.test.tsx src/daemon/sources/__tests__/sourceConnectService.test.ts src/daemon/import/__tests__/importWorkUnitRunner.test.ts src/daemon/import/__tests__/progressiveImport.test.ts`
-  - `npm test -- --run src/app/workbench/__tests__/useWorkbenchController.test.tsx src/ui/workbench/__tests__/WorkbenchPanel.test.tsx src/ui/workbench/__tests__/workbenchHandoff.test.ts src/ui/session-dossier/__tests__/SessionDossier.test.tsx`
+## Real long-session dogfood
 
-## Automated
+Commands:
 
-- 2026-07-08 focused implementation suite:
-  - Command: `npm test -- --run src/daemon/__tests__/workbenchApi.test.ts src/app/__tests__/daemonClient.test.ts src/app/workbench/__tests__/useWorkbenchController.test.tsx src/ui/workbench src/ui/session-dossier/__tests__/SessionDossier.test.tsx src/workbench src/cli`
-  - Result: 15 files / 107 tests passed.
-- 2026-07-08 Dossier sanitizer regression:
-  - Command: `npm test -- --run src/ui/session-dossier/__tests__/SessionDossier.test.tsx`
-  - Result: 1 file / 32 tests passed.
-- 2026-07-08 typecheck: `npm run typecheck` passed.
-- 2026-07-08 product contract: `npm run check:product-contract` passed.
-- 2026-07-08 surface contract: `npm run check:surface-contract` passed.
-- 2026-07-08 dev-citation guard: `npm run verify:no-citations` passed.
-- 2026-07-08 endpoint matrix: `npm run check:endpoint-matrix` passed and reported `GET /workbench/missing-sessions?limit=10` as `200`/JSON/present.
-- 2026-07-08 production build: `npm run build` passed.
-- 2026-07-08 full Vitest run:
-  - Command: `npm test -- --run`
-  - Result: 231 files / 1336 tests passed; 3 files / 6 tests failed in existing live projection expectations (`fixtureReplay.test.ts`, `liveRuntimeStates.test.ts`, `reviewDispositions.test.ts`).
-  - Investigation: subagent trace found the remaining failures are outside the Workbench implementation path and relate to current live-state/blocked-state projection behavior versus older test expectations.
-- 2026-07-08 visible-token source guard:
-  - Command: `rg -n "mastheadctl|npm run|output\\.json|schema\\.json|apply\\.sh" src/ui/workbench src/ui/session-dossier/SessionDossier.tsx`
-  - Result: no matches.
-- 2026-07-08 local dev run:
-  - Command: `npm run dev`
-  - Result: app served at `http://127.0.0.1:5173` with primary connector at `http://127.0.0.1:17373`.
-  - Browser verification: Workbench loaded 50 visible missing sessions, generated a selected-session handoff, had no `No live connection` / `No live Codex sessions yet` warning, and had no visible forbidden command/file tokens at desktop, tablet, or narrow mobile widths.
-  - API verification: `GET /workbench/missing-sessions?limit=3` returned three missing-session records from the dev database.
-- Earlier focused Workbench/MCP/UI suite recorded on this branch:
-  - Command: `npm test -- --run src/cli/__tests__/mastheadctl.test.ts src/workbench/__tests__/schemas.test.ts src/workbench/__tests__/validation.test.ts src/workbench/__tests__/evidencePacket.test.ts src/workbench/__tests__/queueRepository.test.ts src/workbench/__tests__/instructions.test.ts src/workbench/__tests__/applySessionEnrichment.test.ts src/workbench/__tests__/applyArtifact.test.ts src/workbench/__tests__/batch.test.ts src/daemon/db/__tests__/schema.test.ts src/daemon/db/__tests__/sessionArtifactRepository.test.ts src/daemon/db/__tests__/sessionDossierRepository.test.ts src/mcp/__tests__/tools.test.ts src/mcp/__tests__/protocol.test.ts src/mcp/__tests__/retrieval.test.ts src/ui/session-dossier/__tests__/SessionDossier.test.tsx src/ui/settings/__tests__/SettingsSurface.test.tsx src/ui/workbench/__tests__/WorkbenchPanel.test.tsx src/ui/__tests__/navigation.test.tsx`
-  - Result: 19 files / 104 tests passed.
-- Earlier typecheck: `npm run typecheck` passed.
-- Earlier daemon build: `npm run build:daemon` passed.
-- Earlier dogfood: `node scripts/dogfood-workbench-v1.js` passed against a temporary SQLite database.
+```bash
+npm run install:electron-dev-launcher
+npm run build:daemon
+node scripts/dogfood-workbench-v1.js
+```
 
-This Task 8 docs pass did not rerun the older broad suite above.
+The script starts a writable daemon on an ephemeral loopback port with a
+temporary schema-21 database. It invokes the built thin CLI with
+`MASTHEAD_DAEMON_URL`, never opens that database from the CLI, and deletes the
+temporary directory unless `MASTHEAD_KEEP_DOGFOOD_DB` is set.
 
-## UI Pivot Coverage
-
-| Area | Evidence |
-|---|---|
-| Workbench pipeline daemon APIs | `src/daemon/__tests__/workbenchApi.test.ts` covers pipeline queue/activity/Not Added reads, transcript check/preview/import boundary, and explicit publish. |
-| App client | `src/app/__tests__/daemonClient.test.ts` covers Workbench pipeline client methods. |
-| Workbench controller | `src/app/workbench/__tests__/useWorkbenchController.test.tsx` covers active/live loading, inactive/offline suppression, retry, selection pruning, select-all, clear selection, Activity, Not Added summary, and sanitized handoff text. |
-| Workbench panel | `src/ui/workbench/__tests__/WorkbenchPanel.test.tsx` covers a dense publish-path table, Activity rail, Not Added summary, selection handoff, top copy action, and no old queue/category framing such as bug-fix candidates or missing dossiers. |
-| Handoff builder | `src/ui/workbench/__tests__/workbenchHandoff.test.ts` covers plain-language handoff generation and metadata sanitization. |
-| Session Dossier UI | `src/ui/session-dossier/__tests__/SessionDossier.test.tsx` covers plain-language Workbench guidance and current Workbench artifacts without user-visible CLI instructions. |
-| No visible CLI token guard | Workbench and Session Dossier UI tests assert rendered output does not expose visible tokens such as the CLI binary name, package-script phrase, generated output file names, schema filename, or apply script filename. |
-| Agent-facing CLI guidance | `src/cli/__tests__/mastheadctl.test.ts` and `src/workbench/__tests__/instructions.test.ts` cover help/instructions for all V1 output kinds and validation discipline. |
-
-## CLI
-
-The CLI remains agent-facing. These commands are intentionally documented for
-coding agents, not as user instructions inside the Workbench app surface.
-
-| Command | Result |
-|---|---|
-| `mastheadctl workbench status --json` | Covered by CLI tests and dogfood. |
-| `mastheadctl workbench queue --kind session_enrichment --scope missing --json` | Covered by queue tests, CLI tests, and dogfood. |
-| `mastheadctl workbench next --kind session_enrichment --scope missing --json` | Covered by CLI tests and dogfood. |
-| `mastheadctl workbench schema session_enrichment --json` | Covered by schema tests, CLI tests, and dogfood. |
-| `mastheadctl workbench evidence --session ... --kind session_enrichment --json` | Covered by evidence packet tests, CLI tests, and dogfood. |
-| `mastheadctl workbench validate ...` | Covered by validation tests, CLI tests, and dogfood. |
-| `mastheadctl workbench apply ...` | Covered by enrichment/artifact apply tests, CLI tests, and dogfood. |
-| `mastheadctl workbench batch prepare ...` | Covered by batch tests, CLI tests, and dogfood. |
-| `mastheadctl workbench batch apply ...` | Covered by batch tests, CLI tests, and dogfood. |
-
-## Behavior Evidence
-
-| Scenario | Result |
-|---|---|
-| User opens Workbench | Covered by Workbench controller/panel tests for missing-session loading and session-first rendering. |
-| User selects sessions needing enrichment | Covered by controller tests for toggle/select-all/clear and panel tests for selected handoff rendering. |
-| Workbench creates a disposable handoff | Covered by `workbenchHandoff` tests and Workbench panel tests. |
-| Workbench does not instruct users to run CLI commands | Covered by visible-token guards in Workbench and Session Dossier UI tests. |
-| Agent enriches one session | Passed via `scripts/dogfood-workbench-v1.js`. |
-| Logbook/search can see new enrichment | Covered by `applySessionEnrichment` search assertion. |
-| Now can display enrichment if available | Workbench writes current `live_summary` and current prompt-version capsule rows used by live readers. |
-| Agent creates session dossier artifact | Passed via dogfood and artifact apply tests. |
-| Agent creates bug-fix trace artifact | Covered by `applyArtifact` test. |
-| Session detail shows artifacts | Covered by session dossier repository and UI tests. |
-| MCP remains read-only | Covered by MCP tool-name policy test. |
-
-## Dogfood Output
+Observed on 2026-07-10:
 
 ```json
 {
   "ok": true,
-  "currentWorkbenchEnrichments": 3,
-  "currentArtifacts": 1
+  "databaseIdentityMatched": true,
+  "evidence": {
+    "totalItems": 500,
+    "uniqueItemsRead": 500,
+    "lateOutcomeObserved": true
+  },
+  "submission": {
+    "accepted": true,
+    "artifactsBeforeFinish": 0
+  },
+  "finish": {
+    "publishedArtifacts": 2,
+    "resolvedSessions": 1,
+    "runbook": "published",
+    "adr": "not_applicable",
+    "incidentTimeline": "not_applicable",
+    "idempotentRetry": true
+  },
+  "reuse": {
+    "logbookBodySearch": true,
+    "mcpArtifactRead": true
+  }
 }
 ```
+
+The decisive outcome is evidence item 497 and the passed verification is item
+500. The dossier and runbook cite those late refs, so a regression to an early
+bounded preview makes the dogfood fail.
+
+## User surface evidence
+
+- `src/ui/workbench/__tests__/workbenchHandoff.test.ts` proves copied handoffs
+  use the capabilities-reported command metadata internally, ask for unattended
+  completion, and contain neither a shell recipe nor a privacy permission gate.
+- Workbench panel/controller tests prove the dense session table, selection,
+  Activity rail, Not Added summary, and one plain-language copy action.
+- Session Dossier and Workbench UI token guards keep CLI commands and generated
+  file recipes out of rendered user copy.
+- Copied handoff and directed work share the same daemon contract and bundle
+  validator; there is no conservative handoff-only quality mode.
+
+## Focused checks
+
+The acceptance implementation includes focused tests for the authoring service,
+API, thin CLI, installed launchers, automatic handoff, complete evidence,
+grounded validation, artifact body search/rendering, endpoint policy, and Doctor
+authoring validation. The full release-gate result is recorded in
+`docs/acceptance/product-release-gate.md`.

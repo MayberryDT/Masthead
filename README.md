@@ -18,14 +18,16 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 
 - Canonical local SQLite ownership for Masthead-owned sessions, published
   artifacts + provenance, source/connector state, import jobs, settings, and MCP
-  audit rows (schema 18+ for artifact-first Logbook).
+  audit rows (schema 21 for full-body artifact search).
 - Multi-adapter / multi-harness live connect (Sources V2) and conservative
   history adapters where coverage exists.
 - Workbench package path: transcript checks/import, quality, claims, Activity,
-  disposable agent handoffs, **session package publish**, and multi-kind
-  resolution (runbook / ADR / incident timeline or N/A).
+  disposable agent handoffs, daemon-owned authoring runs, atomic publication,
+  and multi-kind resolution (runbook / ADR / incident timeline published, N/A,
+  or contributed).
 - Logbook artifact book: `GET /logbook/artifacts` + body/provenance inspector;
-  filters kind · project · date · search; no bulk enrich / checkboxes / summary strip.
+  full-body search plus kind · project · date filters; no bulk enrich /
+  checkboxes / summary strip.
 - Read-only MCP with **`search_artifacts` / `get_artifact`** preferred for reuse;
   session/transcript tools for evidence and compile.
 - `npm run dev` launcher (writable daemon or read-only worktree bridge).
@@ -38,9 +40,9 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 - Deeper schema coverage for additional source adapters beyond the initial
   bounded scanners.
 - Transcript import breadth and exclusion policy tuning.
-- Legacy/dev native remote enrichment hooks. Masthead V1 launch enrichment uses
-  user-facing Workbench handoffs plus an agent-facing CLI write path; no native
-  remote model key is required.
+- Legacy/dev native remote enrichment hooks. Masthead V1 launch authoring uses
+  user-facing Workbench handoffs plus a thin installed CLI to the daemon-owned
+  authoring module; no native remote model key is required.
 - Longer packaged desktop release-smoke automation.
 
 ## Install
@@ -73,6 +75,29 @@ MASTHEAD_CONNECTOR_MODE=bridge MASTHEAD_UPSTREAM_URL=http://127.0.0.1:17373 npm 
 MASTHEAD_BRIDGE_PORT=17374 npm run dev
 ```
 
+## Artifact Authoring
+
+People select publish-path sessions in Workbench and copy a plain-language agent
+handoff. They do not see or paste a terminal recipe. A copied handoff asks the
+agent to complete unattended using the same quality policy as user-directed
+agent work.
+
+The agent discovers the active daemon and database identity from authoring
+capabilities, then follows four domain operations:
+
+1. **Open** one durable run for the exact selected session set.
+2. **Read evidence** until every item in the complete canonical redacted
+   evidence manifest has been reviewed.
+3. **Submit** one grounded artifact bundle and revise any structured findings;
+   submit creates no output rows.
+4. **Finish** once to atomically publish all valid artifacts and resolve every
+   automatic kind. Retry returns the same completion report.
+
+Run status is a read-only recovery operation. The installed `mastheadctl` is a
+thin daemon HTTP adapter and never opens the authoring database. See
+[ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md) and the
+[Workbench authoring reference](docs/reference/enrichment.md).
+
 ## Verify
 
 Fast product checks:
@@ -93,10 +118,11 @@ npm run smoke:electron
 npm run smoke:electron:packaged
 ```
 
-`npm run doctor` checks the active daemon contract, source/import readiness,
-Sources pipeline diagnostics, Logbook state, MCP status/tools, and local data
-summary. `npm run verify` runs the product and surface contracts, typecheck,
-Vitest, build, endpoint matrix, and smoke suite.
+`npm run doctor` checks the active daemon contract, installed authoring command
+and database identity, source/import readiness, Sources pipeline diagnostics,
+Logbook state, read-only MCP status/tools, and local data summary. `npm run
+verify` runs the product and surface contracts, typecheck, Vitest, build,
+endpoint matrix, and smoke suite.
 
 ## Data Path
 

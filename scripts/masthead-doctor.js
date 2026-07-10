@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { constants } from "node:fs";
 import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 import { findHookTranscriptStuckSessions } from "./masthead-doctor-hook-capture.js";
+import { buildPackagedCliInvocation } from "./packaged-cli-command.js";
 
 const REQUIRED_HOOK_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"];
 const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
+const AUTHORING_OPERATIONS = ["open", "status", "evidence", "submit", "finish"];
 const REQUIRED_CAPABILITIES = [
   "live_projection",
   "canonical_sessions",
@@ -19,7 +23,8 @@ const REQUIRED_CAPABILITIES = [
   "mcp_status",
   "usage_stats",
   "settings",
-  "data_lifecycle"
+  "data_lifecycle",
+  "artifact_authoring"
 ];
 const PRODUCT_ENDPOINTS = [
   "/adapters",
@@ -38,49 +43,53 @@ const hookConfigPath = resolve(process.env.MASTHEAD_CODEX_HOOKS || join(homedir(
 const jsonOutput = process.argv.includes("--json");
 const strictHooks = process.env.MASTHEAD_DOCTOR_STRICT_HOOKS === "1";
 let mcpRequestId = 0;
-
-const checks = [];
 let health;
 
-checks.push(await checkNodeRuntime());
-checks.push(await checkDaemonBuild());
-checks.push(await checkSqliteRuntime());
-const protocol = await checkProtocol();
-checks.push(protocol.check);
-health = protocol.health;
-checks.push(checkDatabaseIdentity(health));
-checks.push(await checkEndpoints());
-checks.push(await checkSources());
-checks.push(await checkImports());
-checks.push(await checkSourcesPipeline());
-checks.push(await checkMcp());
-checks.push(await checkMcpStdio());
-checks.push(await checkLogbook());
-checks.push(await checkUsage());
-checks.push(await checkHookTranscriptCapture());
-checks.push(await checkSettings());
-checks.push(await checkDestructivePreviewSafety());
-checks.push(await checkLiveConnectors());
-checks.push(await checkHarnessConnectors());
-checks.push(await checkLiveState());
-checks.push(await checkHooks());
+if (isEntrypoint()) await main();
 
-const report = {
-  ok: checks.every((check) => check.status !== "fail"),
-  checkedAt: new Date().toISOString(),
-  baseUrl,
-  checks
-};
+async function main() {
+  const checks = [];
+  checks.push(await checkNodeRuntime());
+  checks.push(await checkDaemonBuild());
+  checks.push(await checkSqliteRuntime());
+  const protocol = await checkProtocol();
+  checks.push(protocol.check);
+  health = protocol.health;
+  checks.push(checkDatabaseIdentity(health));
+  checks.push(await checkAuthoring());
+  checks.push(await checkEndpoints());
+  checks.push(await checkSources());
+  checks.push(await checkImports());
+  checks.push(await checkSourcesPipeline());
+  checks.push(await checkMcp());
+  checks.push(await checkMcpStdio());
+  checks.push(await checkLogbook());
+  checks.push(await checkUsage());
+  checks.push(await checkHookTranscriptCapture());
+  checks.push(await checkSettings());
+  checks.push(await checkDestructivePreviewSafety());
+  checks.push(await checkLiveConnectors());
+  checks.push(await checkHarnessConnectors());
+  checks.push(await checkLiveState());
+  checks.push(await checkHooks());
 
-if (jsonOutput) {
-  console.log(JSON.stringify(report, null, 2));
-} else {
-  for (const result of checks) {
-    console.log(`${result.status} ${result.label}: ${result.message}`);
+  const report = {
+    ok: checks.every((check) => check.status !== "fail"),
+    checkedAt: new Date().toISOString(),
+    baseUrl,
+    checks
+  };
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    for (const result of checks) {
+      console.log(`${result.status} ${result.label}: ${result.message}`);
+    }
   }
-}
 
-process.exitCode = report.ok ? 0 : 1;
+  process.exitCode = report.ok ? 0 : 1;
+}
 
 async function checkNodeRuntime() {
   const minimum = [24, 15, 0];
@@ -198,6 +207,125 @@ function checkDatabaseIdentity(body) {
       sources: data.sources
     }
   };
+}
+
+export function inspectAuthoringCapabilities(value, expectedDatabaseId) {
+  const capabilities = isRecord(value) ? value : {};
+  const problems = [];
+  const command = stringValue(capabilities.command);
+  const databaseId = stringValue(capabilities.databaseId);
+  const operations = Array.isArray(capabilities.operations)
+    ? capabilities.operations.filter((operation) => typeof operation === "string")
+    : [];
+
+  if (capabilities.capability !== "artifact_authoring") problems.push("artifact_authoring capability is missing");
+  if (capabilities.protocol !== "masthead.workbench.authoring/v1") problems.push("authoring protocol is incompatible");
+  if (capabilities.transport !== "daemon_http") problems.push("authoring transport is not daemon_http");
+  if (capabilities.bundleVersion !== "workbench-authoring-v1") problems.push("authoring bundle version is incompatible");
+  if (capabilities.evidencePolicy !== "all_canonical_redacted_evidence") problems.push("authoring evidence policy is incomplete");
+  if (!command) problems.push("authoring command is missing");
+  if (!databaseId || databaseId !== expectedDatabaseId) problems.push("database identity mismatch");
+  if (
+    operations.length !== AUTHORING_OPERATIONS.length ||
+    !AUTHORING_OPERATIONS.every((operation, index) => operations[index] === operation)
+  ) {
+    problems.push("authoring operations are incomplete");
+  }
+
+  return { command, databaseId, ok: problems.length === 0, operations, problems };
+}
+
+export async function resolveAuthoringCommand(command, options = {}) {
+  const value = stringValue(command);
+  if (!value) return undefined;
+  const isExecutable = options.isExecutable;
+  if (typeof isExecutable !== "function") throw new Error("resolveAuthoringCommand requires isExecutable");
+  if (isAbsolute(value)) return (await isExecutable(value)) ? value : undefined;
+  if (value.includes("/") || value.includes("\\")) return undefined;
+
+  // Workbench handoffs require an absolute capability command. Doctor also
+  // accepts the documented compatibility form: a genuinely bare command that
+  // resolves to an executable on PATH, then invokes that resolved path.
+  const pathEntries = Array.isArray(options.pathEntries) ? options.pathEntries : [];
+  const extensions = Array.isArray(options.extensions) && options.extensions.length > 0
+    ? options.extensions
+    : [""];
+  for (const directory of pathEntries) {
+    for (const extension of extensions) {
+      const candidate = join(directory, `${value}${extension}`);
+      if (await isExecutable(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
+async function checkAuthoring() {
+  const data = isRecord(health?.data) ? health.data : {};
+  const expectedDatabaseId = stringValue(data.databaseId);
+  if (!expectedDatabaseId) {
+    return {
+      id: "artifact-authoring",
+      label: "artifact authoring",
+      status: "fail",
+      message: "Health did not expose the database identity required by authoring.",
+      details: { baseUrl }
+    };
+  }
+
+  try {
+    const capabilities = await getJson("/workbench/authoring/capabilities");
+    const inspected = inspectAuthoringCapabilities(capabilities, expectedDatabaseId);
+    const commandPath = await resolveAuthoringCommand(inspected.command, {
+      extensions: process.platform === "win32"
+        ? (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").map((extension) => extension.toLowerCase())
+        : [""],
+      isExecutable: executableFile,
+      pathEntries: (process.env.PATH || "").split(delimiter).filter(Boolean)
+    });
+    const cliCapabilities = commandPath
+      ? await runJsonCommand(commandPath, ["workbench", "capabilities", "--json"])
+      : undefined;
+    const cliInspected = inspectAuthoringCapabilities(cliCapabilities, expectedDatabaseId);
+    const ok = inspected.ok && Boolean(commandPath) && cliInspected.ok;
+    return {
+      id: "artifact-authoring",
+      label: "artifact authoring",
+      status: ok ? "ok" : "fail",
+      message: ok
+        ? `Installed authoring CLI is ready for ${expectedDatabaseId}; open, status, evidence, submit, and finish are available.`
+        : "Daemon authoring capabilities, installed command, or CLI database identity are invalid.",
+      details: {
+        capability: capabilities.capability,
+        command: inspected.command,
+        commandPath,
+        daemonDatabaseId: inspected.databaseId,
+        cliDatabaseId: cliInspected.databaseId,
+        operations: inspected.operations,
+        problems: [
+          ...inspected.problems,
+          ...(commandPath ? [] : ["authoring command is not executable or resolvable on PATH"]),
+          ...cliInspected.problems.map((problem) => `installed CLI: ${problem}`)
+        ]
+      }
+    };
+  } catch (error) {
+    return {
+      id: "artifact-authoring",
+      label: "artifact authoring",
+      status: "fail",
+      message: errorMessage(error),
+      details: { baseUrl, expectedDatabaseId }
+    };
+  }
+}
+
+async function executableFile(path) {
+  try {
+    await access(path, process.platform === "win32" ? constants.F_OK : constants.X_OK);
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
 }
 
 async function checkEndpoints() {
@@ -906,6 +1034,63 @@ async function getJson(path) {
   return response.json();
 }
 
+function runJsonCommand(command, args) {
+  return new Promise((resolve, reject) => {
+    const invocation = buildPackagedCliInvocation(command, args, {
+      comspec: process.env.ComSpec,
+      platform: process.platform,
+      systemRoot: process.env.SystemRoot
+    });
+    const child = spawn(invocation.command, invocation.args, {
+      cwd: process.cwd(),
+      env: { ...process.env, ...invocation.env, MASTHEAD_DAEMON_URL: baseUrl },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      settle(reject, new Error(`authoring CLI timed out; stderr=${stderr}`));
+    }, 8_000);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      child.stdout.off("data", onStdout);
+      child.stderr.off("data", onStderr);
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+    const onStdout = (chunk) => {
+      stdout += chunk.toString();
+    };
+    const onStderr = (chunk) => {
+      stderr += chunk.toString();
+    };
+    const onError = (error) => settle(reject, error);
+    const onExit = (code) => {
+      if (code !== 0) {
+        settle(reject, new Error(`authoring CLI exited ${code}; stderr=${stderr}`));
+        return;
+      }
+      try {
+        settle(resolve, JSON.parse(stdout));
+      } catch (error) {
+        settle(reject, new Error(`authoring CLI returned invalid JSON: ${errorMessage(error)}`));
+      }
+    };
+    child.stdout.on("data", onStdout);
+    child.stderr.on("data", onStderr);
+    child.on("error", onError);
+    child.on("exit", onExit);
+  });
+}
+
 function expectedHookOptions() {
   const expected = {};
   if (process.env.MASTHEAD_EXPECTED_HOOK_COMMAND) expected.command = process.env.MASTHEAD_EXPECTED_HOOK_COMMAND;
@@ -1066,4 +1251,9 @@ function errorMessage(error) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function isEntrypoint() {
+  const invoked = process.argv[1];
+  return Boolean(invoked && import.meta.url === pathToFileURL(resolve(invoked)).href);
 }

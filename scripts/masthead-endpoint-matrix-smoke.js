@@ -19,14 +19,12 @@ try {
   });
 
   const matrix = await runEndpointMatrix(daemon.baseUrl);
+  assertChildSucceeded(matrix, "live endpoint probe");
+  const bridgePolicy = await runScript("scripts/masthead-compatibility-smoke.js", ["--json"]);
+  assertChildSucceeded(bridgePolicy, "read-only bridge endpoint policy");
 
-  if (matrix.exitCode !== 0) {
-    console.error(matrix.stdout);
-    console.error(matrix.stderr);
-    process.exit(matrix.exitCode);
-  }
-
-  console.log(matrix.stdout);
+  console.log(matrix.stdout.trim());
+  console.log(bridgePolicy.stdout.trim());
 } finally {
   if (daemon) await stopChild(daemon.child, "SIGINT");
   if (process.env.MASTHEAD_KEEP_SMOKE_DIR !== "1") {
@@ -103,8 +101,12 @@ function readServerUrl(child) {
 }
 
 function runEndpointMatrix(baseUrl) {
+  return runScript("scripts/masthead-endpoint-matrix.js", [baseUrl]);
+}
+
+function runScript(script, args = []) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, ["scripts/masthead-endpoint-matrix.js", baseUrl], {
+    const child = spawn(process.execPath, [script, ...args], {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -122,6 +124,11 @@ function runEndpointMatrix(baseUrl) {
 
     child.on("exit", (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
   });
+}
+
+function assertChildSucceeded(result, label) {
+  if (result.exitCode === 0) return;
+  throw new Error(`${label} failed with ${result.exitCode}: ${result.stderr || result.stdout}`);
 }
 
 async function stopChild(child, signal) {
