@@ -1,7 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
+  buildWindowsProcessSnapshotInvocation,
   buildWindowsTaskkillInvocation,
-  parseWindowsListenerPid
+  collectWindowsDescendantPids,
+  parseWindowsListenerPid,
+  parseWindowsProcessSnapshot,
+  windowsProcessBelongsToTree
 } from "../../../scripts/packaged-process-cleanup.js";
 
 describe("packaged process cleanup", () => {
@@ -27,5 +31,28 @@ describe("packaged process cleanup", () => {
       "/t",
       "/f"
     ]);
+  });
+
+  test("parses CIM process snapshots and retains descendants after the root exits", () => {
+    const snapshot = parseWindowsProcessSnapshot(JSON.stringify([
+      { ProcessId: 11, ParentProcessId: 10 },
+      { ProcessId: 12, ParentProcessId: 11 },
+      { ProcessId: 13, ParentProcessId: 12 },
+      { ProcessId: 20, ParentProcessId: 1 }
+    ]));
+
+    expect(collectWindowsDescendantPids(snapshot, [10])).toEqual([11, 12, 13]);
+    expect(windowsProcessBelongsToTree(snapshot, 13, [10, 11])).toBe(true);
+    expect(windowsProcessBelongsToTree(snapshot, 20, [10, 11, 12, 13])).toBe(false);
+  });
+
+  test("parses a single CIM process and builds the PowerShell snapshot command", () => {
+    expect(parseWindowsProcessSnapshot('{"ProcessId":42,"ParentProcessId":7}')).toEqual([
+      { parentPid: 7, pid: 42 }
+    ]);
+    expect(buildWindowsProcessSnapshotInvocation("C:\\Windows")).toEqual({
+      args: expect.arrayContaining(["-NoProfile", "-NonInteractive", "-Command"]),
+      command: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    });
   });
 });

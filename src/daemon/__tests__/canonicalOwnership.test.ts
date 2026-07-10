@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -30,6 +30,46 @@ afterEach(async () => {
 });
 
 describe("canonical store ownership", () => {
+  test("rejects a second writable daemon for the same canonical database across data directories", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-canonical-writer-lock-"));
+    tempDirs.push(tempDir);
+    const databasePath = join(tempDir, "database", "masthead.sqlite");
+    const firstDataDirectory = join(tempDir, "first-data");
+    const secondDataDirectory = join(tempDir, "second-data");
+    const databaseDirectory = join(tempDir, "database");
+    await mkdir(databaseDirectory, { recursive: true });
+
+    const firstDaemon = await createTestDaemon(
+      firstDataDirectory,
+      databasePath,
+      join(firstDataDirectory, "legacy", "events.ndjson")
+    );
+    daemons.push(firstDaemon);
+    const aliasedDatabasePath = process.platform === "win32"
+      ? join(tempDir, "database", "..", "database", "masthead.sqlite")
+      : join(tempDir, "database-alias", "masthead.sqlite");
+    if (process.platform !== "win32") await symlink(databaseDirectory, join(tempDir, "database-alias"), "dir");
+
+    await expect(
+      createTestDaemon(
+        secondDataDirectory,
+        aliasedDatabasePath,
+        join(secondDataDirectory, "legacy", "events.ndjson")
+      )
+    ).rejects.toThrow(/same canonical database|already owned.*masthead\.sqlite/u);
+  });
+
+  test("allows writable daemons for different databases in the same data directory", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-distinct-writer-locks-"));
+    tempDirs.push(tempDir);
+    const firstDaemon = await createTestDaemon(tempDir, join(tempDir, "first.sqlite"), join(tempDir, "first.ndjson"));
+    const secondDaemon = await createTestDaemon(tempDir, join(tempDir, "second.sqlite"), join(tempDir, "second.ndjson"));
+    daemons.push(firstDaemon, secondDaemon);
+
+    expect(firstDaemon.database).toBeDefined();
+    expect(secondDaemon.database).toBeDefined();
+  });
+
   test("accepted live ingest writes canonical rows without appending new NDJSON product records", async () => {
     const { daemon, storePath } = await createTestHarness("masthead-canonical-live-");
     const baseUrl = await listen(daemon);
@@ -102,6 +142,7 @@ async function createTestDaemon(tempDir: string, databasePath: string, storePath
   return createMastheadDaemon({
     allowedOrigins: ["http://127.0.0.1:5173"],
     codexHomeDir: tempDir,
+    dataDirectory: tempDir,
     databasePath,
     fixturePath: join(tempDir, "fixture.json"),
     gitRefreshMs: 0,

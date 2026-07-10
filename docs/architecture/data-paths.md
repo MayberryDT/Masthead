@@ -22,7 +22,7 @@ The packaged Electron app uses its app-specific user-data directory as `MASTHEAD
 
 Tests may still set `MASTHEAD_DB_PATH` and `MASTHEAD_STORE_PATH` directly. Runtime code should prefer `MASTHEAD_DATA_DIR` so the daemon, UI launch flow, and MCP launch config refer to the same database identity.
 
-Only one writable daemon may own a data directory. The owner writes `<data-dir>/runtime/database.lock`; a second writable daemon fails with a database ownership diagnostic. Read-only bridges do not open SQLite for writing and do not take the writer lock.
+Only one writable daemon may own a canonical SQLite database path. The owner writes `<database-path>.lock`; a second writable daemon targeting the same database fails with a database ownership diagnostic even when it uses another data directory or a normalized path alias. Different databases may be served from the same data directory. Read-only bridges do not open SQLite for writing and do not take the writer lock.
 
 ## Ownership
 

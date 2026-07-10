@@ -9,8 +9,12 @@ import { dirname, isAbsolute, join, relative, win32 } from "node:path";
 import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { buildPackagedCliInvocation } from "./packaged-cli-command.js";
 import {
+  buildWindowsProcessSnapshotInvocation,
   buildWindowsTaskkillInvocation,
-  parseWindowsListenerPid
+  collectWindowsDescendantPids,
+  parseWindowsListenerPid,
+  parseWindowsProcessSnapshot,
+  windowsProcessBelongsToTree
 } from "./packaged-process-cleanup.js";
 
 try {
@@ -53,12 +57,13 @@ async function runPackagedSmoke(binary) {
   const dataDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-smoke-"));
   let homeDir;
   let child;
+  let electronProcessTree;
   let smokePort;
   let timeout;
   let primaryError;
   let cleanupError;
   const verificationAbort = new AbortController();
-  const commandChildren = new Set();
+  const commandChildren = new Map();
   try {
     homeDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-home-"));
     smokePort = await availablePort();
@@ -80,6 +85,7 @@ async function runPackagedSmoke(binary) {
       },
       stdio: ["ignore", "pipe", "pipe"]
     });
+    electronProcessTree = startWindowsProcessTreeTracker(child.pid);
 
     let stdout = "";
     let stderr = "";
@@ -105,7 +111,7 @@ async function runPackagedSmoke(binary) {
     const electronTimeout = new Promise((_resolve, reject) => {
       timeout = setTimeout(() => {
         const timeoutError = new Error("Packaged Electron smoke timed out after 45 seconds.");
-        void terminateChild(child, { processGroup: true }).then(
+        void terminateChild(child, { processGroup: true, windowsProcessTree: electronProcessTree }).then(
           () => reject(timeoutError),
           (error) => reject(combineErrors(timeoutError, error, timeoutError.message))
         );
@@ -131,7 +137,7 @@ async function runPackagedSmoke(binary) {
     verificationAbort.abort();
     if (timeout) clearTimeout(timeout);
     try {
-      await cleanupPackagedProcesses(commandChildren, child, dataDir, smokePort);
+      await cleanupPackagedProcesses(commandChildren, child, electronProcessTree, dataDir, smokePort);
     } catch (error) {
       cleanupError = error;
     }
@@ -205,7 +211,8 @@ function runCommand(command, args, env, commandChildren) {
       env: { ...env, ...invocation.env },
       stdio: ["ignore", "pipe", "pipe"]
     });
-    commandChildren.add(commandChild);
+    const windowsProcessTree = startWindowsProcessTreeTracker(commandChild.pid);
+    commandChildren.set(commandChild, windowsProcessTree);
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -213,9 +220,8 @@ function runCommand(command, args, env, commandChildren) {
       if (settled) return;
       settled = true;
       const timeoutError = new Error(`Timed out invoking packaged authoring CLI: ${command}`);
-      void terminateChild(commandChild, { processTree: true }).then(
+      void terminateChild(commandChild, { processTree: true, windowsProcessTree }).then(
         () => {
-          commandChildren.delete(commandChild);
           reject(timeoutError);
         },
         (error) => {
@@ -235,35 +241,107 @@ function runCommand(command, args, env, commandChildren) {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      commandChildren.delete(commandChild);
       reject(error);
     });
     commandChild.once("exit", (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      commandChildren.delete(commandChild);
       resolve({ code, stderr, stdout });
     });
   });
+}
+
+function startWindowsProcessTreeTracker(rootPid) {
+  if (process.platform !== "win32" || !rootPid) return undefined;
+  const tracker = {
+    attributedPids: new Set([rootPid]),
+    pending: undefined,
+    rootPid,
+    snapshot: [],
+    timer: undefined
+  };
+  const poll = () => {
+    void refreshWindowsProcessTree(tracker).catch(() => undefined);
+  };
+  tracker.timer = setInterval(poll, 500);
+  tracker.timer.unref();
+  poll();
+  return tracker;
+}
+
+async function stopWindowsProcessTreeTracker(tracker) {
+  if (!tracker) return;
+  if (tracker.timer) clearInterval(tracker.timer);
+  if (tracker.pending) await tracker.pending.catch(() => undefined);
+  await refreshWindowsProcessTree(tracker);
+}
+
+function refreshWindowsProcessTree(tracker) {
+  if (!tracker) return Promise.resolve();
+  if (tracker.pending) return tracker.pending;
+  tracker.pending = queryWindowsProcessSnapshot()
+    .then((snapshot) => {
+      tracker.snapshot = snapshot;
+      for (const pid of collectWindowsDescendantPids(snapshot, tracker.attributedPids)) {
+        tracker.attributedPids.add(pid);
+      }
+    })
+    .finally(() => {
+      tracker.pending = undefined;
+    });
+  return tracker.pending;
+}
+
+async function queryWindowsProcessSnapshot() {
+  const invocation = buildWindowsProcessSnapshotInvocation(
+    process.env.SystemRoot || process.env.SYSTEMROOT
+  );
+  const result = await runBoundedProcess(invocation.command, invocation.args, 3_000);
+  if (result.code !== 0) {
+    throw new Error(`Windows process snapshot failed: ${result.stderr}`);
+  }
+  return parseWindowsProcessSnapshot(result.stdout);
+}
+
+function attributedWindowsPidsStillRunning(tracker) {
+  const runningPids = new Set(tracker.snapshot.map((processRecord) => processRecord.pid));
+  return [...tracker.attributedPids].filter((pid) => runningPids.has(pid));
+}
+
+async function terminateAttributedWindowsProcesses(tracker) {
+  if (!tracker) return;
+  await refreshWindowsProcessTree(tracker);
+  const runningPids = attributedWindowsPidsStillRunning(tracker);
+  for (const pid of runningPids) {
+    await terminateWindowsProcessTree(pid, true);
+  }
 }
 
 async function terminateChild(child, options = {}) {
   if (!child) return;
   const ownsProcessTree = Boolean((options.processGroup || options.processTree) && child.pid);
   const processGroupMayRemain = Boolean(ownsProcessTree && process.platform !== "win32" && child.pid);
-  if (!isChildRunning(child) && !processGroupMayRemain) return;
+  const windowsProcessTreeMayRemain = Boolean(
+    ownsProcessTree && process.platform === "win32" && options.windowsProcessTree
+  );
+  if (!isChildRunning(child) && !processGroupMayRemain && !windowsProcessTreeMayRemain) return;
 
-  if (ownsProcessTree && process.platform === "win32" && child.pid && isChildRunning(child)) {
-    await terminateWindowsProcessTree(child.pid, false);
-  } else {
-    signalChild(child, "SIGTERM", ownsProcessTree);
+  if (ownsProcessTree && process.platform === "win32") {
+    const processTree = options.windowsProcessTree || startWindowsProcessTreeTracker(child.pid);
+    await stopWindowsProcessTreeTracker(processTree);
+    if (child.pid && isChildRunning(child)) await terminateWindowsProcessTree(child.pid, false);
+    await delay(750);
+    await terminateAttributedWindowsProcesses(processTree);
+    if (child.pid && isChildRunning(child)) await terminateWindowsProcessTree(child.pid, true);
+    await assertProcessTreeStopped(child, { processGroup: true, windowsProcessTree: processTree });
+    return;
   }
+
+  signalChild(child, "SIGTERM", ownsProcessTree);
   await (processGroupMayRemain ? delay(750) : Promise.race([waitForChildExit(child), delay(750)]));
 
-  if (ownsProcessTree && process.platform === "win32" && child.pid && isChildRunning(child)) {
-    await terminateWindowsProcessTree(child.pid, true);
-  } else if (ownsProcessTree && process.platform !== "win32" && child.pid && isProcessGroupRunning(child.pid)) {
+  if (ownsProcessTree && process.platform !== "win32" && child.pid && isProcessGroupRunning(child.pid)) {
     try {
       process.kill(-child.pid, "SIGKILL");
     } catch {
@@ -287,10 +365,15 @@ async function terminateWindowsProcessTree(pid, force) {
 async function assertProcessTreeStopped(child, options = {}) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const directRunning = isChildRunning(child);
+    let attributedWindowsProcessesRunning = false;
+    if (process.platform === "win32" && options.windowsProcessTree) {
+      await refreshWindowsProcessTree(options.windowsProcessTree);
+      attributedWindowsProcessesRunning = attributedWindowsPidsStillRunning(options.windowsProcessTree).length > 0;
+    }
     const groupRunning = Boolean(
       options.processGroup && process.platform !== "win32" && child?.pid && isProcessGroupRunning(child.pid)
     );
-    if (!directRunning && !groupRunning) return;
+    if (!directRunning && !groupRunning && !attributedWindowsProcessesRunning) return;
     await delay(100);
   }
   throw new Error(`Could not stop packaged smoke process tree rooted at PID ${child?.pid ?? "unknown"}.`);
@@ -326,23 +409,23 @@ function isChildRunning(child) {
   return Boolean(child && child.exitCode === null && child.signalCode === null);
 }
 
-async function cleanupPackagedProcesses(commandChildren, electronChild, dataDir, smokePort) {
+async function cleanupPackagedProcesses(commandChildren, electronChild, electronProcessTree, dataDir, smokePort) {
   const errors = [];
-  for (const commandChild of commandChildren) {
+  for (const [commandChild, windowsProcessTree] of commandChildren) {
     try {
-      await terminateChild(commandChild, { processTree: true });
+      await terminateChild(commandChild, { processTree: true, windowsProcessTree });
     } catch (error) {
       errors.push(error);
     }
   }
   try {
-    await terminateChild(electronChild, { processGroup: true });
+    await terminateChild(electronChild, { processGroup: true, windowsProcessTree: electronProcessTree });
   } catch (error) {
     errors.push(error);
   }
   if (smokePort) {
     try {
-      await cleanupSmokeConnector(dataDir, smokePort);
+      await cleanupSmokeConnector(dataDir, smokePort, electronProcessTree);
     } catch (error) {
       errors.push(error);
     }
@@ -351,12 +434,12 @@ async function cleanupPackagedProcesses(commandChildren, electronChild, dataDir,
   if (errors.length > 1) throw new AggregateError(errors, "Multiple packaged smoke process trees could not be stopped.");
 }
 
-async function cleanupSmokeConnector(dataDir, smokePort) {
+async function cleanupSmokeConnector(dataDir, smokePort, electronProcessTree) {
   if (process.platform === "win32") {
-    const listenerPid = await waitForWindowsSmokeListener(dataDir, smokePort);
+    const listenerPid = await waitForWindowsSmokeListener(smokePort, electronProcessTree);
     if (!listenerPid) return;
     await terminateWindowsProcessTree(listenerPid, true);
-    await assertSmokeConnectorStopped(dataDir, smokePort);
+    await assertWindowsListenerStopped(smokePort, listenerPid);
     return;
   }
 
@@ -365,20 +448,31 @@ async function cleanupSmokeConnector(dataDir, smokePort) {
   await assertSmokeConnectorStopped(dataDir, smokePort);
 }
 
-async function waitForWindowsSmokeListener(dataDir, smokePort) {
+async function waitForWindowsSmokeListener(smokePort, electronProcessTree) {
   let unexpectedListenerPid;
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const listenerPid = await findWindowsListenerPid(smokePort);
     if (listenerPid) {
       unexpectedListenerPid = listenerPid;
-      const health = await readSmokeHealth(smokePort);
-      if (health?.data?.dataDirectory === dataDir) return listenerPid;
+      if (electronProcessTree) {
+        await refreshWindowsProcessTree(electronProcessTree);
+        if (
+          windowsProcessBelongsToTree(
+            electronProcessTree.snapshot,
+            listenerPid,
+            electronProcessTree.attributedPids
+          )
+        ) {
+          electronProcessTree.attributedPids.add(listenerPid);
+          return listenerPid;
+        }
+      }
     }
     await delay(200);
   }
   if (unexpectedListenerPid) {
     throw new Error(
-      `Port ${smokePort} remained owned by PID ${unexpectedListenerPid}, but it did not identify as the packaged smoke connector for ${dataDir}.`
+      `Port ${smokePort} remained owned by unrelated PID ${unexpectedListenerPid}; it was not terminated.`
     );
   }
   return undefined;
@@ -395,6 +489,18 @@ async function findWindowsListenerPid(port) {
     throw new Error(`Windows netstat failed while locating smoke port ${port}: ${result.stderr}`);
   }
   return parseWindowsListenerPid(result.stdout, port);
+}
+
+async function assertWindowsListenerStopped(port, expectedPid) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const listenerPid = await findWindowsListenerPid(port);
+    if (!listenerPid) return;
+    if (listenerPid !== expectedPid) {
+      throw new Error(`Port ${port} was claimed by unrelated PID ${listenerPid} during packaged smoke cleanup.`);
+    }
+    await delay(100);
+  }
+  throw new Error(`Could not stop packaged smoke listener PID ${expectedPid} on port ${port}.`);
 }
 
 function runBoundedProcess(command, args, timeoutMs) {

@@ -182,7 +182,7 @@ type TranscriptImportOptions = {
 
 export async function createMastheadDaemon(config: DaemonConfig): Promise<MastheadDaemon> {
   await mkdir(dirname(config.storePath), { recursive: true });
-  const writerLock = await acquireDatabaseWriterLock(config.dataDirectory ?? dirname(config.databasePath));
+  const writerLock = await acquireDatabaseWriterLock(config.databasePath);
   let hookTranscriptCatchupQueue: Promise<void> = Promise.resolve();
   const hookTranscriptCatchups = new Map<string, Promise<void>>();
   const disabledHookTranscriptCatchupDiagnostics = new Set<string>();

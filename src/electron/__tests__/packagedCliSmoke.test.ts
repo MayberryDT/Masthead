@@ -28,6 +28,8 @@ describe("packaged authoring CLI smoke coverage", () => {
     expect(cleanupSource).toContain('"taskkill.exe"');
     expect(source).toContain("findWindowsListenerPid");
     expect(source).toContain("assertProcessTreeStopped");
+    expect(source).toContain("startWindowsProcessTreeTracker");
+    expect(source).toContain("windowsProcessBelongsToTree");
     expect(source).toContain("processTree: true");
     expect(source).toContain("cleanupError");
     expect(source).toContain("verificationAbort.abort()");

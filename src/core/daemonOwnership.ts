@@ -1,5 +1,5 @@
-import { mkdir, open, readFile, rm, writeFile, type FileHandle } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, open, readFile, realpath, rm, writeFile, type FileHandle } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 
 export type DaemonOwnershipMetadata = {
   daemonInstanceId: string;
@@ -56,16 +56,16 @@ export type DatabaseWriterLock = {
   release: () => Promise<void>;
 };
 
-export async function acquireDatabaseWriterLock(dataDirectory: string): Promise<DatabaseWriterLock> {
-  const runtimeDirectory = join(dataDirectory, "runtime");
-  await mkdir(runtimeDirectory, { recursive: true });
-  const lockPath = join(runtimeDirectory, "database.lock");
+export async function acquireDatabaseWriterLock(databasePath: string): Promise<DatabaseWriterLock> {
+  const canonicalDatabasePath = await canonicalWriterDatabasePath(databasePath);
+  const lockPath = `${canonicalDatabasePath}.lock`;
   const handle = await createLockFile(lockPath);
   await handle.writeFile(
     JSON.stringify(
       {
         pid: process.pid,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        databasePath: canonicalDatabasePath
       },
       null,
       2
@@ -82,6 +82,19 @@ export async function acquireDatabaseWriterLock(dataDirectory: string): Promise<
   };
 }
 
+async function canonicalWriterDatabasePath(databasePath: string): Promise<string> {
+  const absolutePath = resolve(databasePath);
+  const absoluteDirectory = dirname(absolutePath);
+  await mkdir(absoluteDirectory, { recursive: true });
+  const canonicalDirectory = await realpath(absoluteDirectory);
+  try {
+    return await realpath(absolutePath);
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) throw error;
+    return join(canonicalDirectory, basename(absolutePath));
+  }
+}
+
 async function createLockFile(lockPath: string): Promise<FileHandle> {
   try {
     return await open(lockPath, "wx");
@@ -90,7 +103,9 @@ async function createLockFile(lockPath: string): Promise<FileHandle> {
       return open(lockPath, "wx");
     }
     const detail = await readLockDetail(lockPath);
-    throw new Error(`Masthead database is already owned by another writable daemon at ${lockPath}${detail ? ` (${detail})` : ""}.`);
+    throw new Error(
+      `Masthead database is already owned by another writable daemon at ${lockPath}${detail ? ` (${detail})` : ""}; the lock protects the same canonical database.`
+    );
   }
 }
 
