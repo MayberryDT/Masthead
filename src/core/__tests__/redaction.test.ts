@@ -72,9 +72,37 @@ describe("privacy redaction", () => {
   });
 
   test("distinguishes redaction-only placeholders from retained semantic text", () => {
-    expect(hasSemanticRedactedText("[SECRET:private_key]")).toBe(false);
-    expect(hasSemanticRedactedText("[SECRET:api_key]\n[redacted]")).toBe(false);
-    expect(hasSemanticRedactedText("Authorization: Bearer [SECRET:bearer_token]")).toBe(false);
+    const wrapperOnly = [
+      "[SECRET:private_key]",
+      "[SECRET:api_key]\n[redacted]",
+      "password: [SECRET:api_key]",
+      "email [SECRET:email]",
+      "Authorization: Bearer [SECRET:bearer_token]",
+      "X-Api-Key: [SECRET:api_key]",
+      "  X-Custom-Header: [SECRET:api_key]",
+      "  X-Trace-Id: [SECRET:api_key]",
+      '{"headers":{"authorization":"Bearer [SECRET:bearer_token]"},"password":"[SECRET:api_key]"}',
+      '{"metadata":"[SECRET:api_key]"}',
+      '{"X-Trace-Id":"[SECRET:api_key]"}',
+      [
+        "password: [SECRET:api_key]",
+        "email [SECRET:email]",
+        "Authorization: Bearer [SECRET:bearer_token]",
+        "Cookie: [SECRET:cookie]"
+      ].join("\n")
+    ];
+
+    wrapperOnly.forEach((value) => expect(hasSemanticRedactedText(value)).toBe(false));
+    expect(hasSemanticRedactedText("Deployment failed: [SECRET:api_key]")).toBe(true);
+    expect(hasSemanticRedactedText("Observed failure: Authorization: Bearer [SECRET:bearer_token]")).toBe(true);
+    expect(hasSemanticRedactedText("password-rotation-failed: [SECRET:api_key]")).toBe(true);
+    expect(hasSemanticRedactedText("deployment_password_failed=[SECRET:api_key]")).toBe(true);
+    expect(hasSemanticRedactedText("api.request.failed: [SECRET:api_key]")).toBe(true);
+    expect(hasSemanticRedactedText('{"deployment_failed":"[SECRET:api_key]"}')).toBe(true);
+    expect(
+      hasSemanticRedactedText('{"observed_failure":"Authorization: Bearer [SECRET:bearer_token]"}')
+    ).toBe(true);
+    expect(hasSemanticRedactedText("password rotation failed after [SECRET:api_key]")).toBe(true);
     expect(hasSemanticRedactedText("Use [SECRET:api_key] for the staging integration.")).toBe(true);
     expect(hasSemanticRedactedText("The canonical outcome shipped after verification.")).toBe(true);
   });

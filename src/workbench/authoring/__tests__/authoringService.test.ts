@@ -287,10 +287,26 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
-  test("rejects canonical evidence containing only redaction placeholders", async () => {
+  test("rejects canonical evidence containing only redaction wrappers and placeholders", async () => {
     const db = await readyAuthoringDb();
     clearCanonicalEvidence(db, "session:a");
-    insertMessage(db, "session:a", "redaction-only", "[SECRET:private_key]");
+    [
+      "password: [SECRET:api_key]",
+      "email [SECRET:email]",
+      "Authorization: Bearer [SECRET:bearer_token]",
+      "X-Api-Key: [SECRET:api_key]",
+      "  X-Custom-Header: [SECRET:api_key]",
+      "  X-Trace-Id: [SECRET:api_key]",
+      '{"headers":{"authorization":"Bearer [SECRET:bearer_token]"},"password":"[SECRET:api_key]"}',
+      '{"metadata":"[SECRET:api_key]"}',
+      '{"X-Trace-Id":"[SECRET:api_key]"}',
+      [
+        "  password: [SECRET:api_key]",
+        "  email [SECRET:email]",
+        "  X-Custom-Header: [SECRET:api_key]",
+        "  Cookie: [SECRET:cookie]"
+      ].join("\n")
+    ].forEach((text, index) => insertMessage(db, "session:a", `redaction-only-${index}`, text));
 
     expect(() =>
       openAuthoringRun(db, {
@@ -302,6 +318,62 @@ describe("Workbench authoring service", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_claims").get()).toEqual({ count: 0 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_authoring_runs").get()).toEqual({ count: 0 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_session_state").get()).toEqual({ count: 0 });
+    db.close();
+  });
+
+  test("accepts retained semantic prose around a redaction placeholder", async () => {
+    const db = await readyAuthoringDb();
+    clearCanonicalEvidence(db, "session:a");
+    insertMessage(
+      db,
+      "session:a",
+      "semantic-redaction",
+      "Deployment failed: password rotation failed after [SECRET:api_key]"
+    );
+
+    const opened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+
+    expect(opened.run.status).toBe("open");
+    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
+      qualityStatus: "passed",
+      transcriptStatus: "available"
+    });
+    db.close();
+  });
+
+  test("accepts punctuation-delimited semantic labels around a redaction placeholder", async () => {
+    const db = await readyAuthoringDb();
+    clearCanonicalEvidence(db, "session:a");
+    insertMessage(db, "session:a", "semantic-label", "password-rotation-failed: [SECRET:api_key]");
+
+    const opened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+
+    expect(opened.run.status).toBe("open");
+    expect(readWorkbenchSessionState(db, "session:a")?.qualityStatus).toBe("passed");
+    db.close();
+  });
+
+  test("accepts semantic JSON property names around a redaction placeholder", async () => {
+    const db = await readyAuthoringDb();
+    clearCanonicalEvidence(db, "session:a");
+    insertMessage(db, "session:a", "semantic-json", '{"deployment_failed":"[SECRET:api_key]"}');
+
+    const opened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+
+    expect(opened.run.status).toBe("open");
+    expect(readWorkbenchSessionState(db, "session:a")?.qualityStatus).toBe("passed");
     db.close();
   });
 

@@ -2,7 +2,30 @@ const PRIVATE_KEY_PATTERN =
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
 
 const REDACTION_PLACEHOLDER_PATTERN = /\[(?:SECRET:[^\]]+|redacted)\]/gi;
-const REDACTION_ONLY_WRAPPER_PATTERN = /^(?:(?:authorization\s*:\s*)?bearer|cookie\s*:?)$/i;
+const REDACTION_SECRET_KIND_PATTERN = /\[SECRET:([^\]]+)\]/gi;
+const REDACTION_STRUCTURAL_LABEL_PATTERN =
+  /(^[ \t]*|[{\[,][ \t]*)(["']?)([\p{L}\p{N}_][\p{L}\p{N}_.\-/ ]*)\2[ \t]*[:=]/gmu;
+const REDACTION_WORD_PATTERN = /[\p{L}\p{N}]+/gu;
+const REDACTION_WRAPPER_TOKENS = new Set([
+  "api",
+  "authorization",
+  "bearer",
+  "cookie",
+  "credential",
+  "credentials",
+  "email",
+  "header",
+  "headers",
+  "key",
+  "metadata",
+  "password",
+  "private",
+  "secret",
+  "token",
+  "user",
+  "username",
+  "value"
+]);
 
 const REDACTION_PATTERNS: Array<[RegExp, string]> = [
   [/Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Authorization: Bearer [SECRET:bearer_token]"],
@@ -40,9 +63,29 @@ export function redactText(input: string): string {
 }
 
 export function hasSemanticRedactedText(input: string): boolean {
-  const retained = input.replace(REDACTION_PLACEHOLDER_PATTERN, " ").replace(/\s+/g, " ").trim();
-  if (!retained || REDACTION_ONLY_WRAPPER_PATTERN.test(retained)) return false;
-  return /[\p{L}\p{N}]/u.test(retained);
+  const placeholderKinds = [...input.matchAll(REDACTION_SECRET_KIND_PATTERN)].map((match) => match[1] ?? "");
+  const hasPlaceholder = placeholderKinds.length > 0 || /\[redacted\]/i.test(input);
+  if (!hasPlaceholder) return /[\p{L}\p{N}]/u.test(input);
+
+  const wrapperTokens = new Set(REDACTION_WRAPPER_TOKENS);
+  for (const kind of placeholderKinds) {
+    for (const token of kind.match(REDACTION_WORD_PATTERN) ?? []) wrapperTokens.add(token.toLowerCase());
+  }
+  const retainedTokens = input
+    .replace(REDACTION_PLACEHOLDER_PATTERN, " ")
+    .replace(REDACTION_STRUCTURAL_LABEL_PATTERN, (match, prefix: string, _quote: string, label: string) =>
+      isRedactionWrapperLabel(label, wrapperTokens) ? prefix : match
+    )
+    .match(REDACTION_WORD_PATTERN);
+  return Boolean(retainedTokens?.some((token) => !wrapperTokens.has(token.toLowerCase())));
+}
+
+function isRedactionWrapperLabel(label: string, wrapperTokens: Set<string>): boolean {
+  const labelTokens = label.match(REDACTION_WORD_PATTERN) ?? [];
+  if (labelTokens.length === 0) return false;
+  if (labelTokens.every((token) => wrapperTokens.has(token.toLowerCase()))) return true;
+  const normalized = label.trim();
+  return /^x[-_.]/i.test(normalized) || /(?:^|[-_.])header$/i.test(normalized);
 }
 
 export function redactJsonValue(value: unknown): unknown {
