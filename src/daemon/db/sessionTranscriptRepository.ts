@@ -50,13 +50,31 @@ type TranscriptSelectPart = {
 };
 
 export function getSessionTranscript(db: MastheadDatabase, query: SessionTranscriptQuery): SessionTranscriptResult {
+  const page = getTranscriptPage(db, query, false);
+  return {
+    coverage: getTranscriptCoverage(db, query.sessionId),
+    ...page
+  };
+}
+
+export function getCompleteSessionTranscriptPage(
+  db: MastheadDatabase,
+  query: SessionTranscriptQuery
+): Pick<SessionTranscriptResult, "items" | "nextCursor" | "total"> {
+  return getTranscriptPage(db, query, true);
+}
+
+function getTranscriptPage(
+  db: MastheadDatabase,
+  query: SessionTranscriptQuery,
+  preserveFullText: boolean
+): Pick<SessionTranscriptResult, "items" | "nextCursor" | "total"> {
   const limit = normalizeLimit(query.limit);
   const offset = cursorToOffset(query.cursor);
   const total = countTranscriptItems(db, query);
-  const items = getTranscriptItems(db, query, limit, offset);
+  const items = getTranscriptItems(db, query, limit, offset, preserveFullText);
   const nextOffset = offset + items.length;
   return {
-    coverage: getTranscriptCoverage(db, query.sessionId),
     items,
     nextCursor: nextOffset < total ? String(nextOffset) : undefined,
     total
@@ -114,9 +132,10 @@ function getTranscriptItems(
   db: MastheadDatabase,
   query: Pick<SessionTranscriptQuery, "kind" | "order" | "q" | "sessionId">,
   limit: number,
-  offset: number
+  offset: number,
+  preserveFullText: boolean
 ): SessionTranscriptItem[] {
-  const parts = transcriptSelectParts(query);
+  const parts = transcriptSelectParts(query, preserveFullText);
   if (parts.length === 0) return [];
   const direction = query.order === "desc" ? "DESC" : "ASC";
   const rows = db
@@ -127,7 +146,7 @@ function getTranscriptItems(
       LIMIT ? OFFSET ?`
     )
     .all(...parts.flatMap((part) => part.params), limit, offset) as TranscriptRow[];
-  return rows.map((row) => normalizeTranscriptItem(row));
+  return rows.map((row) => normalizeTranscriptItem(row, preserveFullText));
 }
 
 function countTranscriptItems(db: MastheadDatabase, query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">): number {

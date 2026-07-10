@@ -5,7 +5,7 @@ import type {
   WorkbenchAuthoringEvidencePage
 } from "../../shared/workbenchAuthoring.ts";
 import {
-  getSessionTranscript,
+  getCompleteSessionTranscriptPage,
   iterateSessionTranscriptItems,
   type SessionTranscriptKindFilter
 } from "../../daemon/db/sessionTranscriptRepository.ts";
@@ -42,7 +42,7 @@ export function getAuthoringEvidencePage(
     order?: SessionTranscriptOrder;
   }
 ): WorkbenchAuthoringEvidencePage {
-  const result = getSessionTranscript(db, {
+  const result = getCompleteSessionTranscriptPage(db, {
     cursor: query.cursor,
     kind: query.kind,
     limit: Math.max(1, Math.min(query.limit ?? 100, 250)),
@@ -69,8 +69,10 @@ export function authoringEvidenceRevision(db: MastheadDatabase, sessionIds: stri
           exitCode: item.exitCode,
           itemId: item.itemId,
           kind: item.kind,
+          label: item.label,
           observedAt: item.observedAt,
           role: item.role,
+          sourceRef: item.sourceRef,
           status: item.status,
           text: item.text,
           toolName: item.toolName

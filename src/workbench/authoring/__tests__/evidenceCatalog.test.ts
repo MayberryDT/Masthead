@@ -109,6 +109,21 @@ describe("authoring evidence catalog", () => {
     db.close();
   });
 
+  test("returns decisive redacted tool output beyond the transcript preview boundary", async () => {
+    const db = await testDb();
+    seedToolResultSession(db, "session:complete-page");
+
+    const page = getAuthoringEvidencePage(db, {
+      query: "tail-a",
+      sessionId: "session:complete-page"
+    });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.text).toContain("tail-a");
+    expect(page.items[0]?.text.length).toBeGreaterThan(800);
+    db.close();
+  });
+
   test("changes revision for canonical identity, ordering, redacted content, status, and exit code changes", async () => {
     const db = await testDb();
     seedToolResultSession(db, "session:revision");
@@ -141,6 +156,34 @@ describe("authoring evidence catalog", () => {
       "session:revision"
     );
     expect(authoringEvidenceRevision(db, ["session:revision"])).not.toBe(exitCodeChanged);
+    db.close();
+  });
+
+  test("changes revision when an exposed canonical evidence label changes", async () => {
+    const db = await testDb();
+    seedMixedSession(db, "session:label-revision");
+
+    const initial = authoringEvidenceRevision(db, ["session:label-revision"]);
+    db.prepare("UPDATE checkpoints SET checkpoint_kind = ? WHERE session_id = ?").run(
+      "final_verification",
+      "session:label-revision"
+    );
+
+    expect(authoringEvidenceRevision(db, ["session:label-revision"])).not.toBe(initial);
+    db.close();
+  });
+
+  test("changes revision when exposed canonical source provenance changes", async () => {
+    const db = await testDb();
+    seedMixedSession(db, "session:source-revision");
+
+    const initial = authoringEvidenceRevision(db, ["session:source-revision"]);
+    db.prepare("UPDATE checkpoints SET source_ref_json = ? WHERE session_id = ?").run(
+      JSON.stringify({ source: "updated-checkpoint" }),
+      "session:source-revision"
+    );
+
+    expect(authoringEvidenceRevision(db, ["session:source-revision"])).not.toBe(initial);
     db.close();
   });
 });
