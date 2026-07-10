@@ -72,7 +72,9 @@ describe("daemon database schema", () => {
         "session_artifact_provenance",
         "workbench_session_state",
         "workbench_activity",
-        "workbench_claims"
+        "workbench_claims",
+        "workbench_authoring_runs",
+        "workbench_authoring_run_sessions"
       ])
     );
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
@@ -94,7 +96,8 @@ describe("daemon database schema", () => {
       { version: 15, name: "015_workbench_runs" },
       { version: 16, name: "016_session_artifacts" },
       { version: 17, name: "017_workbench_pipeline" },
-      { version: 18, name: "018_artifact_first_logbook" }
+      { version: 18, name: "018_artifact_first_logbook" },
+      { version: 19, name: "019_workbench_authoring_runs" }
     ]);
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
     expect(indexes.map((row) => row.name)).toEqual(
