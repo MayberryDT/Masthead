@@ -125,18 +125,20 @@ export function useSettingsDataController({
   }, []);
 
   const handleExportLocalData = useCallback(async () => {
-    setLocalDataStatus({ state: "busy", message: "Preparing local export..." });
+    setLocalDataStatus({ action: "export", state: "busy", message: "Preparing local export..." });
     try {
       const canonicalExport = isLive ? await exportMastheadData(activeProjectionUrl, { databaseId: activeDatabaseId }) : undefined;
       const exported = canonicalExport ? JSON.stringify(canonicalExport, null, 2) : await exportNativeLocalData();
       const count = canonicalExport ? exportedSessionCount(canonicalExport) : exportedRecordCount(exported);
       downloadTextFile(`masthead-export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, exported);
       setLocalDataStatus({
+        action: "export",
         state: "exported",
         message: count === undefined ? "Local export prepared." : `Exported ${count} Masthead records.`
       });
     } catch (error) {
       setLocalDataStatus({
+        action: "export",
         state: "error",
         message: `Export failed: ${error instanceof Error ? error.message : String(error)}`
       });
@@ -176,14 +178,15 @@ export function useSettingsDataController({
 
   const handleRequestPruneLocalData = useCallback(async () => {
     if (!writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      setLocalDataStatus({ action: "raw_copies", state: "error", message: writeBlockedMessage });
       return;
     }
-    setLocalDataStatus({ state: "busy", message: "Preparing raw source copy preview..." });
+    setLocalDataStatus({ action: "raw_copies", state: "busy", message: "Preparing raw source copy preview..." });
     try {
       const summary = await loadDataDeletionPreview(undefined, activeDatabaseId);
       setPendingDeletionDatabaseId(activeDatabaseId);
       setLocalDataStatus({
+        action: "raw_copies",
         state: "confirm_prune",
         message: `Confirm deletion of ${formatCount(
           summary.rawEvents
@@ -191,6 +194,7 @@ export function useSettingsDataController({
       });
     } catch (error) {
       setLocalDataStatus({
+        action: "raw_copies",
         state: "error",
         message: `Raw source copy preview failed: ${error instanceof Error ? error.message : String(error)}`
       });
@@ -199,10 +203,10 @@ export function useSettingsDataController({
 
   const handleConfirmPruneLocalData = useCallback(async () => {
     if (!writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      setLocalDataStatus({ action: "raw_copies", state: "error", message: writeBlockedMessage });
       return;
     }
-    setLocalDataStatus({ state: "busy", message: "Deleting raw source copies..." });
+    setLocalDataStatus({ action: "raw_copies", state: "busy", message: "Deleting raw source copies..." });
     try {
       const response = await applyDefaultRetention(activeProjectionUrl, { databaseId: pendingDeletionDatabaseId ?? activeDatabaseId });
       const dispositions = await listReviewDispositions(activeProjectionUrl);
@@ -210,6 +214,7 @@ export function useSettingsDataController({
       setDataSummary(response.summary);
       setPendingDeletionDatabaseId(undefined);
       setLocalDataStatus({
+        action: "raw_copies",
         state: "pruned",
         message: `Deleted ${formatCount(
           response.result.rawEvents ?? 0
@@ -217,6 +222,7 @@ export function useSettingsDataController({
       });
     } catch (error) {
       setLocalDataStatus({
+        action: "raw_copies",
         state: "error",
         message: `Retention failed: ${error instanceof Error ? error.message : String(error)}`
       });

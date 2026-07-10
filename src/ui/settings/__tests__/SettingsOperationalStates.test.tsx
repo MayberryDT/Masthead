@@ -310,6 +310,7 @@ env = {"MASTHEAD_DB_PATH":"/tmp/masthead.sqlite"}`);
       buttonNamed("Test connection")?.click();
     });
     expect(buttonNamed("Testing…")?.disabled).toBe(true);
+    expect(rowNamed("MCP server")?.querySelector(".settings-inline-feedback")?.textContent).toBe("Testing connection…");
 
     await act(async () => {
       resolveTest?.(jsonResponse({ ok: true, test: { status: "failed", message: "MCP process did not answer." } }));
@@ -317,7 +318,32 @@ env = {"MASTHEAD_DB_PATH":"/tmp/masthead.sqlite"}`);
     });
     await waitFor(() => container?.textContent?.includes("MCP process did not answer.") === true);
     expect(buttonNamed("Test connection")?.disabled).toBe(false);
-    expect(container?.querySelectorAll(".settings-mcp-inline-result")).toHaveLength(1);
+    expect(rowNamed("MCP server")?.textContent).toContain("MCP process did not answer.");
+    expect(container?.querySelectorAll(".settings-inline-feedback.error")).toHaveLength(1);
+  });
+
+  test("shows compact connection-test success beside the MCP server row", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        if (requestPath(input) === "/mcp/test-connection") {
+          return jsonResponse({ ok: true, test: { status: "passed", message: "Connection passed." } });
+        }
+        return mcpResponse(input);
+      })
+    );
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Agent access");
+    await waitFor(() => buttonNamed("Test connection") !== undefined);
+
+    await act(async () => {
+      buttonNamed("Test connection")?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => rowNamed("MCP server")?.textContent?.includes("Connection passed.") === true);
+
+    expect(rowNamed("MCP server")?.querySelector(".settings-inline-feedback.success")).not.toBeNull();
+    expect(container?.querySelectorAll(".settings-row")).toHaveLength(3);
   });
 
   test("replaces a stale MCP load error with the latest connection-test failure", async () => {

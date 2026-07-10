@@ -189,6 +189,7 @@ export function LlmProviderControls({
   return (
     <>
       <SettingsSection
+        eyebrow="Enrichment"
         title="Remote enrichment"
         description="Optional durable titles and summaries from your provider. Live board headlines use separate live copy settings."
       >
@@ -215,6 +216,7 @@ export function LlmProviderControls({
         {savingRemote ? <p className="settings-provider-status">Saving...</p> : null}
       </SettingsSection>
       <SettingsSection
+        eyebrow="Enrichment"
         title="Provider connection"
         description="Choose and authenticate the provider used when remote enrichment is on. Credentials stay on this device."
       >

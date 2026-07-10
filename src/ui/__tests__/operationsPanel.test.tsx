@@ -43,6 +43,12 @@ describe("OperationsPanel", () => {
     });
   }
 
+  function rowNamed(label: string): HTMLElement | undefined {
+    return [...(container?.querySelectorAll<HTMLElement>(".settings-row") ?? [])].find(
+      (row) => row.querySelector(".settings-row-copy > span")?.textContent === label
+    );
+  }
+
   test("renders local export and delete controls", async () => {
     await renderPanel(<OperationsPanel settingsLoadState="loading" />);
     await selectCategory("Data");
@@ -237,7 +243,7 @@ describe("OperationsPanel", () => {
     const html = container?.innerHTML ?? "";
 
     expect(html).toContain("Storage");
-    expect(html).toContain("Raw source copies");
+    expect(html).toContain("Include raw copies");
     expect(html).toContain("4");
     expect(html).not.toContain("Sessions");
     expect(html).not.toContain("Retention classes");
@@ -246,18 +252,51 @@ describe("OperationsPanel", () => {
   test("renders local action errors without changing action labels", async () => {
     await renderPanel(
       <OperationsPanel
-        localDataStatus={{ state: "error", message: "Export failed: unavailable" }}
+        localDataStatus={{ action: "export", state: "error", message: "Export failed: unavailable" }}
         settingsLoadState="loading"
       />
     );
     await selectCategory("Data");
+    const exportRow = rowNamed("Export archive");
     const dataHtml = container?.innerHTML ?? "";
     await selectCategory("Danger zone");
     const html = `${dataHtml}${container?.innerHTML ?? ""}`;
 
-    expect(html).toContain("Export failed: unavailable");
+    expect(exportRow?.textContent).toContain("Export failed: unavailable");
     expect(html).toContain("Export data");
     expect(html).toContain("Delete all Masthead data");
+    expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
+  });
+
+  test("shows open-folder success beside the initiating Data row", async () => {
+    const invoke = vi.fn(async () => undefined);
+    window.mastheadDesktop = { invoke: invoke as NonNullable<Window["mastheadDesktop"]>["invoke"] };
+    await renderPanel(<OperationsPanel settingsState={settings} />);
+    await selectCategory("Data");
+
+    await act(async () => {
+      [...(rowNamed("Open data folder")?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+        .find((button) => button.textContent === "Open folder")
+        ?.click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith("open_data_directory_command", { path: settings.storage.dataDirectory });
+    expect(rowNamed("Open data folder")?.textContent).toContain("Opened data folder.");
+    expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
+  });
+
+  test("shows raw-copy success beside the initiating Data row", async () => {
+    await renderPanel(
+      <OperationsPanel
+        localDataStatus={{ action: "raw_copies", state: "pruned", message: "Deleted 4 raw source copies." }}
+        settingsState={settings}
+      />
+    );
+    await selectCategory("Data");
+
+    expect(rowNamed("Include raw copies")?.textContent).toContain("Deleted 4 raw source copies.");
+    expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
   });
 
   test("keeps preference, export, and raw-copy callbacks wired", async () => {

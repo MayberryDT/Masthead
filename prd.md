@@ -17,12 +17,17 @@ normally becomes difficult to find or reuse once a session ends.
 
 Masthead discovers that history, imports it into a canonical local session graph, continuously
 syncs new activity, enriches sessions into compact human- and agent-readable records, and exposes
-the result through:
+the result through this product hierarchy:
 
-1. **Now** — a glanceable live view of current sessions.
-2. **Logbook** — a durable searchable library of past sessions.
-3. **Sources** — runtime discovery, import, sync, and adapter health.
-4. **Agent Access** — read-only MCP access for the user’s existing agents.
+1. **Canonical session database** — the local source of truth.
+2. **Workbench** — the raw-to-publish pipeline for sessions and multi-kind artifacts.
+3. **Logbook** — a durable searchable library of published artifacts.
+4. **Read-only MCP** — artifact-primary reuse, with session tools retained for evidence.
+5. **Now** — a glanceable live view of current sessions.
+6. **Sources** — harness discovery and live-connector enablement.
+
+Agent access is the compact MCP information/setup category inside Settings, not a primary
+destination or standalone surface.
 
 Live observability is a view over the data layer. It is not Masthead’s category.
 
@@ -89,8 +94,8 @@ The first build is done when Masthead can be dogfooded against real local Codex 
   or harness state.
 - **Durable by default:** Canonical session metadata and capsules are not subject to short
   observability retention.
-- **Live is one view:** The Now surface must not dictate the composition of Logbook, Sources,
-  Agent Access, or Settings.
+- **Live is one view:** The Now surface must not dictate the composition of Workbench, Logbook,
+  Sources, or Settings.
 - **Original-harness provenance:** Every session preserves enough source identity to inspect or
   resume work in the originating harness when possible.
 - **Evidence before claims:** Masthead may summarize agent work, but it must show the evidence

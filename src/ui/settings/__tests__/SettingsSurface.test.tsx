@@ -132,10 +132,11 @@ describe("Settings surface", () => {
       dataButton?.click();
     });
 
-    expect(pane?.textContent).toContain("Database");
+    expect(pane?.textContent).toContain("Open data folder");
     expect(pane?.textContent).toContain("Open folder");
+    expect(pane?.textContent).toContain("Export archive");
     expect(pane?.textContent).toContain("Export data");
-    expect(pane?.textContent).toContain("Raw source copies");
+    expect(pane?.textContent).toContain("Include raw copies");
     expect(pane?.textContent).toContain(
       "Deletes stored raw copies only; normalized records and original harness files remain."
     );
@@ -362,17 +363,14 @@ describe("Settings surface", () => {
     expect(focusRingRuleIndex).toBeGreaterThan(activeRuleIndex);
   });
 
-  test("uses shared card entrance motion for settings sections", () => {
-    const css = readFileSync("src/styles/masthead.css", "utf8");
+  test("keeps the focused Settings ledger flat without removing shared section cards", () => {
+    const settingsCss = readFileSync("src/styles/settings.css", "utf8");
+    const mastheadCss = readFileSync("src/styles/masthead.css", "utf8");
 
-    expect(css).toMatch(/\.summary-strip \.summary-metric,[\s\S]*\.settings-section,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: surface-card-enter 400ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;[\s\S]*transform-origin: 50% 100%;/);
-    expect(css).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{[\s\S]*\.observability-console \.session-card\.is-new-card,[\s\S]*\.masthead-shell \.session-card\.is-new-card\s*\{[\s\S]*animation: session-card-created 760ms var\(--layout-ease\) both;[\s\S]*animation-delay: calc\(var\(--new-card-index\) \* 70ms\);[\s\S]*transform-origin: 50% 100%;/);
-    expect(css).toMatch(/@keyframes surface-card-enter\s*\{[\s\S]*transform: translateY\(9px\) scale\(0\.968\);[\s\S]*transform: translateY\(-1px\) scale\(1\.004\);[\s\S]*transform: translateY\(1px\) scale\(0\.999\);[\s\S]*transform: translateY\(0\) scale\(1\);/);
-    expect(css).toMatch(/@keyframes session-card-created\s*\{[\s\S]*opacity: 0\.92;[\s\S]*transform: translateY\(18px\) scale\(0\.992\);[\s\S]*transform: translateY\(3px\) scale\(0\.998\);[\s\S]*transform: translateY\(0\) scale\(1\);/);
-    expect(css).not.toContain("filter: blur(4px);");
-    expect(css).not.toContain("filter: blur(5px);");
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.settings-section,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: none/);
-    expect(css).toMatch(/\.masthead-shell\[data-motion-mode="off"\],[\s\S]*\.masthead-shell\[data-motion-mode="off"\] \*::after\s*\{[\s\S]*animation: none !important;[\s\S]*transition-duration: 1ms !important;/);
+    expect(settingsCss).toMatch(/\.settings-panel \.settings-pane > \.settings-section\s*\{[\s\S]*border: 0;[\s\S]*border-radius: 0;[\s\S]*background: transparent;[\s\S]*animation: none;[\s\S]*transition: none;/);
+    expect(settingsCss).toMatch(/\.settings-panel \.settings-pane > \.settings-section::before,[\s\S]*\.settings-panel \.settings-pane > \.settings-section::after\s*\{[\s\S]*content: none;[\s\S]*display: none;/);
+    expect(mastheadCss).toMatch(/\.observability-console \.settings-section,[\s\S]*\.masthead-shell \.settings-section,[\s\S]*\.masthead-shell \.adapter-card\s*\{[\s\S]*border: 1px solid rgba\(92, 153, 187, 0\.14\);[\s\S]*border-radius: 5px;[\s\S]*background: #071b28;/);
+    expect(mastheadCss).toMatch(/\.summary-strip \.summary-metric,[\s\S]*\.settings-section,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: surface-card-enter 400ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;/);
   });
 });
 

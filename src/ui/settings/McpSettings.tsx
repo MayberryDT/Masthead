@@ -117,7 +117,15 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
     }
   }
 
-  const serverError = loadError ?? (testState === "failed" ? testResult?.message : undefined);
+  const serverFeedback = loadError
+    ? { message: loadError, tone: "error" as const }
+    : testState === "testing"
+      ? { message: "Testing connection…", tone: "neutral" as const }
+      : testState === "passed"
+        ? { message: testResult?.message ?? "Connection passed.", tone: "success" as const }
+        : testState === "failed" && testResult?.message
+          ? { message: testResult.message, tone: "error" as const }
+          : undefined;
 
   return (
     <SettingsSection title="Agent access">
@@ -129,20 +137,22 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
           </StatusBadge>
         }
         control={
-          <AppButton
-            disabled={testState === "testing"}
-            onClick={() => void runLaunchTest()}
-            variant="quiet"
-          >
-            {testState === "testing" ? "Testing…" : "Test connection"}
-          </AppButton>
+          <div className="settings-inline-actions">
+            <AppButton
+              disabled={testState === "testing"}
+              onClick={() => void runLaunchTest()}
+              variant="quiet"
+            >
+              {testState === "testing" ? "Testing…" : "Test connection"}
+            </AppButton>
+            {serverFeedback ? (
+              <span className={`settings-inline-feedback ${serverFeedback.tone}`} role="status">
+                {serverFeedback.message}
+              </span>
+            ) : null}
+          </div>
         }
       />
-      {serverError ? (
-        <p className="settings-mcp-inline-result error" role="status">
-          {serverError}
-        </p>
-      ) : null}
 
       <SettingsRow
         label="Access"

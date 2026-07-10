@@ -729,6 +729,9 @@ describe("SourcesPanel import controls", () => {
     expect(container.textContent).toContain("Configure provider settings now if you want.");
     expect(container.textContent).toContain("Remote enrichment");
     expect(container.textContent).toContain("Save provider");
+    expect(
+      [...container.querySelectorAll(".settings-section-head .mono-label")].map((node) => node.textContent)
+    ).toEqual(["Enrichment", "Enrichment"]);
     await act(async () => root.unmount());
   });
 
