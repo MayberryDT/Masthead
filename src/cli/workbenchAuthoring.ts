@@ -32,6 +32,7 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
     if (command === "open") {
       const databaseId = requiredOption(args, "--database-id", json);
       if (isCliResult(databaseId)) return databaseId;
+      if (optionHasMissingValue(args, "--session")) return missingOptionValue("--session", json);
       const sessionIds = optionValues(args, "--session");
       if (sessionIds.length === 0) return missingArgument("--session", json);
       const capabilities = await client.capabilities();
@@ -59,6 +60,9 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
     if (command === "evidence") {
       const sessionId = requiredOption(args, "--session", json);
       if (isCliResult(sessionId)) return sessionId;
+      for (const option of ["--cursor", "--limit", "--order", "--kind", "--query"]) {
+        if (optionHasMissingValue(args, option)) return missingOptionValue(option, json);
+      }
       const query = new URLSearchParams({ sessionId });
       const cursor = optionValue(args, "--cursor");
       const queryText = optionValue(args, "--query");
@@ -123,6 +127,7 @@ export function workbenchHelp(): string {
 }
 
 function requiredOption(args: string[], option: string, json: boolean): string | CliResult {
+  if (optionHasMissingValue(args, option)) return missingOptionValue(option, json);
   return optionValue(args, option) ?? missingArgument(option, json);
 }
 
@@ -130,10 +135,17 @@ function missingArgument(option: string, json: boolean): CliResult {
   return errorResult("missing_argument", `Missing required option: ${option}`, json);
 }
 
+function missingOptionValue(option: string, json: boolean): CliResult {
+  return errorResult("missing_argument", `Missing value for option: ${option}`, json);
+}
+
 function optionValue(args: string[], option: string): string | undefined {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === option) return args[index + 1]?.trim() || undefined;
+    if (arg === option) {
+      const candidate = args[index + 1];
+      return candidate && !candidate.startsWith("--") ? candidate.trim() || undefined : undefined;
+    }
     if (arg.startsWith(`${option}=`)) return arg.slice(option.length + 1).trim() || undefined;
   }
   return undefined;
@@ -144,15 +156,29 @@ function optionValues(args: string[], option: string): string[] {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === option) {
-      const value = args[index + 1]?.trim();
+      const candidate = args[index + 1];
+      const value = candidate && !candidate.startsWith("--") ? candidate.trim() : undefined;
       if (value) values.push(value);
-      index += 1;
+      if (value) index += 1;
     } else if (arg.startsWith(`${option}=`)) {
       const value = arg.slice(option.length + 1).trim();
       if (value) values.push(value);
     }
   }
   return [...new Set(values)];
+}
+
+function optionHasMissingValue(args: string[], option: string): boolean {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === option) {
+      const candidate = args[index + 1];
+      if (!candidate || candidate.startsWith("--") || !candidate.trim()) return true;
+    } else if (arg.startsWith(`${option}=`) && !arg.slice(option.length + 1).trim()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isCliResult(value: string | CliResult): value is CliResult {

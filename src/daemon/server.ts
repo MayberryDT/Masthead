@@ -2344,7 +2344,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
       const result = await routeWorkbenchAuthoringRequest(
         {
-          authoringCommand: process.env.MASTHEAD_CLI_COMMAND ?? "mastheadctl",
+          authoringCommand: process.env.MASTHEAD_CLI_COMMAND?.trim() || "mastheadctl",
           db: database
         },
         { body, method: request.method ?? "GET", url }
@@ -3457,26 +3457,38 @@ async function backupDatabaseBeforeMigration(databasePath: string): Promise<void
 
 function readBody(request: IncomingMessage, limitBytes = DEFAULT_BODY_LIMIT_BYTES): Promise<string> {
   return new Promise((resolve, reject) => {
-    const contentLength = request.headers["content-length"];
-    if (typeof contentLength === "string" && Number(contentLength) > limitBytes) {
-      reject(clientError(`Request body exceeds ${limitBytes} bytes.`));
-      request.destroy();
-      return;
-    }
     let body = "";
     let bytes = 0;
+    let settled = false;
+    const rejectOnce = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      body = "";
+      reject(error);
+    };
     request.setEncoding("utf8");
     request.on("data", (chunk) => {
+      if (settled) return;
       bytes += Buffer.byteLength(chunk, "utf8");
       if (bytes > limitBytes) {
-        reject(clientError(`Request body exceeds ${limitBytes} bytes.`));
-        request.destroy();
+        rejectOnce(clientError(`Request body exceeds ${limitBytes} bytes.`));
+        request.resume();
         return;
       }
       body += chunk;
     });
-    request.on("error", reject);
-    request.on("end", () => resolve(body));
+    request.once("error", (error) => rejectOnce(error));
+    request.once("end", () => {
+      if (settled) return;
+      settled = true;
+      resolve(body);
+    });
+
+    const contentLength = request.headers["content-length"];
+    if (typeof contentLength === "string" && Number(contentLength) > limitBytes) {
+      rejectOnce(clientError(`Request body exceeds ${limitBytes} bytes.`));
+      request.resume();
+    }
   });
 }
 

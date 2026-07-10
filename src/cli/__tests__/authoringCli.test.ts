@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { createMastheadDaemon, type MastheadDaemon } from "../../daemon/server.ts";
 import type { DaemonConfig } from "../../daemon/config.ts";
 import { seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
@@ -18,6 +18,7 @@ const daemons: MastheadDaemon[] = [];
 const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(daemons.map((daemon) => daemon.close()));
   daemons.length = 0;
   await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
@@ -153,6 +154,58 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     const missing = await runMastheadCli(["workbench", "status", "--json"], { env: {} });
     expect(missing.exitCode).toBe(1);
     expect(JSON.parse(missing.stderr)).toMatchObject({ ok: false, error: { code: "missing_argument" } });
+  });
+
+  test.each([
+    { args: ["workbench", "open", "--database-id", "--session", "session:a", "--json"], option: "--database-id" },
+    { args: ["workbench", "open", "--database-id", "database", "--session", "--json"], option: "--session" },
+    { args: ["workbench", "status", "--run", "--json"], option: "--run" },
+    { args: ["workbench", "submit", "--run", "run", "--file", "--json"], option: "--file" },
+    { args: ["workbench", "evidence", "--run", "run", "--session", "--json"], option: "--session" },
+    { args: ["workbench", "evidence", "--run", "run", "--session", "session:a", "--cursor", "--json"], option: "--cursor" },
+    { args: ["workbench", "evidence", "--run", "run", "--session", "session:a", "--limit", "--json"], option: "--limit" },
+    { args: ["workbench", "evidence", "--run", "run", "--session", "session:a", "--order", "--json"], option: "--order" },
+    { args: ["workbench", "evidence", "--run", "run", "--session", "session:a", "--kind", "--json"], option: "--kind" },
+    { args: ["workbench", "evidence", "--run", "run", "--session", "session:a", "--query", "--json"], option: "--query" }
+  ])("rejects valueless $option before network or filesystem access", async ({ args, option }) => {
+    const result = await runMastheadCli(args, {
+      env: { MASTHEAD_DAEMON_URL: "http://127.0.0.1:1" }
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: { code: "missing_argument", message: `Missing value for option: ${option}` },
+      ok: false
+    });
+  });
+
+  test("normalizes a blank daemon URL to the default connector", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          bundleVersion: "workbench-authoring-v1",
+          capability: "artifact_authoring",
+          command: "mastheadctl",
+          databaseId: "database",
+          evidencePolicy: "all_canonical_redacted_evidence",
+          operations: ["open", "status", "evidence", "submit", "finish"],
+          protocol: "masthead.workbench.authoring/v1",
+          transport: "daemon_http"
+        }),
+        { headers: { "content-type": "application/json" }, status: 200 }
+      )
+    );
+
+    const result = await runMastheadCli(["workbench", "capabilities", "--json"], {
+      env: { MASTHEAD_DAEMON_URL: "   " }
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:17373/workbench/authoring/capabilities",
+      expect.any(Object)
+    );
   });
 
   test("catches unexpected failures at the executable boundary", async () => {

@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +8,9 @@ import type { WorkbenchAuthoringBundle } from "../../shared/workbenchAuthoring.t
 import type { DaemonConfig } from "../config.ts";
 import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
 import { getOrCreateDatabaseIdentity } from "../db/schema.ts";
+import { applySessionArtifact, publishSessionArtifact } from "../db/sessionArtifactRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
+import type { MastheadDatabase } from "../db/sqlite.ts";
 import {
   getWorkbenchAuthoringBodyLimit,
   isWorkbenchAuthoringPath,
@@ -48,6 +51,24 @@ describe("Workbench authoring HTTP API", () => {
       }
     );
     expect(injected?.body).toMatchObject({ command: "/opt/masthead/bin/mastheadctl" });
+    const blankCommand = await routeWorkbenchAuthoringRequest(
+      { authoringCommand: "   ", db: daemon.database },
+      {
+        method: "GET",
+        url: new URL("http://127.0.0.1/workbench/authoring/capabilities")
+      }
+    );
+    expect(blankCommand?.body).toMatchObject({ command: "mastheadctl" });
+    const previousCommand = process.env.MASTHEAD_CLI_COMMAND;
+    process.env.MASTHEAD_CLI_COMMAND = "   ";
+    try {
+      expect((await getJson(baseUrl, "/workbench/authoring/capabilities")).body).toMatchObject({
+        command: "mastheadctl"
+      });
+    } finally {
+      if (previousCommand === undefined) delete process.env.MASTHEAD_CLI_COMMAND;
+      else process.env.MASTHEAD_CLI_COMMAND = previousCommand;
+    }
 
     const opened = await postJson(
       baseUrl,
@@ -197,6 +218,158 @@ describe("Workbench authoring HTTP API", () => {
     expect(getWorkbenchAuthoringBodyLimit("/workbench/authoring/runs/run%3A1/submit", 1024)).toBe(5 * 1024 * 1024);
     expect(getWorkbenchAuthoringBodyLimit("/workbench/authoring/runs", 1024)).toBe(1024);
   });
+
+  test("returns structured body-limit errors without destroying the response socket", async () => {
+    const { baseUrl } = await startTestDaemon();
+
+    const oversizedOpen = await postChunked(
+      baseUrl,
+      "/workbench/authoring/runs",
+      ["{\"padding\":\"", "x".repeat(1_048_576), "\"}"],
+      400
+    );
+    expect(oversizedOpen.body).toEqual({
+      error: {
+        code: "request_body_too_large",
+        message: "Request body exceeds 1048576 bytes."
+      },
+      ok: false
+    });
+
+    const oversizedSubmit = await postRaw(
+      baseUrl,
+      "/workbench/authoring/runs/missing/submit",
+      JSON.stringify({ padding: "x".repeat(5 * 1024 * 1024) }),
+      400
+    );
+    expect(oversizedSubmit.body).toEqual({
+      error: {
+        code: "request_body_too_large",
+        message: "Request body exceeds 5242880 bytes."
+      },
+      ok: false
+    });
+
+    const unrelated = await postRaw(
+      baseUrl,
+      "/settings/llm-provider",
+      JSON.stringify({ padding: "x".repeat(1_048_576) }),
+      400
+    );
+    expect(unrelated.body).toMatchObject({ ok: false, error: "Request body exceeds 1048576 bytes." });
+    await getJson(baseUrl, "/health");
+  });
+
+  test("returns sanitized 500 responses for corrupted run invariants and unexpected adapter errors", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedAuthoringSession(daemon, "session:corrupted");
+    const opened = await postJson(
+      baseUrl,
+      "/workbench/authoring/runs",
+      {
+        actorId: "codex",
+        databaseId: getOrCreateDatabaseIdentity(daemon.database),
+        sessionIds: ["session:corrupted"]
+      },
+      201
+    );
+    const runId = opened.body.run.runId as string;
+    daemon.database
+      .prepare("UPDATE workbench_authoring_runs SET status = 'ready_to_finish', bundle_json = NULL WHERE run_id = ?")
+      .run(runId);
+
+    const corrupted = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`,
+      {},
+      500
+    );
+    expect(corrupted.body).toEqual({
+      error: { code: "authoring_internal_error", message: "Workbench authoring request failed" },
+      ok: false
+    });
+    expect(JSON.stringify(corrupted.body)).not.toContain("authoring_run_bundle_missing");
+    expect(JSON.stringify(corrupted.body)).not.toContain(runId);
+
+    const unexpected = await routeWorkbenchAuthoringRequest(
+      {
+        authoringCommand: "mastheadctl",
+        db: {
+          prepare() {
+            throw new Error("secret database invariant detail");
+          }
+        } as unknown as MastheadDatabase
+      },
+      {
+        method: "GET",
+        url: new URL("http://127.0.0.1/workbench/authoring/capabilities")
+      }
+    );
+    expect(unexpected).toEqual({
+      body: {
+        error: { code: "authoring_internal_error", message: "Workbench authoring request failed" },
+        ok: false
+      },
+      status: 500
+    });
+    expect(JSON.stringify(unexpected)).not.toContain("secret database invariant detail");
+  });
+
+  test("returns 409 when an accepted contribution becomes invalid before finish", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedAuthoringSession(daemon, "session:contribution");
+    const existing = applySessionArtifact(daemon.database, {
+      artifactKind: "runbook",
+      content: { title: "Published contribution" },
+      contentFingerprint: "published-contribution",
+      createdBy: "test",
+      evidenceRefs: ["message:session:contribution:message"],
+      provenanceSessionIds: ["session:contribution"],
+      schemaVersion: "runbook-v1",
+      sessionId: "session:contribution",
+      title: "Published contribution",
+      validation: { ok: true }
+    });
+    publishSessionArtifact(daemon.database, existing.artifactId);
+    const opened = await postJson(
+      baseUrl,
+      "/workbench/authoring/runs",
+      {
+        actorId: "codex",
+        databaseId: getOrCreateDatabaseIdentity(daemon.database),
+        sessionIds: ["session:contribution"]
+      },
+      201
+    );
+    const runId = opened.body.run.runId as string;
+    const bundle = validBundle(runId, opened.body.run.evidenceRevision, "session:contribution");
+    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    bundle.contributions = [
+      {
+        kind: "runbook",
+        publishedArtifactId: existing.artifactId,
+        sessionId: "session:contribution"
+      }
+    ];
+    const submitted = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`,
+      bundle
+    );
+    expect(submitted.body).toMatchObject({ accepted: true, run: { status: "ready_to_finish" } });
+
+    daemon.database.prepare("UPDATE session_artifacts SET status = 'superseded' WHERE artifact_id = ?").run(existing.artifactId);
+    const finished = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`,
+      {},
+      409
+    );
+    expect(finished.body).toMatchObject({
+      error: { code: "authoring_finish_invalid_contribution" },
+      ok: false
+    });
+  });
 });
 
 async function startTestDaemon(): Promise<{ baseUrl: string; daemon: MastheadDaemon }> {
@@ -307,4 +480,35 @@ async function postRaw(baseUrl: string, path: string, body: string, expectedStat
   });
   expect(response.status).toBe(expectedStatus);
   return { body: (await response.json()) as any, status: response.status };
+}
+
+async function postChunked(baseUrl: string, path: string, chunks: string[], expectedStatus: number) {
+  return new Promise<{ body: any; status: number }>((resolve, reject) => {
+    const request = httpRequest(
+      new URL(path, baseUrl),
+      {
+        headers: { accept: "application/json", "content-type": "application/json" },
+        method: "POST"
+      },
+      (response) => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          body += chunk;
+        });
+        response.once("error", reject);
+        response.once("end", () => {
+          try {
+            expect(response.statusCode).toBe(expectedStatus);
+            resolve({ body: JSON.parse(body) as any, status: response.statusCode ?? 0 });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+    request.once("error", reject);
+    for (const chunk of chunks) request.write(chunk);
+    request.end();
+  });
 }

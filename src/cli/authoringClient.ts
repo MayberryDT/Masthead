@@ -26,7 +26,7 @@ export class MastheadAuthoringClient {
   private readonly baseUrl: string;
 
   constructor(baseUrl = DEFAULT_MASTHEAD_DAEMON_URL) {
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.baseUrl = (baseUrl.trim() || DEFAULT_MASTHEAD_DAEMON_URL).replace(/\/+$/, "");
   }
 
   capabilities(): Promise<WorkbenchAuthoringCapabilitiesDto> {

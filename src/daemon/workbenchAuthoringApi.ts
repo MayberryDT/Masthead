@@ -43,7 +43,7 @@ export async function routeWorkbenchAuthoringRequest(
       const body: WorkbenchAuthoringCapabilitiesDto = {
         bundleVersion: "workbench-authoring-v1",
         capability: "artifact_authoring",
-        command: context.authoringCommand,
+        command: context.authoringCommand.trim() || "mastheadctl",
         databaseId: getOrCreateDatabaseIdentity(context.db),
         evidencePolicy: "all_canonical_redacted_evidence",
         operations: ["open", "status", "evidence", "submit", "finish"],
@@ -147,15 +147,7 @@ function authoringErrorResult(error: unknown): WorkbenchAuthoringHttpResult {
   if (code === "authoring_run_not_found" || code === "authoring_session_not_found" || code === "session_not_found") {
     return { body: { error: { code, message }, ok: false }, status: 404 };
   }
-  if (
-    code === "database_identity_mismatch" ||
-    code === "missing_canonical_evidence" ||
-    code.startsWith("authoring_run_") ||
-    code.startsWith("authoring_claim_") ||
-    code.startsWith("authoring_session_") ||
-    code.startsWith("authoring_finish_") ||
-    code.startsWith("evidence_revision_")
-  ) {
+  if (authoringConflictCodes.has(code)) {
     return { body: { error: { code, message }, ok: false }, status: 409 };
   }
   return {
@@ -166,6 +158,25 @@ function authoringErrorResult(error: unknown): WorkbenchAuthoringHttpResult {
     status: 500
   };
 }
+
+const authoringConflictCodes = new Set([
+  "authoring_actor_mismatch",
+  "authoring_claim_conflict",
+  "authoring_claim_missing",
+  // A contribution can become non-current after submit; refreshing evidence and
+  // resubmitting against a current published artifact resolves this conflict.
+  "authoring_finish_invalid_contribution",
+  "authoring_run_completed",
+  "authoring_run_mismatch",
+  "authoring_run_needs_revision",
+  "authoring_run_not_ready",
+  "authoring_session_not_in_run",
+  "authoring_session_not_on_publish_path",
+  "database_identity_mismatch",
+  "evidence_revision_changed",
+  "evidence_revision_mismatch",
+  "missing_canonical_evidence"
+]);
 
 function methodNotAllowed(): WorkbenchAuthoringHttpResult {
   return {
