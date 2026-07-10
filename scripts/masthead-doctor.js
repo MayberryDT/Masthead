@@ -33,15 +33,6 @@ const PRODUCT_ENDPOINTS = [
   "/data/summary",
   "/live/state"
 ];
-const EXPECTED_MCP_TOOLS = [
-  "get_masthead_coverage",
-  "get_project_history",
-  "get_session",
-  "get_session_excerpt",
-  "list_project_sessions",
-  "search_sessions"
-];
-
 const baseUrl = normalizeBaseUrl(process.env.MASTHEAD_BASE_URL || process.env.MASTHEAD_HEALTH_URL || "http://127.0.0.1:17373");
 const hookConfigPath = resolve(process.env.MASTHEAD_CODEX_HOOKS || join(homedir(), ".codex/hooks.json"));
 const jsonOutput = process.argv.includes("--json");
@@ -232,23 +223,25 @@ async function checkEndpoints() {
 async function checkSources() {
   try {
     const body = await getJson("/adapters");
-    const adapters = Array.isArray(body.adapters) ? body.adapters : [];
-    const codex = adapters.find((adapter) => isRecord(adapter) && adapter.runtime === "codex");
+    const adapters = Array.isArray(body.adapters) ? body.adapters.filter(isRecord) : [];
+    const importAdapters = adapters.filter((adapter) => adapter.implementationState === "active");
+    const scanTargets = adapters.filter((adapter) => adapter.implementationState === "scan_target");
+    const detectedAdapters = adapters.filter((adapter) => adapter.state !== "not_detected");
     const plannedAdapters = adapters.filter((adapter) => isRecord(adapter) && (adapter.state === "planned" || adapter.implementationState === "planned"));
     const diagnosticsCount = adapters.reduce((total, adapter) => total + (Array.isArray(adapter.diagnostics) ? adapter.diagnostics.length : 0), 0);
     const details = {
-      codexState: codex?.state ?? "missing",
-      discoveredSessions: numberValue(codex?.discoveredSessions ?? codex?.discoveredCount) ?? 0,
-      importedSessions: numberValue(codex?.importedSessions ?? codex?.importedCount) ?? 0,
+      adapters: adapters.length,
+      detectedAdapters: detectedAdapters.length,
       diagnosticsCount,
+      importAdapters: importAdapters.length,
+      scanTargets: scanTargets.length,
       plannedAdapters: plannedAdapters.length
     };
-    const missingCodex = !codex || codex.state === "not_detected";
     return {
       id: "source-discovery",
       label: "source discovery",
-      status: missingCodex ? "warn" : "ok",
-      message: missingCodex ? "Codex source is not detected." : `Codex source ${details.codexState}; ${details.importedSessions}/${details.discoveredSessions} sessions imported.`,
+      status: adapters.length > 0 && importAdapters.length > 0 ? "ok" : "fail",
+      message: `${adapters.length} adapters reported; ${detectedAdapters.length} detected, ${importAdapters.length} import-capable, ${scanTargets.length} scan-only.`,
       details
     };
   } catch (error) {
@@ -260,21 +253,24 @@ async function checkMcp() {
   try {
     const [statusBody, toolsBody] = await Promise.all([getJson("/mcp/status"), getJson("/mcp/tools")]);
     const status = isRecord(statusBody.status) ? statusBody.status : {};
-    const toolNames = Array.isArray(toolsBody.tools)
-      ? toolsBody.tools.map((tool) => tool.name).filter((name) => typeof name === "string").sort()
-      : [];
-    const missingTools = EXPECTED_MCP_TOOLS.filter((tool) => !toolNames.includes(tool));
+    const tools = Array.isArray(toolsBody.tools) ? toolsBody.tools.filter(isRecord) : [];
+    const toolNames = tools.map((tool) => tool.name).filter((name) => typeof name === "string").sort();
+    const unsafeTools = toolNames.filter((name) => /write|delete|clear|import|install|uninstall|approve|run|execute/i.test(name));
+    const invalidPermissions = tools.filter((tool) => tool.permission !== "Read only").map((tool) => tool.name);
+    const statusToolCount = numberValue(status.toolCount);
+    const catalogMatchesStatus = statusToolCount === toolNames.length;
+    const valid = toolNames.length > 0 && catalogMatchesStatus && unsafeTools.length === 0 && invalidPermissions.length === 0;
     return {
       id: "mcp",
       label: "mcp",
-      status: missingTools.length === 0 && toolNames.length === EXPECTED_MCP_TOOLS.length ? "ok" : "fail",
-      message:
-        missingTools.length === 0 && toolNames.length === EXPECTED_MCP_TOOLS.length
-          ? `MCP exposes ${toolNames.length} read-only tools.`
-          : `MCP tool catalog mismatch; missing ${missingTools.join(", ") || "none"}.`,
+      status: valid ? "ok" : "fail",
+      message: valid ? `MCP exposes ${toolNames.length} read-only tools.` : "MCP HTTP tool catalog is inconsistent or exposes unsafe tools.",
       details: {
+        catalogMatchesStatus,
+        invalidPermissions,
         toolCount: toolNames.length,
         toolNames,
+        unsafeTools,
         globalAccessEnabled: status.globalAccessEnabled,
         queryCount: status.queryCount
       }
@@ -299,6 +295,11 @@ async function checkMcpStdio() {
 
   let child;
   try {
+    const catalogBody = await getJson("/mcp/tools");
+    const expectedToolNames = Array.isArray(catalogBody.tools)
+      ? catalogBody.tools.map((tool) => tool.name).filter((name) => typeof name === "string").sort()
+      : [];
+    assert(expectedToolNames.length > 0, "HTTP MCP tool catalog is empty");
     child = spawn(process.execPath, ["dist/daemon/src/mcp/server.js"], {
       cwd: process.cwd(),
       env: { ...process.env, MASTHEAD_DB_PATH: databasePath },
@@ -311,8 +312,7 @@ async function checkMcpStdio() {
     const tools = await mcpRpc(child, "tools/list", {});
     const toolEntries = Array.isArray(tools.result?.tools) ? tools.result.tools : [];
     const toolNames = toolEntries.map((tool) => tool.name).filter((name) => typeof name === "string").sort();
-    const missingTools = EXPECTED_MCP_TOOLS.filter((tool) => !toolNames.includes(tool));
-    assert(missingTools.length === 0 && toolNames.length === EXPECTED_MCP_TOOLS.length, `tool catalog mismatch: ${toolNames.join(", ")}`);
+    assert(JSON.stringify(toolNames) === JSON.stringify(expectedToolNames), `tool catalog mismatch: ${toolNames.join(", ")}`);
 
     const coverage = await mcpToolCall(child, "get_masthead_coverage", {});
     assert(numberValue(coverage.sessions) !== undefined, "coverage tool did not return a sessions count");
@@ -505,63 +505,45 @@ async function checkSourcesPipeline() {
 
 async function checkLogbook() {
   try {
-    const [summaryBody, searchBody] = await Promise.all([getJson("/logbook/summary"), getJson("/sessions?limit=1")]);
-    const body = summaryBody;
-    const summary = isRecord(body.summary) ? body.summary : {};
-    const sessionRows = Array.isArray(searchBody.sessions) ? searchBody.sessions : [];
-    const sessions = numberValue(summary.sessions) ?? 0;
-    let dossierStatus = "skipped";
-    let dossierError;
-    let transcriptStatus = "skipped";
-    let transcriptError;
-    let transcriptMessages;
-    const firstSessionId = isRecord(sessionRows[0]) && typeof sessionRows[0].sessionId === "string" ? sessionRows[0].sessionId : undefined;
-    if (firstSessionId) {
+    const [summaryBody, searchBody] = await Promise.all([getJson("/logbook/summary"), getJson("/logbook/artifacts?limit=1")]);
+    const summary = isRecord(summaryBody.artifactSummary) ? summaryBody.artifactSummary : {};
+    const artifactRows = Array.isArray(searchBody.artifacts) ? searchBody.artifacts.filter(isRecord) : [];
+    const artifacts = numberValue(summary.artifacts) ?? 0;
+    const firstArtifactId = stringValue(artifactRows[0]?.artifactId);
+    let detailStatus = "skipped";
+    let detailError;
+    let provenanceSessions = 0;
+    if (firstArtifactId) {
       try {
-        const dossierBody = await getJson(`/sessions/${encodeURIComponent(firstSessionId)}/dossier`);
-        dossierStatus = isRecord(dossierBody.dossier) ? "ok" : "invalid";
+        const detailBody = await getJson(`/logbook/artifacts/${encodeURIComponent(firstArtifactId)}`);
+        const artifact = isRecord(detailBody.artifact) ? detailBody.artifact : {};
+        provenanceSessions = Array.isArray(artifact.provenanceSessionIds) ? artifact.provenanceSessionIds.length : 0;
+        detailStatus = isRecord(artifact.body) && provenanceSessions > 0 ? "ok" : "invalid";
       } catch (error) {
-        dossierStatus = "fail";
-        dossierError = errorMessage(error);
-      }
-      try {
-        const transcriptBody = await getJson(`/sessions/${encodeURIComponent(firstSessionId)}/transcript?limit=1`);
-        const coverage = isRecord(transcriptBody.coverage) ? transcriptBody.coverage : {};
-        transcriptMessages = numberValue(coverage.messages);
-        transcriptStatus = Array.isArray(transcriptBody.items) && isRecord(transcriptBody.coverage) ? "ok" : "invalid";
-      } catch (error) {
-        transcriptStatus = "fail";
-        transcriptError = errorMessage(error);
+        detailStatus = "fail";
+        detailError = errorMessage(error);
       }
     }
-    const status =
-      dossierStatus === "fail" || dossierStatus === "invalid" || transcriptStatus === "fail" || transcriptStatus === "invalid"
-        ? "fail"
-        : sessions === 0 || transcriptMessages === 0
-          ? "warn"
-          : "ok";
+    const status = detailStatus === "fail" || detailStatus === "invalid" || (artifacts > 0 && artifactRows.length === 0) ? "fail" : artifacts === 0 ? "warn" : "ok";
     return {
       id: "logbook",
       label: "logbook",
       status,
       message:
-        sessions === 0
-          ? "Logbook has zero sessions."
-          : dossierStatus === "ok" && transcriptStatus === "ok"
-            ? `Logbook has ${sessions} sessions, a canonical dossier, and transcript coverage.`
-            : `Logbook has ${sessions} sessions and search returned ${sessionRows.length}; dossier ${dossierStatus}.`,
+        artifacts === 0
+          ? "Logbook has zero published artifacts."
+          : detailStatus === "ok"
+            ? `Logbook has ${artifacts} published artifact${artifacts === 1 ? "" : "s"}; artifact detail and provenance are readable.`
+            : `Logbook has ${artifacts} published artifact${artifacts === 1 ? "" : "s"}; detail ${detailStatus}.`,
       details: {
-        dossierError,
-        dossierStatus,
-        firstSessionId,
-        transcriptError,
-        transcriptMessages,
-        transcriptStatus,
-        sessions,
+        artifacts,
+        byKind: summary.byKind,
+        detailError,
+        detailStatus,
+        firstArtifactId,
+        provenanceSessions,
         projects: summary.projects,
-        messages: summary.messages,
-        toolCalls: summary.toolCalls,
-        searchRows: sessionRows.length
+        searchRows: artifactRows.length
       }
     };
   } catch (error) {

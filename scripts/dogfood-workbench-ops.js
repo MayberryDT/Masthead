@@ -4,9 +4,10 @@
  * Never touches the real dev database.
  *
  * Pipeline: enroll missing (idempotent catch-up) → check transcript → quality pass →
- * enrichment + dossier satisfied → bug_fix not_applicable → publish →
- * assert Logbook-visible published state.
+ * enrichment + dossier applied → runbook not_applicable → publish →
+ * assert Logbook-visible published artifact state.
  */
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,10 +15,9 @@ import { join, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const requiredModules = [
-  "dist/daemon/src/daemon/db/schema.js",
-  "dist/daemon/src/daemon/db/sqlite.js",
+  "dist/daemon/src/daemon/db/sessionArtifactRepository.js",
   "dist/daemon/src/daemon/db/workbenchPipelineRepository.js",
-  "dist/daemon/src/daemon/db/workbenchPublicationSql.js",
+  "dist/daemon/src/daemon/server.js",
   "dist/daemon/src/workbench/transcriptWorkflow.js",
   "dist/daemon/src/workbench/qualityPrecheck.js"
 ];
@@ -29,8 +29,7 @@ for (const relativePath of requiredModules) {
   }
 }
 
-const { migrateDatabase } = await import("../dist/daemon/src/daemon/db/schema.js");
-const { openMastheadDatabase } = await import("../dist/daemon/src/daemon/db/sqlite.js");
+const { applySessionArtifact } = await import("../dist/daemon/src/daemon/db/sessionArtifactRepository.js");
 const {
   enrollMissingWorkbenchSessions,
   markWorkbenchQuality,
@@ -40,37 +39,56 @@ const {
   publishWorkbenchSession,
   readWorkbenchSessionState
 } = await import("../dist/daemon/src/daemon/db/workbenchPipelineRepository.js");
-const { workbenchSessionIsPublished } = await import("../dist/daemon/src/daemon/db/workbenchPublicationSql.js");
 const { checkWorkbenchTranscript } = await import("../dist/daemon/src/workbench/transcriptWorkflow.js");
 const { runCaptureQualityPrecheck } = await import("../dist/daemon/src/workbench/qualityPrecheck.js");
+const { createMastheadDaemon } = await import("../dist/daemon/src/daemon/server.js");
 
-const sessionId = "session:ops-dogfood";
 const actor = { kind: "agent", id: "dogfood-ops" };
 const steps = [];
 const tempDir = await mkdtemp(join(tmpdir(), "masthead-workbench-ops-"));
+let daemon;
+let restartedDaemon;
+let sessionId;
 
 try {
   const dbPath = join(tempDir, "masthead.sqlite");
-  const db = await openMastheadDatabase(dbPath);
-  migrateDatabase(db);
-  seedSession(db, sessionId);
+  const storePath = join(tempDir, "events.ndjson");
+  const config = daemonConfig(dbPath, storePath);
+  daemon = await createMastheadDaemon(config);
+  const baseUrl = await listen(daemon);
+  const sourceSessionId = "source-session-ops-dogfood";
+  const accepted = await postJson(baseUrl, "/ingest?runtime=opencode", livePayload(sourceSessionId));
+  const projection = await getJson(baseUrl, `/projection?expandedSessionId=${encodeURIComponent(sourceSessionId)}`);
+  const liveCard = projection.projection?.cards?.find((card) => card.sourceSessionId === sourceSessionId);
+  sessionId = liveCard?.canonicalSessionId;
+  if (accepted.status !== "accepted" || !sessionId) throw new Error("Live source did not reach the Now projection with canonical identity");
+  steps.push({
+    name: "live_source_to_now",
+    ok: true,
+    ingestStatus: accepted.status,
+    runtime: liveCard.runtime,
+    canonicalSessionId: sessionId
+  });
+
+  const db = daemon.database;
+  seedSessionEvidence(db, sessionId);
   // Second session stays unenrolled until bulk enroll; proves catch-up only.
   seedSession(db, "session:ops-dogfood-missing", {
     title: "Workbench ops dogfood missing session",
     objective: "Prove enroll-missing catch-up on a temporary database"
   });
 
-  // 0. Enroll missing — no pipeline rows yet; both sessions should enroll.
+  // 0. Enroll missing — the live session is already enrolled, so only the seeded catch-up session should enroll.
   const enrollFirst = enrollMissingWorkbenchSessions(db, { actor, limit: 500 });
   steps.push({
     name: "enroll_missing",
-    ok: enrollFirst.enrolled === 2 && enrollFirst.enrolledSessionIds.includes(sessionId),
+    ok: enrollFirst.enrolled === 1 && enrollFirst.enrolledSessionIds.includes("session:ops-dogfood-missing"),
     enrolled: enrollFirst.enrolled,
     skippedExisting: enrollFirst.skippedExisting,
     enrolledSessionIds: enrollFirst.enrolledSessionIds
   });
-  if (enrollFirst.enrolled !== 2) {
-    throw new Error(`Expected enroll_missing enrolled=2, got ${JSON.stringify(enrollFirst)}`);
+  if (enrollFirst.enrolled !== 1) {
+    throw new Error(`Expected enroll_missing enrolled=1, got ${JSON.stringify(enrollFirst)}`);
   }
   const enrolledState = readWorkbenchSessionState(db, sessionId);
   if (!enrolledState || enrolledState.publicationStatus !== "publish_path") {
@@ -115,7 +133,7 @@ try {
     throw new Error(`Expected quality_status passed, got ${quality.state.qualityStatus}`);
   }
 
-  // 3. Mark enrichment + dossier satisfied; bug_fix not applicable for this non-bug session.
+  // 3. Mark enrichment satisfied, apply a real dossier, and mark runbook not applicable.
   const enrichment = markWorkbenchSessionEnrichmentSatisfied(db, { actor, sessionId });
   steps.push({
     name: "session_enrichment_satisfied",
@@ -123,6 +141,24 @@ try {
     sessionEnrichmentStatus: enrichment.state.sessionEnrichmentStatus
   });
 
+  const dossierArtifact = applySessionArtifact(db, {
+    artifactKind: "session_dossier",
+    confidence: "high",
+    content: {
+      outcome: "Workbench ops dogfood completed against a temporary SQLite database.",
+      verification: ["node scripts/dogfood-workbench-ops.js"]
+    },
+    contentFingerprint: "workbench-ops-dogfood-dossier-v1",
+    createdBy: "dogfood-ops",
+    evidenceRefs: [`${sessionId}:message:user`, `${sessionId}:message:assistant`],
+    highlight: "Completed the full Workbench publish path.",
+    projectLabel: "Masthead",
+    schemaVersion: "session-dossier-v1",
+    sessionId,
+    summary: "Verifies Workbench gates, artifact publication, and Logbook visibility.",
+    title: "Workbench ops dogfood dossier",
+    validation: { valid: true }
+  });
   const dossier = markWorkbenchArtifactSatisfied(db, {
     actor,
     artifactKind: "session_dossier",
@@ -134,17 +170,17 @@ try {
     sessionDossierStatus: dossier.state.sessionDossierStatus
   });
 
-  const bugFix = setWorkbenchArtifactApplicability(db, {
+  const runbook = setWorkbenchArtifactApplicability(db, {
     actor,
-    artifactKind: "bug_fix_trace",
-    reason: "ops_dogfood_non_bug_session",
+    artifactKind: "runbook",
+    reason: "ops_dogfood_no_runbook_evidence",
     sessionId,
     status: "not_applicable"
   });
   steps.push({
-    name: "bug_fix_not_applicable",
-    ok: bugFix.state.bugFixTraceStatus === "not_applicable",
-    bugFixTraceStatus: bugFix.state.bugFixTraceStatus
+    name: "runbook_not_applicable",
+    ok: runbook.state.runbookStatus === "not_applicable",
+    runbookStatus: runbook.state.runbookStatus
   });
 
   // 4. Publish when gates pass.
@@ -165,12 +201,46 @@ try {
     throw new Error(`Expected publication_status published, got ${state?.publicationStatus ?? "missing"}`);
   }
 
-  // 5. Logbook-visible via published-only helper.
-  const logbookVisible = workbenchSessionIsPublished(db, sessionId);
-  steps.push({ name: "logbook_visible", ok: logbookVisible === true, logbookVisible });
-  if (!logbookVisible) throw new Error("workbenchSessionIsPublished returned false after publish");
+  // 5. Logbook-visible through the product API, not merely a published session flag.
+  const logbook = await getJson(baseUrl, "/logbook/artifacts?q=Workbench%20ops%20dogfood&limit=10");
+  const logbookArtifact = logbook.artifacts?.find((artifact) => artifact.artifactId === dossierArtifact.artifactId);
+  const detail = await getJson(baseUrl, `/logbook/artifacts/${encodeURIComponent(dossierArtifact.artifactId)}`);
+  const logbookVisible = Boolean(logbookArtifact && detail.artifact?.provenanceSessionIds?.includes(sessionId));
+  steps.push({
+    name: "published_artifact_visible",
+    ok: logbookVisible,
+    artifactId: dossierArtifact.artifactId,
+    publicationStatus: logbookArtifact ? "published" : "missing"
+  });
+  if (!logbookVisible) throw new Error("Published dossier was not visible in artifact-first Logbook");
 
-  db.close();
+  // 6. Restart the daemon and prove the canonical session and published artifact remain singular.
+  const beforeRestart = persistenceCounts(db);
+  await daemon.close();
+  daemon = undefined;
+  restartedDaemon = await createMastheadDaemon(config);
+  const restartedBaseUrl = await listen(restartedDaemon);
+  const afterRestart = persistenceCounts(restartedDaemon.database);
+  const restartedLogbook = await getJson(restartedBaseUrl, "/logbook/artifacts?q=Workbench%20ops%20dogfood&limit=10");
+  const restartStable =
+    afterRestart.sessions === beforeRestart.sessions &&
+    afterRestart.publishedArtifacts === beforeRestart.publishedArtifacts &&
+    restartedLogbook.artifacts?.some((artifact) => artifact.artifactId === dossierArtifact.artifactId);
+  steps.push({
+    name: "restart_persistence",
+    ok: Boolean(restartStable),
+    before: beforeRestart,
+    after: afterRestart
+  });
+  if (!restartStable) throw new Error("Daemon restart changed session or published artifact counts");
+
+  // 7. Read the same published artifact through the real MCP stdio protocol.
+  const mcp = verifyArtifactThroughMcp(dbPath, dossierArtifact.artifactId);
+  steps.push({ name: "artifact_primary_mcp", ok: mcp.ok, searchResults: mcp.searchResults, artifactRead: mcp.artifactRead });
+  if (!mcp.ok) throw new Error("Artifact-primary MCP did not return the published dossier");
+
+  const failedSteps = steps.filter((step) => !step.ok);
+  if (failedSteps.length > 0) throw new Error(`Dogfood receipt contains failed steps: ${failedSteps.map((step) => step.name).join(", ")}`);
 
   const receipt = { ok: true, sessionId, steps, dbPath };
   console.log(JSON.stringify(receipt, null, 2));
@@ -180,8 +250,107 @@ try {
   console.log(JSON.stringify({ ok: false, sessionId, steps, error: message }, null, 2));
   process.exitCode = 1;
 } finally {
+  if (daemon) await daemon.close();
+  if (restartedDaemon) await restartedDaemon.close();
   if (!process.env.MASTHEAD_KEEP_DOGFOOD_DB) {
     await rm(tempDir, { force: true, recursive: true });
+  }
+}
+
+function daemonConfig(databasePath, storePath) {
+  return {
+    allowedOrigins: ["http://127.0.0.1:5173"],
+    codexHomeDir: tempDir,
+    databasePath,
+    fixturePath: join(tempDir, "fixture.json"),
+    gitRefreshMs: 0,
+    host: "127.0.0.1",
+    hookTranscriptCatchupEnabled: false,
+    llmCopyEnabled: false,
+    port: 0,
+    storePath
+  };
+}
+
+function livePayload(sourceSessionId) {
+  return {
+    content: "Start the Workbench golden-path dogfood.",
+    directory: repoRoot,
+    project: "Masthead",
+    repo_root: repoRoot,
+    sessionID: sourceSessionId,
+    summary: "Workbench golden-path dogfood",
+    time: "2026-07-09T12:00:00.000Z",
+    timestamp: "2026-07-09T12:00:00.000Z",
+    title: "Workbench ops dogfood session",
+    type: "session.created"
+  };
+}
+
+function listen(instance) {
+  return new Promise((resolve) => {
+    instance.server.listen(0, "127.0.0.1", () => {
+      const address = instance.server.address();
+      resolve(`http://127.0.0.1:${address.port}`);
+    });
+  });
+}
+
+async function getJson(baseUrl, path) {
+  const response = await fetch(`${baseUrl}${path}`, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`${path} returned ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
+async function postJson(baseUrl, path, body) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    body: JSON.stringify(body),
+    headers: { accept: "application/json", "content-type": "application/json" },
+    method: "POST"
+  });
+  if (!response.ok) throw new Error(`${path} returned ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
+function persistenceCounts(db) {
+  return {
+    publishedArtifacts: db
+      .prepare("SELECT COUNT(*) AS count FROM session_artifacts WHERE publication_status = 'published' AND status = 'current'")
+      .get().count,
+    sessions: db.prepare("SELECT COUNT(*) AS count FROM sessions").get().count
+  };
+}
+
+function verifyArtifactThroughMcp(databasePath, artifactId) {
+  try {
+    const requests = [
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "search_artifacts", arguments: { query: "Workbench ops dogfood", limit: 5 } }
+      },
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "get_artifact", arguments: { artifactId } }
+      }
+    ];
+    const child = spawnSync(process.execPath, ["dist/daemon/src/mcp/server.js"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, MASTHEAD_DB_PATH: databasePath },
+      input: `${requests.map((request) => JSON.stringify(request)).join("\n")}\n`
+    });
+    if (child.status !== 0) throw new Error(child.stderr || `MCP exited ${child.status}`);
+    const replies = child.stdout.trim().split(/\n/).map((line) => JSON.parse(line));
+    const search = JSON.parse(replies[0]?.result?.content?.[0]?.text ?? "{}");
+    const detail = JSON.parse(replies[1]?.result?.content?.[0]?.text ?? "{}");
+    const artifactRead = detail.artifact?.capsule?.artifactId === artifactId;
+    return { artifactRead, ok: search.total === 1 && artifactRead, searchResults: search.total ?? 0 };
+  } catch (error) {
+    return { artifactRead: false, error: error instanceof Error ? error.message : String(error), ok: false, searchResults: 0 };
   }
 }
 
@@ -242,6 +411,10 @@ function seedSession(db, id, overrides = {}) {
     VALUES (?, ?, ?, ?, ?)`
   ).run(id, sourceId, now, now, 3);
 
+  seedSessionEvidence(db, id, now);
+}
+
+function seedSessionEvidence(db, id, now = "2026-07-08T16:00:00.000Z") {
   // Meaningful user + assistant messages so transcript coverage is usable and quality precheck passes.
   db.prepare(
     `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)

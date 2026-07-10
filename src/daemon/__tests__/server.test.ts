@@ -43,6 +43,33 @@ describe("Masthead daemon startup", () => {
     await expect(access(databasePath)).rejects.toThrow();
   });
 
+  test("updates source policies when the source id path segment is URL encoded", async () => {
+    const daemon = await createTestDaemon();
+    const sourceId = "opencode:encoded-source";
+    const now = "2026-07-09T12:00:00.000Z";
+    daemon.database
+      .prepare(
+        `INSERT INTO ingest_sources (
+          source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(sourceId, "opencode", "jsonl", "/tmp/encoded-source.jsonl", "heuristic", now, now);
+    const baseUrl = await listen(daemon);
+
+    const response = await fetch(`${baseUrl}/sources/${encodeURIComponent(sourceId)}/policies`, {
+      body: JSON.stringify({ enabled: true, policyKind: "transcript_import" }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "PUT"
+    });
+
+    expect(response.status).toBe(202);
+    expect(
+      daemon.database
+        .prepare("SELECT enabled FROM source_policies WHERE source_id = ? AND policy_kind = 'transcript_import'")
+        .get(sourceId)
+    ).toEqual({ enabled: 1 });
+  });
+
   test("previews enrichment rebuilds without writing rows", async () => {
     const daemon = await createTestDaemon();
     seedSession(daemon.database, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:rebuild", title: "Rebuild preview" });

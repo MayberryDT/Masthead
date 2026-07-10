@@ -116,6 +116,13 @@ export const MCP_TOOL_CATALOG: McpToolDto[] = [
     purpose: "Read bounded historical excerpts"
   },
   {
+    arguments: "sessionId, optional limit, maxBytes, role",
+    dataReturned: "Bounded canonical transcript rows with coverage",
+    name: "get_session_transcript",
+    permission: "Read only",
+    purpose: "Read canonical transcript evidence"
+  },
+  {
     arguments: "project, limit",
     dataReturned: "Recent session summaries for a project",
     name: "list_project_sessions",
@@ -138,17 +145,16 @@ export const MCP_TOOL_CATALOG: McpToolDto[] = [
   }
 ];
 
-const allowedPermissions = ["Search session summaries", "Read bounded historical excerpts", "Read project history"];
+const allowedPermissions = [
+  "Search published artifacts",
+  "Read published artifact bodies with provenance",
+  "Search session summaries for evidence",
+  "Read bounded historical excerpts and transcripts",
+  "Read project history"
+];
 const blockedPermissions = ["Execute shell commands", "Mutate files or Git", "Modify harness sessions"];
 const testConnectionTimeoutMs = 2_500;
-const expectedMcpToolNames = [
-  "get_masthead_coverage",
-  "get_project_history",
-  "get_session",
-  "get_session_excerpt",
-  "list_project_sessions",
-  "search_sessions"
-];
+const expectedMcpToolNames = MCP_TOOL_CATALOG.map((tool) => tool.name);
 
 export function getMcpStatus(db: MastheadDatabase, databasePath: string, dataDirectory?: string): McpStatusDto {
   const summary = getMcpQuerySummary(db);

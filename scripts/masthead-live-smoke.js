@@ -71,8 +71,14 @@ try {
   const events = await getJson(server.baseUrl, "/events");
   assert(events.events?.length === RELEASE_LIVE_RUNTIMES.length + 2, `events endpoint should return ${RELEASE_LIVE_RUNTIMES.length + 2} accepted events`);
 
-  const logbook = await getJson(server.baseUrl, "/logbook/search?q=Live%20smoke");
-  assert(logbook.sessions?.some((session) => session.title === "Live smoke approval"), "logbook search missing live smoke session");
+  const workbench = await getJson(server.baseUrl, "/workbench/sessions?limit=50");
+  assert(
+    workbench.sessions?.some((session) => session.title === "Live smoke approval"),
+    "workbench queue missing captured live smoke session"
+  );
+
+  const logbook = await getJson(server.baseUrl, "/logbook/artifacts?q=Live%20smoke");
+  assert(logbook.total === 0, "unpublished live smoke session should not appear in artifact-first Logbook");
 
   const data = await getJson(server.baseUrl, "/data/summary");
   assert(data.summary?.sessions >= 1, "data summary missing canonical session");

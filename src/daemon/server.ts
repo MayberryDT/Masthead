@@ -2899,6 +2899,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const sourcePolicyMatch = url.pathname.match(/^\/sources\/([^/]+)\/policies$/);
     if (request.method === "PUT" && sourcePolicyMatch?.[1]) {
       try {
+        const sourceId = decodeURIComponent(sourcePolicyMatch[1]);
         const body = JSON.parse(await readBody(request)) as { policyKind?: string; enabled?: unknown; reason?: string };
         if (!isSourcePolicyKind(body.policyKind) || typeof body.enabled !== "boolean") throw new Error("policyKind and enabled are required");
         setSourcePolicy(database, {
@@ -2906,7 +2907,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           enabled: body.enabled,
           policyKind: body.policyKind,
           reason: body.reason,
-          sourceId: sourcePolicyMatch[1]
+          sourceId
         });
         sendJson(request, response, config.allowedOrigins, 202, { ok: true });
       } catch (error) {

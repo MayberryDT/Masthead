@@ -1,28 +1,31 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const fixtureDir = resolve("fixtures/adapters/codex");
 const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-smoke-"));
 let server;
 let restarted;
 
 try {
-  const codexHome = join(tempDir, "codex-home");
-  const nested = join(codexHome, ".codex", "sessions", "2026", "06", "25", "masthead");
+  const harnessHome = join(tempDir, "harness-home");
+  const nested = join(harnessHome, ".opencode", "sessions", "2026", "06", "25", "masthead");
   const databasePath = join(tempDir, "masthead.sqlite");
   const storePath = join(tempDir, "events.ndjson");
   await mkdir(nested, { recursive: true });
-  await copyTranscriptFixtures(nested);
+  await writeTranscriptFixture(nested);
 
-  server = await startDaemon({ codexHome, databasePath, storePath });
-  const sourceId = await assertCodexSource(server.baseUrl);
+  server = await startDaemon({ harnessHome, databasePath, storePath });
+  const sourceId = await assertOpenCodeSource(server.baseUrl);
   await runImport(server.baseUrl, sourceId, "metadata");
-  await postJson(server.baseUrl, "/sources/codex/approve-transcripts", {});
+  await putJson(server.baseUrl, `/sources/${encodeURIComponent(sourceId)}/policies`, {
+    enabled: true,
+    policyKind: "transcript_import",
+    reason: "Import smoke fixture"
+  });
   await runImport(server.baseUrl, sourceId, "transcript");
 
   assertDb(databasePath, {
@@ -32,13 +35,15 @@ try {
   });
   await assertSearch(server.baseUrl);
 
+  await waitForDbCount(databasePath, "session_search", 4);
   const beforeRestart = dbCounts(databasePath, ["sessions", "messages", "tool_calls", "tool_results", "session_search", "import_jobs"]);
   await stopDaemon(server);
   server = undefined;
 
-  restarted = await startDaemon({ codexHome, databasePath, storePath });
+  restarted = await startDaemon({ harnessHome, databasePath, storePath });
   await runImport(restarted.baseUrl, sourceId, "metadata");
   await runImport(restarted.baseUrl, sourceId, "transcript");
+  await waitForDbCount(databasePath, "session_search", beforeRestart.session_search);
   const afterRestart = dbCounts(databasePath, ["sessions", "messages", "tool_calls", "tool_results", "session_search", "import_jobs"]);
   assertCountsStable(afterRestart, beforeRestart, ["sessions", "messages", "tool_calls", "tool_results", "session_search"]);
   assert(afterRestart.import_jobs >= beforeRestart.import_jobs, "import job audit rows should remain append-only");
@@ -57,17 +62,23 @@ try {
   if (process.env.MASTHEAD_KEEP_SMOKE_DIR !== "1") await rm(tempDir, { force: true, recursive: true });
 }
 
-async function copyTranscriptFixtures(targetDir) {
-  for (const name of ["rollout-basic.jsonl", "rollout-tools.jsonl", "rollout-compacted.jsonl", "rollout-partial.jsonl"]) {
-    await cp(join(fixtureDir, name), join(targetDir, name));
-  }
+async function writeTranscriptFixture(targetDir) {
+  const rows = [
+    { session_id: "import-smoke-basic", timestamp: "2026-06-25T00:00:00.000Z", role: "user", content: "Logbook import smoke basic" },
+    { session_id: "import-smoke-basic", timestamp: "2026-06-25T00:01:00.000Z", role: "assistant", content: "Imported basic transcript" },
+    { session_id: "import-smoke-tools", timestamp: "2026-06-25T00:02:00.000Z", role: "user", content: "Logbook import smoke tools" },
+    { session_id: "import-smoke-tools", timestamp: "2026-06-25T00:03:00.000Z", toolName: "read_file" },
+    { session_id: "import-smoke-compacted", timestamp: "2026-06-25T00:04:00.000Z", role: "assistant", content: "Logbook import smoke compacted" },
+    { session_id: "import-smoke-partial", timestamp: "2026-06-25T00:05:00.000Z", role: "user", content: "Logbook import smoke partial" }
+  ];
+  await writeFile(join(targetDir, "import-smoke.jsonl"), `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
 }
 
-async function assertCodexSource(baseUrl) {
+async function assertOpenCodeSource(baseUrl) {
   const sources = await postJson(baseUrl, "/sources/discover", {});
   assert(Array.isArray(sources.sources) && sources.sources.length > 0, "expected source discovery results");
-  const sessionSource = sources.sources.find((source) => source.sourceId === "codex-sessions");
-  assert(sessionSource, "expected Codex sessions source discovery");
+  const sessionSource = sources.sources.find((source) => source.runtime === "opencode");
+  assert(sessionSource, "expected OpenCode sessions source discovery");
   return sessionSource.sourceId;
 }
 
@@ -78,19 +89,21 @@ async function runImport(baseUrl, sourceId, kind) {
 }
 
 async function assertSearch(baseUrl) {
-  const search = await getJson(baseUrl, "/logbook/search?q=Logbook&limit=10");
-  assert(search.sessions?.length > 0, "expected Logbook search results");
   const sessions = await getJson(baseUrl, "/sessions?q=Logbook&limit=10");
-  assert(sessions.sessions?.length > 0, "expected canonical session search results");
+  assert(sessions.total === 0, "unpublished imported sessions should not appear in published session evidence search");
+  const workbench = await getJson(baseUrl, "/workbench/sessions?limit=10");
+  assert(workbench.sessions?.length >= 4, "expected imported sessions in Workbench");
+  const logbook = await getJson(baseUrl, "/logbook/artifacts?q=Logbook&limit=10");
+  assert(logbook.total === 0, "unpublished imported sessions should not appear in artifact-first Logbook");
 }
 
-async function startDaemon({ codexHome, databasePath, storePath }) {
+async function startDaemon({ harnessHome, databasePath, storePath }) {
   const child = spawn(process.execPath, ["scripts/masthead-ingest-server.js"], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       MASTHEAD_ALLOWED_ORIGINS: "http://127.0.0.1:5173",
-      MASTHEAD_CODEX_HOME: codexHome,
+      MASTHEAD_CODEX_HOME: harnessHome,
       MASTHEAD_DATA_DIR: dirname(databasePath),
       MASTHEAD_DB_PATH: databasePath,
       MASTHEAD_GIT_REFRESH_MS: "0",
@@ -177,6 +190,16 @@ async function postJson(baseUrl, path, body) {
   return response.json();
 }
 
+async function putJson(baseUrl, path, body) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    body: JSON.stringify(body),
+    headers: { accept: "application/json", "content-type": "application/json" },
+    method: "PUT"
+  });
+  if (!response.ok) throw new Error(`${path} returned ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
 async function waitForImportJob(baseUrl, importJobId) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
@@ -188,6 +211,15 @@ async function waitForImportJob(baseUrl, importJobId) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`timed out waiting for import job: ${importJobId}`);
+}
+
+async function waitForDbCount(databasePath, table, expected) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (dbCount(databasePath, table) === expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${table} count ${expected}; got ${dbCount(databasePath, table)}`);
 }
 
 function assertDb(databasePath, { minSessions, minMessages, minToolCalls }) {

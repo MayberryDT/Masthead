@@ -35,7 +35,7 @@ describe("MCP status API", () => {
         queryCount: 1,
         readOnly: true,
         ready: true,
-        toolCount: 8
+        toolCount: 9
       }
     });
     expect(status.status.launchConfig).toBeUndefined();
@@ -75,7 +75,7 @@ describe("MCP status API", () => {
     await writeFile(
       testEntry,
       [
-        "const tools = ['get_masthead_coverage','get_project_history','get_session','get_session_excerpt','list_project_sessions','search_sessions'];",
+        "const tools = ['get_artifact','get_masthead_coverage','get_project_history','get_session','get_session_excerpt','get_session_transcript','list_project_sessions','search_artifacts','search_sessions'];",
         "let buffer = '';",
         "process.stdin.setEncoding('utf8');",
         "process.stdin.on('data', (chunk) => {",
@@ -102,7 +102,7 @@ describe("MCP status API", () => {
       ok: true,
       status: "passed",
       serverInfo: { name: "masthead", version: "api-test" },
-      toolCount: 6,
+      toolCount: 9,
       toolNames: expect.arrayContaining(["search_sessions"]),
       validation: {
         commandExists: true,
@@ -130,6 +130,10 @@ describe("MCP status API", () => {
         expect.objectContaining({
           name: "get_session_excerpt",
           dataReturned: "Bounded transcript excerpts"
+        }),
+        expect.objectContaining({
+          name: "get_session_transcript",
+          dataReturned: "Bounded canonical transcript rows with coverage"
         })
       ])
     );
