@@ -3,298 +3,175 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Masthead — Settings layout directions</title>
+    <title>Masthead — Settings layouts, second pass</title>
     <style>
       :root {
         --canvas: #031019;
         --sidebar: #041522;
-        --metal: #071b28;
-        --raised: #081d2a;
-        --raised-hover: #092231;
+        --toolbar: #051724;
+        --surface: #081d2b;
+        --control: #081d2a;
         --ink: #f6fbff;
         --body: #d6e4ef;
         --mute: #91a8ba;
         --ash: #61798e;
         --blue: #2ea7ff;
-        --blue-soft: rgba(45, 168, 255, 0.16);
+        --blue-soft: rgba(45, 168, 255, .13);
         --green: #36d869;
-        --green-soft: rgba(89, 212, 153, 0.14);
-        --yellow: #ffcf36;
         --red: #ff483e;
-        --line: rgba(194, 221, 241, 0.13);
-        --border: rgba(92, 153, 187, 0.18);
-        --border-strong: rgba(112, 173, 205, 0.32);
-        --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+        --line: rgba(194, 221, 241, .13);
+        --border: rgba(92, 153, 187, .18);
+        --mono: "IBM Plex Mono", Consolas, monospace;
         --sans: "IBM Plex Sans", Inter, system-ui, sans-serif;
       }
-
       * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        min-width: 1080px;
-        color: var(--body);
-        background: var(--canvas);
-        font: 13px/1.4 var(--sans);
-        background-image: radial-gradient(circle at 35% -20%, rgba(31, 91, 127, .16), transparent 34%);
+      body { margin: 0; min-width: 1100px; background: var(--canvas); color: var(--body); font: 13px/1.4 var(--sans); }
+      .board {
+        min-height: 100vh;
+        background: radial-gradient(circle at 26% -15%, rgba(46,167,255,.09), transparent 29%), var(--canvas);
       }
-
-      .board-header {
-        position: sticky;
-        top: 0;
-        z-index: 4;
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        min-height: 72px;
-        padding: 14px 28px;
-        border-bottom: 1px solid var(--border);
-        background: rgba(3, 16, 25, .96);
-        backdrop-filter: blur(12px);
+      .board-head {
+        position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 14px; min-height: 66px;
+        padding: 12px 28px; border-bottom: 1px solid var(--border); background: rgba(3,16,25,.96); backdrop-filter: blur(10px);
       }
-      .board-header img { width: 30px; height: 30px; object-fit: contain; }
-      .board-title { min-width: 260px; }
-      .board-title h1 { margin: 0; color: var(--ink); font-size: 15px; font-weight: 600; }
-      .board-title p { margin: 2px 0 0; color: var(--mute); font: 10px var(--mono); }
-      .index { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
-      .index a {
-        color: var(--mute);
-        text-decoration: none;
-        font: 10px var(--mono);
-        padding: 5px 7px;
-        border: 1px solid var(--border);
-        background: var(--raised);
+      .board-head img { width: 28px; height: 28px; object-fit: contain; }
+      .board-head h1 { margin: 0; color: var(--ink); font-size: 15px; font-weight: 600; }
+      .board-head p { margin: 2px 0 0; color: var(--mute); font: 10px var(--mono); }
+      .board-head strong { margin-left: auto; color: var(--blue); font: 10px var(--mono); }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(520px, 1fr)); gap: 20px; padding: 26px 28px 56px; }
+      .direction { position: relative; min-height: 430px; overflow: hidden; border: 1px solid var(--border); background: #041522; box-shadow: inset 0 1px rgba(255,255,255,.025); }
+      .direction::before { content: ""; position: absolute; inset: 0; opacity: .11; pointer-events: none; background: url("../public/textures/anodized-noise.svg") repeat; mix-blend-mode: screen; }
+      .tag { position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: 35px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid var(--border); background: rgba(4,21,34,.93); }
+      .tag b { color: var(--ink); font: 600 10px var(--mono); }
+      .tag span { color: var(--mute); font: 10px var(--mono); }
+      .mock { position: relative; height: 430px; padding-top: 35px; overflow: hidden; background: var(--canvas); }
+      .chrome { height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--border); background: var(--toolbar); }
+      .chrome img { width: 18px; height: 18px; object-fit: contain; }
+      .chrome .surface-name { color: var(--ink); font-weight: 600; font-size: 11px; }
+      .chrome .divider { width: 1px; height: 18px; background: var(--line); }
+      .chrome .spacer { flex: 1; }
+      .button, .dropdown { min-height: 29px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 3px; background: var(--control); color: var(--body); font: 10px var(--sans); }
+      .button.primary { color: var(--ink); border-color: rgba(46,167,255,.52); background: rgba(46,167,255,.10); }
+      .button.danger { color: #ffc4c0; border-color: rgba(255,72,62,.5); }
+      .dropdown::after { content: "⌄"; margin-left: 13px; color: var(--mute); }
+      .workspace { height: calc(100% - 48px); padding: 18px; }
+      .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 13px; }
+      .eyebrow { color: var(--ash); font: 9px var(--mono); letter-spacing: .1em; }
+      h2 { margin: 3px 0 0; color: var(--ink); font-size: 16px; font-weight: 600; }
+      .surface {
+        position: relative; min-width: 0; border: 1px solid var(--border); border-radius: 5px; background: var(--surface);
+        box-shadow: inset 0 1px rgba(190,225,245,.035);
       }
-      .index a:hover { color: var(--ink); border-color: var(--blue); }
-
-      .directions {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(520px, 1fr));
-        gap: 20px;
-        padding: 26px 28px 54px;
-      }
-      .direction {
-        position: relative;
-        min-height: 444px;
-        overflow: hidden;
-        border: 1px solid var(--border);
-        background: #041522;
-        box-shadow: inset 0 1px rgba(255,255,255,.025);
-      }
-      .direction::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        opacity: .14;
-        background: url("../public/textures/anodized-noise.svg") repeat;
-        mix-blend-mode: screen;
-      }
-      .direction-label {
-        position: absolute;
-        z-index: 3;
-        top: 0;
-        left: 0;
-        right: 0;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        height: 38px;
-        padding: 0 12px;
-        border-bottom: 1px solid var(--border);
-        background: rgba(4, 21, 34, .92);
-      }
-      .direction-label strong { color: var(--ink); font: 600 10px var(--mono); }
-      .direction-label span { color: var(--mute); font: 10px var(--mono); }
-      .screen {
-        position: relative;
-        display: flex;
-        height: 444px;
-        padding-top: 38px;
-        overflow: hidden;
-        background: var(--canvas);
-      }
-      .side {
-        flex: 0 0 132px;
-        min-height: 100%;
-        padding: 10px 9px;
-        border-right: 1px solid var(--border);
-        background: var(--sidebar);
-      }
-      .side-brand { display: flex; align-items: center; gap: 7px; margin: 2px 4px 15px; color: var(--ink); font: 600 10px var(--mono); }
-      .side-brand img { width: 16px; height: 16px; }
-      .nav-item { padding: 9px 10px; border-top: 1px solid transparent; border-bottom: 1px solid transparent; color: var(--mute); font-size: 11px; }
-      .nav-item.active { color: var(--ink); border-color: var(--border); border-left: 2px solid var(--blue); padding-left: 8px; background: rgba(45,168,255,.07); }
-      .nav-item.danger { color: #c59696; }
-      .work { min-width: 0; flex: 1; padding: 20px; }
-      .eyebrow { color: var(--ash); font: 9px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-      .heading { margin: 2px 0 13px; color: var(--ink); font-size: 16px; font-weight: 600; }
-      .subtle { color: var(--mute); font-size: 10px; }
-      .hairline { height: 1px; background: var(--line); }
-      .mini-toggle { display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; color: var(--body); font-size: 10px; white-space: nowrap; }
-      .switch { width: 30px; height: 18px; padding: 2px; border: 1px solid var(--border-strong); background: #061925; }
-      .switch i { display: block; width: 12px; height: 12px; background: #375466; }
-      .switch.on { border-color: rgba(54,216,105,.55); background: #0a3a2a; }
-      .switch.on i { margin-left: 12px; background: var(--green); }
-      .control { min-height: 31px; padding: 7px 9px; border: 1px solid var(--border); background: var(--raised); color: var(--body); font: 10px var(--sans); }
-      .control.primary { border-color: rgba(45,168,255,.5); color: var(--ink); }
-      .control.danger { border-color: rgba(255,72,62,.5); color: #ffc2be; }
+      .surface::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: var(--blue); opacity: .72; }
+      .surface.pad { padding: 14px; }
+      .surface.danger::before { background: var(--red); }
+      .surface-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 9px; border-bottom: 1px solid var(--line); }
+      .surface-head b { color: var(--ink); font-size: 11px; }
+      .surface-head small, .muted { color: var(--mute); font: 9px var(--mono); }
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 53px; border-bottom: 1px solid rgba(194,221,241,.08); }
+      .row:last-child { border-bottom: 0; }
+      .row b { display: block; color: var(--ink); font-size: 11px; }
+      .row small { display: block; margin-top: 2px; color: var(--mute); font: 9px var(--mono); }
+      .toggle { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; color: var(--body); font-size: 10px; }
+      .switch { width: 33px; height: 18px; padding: 2px; border: 1px solid rgba(92,153,187,.42); background: #061925; }
+      .switch i { display: block; width: 12px; height: 12px; background: #365365; }
+      .switch.on { border-color: rgba(54,216,105,.58); background: #0b3929; }
+      .switch.on i { margin-left: 15px; background: var(--green); }
       .status { display: inline-flex; align-items: center; gap: 5px; color: var(--mute); font: 9px var(--mono); }
-      .status i { display: inline-block; width: 5px; height: 5px; background: var(--green); border-radius: 50%; box-shadow: 0 0 0 3px var(--green-soft); }
-      .settings-row { display: flex; align-items: center; justify-content: space-between; min-height: 55px; gap: 12px; border-bottom: 1px solid var(--line); }
-      .settings-row b { display: block; color: var(--ink); font-size: 11px; font-weight: 600; }
-      .settings-row small { display: block; margin-top: 2px; color: var(--mute); font: 9px var(--mono); }
-      .rail-mark { width: 1px; background: var(--line); }
+      .status i { width: 5px; height: 5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px rgba(54,216,105,.12); }
+      .card-label { color: var(--ash); font: 9px var(--mono); letter-spacing: .08em; }
+      .fact { color: var(--ink); font: 600 11px var(--mono); }
+      .tile { padding: 13px; border: 1px solid var(--border); background: #071b28; }
+      .tile b { display: block; margin-top: 8px; color: var(--ink); font-size: 11px; }
 
-      /* 01 — wide control bar */
-      .d01 .work { padding: 0; }
-      .d01 .topline { display: flex; align-items: center; justify-content: space-between; height: 81px; padding: 0 22px; border-bottom: 1px solid var(--border); background: #051724; }
-      .d01 .settings-row { min-height: 70px; padding: 0 22px; }
-      .d01 .tail { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; color: var(--mute); font: 10px var(--mono); }
+      /* 01 — same panel family, anchored by an action shelf */
+      .v1 .layout { display: grid; grid-template-rows: 1fr auto; height: 100%; gap: 12px; }
+      .v1 .prefs { max-width: 620px; }
+      .v1 .shelf { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+      .v1 .shelf .surface { min-height: 76px; padding: 12px; }
 
-      /* 02 — split ledger plus live metal plate */
-      .d02 .work { display: grid; grid-template-columns: 1.2fr .8fr; gap: 0; padding: 0; }
-      .d02 .ledger { padding: 18px 18px 0; }
-      .d02 .plate { padding: 18px; border-left: 1px solid var(--border); background: rgba(7,27,40,.68); }
-      .d02 .plate-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; margin-top: 28px; }
-      .d02 .plate-cell { min-height: 70px; padding: 10px; border: 1px solid var(--border); background: #061925; }
-      .d02 .plate-cell b { display: block; color: var(--ink); margin: 10px 0 2px; font: 11px var(--mono); }
+      /* 02 — two normal Masthead surfaces, no new navigation */
+      .v2 .layout { display: grid; grid-template-columns: 1.12fr .88fr; gap: 12px; }
+      .v2 .layout > .surface { min-height: 244px; }
+      .v2 .right-stack { display: grid; grid-template-rows: 1fr 1fr; gap: 12px; }
 
-      /* 03 — category command deck */
-      .d03 .screen { display: block; padding-left: 0; }
-      .d03 .deck-nav { display: flex; height: 48px; border-bottom: 1px solid var(--border); background: #041522; }
-      .d03 .deck-nav span { flex: 1; padding: 16px 10px; border-right: 1px solid var(--border); color: var(--mute); text-align: center; font: 9px var(--mono); }
-      .d03 .deck-nav span.active { color: var(--ink); background: rgba(45,168,255,.08); box-shadow: inset 0 -2px var(--blue); }
-      .d03 .command-field { display: grid; grid-template-columns: 1fr 1fr; gap: 0; height: calc(100% - 48px); }
-      .d03 .command { display: flex; flex-direction: column; justify-content: space-between; min-height: 150px; padding: 18px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); background: rgba(7,27,40,.28); }
-      .d03 .command b { color: var(--ink); font-size: 12px; }
+      /* 03 — familiar toolbar + cards across the available board */
+      .v3 .toolbar-strip { display: flex; gap: 7px; margin: -1px 0 13px; }
+      .v3 .toolbar-strip .button.active { color: var(--ink); border-color: rgba(46,167,255,.58); background: var(--blue-soft); }
+      .v3 .cards { display: grid; grid-template-columns: 1.2fr .9fr .9fr; gap: 12px; }
+      .v3 .cards .surface { min-height: 220px; }
 
-      /* 04 — vertical spine */
-      .d04 .work { display: grid; grid-template-columns: 45px 1fr 165px; gap: 0; padding: 0; }
-      .d04 .spine { display: flex; flex-direction: column; align-items: center; padding-top: 23px; border-right: 1px solid var(--border); background: #041522; }
-      .d04 .spine i { width: 7px; height: 7px; margin: 10px 0; border: 1px solid var(--ash); border-radius: 50%; }
-      .d04 .spine i:first-child { border-color: var(--blue); background: var(--blue); box-shadow: 0 0 0 4px var(--blue-soft); }
-      .d04 .spine-ledger { padding: 15px 18px; }
-      .d04 .spine-note { padding: 19px 13px; border-left: 1px solid var(--border); background: #061925; }
-      .d04 .spine-note p { margin: 25px 0 0; color: var(--mute); font: 10px/1.7 var(--mono); }
+      /* 04 — direct-control card plus a standard compact detail inspector */
+      .v4 .layout { display: grid; grid-template-columns: 1fr 215px; gap: 12px; }
+      .v4 .detail { display: grid; align-content: start; gap: 9px; }
+      .v4 .detail .tile { min-height: 74px; }
 
-      /* 05 — lower equipment bay */
-      .d05 .work { display: flex; flex-direction: column; padding: 0; }
-      .d05 .upper { flex: 1; padding: 18px 20px 0; }
-      .d05 .equipment { display: grid; grid-template-columns: 1.1fr .9fr .9fr; min-height: 125px; border-top: 1px solid var(--border); background: #051724; }
-      .d05 .equipment > div { padding: 15px; border-right: 1px solid var(--border); }
-      .d05 .equipment > div:last-child { border-right: 0; }
-      .d05 .equipment b { display: block; margin: 8px 0; color: var(--ink); font: 11px var(--mono); }
+      /* 05 — a wide surface split into familiar cards, not a new shell */
+      .v5 .wide { display: grid; grid-template-columns: 1.35fr .85fr; overflow: hidden; }
+      .v5 .wide > div { padding: 14px; }
+      .v5 .wide > div + div { border-left: 1px solid var(--border); background: #071b28; }
+      .v5 .lower { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
 
-      /* 06 — double-column field sheet */
-      .d06 .work { padding: 18px; }
-      .d06 .field-sheet { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
-      .d06 .field-sheet > div { min-height: 86px; padding: 14px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); background: rgba(7,27,40,.55); }
-      .d06 .field-sheet > div:nth-child(3), .d06 .field-sheet > div:nth-child(4) { background: #061925; }
-      .d06 .field-sheet b { display: block; margin-bottom: 7px; color: var(--ink); font-size: 11px; }
+      /* 06 — compact left rail made of cards, never another nav */
+      .v6 .layout { display: grid; grid-template-columns: 235px 1fr; gap: 12px; }
+      .v6 .stack { display: grid; gap: 12px; }
+      .v6 .stack .surface { min-height: 83px; padding: 12px; }
+      .v6 .prefs { min-height: 244px; }
 
-      /* 07 — framed index plate */
-      .d07 .work { display: grid; grid-template-columns: 132px 1fr; gap: 0; padding: 0; }
-      .d07 .index-plate { padding: 15px 12px; border-right: 1px solid var(--border); background: #061925; }
-      .d07 .index-plate div { padding: 12px 8px; border-bottom: 1px solid var(--line); color: var(--mute); font: 10px var(--mono); }
-      .d07 .index-plate div.active { color: var(--ink); }
-      .d07 .plate-work { padding: 18px; }
-      .d07 .plate-work .settings-row { min-height: 78px; }
-      .d07 .plate-foot { margin-top: 19px; display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid var(--border); }
+      /* 07 — balanced primary/secondary panels, with the workspace still visible */
+      .v7 .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .v7 .layout .surface { min-height: 195px; }
+      .v7 .action-strip { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 11px; border: 1px solid var(--border); background: var(--toolbar); }
+      .v7 .action-strip span { margin-right: auto; }
 
-      /* 08 — central ledger with wide quiet margins */
-      .d08 .work { padding: 0; }
-      .d08 .quiet-ruler { display: grid; grid-template-columns: 1fr 370px 1fr; height: 100%; }
-      .d08 .ruler-side { position: relative; border-right: 1px solid var(--border); background: linear-gradient(90deg, rgba(7,27,40,.22), transparent); }
-      .d08 .ruler-side:last-child { border-left: 1px solid var(--border); border-right: 0; background: linear-gradient(-90deg, rgba(7,27,40,.22), transparent); }
-      .d08 .ruler-side::after { content: "LOCAL SETTINGS"; position: absolute; bottom: 22px; left: 14px; color: var(--ash); font: 9px var(--mono); writing-mode: vertical-rl; letter-spacing: .14em; }
-      .d08 .ledger-core { padding: 20px; }
-      .d08 .ledger-core .heading { margin-bottom: 20px; }
+      /* 08 — a full-width settings band with normal inner cards */
+      .v8 .band { display: grid; grid-template-columns: 1.2fr .9fr .9fr; gap: 12px; padding: 12px; border: 1px solid var(--border); background: #051724; }
+      .v8 .band .surface { min-height: 205px; }
+      .v8 .footer-note { display: flex; justify-content: space-between; margin-top: 12px; color: var(--mute); font: 9px var(--mono); }
 
-      /* 09 — folded configuration sheet */
-      .d09 .work { display: grid; grid-template-rows: 98px 1fr; gap: 0; padding: 0; }
-      .d09 .sheet-top { display: grid; grid-template-columns: 1.2fr 1fr 1fr; border-bottom: 1px solid var(--border); background: #051724; }
-      .d09 .sheet-top > div { padding: 16px; border-right: 1px solid var(--border); }
-      .d09 .sheet-top b { display: block; margin-top: 9px; color: var(--ink); font: 11px var(--mono); }
-      .d09 .sheet-body { display: grid; grid-template-columns: 1fr 1fr; }
-      .d09 .sheet-body > div { padding: 18px; }
-      .d09 .sheet-body > div + div { border-left: 1px solid var(--border); background: rgba(7,27,40,.4); }
-      .d09 .safe-list { margin-top: 22px; border-top: 1px solid var(--line); }
-      .d09 .safe-list div { display: flex; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--line); color: var(--mute); font: 10px var(--mono); }
+      /* 09 — table rhythm borrowed from other Masthead operational surfaces */
+      .v9 .table { border: 1px solid var(--border); background: var(--surface); }
+      .v9 .table-head, .v9 .table-row { display: grid; grid-template-columns: 1.25fr .75fr .7fr; align-items: center; padding: 0 14px; }
+      .v9 .table-head { height: 35px; border-bottom: 1px solid var(--border); color: var(--ash); background: #051724; font: 9px var(--mono); letter-spacing: .08em; }
+      .v9 .table-row { min-height: 63px; border-bottom: 1px solid rgba(194,221,241,.08); }
+      .v9 .table-row:last-child { border-bottom: 0; }
 
-      /* 10 — workbench settings matrix */
-      .d10 .work { padding: 0; }
-      .d10 .matrix-head { display: grid; grid-template-columns: 1.2fr .8fr .8fr; padding: 12px 18px; border-bottom: 1px solid var(--border); color: var(--ash); font: 9px var(--mono); letter-spacing: .08em; }
-      .d10 .matrix-row { display: grid; grid-template-columns: 1.2fr .8fr .8fr; align-items: center; min-height: 63px; padding: 0 18px; border-bottom: 1px solid var(--line); }
-      .d10 .matrix-row b { color: var(--ink); font-size: 11px; }
-      .d10 .matrix-row small { display: block; margin-top: 2px; color: var(--mute); font: 9px var(--mono); }
-      .d10 .matrix-foot { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; background: #051724; }
-
-      .note { position: absolute; right: 12px; bottom: 9px; z-index: 2; color: rgba(145,168,186,.6); font: 9px var(--mono); }
+      /* 10 — card grid with a deliberately useful lower row */
+      .v10 .layout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+      .v10 .layout .surface { min-height: 155px; }
+      .v10 .layout .surface.wide { grid-column: span 2; }
+      .v10 .quick { display: flex; align-items: center; justify-content: space-between; margin-top: 15px; padding-top: 11px; border-top: 1px solid var(--line); }
     </style>
   </head>
   <body>
-    <header class="board-header">
-      <img src="../public/assets/masthead-logo-sail.png" alt="Masthead sail" />
-      <div class="board-title">
-        <h1>Settings layout directions</h1>
-        <p>throwaway comparison board · ten static compositions · General selected</p>
-      </div>
-      <nav class="index" aria-label="Layout directions">
-        <a href="#one">01</a><a href="#two">02</a><a href="#three">03</a><a href="#four">04</a><a href="#five">05</a>
-        <a href="#six">06</a><a href="#seven">07</a><a href="#eight">08</a><a href="#nine">09</a><a href="#ten">10</a>
-      </nav>
-    </header>
+    <div class="board">
+      <header class="board-head">
+        <img src="../public/assets/masthead-logo-sail.png" alt="Masthead sail" />
+        <div><h1>Settings layout directions — second pass</h1><p>one Masthead shell · toolbar, panels, buttons, rows, and dropdowns only · no settings sidebar</p></div>
+        <strong>STATIC COMPARISON</strong>
+      </header>
 
-    <main class="directions">
-      <article class="direction d01" id="one">
-        <div class="direction-label"><strong>01 — FULL-WIDTH CONTROL BAR</strong><span>use the breadth as a band</span></div>
-        <div class="screen"><aside class="side"><div class="side-brand"><img src="../public/assets/masthead-logo-sail.png" alt="" />SETTINGS</div><div class="nav-item active">General</div><div class="nav-item">Data</div><div class="nav-item">Agent access</div><div class="nav-item">Advanced</div><div class="nav-item danger">Danger zone</div></aside><section class="work"><div class="topline"><div><div class="eyebrow">LOCAL PREFERENCES</div><div class="heading">General</div></div><span class="status"><i></i>Local configuration</span></div><div class="settings-row"><div><b>Motion</b><small>Interface transitions</small></div><span class="mini-toggle"><span class="switch on"><i></i></span>Motion on</span></div><div class="settings-row"><div><b>Session notifications</b><small>Quiet-state and action alerts</small></div><span class="mini-toggle"><span class="switch"><i></i></span>Notifications off</span></div><div class="tail"><span>Changes apply to this machine</span><span>MASTHEAD DEV · LOCAL</span></div></section></div>
-      </article>
+      <main class="grid">
+        <article class="direction v1"><div class="tag"><b>01 — PREFERENCES + ACTION SHELF</b><span>anchor a small card with useful neighbors</span></div><div class="mock"><div class="chrome"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span class="surface-name">Settings</span><span class="divider"></span><button class="dropdown">General</button><span class="spacer"></span><span class="status"><i></i>Local</span></div><div class="workspace"><div class="layout"><div class="surface pad prefs"><div class="surface-head"><b>Preferences</b><small>GENERAL</small></div><div class="row"><div><b>Motion</b><small>Interface transitions</small></div><span class="toggle"><span class="switch on"><i></i></span>Motion on</span></div><div class="row"><div><b>Session notifications</b><small>Desktop attention signals</small></div><span class="toggle"><span class="switch"><i></i></span>Notifications off</span></div></div><div class="shelf"><div class="surface"><span class="card-label">DATA</span><b class="fact">Local database</b><small class="muted">This machine</small></div><div class="surface"><span class="card-label">AGENT ACCESS</span><b class="fact">MCP ready</b><small class="muted">Read-only tools</small></div><div class="surface"><span class="card-label">ADVANCED</span><b class="fact">Developer mode</b><small class="muted">Identity &amp; paths</small></div></div></div></div></article>
 
-      <article class="direction d02" id="two">
-        <div class="direction-label"><strong>02 — LEDGER + LOCAL POSTURE</strong><span>use the right side as quiet context</span></div>
-        <div class="screen"><aside class="side"><div class="side-brand"><img src="../public/assets/masthead-logo-sail.png" alt="" />SETTINGS</div><div class="nav-item active">General</div><div class="nav-item">Data</div><div class="nav-item">Agent access</div><div class="nav-item">Advanced</div><div class="nav-item danger">Danger zone</div></aside><section class="work"><div class="ledger"><div class="eyebrow">GENERAL</div><div class="heading">Preferences</div><div class="settings-row"><div><b>Motion</b><small>System presentation</small></div><span class="mini-toggle"><span class="switch on"><i></i></span>On</span></div><div class="settings-row"><div><b>Session notifications</b><small>Local desktop signals</small></div><span class="mini-toggle"><span class="switch"><i></i></span>Off</span></div></div><aside class="plate"><div class="eyebrow">LOCAL POSTURE</div><div class="plate-grid"><div class="plate-cell"><span class="status"><i></i>Daemon</span><b>Connected</b><small class="subtle">127.0.0.1</small></div><div class="plate-cell"><span class="eyebrow">SCOPE</span><b>Machine</b><small class="subtle">No cloud account</small></div><div class="plate-cell"><span class="eyebrow">MOTION</span><b>Standard</b><small class="subtle">User controlled</small></div><div class="plate-cell"><span class="eyebrow">ALERTS</span><b>Quiet</b><small class="subtle">No interruption</small></div></div></aside></section></div>
-      </article>
+        <article class="direction v2"><div class="tag"><b>02 — TWIN SURFACES</b><span>fill space with ordinary settings panels</span></div><div class="mock"><div class="chrome"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span class="surface-name">Settings</span><button class="dropdown">General</button><span class="spacer"></span><button class="button">Reload</button></div><div class="workspace"><div class="title-row"><div><div class="eyebrow">SETTINGS / GENERAL</div><h2>Preferences</h2></div><span class="status"><i></i>Configuration loaded</span></div><div class="layout"><div class="surface pad"><div class="row"><div><b>Motion</b><small>Surface and modal transitions</small></div><span class="toggle"><span class="switch on"><i></i></span>On</span></div><div class="row"><div><b>Session notifications</b><small>Alert when attention is needed</small></div><span class="toggle"><span class="switch"><i></i></span>Off</span></div></div><div class="right-stack"><div class="surface pad"><div class="surface-head"><b>Local posture</b><small>INFO</small></div><p class="muted">Masthead stores settings and session data on this machine.</p><span class="status"><i></i>Daemon available</span></div><div class="surface pad"><div class="surface-head"><b>Next control</b><small>DATA</small></div><p class="muted">Review storage, export, and raw source copies.</p><button class="button primary">Open data</button></div></div></div></div></div></article>
 
-      <article class="direction d03" id="three">
-        <div class="direction-label"><strong>03 — CATEGORY COMMAND DECK</strong><span>turn the top edge into the organizer</span></div>
-        <div class="screen"><section class="work"><div class="deck-nav"><span class="active">GENERAL</span><span>DATA</span><span>AGENT ACCESS</span><span>ADVANCED</span><span>DANGER</span></div><div class="command-field"><div class="command"><div><div class="eyebrow">PRESENTATION</div><b>Motion</b><p class="subtle">Transitions when you change layout or open a surface.</p></div><span class="mini-toggle"><span class="switch on"><i></i></span>Enabled</span></div><div class="command"><div><div class="eyebrow">DESKTOP</div><b>Session notifications</b><p class="subtle">Alert only when a session needs your attention.</p></div><span class="mini-toggle"><span class="switch"><i></i></span>Disabled</span></div><div class="command"><div><div class="eyebrow">LOCAL SCOPE</div><b>This machine</b></div><span class="status"><i></i>Private store ready</span></div><div class="command"><div><div class="eyebrow">NEXT SURFACE</div><b>Data</b></div><button class="control primary">Open data controls</button></div></div></section></div>
-      </article>
+        <article class="direction v3"><div class="tag"><b>03 — TOOLBAR TABS + CARD ROW</b><span>categories live in existing toolbar controls</span></div><div class="mock"><div class="chrome"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span class="surface-name">Settings</span><span class="divider"></span><button class="button primary">General</button><button class="button">Data</button><button class="button">Agent access</button><button class="button">Advanced</button><button class="button danger">Danger zone</button><span class="spacer"></span></div><div class="workspace"><div class="toolbar-strip"><button class="button active">Preferences</button><button class="button">Presentation</button><button class="button">Notifications</button></div><div class="cards"><div class="surface pad"><div class="surface-head"><b>Preferences</b><small>2 CONTROLS</small></div><div class="row"><div><b>Motion</b><small>Interface motion</small></div><span class="toggle"><span class="switch on"><i></i></span>On</span></div><div class="row"><div><b>Notifications</b><small>Session attention</small></div><span class="toggle"><span class="switch"><i></i></span>Off</span></div></div><div class="surface pad"><span class="card-label">DATA</span><b class="fact" style="display:block;margin-top:14px">Database</b><p class="muted">Canonical local session store.</p><button class="button">Open folder</button></div><div class="surface pad"><span class="card-label">AGENT ACCESS</span><b class="fact" style="display:block;margin-top:14px">MCP server</b><p class="muted">Artifact-first read access.</p><button class="button">Test connection</button></div></div></div></div></article>
 
-      <article class="direction d04" id="four">
-        <div class="direction-label"><strong>04 — VERTICAL SPINE</strong><span>anchor the wide canvas with an equipment rail</span></div>
-        <div class="screen"><aside class="side"><div class="side-brand"><img src="../public/assets/masthead-logo-sail.png" alt="" />SETTINGS</div><div class="nav-item active">General</div><div class="nav-item">Data</div><div class="nav-item">Agent access</div><div class="nav-item">Advanced</div><div class="nav-item danger">Danger zone</div></aside><section class="work"><div class="spine"><i></i><i></i><i></i><i></i><i></i></div><div class="spine-ledger"><div class="eyebrow">01 / GENERAL</div><div class="heading">Preferences</div><div class="settings-row"><div><b>Motion</b><small>Layout and control transitions</small></div><span class="mini-toggle"><span class="switch on"><i></i></span>On</span></div><div class="settings-row"><div><b>Session notifications</b><small>Attention signals</small></div><span class="mini-toggle"><span class="switch"><i></i></span>Off</span></div></div><aside class="spine-note"><div class="eyebrow">CONFIGURATION</div><p>Two direct controls.<br /><br />No account.<br />No cloud sync.<br /><br /><span class="status"><i></i>Local daemon</span></p></aside></section></div>
-      </article>
+        <article class="direction v4"><div class="tag"><b>04 — PANEL + DETAIL INSPECTOR</b><span>reuse the app’s existing inspector rhythm</span></div><div class="mock"><div class="chrome"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span class="surface-name">Settings</span><button class="dropdown">General</button><span class="spacer"></span><button class="button">Reset defaults</button></div><div class="workspace"><div class="title-row"><div><div class="eyebrow">GENERAL</div><h2>Preferences</h2></div></div><div class="layout"><div class="surface pad"><div class="surface-head"><b>Presentation</b><small>LOCAL</small></div><div class="row"><div><b>Motion</b><small>Make interaction changes visible</small></div><span class="toggle"><span class="switch on"><i></i></span>Enabled</span></div><div class="row"><div><b>Session notifications</b><small>Quiet state transition notices</small></div><span class="toggle"><span class="switch"><i></i></span>Disabled</span></div></div><div class="surface pad detail"><div class="surface-head"><b>Selected scope</b><small>GENERAL</small></div><div class="tile"><span class="card-label">AFFECTS</span><b>Current desktop</b><span class="muted">No account preference</span></div><div class="tile"><span class="card-label">SAVED TO</span><b>Local configuration</b><span class="muted">Immediate apply</span></div></div></div></div></div></article>
 
-      <article class="direction d05" id="five">
-        <div class="direction-label"><strong>05 — LOWER EQUIPMENT BAY</strong><span>give empty space a grounded bottom edge</span></div>
-        <div class="screen"><aside class="side"><div class="side-brand"><img src="../public/assets/masthead-logo-sail.png" alt="" />SETTINGS</div><div class="nav-item active">General</div><div class="nav-item">Data</div><div class="nav-item">Agent access</div><div class="nav-item">Advanced</div><div class="nav-item danger">Danger zone</div></aside><section class="work"><div class="upper"><div class="eyebrow">GENERAL SETTINGS</div><div class="heading">Preferences</div><div class="settings-row"><div><b>Motion</b><small>Interface motion</small></div><span class="mini-toggle"><span class="switch on"><i></i></span>Motion on</span></div><div class="settings-row"><div><b>Session notifications</b><small>Desktop attention signals</small></div><span class="mini-toggle"><span class="switch"><i></i></span>Notifications off</span></div></div><div class="equipment"><div><div class="eyebrow">CONFIGURATION SOURCE</div><b>Local defaults</b><span class="subtle">Stored with Masthead Dev</span></div><div><div class="eyebrow">RUNNING CONTEXT</div><b>Developer mode</b><span class="status"><i></i>Daemon ready</span></div><div><div class="eyebrow">NEXT</div><b>Data policy</b><button class="control" style="margin-top:8px">Review data</button></div></div></section></div>
-      </article>
+        <article class="direction v5"><div class="tag"><b>05 — WIDE SETTINGS SURFACE</b><span>one broad familiar panel, then supporting cards</span></div><div class="mock"><div class="chrome"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span class="surface-name">Settings</span><button class="dropdown">General</button><span class="spacer"></span><span class="status"><i></i>Saved</span></div><div class="workspace"><div class="surface wide"><div><div class="surface-head"><b>Preferences</b><small>GENERAL</small></div><div class="row"><div><b>Motion</b><small>Interface transitions</small></div><span class="toggle"><span class="switch on"><i></i></span>Motion on</span></div><div class="row"><div><b>Session notifications</b><small>Desktop signals</small></div><span class="toggle"><span class="switch"><i></i></span>Notifications off</span></div></div><div><span class="card-label">SURFACE NOTE</span><p class="muted" style="margin-top:17px">This area stays calm because General has only two real controls.</p><button class="button">Review notification behavior</button></div></div><div class="lower"><div class="surface pad"><span class="card-label">DATA</span><b class="fact" style="display:block;margin-top:9px">Local database</b></div><div class="surface pad"><span class="card-label">AGENT ACCESS</span><b class="fact" style="display:block;margin-top:9px">MCP ready</b></div><div class="surface pad"><span class="card-label">ADVANCED</span><b class="fact" style="display:block;margin-top:9px">Developer settings</b></div></div></div></div></article>
 
-      <article class="direction d06" id="six">
-        <div class="direction-label"><strong>06 — DOUBLE-COLUMN FIELD SHEET</strong><span>make the small set feel like a control sheet</span></div>
-        <div class="screen"><aside class="side"><div class="side-brand"><img src="../public/assets/masthead-logo-sail.png" alt="" />SETTINGS</div><div class="nav-item active">General</div><div class="nav-item">Data</div><div class="nav-item">Agent access</div><div class="nav-item">Advanced</div><div class="nav-item danger">Danger zone</div></aside><section class="work"><div class="eyebrow">SETTINGS / GENERAL</div><div class="heading">Preferences</div><div class="field-sheet"><div><b>Motion</b><span class="subtle">User-invoked transitions</span><div style="margin-top:12px"><span class="mini-toggle"><span class="switch on"><i></i></span>Enabled</span></div></div><div><b>Session notifications</b><span class="subtle">Local attention state</span><div style="margin-top:12px"><span class="mini-toggle"><span class="switch"><i></i></span>Disabled</span></div></div><div><b>Interaction posture</b><span class="subtle">Calm by default</span></div><div><b>Data ownership</b><span class="subtle">This machine only</span></div></div></section></div>
-      </article>
+        <article class="direction v6"><div class="tag"><b>06 — CONTROL STACK + MAIN PANEL</b><span>fill width with existing short cards, never a menu</span></div><div class="mock"><div class="chrome"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span class="surface-name">Settings</span><button class="dropdown">General</button><span class="spacer"></span><button class="button primary">General</button></div><div class="workspace"><div class="layout"><div class="stack"><div class="surface"><span class="card-label">DATA</span><b class="fact">Local storage</b><span class="muted">1 database</span></div><div class="surface"><span class="card-label">AGENT ACCESS</span><b class="fact">MCP ready</b><span class="muted">Read-only</span></div><div class="surface danger"><span class="card-label">DANGER ZONE</span><b class="fact">Data lifecycle</b><span class="muted">Scoped deletion</span></div></div><div class="surface pad prefs"><div class="surface-head"><b>Preferences</b><small>GENERAL</small></div><div class="row"><div><b>Motion</b><small>Layout, modal, and control feedback</small></div><span class="toggle"><span class="switch on"><i></i></span>On</span></div><div class="row"><div><b>Session notifications</b><small>Attention state only</small></div><span class="toggle"><span class="switch"><i></i></span>Off</span></div></div></div></div></div></article>
 
-      <article class="direction d07" id="seven">
-        <div class="direction-label"><strong>07 — FRAMED INDEX PLATE</strong><span>promote the category index into the composition</span></div>
-        <div class="screen"><aside class="side"><div class="side-brand"><img src="../public/assets/masthead-logo-sail.png" alt="" />SETTINGS</div><div class="nav-item active">General</div><div class="nav-item">Data</div><div class="nav-item">Agent access</div><div class="nav-item">Advanced</div><div class="nav-item danger">Danger zone</div></aside><section class="work"><aside class="index-plate"><div class="eyebrow">CONTROL INDEX</div><div class="active">01 / General</div><div>02 / Data</div><div>03 / Agent access</div><div>04 / Advanced</div><div>05 / Danger zone</div></aside><div class="plate-work"><div class="eyebrow">01 / GENERAL</div><div class="heading">Preferences</div><div class="settings-row"><div><b>Motion</b><small>Surface transitions</small></div><span class="mini-toggle"><span class="switch on"><i></i></span>On</span></div><div class="settings-row"><div><b>Session notifications</b><small>Session attention states</small></div><span class="mini-toggle"><span class="switch"><i></i></span>Off</span></div><div class="plate-foot"><span class="subtle">Settings are local to this machine.</span><span class="status"><i></i>Ready</span></div></div></section></div>
-      </article>
+        <article class="direction v7"><div class="tag"><b>07 — BALANCED TWO-PANEL WORKSPACE</b><span>use a second real setting surface, not decoration</span></div><div class="mock"><div class="chrome"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span class="surface-name">Settings</span><button class="dropdown">General</button><span class="spacer"></span><button class="button">Export settings</button></div><div class="workspace"><div class="layout"><div class="surface pad"><div class="surface-head"><b>Preferences</b><small>GENERAL</small></div><div class="row"><div><b>Motion</b><small>Interaction transitions</small></div><span class="toggle"><span class="switch on"><i></i></span>On</span></div><div class="row"><div><b>Notifications</b><small>Session state signals</small></div><span class="toggle"><span class="switch"><i></i></span>Off</span></div></div><div class="surface pad"><div class="surface-head"><b>Runtime posture</b><small>LOCAL</small></div><div class="row"><div><b>Data store</b><small>Canonical SQLite database</small></div><span class="status"><i></i>Available</span></div><div class="row"><div><b>Agent endpoint</b><small>Read-only MCP server</small></div><span class="status"><i></i>Ready</span></div></div></div><div class="action-strip"><span class="muted">Settings apply immediately to this Masthead desktop.</span><button class="button">Open data folder</button><button class="button primary">Test MCP</button></div></div></div></article>
 
-      <article class="direction d08" id="eight">
-        <div class="direction-label"><strong>08 — CENTRAL QUIET LEDGER</strong><span>make blank space deliberate, not abandoned</span></div>
-        <div class="screen"><section class="work"><div class="quiet-ruler"><div class="ruler-side"></div><div class="ledger-core"><div class="eyebrow">GENERAL</div><div class="heading">Preferences</div><div class="settings-row"><div><b>Motion</b><small>Interface transitions</small></div><span class="mini-toggle"><span class="switch on"><i></i></span>On</span></div><div class="settings-row"><div><b>Session notifications</b><small>Local desktop signals</small></div><span class="mini-toggle"><span class="switch"><i></i></span>Off</span></div><div style="margin-top:18px" class="status"><i></i>Configuration saved locally</div></div><div class="ruler-side"></div></div></section></div>
-      </article>
+        <article class="direction v8"><div class="tag"><b>08 — TOOLBAR + THREE-CARD BAND</b><span>more density, entirely through known card components</span></div><div class="mock"><div class="chrome"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span class="surface-name">Settings</span><span class="divider"></span><button class="dropdown">General</button><button class="button">View all categories</button><span class="spacer"></span><span class="status"><i></i>Connected</span></div><div class="workspace"><div class="title-row"><div><div class="eyebrow">GENERAL</div><h2>Preferences</h2></div><button class="button">Restore defaults</button></div><div class="band"><div class="surface pad"><div class="surface-head"><b>Presentation</b><small>MOTION</small></div><div class="row"><div><b>Motion</b><small>Transitions</small></div><span class="toggle"><span class="switch on"><i></i></span>On</span></div></div><div class="surface pad"><div class="surface-head"><b>Attention</b><small>NOTIFICATIONS</small></div><div class="row"><div><b>Session notifications</b><small>Desktop signals</small></div><span class="toggle"><span class="switch"><i></i></span>Off</span></div></div><div class="surface pad"><div class="surface-head"><b>Local scope</b><small>MASTHEAD</small></div><p class="muted">Private by default. Original harness files stay untouched.</p><span class="status"><i></i>Local only</span></div></div><div class="footer-note"><span>Configuration is stored on this machine.</span><span>2 direct controls</span></div></div></div></article>
 
-      <article class="direction d09" id="nine">
-        <div class="direction-label"><strong>09 — FOLDED CONFIGURATION SHEET</strong><span>use a dense header slab and two working zones</span></div>
-        <div class="screen"><aside class="side"><div class="side-brand"><img src="../public/assets/masthead-logo-sail.png" alt="" />SETTINGS</div><div class="nav-item active">General</div><div class="nav-item">Data</div><div class="nav-item">Agent access</div><div class="nav-item">Advanced</div><div class="nav-item danger">Danger zone</div></aside><section class="work"><div class="sheet-top"><div><div class="eyebrow">CURRENT SURFACE</div><b>General / Preferences</b></div><div><div class="eyebrow">STORAGE</div><b>Local machine</b></div><div><div class="eyebrow">CONNECTOR</div><b style="color:var(--green)">Ready</b></div></div><div class="sheet-body"><div><div class="heading">Direct controls</div><div class="settings-row"><div><b>Motion</b><small>Presentation transitions</small></div><span class="mini-toggle"><span class="switch on"><i></i></span>On</span></div><div class="settings-row"><div><b>Session notifications</b><small>Desktop attention state</small></div><span class="mini-toggle"><span class="switch"><i></i></span>Off</span></div></div><div><div class="eyebrow">CONTROL NOTES</div><div class="safe-list"><div><span>Motion</span><span>enabled</span></div><div><span>Notifications</span><span>disabled</span></div><div><span>Scope</span><span>local</span></div></div></div></div></section></div>
-      </article>
+        <article class="direction v9"><div class="tag"><b>09 — SETTINGS TABLE</b><span>borrow Workbench scan rhythm without becoming a dashboard</span></div><div class="mock"><div class="chrome"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span class="surface-name">Settings</span><button class="dropdown">General</button><span class="spacer"></span><button class="button">Search controls</button></div><div class="workspace"><div class="title-row"><div><div class="eyebrow">GENERAL</div><h2>Preferences</h2></div><span class="muted">LOCAL CONFIGURATION</span></div><div class="table"><div class="table-head"><span>CONTROL</span><span>STATE</span><span>APPLIES TO</span></div><div class="table-row"><div><b>Motion</b><small>Interface transitions</small></div><span class="toggle"><span class="switch on"><i></i></span>On</span><span class="muted">Presentation</span></div><div class="table-row"><div><b>Session notifications</b><small>Attention state alerts</small></div><span class="toggle"><span class="switch"><i></i></span>Off</span><span class="muted">Desktop</span></div><div class="table-row"><div><b>Data ownership</b><small>Canonical session database</small></div><span class="status"><i></i>Local</span><span class="muted">This machine</span></div></div></div></div></article>
 
-      <article class="direction d10" id="ten">
-        <div class="direction-label"><strong>10 — SETTINGS MATRIX</strong><span>borrow the workbench’s scan rhythm, not its data density</span></div>
-        <div class="screen"><aside class="side"><div class="side-brand"><img src="../public/assets/masthead-logo-sail.png" alt="" />SETTINGS</div><div class="nav-item active">General</div><div class="nav-item">Data</div><div class="nav-item">Agent access</div><div class="nav-item">Advanced</div><div class="nav-item danger">Danger zone</div></aside><section class="work"><div class="matrix-head"><span>CONTROL</span><span>STATE</span><span>LOCAL EFFECT</span></div><div class="matrix-row"><div><b>Motion</b><small>Layout and interface transitions</small></div><span class="mini-toggle"><span class="switch on"><i></i></span>On</span><span class="subtle">Presentation</span></div><div class="matrix-row"><div><b>Session notifications</b><small>When sessions require attention</small></div><span class="mini-toggle"><span class="switch"><i></i></span>Off</span><span class="subtle">Desktop only</span></div><div class="matrix-row"><div><b>Data ownership</b><small>Canonical session database</small></div><span class="status"><i></i>Local</span><span class="subtle">This machine</span></div><div class="matrix-foot"><span class="subtle">3 local controls · no account settings</span><button class="control primary">Open data policy</button></div></section></div>
-      </article>
-    </main>
+        <article class="direction v10"><div class="tag"><b>10 — USEFUL CARD GRID</b><span>every occupied area is a real Masthead control surface</span></div><div class="mock"><div class="chrome"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span class="surface-name">Settings</span><button class="dropdown">General</button><span class="spacer"></span><button class="button primary">Save changes</button></div><div class="workspace"><div class="layout"><div class="surface wide pad"><div class="surface-head"><b>Preferences</b><small>GENERAL</small></div><div class="row"><div><b>Motion</b><small>Interaction and layout transitions</small></div><span class="toggle"><span class="switch on"><i></i></span>Motion on</span></div><div class="row"><div><b>Session notifications</b><small>Desktop session signals</small></div><span class="toggle"><span class="switch"><i></i></span>Notifications off</span></div></div><div class="surface pad"><span class="card-label">RUNTIME</span><b class="fact" style="display:block;margin-top:10px">Ready</b><p class="muted">Daemon and local database available.</p></div><div class="surface pad"><span class="card-label">DATA</span><b class="fact" style="display:block;margin-top:10px">Database</b><div class="quick"><span class="muted">Local</span><button class="button">Open</button></div></div><div class="surface pad"><span class="card-label">AGENT ACCESS</span><b class="fact" style="display:block;margin-top:10px">MCP server</b><div class="quick"><span class="status"><i></i>Ready</span><button class="button">Test</button></div></div></div></div></div></article>
+      </main>
+    </div>
   </body>
 </html>

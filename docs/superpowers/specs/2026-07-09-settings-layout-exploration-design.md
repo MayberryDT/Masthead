@@ -11,6 +11,8 @@ Create a disposable visual comparison board for the simplified Settings surface.
 - Reuse Masthead palette, typography, anodized texture, sail asset, narrow borders, square controls, and compact status treatments.
 - Retain the same General, Data, Agent access, Advanced, and Danger zone vocabulary.
 - Focus the layouts on making broad desktop space intentional without inventing dashboards, usage analytics, or generic onboarding.
+- Assume Masthead's existing application navigation remains outside the Settings workspace. Do not add a Settings category sidebar, a second application menu, or a bespoke navigation system inside a specimen.
+- Use familiar Masthead toolbar controls, surface cards, buttons, value rows, and select/dropdown treatments for category location and actions.
 
 ## Layout families
 
