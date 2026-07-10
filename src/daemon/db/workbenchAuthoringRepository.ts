@@ -39,26 +39,40 @@ export function createWorkbenchAuthoringRun(
     sessions: Array<{ claimId: string; ordinal: number; sessionId: string }>;
   }
 ): WorkbenchAuthoringRunDto {
-  if (input.sessions.length === 0) throw new Error("authoring_run_requires_sessions");
-  const now = new Date().toISOString();
   db.exec("BEGIN IMMEDIATE;");
   try {
-    db.prepare(
-      `INSERT INTO workbench_authoring_runs (
-        run_id, actor_id, database_id, status, evidence_revision, created_at, updated_at
-      ) VALUES (?, ?, ?, 'open', ?, ?, ?)`
-    ).run(input.runId, input.actorId, input.databaseId, input.evidenceRevision, now, now);
-    const insertSession = db.prepare(
-      `INSERT INTO workbench_authoring_run_sessions (run_id, session_id, claim_id, ordinal)
-       VALUES (?, ?, ?, ?)`
-    );
-    for (const session of input.sessions) {
-      insertSession.run(input.runId, session.sessionId, session.claimId, session.ordinal);
-    }
+    const run = createWorkbenchAuthoringRunInTransaction(db, input);
     db.exec("COMMIT;");
+    return run;
   } catch (error) {
     db.exec("ROLLBACK;");
     throw error;
+  }
+}
+
+export function createWorkbenchAuthoringRunInTransaction(
+  db: MastheadDatabase,
+  input: {
+    actorId: string;
+    databaseId: string;
+    evidenceRevision: string;
+    runId: string;
+    sessions: Array<{ claimId: string; ordinal: number; sessionId: string }>;
+  }
+): WorkbenchAuthoringRunDto {
+  if (input.sessions.length === 0) throw new Error("authoring_run_requires_sessions");
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO workbench_authoring_runs (
+      run_id, actor_id, database_id, status, evidence_revision, created_at, updated_at
+    ) VALUES (?, ?, ?, 'open', ?, ?, ?)`
+  ).run(input.runId, input.actorId, input.databaseId, input.evidenceRevision, now, now);
+  const insertSession = db.prepare(
+    `INSERT INTO workbench_authoring_run_sessions (run_id, session_id, claim_id, ordinal)
+     VALUES (?, ?, ?, ?)`
+  );
+  for (const session of input.sessions) {
+    insertSession.run(input.runId, session.sessionId, session.claimId, session.ordinal);
   }
   return getWorkbenchAuthoringRun(db, input.runId)!;
 }
@@ -138,7 +152,6 @@ export function findReusableWorkbenchAuthoringRun(
        FROM workbench_authoring_runs
        WHERE actor_id = ?
          AND database_id = ?
-         AND status <> 'completed'
        ORDER BY updated_at DESC, run_id DESC`
     )
     .all(input.actorId, input.databaseId) as Array<{ runId: string }>;

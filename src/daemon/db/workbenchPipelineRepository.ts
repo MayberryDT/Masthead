@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import type { WorkbenchAuthoringRunDto } from "../../shared/workbenchAuthoring.ts";
 import { stableRecordId } from "../identity.ts";
 import { listSessionArtifacts, publishSessionArtifact } from "./sessionArtifactRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
+import { getWorkbenchAuthoringRun } from "./workbenchAuthoringRepository.ts";
 
 export type WorkbenchPublicationStatus = "publish_path" | "published" | "not_added_to_logbook";
 export type WorkbenchNextAction =
@@ -38,6 +40,8 @@ export type WorkbenchClaimRecord = {
   releasedAt?: string;
   releaseReason?: string;
 };
+
+export type WorkbenchClaimBatch = { claims: WorkbenchClaimRecord[] };
 
 export type WorkbenchSessionStateRecord = {
   sessionId: string;
@@ -395,45 +399,13 @@ export function markWorkbenchQuality(
     reason?: string;
   }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
-  const now = new Date().toISOString();
   return writeStateTransition(db, () => {
-    const current = ensureWorkbenchSessionState(db, input.sessionId);
     if (input.status === "passed") {
-      // Re-admit failed / not-added sessions to the publish path. Leave published rows published.
-      if (current.publicationStatus === "published") {
-        db.prepare(
-          `UPDATE workbench_session_state
-           SET quality_status = 'passed', non_publication_reason = NULL, updated_at = ?
-           WHERE session_id = ?`
-        ).run(now, input.sessionId);
-      } else {
-        db.prepare(
-          `UPDATE workbench_session_state
-           SET quality_status = 'passed',
-               publication_status = 'publish_path',
-               non_publication_reason = NULL,
-               updated_at = ?
-           WHERE session_id = ?`
-        ).run(now, input.sessionId);
-        updateWorkbenchNextAction(db, input.sessionId, now);
-      }
-      const activity = insertWorkbenchActivity(db, {
-        activityId: stableRecordId("workbench_activity", [input.sessionId, "quality_passed", now]),
-        actor: input.actor,
-        details: {},
-        eventAt: now,
-        eventType: "quality_passed",
-        sessionId: input.sessionId,
-        summary: "Quality accepted"
-      });
-      db.prepare(`UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?`).run(
-        now,
-        now,
-        input.sessionId
-      );
-      return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+      return applyWorkbenchQualityPassedInTransaction(db, input);
     }
 
+    const now = new Date().toISOString();
+    const current = ensureWorkbenchSessionState(db, input.sessionId);
     if (current.publicationStatus === "published") {
       throw new Error("cannot_fail_quality_on_published_session");
     }
@@ -464,6 +436,54 @@ export function markWorkbenchQuality(
     );
     return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
   });
+}
+
+export function markWorkbenchQualityPassedInTransaction(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; sessionId: string }
+): void {
+  applyWorkbenchQualityPassedInTransaction(db, input);
+}
+
+function applyWorkbenchQualityPassedInTransaction(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; sessionId: string }
+): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  const now = new Date().toISOString();
+  const current = ensureWorkbenchSessionState(db, input.sessionId);
+  // Re-admit failed / not-added sessions to the publish path. Leave published rows published.
+  if (current.publicationStatus === "published") {
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET quality_status = 'passed', non_publication_reason = NULL, updated_at = ?
+       WHERE session_id = ?`
+    ).run(now, input.sessionId);
+  } else {
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET quality_status = 'passed',
+           publication_status = 'publish_path',
+           non_publication_reason = NULL,
+           updated_at = ?
+       WHERE session_id = ?`
+    ).run(now, input.sessionId);
+    updateWorkbenchNextAction(db, input.sessionId, now);
+  }
+  const activity = insertWorkbenchActivity(db, {
+    activityId: stableRecordId("workbench_activity", [input.sessionId, "quality_passed", now]),
+    actor: input.actor,
+    details: {},
+    eventAt: now,
+    eventType: "quality_passed",
+    sessionId: input.sessionId,
+    summary: "Quality accepted"
+  });
+  db.prepare(`UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?`).run(
+    now,
+    now,
+    input.sessionId
+  );
+  return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
 }
 
 export function recordWorkbenchActivity(
@@ -648,6 +668,32 @@ export function markWorkbenchTranscriptStatus(
   });
 }
 
+export function markWorkbenchTranscriptAvailableInTransaction(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; sessionId: string }
+): void {
+  const now = new Date().toISOString();
+  ensureWorkbenchSessionState(db, input.sessionId);
+  db.prepare(
+    `UPDATE workbench_session_state
+     SET transcript_status = CASE
+           WHEN transcript_status = 'imported' THEN 'imported'
+           ELSE 'available'
+         END,
+         updated_at = ?
+     WHERE session_id = ?`
+  ).run(now, input.sessionId);
+  insertWorkbenchActivity(db, {
+    activityId: stableRecordId("workbench_activity", [input.sessionId, "authoring_evidence_ready"]),
+    actor: input.actor,
+    details: { source: "canonical_redacted_evidence" },
+    eventAt: now,
+    eventType: "authoring_evidence_ready",
+    sessionId: input.sessionId,
+    summary: "Canonical redacted evidence ready for authoring"
+  });
+}
+
 export function listWorkbenchActivity(db: MastheadDatabase, options: { limit: number; sessionId?: string }): WorkbenchActivityRecord[] {
   const limit = Math.max(1, Math.min(Math.trunc(options.limit), 100));
   const rows = options.sessionId
@@ -752,42 +798,114 @@ export function listWorkbenchQueue(
 export function claimWorkbenchSessions(
   db: MastheadDatabase,
   input: { claimedBy: string; expiresAt: string; sessionIds: string[] }
-): { claims: WorkbenchClaimRecord[] } {
-  const now = new Date().toISOString();
-  const claims: WorkbenchClaimRecord[] = [];
+): WorkbenchClaimBatch {
   db.exec("BEGIN IMMEDIATE;");
   try {
-    for (const sessionId of input.sessionIds) {
-      ensureWorkbenchSessionState(db, sessionId);
-      db.prepare(
-        `UPDATE workbench_claims
-        SET released_at = ?, release_reason = ?
-        WHERE session_id = ? AND released_at IS NULL`
-      ).run(now, "replaced", sessionId);
-      const claimId = randomUUID();
-      db.prepare(
-        `INSERT INTO workbench_claims (
-          claim_id, session_id, claim_kind, claimed_by, claimed_at, heartbeat_at, expires_at
-        ) VALUES (?, ?, 'publish_path', ?, ?, ?, ?)`
-      ).run(claimId, sessionId, input.claimedBy, now, now, input.expiresAt);
-      insertWorkbenchActivity(db, {
-        activityId: stableRecordId("workbench_activity", [sessionId, "claimed", claimId]),
-        actor: { kind: "agent", id: input.claimedBy },
-        details: { expiresAt: input.expiresAt },
-        eventAt: now,
-        eventType: "claimed",
-        relatedClaimId: claimId,
-        sessionId,
-        summary: "Workbench session claimed"
-      });
-      claims.push(readWorkbenchClaim(db, claimId)!);
-    }
+    const batch = claimWorkbenchSessionsInTransaction(db, input);
     db.exec("COMMIT;");
+    return batch;
   } catch (error) {
     db.exec("ROLLBACK;");
     throw error;
   }
+}
+
+export function claimWorkbenchSessionsInTransaction(
+  db: MastheadDatabase,
+  input: { claimedBy: string; expiresAt: string; sessionIds: string[] }
+): WorkbenchClaimBatch {
+  const now = new Date().toISOString();
+  const claims: WorkbenchClaimRecord[] = [];
+  for (const sessionId of input.sessionIds) {
+    ensureWorkbenchSessionState(db, sessionId);
+    db.prepare(
+      `UPDATE workbench_claims
+       SET released_at = ?, release_reason = ?
+       WHERE session_id = ? AND released_at IS NULL`
+    ).run(now, "replaced", sessionId);
+    const claimId = randomUUID();
+    db.prepare(
+      `INSERT INTO workbench_claims (
+        claim_id, session_id, claim_kind, claimed_by, claimed_at, heartbeat_at, expires_at
+      ) VALUES (?, ?, 'publish_path', ?, ?, ?, ?)`
+    ).run(claimId, sessionId, input.claimedBy, now, now, input.expiresAt);
+    insertWorkbenchActivity(db, {
+      activityId: stableRecordId("workbench_activity", [sessionId, "claimed", claimId]),
+      actor: { kind: "agent", id: input.claimedBy },
+      details: { expiresAt: input.expiresAt },
+      eventAt: now,
+      eventType: "claimed",
+      relatedClaimId: claimId,
+      sessionId,
+      summary: "Workbench session claimed"
+    });
+    claims.push(readWorkbenchClaim(db, claimId)!);
+  }
   return { claims };
+}
+
+export function renewOrReacquireAuthoringClaimsInTransaction(
+  db: MastheadDatabase,
+  input: { actorId: string; expiresAt: string; runId: string }
+): WorkbenchAuthoringRunDto {
+  const run = getWorkbenchAuthoringRun(db, input.runId);
+  if (!run) throw new Error(`authoring_run_not_found:${input.runId}`);
+  if (run.actorId !== input.actorId) throw new Error(`authoring_actor_mismatch:${input.runId}`);
+  const now = new Date().toISOString();
+
+  for (const sessionId of run.sessionIds) {
+    const runClaim = db
+      .prepare(
+        `SELECT claims.claim_id AS claimId,
+                claims.claimed_by AS claimedBy,
+                claims.expires_at AS expiresAt,
+                claims.released_at AS releasedAt
+         FROM workbench_authoring_run_sessions AS run_sessions
+         JOIN workbench_claims AS claims ON claims.claim_id = run_sessions.claim_id
+         WHERE run_sessions.run_id = ? AND run_sessions.session_id = ?`
+      )
+      .get(input.runId, sessionId) as
+      | { claimId: string; claimedBy: string; expiresAt: string; releasedAt: string | null }
+      | undefined;
+    if (!runClaim) throw new Error(`authoring_claim_missing:${sessionId}`);
+
+    const conflicting = db
+      .prepare(
+        `SELECT claim_id AS claimId
+         FROM workbench_claims
+         WHERE session_id = ?
+           AND claim_id <> ?
+           AND released_at IS NULL
+           AND expires_at > ?
+         LIMIT 1`
+      )
+      .get(sessionId, runClaim.claimId, now) as { claimId: string } | undefined;
+    if (conflicting || (runClaim.releasedAt === null && runClaim.expiresAt > now && runClaim.claimedBy !== input.actorId)) {
+      throw new Error(`authoring_claim_conflict:${sessionId}`);
+    }
+
+    if (runClaim.releasedAt === null && runClaim.expiresAt > now) {
+      db.prepare("UPDATE workbench_claims SET heartbeat_at = ?, expires_at = ? WHERE claim_id = ?").run(
+        now,
+        input.expiresAt,
+        runClaim.claimId
+      );
+      continue;
+    }
+
+    const replacement = claimWorkbenchSessionsInTransaction(db, {
+      claimedBy: input.actorId,
+      expiresAt: input.expiresAt,
+      sessionIds: [sessionId]
+    }).claims[0]!;
+    db.prepare(
+      `UPDATE workbench_authoring_run_sessions
+       SET claim_id = ?
+       WHERE run_id = ? AND session_id = ?`
+    ).run(replacement.claimId, input.runId, sessionId);
+  }
+
+  return getWorkbenchAuthoringRun(db, input.runId)!;
 }
 
 export function releaseWorkbenchClaim(db: MastheadDatabase, input: { claimId: string; reason: string }): WorkbenchClaimRecord | undefined {
