@@ -18,7 +18,7 @@ export function buildPackagedCliInvocation(command, args, options) {
     .map((name) => `"${name}"`)
     .join(" ");
   return {
-    args: ["/d", "/v:off", "/s", "/c", `call ${commandLine}`],
+    args: ["/d", "/v:off", "/s", "/c", `"${commandLine}"`],
     command: comspec,
     env
   };

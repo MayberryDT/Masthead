@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   isAbsoluteAuthoringCommand,
   isWorkbenchAuthoringCapabilitiesDto
@@ -90,9 +90,9 @@ export function connectorBaseUrl(port: number): string {
 
 export function resolveDaemonLaunchTarget(input: ResolveDaemonLaunchTargetInput): DaemonLaunchTarget {
   const port = parsePort(input.env.MASTHEAD_PORT, DEFAULT_CONNECTOR_PORT);
-  const dataDirectory = input.env.MASTHEAD_DATA_DIR || input.defaultDataDir || input.userDataDir;
-  const databasePath = input.env.MASTHEAD_DB_PATH || join(dataDirectory, "masthead.sqlite");
-  const legacyStorePath = input.env.MASTHEAD_STORE_PATH || join(dataDirectory, "legacy", "events.ndjson");
+  const dataDirectory = resolve(input.env.MASTHEAD_DATA_DIR || input.defaultDataDir || input.userDataDir);
+  const databasePath = resolve(input.env.MASTHEAD_DB_PATH || join(dataDirectory, "masthead.sqlite"));
+  const legacyStorePath = resolve(input.env.MASTHEAD_STORE_PATH || join(dataDirectory, "legacy", "events.ndjson"));
   const mcpEntryOverride = input.env.MASTHEAD_MCP_ENTRY;
 
   if (input.env.MASTHEAD_DAEMON_ENTRY) {
@@ -182,7 +182,7 @@ export async function startLiveConnector(
   if (!cliCommand || !isAbsoluteAuthoringCommand(cliCommand)) {
     throw new Error("Masthead connector requires an absolute installed MASTHEAD_CLI_COMMAND");
   }
-  const initialProbe = await probeCollector(target.port, target.dataDirectory, cliCommand);
+  const initialProbe = await probeCollector(target.port, target.dataDirectory, target.databasePath, cliCommand);
   if (initialProbe.state === "same_database_authoring_incompatible") {
     throw new Error(
       `A Masthead collector for the same database is running at ${connectorBaseUrl(target.port)} without the expected daemon-owned authoring contract; stop or restart that collector before retrying.`
@@ -223,7 +223,7 @@ export async function startLiveConnector(
     ownedChildren.delete(child);
   });
 
-  const health = await waitForCompatibleCollector(port, target.dataDirectory, cliCommand);
+  const health = await waitForCompatibleCollector(port, target.dataDirectory, target.databasePath, cliCommand);
   await warmProjection(baseUrl);
   return connectorStartResult(true, baseUrl, "Started local Masthead collector.", health);
 }
@@ -287,6 +287,7 @@ function connectorStartResult(started: boolean, baseUrl: string, message: string
 async function probeCollector(
   port: number,
   expectedDataDirectory: string,
+  expectedDatabasePath: string,
   expectedCliCommand: string
 ): Promise<
   | { state: "compatible"; health: MastheadHealthSummary }
@@ -301,12 +302,22 @@ async function probeCollector(
     return { state: "offline" };
   }
 
-  const observedDataDirectory = observedMastheadDataDirectory(healthBody);
+  const observedIdentity = observedMastheadIdentity(healthBody);
   const health = parseCompatibleHealth(healthBody);
-  if (observedDataDirectory === expectedDataDirectory && !health) {
+  const sameDatabase = observedIdentity.databasePath
+    ? observedIdentity.databasePath === expectedDatabasePath
+    : observedIdentity.dataDirectory === expectedDataDirectory;
+  if (
+    sameDatabase &&
+    (!observedIdentity.databasePath || !health || observedIdentity.dataDirectory !== expectedDataDirectory)
+  ) {
     return { state: "same_database_authoring_incompatible" };
   }
-  if (!health || health.dataDirectory !== expectedDataDirectory) return { state: "incompatible" };
+  if (
+    !health ||
+    observedIdentity.databasePath !== expectedDatabasePath ||
+    observedIdentity.dataDirectory !== expectedDataDirectory
+  ) return { state: "incompatible" };
 
   try {
     const capabilitiesResponse = await fetch(`${connectorBaseUrl(port)}/workbench/authoring/capabilities`, {
@@ -334,21 +345,28 @@ async function warmProjection(baseUrl: string): Promise<void> {
 async function waitForCompatibleCollector(
   port: number,
   expectedDataDirectory: string,
+  expectedDatabasePath: string,
   expectedCliCommand: string
 ): Promise<MastheadHealthSummary> {
   const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
-    const probe = await probeCollector(port, expectedDataDirectory, expectedCliCommand);
+    const probe = await probeCollector(port, expectedDataDirectory, expectedDatabasePath, expectedCliCommand);
     if (probe.state === "compatible") return probe.health;
     await delay(200);
   }
   throw new Error(`Started Masthead collector but it did not become compatible at ${connectorBaseUrl(port)}/health`);
 }
 
-function observedMastheadDataDirectory(value: unknown): string | undefined {
+function observedMastheadIdentity(value: unknown): { dataDirectory?: string; databasePath?: string } {
   const record = objectField(value);
-  if (record?.ok !== true || record.product !== "masthead") return undefined;
-  return stringField(objectField(record.data)?.dataDirectory);
+  if (record?.ok !== true || record.product !== "masthead") return {};
+  const data = objectField(record.data);
+  const dataDirectory = stringField(data?.dataDirectory);
+  const databasePath = stringField(data?.databasePath);
+  return {
+    ...(dataDirectory ? { dataDirectory: resolve(dataDirectory) } : {}),
+    ...(databasePath ? { databasePath: resolve(databasePath) } : {})
+  };
 }
 
 async function findAvailablePort(startPort: number): Promise<number> {

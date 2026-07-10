@@ -183,10 +183,13 @@ stop_stale_authoring_daemon() {
 
 install_active_cli_launcher() {
   local temporary_path="\${CLI_LAUNCHER}.tmp.$$"
-  printf '#!/bin/sh\\nexec env MASTHEAD_DAEMON_URL=%q %q %q "$@"\\n' \\
-    "$ACTIVE_DAEMON_BASE_URL" "$NODE_BIN" "$CLI_ENTRY" >"$temporary_path"
-  chmod 0755 "$temporary_path"
-  mv -f "$temporary_path" "$CLI_LAUNCHER"
+  if ! printf '#!/bin/sh\\nexec env MASTHEAD_DAEMON_URL=%q %q %q "$@"\\n' \\
+    "$ACTIVE_DAEMON_BASE_URL" "$NODE_BIN" "$CLI_ENTRY" >"$temporary_path" || \\
+    ! chmod 0755 "$temporary_path" || \\
+    ! mv -f "$temporary_path" "$CLI_LAUNCHER"; then
+    rm -f "$temporary_path"
+    return 1
+  fi
 }
 
 set_active_daemon() {
@@ -306,8 +309,25 @@ build_electron_dev_bundles() {
   return "$build_status"
 }
 
+cleanup_failed_dev_daemon() {
+  local pid="$1"
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    for _ in {1..20}; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+  wait "$pid" 2>/dev/null || true
+  rm -f "$LOG_DIR/dev-daemon.pid"
+}
+
 start_dev_daemon() {
   local port="17373"
+  local daemon_pid
 
   log "Building Masthead daemon..."
   if (cd "$APP_DIR" && "$NPM_BIN" run build:daemon) >>"$LOG_FILE" 2>&1; then
@@ -337,6 +357,11 @@ start_dev_daemon() {
     wait_for_port_to_close "$port" || log "Port 17373 stayed occupied by an unhealthy process; daemon start may fail."
   fi
 
+  if ! set_active_daemon "$port"; then
+    log "Could not atomically bind the authoring CLI launcher to http://127.0.0.1:$port; daemon was not started."
+    return 1
+  fi
+
   log "Starting Masthead daemon at http://127.0.0.1:$port"
   (
     cd "$APP_DIR"
@@ -354,18 +379,27 @@ start_dev_daemon() {
       "$NODE_BIN" "$DAEMON_ENTRY"
   ) >>"$LOG_FILE" 2>&1 &
 
-  echo "$!" >"$LOG_DIR/dev-daemon.pid"
+  daemon_pid="$!"
+  if ! echo "$daemon_pid" >"$LOG_DIR/dev-daemon.pid"; then
+    log "Could not record Masthead daemon PID $daemon_pid."
+    cleanup_failed_dev_daemon "$daemon_pid"
+    return 1
+  fi
 
   for _ in {1..240}; do
     if daemon_is_compatible "$port"; then
-      set_active_daemon "$port"
       log "Masthead daemon is ready at $ACTIVE_DAEMON_BASE_URL."
       return 0
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      log "Masthead daemon process $daemon_pid exited before becoming ready."
+      break
     fi
     sleep 0.25
   done
 
   log "Masthead daemon did not become ready at http://127.0.0.1:$port"
+  cleanup_failed_dev_daemon "$daemon_pid"
   return 1
 }
 

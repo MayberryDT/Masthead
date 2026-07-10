@@ -243,27 +243,65 @@ describe("Electron daemon launcher policy", () => {
     ).rejects.toThrow("launcher write failed");
     expect(owned.size).toBe(0);
   });
+
+  test("refuses a collector using the same canonical database through a different data directory", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      jsonResponse(compatibleHealth("/tmp/other-data", "/tmp/shared/masthead.sqlite"))
+    ));
+    const owned = new Set<never>();
+
+    await expect(
+      startLiveConnector(
+        connectorInput("/home/test/.local/bin/mastheadctl", {
+          MASTHEAD_DB_PATH: "/tmp/shared/../shared/masthead.sqlite"
+        }),
+        ["masthead://app"],
+        owned
+      )
+    ).rejects.toThrow("same database");
+    expect(owned.size).toBe(0);
+  });
+
+  test("treats the same data directory with a different canonical database as another collector", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      jsonResponse(compatibleHealth("/tmp/masthead", "/tmp/other/masthead.sqlite"))
+    ));
+    const owned = new Set<never>();
+    const prepare = vi.fn(async (_input: { baseUrl: string; port: number }) => {
+      throw new Error("fallback launcher selected");
+    });
+
+    await expect(
+      startLiveConnector(connectorInput("/home/test/.local/bin/mastheadctl"), ["masthead://app"], owned, {
+        prepareAuthoringLauncher: prepare
+      })
+    ).rejects.toThrow("fallback launcher selected");
+    expect(prepare).toHaveBeenCalledWith({ baseUrl: expect.any(String), port: expect.any(Number) });
+    expect(prepare.mock.calls[0]?.[0].port).toBeGreaterThan(17373);
+    expect(owned.size).toBe(0);
+  });
 });
 
-function connectorInput(cliCommand: string) {
+function connectorInput(cliCommand: string, env: Record<string, string> = {}) {
   return {
     currentDir: "/tmp",
     env: {
       MASTHEAD_CLI_COMMAND: cliCommand,
       MASTHEAD_DAEMON_ENTRY: process.execPath,
       MASTHEAD_DATA_DIR: "/tmp/masthead",
-      MASTHEAD_NODE_PATH: process.execPath
+      MASTHEAD_NODE_PATH: process.execPath,
+      ...env
     },
     resourcesPath: "/opt/Masthead/resources",
     userDataDir: "/tmp/masthead"
   };
 }
 
-function compatibleHealth(dataDirectory: string) {
+function compatibleHealth(dataDirectory: string, databasePath = `${dataDirectory}/masthead.sqlite`) {
   return {
     apiVersion: 1,
     capabilities: ["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings", "artifact_authoring"],
-    data: { dataDirectory, migrationState: "ready" },
+    data: { databasePath, dataDirectory, migrationState: "ready" },
     ok: true,
     product: "masthead"
   };

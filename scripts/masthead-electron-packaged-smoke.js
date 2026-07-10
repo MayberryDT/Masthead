@@ -8,6 +8,10 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, win32 } from "node:path";
 import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { buildPackagedCliInvocation } from "./packaged-cli-command.js";
+import {
+  buildWindowsTaskkillInvocation,
+  parseWindowsListenerPid
+} from "./packaged-process-cleanup.js";
 
 try {
   await main();
@@ -49,12 +53,15 @@ async function runPackagedSmoke(binary) {
   const dataDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-smoke-"));
   let homeDir;
   let child;
+  let smokePort;
   let timeout;
+  let primaryError;
+  let cleanupError;
   const verificationAbort = new AbortController();
   const commandChildren = new Set();
   try {
     homeDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-home-"));
-    const smokePort = await availablePort();
+    smokePort = await availablePort();
     const baseUrl = `http://127.0.0.1:${smokePort}`;
     const disableSandboxForCi = process.env.CI ? { ELECTRON_DISABLE_SANDBOX: "1" } : {};
     child = spawn(binary, [], {
@@ -97,8 +104,11 @@ async function runPackagedSmoke(binary) {
     );
     const electronTimeout = new Promise((_resolve, reject) => {
       timeout = setTimeout(() => {
-        void terminateChild(child, { processGroup: true });
-        reject(new Error("Packaged Electron smoke timed out after 45 seconds."));
+        const timeoutError = new Error("Packaged Electron smoke timed out after 45 seconds.");
+        void terminateChild(child, { processGroup: true }).then(
+          () => reject(timeoutError),
+          (error) => reject(combineErrors(timeoutError, error, timeoutError.message))
+        );
       }, 45_000);
     });
     const [[code], cliCheck] = await Promise.race([
@@ -115,15 +125,32 @@ async function runPackagedSmoke(binary) {
 
     const parsed = JSON.parse(jsonLine);
     assertPackagedSmokeResult(parsed, dataDir, smokePort);
-    await assertSmokeConnectorStopped(dataDir, smokePort);
+  } catch (error) {
+    primaryError = error;
   } finally {
     verificationAbort.abort();
     if (timeout) clearTimeout(timeout);
-    await Promise.all([...commandChildren].map((commandChild) => terminateChild(commandChild)));
-    await terminateChild(child, { processGroup: true });
-    if (homeDir) await rm(homeDir, { force: true, recursive: true });
-    await rm(dataDir, { force: true, recursive: true });
+    try {
+      await cleanupPackagedProcesses(commandChildren, child, dataDir, smokePort);
+    } catch (error) {
+      cleanupError = error;
+    }
+
+    if (!cleanupError) {
+      try {
+        if (homeDir) await rm(homeDir, { force: true, recursive: true });
+        await rm(dataDir, { force: true, recursive: true });
+      } catch (error) {
+        cleanupError = error;
+      }
+    }
   }
+
+  if (primaryError) {
+    if (cleanupError) throw combineErrors(primaryError, cleanupError, "Packaged smoke failed and cleanup also failed.");
+    throw primaryError;
+  }
+  if (cleanupError) throw cleanupError;
 }
 
 async function verifyPackagedAuthoringCli(baseUrl, homeDir, child, commandChildren, signal) {
@@ -174,22 +201,27 @@ function runCommand(command, args, env, commandChildren) {
       systemRoot: process.env.SystemRoot || process.env.SYSTEMROOT
     });
     const commandChild = spawn(invocation.command, invocation.args, {
+      detached: process.platform !== "win32",
       env: { ...env, ...invocation.env },
       stdio: ["ignore", "pipe", "pipe"]
     });
     commandChildren.add(commandChild);
     let stdout = "";
     let stderr = "";
-    let timedOut = false;
     let settled = false;
     const timeout = setTimeout(() => {
-      timedOut = true;
-      void terminateChild(commandChild).finally(() => {
-        if (settled) return;
-        settled = true;
-        commandChildren.delete(commandChild);
-        reject(new Error(`Timed out invoking packaged authoring CLI: ${command}`));
-      });
+      if (settled) return;
+      settled = true;
+      const timeoutError = new Error(`Timed out invoking packaged authoring CLI: ${command}`);
+      void terminateChild(commandChild, { processTree: true }).then(
+        () => {
+          commandChildren.delete(commandChild);
+          reject(timeoutError);
+        },
+        (error) => {
+          reject(combineErrors(timeoutError, error, timeoutError.message));
+        }
+      );
     }, 10_000);
     commandChild.stdout.setEncoding("utf8");
     commandChild.stderr.setEncoding("utf8");
@@ -211,27 +243,27 @@ function runCommand(command, args, env, commandChildren) {
       settled = true;
       clearTimeout(timeout);
       commandChildren.delete(commandChild);
-      if (timedOut) reject(new Error(`Timed out invoking packaged authoring CLI: ${command}`));
-      else resolve({ code, stderr, stdout });
+      resolve({ code, stderr, stdout });
     });
   });
 }
 
 async function terminateChild(child, options = {}) {
   if (!child) return;
-  const processGroupMayRemain = Boolean(options.processGroup && child.pid);
+  const ownsProcessTree = Boolean((options.processGroup || options.processTree) && child.pid);
+  const processGroupMayRemain = Boolean(ownsProcessTree && process.platform !== "win32" && child.pid);
   if (!isChildRunning(child) && !processGroupMayRemain) return;
 
-  if (options.processGroup && process.platform === "win32" && child.pid && isChildRunning(child)) {
+  if (ownsProcessTree && process.platform === "win32" && child.pid && isChildRunning(child)) {
     await terminateWindowsProcessTree(child.pid, false);
   } else {
-    signalChild(child, "SIGTERM", options.processGroup);
+    signalChild(child, "SIGTERM", ownsProcessTree);
   }
   await (processGroupMayRemain ? delay(750) : Promise.race([waitForChildExit(child), delay(750)]));
 
-  if (options.processGroup && process.platform === "win32" && child.pid && isChildRunning(child)) {
+  if (ownsProcessTree && process.platform === "win32" && child.pid && isChildRunning(child)) {
     await terminateWindowsProcessTree(child.pid, true);
-  } else if (options.processGroup && process.platform !== "win32" && child.pid && isProcessGroupRunning(child.pid)) {
+  } else if (ownsProcessTree && process.platform !== "win32" && child.pid && isProcessGroupRunning(child.pid)) {
     try {
       process.kill(-child.pid, "SIGKILL");
     } catch {
@@ -240,15 +272,28 @@ async function terminateChild(child, options = {}) {
   } else if (isChildRunning(child)) {
     child.kill("SIGKILL");
   }
-  await Promise.race([waitForChildExit(child), delay(750)]);
+  await assertProcessTreeStopped(child, { processGroup: ownsProcessTree });
 }
 
 async function terminateWindowsProcessTree(pid, force) {
-  const taskkill = win32.join(process.env.SystemRoot || process.env.SYSTEMROOT || "C:\\Windows", "System32", "taskkill.exe");
-  const args = ["/pid", String(pid), "/t", ...(force ? ["/f"] : [])];
-  const taskkillChild = spawn(taskkill, args, { stdio: "ignore" });
-  await Promise.race([once(taskkillChild, "exit").catch(() => undefined), delay(750)]);
-  if (isChildRunning(taskkillChild)) taskkillChild.kill("SIGKILL");
+  const invocation = buildWindowsTaskkillInvocation(
+    pid,
+    force,
+    process.env.SystemRoot || process.env.SYSTEMROOT
+  );
+  await runBoundedProcess(invocation.command, invocation.args, 1_500);
+}
+
+async function assertProcessTreeStopped(child, options = {}) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const directRunning = isChildRunning(child);
+    const groupRunning = Boolean(
+      options.processGroup && process.platform !== "win32" && child?.pid && isProcessGroupRunning(child.pid)
+    );
+    if (!directRunning && !groupRunning) return;
+    await delay(100);
+  }
+  throw new Error(`Could not stop packaged smoke process tree rooted at PID ${child?.pid ?? "unknown"}.`);
 }
 
 function isProcessGroupRunning(pid) {
@@ -279,6 +324,118 @@ function waitForChildExit(child) {
 
 function isChildRunning(child) {
   return Boolean(child && child.exitCode === null && child.signalCode === null);
+}
+
+async function cleanupPackagedProcesses(commandChildren, electronChild, dataDir, smokePort) {
+  const errors = [];
+  for (const commandChild of commandChildren) {
+    try {
+      await terminateChild(commandChild, { processTree: true });
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  try {
+    await terminateChild(electronChild, { processGroup: true });
+  } catch (error) {
+    errors.push(error);
+  }
+  if (smokePort) {
+    try {
+      await cleanupSmokeConnector(dataDir, smokePort);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, "Multiple packaged smoke process trees could not be stopped.");
+}
+
+async function cleanupSmokeConnector(dataDir, smokePort) {
+  if (process.platform === "win32") {
+    const listenerPid = await waitForWindowsSmokeListener(dataDir, smokePort);
+    if (!listenerPid) return;
+    await terminateWindowsProcessTree(listenerPid, true);
+    await assertSmokeConnectorStopped(dataDir, smokePort);
+    return;
+  }
+
+  const health = await readSmokeHealth(smokePort);
+  if (!health || health?.data?.dataDirectory !== dataDir) return;
+  await assertSmokeConnectorStopped(dataDir, smokePort);
+}
+
+async function waitForWindowsSmokeListener(dataDir, smokePort) {
+  let unexpectedListenerPid;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const listenerPid = await findWindowsListenerPid(smokePort);
+    if (listenerPid) {
+      unexpectedListenerPid = listenerPid;
+      const health = await readSmokeHealth(smokePort);
+      if (health?.data?.dataDirectory === dataDir) return listenerPid;
+    }
+    await delay(200);
+  }
+  if (unexpectedListenerPid) {
+    throw new Error(
+      `Port ${smokePort} remained owned by PID ${unexpectedListenerPid}, but it did not identify as the packaged smoke connector for ${dataDir}.`
+    );
+  }
+  return undefined;
+}
+
+async function findWindowsListenerPid(port) {
+  const command = win32.join(
+    process.env.SystemRoot || process.env.SYSTEMROOT || "C:\\Windows",
+    "System32",
+    "netstat.exe"
+  );
+  const result = await runBoundedProcess(command, ["-ano", "-p", "tcp"], 2_000);
+  if (result.code !== 0) {
+    throw new Error(`Windows netstat failed while locating smoke port ${port}: ${result.stderr}`);
+  }
+  return parseWindowsListenerPid(result.stdout, port);
+}
+
+function runBoundedProcess(command, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error(`Process cleanup command timed out: ${command}`));
+    }, timeoutMs);
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve({ code, stderr, stdout });
+    });
+  });
+}
+
+function combineErrors(primaryError, cleanupError, message) {
+  const primary = primaryError instanceof Error ? primaryError : new Error(String(primaryError));
+  const cleanup = cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
+  return new AggregateError([primary, cleanup], `${message} ${primary.message}`, { cause: primary });
 }
 
 function assertPackagedSmokeResult(parsed, dataDir, smokePort) {
@@ -318,13 +475,17 @@ function assertFuse(fuseWire, option, expected, name) {
 
 async function assertSmokeConnectorStopped(dataDir, smokePort) {
   for (let attempt = 0; attempt < 24; attempt += 1) {
-    const health = await fetch(`http://127.0.0.1:${smokePort}/health`, { signal: AbortSignal.timeout(500) })
-      .then((response) => (response.ok ? response.json() : undefined))
-      .catch(() => undefined);
+    const health = await readSmokeHealth(smokePort);
     if (!health || health?.data?.dataDirectory !== dataDir) return;
     await delay(250);
   }
   throw new Error(`Packaged Electron smoke connector was still running from ${dataDir} after the app exited.`);
+}
+
+function readSmokeHealth(smokePort) {
+  return fetch(`http://127.0.0.1:${smokePort}/health`, { signal: AbortSignal.timeout(500) })
+    .then((response) => (response.ok ? response.json() : undefined))
+    .catch(() => undefined);
 }
 
 async function availablePort() {

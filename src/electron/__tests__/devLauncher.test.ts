@@ -67,4 +67,19 @@ describe("Masthead Dev launcher template", () => {
     expect(source).toContain('spawnSync(npmBin, ["run", "build:daemon"]');
     expect(source.indexOf("await installCliLauncher()")).toBeLessThan(source.indexOf("await writeFile(launcherPath"));
   });
+
+  test("atomically binds the active CLI launcher before spawning the selected daemon port", async () => {
+    const source = await readFile("scripts/install-electron-dev-launcher.js", "utf8");
+    const start = source.slice(source.indexOf("start_dev_daemon()"), source.indexOf('if [[ "\\${MASTHEAD_DEV_LAUNCH_CHILD'));
+    const bindIndex = start.indexOf('set_active_daemon "$port"');
+    const spawnIndex = start.indexOf('log "Starting Masthead daemon');
+
+    expect(bindIndex).toBeGreaterThan(-1);
+    expect(spawnIndex).toBeGreaterThan(bindIndex);
+    expect(start).toContain('local daemon_pid');
+    expect(start).toContain('daemon_pid="$!"');
+    expect(start).toContain('cleanup_failed_dev_daemon "$daemon_pid"');
+    expect(source).toContain('rm -f "$LOG_DIR/dev-daemon.pid"');
+    expect(source).toContain('wait "$pid" 2>/dev/null || true');
+  });
 });

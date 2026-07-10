@@ -11,6 +11,7 @@ describe("packaged authoring CLI smoke coverage", () => {
 
   test("packaged smoke invokes the capability-reported launcher from an isolated home", async () => {
     const source = await readFile("scripts/masthead-electron-packaged-smoke.js", "utf8");
+    const cleanupSource = await readFile("scripts/packaged-process-cleanup.js", "utf8");
 
     expect(source).toContain('homeDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-home-"))');
     expect(source).toContain("HOME: homeDir");
@@ -24,7 +25,11 @@ describe("packaged authoring CLI smoke coverage", () => {
     expect(source).toContain("await terminateChild");
     expect(source).toContain('child.kill("SIGKILL")');
     expect(source).toContain("processGroupMayRemain");
-    expect(source).toContain('"taskkill.exe"');
+    expect(cleanupSource).toContain('"taskkill.exe"');
+    expect(source).toContain("findWindowsListenerPid");
+    expect(source).toContain("assertProcessTreeStopped");
+    expect(source).toContain("processTree: true");
+    expect(source).toContain("cleanupError");
     expect(source).toContain("verificationAbort.abort()");
     expect(source).toContain("const electronTimeout = new Promise");
     expect(source).toContain("let settled = false");

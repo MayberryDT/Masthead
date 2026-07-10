@@ -17,8 +17,8 @@ describe("packaged CLI process invocation", () => {
   test("runs Windows command launchers through explicit ComSpec with escaped metacharacters", () => {
     expect(
       buildPackagedCliInvocation(
-        "C:\\Users\\Test & 100%\\Masthead CLI\\mastheadctl.cmd",
-        ["workbench", "capabilities", "--json"],
+        "C:\\Users\\%TEMP% & 100%%\\Masthead CLI\\mastheadctl.cmd",
+        ["workbench", "%TEMP% & capabilities", "--json"],
         { comspec: "C:\\Windows\\System32\\cmd.exe", platform: "win32" }
       )
     ).toEqual({
@@ -27,13 +27,13 @@ describe("packaged CLI process invocation", () => {
         "/v:off",
         "/s",
         "/c",
-        'call "%MASTHEAD_PACKAGED_CLI%" "%MASTHEAD_PACKAGED_CLI_ARG_0%" "%MASTHEAD_PACKAGED_CLI_ARG_1%" "%MASTHEAD_PACKAGED_CLI_ARG_2%"'
+        '""%MASTHEAD_PACKAGED_CLI%" "%MASTHEAD_PACKAGED_CLI_ARG_0%" "%MASTHEAD_PACKAGED_CLI_ARG_1%" "%MASTHEAD_PACKAGED_CLI_ARG_2%""'
       ],
       command: "C:\\Windows\\System32\\cmd.exe",
       env: {
-        MASTHEAD_PACKAGED_CLI: "C:\\Users\\Test & 100%\\Masthead CLI\\mastheadctl.cmd",
+        MASTHEAD_PACKAGED_CLI: "C:\\Users\\%TEMP% & 100%%\\Masthead CLI\\mastheadctl.cmd",
         MASTHEAD_PACKAGED_CLI_ARG_0: "workbench",
-        MASTHEAD_PACKAGED_CLI_ARG_1: "capabilities",
+        MASTHEAD_PACKAGED_CLI_ARG_1: "%TEMP% & capabilities",
         MASTHEAD_PACKAGED_CLI_ARG_2: "--json"
       }
     });
