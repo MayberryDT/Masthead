@@ -442,6 +442,10 @@ export function markWorkbenchQualityPassedInTransaction(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; sessionId: string }
 ): void {
+  const current = readWorkbenchSessionState(db, input.sessionId);
+  if (current?.publicationStatus === "not_added_to_logbook") {
+    throw new Error(`authoring_session_not_on_publish_path:${input.sessionId}`);
+  }
   applyWorkbenchQualityPassedInTransaction(db, input);
 }
 

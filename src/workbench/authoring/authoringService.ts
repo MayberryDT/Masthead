@@ -7,6 +7,7 @@ import type {
   WorkbenchAuthoringFinding,
   WorkbenchAuthoringRunDto
 } from "../../shared/workbenchAuthoring.ts";
+import { hasSemanticRedactedText } from "../../core/redaction.ts";
 import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepository.ts";
 import { listSessionArtifacts } from "../../daemon/db/sessionArtifactRepository.ts";
 import { iterateSessionTranscriptItems, type SessionTranscriptKindFilter } from "../../daemon/db/sessionTranscriptRepository.ts";
@@ -24,6 +25,7 @@ import {
   ensureWorkbenchSessionState,
   markWorkbenchQualityPassedInTransaction,
   markWorkbenchTranscriptAvailableInTransaction,
+  readWorkbenchSessionState,
   recordWorkbenchActivity,
   renewOrReacquireAuthoringClaimsInTransaction
 } from "../../daemon/db/workbenchPipelineRepository.ts";
@@ -98,6 +100,7 @@ export function openAuthoringRun(
     if (reusable?.status === "completed") {
       return openResult(db, reusable, evidence);
     }
+    assertSessionsOnPublishPath(db, sessionIds);
     assertCanonicalEvidence(db, evidence);
     if (reusable?.evidenceRevision === evidence.evidenceRevision) return openResult(db, reusable, evidence);
     if (reusable) {
@@ -273,10 +276,19 @@ function assertSessionExists(db: MastheadDatabase, sessionId: string): void {
 function assertCanonicalEvidence(db: MastheadDatabase, evidence: WorkbenchAuthoringEvidenceManifest): void {
   for (const session of evidence.sessions) {
     const hasUsableText = [...iterateSessionTranscriptItems(db, { order: "asc", sessionId: session.sessionId })].some(
-      (item) => item.text.trim().length > 0 && !item.lowValue
+      (item) => !item.lowValue && hasSemanticRedactedText(item.text)
     );
     if (session.totalItems === 0 || !hasUsableText) {
       throw new Error(`missing_canonical_evidence:${session.sessionId}`);
+    }
+  }
+}
+
+function assertSessionsOnPublishPath(db: MastheadDatabase, sessionIds: string[]): void {
+  for (const sessionId of sessionIds) {
+    const state = readWorkbenchSessionState(db, sessionId);
+    if (state && state.publicationStatus !== "publish_path") {
+      throw new Error(`authoring_session_not_on_publish_path:${sessionId}`);
     }
   }
 }

@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchAuthoringBundle } from "../../../shared/workbenchAuthoring.ts";
 import { seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
-import { readWorkbenchSessionState, claimWorkbenchSessions } from "../../../daemon/db/workbenchPipelineRepository.ts";
+import {
+  claimWorkbenchSessions,
+  markWorkbenchNotAdded,
+  readWorkbenchSessionState
+} from "../../../daemon/db/workbenchPipelineRepository.ts";
 import { completeWorkbenchAuthoringRun } from "../../../daemon/db/workbenchAuthoringRepository.ts";
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
@@ -242,6 +246,31 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
+  test("does not resurrect an explicitly suppressed session", async () => {
+    const db = await readyAuthoringDb();
+    markWorkbenchNotAdded(db, {
+      actor: { id: "operator", kind: "user" },
+      reason: "user_suppressed",
+      sessionId: "session:a"
+    });
+    const stateBeforeOpen = readWorkbenchSessionState(db, "session:a");
+    const activityCountBeforeOpen = db.prepare("SELECT COUNT(*) AS count FROM workbench_activity").get();
+
+    expect(() =>
+      openAuthoringRun(db, {
+        actorId: "codex",
+        databaseId: testDatabaseId(db),
+        sessionIds: ["session:a"]
+      })
+    ).toThrow("authoring_session_not_on_publish_path:session:a");
+
+    expect(readWorkbenchSessionState(db, "session:a")).toEqual(stateBeforeOpen);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_activity").get()).toEqual(activityCountBeforeOpen);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_claims").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_authoring_runs").get()).toEqual({ count: 0 });
+    db.close();
+  });
+
   test("rejects sessions with no usable canonical redacted evidence", async () => {
     const db = await readyAuthoringDb();
     clearCanonicalEvidence(db, "session:a");
@@ -254,6 +283,24 @@ describe("Workbench authoring service", () => {
       })
     ).toThrow("missing_canonical_evidence:session:a");
     expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_claims").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_session_state").get()).toEqual({ count: 0 });
+    db.close();
+  });
+
+  test("rejects canonical evidence containing only redaction placeholders", async () => {
+    const db = await readyAuthoringDb();
+    clearCanonicalEvidence(db, "session:a");
+    insertMessage(db, "session:a", "redaction-only", "[SECRET:private_key]");
+
+    expect(() =>
+      openAuthoringRun(db, {
+        actorId: "codex",
+        databaseId: testDatabaseId(db),
+        sessionIds: ["session:a"]
+      })
+    ).toThrow("missing_canonical_evidence:session:a");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_claims").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_authoring_runs").get()).toEqual({ count: 0 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_session_state").get()).toEqual({ count: 0 });
     db.close();
   });
@@ -334,6 +381,79 @@ describe("Workbench authoring service", () => {
       status: "completed"
     });
     expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_authoring_runs").get()).toEqual({ count: 1 });
+    db.close();
+  });
+
+  test("returns a completed receipt without rewriting later suppression", async () => {
+    const db = await readyAuthoringDb();
+    const input = {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    };
+    const opened = openAuthoringRun(db, input);
+    completeWorkbenchAuthoringRun(db, {
+      receipt: {
+        completedAt: "2026-07-10T12:30:00.000Z",
+        contributions: [],
+        notApplicable: [],
+        publishedArtifactIds: [],
+        resolvedSessionIds: ["session:a"],
+        runId: opened.run.runId
+      },
+      runId: opened.run.runId
+    });
+    markWorkbenchNotAdded(db, {
+      actor: { id: "operator", kind: "user" },
+      reason: "user_suppressed",
+      sessionId: "session:a"
+    });
+    const stateBeforeOpen = readWorkbenchSessionState(db, "session:a");
+    const rowsBeforeOpen = authoringRowCounts(db);
+
+    const reopened = openAuthoringRun(db, input);
+
+    expect(reopened.run).toMatchObject({
+      receipt: { runId: opened.run.runId },
+      runId: opened.run.runId,
+      status: "completed"
+    });
+    expect(readWorkbenchSessionState(db, "session:a")).toEqual(stateBeforeOpen);
+    expect(authoringRowCounts(db)).toEqual(rowsBeforeOpen);
+    db.close();
+  });
+
+  test("returns a completed receipt without reopening changed placeholder-only evidence", async () => {
+    const db = await readyAuthoringDb();
+    const input = {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    };
+    const opened = openAuthoringRun(db, input);
+    completeWorkbenchAuthoringRun(db, {
+      receipt: {
+        completedAt: "2026-07-10T12:30:00.000Z",
+        contributions: [],
+        notApplicable: [],
+        publishedArtifactIds: [],
+        resolvedSessionIds: ["session:a"],
+        runId: opened.run.runId
+      },
+      runId: opened.run.runId
+    });
+    clearCanonicalEvidence(db, "session:a");
+    insertMessage(db, "session:a", "redaction-only", "[SECRET:private_key]");
+    const rowsBeforeOpen = authoringRowCounts(db);
+
+    const reopened = openAuthoringRun(db, input);
+
+    expect(reopened.run).toMatchObject({
+      receipt: { runId: opened.run.runId },
+      runId: opened.run.runId,
+      status: "completed"
+    });
+    expect(authoringRowCounts(db)).toEqual(rowsBeforeOpen);
     db.close();
   });
 });

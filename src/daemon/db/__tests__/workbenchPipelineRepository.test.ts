@@ -16,6 +16,7 @@ import {
   markWorkbenchNotAdded,
   markWorkbenchPublished,
   markWorkbenchQuality,
+  markWorkbenchQualityPassedInTransaction,
   markWorkbenchSessionEnrichmentSatisfied,
   publishWorkbenchSession,
   readWorkbenchSessionState,
@@ -354,6 +355,32 @@ describe("workbench pipeline repository", () => {
     expect(recovered.state.nonPublicationReason).toBeUndefined();
     expect(recovered.state.nextAction).toBe("enrich");
     expect(recovered.activity.eventType).toBe("quality_passed");
+  });
+
+  test("authoring quality pass does not erase explicit non-publication state", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:authoring-suppressed",
+      title: "Authoring suppressed"
+    });
+    markWorkbenchQuality(db, {
+      actor: { kind: "user", id: "tyler" },
+      reason: "user_suppressed",
+      sessionId: "session:authoring-suppressed",
+      status: "failed"
+    });
+    const before = readWorkbenchSessionState(db, "session:authoring-suppressed");
+
+    expect(() =>
+      markWorkbenchQualityPassedInTransaction(db, {
+        actor: { id: "codex", kind: "agent" },
+        sessionId: "session:authoring-suppressed"
+      })
+    ).toThrow("authoring_session_not_on_publish_path:session:authoring-suppressed");
+    expect(readWorkbenchSessionState(db, "session:authoring-suppressed")).toEqual(before);
   });
 
   test("quality fail on published session throws and leaves publication unchanged", async () => {

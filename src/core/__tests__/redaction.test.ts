@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { redactCommandOutput, redactPath, redactText } from "../redaction";
+import { hasSemanticRedactedText, redactCommandOutput, redactPath, redactText } from "../redaction";
 
 describe("privacy redaction", () => {
   test("redacts common secret-bearing strings before persistence", () => {
@@ -69,5 +69,13 @@ describe("privacy redaction", () => {
     expect(output.text).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
     expect(output.text.length).toBeLessThanOrEqual(160);
     expect(output.truncated).toBe(true);
+  });
+
+  test("distinguishes redaction-only placeholders from retained semantic text", () => {
+    expect(hasSemanticRedactedText("[SECRET:private_key]")).toBe(false);
+    expect(hasSemanticRedactedText("[SECRET:api_key]\n[redacted]")).toBe(false);
+    expect(hasSemanticRedactedText("Authorization: Bearer [SECRET:bearer_token]")).toBe(false);
+    expect(hasSemanticRedactedText("Use [SECRET:api_key] for the staging integration.")).toBe(true);
+    expect(hasSemanticRedactedText("The canonical outcome shipped after verification.")).toBe(true);
   });
 });

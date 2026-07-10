@@ -1,6 +1,9 @@
 const PRIVATE_KEY_PATTERN =
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
 
+const REDACTION_PLACEHOLDER_PATTERN = /\[(?:SECRET:[^\]]+|redacted)\]/gi;
+const REDACTION_ONLY_WRAPPER_PATTERN = /^(?:(?:authorization\s*:\s*)?bearer|cookie\s*:?)$/i;
+
 const REDACTION_PATTERNS: Array<[RegExp, string]> = [
   [/Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Authorization: Bearer [SECRET:bearer_token]"],
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [SECRET:bearer_token]"],
@@ -34,6 +37,12 @@ export function redactText(input: string): string {
     redacted = redacted.replace(pattern, replacement);
   }
   return redacted;
+}
+
+export function hasSemanticRedactedText(input: string): boolean {
+  const retained = input.replace(REDACTION_PLACEHOLDER_PATTERN, " ").replace(/\s+/g, " ").trim();
+  if (!retained || REDACTION_ONLY_WRAPPER_PATTERN.test(retained)) return false;
+  return /[\p{L}\p{N}]/u.test(retained);
 }
 
 export function redactJsonValue(value: unknown): unknown {
