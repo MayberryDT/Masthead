@@ -1,6 +1,7 @@
 import type { SettingsOptionDto } from "../../app/daemonClient";
 import { AppButton } from "../primitives/AppButton";
 import { FilterableSelect } from "../primitives/FilterableSelect";
+import { SettingsActionFeedback, type SettingsFeedback } from "./SettingsActionFeedback";
 import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 import type { DeletionScopeKind } from "../OperationsPanel";
@@ -19,6 +20,8 @@ type DangerZoneProps = {
   onDeletionScopeTargetChange?: (target: string) => void;
   onRequestScopedDelete?: () => void;
   onRequestDeleteAll?: () => void;
+  scopedDeleteFeedback?: SettingsFeedback;
+  deleteAllFeedback?: SettingsFeedback;
 };
 
 const scopeOptions: Array<{ label: string; value: DeletionScopeKind }> = [
@@ -37,6 +40,8 @@ export function DangerZone({
   onDeletionScopeTargetChange,
   onRequestDeleteAll,
   onRequestScopedDelete,
+  scopedDeleteFeedback,
+  deleteAllFeedback,
   targets
 }: DangerZoneProps) {
   const targetOptions = optionsForScope(deletionScopeKind, targets);
@@ -88,15 +93,19 @@ export function DangerZone({
             <AppButton disabled={busy || deletionScopeTarget.trim().length === 0} onClick={onRequestScopedDelete} variant="danger">
               Delete selected records
             </AppButton>
+            <SettingsActionFeedback feedback={scopedDeleteFeedback} />
           </div>
         }
         label="Delete scoped records"
       />
       <SettingsRow
         control={
-          <AppButton disabled={busy} onClick={onRequestDeleteAll} variant="danger">
-            Delete all Masthead data
-          </AppButton>
+          <div className="settings-inline-actions">
+            <AppButton disabled={busy} onClick={onRequestDeleteAll} variant="danger">
+              Delete all Masthead data
+            </AppButton>
+            <SettingsActionFeedback feedback={deleteAllFeedback} />
+          </div>
         }
         label="Delete all"
       />

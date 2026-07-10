@@ -34,7 +34,7 @@ export function useSettingsDataController({
   onReviewDispositionsChanged,
   writable
 }: UseSettingsDataControllerOptions) {
-  const [localDataStatus, setLocalDataStatus] = useState<LocalDataStatus>({ state: "idle" });
+  const [localDataStatus, setLocalDataStatus] = useState<LocalDataStatus>({ action: "none", state: "idle" });
   const [dataSummary, setDataSummary] = useState<DataSummary>();
   const [deletionScopeKind, setDeletionScopeKind] = useState<DeletionScopeKind>("project");
   const [deletionScopeTarget, setDeletionScopeTarget] = useState("");
@@ -89,6 +89,7 @@ export function useSettingsDataController({
       } catch (error) {
         if (!cancelled) {
           setLocalDataStatus({
+            action: "none",
             state: "error",
             message: `Local history unavailable: ${error instanceof Error ? error.message : String(error)}`
           });
@@ -108,7 +109,7 @@ export function useSettingsDataController({
   }, []);
 
   const cancelLocalDataAction = useCallback(() => {
-    setLocalDataStatus({ state: "idle" });
+    setLocalDataStatus({ action: "none", state: "idle" });
     resetPendingDeletion();
   }, [resetPendingDeletion]);
 
@@ -153,14 +154,15 @@ export function useSettingsDataController({
 
   const handleRequestDeleteLocalData = useCallback(async () => {
     if (!writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      setLocalDataStatus({ action: "delete_all", state: "error", message: writeBlockedMessage });
       return;
     }
-    setLocalDataStatus({ state: "busy", message: "Preparing delete-all preview..." });
+    setLocalDataStatus({ action: "delete_all", state: "busy", message: "Preparing delete-all preview..." });
     try {
       const summary = await loadDataDeletionPreview(undefined, activeDatabaseId);
       setPendingDeletionDatabaseId(activeDatabaseId);
       setLocalDataStatus({
+        action: "delete_all",
         state: "confirm_delete",
         message: `Confirm delete all Masthead data: ${formatCount(summary.sessions)} sessions, ${formatCount(
           summary.rawEvents
@@ -170,6 +172,7 @@ export function useSettingsDataController({
       });
     } catch (error) {
       setLocalDataStatus({
+        action: "delete_all",
         state: "error",
         message: `Delete preview failed: ${error instanceof Error ? error.message : String(error)}`
       });
@@ -247,20 +250,21 @@ export function useSettingsDataController({
 
   const handleRequestScopedDelete = useCallback(async () => {
     if (!writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      setLocalDataStatus({ action: "scoped_delete", state: "error", message: writeBlockedMessage });
       return;
     }
     const scope = selectedDeletionScope();
     if (!scope) {
-      setLocalDataStatus({ state: "error", message: "Choose a deletion scope and target before deleting records." });
+      setLocalDataStatus({ action: "scoped_delete", state: "error", message: "Choose a deletion scope and target before deleting records." });
       return;
     }
-    setLocalDataStatus({ state: "busy", message: "Preparing scoped deletion preview..." });
+    setLocalDataStatus({ action: "scoped_delete", state: "busy", message: "Preparing scoped deletion preview..." });
     try {
       const summary = await loadDataDeletionPreview(scope, activeDatabaseId);
       setPendingDeletionScope(scope);
       setPendingDeletionDatabaseId(activeDatabaseId);
       setLocalDataStatus({
+        action: "scoped_delete",
         state: "confirm_scoped_delete",
         message: `Confirm scoped deletion for ${scopeLabel(scope)}: ${formatCount(
           summary.sessions
@@ -270,6 +274,7 @@ export function useSettingsDataController({
       });
     } catch (error) {
       setLocalDataStatus({
+        action: "scoped_delete",
         state: "error",
         message: `Scoped delete preview failed: ${error instanceof Error ? error.message : String(error)}`
       });
@@ -278,21 +283,22 @@ export function useSettingsDataController({
 
   const handleConfirmScopedDelete = useCallback(async () => {
     if (!writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      setLocalDataStatus({ action: "scoped_delete", state: "error", message: writeBlockedMessage });
       return;
     }
     const scope = pendingDeletionScope ?? selectedDeletionScope();
     if (!scope) {
-      setLocalDataStatus({ state: "error", message: "Choose a deletion scope and target before deleting records." });
+      setLocalDataStatus({ action: "scoped_delete", state: "error", message: "Choose a deletion scope and target before deleting records." });
       return;
     }
-    setLocalDataStatus({ state: "busy", message: `Deleting Masthead records for ${scopeLabel(scope)}...` });
+    setLocalDataStatus({ action: "scoped_delete", state: "busy", message: `Deleting Masthead records for ${scopeLabel(scope)}...` });
     try {
       const response = await deleteMastheadData(scope, activeProjectionUrl, { databaseId: pendingDeletionDatabaseId ?? activeDatabaseId });
       setDataSummary(response.summary);
       setPendingDeletionScope(undefined);
       setPendingDeletionDatabaseId(undefined);
       setLocalDataStatus({
+        action: "scoped_delete",
         state: "deleted",
         message: `Deleted ${formatCount(response.result.sessions ?? 0)} sessions for ${scopeLabel(
           scope
@@ -300,6 +306,7 @@ export function useSettingsDataController({
       });
     } catch (error) {
       setLocalDataStatus({
+        action: "scoped_delete",
         state: "error",
         message: `Scoped delete failed: ${error instanceof Error ? error.message : String(error)}`
       });
@@ -316,10 +323,10 @@ export function useSettingsDataController({
 
   const handleConfirmDeleteLocalData = useCallback(async () => {
     if (!writable) {
-      setLocalDataStatus({ state: "error", message: writeBlockedMessage });
+      setLocalDataStatus({ action: "delete_all", state: "error", message: writeBlockedMessage });
       return;
     }
-    setLocalDataStatus({ state: "busy", message: "Deleting canonical Masthead data..." });
+    setLocalDataStatus({ action: "delete_all", state: "busy", message: "Deleting canonical Masthead data..." });
     try {
       const response = await deleteMastheadData({ kind: "all" }, activeProjectionUrl, {
         databaseId: pendingDeletionDatabaseId ?? activeDatabaseId
@@ -329,6 +336,7 @@ export function useSettingsDataController({
       onCanonicalDataDeleted();
       setPendingDeletionDatabaseId(undefined);
       setLocalDataStatus({
+        action: "delete_all",
         state: "deleted",
         message: `Deleted ${formatCount(response.result.sessions ?? 0)} sessions, ${formatCount(
           response.result.rawEvents ?? 0
@@ -338,6 +346,7 @@ export function useSettingsDataController({
       });
     } catch (error) {
       setLocalDataStatus({
+        action: "delete_all",
         state: "error",
         message: `Delete failed: ${error instanceof Error ? error.message : String(error)}`
       });

@@ -132,11 +132,11 @@ describe("Settings surface", () => {
       dataButton?.click();
     });
 
-    expect(pane?.textContent).toContain("Open data folder");
+    expect(pane?.textContent).toContain("Database");
     expect(pane?.textContent).toContain("Open folder");
-    expect(pane?.textContent).toContain("Export archive");
+    expect(pane?.textContent).toContain("Export");
     expect(pane?.textContent).toContain("Export data");
-    expect(pane?.textContent).toContain("Include raw copies");
+    expect(pane?.textContent).toContain("Raw source copies");
     expect(pane?.textContent).toContain(
       "Deletes stored raw copies only; normalized records and original harness files remain."
     );
@@ -245,6 +245,7 @@ describe("Settings surface", () => {
       <OperationsPanel
         dataSummary={settings.storage.dataSummary}
         localDataStatus={{
+          action: "delete_all",
           state: "confirm_delete",
           message: "Confirm delete all Masthead data: 31 sessions and 7,657 raw source copies."
         }}
@@ -267,6 +268,7 @@ describe("Settings surface", () => {
       <OperationsPanel
         dataSummary={settings.storage.dataSummary}
         localDataStatus={{
+          action: "delete_all",
           state: "confirm_delete",
           message: "Confirm delete all Masthead data: 31 sessions and 7,657 raw source copies."
         }}
@@ -286,6 +288,7 @@ describe("Settings surface", () => {
         deletionScopeKind="project"
         deletionScopeTarget="Masthead"
         localDataStatus={{
+          action: "scoped_delete",
           state: "confirm_scoped_delete",
           message: "Confirm scoped deletion for project Masthead: 31 sessions."
         }}
@@ -371,6 +374,18 @@ describe("Settings surface", () => {
     expect(settingsCss).toMatch(/\.settings-panel \.settings-pane > \.settings-section::before,[\s\S]*\.settings-panel \.settings-pane > \.settings-section::after\s*\{[\s\S]*content: none;[\s\S]*display: none;/);
     expect(mastheadCss).toMatch(/\.observability-console \.settings-section,[\s\S]*\.masthead-shell \.settings-section,[\s\S]*\.masthead-shell \.adapter-card\s*\{[\s\S]*border: 1px solid rgba\(92, 153, 187, 0\.14\);[\s\S]*border-radius: 5px;[\s\S]*background: #071b28;/);
     expect(mastheadCss).toMatch(/\.summary-strip \.summary-metric,[\s\S]*\.settings-section,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: surface-card-enter 400ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;/);
+  });
+
+  test("shares one accessible inline action-feedback primitive", () => {
+    const storageSource = readFileSync("src/ui/settings/StorageSettings.tsx", "utf8");
+    const mcpSource = readFileSync("src/ui/settings/McpSettings.tsx", "utf8");
+    const dangerSource = readFileSync("src/ui/settings/DangerZone.tsx", "utf8");
+
+    expect(storageSource).toContain('from "./SettingsActionFeedback"');
+    expect(mcpSource).toContain('from "./SettingsActionFeedback"');
+    expect(dangerSource).toContain('from "./SettingsActionFeedback"');
+    expect(storageSource).not.toContain("<span className={`settings-inline-feedback");
+    expect(mcpSource).not.toContain("<span className={`settings-inline-feedback");
   });
 });
 

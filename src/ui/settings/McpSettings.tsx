@@ -11,6 +11,7 @@ import {
 } from "../../app/mcpLaunchClient";
 import { AppButton } from "../primitives/AppButton";
 import { StatusBadge } from "../primitives/StatusBadge";
+import { SettingsActionFeedback } from "./SettingsActionFeedback";
 import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 
@@ -145,11 +146,7 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
             >
               {testState === "testing" ? "Testing…" : "Test connection"}
             </AppButton>
-            {serverFeedback ? (
-              <span className={`settings-inline-feedback ${serverFeedback.tone}`} role="status">
-                {serverFeedback.message}
-              </span>
-            ) : null}
+            <SettingsActionFeedback feedback={serverFeedback} />
           </div>
         }
       />

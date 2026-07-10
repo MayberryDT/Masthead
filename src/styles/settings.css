@@ -88,14 +88,18 @@
 }
 
 .settings-section {
+  position: relative;
   display: grid;
   align-content: start;
+  gap: 10px;
   min-width: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  padding: 15px 16px 7px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #081d2b;
+  box-shadow:
+    0 0 0 1px rgba(92, 153, 187, 0.14),
+    inset 0 1px 0 rgba(190, 225, 245, 0.035);
+  padding: 14px;
 }
 
 .settings-panel .settings-pane > .settings-section {
@@ -106,6 +110,8 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+  gap: 0;
+  padding: 15px 16px 7px;
   animation: none;
   transform: none;
   transition: none;
@@ -138,11 +144,27 @@
 }
 
 .settings-section-danger {
-  box-shadow: inset 2px 0 0 rgba(255, 72, 62, 0.72);
+  grid-column: auto;
+  box-shadow:
+    0 0 0 1px rgba(255, 97, 97, 0.22),
+    inset 0 1px 0 rgba(255, 210, 210, 0.04);
+}
+
+.settings-section::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--blue, #2ea7ff);
+  opacity: 0.72;
+}
+
+.settings-section-danger::before {
+  background: var(--red, #ff483e);
 }
 
 .settings-section-head h2 {
-  margin: 0;
+  margin: 2px 0 0;
   color: var(--ink, #f6fbff);
   font-size: 15px;
   font-weight: 600;
@@ -150,12 +172,13 @@
 }
 
 .settings-section-head .mono-label {
-  margin: 0 0 4px;
+  margin: 0;
+  text-transform: uppercase;
 }
 
 .settings-section-head p {
   max-width: 680px;
-  margin: 5px 0 0;
+  margin: 4px 0 0;
   color: var(--mute, #91a8ba);
   font-size: 12px;
   line-height: 1.35;
@@ -163,15 +186,39 @@
 
 .settings-section-body {
   display: grid;
+}
+
+.settings-panel .settings-pane .settings-section-head h2 {
+  margin: 0;
+}
+
+.settings-panel .settings-pane .settings-section-head .mono-label {
+  margin: 0 0 4px;
+  text-transform: none;
+}
+
+.settings-panel .settings-pane .settings-section-head p {
+  margin: 5px 0 0;
+}
+
+.settings-panel .settings-pane .settings-section-body {
   margin-top: 9px;
 }
 
 .settings-row {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px 12px;
+  border-bottom: 1px solid rgba(194, 221, 241, 0.08);
+  padding: 8px 0;
+}
+
+.settings-panel .settings-pane .settings-row {
   grid-template-columns: minmax(0, 1fr) minmax(180px, 360px);
   align-items: center;
-  gap: 8px 12px;
   border-top: 1px solid rgba(194, 221, 241, 0.1);
+  border-bottom: 0;
   padding: 9px 0;
 }
 
@@ -196,6 +243,10 @@
 }
 
 .settings-row-detail {
+  display: contents;
+}
+
+.settings-panel .settings-pane .settings-row-detail {
   grid-column: 2;
   display: flex;
   align-items: center;
@@ -206,17 +257,30 @@
 }
 
 .settings-row-value {
+  grid-column: 2;
   min-width: 0;
   max-width: min(100%, 280px);
   color: var(--body, #d6e4ef);
-  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
   font-size: 12px;
+  justify-self: end;
   text-align: right;
   overflow-wrap: anywhere;
 }
 
+.settings-panel .settings-pane .settings-row-value {
+  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  justify-self: auto;
+}
+
 .settings-row-control {
+  grid-column: 1 / -1;
   min-width: 0;
+  justify-self: stretch;
+}
+
+.settings-panel .settings-pane .settings-row-control {
+  grid-column: auto;
+  justify-self: auto;
 }
 
 .settings-inline-actions,
@@ -704,6 +768,29 @@
     0 0 0 3px rgba(46, 167, 255, 0.12);
 }
 
+@media (max-width: 860px) {
+  .sources-onboarding-step-content .settings-row,
+  .source-detail-enrichment .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .sources-onboarding-step-content .settings-row-copy,
+  .sources-onboarding-step-content .settings-row-control,
+  .sources-onboarding-step-content .settings-row-value,
+  .sources-onboarding-step-content .settings-inline-actions,
+  .source-detail-enrichment .settings-row-copy,
+  .source-detail-enrichment .settings-row-control,
+  .source-detail-enrichment .settings-row-value,
+  .source-detail-enrichment .settings-inline-actions {
+    grid-column: 1;
+    justify-self: stretch;
+    justify-content: flex-start;
+    max-width: none;
+    text-align: left;
+  }
+}
+
 @media (max-width: 760px) {
   .settings-workspace {
     grid-template-columns: minmax(0, 1fr);
@@ -729,23 +816,23 @@
     border-right: 0;
   }
 
-  .settings-row {
+  .settings-panel .settings-pane .settings-row {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
   }
 
-  .settings-row-copy,
-  .settings-row-detail {
+  .settings-panel .settings-pane .settings-row-copy,
+  .settings-panel .settings-pane .settings-row-detail {
     grid-column: 1;
     justify-self: stretch;
     max-width: none;
   }
 
-  .settings-row-detail {
+  .settings-panel .settings-pane .settings-row-detail {
     justify-content: flex-start;
   }
 
-  .settings-row-value {
+  .settings-panel .settings-pane .settings-row-value {
     text-align: left;
   }
 
@@ -756,7 +843,7 @@
     text-align: left;
   }
 
-  .settings-inline-actions,
+  .settings-panel .settings-pane .settings-inline-actions,
   .confirm-dialog-actions {
     justify-content: flex-start;
     justify-self: stretch;
@@ -764,7 +851,7 @@
     text-align: left;
   }
 
-  .settings-inline-feedback {
+  .settings-panel .settings-pane .settings-inline-feedback {
     max-width: none;
     text-align: left;
   }
@@ -776,12 +863,12 @@
 }
 
 @media (max-width: 390px) {
-  .settings-delete-controls {
+  .settings-panel .settings-pane .settings-delete-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .settings-row-control > .app-button,
-  .settings-inline-actions .app-button {
+  .settings-panel .settings-pane .settings-row-control > .app-button,
+  .settings-panel .settings-pane .settings-inline-actions .app-button {
     width: 100%;
   }
 }

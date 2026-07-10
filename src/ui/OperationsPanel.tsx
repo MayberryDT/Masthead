@@ -11,14 +11,16 @@ import { AdvancedSettings } from "./settings/AdvancedSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { McpSettings } from "./settings/McpSettings";
 import { PreferencesSettings } from "./settings/PreferencesSettings";
+import type { SettingsFeedback } from "./settings/SettingsActionFeedback";
 import { SettingsCategoryNav, type SettingsCategory } from "./settings/SettingsCategoryNav";
-import { StorageSettings, type SettingsActionFeedback } from "./settings/StorageSettings";
+import { StorageSettings } from "./settings/StorageSettings";
 import { AppButton } from "./primitives/AppButton";
 
 export type DeletionScopeKind = "project" | "session" | "runtime" | "host";
+export type LocalDataAction = "none" | "export" | "raw_copies" | "scoped_delete" | "delete_all";
 
 export type LocalDataStatus = {
-  action?: "export" | "raw_copies";
+  action: LocalDataAction;
   state:
     | "idle"
     | "confirm_delete"
@@ -67,7 +69,7 @@ export function OperationsPanel({
   dataSummary,
   deletionScopeKind = "project",
   deletionScopeTarget = "",
-  localDataStatus = { state: "idle" },
+  localDataStatus = { action: "none", state: "idle" },
   motionDisabled,
   sessionEndedNotificationsEnabled,
   onSessionEndedNotificationsEnabledChange,
@@ -92,7 +94,7 @@ export function OperationsPanel({
   const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
   const [localSettingsError, setLocalSettingsError] = useState<string>();
   const [localSettingsLoadState, setLocalSettingsLoadState] = useState<"loading" | "ready" | "error">(settingsState ? "ready" : "loading");
-  const [openDataDirectoryFeedback, setOpenDataDirectoryFeedback] = useState<SettingsActionFeedback>();
+  const [openDataDirectoryFeedback, setOpenDataDirectoryFeedback] = useState<SettingsFeedback>();
   const settingsError = controlledSettingsError ?? localSettingsError;
   const settingsLoadState = controlledSettingsLoadState ?? localSettingsLoadState;
   const effectiveSettings = loadedSettings ?? settingsState;
@@ -148,8 +150,10 @@ export function OperationsPanel({
   const showSettingsSections = Boolean(effectiveSettings) || settingsLoadState !== "error";
   const localOnlyDeletionNote =
     "Deletes Masthead's local canonical data only. Original source harness files are not modified.";
-  const exportFeedback = dataActionFeedback(localDataStatus, "export");
-  const rawCopiesFeedback = dataActionFeedback(localDataStatus, "raw_copies");
+  const exportFeedback = actionFeedback(localDataStatus, "export");
+  const rawCopiesFeedback = actionFeedback(localDataStatus, "raw_copies");
+  const scopedDeleteFeedback = actionFeedback(localDataStatus, "scoped_delete");
+  const deleteAllFeedback = actionFeedback(localDataStatus, "delete_all");
 
   return (
     <section id="settings" className="settings-panel" aria-label="Settings">
@@ -204,6 +208,8 @@ export function OperationsPanel({
                 onDeletionScopeTargetChange={onDeletionScopeTargetChange}
                 onRequestDeleteAll={onRequestDeleteLocalData}
                 onRequestScopedDelete={onRequestScopedDelete}
+                deleteAllFeedback={deleteAllFeedback}
+                scopedDeleteFeedback={scopedDeleteFeedback}
                 targets={effectiveSettings?.deletionTargets}
               />
             ) : null}
@@ -251,14 +257,19 @@ export function OperationsPanel({
   );
 }
 
-function dataActionFeedback(
+function actionFeedback(
   status: LocalDataStatus,
-  action: "export" | "raw_copies"
-): SettingsActionFeedback | undefined {
+  action: Exclude<LocalDataAction, "none">
+): SettingsFeedback | undefined {
   if (!status.message || status.state.startsWith("confirm")) return undefined;
   if (status.action !== action) return undefined;
   return {
     message: status.message,
-    tone: status.state === "error" ? "error" : status.state === "exported" || status.state === "pruned" ? "success" : undefined
+    tone:
+      status.state === "error"
+        ? "error"
+        : status.state === "exported" || status.state === "pruned" || status.state === "deleted"
+          ? "success"
+          : undefined
   };
 }

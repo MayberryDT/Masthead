@@ -70,7 +70,7 @@ describe("Settings operational states", () => {
     const onConfirmDeleteLocalData = vi.fn();
     await renderPanel(
       <OperationsPanel
-        localDataStatus={{ state: "confirm_delete", message: "Confirm deletion." }}
+        localDataStatus={{ action: "delete_all", state: "confirm_delete", message: "Confirm deletion." }}
         onConfirmDeleteLocalData={onConfirmDeleteLocalData}
         settingsState={settings}
       />
@@ -343,6 +343,7 @@ env = {"MASTHEAD_DB_PATH":"/tmp/masthead.sqlite"}`);
     await waitFor(() => rowNamed("MCP server")?.textContent?.includes("Connection passed.") === true);
 
     expect(rowNamed("MCP server")?.querySelector(".settings-inline-feedback.success")).not.toBeNull();
+    expect(rowNamed("MCP server")?.querySelector(".settings-inline-feedback.success")?.getAttribute("aria-live")).toBe("polite");
     expect(container?.querySelectorAll(".settings-row")).toHaveLength(3);
   });
 

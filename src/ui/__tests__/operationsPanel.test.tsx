@@ -74,6 +74,7 @@ describe("OperationsPanel", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel
         localDataStatus={{
+          action: "delete_all",
           state: "confirm_delete",
           message: "Confirm delete all Masthead data. Original harness files remain untouched."
         }}
@@ -89,6 +90,7 @@ describe("OperationsPanel", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel
         localDataStatus={{
+          action: "raw_copies",
           state: "confirm_prune",
           message: "Confirm deletion of 4 raw source copies. Normalized session metadata, summaries, and search records stay available."
         }}
@@ -106,6 +108,7 @@ describe("OperationsPanel", () => {
         deletionScopeKind="project"
         deletionScopeTarget="Pip"
         localDataStatus={{
+          action: "scoped_delete",
           state: "confirm_scoped_delete",
           message: "Confirm scoped deletion for project Pip."
         }}
@@ -243,7 +246,7 @@ describe("OperationsPanel", () => {
     const html = container?.innerHTML ?? "";
 
     expect(html).toContain("Storage");
-    expect(html).toContain("Include raw copies");
+    expect(html).toContain("Raw source copies");
     expect(html).toContain("4");
     expect(html).not.toContain("Sessions");
     expect(html).not.toContain("Retention classes");
@@ -257,7 +260,7 @@ describe("OperationsPanel", () => {
       />
     );
     await selectCategory("Data");
-    const exportRow = rowNamed("Export archive");
+    const exportRow = rowNamed("Export");
     const dataHtml = container?.innerHTML ?? "";
     await selectCategory("Danger zone");
     const html = `${dataHtml}${container?.innerHTML ?? ""}`;
@@ -275,14 +278,14 @@ describe("OperationsPanel", () => {
     await selectCategory("Data");
 
     await act(async () => {
-      [...(rowNamed("Open data folder")?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      [...(rowNamed("Database")?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
         .find((button) => button.textContent === "Open folder")
         ?.click();
       await Promise.resolve();
     });
 
     expect(invoke).toHaveBeenCalledWith("open_data_directory_command", { path: settings.storage.dataDirectory });
-    expect(rowNamed("Open data folder")?.textContent).toContain("Opened data folder.");
+    expect(rowNamed("Database")?.textContent).toContain("Opened data folder.");
     expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
   });
 
@@ -295,7 +298,39 @@ describe("OperationsPanel", () => {
     );
     await selectCategory("Data");
 
-    expect(rowNamed("Include raw copies")?.textContent).toContain("Deleted 4 raw source copies.");
+    expect(rowNamed("Raw source copies")?.textContent).toContain("Deleted 4 raw source copies.");
+    expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
+  });
+
+  test("shows scoped-delete failure beside the initiating Danger row", async () => {
+    await renderPanel(
+      <OperationsPanel
+        localDataStatus={{ action: "scoped_delete", state: "error", message: "Scoped delete failed: unavailable" }}
+        settingsState={settings}
+      />
+    );
+    await selectCategory("Danger zone");
+
+    const feedback = rowNamed("Delete scoped records")?.querySelector<HTMLElement>(".settings-inline-feedback.error");
+    expect(feedback?.textContent).toBe("Scoped delete failed: unavailable");
+    expect(feedback?.getAttribute("role")).toBe("status");
+    expect(feedback?.getAttribute("aria-live")).toBe("polite");
+    expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
+  });
+
+  test("shows delete-all success beside the initiating Danger row", async () => {
+    await renderPanel(
+      <OperationsPanel
+        localDataStatus={{ action: "delete_all", state: "deleted", message: "Deleted 31 sessions." }}
+        settingsState={settings}
+      />
+    );
+    await selectCategory("Danger zone");
+
+    const feedback = rowNamed("Delete all")?.querySelector<HTMLElement>(".settings-inline-feedback.success");
+    expect(feedback?.textContent).toBe("Deleted 31 sessions.");
+    expect(feedback?.getAttribute("role")).toBe("status");
+    expect(feedback?.getAttribute("aria-live")).toBe("polite");
     expect(container?.querySelector(".settings-panel > .settings-status")).toBeNull();
   });
 

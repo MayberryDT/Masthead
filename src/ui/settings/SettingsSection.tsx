@@ -14,9 +14,11 @@ export function SettingsSection({ children, className = "", danger = false, desc
   return (
     <section className={sectionClassName} aria-labelledby={sectionId(title)}>
       <header className="settings-section-head">
-        {eyebrow ? <p className="mono-label">{eyebrow}</p> : null}
-        <h2 id={sectionId(title)}>{title}</h2>
-        {description ? <p>{description}</p> : null}
+        <div>
+          {eyebrow ? <p className="mono-label">{eyebrow}</p> : null}
+          <h2 id={sectionId(title)}>{title}</h2>
+          {description ? <p>{description}</p> : null}
+        </div>
       </header>
       <div className="settings-section-body">{children}</div>
     </section>

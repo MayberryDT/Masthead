@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { DataSummary, SettingsStateDto } from "../../app/daemonClient";
 import { AppButton } from "../primitives/AppButton";
+import { SettingsActionFeedback, type SettingsFeedback } from "./SettingsActionFeedback";
 import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 
@@ -12,14 +13,9 @@ type StorageSettingsProps = {
   onExport?: () => void;
   onOpenDataDirectory?: () => void;
   onRequestPrune?: () => void;
-  exportFeedback?: SettingsActionFeedback;
-  openDataDirectoryFeedback?: SettingsActionFeedback;
-  rawCopiesFeedback?: SettingsActionFeedback;
-};
-
-export type SettingsActionFeedback = {
-  message: string;
-  tone?: "error" | "success";
+  exportFeedback?: SettingsFeedback;
+  openDataDirectoryFeedback?: SettingsFeedback;
+  rawCopiesFeedback?: SettingsFeedback;
 };
 
 export function StorageSettings({
@@ -47,7 +43,7 @@ export function StorageSettings({
             </AppButton>
           </ActionControl>
         }
-        label="Open data folder"
+        label="Database"
         value={databasePath ? <span title={databasePath}>{compactPath(databasePath)}</span> : "Loading"}
       />
       <SettingsRow
@@ -58,7 +54,7 @@ export function StorageSettings({
             </AppButton>
           </ActionControl>
         }
-        label="Export archive"
+        label="Export"
       />
       <SettingsRow
         control={
@@ -69,22 +65,18 @@ export function StorageSettings({
           </ActionControl>
         }
         description="Deletes stored raw copies only; normalized records and original harness files remain."
-        label="Include raw copies"
+        label="Raw source copies"
         value={summary ? formatCount(summary.rawEvents) : "Loading"}
       />
     </SettingsSection>
   );
 }
 
-function ActionControl({ children, feedback }: { children: ReactNode; feedback?: SettingsActionFeedback }) {
+function ActionControl({ children, feedback }: { children: ReactNode; feedback?: SettingsFeedback }) {
   return (
     <div className="settings-inline-actions">
       {children}
-      {feedback ? (
-        <span className={`settings-inline-feedback ${feedback.tone ?? ""}`.trim()} role="status">
-          {feedback.message}
-        </span>
-      ) : null}
+      <SettingsActionFeedback feedback={feedback} />
     </div>
   );
 }
