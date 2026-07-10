@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { NormalizedEvent } from "../../core/types.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { createSessionRepository } from "../../daemon/db/sessionRepository.ts";
-import { applySessionArtifact } from "../../daemon/db/sessionArtifactRepository.ts";
+import { applySessionArtifact, publishSessionArtifact } from "../../daemon/db/sessionArtifactRepository.ts";
 import { publishSessionToLogbook, seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { indexCanonicalSessionSearch } from "../../daemon/db/searchRepository.ts";
 import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
@@ -18,6 +18,7 @@ import {
   getSessionExcerptTool,
   getSessionTool,
   listProjectSessionsTool,
+  searchArtifactsTool,
   searchSessionsTool
 } from "../tools.ts";
 
@@ -164,6 +165,41 @@ describe("Masthead MCP tools", () => {
       total: 1,
       latest: [expect.objectContaining({ artifactKind: "session_dossier", title: "Current MCP artifact" })]
     });
+    db.close();
+  });
+
+  test("finds published artifacts by body-only phrases", async () => {
+    const db = await openDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:artifact-body",
+      title: "Artifact body MCP search"
+    });
+    const artifact = applySessionArtifact(db, {
+      artifactKind: "runbook",
+      content: {
+        rootCause: "orphaned flock descriptor after worker cancellation",
+        title: "Repair cache lock"
+      },
+      contentFingerprint: "mcp-body-search:fingerprint",
+      createdBy: "workbench_authoring:test",
+      evidenceRefs: ["message:session:artifact-body:message"],
+      schemaVersion: "runbook-v2",
+      sessionId: "session:artifact-body",
+      title: "Repair cache lock",
+      validation: { ok: true }
+    });
+    publishSessionArtifact(db, artifact.artifactId);
+
+    expect(searchArtifactsTool(db, { query: "orphaned flock descriptor" })).toMatchObject({
+      artifacts: [expect.objectContaining({ artifactId: artifact.artifactId })],
+      total: 1
+    });
+    expect(db.prepare("SELECT tool_name, result_count, status FROM mcp_query_log").all()).toEqual([
+      { result_count: 1, status: "succeeded", tool_name: "search_artifacts" }
+    ]);
     db.close();
   });
 

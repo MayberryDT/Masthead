@@ -178,6 +178,87 @@ describe("session artifact repository", () => {
     });
   });
 
+  test("finds a published artifact by a body-only phrase", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:abc",
+      title: "Body search"
+    });
+    const artifact = applySessionArtifact(db, {
+      ...runbookInput("fp-body-search", "Repair cache lock"),
+      content: {
+        fixSteps: ["Close the inherited descriptor before retrying."],
+        rootCause: "orphaned flock descriptor after worker cancellation",
+        title: "Repair cache lock"
+      }
+    });
+    publishSessionArtifact(db, artifact.artifactId);
+
+    expect(
+      searchPublishedArtifactCapsules(db, { q: "orphaned flock descriptor" }).artifacts.map(
+        (entry) => entry.artifactId
+      )
+    ).toEqual([artifact.artifactId]);
+  });
+
+  test("sanitizes FTS syntax and treats punctuation-only queries as unfiltered", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:abc",
+      title: "Sanitized search"
+    });
+    const artifact = applySessionArtifact(db, {
+      ...runbookInput("fp-sanitized-search", "Repair parser"),
+      content: { rootCause: "worker cancellation broke the parser", title: "Repair parser" }
+    });
+    publishSessionArtifact(db, artifact.artifactId);
+
+    expect(() => searchPublishedArtifactCapsules(db, { q: 'worker OR "unterminated' })).not.toThrow();
+    expect(searchPublishedArtifactCapsules(db, { q: "worker*" }).artifacts).toEqual([
+      expect.objectContaining({ artifactId: artifact.artifactId })
+    ]);
+    expect(searchPublishedArtifactCapsules(db, { q: "!!! (( ))" }).artifacts).toEqual([
+      expect.objectContaining({ artifactId: artifact.artifactId })
+    ]);
+  });
+
+  test("removes superseded artifacts from body search and indexes the published replacement", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:abc",
+      title: "Superseded search"
+    });
+    const first = applySessionArtifact(db, {
+      ...runbookInput("fp-old-search", "Old runbook"),
+      content: { rootCause: "legacy descriptor leak", title: "Old runbook" },
+      signatureKey: "signature:descriptor-lock"
+    });
+    publishSessionArtifact(db, first.artifactId);
+    expect(searchPublishedArtifactCapsules(db, { q: "legacy descriptor" }).total).toBe(1);
+
+    const replacement = applySessionArtifact(db, {
+      ...runbookInput("fp-new-search", "New runbook"),
+      content: { rootCause: "replacement ownership race", title: "New runbook" },
+      signatureKey: "signature:descriptor-lock"
+    });
+
+    expect(searchPublishedArtifactCapsules(db, { q: "legacy descriptor" }).total).toBe(0);
+    expect(searchPublishedArtifactCapsules(db, { q: "replacement ownership" }).total).toBe(0);
+    publishSessionArtifact(db, replacement.artifactId);
+    expect(searchPublishedArtifactCapsules(db, { q: "replacement ownership" }).artifacts).toEqual([
+      expect.objectContaining({ artifactId: replacement.artifactId })
+    ]);
+  });
+
   test("filters published artifacts by published_at dateFrom/dateTo bounds", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Artifact session" });
@@ -236,6 +317,7 @@ describe("session artifact repository", () => {
     expect(result.artifactsDeleted).toBeGreaterThan(0);
     expect(listSessionArtifacts(db)).toEqual([]);
     expect(searchPublishedArtifactCapsules(db).total).toBe(0);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM session_artifact_search").get()).toEqual({ count: 0 });
   });
 });
 

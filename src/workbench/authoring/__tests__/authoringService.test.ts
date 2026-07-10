@@ -583,6 +583,15 @@ describe("Workbench authoring service", () => {
     ]);
     expect(first.publishedArtifactIds.every((artifactId) => getLogbookArtifactDetail(db, artifactId))).toBe(true);
     expect(
+      db
+        .prepare(
+          `SELECT artifact_id AS artifactId
+           FROM session_artifact_search
+           ORDER BY artifact_id`
+        )
+        .all()
+    ).toEqual(first.publishedArtifactIds.slice().sort().map((artifactId) => ({ artifactId })));
+    expect(
       db.prepare("SELECT COUNT(*) AS count FROM workbench_claims WHERE released_at IS NULL").get()
     ).toEqual({ count: 0 });
     expect(
@@ -604,14 +613,22 @@ describe("Workbench authoring service", () => {
     const { db, runId } = await submittedAuthoringDb();
     const before = authoringOutputCounts(db);
 
+    let indexedBeforeFailure = 0;
     expect(() =>
       finishAuthoringRun(db, {
         runId,
-        verifyPublished: () => false
+        verifyPublished: () => {
+          indexedBeforeFailure = (
+            db.prepare("SELECT COUNT(*) AS count FROM session_artifact_search").get() as { count: number }
+          ).count;
+          return false;
+        }
       })
     ).toThrow("authoring_finish_visibility_failed");
 
+    expect(indexedBeforeFailure).toBe(2);
     expect(authoringOutputCounts(db)).toEqual(before);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM session_artifact_search").get()).toEqual({ count: 0 });
     expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
 
     const retried = finishAuthoringRun(db, { runId });

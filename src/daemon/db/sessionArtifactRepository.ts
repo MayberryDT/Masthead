@@ -146,6 +146,7 @@ export function applySessionArtifactInTransaction(
   const existing = readArtifactByFingerprint(db, artifactInput);
   if (existing) {
     makeCurrentInTransaction(db, existing);
+    indexArtifactScope(db, artifactInput);
     return readArtifactById(db, existing.artifactId)!;
   }
 
@@ -190,6 +191,7 @@ export function applySessionArtifactInTransaction(
     artifactInput.joinRationale ?? null
   );
   replaceProvenance(db, artifactId, provenanceSessionIds);
+  indexArtifactScope(db, artifactInput);
   return readArtifactById(db, artifactId)!;
 }
 
@@ -214,7 +216,10 @@ export function publishSessionArtifactInTransaction(
   if (existing.status !== "current") {
     throw new Error(`Cannot publish non-current artifact: ${artifactId}`);
   }
-  if (existing.publicationStatus === "published") return existing;
+  if (existing.publicationStatus === "published") {
+    indexSessionArtifactSearch(db, artifactId);
+    return existing;
+  }
 
   const now = new Date().toISOString();
   db.prepare(
@@ -222,7 +227,23 @@ export function publishSessionArtifactInTransaction(
      SET publication_status = 'published', published_at = ?, updated_at = ?
      WHERE artifact_id = ?`
   ).run(now, now, artifactId);
+  indexSessionArtifactSearch(db, artifactId);
   return readArtifactById(db, artifactId)!;
+}
+
+export function indexSessionArtifactSearch(db: MastheadDatabase, artifactId: string): void {
+  db.prepare("DELETE FROM session_artifact_search WHERE artifact_id = ?").run(artifactId);
+  db.prepare(
+    `INSERT INTO session_artifact_search (artifact_id, title, summary, highlight, project, body)
+     SELECT artifact_id,
+            COALESCE(title, ''),
+            COALESCE(summary, ''),
+            COALESCE(highlight, ''),
+            COALESCE(project_label, ''),
+            content_json
+     FROM session_artifacts
+     WHERE artifact_id = ? AND status = 'current' AND publication_status = 'published'`
+  ).run(artifactId);
 }
 
 export function getSessionArtifact(db: MastheadDatabase, artifactId: string): SessionArtifactRecord | undefined {
@@ -277,12 +298,16 @@ export function searchPublishedArtifactCapsules(
     clauses.push("project_label = ?");
     params.push(query.project);
   }
-  if (query.q?.trim()) {
-    clauses.push(`(
-      title LIKE ? OR summary LIKE ? OR highlight LIKE ? OR IFNULL(project_label, '') LIKE ?
-    )`);
-    const like = `%${query.q.trim()}%`;
-    params.push(like, like, like, like);
+  const searchQuery = sanitizeArtifactSearchQuery(query.q);
+  if (searchQuery) {
+    clauses.push(
+      `artifact_id IN (
+        SELECT artifact_id
+        FROM session_artifact_search
+        WHERE session_artifact_search MATCH ?
+      )`
+    );
+    params.push(searchQuery);
   }
   const dateFrom = normalizeDateLowerBound(query.dateFrom);
   if (dateFrom) {
@@ -323,6 +348,7 @@ export function wipePublishedArtifactState(db: MastheadDatabase): { artifactsDel
     db.prepare("SELECT COUNT(*) AS count FROM session_artifacts").get() as { count: number }
   ).count;
   db.exec("DELETE FROM session_artifact_provenance;");
+  db.exec("DELETE FROM session_artifact_search;");
   db.exec("DELETE FROM session_artifacts;");
   db.prepare(
     `UPDATE workbench_session_state
@@ -353,6 +379,25 @@ export function wipePublishedArtifactState(db: MastheadDatabase): { artifactsDel
          updated_at = ?`
   ).run(new Date().toISOString());
   return { artifactsDeleted, provenanceDeleted };
+}
+
+function indexArtifactScope(db: MastheadDatabase, input: SessionArtifactInput): void {
+  const rows = input.signatureKey
+    ? (db
+        .prepare(
+          `SELECT artifact_id AS artifactId
+           FROM session_artifacts
+           WHERE artifact_kind = ? AND signature_key = ?`
+        )
+        .all(input.artifactKind, input.signatureKey) as Array<{ artifactId: string }>)
+    : (db
+        .prepare(
+          `SELECT artifact_id AS artifactId
+           FROM session_artifacts
+           WHERE session_id = ? AND artifact_kind = ?`
+        )
+        .all(input.sessionId, input.artifactKind) as Array<{ artifactId: string }>);
+  for (const row of rows) indexSessionArtifactSearch(db, row.artifactId);
 }
 
 function normalizeProvenance(input: SessionArtifactInput): string[] {
@@ -579,6 +624,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function normalizeDateLowerBound(value: string | undefined): string | undefined {
   if (!value) return undefined;
   return isDateOnly(value) ? `${value}T00:00:00.000Z` : value;
+}
+
+function sanitizeArtifactSearchQuery(value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  const terms = value.match(/[\p{L}\p{N}_]+/gu) ?? [];
+  if (terms.length === 0) return undefined;
+  return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" ");
 }
 
 function normalizeDateUpperBound(value: string | undefined): string | undefined {

@@ -12,6 +12,7 @@ import { hasSemanticRedactedText } from "../../core/redaction.ts";
 import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepository.ts";
 import {
   applySessionArtifactInTransaction,
+  indexSessionArtifactSearch,
   listSessionArtifacts,
   normalizeSessionArtifactSignatureKey,
   publishSessionArtifactInTransaction
@@ -413,6 +414,7 @@ function finishInsideTransaction(
   }
 
   for (const expected of expectedArtifacts) {
+    indexSessionArtifactSearch(db, expected.artifactId);
     assertPublishedArtifactVisible(db, expected.artifactId, expected.provenanceSessionIds);
     if (verifyPublished && !verifyPublished(expected.artifactId)) {
       throw new Error(`authoring_finish_visibility_failed:${expected.artifactId}`);

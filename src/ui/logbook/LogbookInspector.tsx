@@ -122,6 +122,14 @@ function renderArtifactBody(kind: string, body: unknown): ReactNode {
     if (body === undefined || body === null || body === "") {
       return <p className="surface-status">No body captured for this artifact.</p>;
     }
+    if (isKnownArtifactKind(kind)) {
+      if (typeof body === "string") return <TextSection label="Body" value={body.trim()} />;
+      if (Array.isArray(body)) {
+        const values = body.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()));
+        if (values.length > 0) return <ListSection label="Body" values={values} />;
+      }
+      return <p className="surface-status">No structured body captured for this artifact.</p>;
+    }
     return <pre className="logbook-inspector-json">{prettyUnknown(body)}</pre>;
   }
 
@@ -129,11 +137,23 @@ function renderArtifactBody(kind: string, body: unknown): ReactNode {
     return (
       <div className="logbook-inspector-sections">
         <TextSection label="Problem" value={stringField(record, "problemStatement") ?? stringField(record, "problem")} />
+        <TextSection label="Objective" value={stringField(record, "objective")} />
         <TextSection label="Context" value={stringField(record, "context")} />
         <ListSection label="Approach" values={stringArrayField(record, "approach")} />
+        <ListSection label="Key decisions" values={stringArrayField(record, "keyDecisions")} />
+        <ObjectListSection label="Files touched" values={record.filesTouched} primary="label" secondary="role" />
+        <ObjectListSection
+          label="Commands and tools"
+          values={record.commandsAndTools}
+          primary="label"
+          secondary="purpose"
+          tertiary="status"
+        />
         <TextSection label="Outcome" value={stringField(record, "outcome")} />
         <ListSection label="Verification" values={stringArrayField(record, "verification")} />
         <ListSection label="Risks" values={stringArrayField(record, "risksOrGaps") ?? stringArrayField(record, "risks")} />
+        <ListSection label="Lessons learned" values={stringArrayField(record, "lessonsLearned")} />
+        <CommonArtifactSections record={record} />
       </div>
     );
   }
@@ -142,10 +162,18 @@ function renderArtifactBody(kind: string, body: unknown): ReactNode {
     return (
       <div className="logbook-inspector-sections">
         <ProblemSignatureSection value={record.problemSignature} />
-        <ListSection label="Repro steps" values={stringArrayField(record, "reproSteps")} />
-        <ListSection label="Fix steps" values={stringArrayField(record, "fixSteps")} />
+        <ListSection label="Preconditions" values={stringArrayField(record, "preconditions")} />
+        <ListSection label="Reproduction" values={stringArrayField(record, "reproSteps")} />
         <ListSection label="Dead ends" values={stringArrayField(record, "deadEnds")} />
+        <ListSection label="Fix steps" values={stringArrayField(record, "fixSteps")} />
+        <ListSection label="Commands" values={stringArrayField(record, "commands")} />
+        <ListSection label="Changed files" values={stringArrayField(record, "changedFiles")} />
         <ListSection label="Validation checks" values={stringArrayField(record, "validationChecks")} />
+        <ListSection label="Environment" values={stringArrayField(record, "environmentRequirements")} />
+        <TextSection label="Root cause" value={stringField(record, "rootCause")} />
+        <ListSection label="Prevention" values={stringArrayField(record, "preventionNotes")} />
+        <ListSection label="Risks and gaps" values={stringArrayField(record, "risksOrGaps")} />
+        <CommonArtifactSections record={record} />
       </div>
     );
   }
@@ -158,6 +186,9 @@ function renderArtifactBody(kind: string, body: unknown): ReactNode {
         <TextSection label="Decision" value={stringField(record, "decision")} />
         <ListSection label="Alternatives" values={stringArrayField(record, "alternatives")} />
         <ListSection label="Consequences" values={stringArrayField(record, "consequences")} />
+        <ListSection label="Affected paths" values={stringArrayField(record, "affectedPaths")} />
+        <ListSection label="Supersedes" values={stringArrayField(record, "supersedes")} />
+        <CommonArtifactSections record={record} />
       </div>
     );
   }
@@ -168,12 +199,34 @@ function renderArtifactBody(kind: string, body: unknown): ReactNode {
         <TextSection label="Symptom" value={stringField(record, "symptom")} />
         <TextSection label="Impact" value={stringField(record, "impact")} />
         <TimelineSection value={record.timeline} />
+        <TextSection label="Root cause" value={stringField(record, "rootCause")} />
+        <ListSection label="Contributing factors" values={stringArrayField(record, "contributingFactors")} />
         <ListSection label="Remediation" values={stringArrayField(record, "remediation")} />
+        <ListSection label="Prevention" values={stringArrayField(record, "prevention")} />
+        <TextSection label="Status" value={stringField(record, "status")} />
+        <CommonArtifactSections record={record} />
       </div>
     );
   }
 
   return <pre className="logbook-inspector-json">{prettyUnknown(body)}</pre>;
+}
+
+function isKnownArtifactKind(kind: string): boolean {
+  return kind === "session_dossier" || kind === "runbook" || kind === "adr" || kind === "incident_timeline";
+}
+
+function CommonArtifactSections({ record }: { record: Record<string, unknown> }) {
+  return (
+    <>
+      <ListSection label="Evidence" values={stringArrayField(record, "evidenceRefs")} />
+      <ClaimEvidenceSection values={record.claimEvidence} />
+      <ListSection label="Missing evidence" values={stringArrayField(record, "missingEvidence")} />
+      <ListSection label="Provenance sessions" values={stringArrayField(record, "provenanceSessionIds")} />
+      <TextSection label="Join rationale" value={stringField(record, "joinRationale")} />
+      <TextSection label="Signature" value={stringField(record, "signatureKey")} />
+    </>
+  );
 }
 
 function ProblemSignatureSection({ value }: { value: unknown }) {
@@ -217,7 +270,7 @@ function TimelineSection({ value }: { value: unknown }) {
       const at = stringField(record, "at");
       const summary = stringField(record, "summary");
       if (!at && !summary) return undefined;
-      return { at, summary };
+      return { at, evidenceRefs: stringArrayField(record, "evidenceRefs"), summary };
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
   if (entries.length === 0) return null;
@@ -230,9 +283,98 @@ function TimelineSection({ value }: { value: unknown }) {
           <li key={`${entry.at ?? "entry"}-${index}`}>
             {entry.at ? <time dateTime={entry.at}>{formatDateTime(entry.at)}</time> : null}
             {entry.summary ? <p>{entry.summary}</p> : null}
+            {entry.evidenceRefs?.length ? (
+              <ul>
+                {entry.evidenceRefs.map((evidenceRef) => (
+                  <li key={`${entry.at ?? index}:${evidenceRef}`}>
+                    <code>{evidenceRef}</code>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </li>
         ))}
       </ol>
+    </section>
+  );
+}
+
+function ObjectListSection({
+  label,
+  primary,
+  secondary,
+  tertiary,
+  values
+}: {
+  label: string;
+  primary: string;
+  secondary?: string;
+  tertiary?: string;
+  values: unknown;
+}) {
+  if (!Array.isArray(values)) return null;
+  const entries = values.flatMap((value) => {
+    const record = asRecord(value);
+    if (!record) return [];
+    const primaryValue = stringField(record, primary);
+    if (!primaryValue) return [];
+    return [
+      {
+        primary: primaryValue,
+        secondary: secondary ? stringField(record, secondary) : undefined,
+        tertiary: tertiary ? stringField(record, tertiary) : undefined
+      }
+    ];
+  });
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="logbook-inspector-section">
+      <p className="mono-label">{label}</p>
+      <ul>
+        {entries.map((entry, index) => (
+          <li key={`${label}:${entry.primary}:${index}`}>
+            <span>{entry.primary}</span>
+            {entry.secondary ? <span>{` — ${entry.secondary}`}</span> : null}
+            {entry.tertiary ? <span>{` (${entry.tertiary})`}</span> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ClaimEvidenceSection({ values }: { values: unknown }) {
+  if (!Array.isArray(values)) return null;
+  const entries = values.flatMap((value) => {
+    const record = asRecord(value);
+    if (!record) return [];
+    const path = stringField(record, "path");
+    const evidenceRefs = stringArrayField(record, "evidenceRefs") ?? [];
+    if (!path && evidenceRefs.length === 0) return [];
+    return [{ evidenceRefs, path }];
+  });
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="logbook-inspector-section">
+      <p className="mono-label">Claim evidence</p>
+      <ul>
+        {entries.map((entry, index) => (
+          <li key={`${entry.path ?? "claim"}:${index}`}>
+            {entry.path ? <code>{entry.path}</code> : null}
+            {entry.evidenceRefs.length > 0 ? (
+              <ul>
+                {entry.evidenceRefs.map((evidenceRef) => (
+                  <li key={`${entry.path ?? index}:${evidenceRef}`}>
+                    <code>{evidenceRef}</code>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

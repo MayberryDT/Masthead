@@ -105,6 +105,11 @@ const migrations = [
     version: 20,
     name: "020_normalize_workbench_optional_statuses",
     path: resolve(currentDir, "migrations/020_normalize_workbench_optional_statuses.sql")
+  },
+  {
+    version: 21,
+    name: "021_artifact_body_search",
+    path: resolve(currentDir, "migrations/021_artifact_body_search.sql")
   }
 ];
 
@@ -138,6 +143,7 @@ const criticalTables = [
   "live_state_reports",
   "workbench_runs",
   "session_artifacts",
+  "session_artifact_search",
   "session_artifact_provenance",
   "workbench_session_state",
   "workbench_activity",
