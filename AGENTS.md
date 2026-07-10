@@ -59,10 +59,9 @@ Surface archetypes:
 - Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
 - Logbook: dense **artifact** capsule table plus body/provenance inspector (no bulk/checkboxes/summary strip).
 - Sources: harness connector rows plus live enablement (Discover → Enable → Activate → Test); see `docs/reference/sources-v2.md`.
-- Settings: category rail plus a focused settings pane/ledger for General, Data, Agent access,
-  Advanced, and Danger zone.
-- Agent access is a compact MCP information/setup category inside Settings, not a standalone
-  surface.
+- Settings: one centered compact steel spine with direct preferences and one inline detail section
+  at a time for Data, Agent access, Advanced, or Danger zone.
+- Agent access is a compact MCP information/setup section inside Settings, not a standalone surface.
 
 Shared visual language does not permit reusing fixed live-card DOM or CSS on every surface.
 Before finishing UI work, run the surface contract check and use the in-app Browser to inspect the

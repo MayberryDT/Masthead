@@ -10,9 +10,8 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { AdvancedSettings } from "./settings/AdvancedSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { McpSettings } from "./settings/McpSettings";
-import { PreferencesSettings } from "./settings/PreferencesSettings";
 import type { SettingsFeedback } from "./settings/SettingsActionFeedback";
-import { SettingsCategoryNav, type SettingsCategory } from "./settings/SettingsCategoryNav";
+import { SettingsSpineCard, type SettingsSpineDetail } from "./settings/SettingsSpineCard";
 import { StorageSettings } from "./settings/StorageSettings";
 import { AppButton } from "./primitives/AppButton";
 
@@ -90,7 +89,7 @@ export function OperationsPanel({
   readOnly = false,
   settingsState
 }: Props) {
-  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
+  const [activeDetail, setActiveDetail] = useState<SettingsSpineDetail>();
   const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
   const [localSettingsError, setLocalSettingsError] = useState<string>();
   const [localSettingsLoadState, setLocalSettingsLoadState] = useState<"loading" | "ready" | "error">(settingsState ? "ready" : "loading");
@@ -170,17 +169,15 @@ export function OperationsPanel({
 
       {showSettingsSections ? (
         <div className="settings-workspace">
-          <SettingsCategoryNav active={activeCategory} onChange={setActiveCategory} />
-          <div className="settings-pane" data-settings-category={activeCategory}>
-            {activeCategory === "general" ? (
-              <PreferencesSettings
-                motionDisabled={motionDisabled}
-                onMotionDisabledChange={onMotionDisabledChange}
-                sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled}
-                onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange}
-              />
-            ) : null}
-            {activeCategory === "data" ? (
+          <SettingsSpineCard
+            activeDetail={activeDetail}
+            motionDisabled={motionDisabled}
+            onDetailChange={setActiveDetail}
+            onMotionDisabledChange={onMotionDisabledChange}
+            onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange}
+            sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled}
+          >
+            {activeDetail === "data" ? (
               <StorageSettings
                 busy={busy}
                 dataSummary={effectiveSummary}
@@ -194,11 +191,11 @@ export function OperationsPanel({
                 writeDisabled={writesDisabled}
               />
             ) : null}
-            {activeCategory === "agent-access" ? (
+            {activeDetail === "agent-access" ? (
               <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
             ) : null}
-            {activeCategory === "advanced" ? <AdvancedSettings settings={effectiveSettings} /> : null}
-            {activeCategory === "danger" ? (
+            {activeDetail === "advanced" ? <AdvancedSettings settings={effectiveSettings} /> : null}
+            {activeDetail === "danger" ? (
               <DangerZone
                 busy={writesDisabled}
                 databaseId={effectiveSettings?.data.databaseId}
@@ -213,7 +210,7 @@ export function OperationsPanel({
                 targets={effectiveSettings?.deletionTargets}
               />
             ) : null}
-          </div>
+          </SettingsSpineCard>
         </div>
       ) : null}
 

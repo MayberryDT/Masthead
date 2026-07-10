@@ -298,9 +298,9 @@ recur across views, but each surface may use the structure that fits its job:
   requested via Copy Agent Prompt, never via an in-app enrichment editor.
 - Logbook: dense table plus inspector.
 - Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
-- Settings: category rail plus a focused settings ledger for General, Data, Agent access, Advanced,
-  and Danger zone.
-- Agent access is a compact MCP information/setup category inside Settings, not a primary surface.
+- Settings: one centered compact steel spine with direct controls for everyday preferences and one
+  inline detail section at a time for Data, Agent access, Advanced, or Danger zone.
+- Agent access is a compact MCP information/setup section inside Settings, not a primary surface.
 
 Shared visual language does not permit reusing fixed live-card DOM or CSS on every surface.
 
@@ -387,10 +387,11 @@ prove it. Deeper session processing belongs in Workbench; published history belo
 
 ### Settings
 
-Settings uses a category rail and one focused ledger for General, Data, Agent access, Advanced, and
-Danger zone. Rows should prefer direct controls with no explanatory paragraph unless safety or
-ambiguity requires one. Agent access stays compact and evidence-forward: show MCP status, setup,
-format selection, testing, and copy actions without turning the category into a code wall.
+Settings uses one centered compact steel spine. Everyday preferences are direct controls; Data,
+Agent access, Advanced, and Danger zone open one inline detail section at a time. Rows should prefer
+direct controls with no explanatory paragraph unless safety or ambiguity requires one. Agent access
+stays compact and evidence-forward: show MCP status, setup, format selection, testing, and copy
+actions without turning the section into a code wall.
 
 ### Toolbar, Filters, And Dropdowns
 

@@ -35,8 +35,9 @@ describe("Settings operational states", () => {
   }
 
   async function selectCategory(label: string) {
-    const button = [...(container?.querySelectorAll<HTMLButtonElement>(".settings-category-nav button") ?? [])]
-      .find((candidate) => candidate.textContent === label);
+    const row = [...(container?.querySelectorAll<HTMLElement>(".settings-spine-row") ?? [])]
+      .find((candidate) => candidate.querySelector(".settings-spine-copy strong")?.textContent === label);
+    const button = row?.querySelector<HTMLButtonElement>(".settings-spine-control > .app-button");
     expect(button).toBeDefined();
     await act(async () => {
       button?.click();
@@ -77,7 +78,7 @@ describe("Settings operational states", () => {
     );
 
     const dialog = container?.querySelector<HTMLElement>('[role="dialog"]');
-    const pane = container?.querySelector<HTMLElement>(".settings-pane");
+    const pane = container?.querySelector<HTMLElement>(".settings-spine-card");
     const confirmation = dialog?.querySelector<HTMLInputElement>('input[placeholder="sqlite:test"]');
     const confirmButton = [...(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
       .find((button) => button.textContent === "Delete all Masthead data");

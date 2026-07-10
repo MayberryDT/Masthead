@@ -35,8 +35,9 @@ describe("OperationsPanel", () => {
   }
 
   async function selectCategory(label: string) {
-    const button = [...(container?.querySelectorAll<HTMLButtonElement>(".settings-category-nav button") ?? [])]
-      .find((candidate) => candidate.textContent === label);
+    const row = [...(container?.querySelectorAll<HTMLElement>(".settings-spine-row") ?? [])]
+      .find((candidate) => candidate.querySelector(".settings-spine-copy strong")?.textContent === label);
+    const button = row?.querySelector<HTMLButtonElement>(".settings-spine-control > .app-button");
     expect(button).toBeDefined();
     await act(async () => {
       button?.click();

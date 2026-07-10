@@ -6929,6 +6929,8 @@ body {
  */
 .observability-console .sidebar-knowledge-flow,
 .masthead-shell .sidebar-knowledge-flow,
+.observability-console .settings-spine-card,
+.masthead-shell .settings-spine-card,
 .observability-console .summary-strip .summary-metric,
 .masthead-shell .summary-strip .summary-metric,
 .observability-console .import-jobs-summary div,
@@ -6979,6 +6981,8 @@ body {
 
 .observability-console .sidebar-knowledge-flow::before,
 .masthead-shell .sidebar-knowledge-flow::before,
+.observability-console .settings-spine-card::before,
+.masthead-shell .settings-spine-card::before,
 .observability-console .summary-strip .summary-metric::before,
 .masthead-shell .summary-strip .summary-metric::before,
 .observability-console .import-jobs-summary div::before,
@@ -7048,6 +7052,8 @@ body {
 
 .observability-console .sidebar-knowledge-flow::after,
 .masthead-shell .sidebar-knowledge-flow::after,
+.observability-console .settings-spine-card::after,
+.masthead-shell .settings-spine-card::after,
 .observability-console .summary-strip .summary-metric::after,
 .masthead-shell .summary-strip .summary-metric::after,
 .observability-console .import-jobs-summary div::after,
@@ -7072,6 +7078,8 @@ body {
 
 .observability-console .sidebar-knowledge-flow > *,
 .masthead-shell .sidebar-knowledge-flow > *,
+.observability-console .settings-spine-card > *,
+.masthead-shell .settings-spine-card > *,
 .observability-console .summary-strip .summary-metric > *,
 .masthead-shell .summary-strip .summary-metric > *,
 .observability-console .import-jobs-summary div > *,
