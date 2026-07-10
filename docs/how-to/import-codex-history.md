@@ -1,8 +1,8 @@
-# Import Codex History
+# Import Codex history
 
-Codex is the first supported source adapter. Masthead imports Codex history into the canonical local SQLite session graph while preserving source provenance.
+Masthead can materialize existing Codex history into its canonical local session database. Imported sessions enter Workbench; they do not become Logbook rows. Logbook contains only artifacts published from Workbench.
 
-## Start the Daemon
+## Start Masthead
 
 ```bash
 npm run dev
@@ -14,47 +14,48 @@ For a non-default Codex home:
 MASTHEAD_CODEX_HOME=/path/to/home npm run dev
 ```
 
-## Discover Sources
+Use the Sources surface to **Discover**, **Enable**, activate, and test the Codex live connector. That flow configures future live capture. It does not bulk-import transcript history.
 
-Use the Sources surface or call:
+## Import session metadata
 
-```bash
-curl http://127.0.0.1:17373/sources
-```
-
-The response lists discovered Codex sources, adapter state, source paths, import state, and policy state.
-
-## Import Metadata
+Existing-history import is a daemon operation. Ask the writable primary daemon to queue Codex metadata import:
 
 ```bash
-curl -X POST http://127.0.0.1:17373/sources/codex/import-metadata
+curl -X POST http://127.0.0.1:17373/adapters/codex/import-metadata
 ```
 
-Metadata import is the normal first pass. It creates canonical session records without requiring transcript approval.
-
-## Transcript Work
-
-Transcript import is no longer a broad Sources step. Use Workbench to review
-captured sessions, run lightweight transcript checks, and hand selected sessions
-to an agent. The agent can use the Workbench CLI:
-
-```bash
-mastheadctl workbench transcript check --session session:abc --json
-mastheadctl workbench transcript preview --session session:abc --source source:abc --json
-mastheadctl workbench transcript import --session session:abc --source source:abc --json
-```
-
-Transcript import requires exact source-scoped permission and the requested
-source must be linked to the session. Use source exclusions before transcript
-import when a source, project, or path should not be ingested.
-
-## Check Jobs
+Metadata import creates canonical session records without importing transcript bodies. Check the returned job and the import list:
 
 ```bash
 curl http://127.0.0.1:17373/imports
+curl http://127.0.0.1:17373/imports/<importJobId>
 curl http://127.0.0.1:17373/imports/<importJobId>/units
 curl http://127.0.0.1:17373/imports/<importJobId>/report
-curl http://127.0.0.1:17373/sessions?q=Logbook
 ```
 
-Imported sessions should appear in Logbook and become available to read-only MCP tools according to MCP access policies.
+## Deepen selected sessions in Workbench
+
+Open Workbench after metadata import. Select the sessions you want to deepen, then use **Check Transcript** and **Import Transcript**. Transcript import is per session and requires the exact linked source to have source-scoped permission. Masthead does not grant or bypass that permission automatically.
+
+The Workbench UI calls these supported primary-daemon operations:
+
+```bash
+curl -X POST \
+  http://127.0.0.1:17373/workbench/sessions/session%3Aabc/check-transcript
+
+curl -X POST \
+  -H 'content-type: application/json' \
+  --data '{"sourceId":"source:abc"}' \
+  http://127.0.0.1:17373/workbench/sessions/session%3Aabc/import-transcript-preview
+
+curl -X POST \
+  -H 'content-type: application/json' \
+  --data '{"sourceId":"source:abc"}' \
+  http://127.0.0.1:17373/workbench/sessions/session%3Aabc/import-transcript
+```
+
+URL-encode the session id in the path. Preview checks that the requested source is linked and permitted; import queues the transcript job only when that check passes. These writes are intentionally unavailable through a read-only worktree bridge.
+
+For artifact authoring, copy the plain-language handoff from Workbench or direct your agent to the selected Workbench sessions. The installed CLI is a daemon HTTP adapter; normal authoring never opens SQLite directly.
+
+After automatic authoring finishes, search the published artifacts in Logbook. Use `/sessions` only for session evidence and Workbench inspection, not as a Logbook listing.
