@@ -150,6 +150,12 @@ import {
   uninstallRuntimeHooks
 } from "./settingsService.ts";
 import { isLiveConnectorRuntime } from "./liveConnectorSettings.ts";
+import {
+  authoringInvalidJsonResult,
+  getWorkbenchAuthoringBodyLimit,
+  isWorkbenchAuthoringPath,
+  routeWorkbenchAuthoringRequest
+} from "./workbenchAuthoringApi.ts";
 
 export type MastheadDaemon = {
   server: Server;
@@ -2320,6 +2326,33 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         summary: getKnowledgeFlowSummary(database)
       });
       return;
+    }
+
+    if (isWorkbenchAuthoringPath(url.pathname)) {
+      let body: unknown;
+      if (request.method === "POST") {
+        try {
+          body = await optionalJsonBody(
+            request,
+            getWorkbenchAuthoringBodyLimit(url.pathname, DEFAULT_BODY_LIMIT_BYTES)
+          );
+        } catch (error) {
+          const result = authoringInvalidJsonResult(error);
+          sendJson(request, response, config.allowedOrigins, result.status, result.body);
+          return;
+        }
+      }
+      const result = await routeWorkbenchAuthoringRequest(
+        {
+          authoringCommand: process.env.MASTHEAD_CLI_COMMAND ?? "mastheadctl",
+          db: database
+        },
+        { body, method: request.method ?? "GET", url }
+      );
+      if (result) {
+        sendJson(request, response, config.allowedOrigins, result.status, result.body);
+        return;
+      }
     }
 
     if (request.method === "GET" && url.pathname === "/workbench/sessions") {

@@ -155,7 +155,8 @@ export function settingsRuntimeIdentity(config: DaemonConfig, db: MastheadDataba
       "mcp_status",
       "usage_stats",
       "settings",
-      "data_lifecycle"
+      "data_lifecycle",
+      "artifact_authoring"
     ],
     schemaVersion: CURRENT_SCHEMA_VERSION,
     data: {

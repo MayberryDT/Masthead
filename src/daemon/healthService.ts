@@ -16,7 +16,8 @@ const capabilities: MastheadCapability[] = [
   "mcp_status",
   "usage_stats",
   "settings",
-  "data_lifecycle"
+  "data_lifecycle",
+  "artifact_authoring"
 ];
 
 export type HealthServiceRuntime = {

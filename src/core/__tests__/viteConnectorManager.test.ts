@@ -15,7 +15,8 @@ const compatibleHealth = {
     "mcp_status",
     "usage_stats",
     "settings",
-    "data_lifecycle"
+    "data_lifecycle",
+    "artifact_authoring"
   ],
   data: {
     databaseId: "db",
@@ -26,6 +27,15 @@ const compatibleHealth = {
 describe("Vite connector manager protocol checks", () => {
   test("accepts the current Masthead health contract", () => {
     expect(isCompatibleMastheadHealth(compatibleHealth)).toBe(true);
+  });
+
+  test("requires daemon-owned artifact authoring", () => {
+    expect(
+      isCompatibleMastheadHealth({
+        ...compatibleHealth,
+        capabilities: compatibleHealth.capabilities.filter((capability) => capability !== "artifact_authoring")
+      })
+    ).toBe(false);
   });
 
   test("rejects legacy and failed-migration health payloads", () => {

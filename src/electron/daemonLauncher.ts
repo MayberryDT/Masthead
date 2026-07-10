@@ -5,7 +5,16 @@ import { dirname, join } from "node:path";
 import { packagedDaemonPaths } from "./pathPolicy";
 
 const DEFAULT_CONNECTOR_PORT = 17373;
-const REQUIRED_CAPABILITIES = ["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings"];
+const REQUIRED_CAPABILITIES = [
+  "live_projection",
+  "canonical_sessions",
+  "logbook_search",
+  "source_discovery",
+  "adapter_inventory",
+  "mcp_status",
+  "settings",
+  "artifact_authoring"
+];
 
 export type MastheadHealthSummary = {
   apiVersion?: number;

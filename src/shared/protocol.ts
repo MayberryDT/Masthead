@@ -12,7 +12,8 @@ export type MastheadCapability =
   | "mcp_status"
   | "usage_stats"
   | "settings"
-  | "data_lifecycle";
+  | "data_lifecycle"
+  | "artifact_authoring";
 
 export const REQUIRED_CLIENT_CAPABILITIES: MastheadCapability[] = [
   "live_projection",
@@ -24,7 +25,8 @@ export const REQUIRED_CLIENT_CAPABILITIES: MastheadCapability[] = [
   "mcp_status",
   "usage_stats",
   "settings",
-  "data_lifecycle"
+  "data_lifecycle",
+  "artifact_authoring"
 ];
 
 export type MastheadRuntimeMode = "primary" | "read_only_bridge";

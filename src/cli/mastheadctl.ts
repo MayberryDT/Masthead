@@ -23,15 +23,22 @@ function topLevelHelp(): string {
     "  mastheadctl workbench    Agent-authored local enrichment and artifacts",
     "",
     "Try:",
-    "  mastheadctl workbench status --json"
+    "  mastheadctl workbench capabilities --json",
+    "  mastheadctl workbench open --database-id <id> --session <id> --json"
   ].join("\n") + "\n";
 }
 
 async function main(): Promise<void> {
-  const result = await runMastheadCli(process.argv.slice(2), { env: process.env });
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
-  process.exitCode = result.exitCode;
+  try {
+    const result = await runMastheadCli(process.argv.slice(2), { env: process.env });
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    process.exitCode = result.exitCode;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${JSON.stringify({ ok: false, error: { code: "unhandled_cli_error", message } })}\n`);
+    process.exitCode = 1;
+  }
 }
 
 if (isCliEntrypoint()) {

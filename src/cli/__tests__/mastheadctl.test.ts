@@ -28,7 +28,7 @@ describe("mastheadctl workbench CLI foundation", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("mastheadctl workbench");
-    expect(result.stdout).toContain("status");
+    expect(result.stdout).toContain("workbench open");
     expect(result.stderr).toBe("");
   });
 
@@ -36,40 +36,30 @@ describe("mastheadctl workbench CLI foundation", () => {
     const result = await runMastheadCli(["workbench", "--help"], { env: {} });
 
     expect(result.exitCode).toBe(0);
+    for (const command of ["capabilities", "open", "status", "evidence", "submit", "finish", "wipe-published"]) {
+      expect(result.stdout).toContain(`workbench ${command}`);
+    }
+    for (const command of ["queue", "next", "apply", "publish", "batch"]) {
+      expect(result.stdout).not.toContain(`workbench ${command}`);
+    }
     for (const command of [
-      "mastheadctl workbench queue --kind <kind> --scope <scope> --json",
-      "mastheadctl workbench next --kind <kind> --scope <scope> --json",
-      "mastheadctl workbench instructions --kind <kind> --scope <scope>",
-      "mastheadctl workbench schema <kind> --json",
-      "mastheadctl workbench evidence --kind <kind> --session <id> --json",
-      "mastheadctl workbench validate --kind <kind> --session <id> --file <file> --json",
-      "mastheadctl workbench apply --kind <kind> --session <id> --file <file> --json"
+      "mastheadctl workbench capabilities --json",
+      "mastheadctl workbench status --run <run-id> --json"
     ]) {
       expect(result.stdout).toContain(command);
     }
-    expect(result.stdout).toContain("Agent loop:");
-    expect(result.stdout).toContain("Use next for a complete packet, write schema JSON, validate with --session,");
-    expect(result.stdout).toContain("runbook, adr, incident_timeline");
+    expect(result.stdout).toContain("daemon owns evidence, validation, claims, publication");
     expect(result.stderr).toBe("");
   });
 
-  test("reports status as JSON with the resolved database path", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-cli-status-"));
-    const dbPath = join(tempDir, "masthead.sqlite");
-    const result = await runMastheadCli(["workbench", "status", "--json"], {
-      env: { MASTHEAD_DB_PATH: dbPath }
+  test("requires an authoring run for status", async () => {
+    const result = await runMastheadCli(["workbench", "status", "--json"], { env: {} });
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stderr)).toEqual({
+      ok: false,
+      error: { code: "missing_argument", message: "Missing required option: --run" }
     });
-
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({
-      ok: true,
-      command: "workbench status",
-      databasePath: dbPath,
-      queue: { notAdded: 0, publishPath: 0, published: 0 },
-      activeClaims: 0
-    });
-    expect(result.stderr).toBe("");
-    await rm(tempDir, { force: true, recursive: true });
+    expect(result.stdout).toBe("");
   });
 
   test("prints resolved db path", async () => {
@@ -203,17 +193,11 @@ describe("mastheadctl workbench CLI foundation", () => {
       const binPath = join(tempDir, "mastheadctl");
       await symlink(join(process.cwd(), "dist/daemon/src/cli/mastheadctl.js"), binPath);
 
-      const { stdout, stderr } = await execFileAsync(process.execPath, [binPath, "workbench", "status", "--json"], {
+      const { stdout, stderr } = await execFileAsync(process.execPath, [binPath, "workbench", "db-path"], {
         env: { ...process.env, MASTHEAD_DB_PATH: "/tmp/symlink.sqlite" }
       });
 
-      expect(JSON.parse(stdout)).toEqual({
-        ok: true,
-        command: "workbench status",
-        databasePath: "/tmp/symlink.sqlite",
-        queue: { notAdded: 0, publishPath: 0, published: 0 },
-        activeClaims: 0
-      });
+      expect(stdout).toBe("/tmp/symlink.sqlite\n");
       expect(stderr).toBe("");
     } finally {
       await rm(tempDir, { force: true, recursive: true });

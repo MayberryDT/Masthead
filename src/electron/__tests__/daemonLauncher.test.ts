@@ -12,7 +12,7 @@ describe("Electron daemon launcher policy", () => {
       product: "masthead",
       apiVersion: 1,
       buildSha: "development",
-      capabilities: ["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings"],
+      capabilities: ["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings", "artifact_authoring"],
       data: {
         databaseId: "db",
         databasePath: "/tmp/masthead/masthead.sqlite",
@@ -36,7 +36,15 @@ describe("Electron daemon launcher policy", () => {
         ok: true,
         product: "masthead",
         apiVersion: 1,
-        capabilities: ["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings"],
+        capabilities: ["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings"]
+      })
+    ).toBeUndefined();
+    expect(
+      parseCompatibleHealth({
+        ok: true,
+        product: "masthead",
+        apiVersion: 1,
+        capabilities: ["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings", "artifact_authoring"],
         data: { migrationState: "failed" }
       })
     ).toBeUndefined();

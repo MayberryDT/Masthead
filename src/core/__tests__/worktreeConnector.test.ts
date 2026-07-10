@@ -150,7 +150,10 @@ describe("Masthead worktree connector planning", () => {
     "/workbench/sessions",
     "/workbench/activity",
     "/workbench/not-added-summary",
-    "/workbench/not-added"
+    "/workbench/not-added",
+    "/workbench/authoring/capabilities",
+    "/workbench/authoring/runs/authoring%3Arun",
+    "/workbench/authoring/runs/authoring%3Arun/evidence"
   ])("forwards canonical read endpoint %s", async (pathname) => {
     expect(isAllowedReadOnlyBridgeRequest("GET", pathname)).toBe(true);
   });
@@ -174,6 +177,9 @@ describe("Masthead worktree connector planning", () => {
   test("still blocks mutations", () => {
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/data/delete")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/submit")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/finish")).toBe(false);
   });
 
   test("proxies read endpoints through a read-only worktree bridge", async () => {
