@@ -234,6 +234,11 @@ function deleteAllCanonicalData(db: MastheadDatabase): CanonicalDeleteResult {
   try {
     db.exec(`
       DELETE FROM session_search;
+      DELETE FROM session_artifact_search;
+      DELETE FROM session_artifact_provenance;
+      DELETE FROM session_artifacts;
+      DELETE FROM workbench_authoring_runs;
+      DELETE FROM workbench_runs;
       DELETE FROM mcp_query_log;
       DELETE FROM project_summaries;
       DELETE FROM session_topics;
@@ -300,6 +305,7 @@ function deleteSessionScope(
 
   db.exec("BEGIN IMMEDIATE;");
   try {
+    deleteAuthoredDataForSessions(db, sessionIds);
     deleteWhereIn(db, "session_search", "session_id", sessionIds);
     deleteWhereIn(db, "raw_events", "raw_event_id", rawEventIds);
     deleteReviewDispositionsForSessions(db, sessionIds);
@@ -312,6 +318,46 @@ function deleteSessionScope(
     db.exec("ROLLBACK;");
     throw error;
   }
+}
+
+function deleteAuthoredDataForSessions(db: MastheadDatabase, sessionIds: string[]): void {
+  if (sessionIds.length === 0) return;
+  const placeholders = sessionIds.map(() => "?").join(", ");
+  const artifactIds = (
+    db
+      .prepare(
+        `SELECT DISTINCT artifacts.artifact_id AS artifactId
+         FROM session_artifacts AS artifacts
+         LEFT JOIN session_artifact_provenance AS provenance
+           ON provenance.artifact_id = artifacts.artifact_id
+         WHERE artifacts.session_id IN (${placeholders})
+            OR provenance.session_id IN (${placeholders})`
+      )
+      .all(...sessionIds, ...sessionIds) as Array<{ artifactId: string }>
+  ).map((row) => row.artifactId);
+  const authoringRows = db
+    .prepare(
+      `SELECT DISTINCT all_sessions.run_id AS runId, all_sessions.claim_id AS claimId
+       FROM workbench_authoring_run_sessions AS all_sessions
+       WHERE all_sessions.run_id IN (
+         SELECT selected_sessions.run_id
+         FROM workbench_authoring_run_sessions AS selected_sessions
+         WHERE selected_sessions.session_id IN (${placeholders})
+       )`
+    )
+    .all(...sessionIds) as Array<{ claimId: string; runId: string }>;
+  const runIds = [...new Set(authoringRows.map((row) => row.runId))];
+  const claimIds = [...new Set(authoringRows.map((row) => row.claimId))];
+
+  deleteWhereIn(db, "session_artifact_search", "artifact_id", artifactIds);
+  deleteWhereIn(db, "session_artifact_provenance", "artifact_id", artifactIds);
+  deleteWhereIn(db, "workbench_runs", "artifact_id", artifactIds);
+  deleteWhereIn(db, "session_artifacts", "artifact_id", artifactIds);
+  deleteWhereIn(db, "workbench_activity", "related_run_id", runIds);
+  deleteWhereIn(db, "workbench_activity", "related_claim_id", claimIds);
+  deleteWhereIn(db, "workbench_authoring_runs", "run_id", runIds);
+  deleteUnreferencedClaims(db, claimIds);
+  deleteWhereIn(db, "workbench_runs", "session_id", sessionIds);
 }
 
 function sessionRowsForScope(
@@ -442,6 +488,20 @@ function deleteWhereIn(db: MastheadDatabase, table: string, column: string, valu
   if (values.length === 0) return;
   const placeholders = values.map(() => "?").join(", ");
   db.prepare(`DELETE FROM ${table} WHERE ${column} IN (${placeholders})`).run(...values);
+}
+
+function deleteUnreferencedClaims(db: MastheadDatabase, claimIds: string[]): void {
+  if (claimIds.length === 0) return;
+  const placeholders = claimIds.map(() => "?").join(", ");
+  db.prepare(
+    `DELETE FROM workbench_claims
+     WHERE claim_id IN (${placeholders})
+       AND NOT EXISTS (
+         SELECT 1
+         FROM workbench_authoring_run_sessions
+         WHERE workbench_authoring_run_sessions.claim_id = workbench_claims.claim_id
+       )`
+  ).run(...claimIds);
 }
 
 function deleteReviewDispositionsForSessions(db: MastheadDatabase, sessionIds: string[]): void {
