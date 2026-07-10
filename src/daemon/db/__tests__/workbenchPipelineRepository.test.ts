@@ -12,6 +12,9 @@ import {
   ensureWorkbenchSessionState,
   listWorkbenchActivity,
   listWorkbenchQueue,
+  legacyBugFixTraceStatusForOptionalStatus,
+  markContributionSatisfactionForProvenanceInTransaction,
+  markWorkbenchArtifactAppliedInTransaction,
   markWorkbenchArtifactSatisfied,
   markWorkbenchNotAdded,
   markWorkbenchPublished,
@@ -20,7 +23,8 @@ import {
   markWorkbenchSessionEnrichmentSatisfied,
   publishWorkbenchSession,
   readWorkbenchSessionState,
-  releaseWorkbenchClaim
+  releaseWorkbenchClaim,
+  setWorkbenchArtifactApplicability
 } from "../workbenchPipelineRepository.ts";
 
 const tempDirs: string[] = [];
@@ -268,6 +272,98 @@ describe("workbench pipeline repository", () => {
       activity: { eventType: "published" },
       state: { publicationStatus: "published", sessionId: "session:1" }
     });
+  });
+
+  test("does not resolve an applied optional artifact", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:applied",
+      title: "Applied runbook"
+    });
+    ensureWorkbenchSessionState(db, "session:applied");
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET transcript_status = 'imported', quality_status = 'passed'
+       WHERE session_id = ?`
+    ).run("session:applied");
+    markWorkbenchSessionEnrichmentSatisfied(db, {
+      actor: { kind: "agent", id: "codex" },
+      sessionId: "session:applied"
+    });
+    markWorkbenchArtifactSatisfied(db, {
+      actor: { kind: "agent", id: "codex" },
+      artifactKind: "session_dossier",
+      sessionId: "session:applied"
+    });
+    db.exec("BEGIN IMMEDIATE;");
+    markWorkbenchArtifactAppliedInTransaction(db, {
+      actor: { kind: "agent", id: "codex" },
+      artifactKind: "runbook",
+      sessionId: "session:applied"
+    });
+    db.exec("COMMIT;");
+
+    publishWorkbenchSession(db, {
+      actor: { kind: "agent", id: "codex" },
+      sessionId: "session:applied"
+    });
+
+    expect(readWorkbenchSessionState(db, "session:applied")).toMatchObject({
+      resolutionStatus: "compile_ready",
+      runbookStatus: "applied"
+    });
+  });
+
+  test("maps every runbook state into the constrained legacy bug-fix status", () => {
+    expect(
+      (["unknown", "required", "applied", "published", "not_applicable", "contributed"] as const).map(
+        (status) => [status, legacyBugFixTraceStatusForOptionalStatus(status)]
+      )
+    ).toEqual([
+      ["unknown", "unknown"],
+      ["required", "required"],
+      ["applied", "required"],
+      ["published", "satisfied"],
+      ["not_applicable", "not_applicable"],
+      ["contributed", "satisfied"]
+    ]);
+  });
+
+  test("marks every non-seed provenance session contributed even after an earlier resolution", async () => {
+    const db = await testDb();
+    for (const sessionId of ["session:seed", "session:provenance"]) {
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId,
+        title: sessionId
+      });
+      ensureWorkbenchSessionState(db, sessionId);
+    }
+    setWorkbenchArtifactApplicability(db, {
+      actor: { kind: "agent", id: "codex" },
+      artifactKind: "runbook",
+      reason: "Earlier evidence did not support a runbook.",
+      sessionId: "session:provenance",
+      status: "not_applicable"
+    });
+
+    db.exec("BEGIN IMMEDIATE;");
+    markContributionSatisfactionForProvenanceInTransaction(db, {
+      actor: { kind: "agent", id: "codex" },
+      artifactKind: "runbook",
+      provenanceSessionIds: ["session:seed", "session:provenance"],
+      publishedArtifactId: "artifact:shared",
+      seedSessionId: "session:seed"
+    });
+    db.exec("COMMIT;");
+
+    expect(readWorkbenchSessionState(db, "session:seed")?.runbookStatus).toBe("unknown");
+    expect(readWorkbenchSessionState(db, "session:provenance")?.runbookStatus).toBe("contributed");
   });
 
   test("quality pass advances next action toward enrichment", async () => {

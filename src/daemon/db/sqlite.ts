@@ -5,6 +5,18 @@ import { DatabaseSync } from "node:sqlite";
 export type MastheadDatabase = DatabaseSync;
 export type WalCheckpointMode = "PASSIVE" | "FULL" | "RESTART" | "TRUNCATE";
 
+export function withImmediateTransaction<T>(db: MastheadDatabase, callback: () => T): T {
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    const result = callback();
+    db.exec("COMMIT;");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+}
+
 export async function openMastheadDatabase(databasePath: string): Promise<MastheadDatabase> {
   await mkdir(dirname(databasePath), { recursive: true });
   const db = new DatabaseSync(databasePath);

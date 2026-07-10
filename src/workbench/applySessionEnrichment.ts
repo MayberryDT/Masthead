@@ -3,9 +3,9 @@ import { SESSION_CAPSULE_PROMPT_VERSION } from "../enrichment/sessionCompiler.ts
 import type { SessionCapsule, SessionEnrichmentKind } from "../enrichment/types.ts";
 import { markStaleCurrentSessionEnrichments, upsertSessionEnrichment } from "../daemon/db/enrichmentRepository.ts";
 import { indexCanonicalSessionSearch } from "../daemon/db/searchRepository.ts";
-import { markWorkbenchSessionEnrichmentSatisfied } from "../daemon/db/workbenchPipelineRepository.ts";
+import { markWorkbenchSessionEnrichmentSatisfiedInTransaction } from "../daemon/db/workbenchPipelineRepository.ts";
 import { stableRecordId } from "../daemon/identity.ts";
-import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
+import { type MastheadDatabase, withImmediateTransaction } from "../daemon/db/sqlite.ts";
 import type { SessionEnrichmentOutput } from "./types.ts";
 import { validateWorkbenchOutput } from "./validation.ts";
 import { buildWorkbenchEvidencePacket } from "./evidencePacket.ts";
@@ -29,6 +29,17 @@ export function applySessionEnrichment(
   const plannedRows: SessionEnrichmentKind[] = ["session_capsule", "live_summary", "search_projection"];
   if (options.dryRun) return { dryRun: true, enrichmentIds: [], ok: true, plannedRows };
 
+  return withImmediateTransaction(db, () =>
+    applySessionEnrichmentInTransaction(db, { output: options.output, sessionId: options.sessionId })
+  );
+}
+
+export function applySessionEnrichmentInTransaction(
+  db: MastheadDatabase,
+  options: { sessionId: string; output: SessionEnrichmentOutput }
+): ApplySessionEnrichmentResult {
+  const plannedRows: SessionEnrichmentKind[] = ["session_capsule", "live_summary", "search_projection"];
+
   const now = new Date().toISOString();
   const fingerprint = contentFingerprint(options.output);
   const capsule = capsuleFromOutput(options.output, now);
@@ -38,52 +49,50 @@ export function applySessionEnrichment(
     session_capsule: capsule
   };
 
-  db.exec("BEGIN IMMEDIATE;");
-  try {
-    const enrichmentIds = plannedRows.map((enrichmentKind) => {
-      markStaleCurrentSessionEnrichments(db, {
-        enrichmentKind,
-        exceptContentFingerprint: fingerprint,
-        promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
-        sessionId: options.sessionId
-      });
-      return upsertSessionEnrichment(db, {
-        content: contents[enrichmentKind],
-        contentFingerprint: fingerprint,
-        enrichmentKind,
-        generatedAt: now,
-        model: "external_agent",
-        promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
-        provider: "workbench_cli",
-        sessionId: options.sessionId,
-        sourceRefs: options.output.evidenceRefs.map((ref) => ({ id: ref, kind: "event", source: "workbench", observedAt: now })),
-        status: "current"
-      });
-    });
-    indexCanonicalSessionSearch(db, options.sessionId);
-    db.prepare(
-      `INSERT INTO workbench_runs (run_id, command, started_at, completed_at, status, session_id, artifact_id, details_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      stableRecordId("workbench_run", [options.sessionId, "session_enrichment", fingerprint, now]),
-      "apply session_enrichment",
-      now,
-      now,
-      "succeeded",
-      options.sessionId,
-      null,
-      JSON.stringify({ enrichmentIds, fingerprint })
-    );
-    db.exec("COMMIT;");
-    markWorkbenchSessionEnrichmentSatisfied(db, {
-      actor: { kind: "agent", id: "external_agent" },
+  const enrichmentIds = plannedRows.map((enrichmentKind) => {
+    markStaleCurrentSessionEnrichments(db, {
+      enrichmentKind,
+      exceptContentFingerprint: fingerprint,
+      promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
       sessionId: options.sessionId
     });
-    return { dryRun: false, enrichmentIds, ok: true, plannedRows };
-  } catch (error) {
-    db.exec("ROLLBACK;");
-    throw error;
-  }
+    return upsertSessionEnrichment(db, {
+      content: contents[enrichmentKind],
+      contentFingerprint: fingerprint,
+      enrichmentKind,
+      generatedAt: now,
+      model: "external_agent",
+      promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
+      provider: "workbench_cli",
+      sessionId: options.sessionId,
+      sourceRefs: options.output.evidenceRefs.map((ref) => ({
+        id: ref,
+        kind: "event",
+        observedAt: now,
+        source: "workbench"
+      })),
+      status: "current"
+    });
+  });
+  indexCanonicalSessionSearch(db, options.sessionId);
+  db.prepare(
+    `INSERT INTO workbench_runs (run_id, command, started_at, completed_at, status, session_id, artifact_id, details_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    stableRecordId("workbench_run", [options.sessionId, "session_enrichment", fingerprint, now]),
+    "apply session_enrichment",
+    now,
+    now,
+    "succeeded",
+    options.sessionId,
+    null,
+    JSON.stringify({ enrichmentIds, fingerprint })
+  );
+  markWorkbenchSessionEnrichmentSatisfiedInTransaction(db, {
+    actor: { kind: "agent", id: "external_agent" },
+    sessionId: options.sessionId
+  });
+  return { dryRun: false, enrichmentIds, ok: true, plannedRows };
 }
 
 function capsuleFromOutput(output: SessionEnrichmentOutput, generatedAt: string): SessionCapsule {

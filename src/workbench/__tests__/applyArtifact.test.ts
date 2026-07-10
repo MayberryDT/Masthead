@@ -97,7 +97,7 @@ describe("applyArtifact", () => {
     ]);
     expect(readWorkbenchSessionState(db, "session:abc")).toMatchObject({
       publicationStatus: "publish_path",
-      runbookStatus: "satisfied"
+      runbookStatus: "applied"
     });
     expect(listWorkbenchActivity(db, { limit: 10, sessionId: "session:abc" })).toEqual([
       expect.objectContaining({ eventType: "runbook_applied", summary: "Runbook applied" })

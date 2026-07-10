@@ -5,16 +5,23 @@ import type {
   WorkbenchAuthoringEvidenceManifest,
   WorkbenchAuthoringEvidencePage,
   WorkbenchAuthoringFinding,
+  WorkbenchAuthoringReceipt,
   WorkbenchAuthoringRunDto
 } from "../../shared/workbenchAuthoring.ts";
 import { hasSemanticRedactedText } from "../../core/redaction.ts";
 import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepository.ts";
-import { listSessionArtifacts } from "../../daemon/db/sessionArtifactRepository.ts";
+import {
+  applySessionArtifactInTransaction,
+  listSessionArtifacts,
+  publishSessionArtifactInTransaction
+} from "../../daemon/db/sessionArtifactRepository.ts";
+import { getLogbookArtifactDetail } from "../../daemon/db/logbookArtifactRepository.ts";
 import { iterateSessionTranscriptItems, type SessionTranscriptKindFilter } from "../../daemon/db/sessionTranscriptRepository.ts";
 import { getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
-import type { MastheadDatabase } from "../../daemon/db/sqlite.ts";
+import { type MastheadDatabase, withImmediateTransaction } from "../../daemon/db/sqlite.ts";
 import {
   createWorkbenchAuthoringRunInTransaction,
+  completeWorkbenchAuthoringRun,
   findReusableWorkbenchAuthoringRun,
   getWorkbenchAuthoringRun,
   resetWorkbenchAuthoringRunEvidence,
@@ -24,13 +31,21 @@ import {
   claimWorkbenchSessionsInTransaction,
   ensureWorkbenchSessionState,
   markWorkbenchQualityPassedInTransaction,
+  markContributionSatisfactionForProvenanceInTransaction,
+  markWorkbenchArtifactAppliedInTransaction,
+  markWorkbenchArtifactPublishedInTransaction,
   markWorkbenchTranscriptAvailableInTransaction,
+  publishWorkbenchSessionInTransaction,
   readWorkbenchSessionState,
   recordWorkbenchActivity,
-  renewOrReacquireAuthoringClaimsInTransaction
+  releaseWorkbenchClaimInTransaction,
+  renewOrReacquireAuthoringClaimsInTransaction,
+  setWorkbenchArtifactApplicabilityInTransaction
 } from "../../daemon/db/workbenchPipelineRepository.ts";
 import { runCaptureQualityPrecheck } from "../qualityPrecheck.ts";
-import type { WorkbenchValidationEvidence } from "../types.ts";
+import { fingerprintWorkbenchOutput } from "../applyArtifact.ts";
+import { applySessionEnrichmentInTransaction } from "../applySessionEnrichment.ts";
+import type { SessionEnrichmentOutput, WorkbenchValidationEvidence } from "../types.ts";
 import { getAuthoringBundleSchema } from "./authoringSchemas.ts";
 import {
   authoringEvidenceRevision,
@@ -83,7 +98,7 @@ export function openAuthoringRun(
   db: MastheadDatabase,
   input: { actorId: string; databaseId: string; sessionIds: string[] }
 ): OpenAuthoringRunResult {
-  return immediateTransaction(db, () => {
+  return withImmediateTransaction(db, () => {
     const sessionIds = normalizeSessionIds(input.sessionIds);
     if (sessionIds.length === 0) throw new Error("authoring_run_requires_sessions");
     for (const sessionId of sessionIds) assertSessionExists(db, sessionId);
@@ -186,7 +201,7 @@ export function submitAuthoringBundle(
   db: MastheadDatabase,
   input: { bundle: WorkbenchAuthoringBundle; runId: string }
 ): SubmitAuthoringBundleResult {
-  return immediateTransaction(db, () => {
+  return withImmediateTransaction(db, () => {
     const existing = requireAuthoringRun(db, input.runId);
     if (existing.status === "completed") throw new Error(`authoring_run_completed:${input.runId}`);
     if (input.bundle.runId !== input.runId) throw new Error("authoring_run_mismatch");
@@ -223,6 +238,196 @@ export function submitAuthoringBundle(
   });
 }
 
+export function finishAuthoringRun(
+  db: MastheadDatabase,
+  input: { runId: string; verifyPublished?: (artifactId: string) => boolean }
+): WorkbenchAuthoringReceipt {
+  return withImmediateTransaction(db, () => {
+    const existing = requireAuthoringRun(db, input.runId);
+    if (existing.receipt) return existing.receipt;
+    if (existing.status !== "ready_to_finish") {
+      throw new Error(`authoring_run_not_ready:${existing.status}`);
+    }
+
+    const run = renewOrReacquireAuthoringClaimsInTransaction(db, {
+      actorId: existing.actorId,
+      expiresAt: authoringLeaseExpiry(),
+      runId: existing.runId
+    });
+    if (authoringEvidenceRevision(db, run.sessionIds) !== run.evidenceRevision) {
+      throw new Error("evidence_revision_changed");
+    }
+    if (!run.bundle) throw new Error(`authoring_run_bundle_missing:${run.runId}`);
+
+    const receipt = finishInsideTransaction(db, { ...run, bundle: run.bundle }, input.verifyPublished);
+    completeWorkbenchAuthoringRun(db, { receipt, runId: run.runId });
+    return receipt;
+  });
+}
+
+function finishInsideTransaction(
+  db: MastheadDatabase,
+  run: WorkbenchAuthoringRunDto & { bundle: WorkbenchAuthoringBundle },
+  verifyPublished: ((artifactId: string) => boolean) | undefined
+): WorkbenchAuthoringReceipt {
+  const actor = { id: run.actorId, kind: "agent" } as const;
+  const expectedArtifacts: Array<{ artifactId: string; provenanceSessionIds: string[] }> = [];
+  const contributions: WorkbenchAuthoringReceipt["contributions"] = [];
+  const appliedArtifacts: Array<{
+    artifact: SessionArtifactRecord;
+    kind: SessionArtifactRecord["artifactKind"];
+    provenanceSessionIds: string[];
+    seedSessionId: string;
+  }> = [];
+
+  for (const sessionPackage of run.bundle.sessionPackages) {
+    applySessionEnrichmentInTransaction(db, {
+      output: sessionPackage.enrichment as SessionEnrichmentOutput,
+      sessionId: sessionPackage.sessionId
+    });
+    const dossier = applyAuthoringArtifactInTransaction(db, {
+      actorId: run.actorId,
+      kind: "session_dossier",
+      output: sessionPackage.dossier,
+      provenanceSessionIds: [sessionPackage.sessionId],
+      seedSessionId: sessionPackage.sessionId
+    });
+    markWorkbenchArtifactAppliedInTransaction(db, {
+      actor,
+      artifactKind: "session_dossier",
+      sessionId: sessionPackage.sessionId
+    });
+    appliedArtifacts.push({
+      artifact: dossier,
+      kind: "session_dossier",
+      provenanceSessionIds: [sessionPackage.sessionId],
+      seedSessionId: sessionPackage.sessionId
+    });
+  }
+
+  for (const artifactDraft of run.bundle.artifacts) {
+    const artifact = applyAuthoringArtifactInTransaction(db, {
+      actorId: run.actorId,
+      kind: artifactDraft.kind,
+      output: artifactDraft.output,
+      provenanceSessionIds: artifactDraft.provenanceSessionIds,
+      seedSessionId: artifactDraft.seedSessionId
+    });
+    markWorkbenchArtifactAppliedInTransaction(db, {
+      actor,
+      artifactKind: artifactDraft.kind,
+      sessionId: artifactDraft.seedSessionId
+    });
+    appliedArtifacts.push({
+      artifact,
+      kind: artifactDraft.kind,
+      provenanceSessionIds: artifactDraft.provenanceSessionIds,
+      seedSessionId: artifactDraft.seedSessionId
+    });
+  }
+
+  for (const applied of appliedArtifacts) {
+    const published = publishSessionArtifactInTransaction(db, applied.artifact.artifactId);
+    if (!published) throw new Error(`authoring_finish_artifact_missing:${applied.artifact.artifactId}`);
+    expectedArtifacts.push({
+      artifactId: published.artifactId,
+      provenanceSessionIds: applied.provenanceSessionIds
+    });
+  }
+
+  for (const applied of appliedArtifacts) {
+    if (applied.kind === "session_dossier") continue;
+    markWorkbenchArtifactPublishedInTransaction(db, {
+      actor,
+      artifactId: applied.artifact.artifactId,
+      artifactKind: applied.kind,
+      sessionId: applied.seedSessionId
+    });
+    markContributionSatisfactionForProvenanceInTransaction(db, {
+      actor,
+      artifactKind: applied.kind,
+      provenanceSessionIds: applied.provenanceSessionIds,
+      publishedArtifactId: applied.artifact.artifactId,
+      seedSessionId: applied.seedSessionId
+    });
+    for (const sessionId of applied.provenanceSessionIds) {
+      if (sessionId === applied.seedSessionId) continue;
+      contributions.push({ artifactId: applied.artifact.artifactId, kind: applied.kind, sessionId });
+    }
+  }
+
+  for (const decision of run.bundle.notApplicable) {
+    setWorkbenchArtifactApplicabilityInTransaction(db, {
+      actor,
+      artifactKind: decision.kind,
+      reason: decision.reason,
+      sessionId: decision.sessionId,
+      status: "not_applicable"
+    });
+  }
+
+  for (const decision of run.bundle.contributions) {
+    assertExistingContribution(db, decision);
+    setWorkbenchArtifactApplicabilityInTransaction(db, {
+      actor,
+      artifactKind: decision.kind,
+      reason: `contributed_to:${decision.publishedArtifactId}`,
+      sessionId: decision.sessionId,
+      status: "contributed"
+    });
+    contributions.push({
+      artifactId: decision.publishedArtifactId,
+      kind: decision.kind,
+      sessionId: decision.sessionId
+    });
+  }
+
+  for (const sessionId of run.sessionIds) {
+    const result = publishWorkbenchSessionInTransaction(db, { actor, sessionId });
+    if (!result.ok) {
+      throw new Error(`authoring_finish_package_gate_failed:${sessionId}:${result.missing.join(",")}`);
+    }
+  }
+
+  for (const expected of expectedArtifacts) {
+    assertPublishedArtifactVisible(db, expected.artifactId, expected.provenanceSessionIds);
+    if (verifyPublished && !verifyPublished(expected.artifactId)) {
+      throw new Error(`authoring_finish_visibility_failed:${expected.artifactId}`);
+    }
+  }
+  for (const sessionId of run.sessionIds) {
+    if (readWorkbenchSessionState(db, sessionId)?.resolutionStatus !== "automatic_resolved") {
+      throw new Error(`authoring_finish_unresolved:${sessionId}`);
+    }
+  }
+
+  const receipt: WorkbenchAuthoringReceipt = {
+    completedAt: new Date().toISOString(),
+    contributions: contributions.sort(compareReceiptResolution),
+    notApplicable: run.bundle.notApplicable
+      .map(({ kind, sessionId }) => ({ kind, sessionId }))
+      .sort(compareReceiptResolution),
+    publishedArtifactIds: expectedArtifacts.map(({ artifactId }) => artifactId),
+    resolvedSessionIds: [...run.sessionIds],
+    runId: run.runId
+  };
+  for (const claimId of run.claimIds) {
+    releaseWorkbenchClaimInTransaction(db, { claimId, reason: "authoring_finished" });
+  }
+  run.sessionIds.forEach((sessionId, index) => {
+    recordWorkbenchActivity(db, {
+      actor,
+      details: { publishedArtifactIds: receipt.publishedArtifactIds },
+      eventType: "authoring_finished",
+      relatedClaimId: run.claimIds[index],
+      relatedRunId: run.runId,
+      sessionId,
+      summary: "Workbench authoring finished"
+    });
+  });
+  return receipt;
+}
+
 function openResult(
   db: MastheadDatabase,
   run: WorkbenchAuthoringRunDto,
@@ -242,18 +447,6 @@ function openResult(
     ok: true,
     run
   };
-}
-
-function immediateTransaction<T>(db: MastheadDatabase, callback: () => T): T {
-  db.exec("BEGIN IMMEDIATE;");
-  try {
-    const result = callback();
-    db.exec("COMMIT;");
-    return result;
-  } catch (error) {
-    db.exec("ROLLBACK;");
-    throw error;
-  }
 }
 
 function requireAuthoringRun(db: MastheadDatabase, runId: string): WorkbenchAuthoringRunDto {
@@ -365,4 +558,99 @@ function currentArtifacts(db: MastheadDatabase, sessionIds: string[]): SessionAr
     }
   }
   return [...artifacts.values()].sort((left, right) => left.artifactId.localeCompare(right.artifactId));
+}
+
+function applyAuthoringArtifactInTransaction(
+  db: MastheadDatabase,
+  input: {
+    actorId: string;
+    kind: SessionArtifactRecord["artifactKind"];
+    output: Record<string, unknown>;
+    provenanceSessionIds: string[];
+    seedSessionId: string;
+  }
+): SessionArtifactRecord {
+  return applySessionArtifactInTransaction(db, {
+    artifactKind: input.kind,
+    confidence: confidenceFromOutput(input.output),
+    content: input.output,
+    contentFingerprint: fingerprintWorkbenchOutput(input.output),
+    createdBy: `workbench_authoring:${input.actorId}`,
+    evidenceRefs: stringArrayFromOutput(input.output.evidenceRefs),
+    joinRationale: stringFromOutput(input.output.joinRationale),
+    projectLabel: projectLabelForSession(db, input.seedSessionId),
+    provenanceSessionIds: input.provenanceSessionIds,
+    schemaVersion: `${input.kind}-v2`,
+    sessionId: input.seedSessionId,
+    signatureKey: stringFromOutput(input.output.signatureKey),
+    title: stringFromOutput(input.output.title),
+    validation: { contract: "workbench-authoring-v1", ok: true, schemaVersion: `${input.kind}-v2` }
+  });
+}
+
+function assertPublishedArtifactVisible(
+  db: MastheadDatabase,
+  artifactId: string,
+  expectedProvenanceSessionIds: string[]
+): void {
+  const detail = getLogbookArtifactDetail(db, artifactId);
+  if (
+    !detail ||
+    detail.status !== "current" ||
+    detail.publicationStatus !== "published" ||
+    !sameStringSet(detail.provenanceSessionIds, expectedProvenanceSessionIds)
+  ) {
+    throw new Error(`authoring_finish_visibility_failed:${artifactId}`);
+  }
+}
+
+function assertExistingContribution(
+  db: MastheadDatabase,
+  decision: WorkbenchAuthoringBundle["contributions"][number]
+): void {
+  const detail = getLogbookArtifactDetail(db, decision.publishedArtifactId);
+  if (
+    !detail ||
+    detail.capsule.kind !== decision.kind ||
+    !detail.provenanceSessionIds.includes(decision.sessionId)
+  ) {
+    throw new Error(`authoring_finish_invalid_contribution:${decision.sessionId}:${decision.kind}`);
+  }
+}
+
+function projectLabelForSession(db: MastheadDatabase, sessionId: string): string | undefined {
+  const row = db
+    .prepare("SELECT project_label AS projectLabel FROM sessions WHERE session_id = ?")
+    .get(sessionId) as { projectLabel: string | null } | undefined;
+  return row?.projectLabel ?? undefined;
+}
+
+function confidenceFromOutput(output: Record<string, unknown>): "high" | "medium" | "low" | undefined {
+  return output.confidence === "high" || output.confidence === "medium" || output.confidence === "low"
+    ? output.confidence
+    : undefined;
+}
+
+function stringFromOutput(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function stringArrayFromOutput(value: unknown): string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : [];
+}
+
+function sameStringSet(left: string[], right: string[]): boolean {
+  const normalizedLeft = [...new Set(left)].sort();
+  const normalizedRight = [...new Set(right)].sort();
+  return (
+    normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((value, index) => value === normalizedRight[index])
+  );
+}
+
+function compareReceiptResolution(
+  left: { sessionId: string; kind: string },
+  right: { sessionId: string; kind: string }
+): number {
+  return left.sessionId.localeCompare(right.sessionId) || left.kind.localeCompare(right.kind);
 }

@@ -1,5 +1,5 @@
 import { stableRecordId } from "../identity.ts";
-import type { MastheadDatabase } from "./sqlite.ts";
+import { type MastheadDatabase, withImmediateTransaction } from "./sqlite.ts";
 
 export type SessionArtifactKind = "session_dossier" | "runbook" | "adr" | "incident_timeline";
 export type SessionArtifactStatus = "current" | "superseded" | "invalid";
@@ -129,12 +129,19 @@ const ARTIFACT_SELECT = `SELECT
 FROM session_artifacts`;
 
 export function applySessionArtifact(db: MastheadDatabase, input: SessionArtifactInput): SessionArtifactRecord {
+  return withImmediateTransaction(db, () => applySessionArtifactInTransaction(db, input));
+}
+
+export function applySessionArtifactInTransaction(
+  db: MastheadDatabase,
+  input: SessionArtifactInput
+): SessionArtifactRecord {
   const provenanceSessionIds = normalizeProvenance(input);
   validateProvenanceRules(input.artifactKind, provenanceSessionIds, input.joinRationale);
 
   const existing = readArtifactByFingerprint(db, input);
   if (existing) {
-    makeCurrent(db, existing);
+    makeCurrentInTransaction(db, existing);
     return readArtifactById(db, existing.artifactId)!;
   }
 
@@ -148,48 +155,48 @@ export function applySessionArtifact(db: MastheadDatabase, input: SessionArtifac
   const lineageId = resolveLineageId(db, input, artifactId);
   const capsule = capsuleFieldsFromInput(input);
 
-  db.exec("BEGIN IMMEDIATE;");
-  try {
-    supersedeForApply(db, input, lineageId);
-    db.prepare(
-      `INSERT INTO session_artifacts (
-        artifact_id, session_id, artifact_kind, status, content_fingerprint, created_at, updated_at,
-        created_by, schema_version, title, content_json, evidence_refs_json, validation_json,
-        publication_status, signature_key, lineage_id, summary, highlight, confidence, project_label,
-        join_rationale, published_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'applied', ?, ?, ?, ?, ?, ?, ?, NULL)`
-    ).run(
-      artifactId,
-      input.sessionId,
-      input.artifactKind,
-      "current",
-      input.contentFingerprint,
-      now,
-      now,
-      input.createdBy,
-      input.schemaVersion,
-      capsule.title,
-      JSON.stringify(input.content),
-      JSON.stringify(input.evidenceRefs),
-      JSON.stringify(input.validation),
-      input.signatureKey ?? null,
-      lineageId,
-      capsule.summary,
-      capsule.highlight,
-      capsule.confidence,
-      capsule.projectLabel,
-      input.joinRationale ?? null
-    );
-    replaceProvenance(db, artifactId, provenanceSessionIds);
-    db.exec("COMMIT;");
-  } catch (error) {
-    db.exec("ROLLBACK;");
-    throw error;
-  }
+  supersedeForApply(db, input, lineageId);
+  db.prepare(
+    `INSERT INTO session_artifacts (
+      artifact_id, session_id, artifact_kind, status, content_fingerprint, created_at, updated_at,
+      created_by, schema_version, title, content_json, evidence_refs_json, validation_json,
+      publication_status, signature_key, lineage_id, summary, highlight, confidence, project_label,
+      join_rationale, published_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'applied', ?, ?, ?, ?, ?, ?, ?, NULL)`
+  ).run(
+    artifactId,
+    input.sessionId,
+    input.artifactKind,
+    "current",
+    input.contentFingerprint,
+    now,
+    now,
+    input.createdBy,
+    input.schemaVersion,
+    capsule.title,
+    JSON.stringify(input.content),
+    JSON.stringify(input.evidenceRefs),
+    JSON.stringify(input.validation),
+    input.signatureKey ?? null,
+    lineageId,
+    capsule.summary,
+    capsule.highlight,
+    capsule.confidence,
+    capsule.projectLabel,
+    input.joinRationale ?? null
+  );
+  replaceProvenance(db, artifactId, provenanceSessionIds);
   return readArtifactById(db, artifactId)!;
 }
 
 export function publishSessionArtifact(
+  db: MastheadDatabase,
+  artifactId: string
+): SessionArtifactRecord | undefined {
+  return withImmediateTransaction(db, () => publishSessionArtifactInTransaction(db, artifactId));
+}
+
+export function publishSessionArtifactInTransaction(
   db: MastheadDatabase,
   artifactId: string
 ): SessionArtifactRecord | undefined {
@@ -318,9 +325,22 @@ export function wipePublishedArtifactState(db: MastheadDatabase): { artifactsDel
            ELSE 'missing'
          END,
          resolution_status = 'in_progress',
-         runbook_status = CASE WHEN runbook_status = 'satisfied' THEN 'unknown' ELSE runbook_status END,
-         adr_status = CASE WHEN adr_status = 'satisfied' THEN 'unknown' ELSE adr_status END,
-         incident_timeline_status = CASE WHEN incident_timeline_status = 'satisfied' THEN 'unknown' ELSE incident_timeline_status END,
+         bug_fix_trace_status = CASE
+           WHEN runbook_status IN ('applied', 'published', 'contributed') THEN 'unknown'
+           ELSE bug_fix_trace_status
+         END,
+         runbook_status = CASE
+           WHEN runbook_status IN ('applied', 'published', 'contributed') THEN 'unknown'
+           ELSE runbook_status
+         END,
+         adr_status = CASE
+           WHEN adr_status IN ('applied', 'published', 'contributed') THEN 'unknown'
+           ELSE adr_status
+         END,
+         incident_timeline_status = CASE
+           WHEN incident_timeline_status IN ('applied', 'published', 'contributed') THEN 'unknown'
+           ELSE incident_timeline_status
+         END,
          updated_at = ?`
   ).run(new Date().toISOString());
   return { artifactsDeleted, provenanceDeleted };
@@ -417,27 +437,20 @@ function readArtifactById(db: MastheadDatabase, artifactId: string): SessionArti
   return row ? rowToRecord(db, row) : undefined;
 }
 
-function makeCurrent(db: MastheadDatabase, artifact: SessionArtifactRecord): void {
+function makeCurrentInTransaction(db: MastheadDatabase, artifact: SessionArtifactRecord): void {
   const now = new Date().toISOString();
-  db.exec("BEGIN IMMEDIATE;");
-  try {
-    if (artifact.signatureKey) {
-      db.prepare(
-        `UPDATE session_artifacts SET status = 'superseded', updated_at = ?
-         WHERE artifact_kind = ? AND signature_key = ? AND status = 'current' AND artifact_id <> ?`
-      ).run(now, artifact.artifactKind, artifact.signatureKey, artifact.artifactId);
-    } else if (artifact.artifactKind === "session_dossier") {
-      db.prepare(
-        `UPDATE session_artifacts SET status = 'superseded', updated_at = ?
-         WHERE session_id = ? AND artifact_kind = ? AND status = 'current' AND artifact_id <> ?`
-      ).run(now, artifact.sessionId, artifact.artifactKind, artifact.artifactId);
-    }
-    db.prepare("UPDATE session_artifacts SET status = 'current', updated_at = ? WHERE artifact_id = ?").run(now, artifact.artifactId);
-    db.exec("COMMIT;");
-  } catch (error) {
-    db.exec("ROLLBACK;");
-    throw error;
+  if (artifact.signatureKey) {
+    db.prepare(
+      `UPDATE session_artifacts SET status = 'superseded', updated_at = ?
+       WHERE artifact_kind = ? AND signature_key = ? AND status = 'current' AND artifact_id <> ?`
+    ).run(now, artifact.artifactKind, artifact.signatureKey, artifact.artifactId);
+  } else if (artifact.artifactKind === "session_dossier") {
+    db.prepare(
+      `UPDATE session_artifacts SET status = 'superseded', updated_at = ?
+       WHERE session_id = ? AND artifact_kind = ? AND status = 'current' AND artifact_id <> ?`
+    ).run(now, artifact.sessionId, artifact.artifactKind, artifact.artifactId);
   }
+  db.prepare("UPDATE session_artifacts SET status = 'current', updated_at = ? WHERE artifact_id = ?").run(now, artifact.artifactId);
 }
 
 function provenanceFor(db: MastheadDatabase, artifactId: string): string[] {

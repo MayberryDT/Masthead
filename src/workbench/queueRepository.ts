@@ -149,5 +149,5 @@ function statusForKind(kind: WorkbenchOutputKind, state: ReturnType<typeof listW
 }
 
 function isResolvedOptional(status: string): boolean {
-  return status === "satisfied" || status === "not_applicable" || status === "contributed";
+  return status === "published" || status === "not_applicable" || status === "contributed";
 }

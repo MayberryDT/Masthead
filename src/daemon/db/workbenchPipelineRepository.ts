@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { WorkbenchAuthoringRunDto } from "../../shared/workbenchAuthoring.ts";
 import { stableRecordId } from "../identity.ts";
-import { listSessionArtifacts, publishSessionArtifact } from "./sessionArtifactRepository.ts";
-import type { MastheadDatabase } from "./sqlite.ts";
+import {
+  getSessionArtifact,
+  listSessionArtifacts,
+  publishSessionArtifactInTransaction
+} from "./sessionArtifactRepository.ts";
+import { type MastheadDatabase, withImmediateTransaction } from "./sqlite.ts";
 import { getWorkbenchAuthoringRun } from "./workbenchAuthoringRepository.ts";
 
 export type WorkbenchPublicationStatus = "publish_path" | "published" | "not_added_to_logbook";
@@ -20,7 +24,13 @@ export type WorkbenchTranscriptStatus = "unchecked" | "available" | "imported" |
 export type WorkbenchQualityStatus = "unchecked" | "passed" | "failed";
 export type WorkbenchRequirementStatus = "missing" | "satisfied";
 /** Optional automatic kinds: runbook, ADR, incident timeline. */
-export type WorkbenchOptionalKindStatus = "unknown" | "required" | "satisfied" | "not_applicable" | "contributed";
+export type WorkbenchOptionalKindStatus =
+  | "unknown"
+  | "required"
+  | "applied"
+  | "published"
+  | "not_applicable"
+  | "contributed";
 /** @deprecated Use WorkbenchOptionalKindStatus / runbookStatus. Kept for transitional call sites. */
 export type WorkbenchBugFixTraceStatus = WorkbenchOptionalKindStatus;
 export type WorkbenchSessionPackageStatus = "missing" | "applied" | "published";
@@ -291,6 +301,13 @@ export function markWorkbenchPublished(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; publishedVia: string; sessionId: string }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  return writeStateTransition(db, () => markWorkbenchPublishedInTransaction(db, input));
+}
+
+export function markWorkbenchPublishedInTransaction(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; publishedVia: string; sessionId: string }
+): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
   const existing = readWorkbenchSessionState(db, input.sessionId);
   if (existing?.publicationStatus === "published" && existing.publishedActivityId) {
     const activity = readWorkbenchActivity(db, existing.publishedActivityId);
@@ -298,43 +315,48 @@ export function markWorkbenchPublished(
   }
   const now = new Date().toISOString();
   const activityId = stableRecordId("workbench_activity", [input.sessionId, "published", input.publishedVia]);
-  return writeStateTransition(db, () => {
-    ensureWorkbenchSessionState(db, input.sessionId);
-    const activity = insertWorkbenchActivity(db, {
-      activityId,
-      actor: input.actor,
-      details: { publishedVia: input.publishedVia },
-      eventAt: now,
-      eventType: "published",
-      sessionId: input.sessionId,
-      summary: "Session published to Logbook"
-    });
-    db.prepare(
-      `UPDATE workbench_session_state
-      SET publication_status = 'published',
-        session_package_status = 'published',
-        non_publication_reason = NULL,
-        published_at = ?,
-        published_activity_id = ?,
-        last_activity_at = ?,
-        updated_at = ?
-      WHERE session_id = ?`
-    ).run(now, activity.activityId, now, now, input.sessionId);
-    // Session package publish admits the current session dossier into the artifact book.
-    for (const artifact of listSessionArtifacts(db, {
-      artifactKind: "session_dossier",
-      sessionId: input.sessionId
-    })) {
-      if (artifact.status === "current" && artifact.publicationStatus !== "published") {
-        publishSessionArtifact(db, artifact.artifactId);
-      }
-    }
-    refreshResolutionAndNextAction(db, input.sessionId, now);
-    return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+  ensureWorkbenchSessionState(db, input.sessionId);
+  const activity = insertWorkbenchActivity(db, {
+    activityId,
+    actor: input.actor,
+    details: { publishedVia: input.publishedVia },
+    eventAt: now,
+    eventType: "published",
+    sessionId: input.sessionId,
+    summary: "Session package published"
   });
+  db.prepare(
+    `UPDATE workbench_session_state
+    SET publication_status = 'published',
+      session_package_status = 'published',
+      non_publication_reason = NULL,
+      published_at = ?,
+      published_activity_id = ?,
+      last_activity_at = ?,
+      updated_at = ?
+    WHERE session_id = ?`
+  ).run(now, activity.activityId, now, now, input.sessionId);
+  // Session package publish admits the current session dossier into the artifact book.
+  for (const artifact of listSessionArtifacts(db, {
+    artifactKind: "session_dossier",
+    sessionId: input.sessionId
+  })) {
+    if (artifact.status === "current" && artifact.publicationStatus !== "published") {
+      publishSessionArtifactInTransaction(db, artifact.artifactId);
+    }
+  }
+  refreshResolutionAndNextAction(db, input.sessionId, now);
+  return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
 }
 
 export function publishWorkbenchSession(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; sessionId: string }
+): PublishWorkbenchSessionResult {
+  return writeStateTransition(db, () => publishWorkbenchSessionInTransaction(db, input));
+}
+
+export function publishWorkbenchSessionInTransaction(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; sessionId: string }
 ): PublishWorkbenchSessionResult {
@@ -343,7 +365,7 @@ export function publishWorkbenchSession(
   if (missing.length > 0) {
     return { code: "publication_gate_failed", missing, ok: false, state };
   }
-  const result = markWorkbenchPublished(db, {
+  const result = markWorkbenchPublishedInTransaction(db, {
     actor: input.actor,
     publishedVia: "workbench_publish",
     sessionId: input.sessionId
@@ -520,73 +542,140 @@ export function markWorkbenchSessionEnrichmentSatisfied(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; sessionId: string }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  return writeStateTransition(db, () => markWorkbenchSessionEnrichmentSatisfiedInTransaction(db, input));
+}
+
+export function markWorkbenchSessionEnrichmentSatisfiedInTransaction(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; sessionId: string }
+): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
   const now = new Date().toISOString();
-  return writeStateTransition(db, () => {
-    ensureWorkbenchSessionState(db, input.sessionId);
-    db.prepare(
-      `UPDATE workbench_session_state
-      SET session_enrichment_status = 'satisfied',
-        session_package_status = CASE
-          WHEN session_dossier_status = 'satisfied' THEN 'applied'
-          ELSE session_package_status
-        END,
-        updated_at = ?
-      WHERE session_id = ?`
-    ).run(now, input.sessionId);
-    updateWorkbenchNextAction(db, input.sessionId, now);
-    const activity = insertWorkbenchActivity(db, {
-      activityId: stableRecordId("workbench_activity", [input.sessionId, "session_enrichment_applied", now]),
-      actor: input.actor,
-      details: { provider: "workbench_cli", outputKind: "session_enrichment" },
-      eventAt: now,
-      eventType: "session_enrichment_applied",
-      sessionId: input.sessionId,
-      summary: "Session enrichment applied"
-    });
-    db.prepare("UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?").run(now, now, input.sessionId);
-    return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+  ensureWorkbenchSessionState(db, input.sessionId);
+  db.prepare(
+    `UPDATE workbench_session_state
+    SET session_enrichment_status = 'satisfied',
+      session_package_status = CASE
+        WHEN session_dossier_status = 'satisfied' THEN 'applied'
+        ELSE session_package_status
+      END,
+      updated_at = ?
+    WHERE session_id = ?`
+  ).run(now, input.sessionId);
+  updateWorkbenchNextAction(db, input.sessionId, now);
+  const activity = insertWorkbenchActivity(db, {
+    activityId: stableRecordId("workbench_activity", [input.sessionId, "session_enrichment_applied", now]),
+    actor: input.actor,
+    details: { provider: "workbench_cli", outputKind: "session_enrichment" },
+    eventAt: now,
+    eventType: "session_enrichment_applied",
+    sessionId: input.sessionId,
+    summary: "Session enrichment applied"
   });
+  db.prepare("UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?").run(
+    now,
+    now,
+    input.sessionId
+  );
+  return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
 }
 
 export function markWorkbenchArtifactSatisfied(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; artifactKind: WorkbenchArtifactKind; sessionId: string }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  return writeStateTransition(db, () => applyWorkbenchArtifactAppliedInTransaction(db, input));
+}
+
+export function markWorkbenchArtifactAppliedInTransaction(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; artifactKind: WorkbenchArtifactKind; sessionId: string }
+): void {
+  applyWorkbenchArtifactAppliedInTransaction(db, input);
+}
+
+function applyWorkbenchArtifactAppliedInTransaction(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; artifactKind: WorkbenchArtifactKind; sessionId: string }
+): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
   const now = new Date().toISOString();
   const eventType = `${input.artifactKind}_applied`;
   const summary = `${kindLabel(input.artifactKind)} applied`;
-  return writeStateTransition(db, () => {
-    ensureWorkbenchSessionState(db, input.sessionId);
-    if (input.artifactKind === "session_dossier") {
-      db.prepare(
-        `UPDATE workbench_session_state
-         SET session_dossier_status = 'satisfied',
-             session_package_status = CASE
-               WHEN session_enrichment_status = 'satisfied' THEN 'applied'
-               ELSE session_package_status
-             END,
-             updated_at = ?
-         WHERE session_id = ?`
-      ).run(now, input.sessionId);
-    } else {
-      setOptionalKindStatus(db, input.sessionId, input.artifactKind, "satisfied", now);
-    }
-    refreshResolutionAndNextAction(db, input.sessionId, now);
-    const activity = insertWorkbenchActivity(db, {
-      activityId: stableRecordId("workbench_activity", [input.sessionId, eventType, now]),
-      actor: input.actor,
-      details: { artifactKind: input.artifactKind },
-      eventAt: now,
-      eventType,
-      sessionId: input.sessionId,
-      summary
-    });
-    db.prepare("UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?").run(now, now, input.sessionId);
-    return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+  ensureWorkbenchSessionState(db, input.sessionId);
+  if (input.artifactKind === "session_dossier") {
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET session_dossier_status = 'satisfied',
+           session_package_status = CASE
+             WHEN session_enrichment_status = 'satisfied' THEN 'applied'
+             ELSE session_package_status
+           END,
+           updated_at = ?
+       WHERE session_id = ?`
+    ).run(now, input.sessionId);
+  } else {
+    setOptionalKindStatus(db, input.sessionId, input.artifactKind, "applied", now);
+  }
+  refreshResolutionAndNextAction(db, input.sessionId, now);
+  const activity = insertWorkbenchActivity(db, {
+    activityId: stableRecordId("workbench_activity", [input.sessionId, eventType, now]),
+    actor: input.actor,
+    details: { artifactKind: input.artifactKind },
+    eventAt: now,
+    eventType,
+    sessionId: input.sessionId,
+    summary
   });
+  db.prepare("UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?").run(
+    now,
+    now,
+    input.sessionId
+  );
+  return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+}
+
+export function markWorkbenchArtifactPublishedInTransaction(
+  db: MastheadDatabase,
+  input: {
+    actor: WorkbenchActor;
+    artifactKind: WorkbenchAutomaticKind;
+    sessionId: string;
+    artifactId: string;
+  }
+): void {
+  const now = new Date().toISOString();
+  ensureWorkbenchSessionState(db, input.sessionId);
+  setOptionalKindStatus(db, input.sessionId, input.artifactKind, "published", now);
+  refreshResolutionAndNextAction(db, input.sessionId, now);
+  insertWorkbenchActivity(db, {
+    activityId: stableRecordId("workbench_activity", [input.sessionId, `${input.artifactKind}_published`, input.artifactId]),
+    actor: input.actor,
+    details: { artifactId: input.artifactId, artifactKind: input.artifactKind },
+    eventAt: now,
+    eventType: `${input.artifactKind}_published`,
+    sessionId: input.sessionId,
+    summary: `${kindLabel(input.artifactKind)} published`
+  });
+  db.prepare("UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?").run(
+    now,
+    now,
+    input.sessionId
+  );
 }
 
 export function setWorkbenchArtifactApplicability(
+  db: MastheadDatabase,
+  input: {
+    actor: WorkbenchActor;
+    artifactKind: WorkbenchAutomaticKind;
+    reason: string;
+    sessionId: string;
+    status: "not_applicable" | "contributed";
+  }
+): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  return writeStateTransition(db, () => setWorkbenchArtifactApplicabilityInTransaction(db, input));
+}
+
+export function setWorkbenchArtifactApplicabilityInTransaction(
   db: MastheadDatabase,
   input: {
     actor: WorkbenchActor;
@@ -602,25 +691,27 @@ export function setWorkbenchArtifactApplicability(
     input.status === "contributed"
       ? `${kindLabel(input.artifactKind)} satisfied via contribution`
       : `${kindLabel(input.artifactKind)} marked not applicable`;
-  return writeStateTransition(db, () => {
-    ensureWorkbenchSessionState(db, input.sessionId);
-    setOptionalKindStatus(db, input.sessionId, input.artifactKind, input.status, now);
-    refreshResolutionAndNextAction(db, input.sessionId, now);
-    const activity = insertWorkbenchActivity(db, {
-      activityId: stableRecordId("workbench_activity", [input.sessionId, eventType, input.reason]),
-      actor: input.actor,
-      details: { artifactKind: input.artifactKind, reason: input.reason, status: input.status },
-      eventAt: now,
-      eventType,
-      sessionId: input.sessionId,
-      summary
-    });
-    db.prepare("UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?").run(now, now, input.sessionId);
-    return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+  ensureWorkbenchSessionState(db, input.sessionId);
+  setOptionalKindStatus(db, input.sessionId, input.artifactKind, input.status, now);
+  refreshResolutionAndNextAction(db, input.sessionId, now);
+  const activity = insertWorkbenchActivity(db, {
+    activityId: stableRecordId("workbench_activity", [input.sessionId, eventType, input.reason]),
+    actor: input.actor,
+    details: { artifactKind: input.artifactKind, reason: input.reason, status: input.status },
+    eventAt: now,
+    eventType,
+    sessionId: input.sessionId,
+    summary
   });
+  db.prepare("UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?").run(
+    now,
+    now,
+    input.sessionId
+  );
+  return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
 }
 
-/** Mark seed sessions contributed when they appear in a published multi-session artifact's provenance. */
+/** Mark non-seed sessions contributed when they appear in a published multi-session artifact's provenance. */
 export function markContributionSatisfactionForProvenance(
   db: MastheadDatabase,
   input: {
@@ -628,14 +719,29 @@ export function markContributionSatisfactionForProvenance(
     artifactKind: WorkbenchAutomaticKind;
     provenanceSessionIds: string[];
     publishedArtifactId: string;
+    seedSessionId?: string;
+  }
+): void {
+  const seedSessionId =
+    input.seedSessionId ?? getSessionArtifact(db, input.publishedArtifactId)?.sessionId ?? "";
+  writeStateTransition(db, () =>
+    markContributionSatisfactionForProvenanceInTransaction(db, { ...input, seedSessionId })
+  );
+}
+
+export function markContributionSatisfactionForProvenanceInTransaction(
+  db: MastheadDatabase,
+  input: {
+    actor: WorkbenchActor;
+    artifactKind: WorkbenchAutomaticKind;
+    provenanceSessionIds: string[];
+    publishedArtifactId: string;
+    seedSessionId: string;
   }
 ): void {
   for (const sessionId of input.provenanceSessionIds) {
-    const state = readWorkbenchSessionState(db, sessionId);
-    if (!state) continue;
-    const status = optionalKindStatus(state, input.artifactKind);
-    if (status === "satisfied" || status === "not_applicable" || status === "contributed") continue;
-    setWorkbenchArtifactApplicability(db, {
+    if (sessionId === input.seedSessionId) continue;
+    setWorkbenchArtifactApplicabilityInTransaction(db, {
       actor: input.actor,
       artifactKind: input.artifactKind,
       reason: `contributed_to:${input.publishedArtifactId}`,
@@ -913,40 +1019,36 @@ export function renewOrReacquireAuthoringClaimsInTransaction(
 }
 
 export function releaseWorkbenchClaim(db: MastheadDatabase, input: { claimId: string; reason: string }): WorkbenchClaimRecord | undefined {
+  return writeStateTransition(db, () => releaseWorkbenchClaimInTransaction(db, input));
+}
+
+export function releaseWorkbenchClaimInTransaction(
+  db: MastheadDatabase,
+  input: { claimId: string; reason: string }
+): WorkbenchClaimRecord | undefined {
   const now = new Date().toISOString();
   const existing = readWorkbenchClaim(db, input.claimId);
   if (!existing) return undefined;
-  db.exec("BEGIN IMMEDIATE;");
-  try {
-    db.prepare("UPDATE workbench_claims SET released_at = ?, release_reason = ? WHERE claim_id = ?").run(now, input.reason, input.claimId);
-    insertWorkbenchActivity(db, {
-      activityId: stableRecordId("workbench_activity", [existing.sessionId, "claim_released", input.claimId]),
-      actor: { kind: "agent", id: existing.claimedBy },
-      details: { reason: input.reason },
-      eventAt: now,
-      eventType: "claim_released",
-      relatedClaimId: input.claimId,
-      sessionId: existing.sessionId,
-      summary: "Workbench claim released"
-    });
-    db.exec("COMMIT;");
-  } catch (error) {
-    db.exec("ROLLBACK;");
-    throw error;
-  }
+  db.prepare("UPDATE workbench_claims SET released_at = ?, release_reason = ? WHERE claim_id = ?").run(
+    now,
+    input.reason,
+    input.claimId
+  );
+  insertWorkbenchActivity(db, {
+    activityId: stableRecordId("workbench_activity", [existing.sessionId, "claim_released", input.claimId]),
+    actor: { kind: "agent", id: existing.claimedBy },
+    details: { reason: input.reason },
+    eventAt: now,
+    eventType: "claim_released",
+    relatedClaimId: input.claimId,
+    sessionId: existing.sessionId,
+    summary: "Workbench claim released"
+  });
   return readWorkbenchClaim(db, input.claimId);
 }
 
 function writeStateTransition<T>(db: MastheadDatabase, callback: () => T): T {
-  db.exec("BEGIN IMMEDIATE;");
-  try {
-    const result = callback();
-    db.exec("COMMIT;");
-    return result;
-  } catch (error) {
-    db.exec("ROLLBACK;");
-    throw error;
-  }
+  return withImmediateTransaction(db, callback);
 }
 
 function updateWorkbenchNextAction(db: MastheadDatabase, sessionId: string, updatedAt: string): void {
@@ -983,7 +1085,7 @@ function resolutionStatusForState(state: WorkbenchSessionStateRecord): Workbench
 }
 
 function isOptionalKindResolved(status: WorkbenchOptionalKindStatus): boolean {
-  return status === "satisfied" || status === "not_applicable" || status === "contributed";
+  return status === "published" || status === "not_applicable" || status === "contributed";
 }
 
 function nextActionForState(state: WorkbenchSessionStateRecord): WorkbenchNextAction {
@@ -1030,7 +1132,7 @@ function setOptionalKindStatus(
       `UPDATE workbench_session_state
        SET runbook_status = ?, bug_fix_trace_status = ?, updated_at = ?
        WHERE session_id = ?`
-    ).run(status, status === "contributed" ? "satisfied" : status, now, sessionId);
+    ).run(status, legacyBugFixTraceStatusForOptionalStatus(status), now, sessionId);
     return;
   }
   if (kind === "adr") {
@@ -1044,10 +1146,13 @@ function setOptionalKindStatus(
   );
 }
 
-function optionalKindStatus(state: WorkbenchSessionStateRecord, kind: WorkbenchAutomaticKind): WorkbenchOptionalKindStatus {
-  if (kind === "runbook") return state.runbookStatus;
-  if (kind === "adr") return state.adrStatus;
-  return state.incidentTimelineStatus;
+export function legacyBugFixTraceStatusForOptionalStatus(
+  status: WorkbenchOptionalKindStatus
+): "unknown" | "required" | "satisfied" | "not_applicable" {
+  if (status === "unknown") return "unknown";
+  if (status === "required" || status === "applied") return "required";
+  if (status === "not_applicable") return "not_applicable";
+  return "satisfied";
 }
 
 function kindLabel(kind: WorkbenchArtifactKind): string {

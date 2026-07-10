@@ -4,15 +4,23 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchAuthoringBundle } from "../../../shared/workbenchAuthoring.ts";
 import { seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
+import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
+import {
+  applySessionArtifact,
+  listSessionArtifacts,
+  publishSessionArtifact
+} from "../../../daemon/db/sessionArtifactRepository.ts";
 import {
   claimWorkbenchSessions,
   markWorkbenchNotAdded,
-  readWorkbenchSessionState
+  readWorkbenchSessionState,
+  setWorkbenchArtifactApplicability
 } from "../../../daemon/db/workbenchPipelineRepository.ts";
 import { completeWorkbenchAuthoringRun } from "../../../daemon/db/workbenchAuthoringRepository.ts";
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
 import {
+  finishAuthoringRun,
   getAuthoringRunEvidence,
   getAuthoringRunStatus,
   openAuthoringRun,
@@ -400,6 +408,168 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
+  test("finishes once and publishes the complete bundle atomically", async () => {
+    const { db, runId } = await submittedAuthoringDb();
+
+    const first = finishAuthoringRun(db, { runId });
+    const second = finishAuthoringRun(db, { runId });
+
+    expect(second).toEqual(first);
+    expect(first.publishedArtifactIds).toHaveLength(2);
+    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
+      adrStatus: "not_applicable",
+      incidentTimelineStatus: "not_applicable",
+      resolutionStatus: "automatic_resolved",
+      runbookStatus: "published",
+      sessionPackageStatus: "published"
+    });
+    expect(
+      db.prepare(
+        "SELECT COUNT(*) AS count FROM session_artifacts WHERE status = 'current' AND publication_status = 'published'"
+      ).get()
+    ).toEqual({ count: 2 });
+    expect(listSessionArtifacts(db).map((artifact) => artifact.schemaVersion).sort()).toEqual([
+      "runbook-v2",
+      "session_dossier-v2"
+    ]);
+    expect(first.publishedArtifactIds.every((artifactId) => getLogbookArtifactDetail(db, artifactId))).toBe(true);
+    expect(
+      db.prepare("SELECT COUNT(*) AS count FROM workbench_claims WHERE released_at IS NULL").get()
+    ).toEqual({ count: 0 });
+    expect(
+      db.prepare("SELECT COUNT(*) AS count FROM workbench_activity WHERE event_type = 'authoring_finished'").get()
+    ).toEqual({ count: 1 });
+    expect(
+      db.prepare(
+        `SELECT event_type AS eventType
+         FROM workbench_activity
+         WHERE session_id = 'session:a' AND event_type IN ('runbook_published', 'published')
+         ORDER BY rowid`
+      ).all()
+    ).toEqual([{ eventType: "runbook_published" }, { eventType: "published" }]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
+    db.close();
+  });
+
+  test("rolls back every write when visibility verification fails and can retry", async () => {
+    const { db, runId } = await submittedAuthoringDb();
+    const before = authoringOutputCounts(db);
+
+    expect(() =>
+      finishAuthoringRun(db, {
+        runId,
+        verifyPublished: () => false
+      })
+    ).toThrow("authoring_finish_visibility_failed");
+
+    expect(authoringOutputCounts(db)).toEqual(before);
+    expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
+
+    const retried = finishAuthoringRun(db, { runId });
+    expect(retried.publishedArtifactIds).toHaveLength(2);
+    expect(getAuthoringRunStatus(db, runId).run.status).toBe("completed");
+    db.close();
+  });
+
+  test("marks multi-session artifact seeds published and other provenance contributed", async () => {
+    const { db, runId } = await submittedMultiSessionAuthoringDb();
+
+    const receipt = finishAuthoringRun(db, { runId });
+    const runbookId = receipt.publishedArtifactIds.find(
+      (artifactId) => getLogbookArtifactDetail(db, artifactId)?.capsule.kind === "runbook"
+    );
+
+    expect(runbookId).toBeTruthy();
+    expect(getLogbookArtifactDetail(db, runbookId!)?.provenanceSessionIds).toEqual(["session:a", "session:b"]);
+    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
+      resolutionStatus: "automatic_resolved",
+      runbookStatus: "published"
+    });
+    expect(readWorkbenchSessionState(db, "session:b")).toMatchObject({
+      resolutionStatus: "automatic_resolved",
+      runbookStatus: "contributed"
+    });
+    expect(receipt.contributions).toContainEqual({
+      artifactId: runbookId,
+      kind: "runbook",
+      sessionId: "session:b"
+    });
+    db.close();
+  });
+
+  test("resolves an explicit existing published contribution without republishing it", async () => {
+    const db = await readyAuthoringDb();
+    const existing = applySessionArtifact(db, {
+      artifactKind: "runbook",
+      content: { title: "Reuse the published OAuth callback runbook" },
+      contentFingerprint: "existing-runbook",
+      createdBy: "test",
+      evidenceRefs: ["message:session:a:message"],
+      provenanceSessionIds: ["session:a"],
+      schemaVersion: "runbook-v1",
+      sessionId: "session:a",
+      title: "Reuse the published OAuth callback runbook",
+      validation: { ok: true }
+    });
+    publishSessionArtifact(db, existing.artifactId);
+    const opened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    const bundle = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
+    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    bundle.contributions = [
+      { kind: "runbook", publishedArtifactId: existing.artifactId, sessionId: "session:a" }
+    ];
+    expect(submitAuthoringBundle(db, { bundle, runId: opened.run.runId }).accepted).toBe(true);
+
+    const receipt = finishAuthoringRun(db, { runId: opened.run.runId });
+
+    expect(receipt.publishedArtifactIds).toHaveLength(1);
+    expect(receipt.contributions).toEqual([
+      { artifactId: existing.artifactId, kind: "runbook", sessionId: "session:a" }
+    ]);
+    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
+      resolutionStatus: "automatic_resolved",
+      runbookStatus: "contributed"
+    });
+    expect(getLogbookArtifactDetail(db, existing.artifactId)).toBeTruthy();
+    db.close();
+  });
+
+  test("rejects changed evidence at finish without applying outputs", async () => {
+    const { db, runId } = await submittedAuthoringDb();
+    const before = authoringOutputCounts(db);
+    insertMessage(db, "session:a", "changed-after-submit", "Canonical evidence changed after submission.");
+
+    expect(() => finishAuthoringRun(db, { runId })).toThrow("evidence_revision_changed");
+
+    expect(authoringOutputCounts(db)).toEqual(before);
+    expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
+    db.close();
+  });
+
+  test("rolls back finish claim reacquisition when another actor owns a selected session", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
+    const { db, runId } = await submittedAuthoringDb();
+    expireAuthoringClaims(db, runId);
+    claimWorkbenchSessions(db, {
+      claimedBy: "other-agent",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      sessionIds: ["session:a"]
+    });
+    const beforeClaims = runClaimRows(db, runId);
+
+    expect(() => finishAuthoringRun(db, { runId })).toThrow("authoring_claim_conflict:session:a");
+
+    expect(runClaimRows(db, runId)).toEqual(beforeClaims);
+    expect(authoringOutputCounts(db)).toEqual({ session_artifacts: 0, session_enrichments: 1 });
+    expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
+    db.close();
+  });
+
   test("rolls back partial claim reacquisition when any run session conflicts", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
@@ -547,6 +717,51 @@ async function readyAuthoringDb(): Promise<MastheadDatabase> {
   return db;
 }
 
+async function submittedAuthoringDb(): Promise<{ db: MastheadDatabase; runId: string }> {
+  const db = await readyAuthoringDb();
+  const opened = openAuthoringRun(db, {
+    actorId: "codex",
+    databaseId: testDatabaseId(db),
+    sessionIds: ["session:a"]
+  });
+  const bundle = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
+  bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+  bundle.artifacts = [validRunbookDraft("session:a")];
+  const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
+  expect(submitted.accepted).toBe(true);
+  return { db, runId: opened.run.runId };
+}
+
+async function submittedMultiSessionAuthoringDb(): Promise<{ db: MastheadDatabase; runId: string }> {
+  const db = await readyAuthoringDb();
+  seedSessionWithRedactedEvidence(db, "session:b");
+  setWorkbenchArtifactApplicability(db, {
+    actor: { kind: "agent", id: "earlier-run" },
+    artifactKind: "runbook",
+    reason: "Earlier evidence did not support a shared runbook.",
+    sessionId: "session:b",
+    status: "not_applicable"
+  });
+  const opened = openAuthoringRun(db, {
+    actorId: "codex",
+    databaseId: testDatabaseId(db),
+    sessionIds: ["session:a", "session:b"]
+  });
+  const first = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
+  const second = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:b");
+  const bundle: WorkbenchAuthoringBundle = {
+    ...first,
+    artifacts: [validRunbookDraft("session:a", ["session:a", "session:b"])],
+    notApplicable: [...first.notApplicable, ...second.notApplicable].filter(
+      (decision) => decision.kind !== "runbook"
+    ),
+    sessionPackages: [...first.sessionPackages, ...second.sessionPackages]
+  };
+  const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
+  expect(submitted.accepted).toBe(true);
+  return { db, runId: opened.run.runId };
+}
+
 function seedSessionWithRedactedEvidence(db: MastheadDatabase, sessionId: string): void {
   seedSession(db, {
     lifecycle: "ended",
@@ -625,6 +840,50 @@ function validBundle(runId: string, evidenceRevision: string, sessionId: string)
         sessionId
       }
     ]
+  };
+}
+
+function validRunbookDraft(
+  sessionId: string,
+  provenanceSessionIds: string[] = [sessionId]
+): WorkbenchAuthoringBundle["artifacts"][number] {
+  const messageRef = `message:${sessionId}:message`;
+  const toolResultRef = `tool_result:${sessionId}:tool-result`;
+  return {
+    kind: "runbook",
+    output: {
+      changedFiles: ["src/workbench/authoring/authoringService.ts"],
+      claimEvidence: [
+        { evidenceRefs: [messageRef], path: "fixSteps[0]" },
+        { evidenceRefs: [messageRef], path: "rootCause" },
+        { evidenceRefs: [toolResultRef], path: "validationChecks[0]" }
+      ],
+      commands: ["npm test"],
+      confidence: "low",
+      deadEnds: [],
+      environmentRequirements: ["Node.js"],
+      evidenceRefs: [messageRef, toolResultRef],
+      fixSteps: ["Finish the accepted bundle inside one database transaction."],
+      ...(provenanceSessionIds.length > 1
+        ? { joinRationale: "Both sessions share the same OAuth callback failure and atomic finish revision." }
+        : {}),
+      missingEvidence: ["Only sparse canonical evidence is available for this session."],
+      preconditions: ["A ready-to-finish authoring run exists."],
+      preventionNotes: ["Keep atomic finish covered by a rollback regression test."],
+      problemSignature: {
+        affectedScope: "Workbench authoring finish",
+        errorStrings: ["authoring_finish_visibility_failed"],
+        symptoms: ["Partial authoring writes could survive a failed finish"]
+      },
+      provenanceSessionIds,
+      reproSteps: ["Fail published-artifact visibility verification during finish."],
+      risksOrGaps: [],
+      rootCause: "Finish did not yet own every publication write in one transaction.",
+      title: "Finish authoring bundles atomically",
+      validationChecks: ["Focused authoring service tests pass."]
+    },
+    provenanceSessionIds,
+    seedSessionId: sessionId
   };
 }
 

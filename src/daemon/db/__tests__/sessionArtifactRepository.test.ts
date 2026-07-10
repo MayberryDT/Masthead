@@ -5,8 +5,10 @@ import { afterEach, describe, expect, test } from "vitest";
 import { seedSession } from "./sessionTestHelpers.ts";
 import {
   applySessionArtifact,
+  applySessionArtifactInTransaction,
   listSessionArtifacts,
   publishSessionArtifact,
+  publishSessionArtifactInTransaction,
   searchPublishedArtifactCapsules,
   wipePublishedArtifactState
 } from "../sessionArtifactRepository.ts";
@@ -32,6 +34,24 @@ describe("session artifact repository", () => {
     expect(listSessionArtifacts(db, { sessionId: "session:abc" })).toEqual([
       expect.objectContaining({ artifactId: first.artifactId, publicationStatus: "applied", status: "current", title: "First dossier" })
     ]);
+  });
+
+  test("lets a caller roll back apply and publish in one owned transaction", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:abc",
+      title: "Atomic artifact"
+    });
+
+    db.exec("BEGIN IMMEDIATE;");
+    const applied = applySessionArtifactInTransaction(db, artifactInput("atomic-fingerprint", "Atomic dossier"));
+    publishSessionArtifactInTransaction(db, applied.artifactId);
+    db.exec("ROLLBACK;");
+
+    expect(listSessionArtifacts(db, { sessionId: "session:abc" })).toEqual([]);
   });
 
   test("supersedes prior current artifact for the same session and kind", async () => {
