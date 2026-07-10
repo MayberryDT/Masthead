@@ -48,16 +48,21 @@ SET runbook_status = CASE
         WHEN EXISTS (
           SELECT 1
           FROM session_artifacts AS artifacts
+          WHERE artifacts.artifact_kind = 'runbook'
+            AND artifacts.status = 'current'
+            AND artifacts.publication_status = 'published'
+            AND artifacts.session_id = workbench_session_state.session_id
+        ) THEN 'published'
+        WHEN EXISTS (
+          SELECT 1
+          FROM session_artifacts AS artifacts
           JOIN session_artifact_provenance AS provenance
             ON provenance.artifact_id = artifacts.artifact_id
           WHERE artifacts.artifact_kind = 'runbook'
             AND artifacts.status = 'current'
             AND artifacts.publication_status = 'published'
             AND provenance.session_id = workbench_session_state.session_id
-        ) THEN CASE
-          WHEN runbook_status = 'contributed' THEN 'contributed'
-          ELSE 'published'
-        END
+        ) THEN 'contributed'
         ELSE 'applied'
       END
       ELSE runbook_status
@@ -67,16 +72,21 @@ SET runbook_status = CASE
         WHEN EXISTS (
           SELECT 1
           FROM session_artifacts AS artifacts
+          WHERE artifacts.artifact_kind = 'adr'
+            AND artifacts.status = 'current'
+            AND artifacts.publication_status = 'published'
+            AND artifacts.session_id = workbench_session_state.session_id
+        ) THEN 'published'
+        WHEN EXISTS (
+          SELECT 1
+          FROM session_artifacts AS artifacts
           JOIN session_artifact_provenance AS provenance
             ON provenance.artifact_id = artifacts.artifact_id
           WHERE artifacts.artifact_kind = 'adr'
             AND artifacts.status = 'current'
             AND artifacts.publication_status = 'published'
             AND provenance.session_id = workbench_session_state.session_id
-        ) THEN CASE
-          WHEN adr_status = 'contributed' THEN 'contributed'
-          ELSE 'published'
-        END
+        ) THEN 'contributed'
         ELSE 'applied'
       END
       ELSE adr_status
@@ -86,16 +96,21 @@ SET runbook_status = CASE
         WHEN EXISTS (
           SELECT 1
           FROM session_artifacts AS artifacts
+          WHERE artifacts.artifact_kind = 'incident_timeline'
+            AND artifacts.status = 'current'
+            AND artifacts.publication_status = 'published'
+            AND artifacts.session_id = workbench_session_state.session_id
+        ) THEN 'published'
+        WHEN EXISTS (
+          SELECT 1
+          FROM session_artifacts AS artifacts
           JOIN session_artifact_provenance AS provenance
             ON provenance.artifact_id = artifacts.artifact_id
           WHERE artifacts.artifact_kind = 'incident_timeline'
             AND artifacts.status = 'current'
             AND artifacts.publication_status = 'published'
             AND provenance.session_id = workbench_session_state.session_id
-        ) THEN CASE
-          WHEN incident_timeline_status = 'contributed' THEN 'contributed'
-          ELSE 'published'
-        END
+        ) THEN 'contributed'
         ELSE 'applied'
       END
       ELSE incident_timeline_status

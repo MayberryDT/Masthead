@@ -548,6 +548,94 @@ describe("daemon database schema", () => {
     db.close();
   });
 
+  test.each([
+    {
+      expectedStatus: "contributed",
+      label: "losing seed remains only as retained artifact provenance",
+      olderSeedIsTarget: true,
+      priorStatus: "published"
+    },
+    {
+      expectedStatus: "published",
+      label: "losing contributor becomes the retained artifact seed",
+      olderSeedIsTarget: false,
+      priorStatus: "contributed"
+    }
+  ] as const)("derives the surviving artifact role when $label", async ({ expectedStatus, olderSeedIsTarget, priorStatus }) => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v19-published-role-swap-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    db.prepare("DELETE FROM schema_migrations WHERE version = 20").run();
+
+    const targetSessionId = "session:role-target";
+    const otherSessionId = "session:role-other";
+    for (const sessionId of [targetSessionId, otherSessionId]) {
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId,
+        title: sessionId
+      });
+    }
+    ensureWorkbenchSessionState(db, targetSessionId);
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET transcript_status = 'imported',
+           quality_status = 'passed',
+           session_enrichment_status = 'satisfied',
+           session_dossier_status = 'satisfied',
+           session_package_status = 'published',
+           publication_status = 'published',
+           runbook_status = ?,
+           adr_status = 'not_applicable',
+           incident_timeline_status = 'not_applicable',
+           resolution_status = 'automatic_resolved',
+           next_action = 'none'
+       WHERE session_id = ?`
+    ).run(priorStatus, targetSessionId);
+
+    insertLegacyArtifact(db, {
+      artifactId: "artifact:role-old",
+      artifactKind: "runbook",
+      createdAt: "2026-07-10T10:00:00.000Z",
+      sessionId: olderSeedIsTarget ? targetSessionId : otherSessionId,
+      signatureKey: "signature:role-swap",
+      updatedAt: "2026-07-10T10:30:00.000Z"
+    });
+    insertLegacyArtifact(db, {
+      artifactId: "artifact:role-new",
+      artifactKind: "runbook",
+      createdAt: "2026-07-10T11:00:00.000Z",
+      sessionId: olderSeedIsTarget ? otherSessionId : targetSessionId,
+      signatureKey: "  signature:role-swap  ",
+      updatedAt: "2026-07-10T11:30:00.000Z"
+    });
+    db.prepare("UPDATE session_artifacts SET publication_status = 'published'").run();
+    db.prepare("INSERT INTO session_artifact_provenance (artifact_id, session_id) VALUES (?, ?)").run(
+      olderSeedIsTarget ? "artifact:role-new" : "artifact:role-old",
+      targetSessionId
+    );
+
+    migrateDatabase(db);
+
+    expect(
+      db.prepare(
+        `SELECT runbook_status AS runbookStatus,
+                resolution_status AS resolutionStatus,
+                next_action AS nextAction
+         FROM workbench_session_state
+         WHERE session_id = ?`
+      ).get(targetSessionId)
+    ).toEqual({
+      nextAction: "none",
+      resolutionStatus: "automatic_resolved",
+      runbookStatus: expectedStatus
+    });
+    db.close();
+  });
+
   test("rejects an applied migration marker when critical schema tables are missing", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-"));
     tempDirs.push(tempDir);
