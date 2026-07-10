@@ -44,8 +44,6 @@ export function SettingsSpineCard({
               onLabel="Motion on"
             />
           }
-          description="Interface transitions"
-          index="01"
           label="Motion"
         />
         <SpineRow
@@ -58,14 +56,12 @@ export function SettingsSpineCard({
               onLabel="Notifications on"
             />
           }
-          description="Session attention signals"
-          index="02"
           label="Session notifications"
         />
-        <DetailRow activeDetail={activeDetail} detail="data" index="03" label="Data" onToggle={toggleDetail} />
-        <DetailRow activeDetail={activeDetail} detail="agent-access" index="04" label="Agent access" onToggle={toggleDetail} />
-        <DetailRow activeDetail={activeDetail} detail="advanced" index="05" label="Advanced" onToggle={toggleDetail} />
-        <DetailRow activeDetail={activeDetail} danger detail="danger" index="06" label="Danger zone" onToggle={toggleDetail} />
+        <DetailRow activeDetail={activeDetail} detail="data" label="Data" onToggle={toggleDetail} />
+        <DetailRow activeDetail={activeDetail} detail="agent-access" label="Agent access" onToggle={toggleDetail} />
+        <DetailRow activeDetail={activeDetail} detail="advanced" label="Advanced" onToggle={toggleDetail} />
+        <DetailRow activeDetail={activeDetail} danger detail="danger" label="Danger zone" onToggle={toggleDetail} />
       </div>
       {activeDetail && children ? (
         <div className="settings-spine-detail" data-settings-detail={activeDetail} id="settings-spine-detail">
@@ -81,14 +77,12 @@ function DetailRow({
   activeDetail,
   danger = false,
   detail,
-  index,
   label,
   onToggle
 }: {
   activeDetail?: SettingsSpineDetail;
   danger?: boolean;
   detail: SettingsSpineDetail;
-  index: string;
   label: string;
   onToggle: (detail: SettingsSpineDetail) => void;
 }) {
@@ -107,7 +101,6 @@ function DetailRow({
         </AppButton>
       }
       danger={danger}
-      index={index}
       label={label}
     />
   );
@@ -116,22 +109,16 @@ function DetailRow({
 function SpineRow({
   control,
   danger = false,
-  description,
-  index,
   label
 }: {
   control: ReactNode;
   danger?: boolean;
-  description?: string;
-  index: string;
   label: string;
 }) {
   return (
     <div className={`settings-spine-row ${danger ? "danger" : ""}`.trim()}>
-      <span className="settings-spine-node" aria-hidden="true">{index}</span>
       <span className="settings-spine-copy">
         <strong>{label}</strong>
-        {description ? <small>{description}</small> : null}
       </span>
       <span className="settings-spine-control">{control}</span>
     </div>

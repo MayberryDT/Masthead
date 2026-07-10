@@ -31,12 +31,9 @@ describe("Settings surface", () => {
     );
 
     expect(html).toContain("settings-spine-card");
-    expect(html).toContain('settings-spine-node" aria-hidden="true">01');
-    expect(html).toContain('settings-spine-node" aria-hidden="true">02');
-    expect(html).toContain('settings-spine-node" aria-hidden="true">03');
-    expect(html).toContain('settings-spine-node" aria-hidden="true">04');
-    expect(html).toContain('settings-spine-node" aria-hidden="true">05');
-    expect(html).toContain('settings-spine-node" aria-hidden="true">06');
+    expect(html).not.toContain("settings-spine-node");
+    expect(html).not.toContain("Interface transitions");
+    expect(html).not.toContain("Session attention signals");
     expect(html).not.toContain("settings-category-nav");
     expect(html).not.toContain('class="settings-pane"');
     expect(html).not.toContain('aria-label="Settings categories"');
@@ -46,6 +43,10 @@ describe("Settings surface", () => {
     expect(html).toContain('aria-label="Open Agent access"');
     expect(html).toContain('aria-label="Open Advanced"');
     expect(html).toContain('aria-label="Open Danger zone"');
+
+    const css = readFileSync("src/styles/settings.css", "utf8");
+    expect(css).toMatch(/\.settings-spine-row\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto;/);
+    expect(css).toMatch(/\.settings-spine-card \.settings-toggle\s*\{[\s\S]*flex-direction: row-reverse;/);
   });
 
   test("renders the compact Settings spine with General controls direct", () => {
