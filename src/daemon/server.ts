@@ -3536,21 +3536,29 @@ function canonicalGitSnapshots(database: MastheadDatabase): GitSnapshot[] {
 
 export function canonicalStoreRecords(database: MastheadDatabase, sourceIds: string[], limit = LIVE_BOARD_RAW_RECORD_LIMIT): StoreRecord[] {
   if (sourceIds.length === 0) return [];
-  const placeholders = sourceIds.map(() => "?").join(", ");
-  const rows = database
-    .prepare(
-      `SELECT payload_json
-      FROM (
-        SELECT raw_event_id, observed_at, payload_json
-        FROM raw_events
-        WHERE source_id IN (${placeholders})
-        ORDER BY observed_at DESC, raw_event_id DESC
-        LIMIT ?
-      )
-      ORDER BY observed_at ASC, raw_event_id ASC`
-    )
-    .all(...sourceIds, Math.max(1, Math.min(limit, CANONICAL_LIVE_REPLAY_LIMIT))) as Array<{ payload_json: string }>;
-  return rows.map((row) => parseStoreRecord(row.payload_json)).filter((record): record is StoreRecord => Boolean(record));
+  const boundedLimit = Math.max(1, Math.min(limit, CANONICAL_LIVE_REPLAY_LIMIT));
+  const query = database.prepare(
+    `SELECT payload_json
+    FROM raw_events
+    WHERE source_id = ?
+    ORDER BY observed_at DESC, raw_event_id DESC
+    LIMIT ?`
+  );
+  const records = [...new Set(sourceIds)].flatMap((sourceId) =>
+    (query.all(sourceId, boundedLimit) as Array<{ payload_json: string }>)
+      .map((row) => parseStoreRecord(row.payload_json))
+      .filter((record): record is StoreRecord => Boolean(record))
+  );
+  const newest = records.sort(compareStoreRecordsDescending).slice(0, boundedLimit);
+  return newest.sort(compareStoreRecordsAscending);
+}
+
+function compareStoreRecordsAscending(left: StoreRecord, right: StoreRecord): number {
+  return left.observedAt.localeCompare(right.observedAt) || left.recordId.localeCompare(right.recordId);
+}
+
+function compareStoreRecordsDescending(left: StoreRecord, right: StoreRecord): number {
+  return compareStoreRecordsAscending(right, left);
 }
 
 function parseStoreRecord(payloadJson: string): StoreRecord | undefined {

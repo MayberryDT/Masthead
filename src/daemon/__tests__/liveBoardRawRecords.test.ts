@@ -48,6 +48,33 @@ describe("live Board raw records", () => {
     expect(records[0]?.recordId).toBe("event:5");
     expect(records.at(-1)?.recordId).toBe("event:504");
   });
+
+  test("uses one source-indexed window per live source before merging the newest records", () => {
+    const queries: string[] = [];
+    const sourceCalls: string[] = [];
+    const recordsBySource = new Map<string, StoreRecord[]>([
+      ["source:a", [eventRecord(6), eventRecord(2)]],
+      ["source:b", [eventRecord(5), eventRecord(4)]]
+    ]);
+    const database = {
+      prepare(sql: string) {
+        queries.push(sql);
+        return {
+          all(sourceId: string) {
+            sourceCalls.push(sourceId);
+            return (recordsBySource.get(sourceId) ?? []).map((record) => ({ payload_json: JSON.stringify(record) }));
+          }
+        };
+      }
+    } as unknown as MastheadDatabase;
+
+    const records = canonicalStoreRecords(database, ["source:a", "source:b"], 3);
+
+    expect(queries).toHaveLength(1);
+    expect(queries.every((query) => query.includes("WHERE source_id = ?"))).toBe(true);
+    expect(sourceCalls).toEqual(["source:a", "source:b"]);
+    expect(records.map((record) => record.recordId)).toEqual(["event:4", "event:5", "event:6"]);
+  });
 });
 
 function eventRecord(index: number): StoreRecord {
