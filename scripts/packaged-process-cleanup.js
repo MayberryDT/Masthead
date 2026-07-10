@@ -26,7 +26,7 @@ export function buildWindowsProcessSnapshotInvocation(systemRoot) {
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      "$ErrorActionPreference = 'Stop'; $processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId); ConvertTo-Json -InputObject $processes -Compress"
+      "$ErrorActionPreference = 'Stop'; $processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, CreationDate); ConvertTo-Json -InputObject $processes -Compress"
     ],
     command: win32.join(
       systemRoot || "C:\\Windows",
@@ -44,8 +44,9 @@ export function parseWindowsProcessSnapshot(output) {
   return records.flatMap((record) => {
     const pid = Number(record?.ProcessId);
     const parentPid = Number(record?.ParentProcessId);
-    return Number.isSafeInteger(pid) && pid > 0 && Number.isSafeInteger(parentPid) && parentPid >= 0
-      ? [{ parentPid, pid }]
+    const creationTime = typeof record?.CreationDate === "string" ? record.CreationDate : undefined;
+    return Number.isSafeInteger(pid) && pid > 0 && Number.isSafeInteger(parentPid) && parentPid >= 0 && creationTime
+      ? [{ creationTime, parentPid, pid }]
       : [];
   });
 }
@@ -66,7 +67,16 @@ export function collectWindowsDescendantPids(snapshot, rootPids) {
   return [...attributed].filter((pid) => !roots.has(pid)).sort((left, right) => left - right);
 }
 
-export function windowsProcessBelongsToTree(snapshot, pid, attributedPids) {
-  const attributed = new Set(attributedPids);
-  return attributed.has(pid) || collectWindowsDescendantPids(snapshot, attributed).includes(pid);
+export function windowsProcessBelongsToTree(snapshot, processIdentity, attributedProcesses) {
+  const current = snapshot.find((process) => process.pid === processIdentity.pid);
+  if (!current || current.creationTime !== processIdentity.creationTime) return false;
+  const attributed = [...attributedProcesses];
+  if (attributed.some((process) => process.pid === processIdentity.pid && process.creationTime === processIdentity.creationTime)) {
+    return true;
+  }
+  const roots = attributed.flatMap((process) => {
+    const currentProcess = snapshot.find((candidate) => candidate.pid === process.pid);
+    return !currentProcess || currentProcess.creationTime === process.creationTime ? [process.pid] : [];
+  });
+  return collectWindowsDescendantPids(snapshot, roots).includes(processIdentity.pid);
 }

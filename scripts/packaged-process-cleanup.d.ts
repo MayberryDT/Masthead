@@ -4,7 +4,8 @@ export function buildWindowsTaskkillInvocation(
   force: boolean,
   systemRoot?: string
 ): { args: string[]; command: string };
-export type WindowsProcessRecord = { parentPid: number; pid: number };
+export type WindowsProcessIdentity = { creationTime: string; pid: number };
+export type WindowsProcessRecord = WindowsProcessIdentity & { parentPid: number };
 export function buildWindowsProcessSnapshotInvocation(systemRoot?: string): { args: string[]; command: string };
 export function parseWindowsProcessSnapshot(output: string): WindowsProcessRecord[];
 export function collectWindowsDescendantPids(
@@ -13,6 +14,6 @@ export function collectWindowsDescendantPids(
 ): number[];
 export function windowsProcessBelongsToTree(
   snapshot: WindowsProcessRecord[],
-  pid: number,
-  attributedPids: Iterable<number>
+  processIdentity: WindowsProcessIdentity,
+  attributedProcesses: Iterable<WindowsProcessIdentity>
 ): boolean;

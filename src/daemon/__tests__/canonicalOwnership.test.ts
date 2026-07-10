@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, open, rm, symlink, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -68,6 +68,30 @@ describe("canonical store ownership", () => {
 
     expect(firstDaemon.database).toBeDefined();
     expect(secondDaemon.database).toBeDefined();
+  });
+
+  test("blocks an old data-directory writer before starting a canonical-path writer", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-legacy-writer-first-"));
+    tempDirs.push(tempDir);
+    const runtimeDirectory = join(tempDir, "runtime");
+    await mkdir(runtimeDirectory, { recursive: true });
+    await writeFile(join(runtimeDirectory, "database.lock"), JSON.stringify({
+      createdAt: new Date().toISOString(),
+      pid: process.pid
+    }), "utf8");
+
+    await expect(
+      createTestDaemon(tempDir, join(tempDir, "masthead.sqlite"), join(tempDir, "events.ndjson"))
+    ).rejects.toThrow("legacy data-directory writer");
+  });
+
+  test("publishes an old-format guard while a canonical-path writer is active", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-canonical-writer-first-"));
+    tempDirs.push(tempDir);
+    const daemon = await createTestDaemon(tempDir, join(tempDir, "masthead.sqlite"), join(tempDir, "events.ndjson"));
+    daemons.push(daemon);
+
+    await expect(open(join(tempDir, "runtime", "database.lock"), "wx")).rejects.toMatchObject({ code: "EEXIST" });
   });
 
   test("accepted live ingest writes canonical rows without appending new NDJSON product records", async () => {

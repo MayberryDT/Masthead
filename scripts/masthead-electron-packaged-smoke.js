@@ -11,7 +11,6 @@ import { buildPackagedCliInvocation } from "./packaged-cli-command.js";
 import {
   buildWindowsProcessSnapshotInvocation,
   buildWindowsTaskkillInvocation,
-  collectWindowsDescendantPids,
   parseWindowsListenerPid,
   parseWindowsProcessSnapshot,
   windowsProcessBelongsToTree
@@ -255,8 +254,9 @@ function runCommand(command, args, env, commandChildren) {
 function startWindowsProcessTreeTracker(rootPid) {
   if (process.platform !== "win32" || !rootPid) return undefined;
   const tracker = {
-    attributedPids: new Set([rootPid]),
+    attributedProcesses: new Map(),
     pending: undefined,
+    rootIdentity: undefined,
     rootPid,
     snapshot: [],
     timer: undefined
@@ -283,8 +283,19 @@ function refreshWindowsProcessTree(tracker) {
   tracker.pending = queryWindowsProcessSnapshot()
     .then((snapshot) => {
       tracker.snapshot = snapshot;
-      for (const pid of collectWindowsDescendantPids(snapshot, tracker.attributedPids)) {
-        tracker.attributedPids.add(pid);
+      if (!tracker.rootIdentity) {
+        const root = snapshot.find((processRecord) => processRecord.pid === tracker.rootPid);
+        if (root) {
+          tracker.rootIdentity = { creationTime: root.creationTime, pid: root.pid };
+          tracker.attributedProcesses.set(root.pid, tracker.rootIdentity);
+        }
+      }
+      const attributed = [...tracker.attributedProcesses.values()];
+      for (const processRecord of snapshot) {
+        const identity = { creationTime: processRecord.creationTime, pid: processRecord.pid };
+        if (windowsProcessBelongsToTree(snapshot, identity, attributed)) {
+          tracker.attributedProcesses.set(identity.pid, identity);
+        }
       }
     })
     .finally(() => {
@@ -305,8 +316,10 @@ async function queryWindowsProcessSnapshot() {
 }
 
 function attributedWindowsPidsStillRunning(tracker) {
-  const runningPids = new Set(tracker.snapshot.map((processRecord) => processRecord.pid));
-  return [...tracker.attributedPids].filter((pid) => runningPids.has(pid));
+  return [...tracker.attributedProcesses.values()].flatMap((identity) => {
+    const current = tracker.snapshot.find((processRecord) => processRecord.pid === identity.pid);
+    return current?.creationTime === identity.creationTime ? [identity.pid] : [];
+  });
 }
 
 async function terminateAttributedWindowsProcesses(tracker) {
@@ -456,14 +469,18 @@ async function waitForWindowsSmokeListener(smokePort, electronProcessTree) {
       unexpectedListenerPid = listenerPid;
       if (electronProcessTree) {
         await refreshWindowsProcessTree(electronProcessTree);
+        const listener = electronProcessTree.snapshot.find((processRecord) => processRecord.pid === listenerPid);
         if (
-          windowsProcessBelongsToTree(
+          listener && windowsProcessBelongsToTree(
             electronProcessTree.snapshot,
-            listenerPid,
-            electronProcessTree.attributedPids
+            { creationTime: listener.creationTime, pid: listener.pid },
+            electronProcessTree.attributedProcesses.values()
           )
         ) {
-          electronProcessTree.attributedPids.add(listenerPid);
+          electronProcessTree.attributedProcesses.set(listener.pid, {
+            creationTime: listener.creationTime,
+            pid: listener.pid
+          });
           return listenerPid;
         }
       }

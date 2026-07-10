@@ -13,7 +13,12 @@ import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent, removeEventFromLiveProjectionState } from "../core/ingestion.ts";
 import { eventLiveProcessingMode } from "../core/liveSessionFacts.ts";
 import { deriveLiveBlockers } from "../core/liveBlockers.ts";
-import { acquireDatabaseWriterLock, type DatabaseWriterLock } from "../core/daemonOwnership.ts";
+import {
+  acquireDatabaseWriterLock,
+  acquireLegacyDataDirectoryGuard,
+  type DatabaseWriterLock,
+  type LegacyDataDirectoryGuard
+} from "../core/daemonOwnership.ts";
 import { approvalBlockerTtlMsForRefresh, projectLiveEvents } from "../core/liveProjection.ts";
 import { selectEffectiveLiveState } from "../core/liveProjectionState.ts";
 import { normalizeLiveStateReport, type LiveStateReport } from "../core/liveState.ts";
@@ -183,11 +188,13 @@ type TranscriptImportOptions = {
 export async function createMastheadDaemon(config: DaemonConfig): Promise<MastheadDaemon> {
   await mkdir(dirname(config.storePath), { recursive: true });
   const writerLock = await acquireDatabaseWriterLock(config.databasePath);
+  let legacyDataDirectoryGuard: LegacyDataDirectoryGuard | undefined;
   let hookTranscriptCatchupQueue: Promise<void> = Promise.resolve();
   const hookTranscriptCatchups = new Map<string, Promise<void>>();
   const disabledHookTranscriptCatchupDiagnostics = new Set<string>();
 
   try {
+    legacyDataDirectoryGuard = await acquireLegacyDataDirectoryGuard(config.dataDirectory ?? dirname(config.databasePath));
     // Legacy compatibility store. Do not add new product writes here.
     // Canonical session data must be written to SQLite/raw_events/session graph.
     const store = await createFileBackedStore(config.storePath);
@@ -3385,7 +3392,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             console.error("[masthead] WAL checkpoint failed during shutdown", error);
           } finally {
             closeDatabase(database);
-            await writerLock.release();
+            try {
+              await legacyDataDirectoryGuard?.release();
+            } finally {
+              await writerLock.release();
+            }
           }
         }
         if (gitRefreshError) throw gitRefreshError;
@@ -3399,7 +3410,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     throw error;
   }
   } catch (error) {
-    await writerLock.release();
+    try {
+      await legacyDataDirectoryGuard?.release();
+    } finally {
+      await writerLock.release();
+    }
     throw error;
   }
 }
