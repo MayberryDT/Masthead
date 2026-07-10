@@ -435,7 +435,10 @@ describe("Settings surface", () => {
     expect(settingsCss).toMatch(/\.settings-panel \.settings-spine-detail > \.settings-section::before,[\s\S]*\.settings-panel \.settings-spine-detail > \.settings-section::after\s*\{[\s\S]*content: none;[\s\S]*display: none;/);
     expect(mastheadCss).toMatch(/\.observability-console \.settings-spine-card,[\s\S]*\.masthead-shell \.settings-spine-card,[\s\S]*border: 1px solid rgba\(92, 153, 187, 0\.14\);[\s\S]*background: #071b28;/);
     expect(mastheadCss).toMatch(/\.observability-console \.settings-section,[\s\S]*\.masthead-shell \.settings-section,[\s\S]*\.masthead-shell \.adapter-card\s*\{[\s\S]*border: 1px solid rgba\(92, 153, 187, 0\.14\);[\s\S]*border-radius: 5px;[\s\S]*background: #071b28;/);
-    expect(mastheadCss).toMatch(/\.summary-strip \.summary-metric,[\s\S]*\.settings-section,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: surface-card-enter 400ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;/);
+    expect(mastheadCss).toMatch(/\.summary-strip \.summary-metric,[\s\S]*\.settings-section,[\s\S]*\.settings-spine-card,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: surface-card-enter 400ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;[\s\S]*transform-origin: 50% 100%;/);
+    expect(settingsCss).toMatch(/\.settings-spine-detail\s*\{[\s\S]*transform-origin: top center;[\s\S]*animation: forged-plate-in var\(--dropdown-open-dur\) var\(--dropdown-weight-ease\) both;/);
+    expect(mastheadCss).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.settings-spine-card,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: none;/);
+    expect(settingsCss).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.settings-spine-detail\s*\{[\s\S]*animation: none;/);
   });
 
   test("shares one accessible inline action-feedback primitive", () => {

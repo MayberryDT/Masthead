@@ -96,6 +96,8 @@
   margin-top: 10px;
   border-top: 1px solid var(--line, rgba(194, 221, 241, 0.13));
   padding-top: 10px;
+  transform-origin: top center;
+  animation: forged-plate-in var(--dropdown-open-dur) var(--dropdown-weight-ease) both;
 }
 
 .settings-spine-note {
@@ -871,5 +873,11 @@
   .settings-panel .settings-spine-detail .settings-row-control > .app-button,
   .settings-panel .settings-spine-detail .settings-inline-actions .app-button {
     width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-spine-detail {
+    animation: none;
   }
 }

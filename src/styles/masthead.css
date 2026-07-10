@@ -1949,6 +1949,7 @@ main {
 
 .summary-strip .summary-metric,
 .settings-section,
+.settings-spine-card,
 .connected-source-row,
 .adapter-card {
   animation: surface-card-enter 400ms cubic-bezier(0.17, 0.78, 0.13, 1) both;
@@ -1997,6 +1998,7 @@ main {
 @media (prefers-reduced-motion: reduce) {
   .summary-strip .summary-metric,
   .settings-section,
+  .settings-spine-card,
   .connected-source-row,
   .adapter-card {
     animation: none;
