@@ -146,7 +146,7 @@ export function applySessionArtifactInTransaction(
   const existing = readArtifactByFingerprint(db, artifactInput);
   if (existing) {
     makeCurrentInTransaction(db, existing);
-    indexArtifactScope(db, artifactInput);
+    indexArtifactScope(db, existing);
     return readArtifactById(db, existing.artifactId)!;
   }
 
@@ -381,7 +381,10 @@ export function wipePublishedArtifactState(db: MastheadDatabase): { artifactsDel
   return { artifactsDeleted, provenanceDeleted };
 }
 
-function indexArtifactScope(db: MastheadDatabase, input: SessionArtifactInput): void {
+function indexArtifactScope(
+  db: MastheadDatabase,
+  input: Pick<SessionArtifactInput, "artifactKind" | "sessionId" | "signatureKey">
+): void {
   const rows = input.signatureKey
     ? (db
         .prepare(

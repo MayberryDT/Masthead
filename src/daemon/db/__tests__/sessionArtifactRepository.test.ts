@@ -259,6 +259,67 @@ describe("session artifact repository", () => {
     ]);
   });
 
+  test.each([
+    { label: "blank", signatureKey: " " },
+    { label: "different", signatureKey: "signature:different" }
+  ])(
+    "reindexes the persisted signature scope when a published fingerprint is reactivated with a $label signature",
+    async ({ signatureKey }) => {
+      const db = await testDb();
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId: "session:a",
+        title: "Original signature artifact"
+      });
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId: "session:b",
+        title: "Replacement signature artifact"
+      });
+      const originalInput = {
+        ...runbookInput("fp-reactivated", "Original runbook", "session:a"),
+        content: { rootCause: "legacy descriptor ownership", title: "Original runbook" },
+        signatureKey: "signature:descriptor-ownership"
+      };
+      const original = applySessionArtifact(db, originalInput);
+      publishSessionArtifact(db, original.artifactId);
+      const replacement = applySessionArtifact(db, {
+        ...runbookInput("fp-replacement", "Replacement runbook", "session:b"),
+        content: { rootCause: "replacement descriptor ownership", title: "Replacement runbook" },
+        signatureKey: "signature:descriptor-ownership"
+      });
+      publishSessionArtifact(db, replacement.artifactId);
+
+      const reactivated = applySessionArtifact(db, { ...originalInput, signatureKey });
+
+      expect(reactivated).toMatchObject({ artifactId: original.artifactId, status: "current" });
+      expect(searchPublishedArtifactCapsules(db, { q: "legacy descriptor ownership" }).artifacts).toEqual([
+        expect.objectContaining({ artifactId: original.artifactId })
+      ]);
+      expect(searchPublishedArtifactCapsules(db, { q: "replacement descriptor ownership" }).total).toBe(0);
+      expect(
+        db
+          .prepare(
+            `SELECT artifact_id AS artifactId
+             FROM session_artifact_search
+             WHERE artifact_id IN (?, ?)
+             ORDER BY artifact_id`
+          )
+          .all(original.artifactId, replacement.artifactId)
+      ).toEqual([{ artifactId: original.artifactId }]);
+      expect(listSessionArtifacts(db, { artifactKind: "runbook" })).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ artifactId: original.artifactId, status: "current" }),
+          expect.objectContaining({ artifactId: replacement.artifactId, status: "superseded" })
+        ])
+      );
+    }
+  );
+
   test("filters published artifacts by published_at dateFrom/dateTo bounds", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Artifact session" });
