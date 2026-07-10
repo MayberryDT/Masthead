@@ -298,7 +298,7 @@ recur across views, but each surface may use the structure that fits its job:
   requested via Copy Agent Prompt, never via an in-app enrichment editor.
 - Logbook: dense table plus inspector.
 - Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
-- Settings: one centered compact steel spine with direct controls for everyday preferences and one
+- Settings: one centered compact steel card with direct controls for everyday preferences and one
   inline detail section at a time for Data, Agent access, Advanced, or Danger zone.
 - Agent access is a compact MCP information/setup section inside Settings, not a primary surface.
 
@@ -387,7 +387,7 @@ prove it. Deeper session processing belongs in Workbench; published history belo
 
 ### Settings
 
-Settings uses one centered compact steel spine. Everyday preferences are direct controls; Data,
+Settings uses one centered compact steel card. Everyday preferences are direct controls; Data,
 Agent access, Advanced, and Danger zone open one inline detail section at a time. Rows should prefer
 direct controls with no explanatory paragraph unless safety or ambiguity requires one. Agent access
 stays compact and evidence-forward: show MCP status, setup, format selection, testing, and copy

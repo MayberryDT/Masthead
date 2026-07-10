@@ -59,7 +59,7 @@ Surface archetypes:
 - Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
 - Logbook: dense **artifact** capsule table plus body/provenance inspector (no bulk/checkboxes/summary strip).
 - Sources: harness connector rows plus live enablement (Discover → Enable → Activate → Test); see `docs/reference/sources-v2.md`.
-- Settings: one centered compact steel spine with direct preferences and one inline detail section
+- Settings: one centered compact steel card with direct preferences and one inline detail section
   at a time for Data, Agent access, Advanced, or Danger zone.
 - Agent access is a compact MCP information/setup section inside Settings, not a standalone surface.
 

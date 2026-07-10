@@ -2,13 +2,13 @@
 
 ## Decision
 
-Replace the Settings category rail and focused pane with one centered compact spine card. The card uses the exact secondary steel treatment already used by the sidebar Knowledge flow card: `#071b28` surface, subtle machining lines, square numbered nodes, a restrained blue lower edge, and no nested cards.
+Replace the Settings category rail and focused pane with one centered compact steel card. The card uses the exact secondary steel treatment already used by the sidebar Knowledge flow card: `#071b28` surface, subtle machining lines, a restrained blue lower edge, and no nested cards.
 
 ## Composition
 
 - The card header is `Settings` with a quiet local-only label.
-- `01 Motion` and `02 Session notifications` remain direct toggles and are always visible.
-- `03 Data`, `04 Agent access`, `05 Advanced`, and `06 Danger zone` are compact spine rows.
+- Motion and Session notifications remain direct toggles and are always visible. Their live state text sits immediately left of the switch; the switch sits at the far right. Neither row has explanatory subtext.
+- Data, Agent access, Advanced, and Danger zone are compact label/action rows.
 - Each category row uses Masthead's existing `AppButton` component. Normal detail actions use the quiet variant; Danger zone uses the danger variant.
 - One detail may expand beneath the spine inside the same steel card. Selecting the active row again closes it.
 - Existing Data, MCP, Advanced, and Danger components retain their behavior but render as unframed detail content inside the card. Existing confirmation dialogs remain outside the card and unchanged.
@@ -23,7 +23,7 @@ Replace the Settings category rail and focused pane with one centered compact sp
 
 ## Success criteria
 
-- Static Settings markup contains one `settings-spine-card` and no `settings-category-nav` or `settings-pane`.
+- Static Settings markup contains one `settings-spine-card`, no numbered flow nodes, and no `settings-category-nav` or `settings-pane`.
 - General toggles work directly from the spine.
 - Data, Agent access, Advanced, and Danger details open and close from real `AppButton` controls.
 - The selected detail remains the only expanded detail.
