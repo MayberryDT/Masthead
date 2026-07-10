@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { seedSession } from "./sessionTestHelpers.ts";
 import { applySessionArtifact, publishSessionArtifact } from "../sessionArtifactRepository.ts";
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from "../schema.ts";
-import { openMastheadDatabase } from "../sqlite.ts";
+import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 import { ensureWorkbenchSessionState } from "../workbenchPipelineRepository.ts";
 
 const tempDirs: string[] = [];
@@ -325,6 +325,104 @@ describe("daemon database schema", () => {
     db.close();
   });
 
+  test("canonicalizes legacy artifact signatures and repairs current lineage collisions", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v19-artifact-signatures-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    db.prepare("DELETE FROM schema_migrations WHERE version = 20").run();
+
+    for (const sessionId of ["session:padded", "session:blank", "session:collision-old", "session:collision-new", "session:next"]) {
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId,
+        title: sessionId
+      });
+    }
+    insertLegacyArtifact(db, {
+      artifactId: "artifact:padded",
+      artifactKind: "runbook",
+      createdAt: "2026-07-10T10:00:00.000Z",
+      sessionId: "session:padded",
+      signatureKey: "  signature:padded  ",
+      updatedAt: "2026-07-10T10:00:00.000Z"
+    });
+    insertLegacyArtifact(db, {
+      artifactId: "artifact:blank",
+      artifactKind: "adr",
+      createdAt: "2026-07-10T10:00:00.000Z",
+      sessionId: "session:blank",
+      signatureKey: " \t ",
+      updatedAt: "2026-07-10T10:00:00.000Z"
+    });
+    insertLegacyArtifact(db, {
+      artifactId: "artifact:collision-old",
+      artifactKind: "runbook",
+      createdAt: "2026-07-10T10:00:00.000Z",
+      sessionId: "session:collision-old",
+      signatureKey: "signature:collision",
+      updatedAt: "2026-07-10T10:30:00.000Z"
+    });
+    insertLegacyArtifact(db, {
+      artifactId: "artifact:collision-new",
+      artifactKind: "runbook",
+      createdAt: "2026-07-10T11:00:00.000Z",
+      sessionId: "session:collision-new",
+      signatureKey: "  signature:collision  ",
+      updatedAt: "2026-07-10T11:30:00.000Z"
+    });
+
+    migrateDatabase(db);
+
+    expect(
+      db.prepare(
+        `SELECT artifact_id AS artifactId, signature_key AS signatureKey, status
+         FROM session_artifacts
+         WHERE artifact_id LIKE 'artifact:%'
+         ORDER BY artifact_id`
+      ).all()
+    ).toEqual([
+      { artifactId: "artifact:blank", signatureKey: null, status: "current" },
+      { artifactId: "artifact:collision-new", signatureKey: "signature:collision", status: "current" },
+      { artifactId: "artifact:collision-old", signatureKey: "signature:collision", status: "superseded" },
+      { artifactId: "artifact:padded", signatureKey: "signature:padded", status: "current" }
+    ]);
+
+    const next = applySessionArtifact(db, {
+      artifactKind: "runbook",
+      content: { title: "Canonical collision successor" },
+      contentFingerprint: "canonical-collision-successor",
+      createdBy: "migration-test",
+      evidenceRefs: ["message:session:next:message"],
+      schemaVersion: "runbook-v2",
+      sessionId: "session:next",
+      signatureKey: " signature:collision ",
+      title: "Canonical collision successor",
+      validation: { ok: true }
+    });
+
+    expect(next).toMatchObject({
+      lineageId: "lineage:collision-new",
+      signatureKey: "signature:collision",
+      status: "current"
+    });
+    expect(
+      db.prepare(
+        `SELECT artifact_id AS artifactId, status
+         FROM session_artifacts
+         WHERE artifact_kind = 'runbook' AND signature_key = 'signature:collision'
+         ORDER BY artifact_id`
+      ).all()
+    ).toEqual([
+      { artifactId: "artifact:collision-new", status: "superseded" },
+      { artifactId: "artifact:collision-old", status: "superseded" },
+      { artifactId: next.artifactId, status: "current" }
+    ]);
+    db.close();
+  });
+
   test("rejects an applied migration marker when critical schema tables are missing", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-"));
     tempDirs.push(tempDir);
@@ -470,3 +568,37 @@ describe("daemon database schema", () => {
     db.close();
   });
 });
+
+function insertLegacyArtifact(
+  db: MastheadDatabase,
+  input: {
+    artifactId: string;
+    artifactKind: "runbook" | "adr";
+    createdAt: string;
+    sessionId: string;
+    signatureKey: string;
+    updatedAt: string;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO session_artifacts (
+       artifact_id, session_id, artifact_kind, status, content_fingerprint, created_at, updated_at,
+       created_by, schema_version, content_json, evidence_refs_json, validation_json,
+       publication_status, signature_key, lineage_id
+     ) VALUES (?, ?, ?, 'current', ?, ?, ?, 'legacy-v19', ?, '{}', '[]', '{"ok":true}', 'applied', ?, ?)`
+  ).run(
+    input.artifactId,
+    input.sessionId,
+    input.artifactKind,
+    `fingerprint:${input.artifactId}`,
+    input.createdAt,
+    input.updatedAt,
+    `${input.artifactKind}-v1`,
+    input.signatureKey,
+    `lineage:${input.artifactId.slice("artifact:".length)}`
+  );
+  db.prepare("INSERT INTO session_artifact_provenance (artifact_id, session_id) VALUES (?, ?)").run(
+    input.artifactId,
+    input.sessionId
+  );
+}

@@ -653,6 +653,13 @@ function validateArtifactSignatures(
   artifacts: unknown[],
   findings: WorkbenchAuthoringFindingV2[]
 ): void {
+  findings.push(...findArtifactSignatureFindings(artifacts));
+}
+
+export function findArtifactSignatureFindings(
+  artifacts: unknown[]
+): WorkbenchAuthoringFindingV2[] {
+  const findings: WorkbenchAuthoringFindingV2[] = [];
   const seenSignatures = new Set<string>();
   artifacts.forEach((artifact, index) => {
     if (!isRecord(artifact) || !isRecord(artifact.output)) return;
@@ -684,6 +691,7 @@ function validateArtifactSignatures(
     }
     seenSignatures.add(key);
   });
+  return findings;
 }
 
 function validateEvidenceRefs(

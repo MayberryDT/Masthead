@@ -53,7 +53,7 @@ import {
   getAuthoringEvidenceManifest,
   getAuthoringEvidencePage
 } from "./evidenceCatalog.ts";
-import { validateAuthoringBundle } from "./authoringValidation.ts";
+import { findArtifactSignatureFindings, validateAuthoringBundle } from "./authoringValidation.ts";
 
 const AUTHORING_LEASE_MS = 60 * 60_000;
 
@@ -243,11 +243,29 @@ export function finishAuthoringRun(
   db: MastheadDatabase,
   input: { runId: string; verifyPublished?: (artifactId: string) => boolean }
 ): WorkbenchAuthoringReceipt {
-  return withImmediateTransaction(db, () => {
+  const result = withImmediateTransaction<WorkbenchAuthoringReceipt | "duplicate_artifact_signature">(db, () => {
     const existing = requireAuthoringRun(db, input.runId);
     if (existing.receipt) return existing.receipt;
     if (existing.status !== "ready_to_finish") {
       throw new Error(`authoring_run_not_ready:${existing.status}`);
+    }
+    if (!existing.bundle) throw new Error(`authoring_run_bundle_missing:${existing.runId}`);
+
+    const signatureCollisions = findArtifactSignatureFindings(existing.bundle.artifacts).filter(
+      (finding) => finding.code === "duplicate_artifact_signature"
+    );
+    if (signatureCollisions.length > 0) {
+      saveWorkbenchAuthoringSubmission(db, {
+        bundle: existing.bundle,
+        evidenceRevision: existing.evidenceRevision,
+        findings: [
+          ...existing.findings.filter((finding) => finding.code !== "duplicate_artifact_signature"),
+          ...signatureCollisions
+        ],
+        runId: existing.runId,
+        status: "needs_revision"
+      });
+      return "duplicate_artifact_signature";
     }
 
     const run = renewOrReacquireAuthoringClaimsInTransaction(db, {
@@ -264,6 +282,10 @@ export function finishAuthoringRun(
     completeWorkbenchAuthoringRun(db, { receipt, runId: run.runId });
     return receipt;
   });
+  if (result === "duplicate_artifact_signature") {
+    throw new Error("authoring_run_needs_revision:duplicate_artifact_signature");
+  }
+  return result;
 }
 
 function finishInsideTransaction(

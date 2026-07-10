@@ -498,6 +498,65 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
+  test("downgrades a historical ready run with canonical signature collisions before finish writes", async () => {
+    const db = await readyAuthoringDb();
+    seedSessionWithRedactedEvidence(db, "session:b");
+    const opened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a", "session:b"]
+    });
+    const first = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
+    const second = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:b");
+    const firstRunbook = validRunbookDraft("session:a");
+    const secondRunbook = validRunbookDraft("session:b");
+    firstRunbook.output.signatureKey = "signature:historical-ready";
+    secondRunbook.output.signatureKey = "  signature:historical-ready  ";
+    const historicalBundle: WorkbenchAuthoringBundle = {
+      ...first,
+      artifacts: [firstRunbook, secondRunbook],
+      notApplicable: [...first.notApplicable, ...second.notApplicable].filter(
+        (decision) => decision.kind !== "runbook"
+      ),
+      sessionPackages: [...first.sessionPackages, ...second.sessionPackages]
+    };
+    db.prepare(
+      `UPDATE workbench_authoring_runs
+       SET status = 'ready_to_finish', bundle_json = ?, findings_json = '[]'
+       WHERE run_id = ?`
+    ).run(JSON.stringify(historicalBundle), opened.run.runId);
+    expireAuthoringClaims(db, opened.run.runId);
+    const claimsBeforeFinish = runClaimRows(db, opened.run.runId);
+    const outputsBeforeFinish = authoringOutputCounts(db);
+
+    expect(() => finishAuthoringRun(db, { runId: opened.run.runId })).toThrow(
+      "authoring_run_needs_revision:duplicate_artifact_signature"
+    );
+
+    expect(getAuthoringRunStatus(db, opened.run.runId).run).toMatchObject({
+      findings: [
+        expect.objectContaining({
+          artifactKind: "runbook",
+          code: "duplicate_artifact_signature",
+          path: "artifacts[1].output.signatureKey",
+          sessionId: "session:b"
+        })
+      ],
+      status: "needs_revision"
+    });
+    expect(runClaimRows(db, opened.run.runId)).toEqual(claimsBeforeFinish);
+    expect(authoringOutputCounts(db)).toEqual(outputsBeforeFinish);
+
+    secondRunbook.output.signatureKey = "signature:historical-ready-b";
+    expect(
+      submitAuthoringBundle(db, {
+        bundle: { ...historicalBundle, artifacts: [firstRunbook, secondRunbook] },
+        runId: opened.run.runId
+      }).accepted
+    ).toBe(true);
+    db.close();
+  });
+
   test("finishes once and publishes the complete bundle atomically", async () => {
     const { db, runId } = await submittedAuthoringDb();
 
