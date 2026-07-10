@@ -69,23 +69,29 @@ export function hasSemanticRedactedText(input: string): boolean {
 
   const wrapperTokens = new Set(REDACTION_WRAPPER_TOKENS);
   for (const kind of placeholderKinds) {
-    for (const token of kind.match(REDACTION_WORD_PATTERN) ?? []) wrapperTokens.add(token.toLowerCase());
+    for (const token of redactionIdentifierTokens(kind)) wrapperTokens.add(token.toLowerCase());
   }
-  const retainedTokens = input
+  const retained = input
     .replace(REDACTION_PLACEHOLDER_PATTERN, " ")
     .replace(REDACTION_STRUCTURAL_LABEL_PATTERN, (match, prefix: string, _quote: string, label: string) =>
       isRedactionWrapperLabel(label, wrapperTokens) ? prefix : match
-    )
-    .match(REDACTION_WORD_PATTERN);
-  return Boolean(retainedTokens?.some((token) => !wrapperTokens.has(token.toLowerCase())));
+    );
+  return redactionIdentifierTokens(retained).some((token) => !wrapperTokens.has(token.toLowerCase()));
 }
 
 function isRedactionWrapperLabel(label: string, wrapperTokens: Set<string>): boolean {
-  const labelTokens = label.match(REDACTION_WORD_PATTERN) ?? [];
+  const labelTokens = redactionIdentifierTokens(label);
   if (labelTokens.length === 0) return false;
   if (labelTokens.every((token) => wrapperTokens.has(token.toLowerCase()))) return true;
   const normalized = label.trim();
   return /^x[-_.]/i.test(normalized) || /(?:^|[-_.])header$/i.test(normalized);
+}
+
+function redactionIdentifierTokens(value: string): string[] {
+  return value
+    .replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2")
+    .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, "$1 $2")
+    .match(REDACTION_WORD_PATTERN) ?? [];
 }
 
 export function redactJsonValue(value: unknown): unknown {

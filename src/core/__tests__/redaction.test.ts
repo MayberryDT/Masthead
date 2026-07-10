@@ -84,6 +84,11 @@ describe("privacy redaction", () => {
       '{"headers":{"authorization":"Bearer [SECRET:bearer_token]"},"password":"[SECRET:api_key]"}',
       '{"metadata":"[SECRET:api_key]"}',
       '{"X-Trace-Id":"[SECRET:api_key]"}',
+      '{"apiKey":"[SECRET:api_key]"}',
+      '{"ApiKey":"[SECRET:api_key]"}',
+      '{"APIKey":"[SECRET:api_key]"}',
+      '{"apiKey":"[SECRET:api_key]"}',
+      '{"privateKey":"[SECRET:private_key]"}',
       [
         "password: [SECRET:api_key]",
         "email [SECRET:email]",
@@ -99,6 +104,8 @@ describe("privacy redaction", () => {
     expect(hasSemanticRedactedText("deployment_password_failed=[SECRET:api_key]")).toBe(true);
     expect(hasSemanticRedactedText("api.request.failed: [SECRET:api_key]")).toBe(true);
     expect(hasSemanticRedactedText('{"deployment_failed":"[SECRET:api_key]"}')).toBe(true);
+    expect(hasSemanticRedactedText('{"deploymentFailed":"[SECRET:api_key]"}')).toBe(true);
+    expect(hasSemanticRedactedText('{"DeploymentFailed":"[SECRET:api_key]"}')).toBe(true);
     expect(
       hasSemanticRedactedText('{"observed_failure":"Authorization: Bearer [SECRET:bearer_token]"}')
     ).toBe(true);

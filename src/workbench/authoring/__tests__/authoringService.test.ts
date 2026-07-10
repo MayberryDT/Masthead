@@ -300,6 +300,9 @@ describe("Workbench authoring service", () => {
       '{"headers":{"authorization":"Bearer [SECRET:bearer_token]"},"password":"[SECRET:api_key]"}',
       '{"metadata":"[SECRET:api_key]"}',
       '{"X-Trace-Id":"[SECRET:api_key]"}',
+      '{"apiKey":"[SECRET:api_key]"}',
+      '{"ApiKey":"[SECRET:api_key]"}',
+      '{"privateKey":"[SECRET:private_key]"}',
       [
         "  password: [SECRET:api_key]",
         "  email [SECRET:email]",
@@ -364,7 +367,7 @@ describe("Workbench authoring service", () => {
   test("accepts semantic JSON property names around a redaction placeholder", async () => {
     const db = await readyAuthoringDb();
     clearCanonicalEvidence(db, "session:a");
-    insertMessage(db, "session:a", "semantic-json", '{"deployment_failed":"[SECRET:api_key]"}');
+    insertMessage(db, "session:a", "semantic-json", '{"deploymentFailed":"[SECRET:api_key]"}');
 
     const opened = openAuthoringRun(db, {
       actorId: "codex",
