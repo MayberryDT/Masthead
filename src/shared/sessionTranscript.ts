@@ -8,6 +8,8 @@ export type SessionTranscriptKind =
 
 export type SessionTranscriptRole = "user" | "assistant" | "system" | "tool" | "unknown";
 
+export type SessionTranscriptOrder = "asc" | "desc";
+
 export type SessionTranscriptItem = {
   itemId: string;
   sessionId: string;

@@ -1,3 +1,5 @@
+import type { SessionTranscriptItem } from "./sessionTranscript.ts";
+
 export type WorkbenchAutomaticArtifactKind = "runbook" | "adr" | "incident_timeline";
 export type WorkbenchAuthoredArtifactKind = "session_dossier" | WorkbenchAutomaticArtifactKind;
 export type WorkbenchAuthoringRunStatus = "open" | "needs_revision" | "ready_to_finish" | "completed";
@@ -16,6 +18,36 @@ export type WorkbenchAuthoringCapabilitiesDto = {
   operations: ["open", "status", "evidence", "submit", "finish"];
   bundleVersion: "workbench-authoring-v1";
   evidencePolicy: "all_canonical_redacted_evidence";
+};
+
+export type WorkbenchAuthoringEvidenceManifest = {
+  evidenceRevision: string;
+  sessions: Array<{
+    sessionId: string;
+    totalItems: number;
+    firstObservedAt?: string;
+    lastObservedAt?: string;
+    coverage: {
+      messages: number;
+      userMessages: number;
+      assistantMessages: number;
+      toolCalls: number;
+      toolResults: number;
+      fileEffects: number;
+      checkpoints: number;
+      runtimeSignals: number;
+    };
+    kindCounts: Array<{ kind: string; count: number }>;
+    warnings: string[];
+  }>;
+};
+
+export type WorkbenchAuthoringEvidencePage = {
+  evidenceRevision: string;
+  sessionId: string;
+  total: number;
+  items: SessionTranscriptItem[];
+  nextCursor?: string;
 };
 
 export type WorkbenchSessionPackageDraft = {

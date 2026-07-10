@@ -2,6 +2,7 @@ import type {
   SessionTranscriptCoverage,
   SessionTranscriptItem,
   SessionTranscriptKind,
+  SessionTranscriptOrder,
   SessionTranscriptResult,
   SessionTranscriptRole
 } from "../../shared/sessionTranscript.ts";
@@ -14,6 +15,7 @@ export type SessionTranscriptQuery = {
   cursor?: string;
   limit?: number;
   kind?: SessionTranscriptKindFilter;
+  order?: SessionTranscriptOrder;
   q?: string;
 };
 
@@ -91,23 +93,41 @@ export function getTranscriptCoverage(db: MastheadDatabase, sessionId: string): 
   };
 }
 
+export function* iterateSessionTranscriptItems(
+  db: MastheadDatabase,
+  query: Pick<SessionTranscriptQuery, "order" | "sessionId">
+): Generator<SessionTranscriptItem> {
+  const parts = transcriptSelectParts(query, true);
+  if (parts.length === 0) return;
+  const direction = query.order === "desc" ? "DESC" : "ASC";
+  const rows = db
+    .prepare(
+      `SELECT itemId, sessionId, kind, role, label, text, observedAt, sourceRefJson, status, exitCode, toolName
+      FROM (${parts.map((part) => part.sql).join(" UNION ALL ")})
+      ORDER BY observedAt ${direction}, itemId ${direction}`
+    )
+    .iterate(...parts.flatMap((part) => part.params)) as Iterable<TranscriptRow>;
+  for (const row of rows) yield normalizeTranscriptItem(row, true);
+}
+
 function getTranscriptItems(
   db: MastheadDatabase,
-  query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">,
+  query: Pick<SessionTranscriptQuery, "kind" | "order" | "q" | "sessionId">,
   limit: number,
   offset: number
 ): SessionTranscriptItem[] {
   const parts = transcriptSelectParts(query);
   if (parts.length === 0) return [];
+  const direction = query.order === "desc" ? "DESC" : "ASC";
   const rows = db
     .prepare(
       `SELECT itemId, sessionId, kind, role, label, text, observedAt, sourceRefJson, status, exitCode, toolName
       FROM (${parts.map((part) => part.sql).join(" UNION ALL ")})
-      ORDER BY observedAt ASC, itemId ASC
+      ORDER BY observedAt ${direction}, itemId ${direction}
       LIMIT ? OFFSET ?`
     )
     .all(...parts.flatMap((part) => part.params), limit, offset) as TranscriptRow[];
-  return rows.map(normalizeTranscriptItem);
+  return rows.map((row) => normalizeTranscriptItem(row));
 }
 
 function countTranscriptItems(db: MastheadDatabase, query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">): number {
@@ -117,13 +137,16 @@ function countTranscriptItems(db: MastheadDatabase, query: Pick<SessionTranscrip
   }, 0);
 }
 
-function transcriptSelectParts(query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">): TranscriptSelectPart[] {
+function transcriptSelectParts(
+  query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">,
+  preserveFullText = false
+): TranscriptSelectPart[] {
   const kind = query.kind ?? "all";
   const parts: TranscriptSelectPart[] = [];
   if (["all", "user", "assistant"].includes(kind)) parts.push(messageSelectPart(query.sessionId, kind, query.q));
   if (["all", "tools"].includes(kind)) {
     parts.push(toolCallSelectPart(query.sessionId, query.q));
-    parts.push(toolResultSelectPart(query.sessionId, query.q));
+    parts.push(toolResultSelectPart(query.sessionId, query.q, preserveFullText));
   }
   if (["all", "checkpoints"].includes(kind)) parts.push(checkpointSelectPart(query.sessionId, query.q));
   if (["all", "signals"].includes(kind)) parts.push(runtimeSignalSelectPart(query.sessionId, query.q));
@@ -186,7 +209,7 @@ function toolCallSelectPart(sessionId: string, query?: string): TranscriptSelect
   };
 }
 
-function toolResultSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
+function toolResultSelectPart(sessionId: string, query?: string, preserveFullText = false): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
   const params: Array<number | string> = [sessionId];
   addTextQuery(clauses, params, query, "COALESCE(output_redacted, status)");
@@ -197,7 +220,7 @@ function toolResultSelectPart(sessionId: string, query?: string): TranscriptSele
         'tool_result' AS kind,
         'tool' AS role,
         status AS label,
-        SUBSTR(COALESCE(output_redacted, status, ''), 1, 801) AS text,
+        ${preserveFullText ? "COALESCE(output_redacted, status, '')" : "SUBSTR(COALESCE(output_redacted, status, ''), 1, 801)"} AS text,
         COALESCE(completed_at, '') AS observedAt,
         source_ref_json AS sourceRefJson,
         status,
@@ -274,8 +297,8 @@ function fileEffectSelectPart(sessionId: string, query?: string): TranscriptSele
   };
 }
 
-function normalizeTranscriptItem(row: TranscriptRow): SessionTranscriptItem {
-  const text = preview(row.text ?? row.label ?? "");
+function normalizeTranscriptItem(row: TranscriptRow, preserveFullText = false): SessionTranscriptItem {
+  const text = preserveFullText ? (row.text ?? row.label ?? "") : preview(row.text ?? row.label ?? "");
   const lowValue = isLowValueText(text) || isLowValueText(row.label ?? "");
   return {
     collapsedByDefault: row.kind === "tool_result" && text.length > 240 ? true : undefined,
@@ -332,7 +355,7 @@ function cursorToOffset(cursor?: string): number {
 }
 
 function normalizeLimit(value = 100): number {
-  return Math.max(1, Math.min(Math.trunc(value), 200));
+  return Math.max(1, Math.min(Math.trunc(value), 250));
 }
 
 function preview(value: string, max = 800): string {

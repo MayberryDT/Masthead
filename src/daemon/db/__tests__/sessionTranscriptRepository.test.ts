@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, test } from "vitest";
-import { getSessionTranscript } from "../sessionTranscriptRepository.ts";
+import { getSessionTranscript, iterateSessionTranscriptItems } from "../sessionTranscriptRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 import { seedSession } from "./sessionTestHelpers.ts";
@@ -129,6 +129,39 @@ describe("session transcript repository", () => {
     db.close();
   });
 
+  test("supports descending pages while preserving ascending defaults and numeric cursors", async () => {
+    const db = await openTestDatabase();
+    seedTranscriptSession(db);
+
+    const ascending = getSessionTranscript(db, { limit: 3, sessionId: "session-transcript" });
+    const descending = getSessionTranscript(db, { limit: 3, order: "desc", sessionId: "session-transcript" });
+    const nextDescending = getSessionTranscript(db, {
+      cursor: descending.nextCursor,
+      limit: 3,
+      order: "desc",
+      sessionId: "session-transcript"
+    });
+
+    expect(ascending.items.map((item) => item.itemId)).toEqual([
+      "message:session-transcript:m1",
+      "message:session-transcript:m2",
+      "tool_call:session-transcript:tool-a"
+    ]);
+    expect(descending.items.map((item) => item.itemId)).toEqual([
+      "message:session-transcript:m3",
+      "signal:session-transcript:signal",
+      "file:session-transcript:file"
+    ]);
+    expect(descending.nextCursor).toBe("3");
+    expect(nextDescending.items.map((item) => item.itemId)).toEqual([
+      "checkpoint:session-transcript:checkpoint",
+      "tool_result:session-transcript:tool-result-a",
+      "tool_call:session-transcript:tool-a"
+    ]);
+    expect(nextDescending.nextCursor).toBe("6");
+    db.close();
+  });
+
   test("marks low-value hook, runtime, shell, and unknown transcript rows without removing them", async () => {
     const db = await openTestDatabase();
     seedHookOnlySession(db);
@@ -181,6 +214,10 @@ describe("session transcript repository", () => {
       toolResults: 180
     });
     expect(elapsedMs).toBeLessThan(150);
+
+    const completeItems = [...iterateSessionTranscriptItems(db, { order: "asc", sessionId: "session-tool-heavy" })];
+    expect(completeItems).toHaveLength(360);
+    expect(completeItems.find((item) => item.kind === "tool_result")?.text.length).toBeGreaterThan(800);
     db.close();
   });
 });
