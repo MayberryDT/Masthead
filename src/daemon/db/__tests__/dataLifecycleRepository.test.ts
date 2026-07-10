@@ -109,7 +109,40 @@ describe("data lifecycle repository", () => {
       runtimeKind: "retained-runtime",
       sessionId: "session:retained"
     });
-    seedSharedAuthoredData(db);
+    const shared = seedSharedAuthoredData(db);
+    seedArtifactReferenceRun(db, {
+      artifactId: shared.artifactId,
+      claimId: "claim:bundle-contribution",
+      referenceSource: "bundle",
+      runId: "authoring:bundle-contribution",
+      sessionId: "session:retained"
+    });
+    seedArtifactReferenceRun(db, {
+      artifactId: shared.artifactId,
+      claimId: "claim:receipt-contribution",
+      referenceSource: "receipt",
+      runId: "authoring:receipt-contribution",
+      sessionId: "session:retained"
+    });
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET runbook_status = 'published', bug_fix_trace_status = 'satisfied'
+       WHERE session_id = ?`
+    ).run("session:retained");
+    db.prepare(
+      `INSERT INTO workbench_activity (
+        activity_id, session_id, event_type, event_at, actor_kind, actor_id, summary, details_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "activity:artifact-only",
+      "session:retained",
+      "runbook_published",
+      "2026-06-25T12:00:00.000Z",
+      "agent",
+      "codex",
+      "Published shared artifact",
+      JSON.stringify({ artifactId: shared.artifactId, artifactKind: "runbook" })
+    );
 
     deleteMastheadData(db, { kind: "session", sessionId: "session:target" });
 
@@ -121,6 +154,115 @@ describe("data lifecycle repository", () => {
     expect(ids(db, "workbench_runs", "run_id")).toEqual(["legacy:authoring:session:retained"]);
     expect(ids(db, "workbench_claims", "claim_id")).toEqual(["claim:session:retained"]);
     expect(ids(db, "workbench_activity", "activity_id")).toEqual(["activity:session:retained"]);
+    expect(
+      db.prepare("SELECT runbook_status AS runbookStatus FROM workbench_session_state WHERE session_id = ?").get(
+        "session:retained"
+      )
+    ).toEqual({ runbookStatus: "applied" });
+    db.close();
+  });
+
+  test("shared-artifact deletion preserves N/A and satisfaction from another current artifact", async () => {
+    const db = await openTestDatabase();
+    seedScopedAuthoredSession(db, {
+      hostId: "host:target",
+      hostname: "target-host",
+      project: "Shared project",
+      runtimeId: "runtime:target",
+      runtimeKind: "target-runtime",
+      sessionId: "session:target"
+    });
+    seedScopedAuthoredSession(db, {
+      hostId: "host:supported",
+      hostname: "supported-host",
+      project: "Shared project",
+      runtimeId: "runtime:supported",
+      runtimeKind: "supported-runtime",
+      sessionId: "session:supported"
+    });
+    seedScopedAuthoredSession(db, {
+      hostId: "host:support-seed",
+      hostname: "support-seed-host",
+      project: "Shared project",
+      runtimeId: "runtime:support-seed",
+      runtimeKind: "support-seed-runtime",
+      sessionId: "session:support-seed"
+    });
+    publishAutomaticArtifact(db, {
+      artifactKind: "runbook",
+      fingerprint: "runbook:deleted",
+      provenanceSessionIds: ["session:target", "session:supported"],
+      seedSessionId: "session:target"
+    });
+    publishAutomaticArtifact(db, {
+      artifactKind: "adr",
+      fingerprint: "adr:deleted",
+      provenanceSessionIds: ["session:target", "session:supported"],
+      seedSessionId: "session:target"
+    });
+    const supportingArtifactId = publishAutomaticArtifact(db, {
+      artifactKind: "runbook",
+      fingerprint: "runbook:supporting",
+      provenanceSessionIds: ["session:support-seed", "session:supported"],
+      seedSessionId: "session:support-seed"
+    });
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET runbook_status = 'contributed', bug_fix_trace_status = 'satisfied', adr_status = 'not_applicable'
+       WHERE session_id = ?`
+    ).run("session:supported");
+
+    deleteMastheadData(db, { kind: "session", sessionId: "session:target" });
+
+    expect(ids(db, "session_artifacts", "artifact_id")).toContain(supportingArtifactId);
+    expect(
+      db.prepare(
+        `SELECT runbook_status AS runbookStatus, adr_status AS adrStatus
+         FROM workbench_session_state WHERE session_id = ?`
+      ).get("session:supported")
+    ).toEqual({ adrStatus: "not_applicable", runbookStatus: "contributed" });
+    db.close();
+  });
+
+  test("project deletion handles more selected sessions than SQLite's parameter limit", async () => {
+    const db = await openTestDatabase();
+    const now = "2026-06-25T12:00:00.000Z";
+    db.prepare("INSERT INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
+      "host:bulk",
+      "bulk-host",
+      now,
+      now
+    );
+    db.prepare(
+      `INSERT INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run("runtime:bulk", "bulk", "test", now, now);
+    db.exec(
+      `WITH RECURSIVE sequence(value) AS (
+         VALUES(1)
+         UNION ALL
+         SELECT value + 1 FROM sequence WHERE value < 33000
+       )
+       INSERT INTO sessions (
+         session_id, host_id, runtime_id, source_session_id, project_label, lifecycle,
+         last_activity_at, source_confidence, created_at, updated_at
+       )
+       SELECT
+         printf('session:bulk:%05d', value),
+         'host:bulk',
+         'runtime:bulk',
+         printf('source:bulk:%05d', value),
+         'Bulk project',
+         'ended',
+         '${now}',
+         'authoritative',
+         '${now}',
+         '${now}'
+       FROM sequence`
+    );
+
+    expect(deleteMastheadData(db, { kind: "project", project: "Bulk project" }).sessions).toBe(33000);
+    expect(count(db, "sessions")).toBe(0);
     db.close();
   });
 });
@@ -321,7 +463,7 @@ function seedScopedAuthoredSession(
   });
 }
 
-function seedSharedAuthoredData(db: MastheadDatabase): void {
+function seedSharedAuthoredData(db: MastheadDatabase): { artifactId: string } {
   const now = "2026-06-25T12:00:00.000Z";
   const artifact = applySessionArtifact(db, {
     artifactKind: "runbook",
@@ -417,6 +559,104 @@ function seedSharedAuthoredData(db: MastheadDatabase): void {
     "authoring:shared",
     "claim:shared:retained"
   );
+  return { artifactId: artifact.artifactId };
+}
+
+function seedArtifactReferenceRun(
+  db: MastheadDatabase,
+  input: {
+    artifactId: string;
+    claimId: string;
+    referenceSource: "bundle" | "receipt";
+    runId: string;
+    sessionId: string;
+  }
+): void {
+  const now = "2026-06-25T12:00:00.000Z";
+  db.prepare(
+    `INSERT INTO workbench_claims (
+      claim_id, session_id, claimed_by, claimed_at, heartbeat_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(input.claimId, input.sessionId, "codex", now, now, "2026-06-25T12:15:00.000Z");
+  db.prepare(
+    `INSERT INTO workbench_authoring_runs (
+      run_id, actor_id, database_id, status, evidence_revision, bundle_json, findings_json,
+      receipt_json, created_at, updated_at, completed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.runId,
+    "codex",
+    getOrCreateDatabaseIdentity(db),
+    "completed",
+    "evidence:contribution",
+    JSON.stringify(
+      input.referenceSource === "bundle"
+        ? { contributions: [{ kind: "runbook", publishedArtifactId: input.artifactId, sessionId: input.sessionId }] }
+        : { contributions: [] }
+    ),
+    "[]",
+    JSON.stringify(
+      input.referenceSource === "receipt"
+        ? {
+            contributions: [{ artifactId: input.artifactId, kind: "runbook", sessionId: input.sessionId }],
+            publishedArtifactIds: []
+          }
+        : { contributions: [], publishedArtifactIds: [] }
+    ),
+    now,
+    now,
+    now
+  );
+  db.prepare(
+    `INSERT INTO workbench_authoring_run_sessions (run_id, session_id, claim_id, ordinal)
+     VALUES (?, ?, ?, ?)`
+  ).run(input.runId, input.sessionId, input.claimId, 0);
+  db.prepare(
+    `INSERT INTO workbench_activity (
+      activity_id, session_id, event_type, event_at, actor_kind, actor_id, summary,
+      details_json, related_run_id, related_claim_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    `activity:${input.referenceSource}-contribution`,
+    input.sessionId,
+    "authoring_finished",
+    now,
+    "agent",
+    "codex",
+    "Resolved contribution",
+    JSON.stringify({ publishedArtifactIds: [] }),
+    input.runId,
+    input.claimId
+  );
+}
+
+function publishAutomaticArtifact(
+  db: MastheadDatabase,
+  input: {
+    artifactKind: "runbook" | "adr" | "incident_timeline";
+    fingerprint: string;
+    provenanceSessionIds: string[];
+    seedSessionId: string;
+  }
+): string {
+  const artifact = applySessionArtifact(db, {
+    artifactKind: input.artifactKind,
+    confidence: "high",
+    content: { outcome: `Published ${input.artifactKind}` },
+    contentFingerprint: input.fingerprint,
+    createdBy: "codex",
+    evidenceRefs: [`message:${input.seedSessionId}`],
+    joinRationale: "The sessions contain evidence for the same reusable artifact.",
+    projectLabel: "Shared project",
+    provenanceSessionIds: input.provenanceSessionIds,
+    schemaVersion: `${input.artifactKind}-v1`,
+    sessionId: input.seedSessionId,
+    summary: `Shared ${input.artifactKind}`,
+    title: `Shared ${input.artifactKind}`,
+    validation: { valid: true }
+  });
+  publishSessionArtifact(db, artifact.artifactId);
+  return artifact.artifactId;
 }
 
 function count(db: MastheadDatabase, table: string): number {

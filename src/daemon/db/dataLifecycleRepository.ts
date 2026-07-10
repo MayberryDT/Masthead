@@ -1,4 +1,10 @@
 import type { MastheadDatabase } from "./sqlite.ts";
+import {
+  reconcileWorkbenchArtifactSatisfactionInTransaction,
+  type WorkbenchAutomaticKind
+} from "./workbenchPipelineRepository.ts";
+
+const SQLITE_BATCH_SIZE = 400;
 
 export type RetentionClass =
   | "canonical_metadata"
@@ -322,42 +328,163 @@ function deleteSessionScope(
 
 function deleteAuthoredDataForSessions(db: MastheadDatabase, sessionIds: string[]): void {
   if (sessionIds.length === 0) return;
-  const placeholders = sessionIds.map(() => "?").join(", ");
-  const artifactIds = (
-    db
+  const artifactIds = new Set<string>();
+  if (tableCount(db, "session_artifacts") > 0) {
+    for (const batch of batches(sessionIds)) {
+      const placeholders = sqlPlaceholders(batch);
+      const rows = db
+        .prepare(
+          `SELECT DISTINCT artifacts.artifact_id AS artifactId
+           FROM session_artifacts AS artifacts
+           LEFT JOIN session_artifact_provenance AS provenance
+             ON provenance.artifact_id = artifacts.artifact_id
+           WHERE artifacts.session_id IN (${placeholders})
+              OR provenance.session_id IN (${placeholders})`
+        )
+        .all(...batch, ...batch) as Array<{ artifactId: string }>;
+      for (const row of rows) artifactIds.add(row.artifactId);
+    }
+  }
+
+  const runIds = new Set<string>();
+  if (tableCount(db, "workbench_authoring_run_sessions") > 0) {
+    for (const batch of batches(sessionIds)) {
+      const rows = db
+        .prepare(
+          `SELECT DISTINCT run_id AS runId
+           FROM workbench_authoring_run_sessions
+           WHERE session_id IN (${sqlPlaceholders(batch)})`
+        )
+        .all(...batch) as Array<{ runId: string }>;
+      for (const row of rows) runIds.add(row.runId);
+    }
+  }
+  if (artifactIds.size > 0) {
+    const runs = db
       .prepare(
-        `SELECT DISTINCT artifacts.artifact_id AS artifactId
+        `SELECT run_id AS runId, bundle_json AS bundleJson, receipt_json AS receiptJson
+         FROM workbench_authoring_runs`
+      )
+      .all() as Array<{ bundleJson: string | null; receiptJson: string | null; runId: string }>;
+    for (const run of runs) {
+      if (authoringRunReferencesArtifacts(run, artifactIds)) runIds.add(run.runId);
+    }
+  }
+
+  const claimIds = new Set<string>();
+  for (const batch of batches([...runIds])) {
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT claim_id AS claimId
+         FROM workbench_authoring_run_sessions
+         WHERE run_id IN (${sqlPlaceholders(batch)})`
+      )
+      .all(...batch) as Array<{ claimId: string }>;
+    for (const row of rows) claimIds.add(row.claimId);
+  }
+  const artifactActivityIds = artifactLinkedActivityIds(db, artifactIds);
+  const affectedSessionsByKind = artifactSessionsByAutomaticKind(db, artifactIds);
+  const deletedSessionIds = new Set(sessionIds);
+  const artifactIdList = [...artifactIds];
+  const runIdList = [...runIds];
+  const claimIdList = [...claimIds];
+
+  deleteWhereIn(db, "session_artifact_search", "artifact_id", artifactIdList);
+  deleteWhereIn(db, "session_artifact_provenance", "artifact_id", artifactIdList);
+  deleteWhereIn(db, "workbench_runs", "artifact_id", artifactIdList);
+  deleteWhereIn(db, "session_artifacts", "artifact_id", artifactIdList);
+  deleteWhereIn(db, "workbench_activity", "activity_id", artifactActivityIds);
+  deleteWhereIn(db, "workbench_activity", "related_run_id", runIdList);
+  deleteWhereIn(db, "workbench_activity", "related_claim_id", claimIdList);
+  deleteWhereIn(db, "workbench_authoring_runs", "run_id", runIdList);
+  deleteUnreferencedClaims(db, claimIdList);
+  deleteWhereIn(db, "workbench_runs", "session_id", sessionIds);
+
+  for (const [artifactKind, affectedSessionIds] of affectedSessionsByKind) {
+    reconcileWorkbenchArtifactSatisfactionInTransaction(db, {
+      artifactKind,
+      sessionIds: [...affectedSessionIds].filter((sessionId) => !deletedSessionIds.has(sessionId))
+    });
+  }
+}
+
+function authoringRunReferencesArtifacts(
+  run: { bundleJson: string | null; receiptJson: string | null },
+  artifactIds: ReadonlySet<string>
+): boolean {
+  const bundle = parseJsonRecord(run.bundleJson);
+  if (
+    unknownArray(bundle.contributions).some((value) =>
+      artifactIds.has(stringValue(objectRecord(value).publishedArtifactId) ?? "")
+    )
+  ) {
+    return true;
+  }
+  const receipt = parseJsonRecord(run.receiptJson);
+  if (unknownArray(receipt.publishedArtifactIds).some((value) => artifactIds.has(stringValue(value) ?? ""))) return true;
+  return unknownArray(receipt.contributions).some((value) =>
+    artifactIds.has(stringValue(objectRecord(value).artifactId) ?? "")
+  );
+}
+
+function artifactLinkedActivityIds(db: MastheadDatabase, artifactIds: ReadonlySet<string>): string[] {
+  if (artifactIds.size === 0) return [];
+  const rows = db
+    .prepare("SELECT activity_id AS activityId, details_json AS detailsJson FROM workbench_activity")
+    .all() as Array<{ activityId: string; detailsJson: string }>;
+  return rows.filter((row) => activityReferencesArtifacts(row.detailsJson, artifactIds)).map((row) => row.activityId);
+}
+
+function activityReferencesArtifacts(detailsJson: string, artifactIds: ReadonlySet<string>): boolean {
+  const details = parseJsonRecord(detailsJson);
+  if (artifactIds.has(stringValue(details.artifactId) ?? "")) return true;
+  if (artifactIds.has(stringValue(details.publishedArtifactId) ?? "")) return true;
+  if (unknownArray(details.publishedArtifactIds).some((value) => artifactIds.has(stringValue(value) ?? ""))) return true;
+  const reason = stringValue(details.reason);
+  if (reason?.startsWith("contributed_to:") && artifactIds.has(reason.slice("contributed_to:".length))) return true;
+  return unknownArray(details.contributions).some((value) => {
+    const contribution = objectRecord(value);
+    return (
+      artifactIds.has(stringValue(contribution.artifactId) ?? "") ||
+      artifactIds.has(stringValue(contribution.publishedArtifactId) ?? "")
+    );
+  });
+}
+
+function artifactSessionsByAutomaticKind(
+  db: MastheadDatabase,
+  artifactIds: ReadonlySet<string>
+): Map<WorkbenchAutomaticKind, Set<string>> {
+  const result = new Map<WorkbenchAutomaticKind, Set<string>>();
+  for (const batch of batches([...artifactIds])) {
+    const rows = db
+      .prepare(
+        `SELECT artifacts.artifact_kind AS artifactKind,
+                artifacts.session_id AS seedSessionId,
+                provenance.session_id AS provenanceSessionId
          FROM session_artifacts AS artifacts
          LEFT JOIN session_artifact_provenance AS provenance
            ON provenance.artifact_id = artifacts.artifact_id
-         WHERE artifacts.session_id IN (${placeholders})
-            OR provenance.session_id IN (${placeholders})`
+         WHERE artifacts.artifact_id IN (${sqlPlaceholders(batch)})`
       )
-      .all(...sessionIds, ...sessionIds) as Array<{ artifactId: string }>
-  ).map((row) => row.artifactId);
-  const authoringRows = db
-    .prepare(
-      `SELECT DISTINCT all_sessions.run_id AS runId, all_sessions.claim_id AS claimId
-       FROM workbench_authoring_run_sessions AS all_sessions
-       WHERE all_sessions.run_id IN (
-         SELECT selected_sessions.run_id
-         FROM workbench_authoring_run_sessions AS selected_sessions
-         WHERE selected_sessions.session_id IN (${placeholders})
-       )`
-    )
-    .all(...sessionIds) as Array<{ claimId: string; runId: string }>;
-  const runIds = [...new Set(authoringRows.map((row) => row.runId))];
-  const claimIds = [...new Set(authoringRows.map((row) => row.claimId))];
+      .all(...batch) as Array<{
+      artifactKind: string;
+      provenanceSessionId: string | null;
+      seedSessionId: string;
+    }>;
+    for (const row of rows) {
+      if (!isWorkbenchAutomaticKind(row.artifactKind)) continue;
+      const sessionIds = result.get(row.artifactKind) ?? new Set<string>();
+      sessionIds.add(row.seedSessionId);
+      if (row.provenanceSessionId) sessionIds.add(row.provenanceSessionId);
+      result.set(row.artifactKind, sessionIds);
+    }
+  }
+  return result;
+}
 
-  deleteWhereIn(db, "session_artifact_search", "artifact_id", artifactIds);
-  deleteWhereIn(db, "session_artifact_provenance", "artifact_id", artifactIds);
-  deleteWhereIn(db, "workbench_runs", "artifact_id", artifactIds);
-  deleteWhereIn(db, "session_artifacts", "artifact_id", artifactIds);
-  deleteWhereIn(db, "workbench_activity", "related_run_id", runIds);
-  deleteWhereIn(db, "workbench_activity", "related_claim_id", claimIds);
-  deleteWhereIn(db, "workbench_authoring_runs", "run_id", runIds);
-  deleteUnreferencedClaims(db, claimIds);
-  deleteWhereIn(db, "workbench_runs", "session_id", sessionIds);
+function isWorkbenchAutomaticKind(value: string): value is WorkbenchAutomaticKind {
+  return value === "runbook" || value === "adr" || value === "incident_timeline";
 }
 
 function sessionRowsForScope(
@@ -477,53 +604,64 @@ function rawEventPayloadMatchesScope(
 }
 
 function countWhereIn(db: MastheadDatabase, table: string, column: string, values: string[]): number {
-  if (values.length === 0) return 0;
-  const placeholders = values.map(() => "?").join(", ");
-  return (
-    db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column} IN (${placeholders})`).get(...values) as { count: number }
-  ).count;
+  let count = 0;
+  for (const batch of batches(values)) {
+    count += (
+      db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column} IN (${sqlPlaceholders(batch)})`).get(
+        ...batch
+      ) as { count: number }
+    ).count;
+  }
+  return count;
 }
 
 function deleteWhereIn(db: MastheadDatabase, table: string, column: string, values: string[]): void {
-  if (values.length === 0) return;
-  const placeholders = values.map(() => "?").join(", ");
-  db.prepare(`DELETE FROM ${table} WHERE ${column} IN (${placeholders})`).run(...values);
+  for (const batch of batches(values)) {
+    db.prepare(`DELETE FROM ${table} WHERE ${column} IN (${sqlPlaceholders(batch)})`).run(...batch);
+  }
 }
 
 function deleteUnreferencedClaims(db: MastheadDatabase, claimIds: string[]): void {
-  if (claimIds.length === 0) return;
-  const placeholders = claimIds.map(() => "?").join(", ");
-  db.prepare(
-    `DELETE FROM workbench_claims
-     WHERE claim_id IN (${placeholders})
-       AND NOT EXISTS (
-         SELECT 1
-         FROM workbench_authoring_run_sessions
-         WHERE workbench_authoring_run_sessions.claim_id = workbench_claims.claim_id
-       )`
-  ).run(...claimIds);
+  for (const batch of batches(claimIds)) {
+    db.prepare(
+      `DELETE FROM workbench_claims
+       WHERE claim_id IN (${sqlPlaceholders(batch)})
+         AND NOT EXISTS (
+           SELECT 1
+           FROM workbench_authoring_run_sessions
+           WHERE workbench_authoring_run_sessions.claim_id = workbench_claims.claim_id
+         )`
+    ).run(...batch);
+  }
 }
 
 function deleteReviewDispositionsForSessions(db: MastheadDatabase, sessionIds: string[]): void {
-  if (sessionIds.length === 0) return;
-  const placeholders = sessionIds.map(() => "?").join(", ");
-  db.prepare(`DELETE FROM review_dispositions WHERE subject_type = 'session' AND subject_id IN (${placeholders})`).run(...sessionIds);
+  for (const batch of batches(sessionIds)) {
+    db.prepare(
+      `DELETE FROM review_dispositions
+       WHERE subject_type = 'session' AND subject_id IN (${sqlPlaceholders(batch)})`
+    ).run(...batch);
+  }
 }
 
 function countMcpAuditRowsForSessions(db: MastheadDatabase, sessionIds: string[]): number {
-  if (sessionIds.length === 0) return 0;
-  return (
-    db.prepare(`SELECT COUNT(*) AS count FROM mcp_query_log WHERE ${mcpAuditSessionPredicate(sessionIds)}`).get(
-      ...sessionIds.map((sessionId) => `%${escapeLike(JSON.stringify(sessionId))}%`)
-    ) as { count: number }
-  ).count;
+  if (sessionIds.length === 0 || tableCount(db, "mcp_query_log") === 0) return 0;
+  const auditIds = new Set<string>();
+  for (const batch of batches(sessionIds)) {
+    const rows = db
+      .prepare(`SELECT mcp_query_id AS auditId FROM mcp_query_log WHERE ${mcpAuditSessionPredicate(batch)}`)
+      .all(...batch.map((sessionId) => `%${escapeLike(JSON.stringify(sessionId))}%`)) as Array<{ auditId: string }>;
+    for (const row of rows) auditIds.add(row.auditId);
+  }
+  return auditIds.size;
 }
 
 function deleteMcpAuditRowsForSessions(db: MastheadDatabase, sessionIds: string[]): void {
-  if (sessionIds.length === 0) return;
-  db.prepare(`DELETE FROM mcp_query_log WHERE ${mcpAuditSessionPredicate(sessionIds)}`).run(
-    ...sessionIds.map((sessionId) => `%${escapeLike(JSON.stringify(sessionId))}%`)
-  );
+  for (const batch of batches(sessionIds)) {
+    db.prepare(`DELETE FROM mcp_query_log WHERE ${mcpAuditSessionPredicate(batch)}`).run(
+      ...batch.map((sessionId) => `%${escapeLike(JSON.stringify(sessionId))}%`)
+    );
+  }
 }
 
 function mcpAuditSessionPredicate(sessionIds: string[]): string {
@@ -538,6 +676,19 @@ function objectRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
+function parseJsonRecord(value: string | null): Record<string, unknown> {
+  if (!value) return {};
+  try {
+    return objectRecord(JSON.parse(value));
+  } catch {
+    return {};
+  }
+}
+
+function unknownArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
@@ -548,16 +699,18 @@ function tableCount(db: MastheadDatabase, table: string): number {
 
 function largeOutputCount(db: MastheadDatabase, sessionIds?: string[]): number {
   if (sessionIds) {
-    if (sessionIds.length === 0) return 0;
-    const placeholders = sessionIds.map(() => "?").join(", ");
-    return (
-      db.prepare(
-        `SELECT COUNT(*) AS count
-        FROM tool_results
-        WHERE session_id IN (${placeholders})
-          AND (output_redacted IS NOT NULL OR output_hash IS NOT NULL)`
-      ).get(...sessionIds) as { count: number }
-    ).count;
+    let count = 0;
+    for (const batch of batches(sessionIds)) {
+      count += (
+        db.prepare(
+          `SELECT COUNT(*) AS count
+           FROM tool_results
+           WHERE session_id IN (${sqlPlaceholders(batch)})
+             AND (output_redacted IS NOT NULL OR output_hash IS NOT NULL)`
+        ).get(...batch) as { count: number }
+      ).count;
+    }
+    return count;
   }
   return (
     db.prepare(
@@ -566,6 +719,18 @@ function largeOutputCount(db: MastheadDatabase, sessionIds?: string[]): number {
       WHERE output_redacted IS NOT NULL OR output_hash IS NOT NULL`
     ).get() as { count: number }
   ).count;
+}
+
+function batches<T>(values: T[]): T[][] {
+  const result: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += SQLITE_BATCH_SIZE) {
+    result.push(values.slice(offset, offset + SQLITE_BATCH_SIZE));
+  }
+  return result;
+}
+
+function sqlPlaceholders(values: unknown[]): string {
+  return values.map(() => "?").join(", ");
 }
 
 function rows(db: MastheadDatabase, table: string): unknown[] {
