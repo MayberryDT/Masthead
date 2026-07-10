@@ -423,6 +423,131 @@ describe("daemon database schema", () => {
     db.close();
   });
 
+  test("repairs resolved optional states after a cross-session published signature collision", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v19-published-signature-collision-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    db.prepare("DELETE FROM schema_migrations WHERE version = 20").run();
+
+    const sessionStatuses = [
+      ["session:collision-old", "published"],
+      ["session:collision-new", "published"],
+      ["session:contribution-old", "contributed"],
+      ["session:contribution-new", "contributed"],
+      ["session:already-applied", "applied"],
+      ["session:not-applicable", "not_applicable"]
+    ] as const;
+    for (const [sessionId, runbookStatus] of sessionStatuses) {
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId,
+        title: sessionId
+      });
+      ensureWorkbenchSessionState(db, sessionId);
+      db.prepare(
+        `UPDATE workbench_session_state
+         SET transcript_status = 'imported',
+             quality_status = 'passed',
+             session_enrichment_status = 'satisfied',
+             session_dossier_status = 'satisfied',
+             session_package_status = 'published',
+             publication_status = 'published',
+             runbook_status = ?,
+             adr_status = 'not_applicable',
+             incident_timeline_status = 'not_applicable',
+             resolution_status = ?,
+             next_action = ?
+         WHERE session_id = ?`
+      ).run(
+        runbookStatus,
+        runbookStatus === "applied" ? "compile_ready" : "automatic_resolved",
+        runbookStatus === "applied" ? "enrich" : "none",
+        sessionId
+      );
+    }
+
+    insertLegacyArtifact(db, {
+      artifactId: "artifact:collision-old",
+      artifactKind: "runbook",
+      createdAt: "2026-07-10T10:00:00.000Z",
+      sessionId: "session:collision-old",
+      signatureKey: "signature:collision",
+      updatedAt: "2026-07-10T10:30:00.000Z"
+    });
+    insertLegacyArtifact(db, {
+      artifactId: "artifact:collision-new",
+      artifactKind: "runbook",
+      createdAt: "2026-07-10T11:00:00.000Z",
+      sessionId: "session:collision-new",
+      signatureKey: "  signature:collision  ",
+      updatedAt: "2026-07-10T11:30:00.000Z"
+    });
+    db.prepare("UPDATE session_artifacts SET publication_status = 'published'").run();
+    db.prepare("INSERT INTO session_artifact_provenance (artifact_id, session_id) VALUES (?, ?)").run(
+      "artifact:collision-old",
+      "session:contribution-old"
+    );
+    db.prepare("INSERT INTO session_artifact_provenance (artifact_id, session_id) VALUES (?, ?)").run(
+      "artifact:collision-new",
+      "session:contribution-new"
+    );
+
+    migrateDatabase(db);
+
+    expect(
+      db.prepare(
+        `SELECT session_id AS sessionId,
+                runbook_status AS runbookStatus,
+                resolution_status AS resolutionStatus,
+                next_action AS nextAction
+         FROM workbench_session_state
+         WHERE session_id LIKE 'session:%'
+         ORDER BY session_id`
+      ).all()
+    ).toEqual([
+      {
+        nextAction: "enrich",
+        resolutionStatus: "compile_ready",
+        runbookStatus: "applied",
+        sessionId: "session:already-applied"
+      },
+      {
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
+        runbookStatus: "published",
+        sessionId: "session:collision-new"
+      },
+      {
+        nextAction: "enrich",
+        resolutionStatus: "compile_ready",
+        runbookStatus: "applied",
+        sessionId: "session:collision-old"
+      },
+      {
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
+        runbookStatus: "contributed",
+        sessionId: "session:contribution-new"
+      },
+      {
+        nextAction: "enrich",
+        resolutionStatus: "compile_ready",
+        runbookStatus: "applied",
+        sessionId: "session:contribution-old"
+      },
+      {
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
+        runbookStatus: "not_applicable",
+        sessionId: "session:not-applicable"
+      }
+    ]);
+    db.close();
+  });
+
   test("rejects an applied migration marker when critical schema tables are missing", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-"));
     tempDirs.push(tempDir);

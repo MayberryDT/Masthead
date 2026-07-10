@@ -44,7 +44,7 @@ WHERE status = 'current'
 
 UPDATE workbench_session_state
 SET runbook_status = CASE
-      WHEN runbook_status = 'satisfied' THEN CASE
+      WHEN runbook_status IN ('satisfied', 'published', 'contributed') THEN CASE
         WHEN EXISTS (
           SELECT 1
           FROM session_artifacts AS artifacts
@@ -54,13 +54,16 @@ SET runbook_status = CASE
             AND artifacts.status = 'current'
             AND artifacts.publication_status = 'published'
             AND provenance.session_id = workbench_session_state.session_id
-        ) THEN 'published'
+        ) THEN CASE
+          WHEN runbook_status = 'contributed' THEN 'contributed'
+          ELSE 'published'
+        END
         ELSE 'applied'
       END
       ELSE runbook_status
     END,
     adr_status = CASE
-      WHEN adr_status = 'satisfied' THEN CASE
+      WHEN adr_status IN ('satisfied', 'published', 'contributed') THEN CASE
         WHEN EXISTS (
           SELECT 1
           FROM session_artifacts AS artifacts
@@ -70,13 +73,16 @@ SET runbook_status = CASE
             AND artifacts.status = 'current'
             AND artifacts.publication_status = 'published'
             AND provenance.session_id = workbench_session_state.session_id
-        ) THEN 'published'
+        ) THEN CASE
+          WHEN adr_status = 'contributed' THEN 'contributed'
+          ELSE 'published'
+        END
         ELSE 'applied'
       END
       ELSE adr_status
     END,
     incident_timeline_status = CASE
-      WHEN incident_timeline_status = 'satisfied' THEN CASE
+      WHEN incident_timeline_status IN ('satisfied', 'published', 'contributed') THEN CASE
         WHEN EXISTS (
           SELECT 1
           FROM session_artifacts AS artifacts
@@ -86,7 +92,10 @@ SET runbook_status = CASE
             AND artifacts.status = 'current'
             AND artifacts.publication_status = 'published'
             AND provenance.session_id = workbench_session_state.session_id
-        ) THEN 'published'
+        ) THEN CASE
+          WHEN incident_timeline_status = 'contributed' THEN 'contributed'
+          ELSE 'published'
+        END
         ELSE 'applied'
       END
       ELSE incident_timeline_status
