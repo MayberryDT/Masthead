@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { lstat, mkdtemp, rm, symlink } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -78,6 +78,45 @@ describe("database writer lock", () => {
     await winners[0].value.release();
     const successor = await acquireLegacyDataDirectoryGuard(dataDirectory);
     locks.push(successor);
+  });
+
+  test("blocks on a stale compatibility sentinel without mutating it", async () => {
+    const dataDirectory = await createTempDir("masthead-stale-data-sentinel-");
+    const lockPath = join(dataDirectory, "runtime", "database.lock");
+    const staleSentinel = JSON.stringify({
+      createdAt: "2026-01-01T00:00:00.000Z",
+      pid: 2_147_483_647,
+      token: "stale-owner"
+    });
+    await mkdir(join(dataDirectory, "runtime"), { recursive: true });
+    await writeFile(lockPath, staleSentinel, "utf8");
+
+    await expect(acquireLegacyDataDirectoryGuard(dataDirectory)).rejects.toThrow(
+      `Confirm no legacy Masthead daemon is running, then remove or repair ${lockPath}`
+    );
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(staleSentinel);
+
+    await rm(lockPath);
+    const repaired = await acquireLegacyDataDirectoryGuard(dataDirectory);
+    locks.push(repaired);
+  });
+
+  test("does not delete a live replacement compatibility sentinel", async () => {
+    const dataDirectory = await createTempDir("masthead-live-data-sentinel-");
+    const lockPath = join(dataDirectory, "runtime", "database.lock");
+    const replacementPath = join(dataDirectory, "runtime", "replacement.lock");
+    const liveSentinel = JSON.stringify({
+      createdAt: "2026-07-10T00:00:00.000Z",
+      pid: process.pid,
+      token: "live-owner"
+    });
+    await mkdir(join(dataDirectory, "runtime"), { recursive: true });
+    await writeFile(lockPath, JSON.stringify({ pid: 2_147_483_647, token: "stale-owner" }), "utf8");
+    await writeFile(replacementPath, liveSentinel, "utf8");
+    await rename(replacementPath, lockPath);
+
+    await expect(acquireLegacyDataDirectoryGuard(dataDirectory)).rejects.toThrow("already owns canonical data directory");
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(liveSentinel);
   });
 
   test("a crashed process automatically releases its SQLite lease", async () => {

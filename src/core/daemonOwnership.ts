@@ -197,11 +197,9 @@ async function acquireCompatibilitySentinel(lockPath: string, dataDirectory: str
           `A writable daemon already owns canonical data directory ${dataDirectory} at ${lockPath}${lockDetail(existing || {})}.`
         );
       }
-      if (!pid && Date.now() - identity.mtimeMs < 1_000) {
-        await delay(20);
-        continue;
-      }
-      await rm(lockPath, { force: true });
+      throw new Error(
+        `Compatibility sentinel at ${lockPath}${lockDetail(existing || {})} is stale or unreadable. Masthead will not remove it automatically because a legacy daemon may replace it concurrently. Confirm no legacy Masthead daemon is running, then remove or repair ${lockPath} and retry.`
+      );
     }
   }
   throw new Error(`Timed out acquiring compatibility sentinel at ${lockPath}.`);
@@ -253,10 +251,6 @@ function processIsAlive(pid: number): boolean {
     if (isErrno(error, "EPERM")) return true;
     return false;
   }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
 function isErrno(error: unknown, code: string): boolean {
