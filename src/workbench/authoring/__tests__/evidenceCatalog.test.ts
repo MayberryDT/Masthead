@@ -238,6 +238,31 @@ describe("authoring evidence catalog", () => {
     ).toEqual(["tool_call"]);
     db.close();
   });
+
+  test("preserves unknown staging evidence without claiming the file was unstaged", async () => {
+    const db = await testDb();
+    seedMixedSession(db, "session:nullable-staged");
+    allowNullableFileEffectStaged(db);
+    db.prepare("UPDATE file_effects SET staged = NULL WHERE session_id = ?").run("session:nullable-staged");
+
+    const unknownRevision = authoringEvidenceRevision(db, ["session:nullable-staged"]);
+    const unknownFile = getAuthoringEvidencePage(db, { sessionId: "session:nullable-staged" }).items.find(
+      (item) => item.kind === "file_effect"
+    );
+
+    expect(unknownFile).not.toHaveProperty("staged");
+    expect(unknownFile?.text).not.toMatch(/\b(?:un)?staged\b/);
+
+    db.prepare("UPDATE file_effects SET staged = 0 WHERE session_id = ?").run("session:nullable-staged");
+    const explicitlyUnstagedRevision = authoringEvidenceRevision(db, ["session:nullable-staged"]);
+    const explicitlyUnstagedFile = getAuthoringEvidencePage(db, {
+      sessionId: "session:nullable-staged"
+    }).items.find((item) => item.kind === "file_effect");
+
+    expect(explicitlyUnstagedFile).toMatchObject({ staged: false, text: expect.stringContaining("unstaged") });
+    expect(explicitlyUnstagedRevision).not.toBe(unknownRevision);
+    db.close();
+  });
 });
 
 async function testDb(): Promise<MastheadDatabase> {
@@ -407,4 +432,13 @@ function clearCanonicalRows(db: MastheadDatabase, sessionId: string): void {
   db.prepare("DELETE FROM tool_results WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
+}
+
+function allowNullableFileEffectStaged(db: MastheadDatabase): void {
+  db.exec(`
+    CREATE TABLE file_effects_nullable AS SELECT * FROM file_effects;
+    DROP TABLE file_effects;
+    ALTER TABLE file_effects_nullable RENAME TO file_effects;
+    CREATE INDEX file_effects_session_idx ON file_effects(session_id, path);
+  `);
 }

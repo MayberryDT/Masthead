@@ -334,7 +334,7 @@ function fileEffectSelectPart(sessionId: string, query?: string): TranscriptSele
     params,
     query,
     `COALESCE(path, '') || ' ' || COALESCE(effect_kind, '') || ' ' ||
-      CASE staged WHEN 1 THEN 'staged' ELSE 'unstaged' END || ' ' ||
+      CASE staged WHEN 1 THEN 'staged' WHEN 0 THEN 'unstaged' ELSE '' END || ' ' ||
       COALESCE(CAST(additions AS TEXT) || ' additions', '') || ' ' ||
       COALESCE(CAST(deletions AS TEXT) || ' deletions', '')`
   );
@@ -396,11 +396,12 @@ function completeCanonicalText(row: TranscriptRow, baseText: string): string {
     return `${baseText}\nDetails: ${row.detailsJson}`;
   }
   if (row.kind === "file_effect") {
-    const changeCounts = [
+    const details = [
+      row.staged === 1 ? "staged" : row.staged === 0 ? "unstaged" : undefined,
       row.additions === null ? undefined : `${row.additions} additions`,
       row.deletions === null ? undefined : `${row.deletions} deletions`
     ].filter((value): value is string => value !== undefined);
-    return `${baseText}\n${row.staged === 1 ? "staged" : "unstaged"}${changeCounts.length ? `; ${changeCounts.join("; ")}` : ""}`;
+    return details.length > 0 ? `${baseText}\n${details.join("; ")}` : baseText;
   }
   return baseText;
 }
