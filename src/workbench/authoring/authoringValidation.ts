@@ -78,19 +78,21 @@ function validateSessionPackages(
   findings: WorkbenchAuthoringFindingV2[]
 ): void {
   for (const sessionId of selectedSessionIds) {
-    const matching = packages.filter((entry) => isRecord(entry) && entry.sessionId === sessionId);
-    if (matching.length === 0) {
+    const matchingIndexes = packages.flatMap((entry, index) =>
+      isRecord(entry) && entry.sessionId === sessionId ? [index] : []
+    );
+    if (matchingIndexes.length === 0) {
       addFinding(findings, {
         code: "missing_session_package",
         message: `Selected session requires exactly one session package: ${sessionId}`,
         path: "sessionPackages",
         sessionId
       });
-    } else if (matching.length > 1) {
+    } else if (matchingIndexes.length > 1) {
       addFinding(findings, {
         code: "duplicate_session_package",
         message: `Selected session has more than one session package: ${sessionId}`,
-        path: "sessionPackages",
+        path: `sessionPackages[${matchingIndexes[1]}].sessionId`,
         sessionId
       });
     }
@@ -158,6 +160,13 @@ function validateArtifact(
   const basePath = `artifacts[${index}]`;
   if (!kind || !seedSessionId) return;
 
+  validateUniqueProvenanceIds(
+    provenanceSessionIds,
+    `${basePath}.provenanceSessionIds`,
+    kind,
+    seedSessionId,
+    findings
+  );
   if (!provenanceSessionIds.includes(seedSessionId)) {
     addFinding(findings, {
       artifactKind: kind,
@@ -181,7 +190,14 @@ function validateArtifact(
 
   if (!isRecord(artifact.output)) return;
   const outputProvenance = stringArray(artifact.output.provenanceSessionIds) ?? [];
-  if (!sameSet(outputProvenance, provenanceSessionIds)) {
+  validateUniqueProvenanceIds(
+    outputProvenance,
+    `${basePath}.output.provenanceSessionIds`,
+    kind,
+    seedSessionId,
+    findings
+  );
+  if (!sameProvenance(outputProvenance, provenanceSessionIds)) {
     addFinding(findings, {
       artifactKind: kind,
       code: "mismatched_output_provenance",
@@ -190,7 +206,7 @@ function validateArtifact(
       sessionId: seedSessionId
     });
   }
-  if (provenanceSessionIds.length > 1) {
+  if (new Set(provenanceSessionIds).size > 1) {
     const joinRationale = stringValue(artifact.output.joinRationale);
     if (!joinRationale?.trim()) {
       addFinding(findings, {
@@ -266,7 +282,12 @@ function validateGroundedOutput(
 
   for (const claimArrayPath of claimBearingArrays(kind)) {
     const resolved = resolvePropertyPath(output, claimArrayPath);
-    if (resolved.exists && Array.isArray(resolved.value) && resolved.value.length === 0) {
+    if (!resolved.exists || !Array.isArray(resolved.value)) continue;
+    const stringClaims = resolved.value.filter((value): value is string => typeof value === "string");
+    const hasSubstantiveClaim =
+      resolved.value.length > 0 &&
+      (stringClaims.length !== resolved.value.length || stringClaims.some(nonBlank));
+    if (!hasSubstantiveClaim) {
       addFinding(findings, {
         artifactKind,
         code: "empty_claim_array",
@@ -275,6 +296,18 @@ function validateGroundedOutput(
         sessionId
       });
     }
+    resolved.value.forEach((value, index) => {
+      if (typeof value === "string") {
+        validateRequiredText(
+          findings,
+          value,
+          `${basePath}.${claimArrayPath}[${index}]`,
+          1,
+          artifactKind,
+          sessionId
+        );
+      }
+    });
   }
 
   const evidenceRefs = stringArray(output.evidenceRefs) ?? [];
@@ -568,7 +601,10 @@ function validateAutomaticKindResolution(
     const seedSessionId = stringValue(artifact.seedSessionId);
     if (!kind || !seedSessionId) return;
     increment(seedSessionId, kind, `artifacts[${artifactIndex}]`);
+    const countedProvenance = new Set<string>();
     (stringArray(artifact.provenanceSessionIds) ?? []).forEach((sessionId, provenanceIndex) => {
+      if (countedProvenance.has(sessionId)) return;
+      countedProvenance.add(sessionId);
       if (sessionId !== seedSessionId) {
         increment(sessionId, kind, `artifacts[${artifactIndex}].provenanceSessionIds[${provenanceIndex}]`);
       }
@@ -896,10 +932,33 @@ function nonBlank(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function sameSet(left: string[], right: string[]): boolean {
+function sameProvenance(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
   const leftSet = new Set(left);
   const rightSet = new Set(right);
   return leftSet.size === rightSet.size && [...leftSet].every((value) => rightSet.has(value));
+}
+
+function validateUniqueProvenanceIds(
+  sessionIds: string[],
+  path: string,
+  artifactKind: WorkbenchAutomaticArtifactKind,
+  seedSessionId: string,
+  findings: WorkbenchAuthoringFindingV2[]
+): void {
+  const seen = new Set<string>();
+  sessionIds.forEach((sessionId, index) => {
+    if (seen.has(sessionId)) {
+      addFinding(findings, {
+        artifactKind,
+        code: "duplicate_provenance_session",
+        message: `Provenance session IDs must be unique: ${sessionId}`,
+        path: `${path}[${index}]`,
+        sessionId: seedSessionId
+      });
+    }
+    seen.add(sessionId);
+  });
 }
 
 function displayPath(path: string): string {

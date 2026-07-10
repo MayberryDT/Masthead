@@ -62,6 +62,7 @@ export type WorkbenchAuthoringValidationInput = {
 export type WorkbenchAuthoringFindingCode =
   | "claim_evidence_outside_declared_evidence"
   | "duplicate_automatic_kind_resolution"
+  | "duplicate_provenance_session"
   | "duplicate_session_package"
   | "duplicate_title_summary"
   | "empty_claim_array"

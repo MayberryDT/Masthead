@@ -129,6 +129,23 @@ describe("validateAuthoringBundle", () => {
     );
   });
 
+  test("points duplicate session packages at the second original package index", () => {
+    const bundle = validAuthoringBundle();
+    const duplicate = bundle.sessionPackages[0]!;
+    bundle.sessionPackages.unshift("malformed" as never);
+    bundle.sessionPackages.push(duplicate);
+
+    const result = validateAuthoringBundle(validValidationInput(bundle));
+
+    expect(result.findings).toContainEqual(
+      expect.objectContaining({
+        code: "duplicate_session_package",
+        path: "sessionPackages[2].sessionId",
+        sessionId: "session:a"
+      })
+    );
+  });
+
   test("rejects thin high confidence and explains sparse session coverage", () => {
     const bundle = validAuthoringBundle();
     bundle.sessionPackages[0]!.enrichment.evidenceRefs = ["message:a:1"];
@@ -261,6 +278,53 @@ describe("validateAuthoringBundle", () => {
     );
   });
 
+  test("rejects duplicate provenance IDs in both artifact draft and output", () => {
+    const bundle = validAuthoringBundle();
+    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    bundle.artifacts.push(validRunbookDraft(["session:a", "session:a"]));
+
+    const result = validateAuthoringBundle(validValidationInput(bundle));
+
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "duplicate_provenance_session",
+          path: "artifacts[0].provenanceSessionIds[1]"
+        }),
+        expect.objectContaining({
+          code: "duplicate_provenance_session",
+          path: "artifacts[0].output.provenanceSessionIds[1]"
+        })
+      ])
+    );
+  });
+
+  test("rejects output provenance multiplicity mismatches before resolution accounting", () => {
+    const bundle = validAuthoringBundle(["session:a", "session:b"]);
+    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    const runbook = validRunbookDraft(["session:a", "session:b"]);
+    runbook.output.provenanceSessionIds = ["session:a", "session:b", "session:b"];
+    bundle.artifacts.push(runbook);
+
+    const result = validateAuthoringBundle(validValidationInput(bundle, ["session:a", "session:b"]));
+
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "duplicate_provenance_session",
+          path: "artifacts[0].output.provenanceSessionIds[2]"
+        }),
+        expect.objectContaining({
+          code: "mismatched_output_provenance",
+          path: "artifacts[0].output.provenanceSessionIds"
+        })
+      ])
+    );
+    expect(result.findings).not.toContainEqual(
+      expect.objectContaining({ code: "duplicate_automatic_kind_resolution", sessionId: "session:b" })
+    );
+  });
+
   test("accepts only contributions to a current published artifact of the same kind containing the session", () => {
     const bundle = validAuthoringBundle();
     bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "adr");
@@ -300,6 +364,35 @@ describe("validateAuthoringBundle", () => {
         expect.objectContaining({ code: "duplicate_title_summary", path: "sessionPackages[0].enrichment.summary" }),
         expect.objectContaining({ code: "insufficient_specificity", path: "sessionPackages[0].dossier.outcome" }),
         expect.objectContaining({ code: "empty_claim_array", path: "sessionPackages[0].dossier.keyDecisions" })
+      ])
+    );
+  });
+
+  test("rejects whitespace-only claim-bearing strings as empty claims", () => {
+    const bundle = validAuthoringBundle();
+    bundle.sessionPackages[0]!.dossier.keyDecisions = [" "];
+    bundle.sessionPackages[0]!.dossier.verification = ["   "];
+    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
+    const runbook = validRunbookDraft();
+    runbook.output.fixSteps = ["\t"];
+    bundle.artifacts.push(runbook);
+
+    const result = validateAuthoringBundle(validValidationInput(bundle));
+
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "empty_claim_array", path: "sessionPackages[0].dossier.keyDecisions" }),
+        expect.objectContaining({
+          code: "insufficient_specificity",
+          path: "sessionPackages[0].dossier.keyDecisions[0]"
+        }),
+        expect.objectContaining({ code: "empty_claim_array", path: "sessionPackages[0].dossier.verification" }),
+        expect.objectContaining({
+          code: "insufficient_specificity",
+          path: "sessionPackages[0].dossier.verification[0]"
+        }),
+        expect.objectContaining({ code: "empty_claim_array", path: "artifacts[0].output.fixSteps" }),
+        expect.objectContaining({ code: "insufficient_specificity", path: "artifacts[0].output.fixSteps[0]" })
       ])
     );
   });
