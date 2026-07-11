@@ -54,6 +54,7 @@ describe("import work unit runner", () => {
         sourceRecordKey: `${sourcePath}:1`
       }
     ];
+    const hydratedSessionIds: string[] = [];
 
     await runImportWorkUnit({
       adapterBackfill: async function* () {
@@ -63,6 +64,7 @@ describe("import work unit runner", () => {
       hostId: "host:test",
       hostname: "test",
       now: () => "2026-07-01T00:00:05.000Z",
+      onSessionHydrated: (sessionId) => hydratedSessionIds.push(sessionId),
       runtimeKind: "opencode",
       workUnitId: unitId
     });
@@ -73,6 +75,8 @@ describe("import work unit runner", () => {
       status: "succeeded"
     });
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
+    expect(hydratedSessionIds).toHaveLength(1);
+    expect(hydratedSessionIds[0]).toMatch(/^session:/);
   });
 
   test("skips records whose project metadata is excluded", async () => {

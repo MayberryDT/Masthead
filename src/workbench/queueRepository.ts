@@ -66,8 +66,7 @@ export function queueWorkbenchSessions(
   const scope = parseWorkbenchScope(options.scope);
   const normalizedLimit = Math.max(1, Math.min(options.limit, 100));
   const states = listWorkbenchQueue(db, {
-    limit: scope.kind === "missing" || scope.kind === "recent" ? normalizedLimit : 5000,
-    publicationStatus: "publish_path"
+    limit: scope.kind === "missing" || scope.kind === "recent" ? normalizedLimit : 5000
   });
   const metadata = metadataForSessions(db, states.map((state) => state.sessionId));
   return states.flatMap((state) => {

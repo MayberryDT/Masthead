@@ -18,6 +18,19 @@
 
 Sessions never become Logbook rows. Provenance points back to sessions.
 
+## Clean-install history intake
+
+The app-level first-run coordinator may start a one-time Workbench-owned history import after live
+connector setup. **Everything** means every discovered supported history unit, with no hidden recent
+cap; the recent option is the only bounded range. Each runtime uses one durable transcript job that
+materializes canonical session identity and evidence together.
+
+Jobs survive restart under the same id. Completed work units are not repeated, interrupted units
+return to the queue, and the coordinator restores Import history / Reconcile progress until the
+jobs terminate. A metadata shell is provisional: after transcript hydration, Workbench reruns the
+quality decision and can return it to the publish path. Tool-only transcripts are usable evidence;
+only complete duplicate or hook-only units are terminal noise.
+
 ## Logbook (locked UI)
 
 - **Row** = published artifact only (`session_dossier`, `runbook`, `adr`, `incident_timeline`).

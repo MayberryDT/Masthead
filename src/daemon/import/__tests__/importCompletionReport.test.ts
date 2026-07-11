@@ -39,7 +39,7 @@ describe("import completion report", () => {
     });
 
     const report = buildImportCompletionReport(db, {
-      failedUnits: 0,
+      failedUnits: 1,
       generatedAt: "2026-07-01T00:03:00.000Z",
       importJobId: "import-1",
       recordsFailed: 0,
@@ -47,6 +47,9 @@ describe("import completion report", () => {
       recordsSkipped: 1,
       runtime: "opencode",
       skippedUnits: 1,
+      sourceUnitsDiscovered: 6,
+      sourceUnitsHydrated: 4,
+      sourceUnitsRemaining: 0,
       status: "succeeded",
       transcriptsImported: 0
     });
@@ -56,9 +59,16 @@ describe("import completion report", () => {
       nextActions: expect.arrayContaining(["open_logbook", "import_full_archive", "run_enrichment"]),
       recordsImported: 4,
       recordsSkipped: 1,
+      sourceUnitsDeferred: 1,
+      sourceUnitsDiscovered: 6,
+      sourceUnitsFailed: 1,
+      sourceUnitsHydrated: 4,
+      sourceUnitsRemaining: 0,
+      sessionsDiscovered: 1,
+      sessionsHydrated: 1,
       sessionsCreated: 1,
       sessionsUpdated: 0,
-      transcriptsImported: 4
+      transcriptsImported: 1
     });
     db.close();
   });

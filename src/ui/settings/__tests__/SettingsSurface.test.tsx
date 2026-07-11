@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 describe("Settings surface", () => {
-  test("renders one compact steel spine with Masthead action buttons", () => {
+  test("renders one compact steel card with every settings group", () => {
     const html = renderToStaticMarkup(
       <SettingsSurface>
         <OperationsPanel
@@ -37,19 +37,22 @@ describe("Settings surface", () => {
     expect(html).not.toContain("settings-category-nav");
     expect(html).not.toContain('class="settings-pane"');
     expect(html).not.toContain('aria-label="Settings categories"');
-    expect(html).toContain('class="app-button app-button-quiet metal-control"');
-    expect(html).toContain('class="app-button app-button-danger metal-control"');
-    expect(html).toContain('aria-label="Open Data"');
-    expect(html).toContain('aria-label="Open Agent access"');
-    expect(html).toContain('aria-label="Open Advanced"');
-    expect(html).toContain('aria-label="Open Danger zone"');
+    expect(html).toContain('class="settings-spine-sections"');
+    expect(html).not.toContain('aria-label="Open Data"');
+    expect(html).not.toContain('aria-label="Open Agent access"');
+    expect(html).not.toContain('aria-label="Open Advanced"');
+    expect(html).not.toContain('aria-label="Open Danger zone"');
+    expect(html).toContain("Data");
+    expect(html).toContain("Agent access");
+    expect(html).toContain("Advanced");
+    expect(html).toContain("Danger zone");
 
     const css = readFileSync("src/styles/settings.css", "utf8");
     expect(css).toMatch(/\.settings-spine-row\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto;/);
     expect(css).toMatch(/\.settings-spine-card \.settings-toggle\s*\{[\s\S]*flex-direction: row-reverse;/);
   });
 
-  test("renders the compact Settings spine with General controls direct", () => {
+  test("renders General and grouped controls together without disclosure chrome", () => {
     const html = renderToStaticMarkup(
       <SettingsSurface>
         <OperationsPanel
@@ -66,7 +69,7 @@ describe("Settings surface", () => {
     expect(html).toContain("settings-workspace");
     expect(html).toContain("settings-spine-card");
     expect(html).not.toContain('aria-label="Settings categories"');
-    expect(html).not.toContain('class="settings-spine-detail"');
+    expect(html).toContain('class="settings-spine-sections"');
     expect(html).not.toContain("settings-layout-priority-bay");
     expect(html).not.toContain("settings-priority-column");
     expect(html).not.toContain("Remote enrichment");
@@ -79,7 +82,7 @@ describe("Settings surface", () => {
     expect(html).not.toContain("type=\"password\"");
     expect(html).not.toContain("Save provider");
     expect(html).not.toContain("sk-test-settings-secret");
-    expect(html).not.toContain("Data boundaries");
+    expect(html).toContain("Data");
     expect(html).not.toContain("Transcript import");
     expect(html).not.toContain("Redaction");
     expect(html).not.toContain("Codex hooks");
@@ -90,20 +93,20 @@ describe("Settings surface", () => {
     expect(html).not.toContain("Onboarding");
     expect(html).not.toContain("Run onboarding again");
     expect(html).not.toContain("Setup wizard");
-    expect(html).not.toContain("MCP access");
-    expect(html).not.toContain("MCP server");
+    expect(html).toContain("Agent access");
+    expect(html).toContain("MCP server");
     expect(html).not.toContain("Refresh MCP");
-    expect(html).not.toContain("MCP TOML");
-    expect(html).not.toContain("MCP JSON");
+    expect(html).toContain("MCP TOML");
+    expect(html).toContain("MCP JSON");
     expect(html).not.toContain("Test MCP launch");
-    expect(html).not.toContain("/home/tyler/.local/share/masthead/masthead.sqlite");
-    expect(html).not.toContain("Export data");
+    expect(html).toContain("/home/tyler/.local/share/masthead/masthead.sqlite");
+    expect(html).toContain("Export data");
     expect(html).toContain("Motion");
     expect(html).toContain("Enable motion");
     expect(html).toContain("settings-toggle checked");
     expect(html).toContain("Motion on");
     expect(html).toContain("checked=\"\"");
-    expect(html).not.toContain("Advanced runtime");
+    expect(html).toContain("Advanced");
     expect(html).not.toContain("Retention classes");
     expect(html).not.toContain("Raw event rows");
     expect(html).not.toContain("<span>MCP audit rows</span>");
@@ -111,11 +114,11 @@ describe("Settings surface", () => {
     expect(html).not.toContain("Lifecycle hooks");
     expect(html).not.toContain("Current enrichments");
     expect(html).not.toContain("Health");
-    expect(html).not.toContain("Copy Codex config");
+    expect(html).toContain("Copy configuration");
     expect(html).not.toContain("Other MCP clients");
     expect(html).not.toContain("Sessions");
     expect(html).not.toContain("Can agents read Masthead?");
-    expect(html).not.toContain("Agent Access");
+    expect(html).toContain("Agent access");
     expect(html).toContain("settings-toggle");
     expect(html).not.toContain("ops-card");
     expect(html).not.toContain("ghost-pill");
@@ -144,7 +147,7 @@ describe("Settings surface", () => {
     host.remove();
   });
 
-  test("shows only direct General and Data controls", async () => {
+  test("shows direct General and Data controls in the same card", async () => {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -158,12 +161,7 @@ describe("Settings surface", () => {
     expect(card?.textContent).not.toContain("Turns off app animations");
     expect(card?.textContent).not.toContain("Desktop only");
 
-    const dataButton = spineAction(host, "Data");
-    await act(async () => {
-      dataButton?.click();
-    });
-
-    const detail = host.querySelector<HTMLElement>('.settings-spine-detail[data-settings-detail="data"]');
+    const detail = host.querySelector<HTMLElement>(".settings-spine-sections");
     expect(detail?.textContent).toContain("Database");
     expect(detail?.textContent).toContain("Open folder");
     expect(detail?.textContent).toContain("Export");
@@ -172,9 +170,9 @@ describe("Settings surface", () => {
     expect(detail?.textContent).toContain(
       "Deletes stored raw copies only; normalized records and original harness files remain."
     );
-    expect(detail?.textContent).not.toContain("Data directory");
-    expect(detail?.textContent).not.toContain("Database ID");
-    expect(detail?.textContent).not.toContain("Runtime");
+    expect(detail?.textContent).toContain("Data directory");
+    expect(detail?.textContent).toContain("Database ID");
+    expect(detail?.textContent).toContain("Runtime");
     expect(host.textContent).not.toContain("Run onboarding again");
 
     await act(async () => {
@@ -183,7 +181,7 @@ describe("Settings surface", () => {
     host.remove();
   });
 
-  test("keeps one detail open and closes the active detail", async () => {
+  test("keeps every settings section visible without open and close controls", async () => {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -191,22 +189,13 @@ describe("Settings surface", () => {
       root.render(<OperationsPanel settingsState={settings} />);
     });
 
-    await act(async () => {
-      spineAction(host, "Data")?.click();
-    });
-    expect(host.querySelectorAll(".settings-spine-detail")).toHaveLength(1);
-    expect(host.querySelector<HTMLElement>(".settings-spine-detail")?.dataset.settingsDetail).toBe("data");
-
-    await act(async () => {
-      spineAction(host, "Advanced")?.click();
-    });
-    expect(host.querySelectorAll(".settings-spine-detail")).toHaveLength(1);
-    expect(host.querySelector<HTMLElement>(".settings-spine-detail")?.dataset.settingsDetail).toBe("advanced");
-
-    await act(async () => {
-      spineAction(host, "Advanced")?.click();
-    });
+    const sections = host.querySelector<HTMLElement>(".settings-spine-sections");
+    expect(sections?.textContent).toContain("Data");
+    expect(sections?.textContent).toContain("Agent access");
+    expect(sections?.textContent).toContain("Advanced");
+    expect(sections?.textContent).toContain("Danger zone");
     expect(host.querySelector(".settings-spine-detail")).toBeNull();
+    expect(host.querySelector('[aria-label^="Open "]')).toBeNull();
 
     await act(async () => {
       root.unmount();
@@ -223,14 +212,12 @@ describe("Settings surface", () => {
       root.render(<OperationsPanel settingsState={settings} />);
     });
 
-    const agentAccessButton = spineAction(host, "Agent access");
     await act(async () => {
-      agentAccessButton?.click();
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    const panel = host.querySelector<HTMLElement>('.settings-spine-detail[data-settings-detail="agent-access"]');
+    const panel = host.querySelector<HTMLElement>(".settings-spine-sections");
     expect(panel?.textContent).toContain("MCP server");
     expect(panel?.textContent).toContain("Test connection");
     expect(panel?.textContent).toContain("Access");
@@ -258,18 +245,12 @@ describe("Settings surface", () => {
       root.render(<OperationsPanel settingsState={settings} />);
     });
 
-    const advancedButton = spineAction(host, "Advanced");
-    await act(async () => {
-      advancedButton?.click();
-    });
-
-    const pane = host.querySelector<HTMLElement>('.settings-spine-detail[data-settings-detail="advanced"]');
-    expect(pane?.dataset.settingsDetail).toBe("advanced");
+    const pane = host.querySelector<HTMLElement>(".settings-spine-sections");
     expect(pane?.textContent).toContain("Database ID");
     expect(pane?.textContent).toContain("/home/tyler/.local/share/masthead/masthead.sqlite");
     expect(pane?.textContent).toContain("127.0.0.1:17373");
     expect(pane?.textContent).toContain("API 1 / schema 5");
-    expect(pane?.textContent).not.toContain("Delete all Masthead data");
+    expect(pane?.textContent).toContain("Delete all Masthead data");
 
     await act(async () => {
       root.unmount();
@@ -283,11 +264,6 @@ describe("Settings surface", () => {
     const root = createRoot(host);
     await act(async () => {
       root.render(<OperationsPanel settingsState={settings} />);
-    });
-
-    const dataButton = spineAction(host, "Data");
-    await act(async () => {
-      dataButton?.click();
     });
 
     const compactPath = host.querySelector<HTMLElement>(
@@ -427,18 +403,17 @@ describe("Settings surface", () => {
     expect(focusRingRuleIndex).toBeGreaterThan(activeRuleIndex);
   });
 
-  test("keeps expanded spine details flat without removing shared section cards", () => {
+  test("keeps grouped spine sections flat inside the shared steel card", () => {
     const settingsCss = readFileSync("src/styles/settings.css", "utf8");
     const mastheadCss = readFileSync("src/styles/masthead.css", "utf8");
 
-    expect(settingsCss).toMatch(/\.settings-panel \.settings-spine-detail > \.settings-section\s*\{[\s\S]*border: 0;[\s\S]*border-radius: 0;[\s\S]*background: transparent;[\s\S]*animation: none;[\s\S]*transition: none;/);
-    expect(settingsCss).toMatch(/\.settings-panel \.settings-spine-detail > \.settings-section::before,[\s\S]*\.settings-panel \.settings-spine-detail > \.settings-section::after\s*\{[\s\S]*content: none;[\s\S]*display: none;/);
+    expect(settingsCss).toMatch(/\.settings-panel \.settings-spine-sections > \.settings-section\s*\{[\s\S]*border: 0;[\s\S]*border-radius: 0;[\s\S]*background: transparent;[\s\S]*animation: none;[\s\S]*transition: none;/);
+    expect(settingsCss).toMatch(/\.settings-panel \.settings-spine-sections > \.settings-section::before,[\s\S]*\.settings-panel \.settings-spine-sections > \.settings-section::after\s*\{[\s\S]*content: none;[\s\S]*display: none;/);
     expect(mastheadCss).toMatch(/\.observability-console \.settings-spine-card,[\s\S]*\.masthead-shell \.settings-spine-card,[\s\S]*border: 1px solid rgba\(92, 153, 187, 0\.14\);[\s\S]*background: #071b28;/);
     expect(mastheadCss).toMatch(/\.observability-console \.settings-section,[\s\S]*\.masthead-shell \.settings-section,[\s\S]*\.masthead-shell \.adapter-card\s*\{[\s\S]*border: 1px solid rgba\(92, 153, 187, 0\.14\);[\s\S]*border-radius: 5px;[\s\S]*background: #071b28;/);
     expect(mastheadCss).toMatch(/\.summary-strip \.summary-metric,[\s\S]*\.settings-section,[\s\S]*\.settings-spine-card,[\s\S]*\.connected-source-row,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: surface-card-enter 400ms cubic-bezier\(0\.17, 0\.78, 0\.13, 1\) both;[\s\S]*transform-origin: 50% 100%;/);
-    expect(settingsCss).toMatch(/\.settings-spine-detail\s*\{[\s\S]*transform-origin: top center;[\s\S]*animation: forged-plate-in var\(--dropdown-open-dur\) var\(--dropdown-weight-ease\) both;/);
     expect(mastheadCss).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.settings-spine-card,[\s\S]*\.adapter-card\s*\{[\s\S]*animation: none;/);
-    expect(settingsCss).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.settings-spine-detail\s*\{[\s\S]*animation: none;/);
+    expect(settingsCss).not.toContain(".settings-spine-detail");
   });
 
   test("shares one accessible inline action-feedback primitive", () => {
@@ -453,12 +428,6 @@ describe("Settings surface", () => {
     expect(mcpSource).not.toContain("<span className={`settings-inline-feedback");
   });
 });
-
-function spineAction(host: HTMLElement, label: string): HTMLButtonElement | undefined {
-  const row = [...host.querySelectorAll<HTMLElement>(".settings-spine-row")]
-    .find((candidate) => candidate.querySelector(".settings-spine-copy strong")?.textContent === label);
-  return row?.querySelector<HTMLButtonElement>(".settings-spine-control > .app-button") ?? undefined;
-}
 
 function classSpecificity(selector: string): number {
   return selector.match(/\.[a-z0-9_-]+/gi)?.length ?? 0;

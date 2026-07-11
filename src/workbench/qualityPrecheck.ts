@@ -40,6 +40,9 @@ export function runCaptureQualityPrecheck(db: MastheadDatabase, sessionId: strin
     return { ok: true, reason: coverage.userMessages > 0 ? "meaningful_message" : "usable_transcript", sessionId };
   }
   if (coverage.messages === 0 && coverage.lowValueItems >= totalTranscriptItems) return { ok: false, reason: "hook_only", sessionId };
+  if (coverage.messages === 0 && nonMessageItems > coverage.lowValueItems) {
+    return { ok: true, reason: "usable_transcript", sessionId };
+  }
   if (coverage.messages === 0) return { ok: false, reason: "no_messages", sessionId };
   if (coverage.lowValueItems >= totalTranscriptItems) return { ok: false, reason: "duplicate_noise", sessionId };
   return { ok: false, reason: "duplicate_noise", sessionId };

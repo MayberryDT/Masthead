@@ -13,7 +13,7 @@ import { SourcesConnectOnboarding } from "../SourcesConnectOnboarding";
 const noop = () => undefined;
 
 describe("SourcesConnectOnboarding", () => {
-  test("shows Discover/Enable language without Import jobs or bulk transcript import", () => {
+  test("shows the five-stage live-connect and history-import coordinator", () => {
     const html = renderToStaticMarkup(
       <SourcesConnectOnboarding
         open
@@ -27,21 +27,19 @@ describe("SourcesConnectOnboarding", () => {
       />
     );
 
-    expect(html).toContain("Connect live harnesses");
-    expect(html).toContain("Wire local harnesses for live capture");
+    expect(html).toContain("Capture local session history");
+    expect(html).toContain("Find local harnesses and their history");
     expect(html).toContain("Discover");
-    expect(html).toContain("Enable");
-    expect(html).toContain("Activate");
+    expect(html).toContain("Connect");
+    expect(html).toContain("Import history");
+    expect(html).toContain("Reconcile");
+    expect(html).toContain("Ready");
     expect(html).toContain("live capture");
-    expect(html).not.toContain("Import jobs");
     expect(html).not.toContain("bulk transcript");
-    expect(html).not.toContain("Import history");
-    expect(html).not.toContain("metadata import");
-    expect(html).not.toContain("Start setup");
     expect(html).not.toContain("Check local sources");
   });
 
-  test("SourcesPanel V2 renders connect onboarding instead of import-centric setup", () => {
+  test("SourcesPanel V2 renders the unified coordinator instead of the legacy setup wizard", () => {
     const html = renderToStaticMarkup(
       <SourcesPanel
         sources={[]}
@@ -58,11 +56,12 @@ describe("SourcesConnectOnboarding", () => {
       />
     );
 
-    expect(html).toContain("Connect live harnesses");
-    expect(html).toContain("Wire local harnesses for live capture");
+    expect(html).toContain("Capture local session history");
+    expect(html).toContain("Find local harnesses and their history");
     expect(html).toContain("Discover");
     expect(html).toContain("Enable");
-    expect(html).not.toContain("Import jobs");
+    expect(html).toContain("Import history");
+    expect(html).toContain("Reconcile");
     expect(html).not.toContain("Set up sources");
     expect(html).not.toContain("Check local sources");
     expect(html).not.toContain("import selected session history");
@@ -91,7 +90,7 @@ describe("SourcesConnectOnboarding", () => {
       });
 
       expect(onDiscover).toHaveBeenCalledTimes(1);
-      expect(container.textContent).toContain("Wire local harnesses for live capture");
+      expect(container.textContent).toContain("Find local harnesses and their history");
 
       const continueButton = Array.from(container.querySelectorAll("button")).find(
         (button) => button.textContent === "Continue"
@@ -104,7 +103,7 @@ describe("SourcesConnectOnboarding", () => {
       expect(container.textContent).toContain("Select found harnesses");
       expect(container.textContent).toContain("Codex");
       expect(container.textContent).toContain("Claude Code");
-      expect(container.textContent).not.toContain("Import jobs");
+      expect(container.textContent).toContain("Import history");
 
       const checkboxes = Array.from(container.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[];
       expect(checkboxes).toHaveLength(2);
@@ -113,6 +112,181 @@ describe("SourcesConnectOnboarding", () => {
       await act(async () => root?.unmount());
       container.remove();
     }
+  });
+
+  test("defaults history capture to Everything and stays open on durable progress", async () => {
+    const onImportHistory = vi.fn(async () => ({
+      jobs: [
+        {
+          importJobId: "job-transcript",
+          importKind: "transcript",
+          sourceId: "codex-sessions",
+          status: "queued"
+        }
+      ]
+    }));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    let root: Root | undefined;
+
+    try {
+      root = createRoot(container);
+      await act(async () => {
+        root?.render(
+          <SourcesConnectOnboarding
+            open
+            snapshot={sampleSnapshot()}
+            busy={false}
+            imports={[]}
+            onClose={noop}
+            onSkip={noop}
+            onDiscover={noop}
+            onEnable={noop}
+            onImportHistory={onImportHistory}
+          />
+        );
+      });
+
+      for (const label of ["Continue", "Continue", "Enable selected", "Continue"]) {
+        const button = Array.from(container.querySelectorAll("button")).find((candidate) => candidate.textContent === label);
+        expect(button, label).toBeTruthy();
+        await act(async () => {
+          button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+          await Promise.resolve();
+        });
+      }
+
+      expect(container.textContent).toContain("Import local history");
+      const everything = container.querySelector<HTMLInputElement>('input[value="everything"]');
+      expect(everything?.checked).toBe(true);
+      const start = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Start history import");
+      await act(async () => {
+        start?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(onImportHistory).toHaveBeenCalledWith(expect.objectContaining({
+        importMetadata: true,
+        importScope: { includeChangedSinceCursor: true, mode: "transcript_full" },
+        runtimes: ["codex", "claude_code"]
+      }));
+      expect(container.textContent).toContain("Import and reconciliation progress");
+      expect(container.querySelector(".sources-onboarding-modal")).not.toBeNull();
+    } finally {
+      await act(async () => root?.unmount());
+      container.remove();
+    }
+  });
+
+  test("reopens directly on durable reconciliation progress after an app restart", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<SourcesConnectOnboarding
+        open
+        snapshot={sampleSnapshot()}
+        busy={false}
+        imports={[
+          {
+            importJobId: "job-resume",
+            importKind: "transcript",
+            sourceId: "codex-sessions",
+            status: "running",
+            discoveredCount: 1_570,
+            processedCount: 400,
+            importedCount: 400,
+            queuedCount: 1_170,
+            failureCount: 0,
+            totalWorkUnits: 1_570,
+            completedWorkUnits: 400,
+            failedWorkUnits: 0,
+            skippedWorkUnits: 0,
+            scope: { includeChangedSinceCursor: true, mode: "transcript_full" },
+            updatedAt: "2026-07-10T00:00:00.000Z"
+          }
+        ]}
+        onClose={noop}
+        onSkip={noop}
+        onDiscover={noop}
+        onEnable={noop}
+      />);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Import and reconciliation progress");
+    expect(container.textContent).toContain("1170");
+    expect(container.textContent).toContain("running");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("offers Import remaining after a bounded recent import defers units", async () => {
+    const onImportHistory = vi.fn(async () => ({
+      jobs: [{ importJobId: "job-full", importKind: "transcript", sourceId: "codex-sessions", status: "queued" }]
+    }));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<SourcesConnectOnboarding
+        open
+        snapshot={sampleSnapshot()}
+        imports={[{
+          importJobId: "job-recent",
+          importKind: "transcript",
+          sourceId: "codex-sessions",
+          status: "succeeded",
+          discoveredCount: 500,
+          importedCount: 500,
+          queuedCount: 0,
+          failureCount: 0,
+          skippedWorkUnits: 1_070,
+          scope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+          completionReport: {
+            importJobId: "job-recent",
+            runtime: "codex",
+            status: "succeeded",
+            generatedAt: "2026-07-10T00:00:00.000Z",
+            sessionsDiscovered: 500,
+            sessionsCreated: 500,
+            sessionsUpdated: 0,
+            transcriptsImported: 500,
+            recordsImported: 500,
+            recordsSkipped: 1_070,
+            recordsFailed: 0,
+            logbookSearchableSessions: 0,
+            dossierReadySessions: 500,
+            enrichedSessions: 0,
+            mcpVisibleSessions: 500,
+            failedUnits: 0,
+            skippedUnits: 1_070,
+            nextActions: ["import_full_archive"]
+          },
+          updatedAt: "2026-07-10T00:00:00.000Z"
+        }]}
+        onClose={noop}
+        onSkip={noop}
+        onDiscover={noop}
+        onEnable={noop}
+        onImportHistory={onImportHistory}
+      />);
+      await Promise.resolve();
+    });
+
+    const importRemaining = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Import remaining");
+    expect(importRemaining).toBeTruthy();
+    await act(async () => {
+      importRemaining?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(onImportHistory).toHaveBeenCalledWith(expect.objectContaining({
+      importScope: { includeChangedSinceCursor: true, mode: "transcript_full" },
+      queueEnrichment: false,
+      runtimes: ["codex"]
+    }));
+    await act(async () => root.unmount());
+    container.remove();
   });
 });
 
@@ -138,14 +312,19 @@ function sampleSnapshot(): HarnessConnectorsSnapshotDto {
         live: "needs_action",
         actionRequired: "trust_hooks",
         actionMessage: "Trust hooks in Codex (/hooks) after install.",
-        supportsActions: true
+        supportsActions: true,
+        historyFound: true,
+        historySessionCount: 1_568,
+        historySourceUnitCount: 1_570
       },
       {
         runtime: "claude_code",
         label: "Claude Code",
         presence: "found",
         live: "not_installed",
-        supportsActions: true
+        supportsActions: true,
+        historyFound: true,
+        historySessionCount: 18
       },
       {
         runtime: "cursor",

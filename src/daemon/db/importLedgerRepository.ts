@@ -252,6 +252,19 @@ export function listImportWorkUnits(db: MastheadDatabase, options: ListImportWor
   return rows.map(workUnitFromRow);
 }
 
+export function listAllImportWorkUnits(
+  db: MastheadDatabase,
+  options: Omit<ListImportWorkUnitsOptions, "limit" | "offset"> = {}
+): ImportWorkUnitDto[] {
+  const pageSize = 10_000;
+  const units: ImportWorkUnitDto[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = listImportWorkUnits(db, { ...options, limit: pageSize, offset });
+    units.push(...page);
+    if (page.length < pageSize) return units;
+  }
+}
+
 export function recordImportFailureGroup(
   db: MastheadDatabase,
   input: {

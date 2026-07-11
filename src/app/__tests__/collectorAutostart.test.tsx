@@ -12,6 +12,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   delete window.mastheadDesktop;
+  window.localStorage.setItem(mastheadOnboardingDismissedStorageKey, "1");
 });
 
 describe("collector autostart", () => {
@@ -93,8 +94,8 @@ describe("collector autostart", () => {
       await waitFor(() => container.querySelector(".sources-onboarding-modal") !== null);
     });
 
-    expect(container.textContent).toContain("Sources connect");
-    expect(container.textContent).toContain("Connect live harnesses");
+    expect(container.textContent).toContain("First-run setup");
+    expect(container.textContent).toContain("Capture local session history");
     expect(container.textContent).not.toContain("ADAPTERS");
     expect(container.textContent).not.toContain("Import data");
     expect(connectorFetch.requests).toContainEqual({ method: "GET", pathname: "/sources/connectors" });

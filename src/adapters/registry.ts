@@ -7,9 +7,11 @@ import { hermesAdapter } from "./hermes/adapter.ts";
 import { piAdapter } from "./pi/adapter.ts";
 import { ompAdapter } from "./omp/adapter.ts";
 import { createDetectorAdapter } from "./generic/detectorAdapter.ts";
+import { codexAdapter } from "./codex/adapter.ts";
 import { canImportHarness, scanTargetHarnesses } from "./harnessCatalog.ts";
 
 export const sessionAdapters: SessionAdapter[] = [
+  codexAdapter,
   cursorAdapter,
   claudeCodeAdapter,
   opencodeAdapter,

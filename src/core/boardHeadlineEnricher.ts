@@ -6,7 +6,7 @@ import {
 } from "./boardHeadlineFrame.ts";
 import type { BoardHeadlineInput } from "./boardHeadlineInput.ts";
 import { boardHeadlineRefreshKey } from "./boardHeadlineRefreshKey.ts";
-import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView, buildWaitingForTranscriptBoardHeadlineView } from "./offlineBoardHeadline.ts";
+import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView } from "./offlineBoardHeadline.ts";
 import {
   rewriteBoardHeadlineFrameWithOpenAI,
   type BoardHeadlineFrameApiStyle,
@@ -193,7 +193,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       const showPendingHeadline = shouldShowPendingHeadlineForCard(card);
       if (!key) {
         if (showPendingHeadline) {
-          overlays.set(card.sessionId, retained ?? buildWaitingForTranscriptBoardHeadlineView(input));
+          overlays.set(card.sessionId, retained ?? buildOfflineBoardHeadlineView(input));
           refreshOverlays.set(card.sessionId, {
             provider: provider.provider,
             model: provider.model,

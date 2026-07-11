@@ -16,7 +16,7 @@ describe("product navigation", () => {
     expect(html).not.toContain("href=\"#");
     expect(html).not.toContain("Usage");
     expect(html).not.toContain("Agent Access");
-    expect(html).toContain("Knowledge flow");
+    expect(html).toContain('aria-label="Knowledge flow"');
     expect(html).not.toContain("#agent-access");
     expect(html).not.toContain("Performance");
     expect(html).not.toContain("Models");

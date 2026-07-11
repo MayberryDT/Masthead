@@ -102,21 +102,23 @@ is a cheap readiness signal.
 _Avoid_: Transcript import, transcript sync
 
 **Transcript import**:
-An explicit Workbench action that reads transcript content into Masthead-owned data. It requires
-user intent or a user-directed agent command because it can be resource-heavy and privacy-sensitive.
+An explicit Workbench action that reads supported local harness history into Masthead-owned data.
+User intent may be expressed by starting Everything or a recent range in first-run; that action
+automatically records the necessary source-scoped import policy and does not require a second
+privacy prompt.
 _Avoid_: Transcript check, background sync
 
 **Source-scoped transcript permission**:
-Permission to import transcript content from a specific source or explicitly selected source group.
-It is narrower than global or runtime-wide approval and must be respected by both user-facing
-Workbench actions and agent-facing tools.
-_Avoid_: Global transcript approval, runtime-wide approval
+Legacy name for the persisted **source-scoped transcript policy** that authorizes a selected local
+history source or source group. Explicitly starting full or recent history import records it
+automatically; it is an implementation guardrail, not a user-facing privacy ceremony.
+_Avoid_: Permission prompt, global transcript approval, runtime-wide approval
 
 **Sources**:
-The harness capture and permissions surface. Sources owns known harnesses, capture or hook
-configuration, source health, readable paths, and source-scoped transcript permissions. It does not
-own per-session transcript import work, Workbench queue state, enrichment, Logbook publication, or
-import job review as the primary workflow.
+The harness live-connection surface. Sources owns known harnesses, capture or hook configuration,
+source health, and readable paths. The app-level clean-install coordinator may begin there and then
+hand history intake to Workbench, but the persistent Sources surface does not own per-session import
+work, queue state, enrichment, Logbook publication, or import job review.
 _Avoid_: Import workflow, Workbench queue, enrichment surface
 
 **Capture quality precheck**:

@@ -75,6 +75,24 @@ describe("useSourcesConnectorsController", () => {
     expect(latest().onboardingOpen).toBe(true);
   });
 
+  test("opens first-run onboarding when found connectors are already ready but onboarding is incomplete", async () => {
+    vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 1, found: true, live: "ready" }));
+
+    await renderHarness({ activeProjectionUrl: baseUrl });
+    await waitFor(() => latest()?.snapshot !== undefined);
+
+    expect(latest().onboardingOpen).toBe(true);
+  });
+
+  test("opens first-run onboarding even when no harness has been found yet", async () => {
+    vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 0, found: false }));
+
+    await renderHarness({ activeProjectionUrl: baseUrl });
+    await waitFor(() => latest()?.snapshot !== undefined);
+
+    expect(latest().onboardingOpen).toBe(true);
+  });
+
   test("does not auto-open onboarding when preference is dismissed", async () => {
     window.localStorage.setItem(mastheadOnboardingDismissedStorageKey, "1");
     vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 0, found: true }));

@@ -41,7 +41,7 @@ export type UseSourcesConnectorsControllerResult = {
 };
 
 function shouldOpenFirstRunOnboarding(snapshot: HarnessConnectorsSnapshotDto): boolean {
-  return snapshot.summary.ready === 0 && snapshot.connectors.some((connector) => connector.presence === "found");
+  return snapshot.connectors.length > 0;
 }
 
 function errorMessage(error: unknown): string {
@@ -88,8 +88,6 @@ export function useSourcesConnectorsController(
     snapshotRef.current = next;
     if (!readOnboardingDismissed() && shouldOpenFirstRunOnboarding(next)) {
       setAutoOnboardingEligible(true);
-    } else if (next.summary.ready > 0) {
-      setAutoOnboardingEligible(false);
     }
   }, []);
 

@@ -128,6 +128,25 @@ export async function discoverHarnessConnectors(
   return listHarnessConnectors(db, config);
 }
 
+export function withHistoryDiscovery(
+  snapshot: HarnessConnectorsSnapshotDto,
+  adapters: Array<{ runtime: string; discoveredSessions: number; discoveredSourceUnits?: number }>
+): HarnessConnectorsSnapshotDto {
+  const countByRuntime = new Map(adapters.map((adapter) => [adapter.runtime, Math.max(0, adapter.discoveredSessions)]));
+  const unitCountByRuntime = new Map(adapters.map((adapter) => [adapter.runtime, Math.max(0, adapter.discoveredSourceUnits ?? adapter.discoveredSessions)]));
+  const connectors = snapshot.connectors.map((connector) => {
+    const historySessionCount = countByRuntime.get(connector.runtime) ?? 0;
+    return {
+      ...connector,
+      historyFound: historySessionCount > 0,
+      historySessionCount,
+      historySourceUnitCount: unitCountByRuntime.get(connector.runtime) ?? 0,
+      presence: historySessionCount > 0 ? ("found" as const) : connector.presence
+    };
+  });
+  return { ...snapshot, connectors, summary: summarizeConnectors(connectors) };
+}
+
 /** Latest live_state_reports.observed_at per runtime (excluding synthetic test sessions). */
 export function latestLiveEventAtByRuntime(db: MastheadDatabase): Map<string, string> {
   const rows = db

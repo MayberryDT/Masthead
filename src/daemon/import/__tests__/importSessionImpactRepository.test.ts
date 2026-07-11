@@ -53,8 +53,10 @@ describe("import session impact repository", () => {
 
     expect(summarizeImportSessionImpacts(db, "import-1")).toEqual({
       enrichedSessions: 1,
+      sessionsAffected: 1,
       sessionsCreated: 1,
       sessionsUpdated: 0,
+      transcriptSessions: 1,
       transcriptsAdded: 4
     });
   });

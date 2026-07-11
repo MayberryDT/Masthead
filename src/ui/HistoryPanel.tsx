@@ -186,6 +186,7 @@ export function HistoryPanel({
   const sourceSummary = sourceImportSummary(sources, adapters);
   const activeFilters = activeFilterFacets(query, filters, onQueryChange, onFilterChange);
   const hasActiveFilters = activeFilters.length > 0;
+  const hasLogbookMeta = hasActiveFilters || Boolean(refreshError && tableSessions.length > 0);
   const isFirstRunLoading = isLoading && tableSessions.length === 0 && !errorState;
   const isPageLoading = (isLoading || isOptimisticPaging) && tableSessions.length > 0 && !errorState;
   useEffect(() => {
@@ -224,7 +225,7 @@ export function HistoryPanel({
     .join(" ");
 
   return (
-    <section id="history" className="history-panel logbook-panel surface-panel" aria-label="Logbook">
+    <section id="history" className={`history-panel logbook-panel surface-panel${hasLogbookMeta ? " has-meta" : ""}`} aria-label="Logbook">
 
       <LogbookToolbar
         filters={filters}
@@ -235,9 +236,12 @@ export function HistoryPanel({
         onQueryChange={onQueryChange}
         onSortChange={onSortChange ?? (() => undefined)}
       />
-      <LogbookFacets facets={activeFilters} />
-
-      {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
+      {hasLogbookMeta ? (
+        <div className="logbook-meta">
+          <LogbookFacets facets={activeFilters} />
+          {refreshError && tableSessions.length > 0 ? <p className="toolbar-result surface-status">Logbook refresh failed: {refreshError}</p> : null}
+        </div>
+      ) : null}
 
       {errorState ? (
         <CanonicalErrorPanel message={errorState.message} onRetry={onRetry} />
@@ -703,4 +707,3 @@ function historyHeadline(session: HistorySession): string {
 function formatCount(value: number): string {
   return new Intl.NumberFormat().format(value);
 }
-

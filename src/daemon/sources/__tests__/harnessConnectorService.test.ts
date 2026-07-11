@@ -15,7 +15,8 @@ import {
 import {
   discoverHarnessConnectors,
   latestLiveEventAtByRuntime,
-  listHarnessConnectors
+  listHarnessConnectors,
+  withHistoryDiscovery
 } from "../harnessConnectorService.ts";
 
 const tempDirs: string[] = [];
@@ -34,6 +35,27 @@ afterEach(async () => {
 });
 
 describe("harnessConnectorService", () => {
+  test("merges full history discovery counts into the lightweight connector snapshot", async () => {
+    const { db, config } = await openTestFixture();
+    const snapshot = await listHarnessConnectors(db, config);
+
+    const merged = withHistoryDiscovery(snapshot, [
+      { discoveredSessions: 1_568, discoveredSourceUnits: 1_570, runtime: "codex" },
+      { discoveredSessions: 177, runtime: "hermes" }
+    ]);
+
+    expect(merged.connectors.find((connector) => connector.runtime === "codex")).toMatchObject({
+      historyFound: true,
+      historySessionCount: 1_568,
+      historySourceUnitCount: 1_570
+    });
+    expect(merged.connectors.find((connector) => connector.runtime === "hermes")).toMatchObject({
+      historyFound: true,
+      historySessionCount: 177
+    });
+    db.close();
+  });
+
   test("list returns all LIVE_CONNECTOR_RUNTIMES with summary counts", async () => {
     const { db, config } = await openTestFixture();
 

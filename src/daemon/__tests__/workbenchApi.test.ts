@@ -74,10 +74,9 @@ describe("workbench API", () => {
 
     const body = await getJson(baseUrl, "/workbench/sessions?limit=10");
 
-    expect(body).toMatchObject({
-      ok: true,
-      scope: "default",
-      sessions: [
+    expect(body).toMatchObject({ ok: true, scope: "default" });
+    expect(body.sessions).toEqual(
+      expect.arrayContaining([
         expect.objectContaining({
           activeClaim: {
             claimId: claim.claims[0].claimId,
@@ -89,10 +88,15 @@ describe("workbench API", () => {
           publicationStatus: "publish_path",
           sessionId: "session:queue",
           title: "Queued session"
+        }),
+        expect.objectContaining({
+          nextAction: "enrich",
+          publicationStatus: "published",
+          sessionId: "session:published"
         })
-      ]
-    });
-    expect(body.sessions).toHaveLength(1);
+      ])
+    );
+    expect(body.sessions).toHaveLength(2);
     expect(JSON.stringify(body)).not.toContain("session:not-added");
   });
 
@@ -283,7 +287,7 @@ describe("workbench API", () => {
 
     const queue = await getJson(baseUrl, "/workbench/sessions?limit=50");
     expect(queue.sessions.some((session: { sessionId: string }) => session.sessionId === "session:missing")).toBe(true);
-    expect(queue.sessions.some((session: { sessionId: string }) => session.sessionId === "session:published")).toBe(false);
+    expect(queue.sessions.some((session: { sessionId: string }) => session.sessionId === "session:published")).toBe(true);
   });
 
   test("POST claim and release round-trip on queue DTO", async () => {

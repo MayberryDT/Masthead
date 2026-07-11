@@ -57,6 +57,22 @@ function allow(...kinds: WorkbenchActionKind[]) {
 }
 
 describe("WorkbenchPanel", () => {
+  test("labels unchecked capture as awaiting transcript instead of a terminal exclusion", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session({ transcriptStatus: "unchecked" })]}
+        selectedSessionIds={new Set()}
+        canRun={allow()}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).toContain("awaiting transcript");
+  });
+
   test("ops toolbar exposes human actions without CLI recipes", () => {
     const publishReady = session({
       nextAction: "publish",

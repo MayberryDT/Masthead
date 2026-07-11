@@ -33,8 +33,7 @@ export type HarnessCatalogEntry = {
 };
 
 export const HARNESS_CATALOG: HarnessCatalogEntry[] = [
-  // Codex is live-capable (hooks + Workbench transcript path) but has no SessionAdapter bulk import.
-  // detector_only + scan_target: live watch only; do not claim transcript import maturity.
+  // Codex is live-capable and its rollout JSONL history is imported read-only.
   // Candidate paths stay narrow (sessions + hooks) so we do not deep-scan all of ~/.codex.
   // CODEX_HOME is the Codex install/config root; MASTHEAD_CODEX_HOME is user home (config), not here.
   {
@@ -46,15 +45,15 @@ export const HARNESS_CATALOG: HarnessCatalogEntry[] = [
     label: "Codex",
     localFirst: true,
     runtime: "codex",
-    runtimeStatus: "scan_target",
+    runtimeStatus: "import_adapter",
     sourceKinds: ["hook", "jsonl"],
-    supportLevel: "detector_only",
+    supportLevel: "active_transcript",
     supportsFileEffects: true,
     supportsLiveWatch: true,
     supportsMcpExposure: true,
-    supportsMetadataImport: false,
+    supportsMetadataImport: true,
     supportsTokenUsage: true,
-    supportsTranscriptImport: false,
+    supportsTranscriptImport: true,
     visibility: "onboarding"
   },
   active("cursor", "Cursor", ["Cursor Agent"], "Cursor local SQLite conversation and workspace history.", "active_transcript", ["sqlite"], [
@@ -184,4 +183,3 @@ function active(
     visibility: "onboarding"
   };
 }
-

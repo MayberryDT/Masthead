@@ -18,6 +18,7 @@ export async function runImportWorkUnit(input: {
   approvedSourceIds?: string[];
   indexSession?: (sessionId: string) => void;
   onSessionImported?: (sessionId: string) => void;
+  onSessionHydrated?: (sessionId: string) => void;
 }): Promise<{ imported: number; failed: number; processed: number; sessionIds: string[] }> {
   const now = input.now ?? (() => new Date().toISOString());
   const unit = getImportWorkUnit(input.db, input.workUnitId);
@@ -143,6 +144,7 @@ export async function runImportWorkUnit(input: {
       } else {
         indexCanonicalSessionSearch(input.db, sessionId);
       }
+      input.onSessionHydrated?.(sessionId);
     }
 
     updateImportWorkUnit(input.db, unit.workUnitId, {

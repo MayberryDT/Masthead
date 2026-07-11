@@ -429,7 +429,7 @@ describe("board headline enricher", () => {
     expect(onFrameApplied).toHaveBeenNthCalledWith(2, expect.objectContaining({ sessionId: "session-2", frame }));
   });
 
-  test("does not call OpenAI when configured LLM mode has no transcript evidence", async () => {
+  test("uses useful deterministic copy when configured LLM mode has no transcript evidence", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     const enricher = createBoardHeadlineEnricher({ enabled: true, apiKey: "key", fetchImpl });
 
@@ -448,10 +448,11 @@ describe("board headline enricher", () => {
 
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(result.cards[0]?.headline).toMatchObject({
-      headline: "Waiting for transcript...",
-      source: "pending",
-      status: "pending"
+      source: "offline",
+      status: "ready"
     });
+    expect(result.cards[0]?.headline.headline).not.toMatch(/waiting for transcript/i);
+    expect(result.cards[0]?.headline.headline).toMatch(/Masthead|Board headline work|in progress|file changes/i);
     expect(result.cards[0]?.headlineRefresh).toMatchObject({
       provider: "openai",
       status: "pending"
@@ -488,10 +489,10 @@ describe("board headline enricher", () => {
 
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(result.cards[0]?.headline).toMatchObject({
-      headline: "Waiting for transcript...",
-      source: "pending",
-      status: "pending"
+      source: "offline",
+      status: "ready"
     });
+    expect(result.cards[0]?.headline.headline).not.toMatch(/waiting for transcript/i);
   });
 
   test("does not leave ended cards waiting for transcript evidence", async () => {

@@ -35,13 +35,7 @@ describe("Settings operational states", () => {
   }
 
   async function selectCategory(label: string) {
-    const row = [...(container?.querySelectorAll<HTMLElement>(".settings-spine-row") ?? [])]
-      .find((candidate) => candidate.querySelector(".settings-spine-copy strong")?.textContent === label);
-    const button = row?.querySelector<HTMLButtonElement>(".settings-spine-control > .app-button");
-    expect(button).toBeDefined();
-    await act(async () => {
-      button?.click();
-    });
+    expect(container?.querySelector(".settings-spine-sections")?.textContent).toContain(label);
   }
 
   test("keeps read-only state out of the Settings chrome while disabling destructive actions", async () => {
@@ -345,7 +339,7 @@ env = {"MASTHEAD_DB_PATH":"/tmp/masthead.sqlite"}`);
 
     expect(rowNamed("MCP server")?.querySelector(".settings-inline-feedback.success")).not.toBeNull();
     expect(rowNamed("MCP server")?.querySelector(".settings-inline-feedback.success")?.getAttribute("aria-live")).toBe("polite");
-    expect(container?.querySelectorAll(".settings-row")).toHaveLength(3);
+    expect(container?.querySelector("#settings-agent-access")?.closest(".settings-section")?.querySelectorAll(".settings-row")).toHaveLength(3);
   });
 
   test("replaces a stale MCP load error with the latest connection-test failure", async () => {

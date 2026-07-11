@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { canScanHarness, harnessForRuntime, type HarnessCatalogEntry } from "./harnessCatalog.ts";
 import type { AdapterPathCandidate } from "./pathTypes.ts";
@@ -12,7 +13,7 @@ export function catalogPathCandidatesForRuntime(runtime: RuntimeKind, context: D
 export function catalogPathCandidatesForHarness(harness: HarnessCatalogEntry, context: DiscoveryContext): AdapterPathCandidate[] {
   const paths = new Set<string>();
   for (const envName of harness.envOverrides) {
-    const value = process.env[envName]?.trim();
+    const value = context.homeDir === homedir() ? process.env[envName]?.trim() : undefined;
     const expanded = value ? expandCatalogPath(value, context) : undefined;
     if (expanded) paths.add(expanded);
   }

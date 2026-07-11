@@ -147,7 +147,7 @@ describe("ingest server live projection", () => {
     expect(serialized).not.toContain("OPENAI_API_KEY");
   });
 
-  test("returns pending Board headline state when the LLM provider is configured but transcript evidence is absent", async () => {
+  test("returns useful deterministic Board copy while transcript evidence is absent", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-ingest-server-"));
     tempDirs.push(tempDir);
     const server = await startServer(join(tempDir, "events.ndjson"), {
@@ -164,15 +164,15 @@ describe("ingest server live projection", () => {
     expect(card).toMatchObject({
       sessionId: "server-live",
       headline: {
-        headline: "Waiting for transcript...",
-        source: "pending",
-        status: "pending"
+        source: "offline",
+        status: "ready"
       },
       headlineRefresh: {
         status: "pending",
         failureMessage: expect.stringMatching(/transcript evidence/i)
       }
     });
+    expect(card.headline.headline).not.toMatch(/waiting for transcript/i);
     expect(card.headlineInput).toBeDefined();
   });
 

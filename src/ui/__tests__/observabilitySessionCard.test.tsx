@@ -297,6 +297,22 @@ describe("observability session card", () => {
     expect(html).not.toContain("019f0626-012e-7251-aaa6-e5aedba59bf3 session");
   });
 
+  test("does not surface an opaque session id when transcript copy is weak", () => {
+    const html = renderToStaticMarkup(
+      <SessionCard
+        session={session({
+          headline: headlineView("Codex hook event: quiet after recent file changes.", { source: "offline" }),
+          title: "019f0626-012e-7251-aaa6-e5aedba59bf3 session",
+          workContext: { label: "Session work", confidence: "generic", pathClusters: [], sourceSignals: [] }
+        })}
+      />
+    );
+
+    expect(html).toContain("Masthead · OpenCode");
+    expect(html).not.toContain("019f0626-012e-7251-aaa6-e5aedba59bf3 session");
+    expect(html).not.toContain("Codex hook event");
+  });
+
   test("renders blocked badge without redundant blocked fields", () => {
     const html = renderToStaticMarkup(
       <SessionCard
@@ -630,6 +646,63 @@ describe("observability session card", () => {
       await act(async () => root.unmount());
       HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
       HTMLElement.prototype.animate = originalAnimate;
+    }
+  });
+
+  test("keeps the disappearing bottom row visible without stretching compact grid rows", async () => {
+    vi.useFakeTimers();
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalAnimate = HTMLElement.prototype.animate;
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const cards = Array.from({ length: 7 }, (_, index) => boardSession({ sessionId: `session-${index + 1}` }));
+
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const sessionId = this.dataset.sessionId;
+      if (!sessionId) return originalGetBoundingClientRect.call(this);
+      const index = Number.parseInt(sessionId.replace("session-", ""), 10) - 1;
+      const isCompact = this.parentElement?.classList.contains("compact") === true;
+      const columns = isCompact ? 4 : 3;
+      const width = isCompact ? 240 : 320;
+      const height = isCompact ? 178 : 218;
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      return testRect(column * (width + 12), row * (height + 12), width, height);
+    };
+    HTMLElement.prototype.animate = vi.fn(() => ({ addEventListener: vi.fn() }) as unknown as Animation);
+
+    try {
+      await act(async () => {
+        root.render(<SessionBoard cards={cards} variant="observability" density="comfortable" />);
+      });
+      await act(async () => {
+        root.render(<SessionBoard cards={cards} variant="observability" density="compact" />);
+      });
+
+      const grid = container.querySelector<HTMLElement>(".observability-card-grid");
+      expect(grid?.style.minHeight).toBe("678px");
+      expect(grid?.style.alignContent).toBe("start");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(
+          SESSION_CARD_LAYOUT_COMPACT_PHASE_MS +
+            SESSION_CARD_LAYOUT_DURATION_MS +
+            (cards.length - 1) * SESSION_CARD_LAYOUT_STAGGER_MS
+        );
+      });
+      expect(grid?.style.minHeight).toBe("368px");
+      expect(grid?.style.transition).toContain(`min-height ${SESSION_CARD_LAYOUT_EXPAND_DURATION_MS}ms`);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_CARD_LAYOUT_EXPAND_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS);
+      });
+      expect(grid?.style.minHeight).toBe("");
+      expect(grid?.style.alignContent).toBe("");
+    } finally {
+      await act(async () => root.unmount());
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      HTMLElement.prototype.animate = originalAnimate;
+      vi.useRealTimers();
     }
   });
 

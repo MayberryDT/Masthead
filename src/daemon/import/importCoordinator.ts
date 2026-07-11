@@ -6,7 +6,7 @@ import {
   updateImportJob
 } from "../db/importJobRepository.ts";
 import { deriveImportVisibilityState } from "../../shared/sourceImport.ts";
-import type { ImportStage } from "../../shared/sourceImport.ts";
+import type { ImportScopeDto, ImportStage } from "../../shared/sourceImport.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 import { recordRuntimeDiagnostic } from "../diagnostics.ts";
 
@@ -28,6 +28,7 @@ export type ImportProgressUpdate = Partial<ImportWorkResult> & {
   completedWorkUnits?: number;
   failedWorkUnits?: number;
   skippedWorkUnits?: number;
+  scope?: ImportScopeDto;
 };
 
 export type ImportCancellationToken = {
@@ -88,13 +89,42 @@ export function queueImportJob(
     sourceId: input.sourceId,
     updatedAt: now()
   });
-  const token: MutableImportCancellationToken = { cancelled: false, importJobId: job.importJobId };
-  activeImportJobs.set(job.importJobId, { token });
-  pendingImportJobs.push({ db, importJobId: job.importJobId, now, token, worker });
+  enqueueImportJob(db, job.importJobId, now, worker);
+  return job;
+}
+
+export function resumeImportJob(
+  db: MastheadDatabase,
+  importJobId: string,
+  worker: (controls: ImportJobControls) => Promise<ImportWorkResult>,
+  now: () => string = () => new Date().toISOString()
+): ImportJobDto {
+  const job = getImportJob(db, importJobId);
+  if (!job) throw new Error(`Import job not found: ${importJobId}`);
+  if (activeImportJobs.has(importJobId)) return job;
+  const resumed = updateImportJob(db, importJobId, {
+    currentPath: null,
+    failureMessage: null,
+    finishedAt: null,
+    heartbeatAt: now(),
+    status: "queued",
+    updatedAt: now()
+  });
+  enqueueImportJob(db, importJobId, now, worker);
+  return resumed;
+}
+
+function enqueueImportJob(
+  db: MastheadDatabase,
+  importJobId: string,
+  now: () => string,
+  worker: (controls: ImportJobControls) => Promise<ImportWorkResult>
+): void {
+  const token: MutableImportCancellationToken = { cancelled: false, importJobId };
+  activeImportJobs.set(importJobId, { token });
+  pendingImportJobs.push({ db, importJobId, now, token, worker });
   logImportBacklogIfNeeded();
   scheduleImportDrain();
-
-  return job;
 }
 
 export function cancelImportJob(db: MastheadDatabase, importJobId: string, now = () => new Date().toISOString()): ImportJobDto {
@@ -121,19 +151,36 @@ export function getImportQueueState(): { active: number; maxActive: number; pend
 }
 
 export function markInterruptedImportJobs(db: MastheadDatabase, now = () => new Date().toISOString()): number {
+  return recoverInterruptedImportJobs(db, now).length;
+}
+
+export function recoverInterruptedImportJobs(db: MastheadDatabase, now = () => new Date().toISOString()): string[] {
+  const rows = db
+    .prepare("SELECT import_job_id AS importJobId FROM import_jobs WHERE status IN ('queued', 'running', 'cancelling') ORDER BY updated_at, import_job_id")
+    .all() as Array<{ importJobId: string }>;
+  if (rows.length === 0) return [];
   const interrupted = db
     .prepare("SELECT COUNT(*) AS count FROM import_jobs WHERE status IN ('queued', 'running', 'cancelling')")
     .get() as { count: number };
-  if (interrupted.count === 0) return 0;
   const interruptedAt = now();
 
   db.prepare(
+    `UPDATE import_work_units
+     SET status = 'queued',
+       status_reason = 'Recovered after daemon restart.',
+       heartbeat_at = NULL,
+       finished_at = NULL,
+       failure_group_id = NULL
+     WHERE import_job_id IN (SELECT import_job_id FROM import_jobs WHERE status IN ('queued', 'running', 'cancelling'))
+       AND status IN ('running', 'failed')`
+  ).run();
+  db.prepare(
     `UPDATE import_jobs
-    SET status = 'failed',
-      failure_count = CASE WHEN failure_count > 0 THEN failure_count ELSE 1 END,
+    SET status = 'queued',
       current_path = NULL,
-      failure_message = COALESCE(NULLIF(failure_message, ''), 'Import was interrupted by a previous daemon shutdown. Re-run the import to continue.'),
-      finished_at = ?,
+      failure_message = NULL,
+      finished_at = NULL,
+      heartbeat_at = ?,
       updated_at = ?
     WHERE status IN ('queued', 'running', 'cancelling')`
   ).run(interruptedAt, interruptedAt);
@@ -141,10 +188,10 @@ export function markInterruptedImportJobs(db: MastheadDatabase, now = () => new 
   recordRuntimeDiagnostic({
     details: { interruptedJobs: interrupted.count },
     kind: "import_jobs_interrupted",
-    message: `Marked ${interrupted.count} interrupted import jobs from a previous daemon run`,
-    severity: "warning"
+    message: `Recovered ${interrupted.count} interrupted import jobs from a previous daemon run`,
+    severity: "info"
   });
-  return interrupted.count;
+  return rows.map((row) => row.importJobId);
 }
 
 function scheduleImportDrain(): void {
@@ -250,7 +297,12 @@ async function runQueuedImportJob(
       finishedAt: now(),
       heartbeatAt: now(),
       stage: "completion",
-      status: result.failureCount > 0 && result.importedCount > 0 ? "succeeded_with_issues" : "succeeded",
+      status:
+        result.failureCount > 0
+          ? result.importedCount > 0
+            ? "succeeded_with_issues"
+            : "failed"
+          : "succeeded",
       updatedAt: now()
     });
     recordRuntimeDiagnostic({

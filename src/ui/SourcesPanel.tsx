@@ -48,8 +48,8 @@ type Props = {
   connectorsSnapshot?: HarnessConnectorsSnapshotDto;
   selectedConnectorRuntime?: string;
   onSelectConnectorRuntime?: (runtime: string | undefined) => void;
-  onDiscoverConnectors?: () => void;
-  onEnableConnector?: (runtime: string) => void;
+  onDiscoverConnectors?: () => Promise<void> | void;
+  onEnableConnector?: (runtime: string) => Promise<void> | void;
   onEnableAllDetectedConnectors?: () => void;
   onTestConnector?: (runtime: string) => void;
   onUninstallConnector?: (runtime: string) => void;
@@ -222,14 +222,18 @@ function SourcesPanelV2(props: Props) {
         open={Boolean(props.onboardingOpen)}
         snapshot={connectorsSnapshot}
         busy={busy || readOnly}
+        imports={props.imports}
         onClose={() => props.onCloseOnboarding?.()}
         onSkip={() => props.onSkipOnboarding?.()}
         onDiscover={async () => {
-          props.onDiscoverConnectors?.();
+          await props.onDiscoverConnectors?.();
         }}
         onEnable={async (runtime) => {
-          props.onEnableConnector?.(runtime);
+          await props.onEnableConnector?.(runtime);
         }}
+        onImportHistory={props.onRunSetup}
+        onPollImports={props.onPollImports}
+        onRetryImport={props.onRetryImport}
         onConfirmActivation={
           props.onConfirmConnectorActivation
             ? async (runtime) => {

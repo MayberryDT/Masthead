@@ -502,7 +502,7 @@ export function WorkbenchPanel({
                           <StatusToken value={session.nextAction} tone="next" />
                         </td>
                         <td>
-                          <StatusToken value={session.transcriptStatus} />
+                          <StatusToken value={session.transcriptStatus} label={transcriptStatusLabel(session.transcriptStatus)} />
                         </td>
                         <td>
                           <StatusToken value={session.qualityStatus} />
@@ -603,13 +603,22 @@ export function WorkbenchPanel({
   );
 }
 
-function StatusToken({ value, tone }: { value: string; tone?: "next" }) {
+function StatusToken({ value, tone, label }: { value: string; tone?: "next"; label?: string }) {
   const safeValue = sanitizeWorkbenchVisibleText(value);
   return (
     <span className={`workbench-status-token is-${statusClass(value)} ${tone === "next" ? "is-next" : ""}`.trim()}>
-      {formatStatus(value, safeValue)}
+      {label ?? formatStatus(value, safeValue)}
     </span>
   );
+}
+
+function transcriptStatusLabel(value: string): string {
+  if (value === "unchecked") return "awaiting transcript";
+  if (value === "available") return "transcript available";
+  if (value === "imported") return "hydrated";
+  if (value === "missing") return "transcript unavailable";
+  if (value === "permission_needed") return "permission needed";
+  return value.replaceAll("_", " ");
 }
 
 function statusClass(value: string): string {

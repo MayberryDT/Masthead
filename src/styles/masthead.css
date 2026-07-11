@@ -4251,31 +4251,15 @@ body {
 
 .sidebar-knowledge-flow {
   display: block;
-  min-height: 180px;
+  min-height: 154px;
   color: var(--body);
   padding: 12px;
-}
-
-.sidebar-knowledge-flow-title {
-  display: flex;
-  min-height: 20px;
-  align-items: center;
-  margin: 0;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 7px;
-  color: var(--ash);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  line-height: 1.2;
-  text-transform: uppercase;
 }
 
 .sidebar-knowledge-spine {
   display: grid;
   gap: 0;
-  margin-top: 11px;
+  margin-top: 0;
 }
 
 .sidebar-knowledge-spine-row {
@@ -4314,8 +4298,9 @@ body {
 }
 
 .sidebar-knowledge-stage-name {
-  color: var(--mute);
-  font-size: 10px;
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 500;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
@@ -4333,7 +4318,7 @@ body {
   border-top: 1px solid var(--line);
   padding-top: 8px;
   color: var(--green);
-  font-size: 9px;
+  font-size: 10.5px;
   line-height: 1.4;
 }
 

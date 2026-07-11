@@ -11,7 +11,7 @@ import { AdvancedSettings } from "./settings/AdvancedSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { McpSettings } from "./settings/McpSettings";
 import type { SettingsFeedback } from "./settings/SettingsActionFeedback";
-import { SettingsSpineCard, type SettingsSpineDetail } from "./settings/SettingsSpineCard";
+import { SettingsSpineCard } from "./settings/SettingsSpineCard";
 import { StorageSettings } from "./settings/StorageSettings";
 import { AppButton } from "./primitives/AppButton";
 
@@ -89,7 +89,6 @@ export function OperationsPanel({
   readOnly = false,
   settingsState
 }: Props) {
-  const [activeDetail, setActiveDetail] = useState<SettingsSpineDetail>();
   const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
   const [localSettingsError, setLocalSettingsError] = useState<string>();
   const [localSettingsLoadState, setLocalSettingsLoadState] = useState<"loading" | "ready" | "error">(settingsState ? "ready" : "loading");
@@ -170,46 +169,38 @@ export function OperationsPanel({
       {showSettingsSections ? (
         <div className="settings-workspace">
           <SettingsSpineCard
-            activeDetail={activeDetail}
             motionDisabled={motionDisabled}
-            onDetailChange={setActiveDetail}
             onMotionDisabledChange={onMotionDisabledChange}
             onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange}
             sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled}
           >
-            {activeDetail === "data" ? (
-              <StorageSettings
-                busy={busy}
-                dataSummary={effectiveSummary}
-                onOpenDataDirectory={openDataDirectory}
-                onExport={onExportLocalData}
-                onRequestPrune={onRequestPruneLocalData}
-                exportFeedback={exportFeedback}
-                openDataDirectoryFeedback={openDataDirectoryFeedback}
-                rawCopiesFeedback={rawCopiesFeedback}
-                settings={effectiveSettings}
-                writeDisabled={writesDisabled}
-              />
-            ) : null}
-            {activeDetail === "agent-access" ? (
-              <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
-            ) : null}
-            {activeDetail === "advanced" ? <AdvancedSettings settings={effectiveSettings} /> : null}
-            {activeDetail === "danger" ? (
-              <DangerZone
-                busy={writesDisabled}
-                databaseId={effectiveSettings?.data.databaseId}
-                deletionScopeKind={deletionScopeKind}
-                deletionScopeTarget={deletionScopeTarget}
-                onDeletionScopeKindChange={onDeletionScopeKindChange}
-                onDeletionScopeTargetChange={onDeletionScopeTargetChange}
-                onRequestDeleteAll={onRequestDeleteLocalData}
-                onRequestScopedDelete={onRequestScopedDelete}
-                deleteAllFeedback={deleteAllFeedback}
-                scopedDeleteFeedback={scopedDeleteFeedback}
-                targets={effectiveSettings?.deletionTargets}
-              />
-            ) : null}
+            <StorageSettings
+              busy={busy}
+              dataSummary={effectiveSummary}
+              onOpenDataDirectory={openDataDirectory}
+              onExport={onExportLocalData}
+              onRequestPrune={onRequestPruneLocalData}
+              exportFeedback={exportFeedback}
+              openDataDirectoryFeedback={openDataDirectoryFeedback}
+              rawCopiesFeedback={rawCopiesFeedback}
+              settings={effectiveSettings}
+              writeDisabled={writesDisabled}
+            />
+            <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
+            <AdvancedSettings settings={effectiveSettings} />
+            <DangerZone
+              busy={writesDisabled}
+              databaseId={effectiveSettings?.data.databaseId}
+              deletionScopeKind={deletionScopeKind}
+              deletionScopeTarget={deletionScopeTarget}
+              onDeletionScopeKindChange={onDeletionScopeKindChange}
+              onDeletionScopeTargetChange={onDeletionScopeTargetChange}
+              onRequestDeleteAll={onRequestDeleteLocalData}
+              onRequestScopedDelete={onRequestScopedDelete}
+              deleteAllFeedback={deleteAllFeedback}
+              scopedDeleteFeedback={scopedDeleteFeedback}
+              targets={effectiveSettings?.deletionTargets}
+            />
           </SettingsSpineCard>
         </div>
       ) : null}

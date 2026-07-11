@@ -32,6 +32,7 @@ export type HarnessConnectorDto = {
   supportsActions: boolean;
   historyFound?: boolean;
   historySessionCount?: number;
+  historySourceUnitCount?: number;
 };
 
 export type HarnessConnectorsSnapshotDto = {

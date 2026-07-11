@@ -1,14 +1,26 @@
 .logbook-panel {
-  /* auto header slots (toolbar / facets / status) · content · footer — summary strip removed */
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  gap: 8px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0;
   height: 100%;
   min-height: 0;
   min-width: 0;
 }
 
-.logbook-toolbar {
+.history-panel.surface-panel.logbook-panel {
+  gap: 0;
+}
+
+.logbook-panel.has-meta {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.logbook-meta {
+  display: grid;
+  gap: 8px;
+}
+
+.logbook-panel > .logbook-toolbar {
   margin-block-end: 0;
 }
 
@@ -760,7 +772,6 @@
 }
 
 .logbook-footer {
-  grid-row: 5;
   align-self: stretch;
   justify-self: center;
   width: fit-content;
@@ -780,12 +791,10 @@
   min-height: 56px;
 }
 
-/* Content row always fills the flexible track (empty auto header rows collapse) */
 .logbook-panel > .logbook-table-wrap,
 .logbook-panel > .logbook-master-detail,
 .logbook-panel > .logbook-loading-state,
 .logbook-panel > .empty-session-state {
-  grid-row: 4;
   min-height: 0;
 }
 
@@ -1161,9 +1170,13 @@
 
 @media (max-width: 760px) {
   .logbook-panel {
-    grid-template-rows: auto auto auto minmax(220px, 1fr) auto;
+    grid-template-rows: auto minmax(220px, 1fr) auto;
     height: auto;
     min-height: 100%;
+  }
+
+  .logbook-panel.has-meta {
+    grid-template-rows: auto auto minmax(220px, 1fr) auto;
   }
 
   .logbook-table-wrap {

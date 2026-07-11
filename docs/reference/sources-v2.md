@@ -3,7 +3,9 @@
 **Status:** accepted product contract  
 **Decision record:** [ADR 0010](../adr/0010-sources-v2-live-connect-only.md)  
 **Design source:** `design.md` (Sources surface archetype)  
-**Supersedes for Sources UI:** import-centric framing in older Sources docs and first-run flows that center history connect / import jobs
+**Supersedes for the normal Sources UI:** import-centric framing in older Sources docs. The app-level
+first-run coordinator is a deliberate exception: after live setup it may hand off a one-time history
+import to Workbench and show that durable job through reconciliation.
 
 This document is the scope fence for Sources V2 implementation. If a Sources change does not serve this contract, it does not belong on Sources.
 
@@ -64,7 +66,8 @@ Rules:
 
 - Live capture may create canonical session identity and runtime-state rows **before** any transcript permission.
 - Deeper transcript/message import remains **Workbench-owned** and must respect source-scoped permission when that permission model is used.
-- Sources does not queue “import all history for this harness” as its primary action.
+- The normal Sources surface does not queue “import all history for this harness” as its primary
+  action. The clean-install coordinator may explicitly queue Everything or a recent range once.
 - History adapters and import APIs may continue to exist in the daemon for Workbench; they are not the Sources V2 product loop.
 
 ---
@@ -185,17 +188,23 @@ For each harness:
 - Advanced: checked paths, diagnostics (collapsed)
 - Honest capture copy: live presence + shallow runtime signals; deeper session data is Workbench
 
-### First-run
+### First-run coordinator
 
-Same loop as above, guided:
+First-run is an app-level coordinator, not the persistent Sources surface:
 
-1. Discover  
-2. Select detected harnesses  
-3. Enable live capture  
-4. Show remaining activation steps  
-5. Close → user can open Now / Workbench  
+1. Discover known harness locations and history counts.
+2. Select detected harnesses.
+3. Enable live capture and show remaining activation steps.
+4. Offer **Everything** by default, with a recent-history range as the narrower option.
+5. Queue one durable full-transcript import per selected runtime and show Import history →
+   Reconcile progress until each job reaches a terminal state.
+6. Finish into the product only after reconciliation; reopening Masthead resumes the same jobs and
+   restores this progress view.
 
-No primary CTA for bulk history import or transcript approval.
+Discover remains non-mutating. Starting history import is the explicit user action. It does not ask
+a separate privacy-permission question: supported adapters read the user's existing local harness
+history, apply canonical redaction, and persist the source-scoped policy needed for that selected
+range. Skip remains available before import begins.
 
 ### Empty / quiet states
 
@@ -295,11 +304,13 @@ Discover returns the full catalog list. Enable/Test/Uninstall call existing runt
 
 ### First install
 
-1. Auto-Discover once when Sources setup is empty / no live connectors ready (exact gate implementation may use setup status, but criteria must be connect-oriented, not import-job-oriented).
-2. Present detected harnesses selected by default.
-3. Enable selected.
-4. Show activation checklist for remaining hosts.
-5. Optional Test all enabled.
+1. Auto-Discover for every fresh profile, including when no harness is found or live connectors are
+   already installed outside this profile.
+2. Present detected harnesses selected by default and include bounded history counts.
+3. Enable selected live connectors and show remaining activation steps.
+4. Default the history range to Everything; a recent range is optional.
+5. Show durable import/reconciliation progress and restore it after restart until the user finishes
+   setup.
 
 ### Later (new harness installed on machine)
 
@@ -314,8 +325,10 @@ Discover never reinstalls every harness silently. Repair is explicit per row or 
 
 ## 8. Relationship to Workbench and transcript permission
 
-- Source-scoped transcript permission may remain a **data-model** concept used by Workbench.
-- Sources V2 UI does **not** center transcript permission grant as a primary setup step.
+- Source-scoped transcript policy remains a **data-model** concept used by Workbench. Explicitly
+  starting a full or recent history import records that policy automatically; it is not a separate
+  privacy ceremony.
+- The normal Sources V2 UI does **not** center history import or policy grants.
 - Workbench performs per-session transcript import only when policy allows.
 - Captured live sessions may appear in Workbench queues without Sources import-job UI.
 - Moving import jobs, progress panels, and completion reports off Sources is intentional, not unfinished work.
@@ -332,7 +345,7 @@ Discover never reinstalls every harness silently. Repair is explicit per row or 
 | Live connector install/test/uninstall | **Keep — core of Sources V2** |
 | Presence scan / preflight / checked paths | **Keep — Discover** |
 | Harness catalog | **Keep — row list** |
-| First-run onboarding shell | Keep structure; rewrite steps to Discover/Enable/Activate |
+| First-run onboarding shell | App-level coordinator: Discover/Enable, then Workbench-owned Import/Reconcile |
 | Doctor connector checks | Keep; extend for activation gaps |
 
 Daemon history adapters stay available for Workbench; Sources V2 simply stops driving them as the main UX.

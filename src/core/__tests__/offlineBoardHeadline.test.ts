@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { toBoardHeadlineInput, type BoardHeadlineInput, type BoardHeadlineSignal } from "../boardHeadlineInput";
 import { validateBoardHeadlineFrame } from "../boardHeadlineFrame";
 import type { BoardHeadlineFacts } from "../boardHeadlineFacts";
-import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView, buildWaitingForTranscriptBoardHeadlineView } from "../offlineBoardHeadline";
+import { buildOfflineBoardHeadlineView, buildPendingBoardHeadlineView } from "../offlineBoardHeadline";
 
 function facts(overrides: Partial<BoardHeadlineFacts> = {}): BoardHeadlineFacts {
   return {
@@ -48,14 +48,6 @@ describe("offline board headline views", () => {
     });
   });
 
-  test("builds a waiting-for-transcript pending headline", () => {
-    expect(buildWaitingForTranscriptBoardHeadlineView(input())).toEqual({
-      headline: "Waiting for transcript...",
-      source: "pending",
-      status: "pending"
-    });
-  });
-
   test("returns an offline deterministic frame without LLM fallback copy", () => {
     const view = buildOfflineBoardHeadlineView(input());
 
@@ -95,6 +87,17 @@ describe("offline board headline views", () => {
     expect(view.frame?.subject).toMatch(/Masthead|Board headline work|Session Card|SessionCard/i);
     expect(view.headline).not.toMatch(/LLM|session narrative|Board headlines: waiting/i);
     expect(validateBoardHeadlineFrame(view.frame).ok).toBe(true);
+  });
+
+  test("rejects hook placeholders as deterministic subjects", () => {
+    const baseInput = input({ recentTranscriptMessages: [], project: "Wargus-TypeScript", runtime: "codex" });
+    const view = buildOfflineBoardHeadlineView({
+      ...baseInput,
+      subjectCandidates: ["Codex hook event", "Session", "019f1ebf-3f79-75c3-b20a-41de26b0f46e session", "Wargus-TypeScript"]
+    });
+
+    expect(view.headline).toMatch(/Wargus-TypeScript/);
+    expect(view.headline).not.toMatch(/Codex hook event|019f1ebf/i);
   });
 
   test("does not collapse multi-area path-cluster work to Settings UI", () => {

@@ -35,13 +35,7 @@ describe("OperationsPanel", () => {
   }
 
   async function selectCategory(label: string) {
-    const row = [...(container?.querySelectorAll<HTMLElement>(".settings-spine-row") ?? [])]
-      .find((candidate) => candidate.querySelector(".settings-spine-copy strong")?.textContent === label);
-    const button = row?.querySelector<HTMLButtonElement>(".settings-spine-control > .app-button");
-    expect(button).toBeDefined();
-    await act(async () => {
-      button?.click();
-    });
+    expect(container?.querySelector(".settings-spine-sections")?.textContent).toContain(label);
   }
 
   function rowNamed(label: string): HTMLElement | undefined {

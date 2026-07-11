@@ -113,6 +113,7 @@ export type ImportCompletionReportDto = {
   status: ImportVisibilityState;
   generatedAt: string;
   sessionsDiscovered: number;
+  sessionsHydrated?: number;
   sessionsCreated: number;
   sessionsUpdated: number;
   transcriptsImported: number;
@@ -125,6 +126,11 @@ export type ImportCompletionReportDto = {
   mcpVisibleSessions: number;
   failedUnits: number;
   skippedUnits: number;
+  sourceUnitsDiscovered?: number;
+  sourceUnitsHydrated?: number;
+  sourceUnitsDeferred?: number;
+  sourceUnitsFailed?: number;
+  sourceUnitsRemaining?: number;
   nextActions: Array<"retry_failed_units" | "import_full_archive" | "approve_transcripts" | "run_enrichment" | "open_logbook">;
 };
 

@@ -6,7 +6,7 @@ import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../sh
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
 import type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest } from "../shared/sourcesSetup";
-import type { ImportCompletionReportDto, ImportJobStatus, ImportManifestSummaryDto, ImportStage, ImportWorkUnitDto, ImportWorkUnitStatus } from "../shared/sourceImport";
+import type { ImportCompletionReportDto, ImportJobStatus, ImportManifestSummaryDto, ImportScopeDto, ImportStage, ImportWorkUnitDto, ImportWorkUnitStatus } from "../shared/sourceImport";
 import type {
   ConnectorActionRequired,
   ConnectorActivation,
@@ -125,6 +125,7 @@ export type ImportJob = {
   completedWorkUnits?: number;
   failedWorkUnits?: number;
   skippedWorkUnits?: number;
+  scope?: ImportScopeDto;
   completionReport?: ImportCompletionReportDto;
 };
 

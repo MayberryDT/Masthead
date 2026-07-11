@@ -20,7 +20,7 @@ describe("ObservabilitySidebar", () => {
     expect(html).toContain("Sources");
     expect(html).not.toContain("Usage");
     expect(html).not.toContain("Agent Access");
-    expect(html).toContain("Knowledge flow");
+    expect(html).toContain('aria-label="Knowledge flow"');
     expect(html).not.toContain("Workspace");
     expect(html).not.toContain("Overview");
     expect(html).not.toContain("Analysis");
@@ -60,7 +60,7 @@ describe("ObservabilitySidebar", () => {
     );
 
     expect(html).toContain('aria-label="Knowledge flow"');
-    expect(html).toContain("Captured sessions");
+    expect(html).toContain("Capture sessions");
     expect(html).toContain("4 automatically resolved");
     expect(html.indexOf('aria-label="Knowledge flow"')).toBeGreaterThan(html.indexOf('aria-label="Masthead sections"'));
   });

@@ -70,7 +70,7 @@ describe("Workbench capture quality precheck", () => {
     });
   });
 
-  test("fails non-message evidence as no messages", async () => {
+  test("passes meaningful tool-only or file-only evidence without requiring chat messages", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:no-messages", title: "File only" });
     db.prepare("DELETE FROM messages WHERE session_id = ?").run("session:no-messages");
@@ -80,8 +80,8 @@ describe("Workbench capture quality precheck", () => {
     db.prepare("DELETE FROM checkpoints WHERE session_id = ?").run("session:no-messages");
 
     expect(runCaptureQualityPrecheck(db, "session:no-messages")).toMatchObject({
-      ok: false,
-      reason: "no_messages",
+      ok: true,
+      reason: "usable_transcript",
       sessionId: "session:no-messages"
     });
   });

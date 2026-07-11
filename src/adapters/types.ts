@@ -28,6 +28,7 @@ export type SourceExclusion = {
 
 export type DiscoveredSource = {
   sourceId: string;
+  sourceSessionId?: string;
   runtime: RuntimeKind;
   sourceKind: SourceKind;
   path?: string;

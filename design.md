@@ -283,8 +283,9 @@ recur across views, but each surface may use the structure that fits its job:
 - Now may use cards and state lanes.
 - Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
 - Logbook should optimize scanning, filtering, and opening historical records.
-- Sources owns onboarding and should optimize harness discovery and live-connector enablement (not
-  session import jobs).
+- Sources owns the live-connector portion of onboarding. The app-level first-run coordinator may
+  continue into a one-time Workbench-owned history import and reconciliation phase; the normal
+  Sources surface remains connector-only.
 - Settings should optimize direct controls, exact blast-radius controls, local data policy, and
   compact MCP setup and access evidence.
 - The right rail is optional and must be contextual to the active surface.
@@ -381,9 +382,12 @@ Sources is the harness connection control plane for live capture, not an import 
 
 It should look like a connector inventory: one row per live-capable harness, with presence, live status, and a clear Enable / Repair / Test action. Detail drawers show managed paths, endpoints, activation steps (for example Codex hook trust), and diagnostics. Do not center import job tables, transcript bulk import, or Workbench pipeline progress on Sources.
 
-Sources owns onboarding. Each connector row should answer: is this harness on the machine, is
-Masthead wired for live capture, what human activation remains, and did the last test or live event
-prove it. Deeper session processing belongs in Workbench; published history belongs in Logbook.
+Sources owns the live-connector portion of onboarding. Each connector row should answer: is this
+harness on the machine, is Masthead wired for live capture, what human activation remains, and did
+the last test or live event prove it. On a clean install, the app-level first-run coordinator may
+then offer Everything or a recent-history range and remain open while the durable Workbench import
+reconciles. That one-time coordinator is not the Sources surface: ongoing history processing and
+retry state belong to Workbench, while published history belongs in Logbook.
 
 ### Settings
 

@@ -16,6 +16,9 @@ export function buildImportCompletionReport(
     transcriptsImported: number;
     failedUnits: number;
     skippedUnits: number;
+    sourceUnitsDiscovered?: number;
+    sourceUnitsHydrated?: number;
+    sourceUnitsRemaining?: number;
   }
 ): ImportCompletionReportDto {
   const impact = summarizeImportSessionImpacts(db, input.importJobId);
@@ -30,6 +33,18 @@ export function buildImportCompletionReport(
     nextActions.push("open_logbook", "import_full_archive");
   }
   if (enriched < runtimeSessionStats) nextActions.push("run_enrichment");
+  const sourceUnitsDeferred = input.skippedUnits;
+  const sourceUnitsFailed = input.failedUnits;
+  const sourceUnitsRemaining = input.sourceUnitsRemaining ?? 0;
+  const sourceUnitsHydrated = input.sourceUnitsHydrated ?? Math.max(
+    0,
+    (input.sourceUnitsDiscovered ?? 0) - sourceUnitsDeferred - sourceUnitsFailed - sourceUnitsRemaining
+  );
+  const sourceUnitsDiscovered = input.sourceUnitsDiscovered ??
+    sourceUnitsHydrated + sourceUnitsDeferred + sourceUnitsFailed + sourceUnitsRemaining;
+  if (sourceUnitsDiscovered !== sourceUnitsHydrated + sourceUnitsDeferred + sourceUnitsFailed + sourceUnitsRemaining) {
+    throw new Error("Import reconciliation invariant failed: discovered units are not fully accounted for.");
+  }
 
   return {
     dossierReadySessions: transcriptReady,
@@ -45,11 +60,17 @@ export function buildImportCompletionReport(
     recordsSkipped: input.recordsSkipped,
     runtime: input.runtime,
     sessionsCreated: impact.sessionsCreated,
-    sessionsDiscovered: runtimeSessionStats,
+    sessionsDiscovered: impact.sessionsAffected,
+    sessionsHydrated: impact.transcriptSessions,
     sessionsUpdated: impact.sessionsUpdated,
     skippedUnits: input.skippedUnits,
+    sourceUnitsDeferred,
+    sourceUnitsDiscovered,
+    sourceUnitsFailed,
+    sourceUnitsHydrated,
+    sourceUnitsRemaining,
     status: input.status,
-    transcriptsImported: Math.max(input.transcriptsImported, impact.transcriptsAdded)
+    transcriptsImported: impact.transcriptSessions
   };
 }
 

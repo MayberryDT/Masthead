@@ -6,6 +6,7 @@ import type { RuntimeKind } from "../../adapters/types.ts";
 import type { ImportScopeDto } from "../../shared/sourceImport.ts";
 import type { SourceScanResult } from "./sourceScanService.ts";
 import type { DiscoveredSource } from "../../adapters/types.ts";
+import { setSourcePolicy } from "../db/sourcePolicyRepository.ts";
 
 export type ConnectSourcesRequest = {
   runtimes: RuntimeKind[];
@@ -42,8 +43,22 @@ export function connectSelectedSources(
       skipped.push({ runtime: adapter.runtime, reason: "No recognized local history was detected for this coding harness." });
       continue;
     }
-    if (request.importMetadata) {
+    const importsTranscripts = request.importScope?.mode === "transcript_full" || request.importScope?.mode === "transcript_recent";
+    if (request.importMetadata && !importsTranscripts) {
       jobs.push(queueImportJob(db, { importKind: "metadata", sourceId: parentSource.sourceId }, (controls) => runImport("metadata", adapter.runtime, sources, controls)));
+    }
+    if (importsTranscripts) {
+      const decidedAt = new Date().toISOString();
+      for (const source of sources) {
+        setSourcePolicy(db, {
+          decidedAt,
+          enabled: true,
+          policyKind: "transcript_import",
+          reason: `Explicit ${request.importScope?.mode === "transcript_full" ? "Everything" : "recent-history"} import selected during setup.`,
+          sourceId: source.sourceId
+        });
+      }
+      jobs.push(queueImportJob(db, { importKind: "transcript", sourceId: parentSource.sourceId }, (controls) => runImport("transcript", adapter.runtime, sources, controls)));
     }
   }
 

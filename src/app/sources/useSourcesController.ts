@@ -324,6 +324,7 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
       setSetup(result.setup);
       setStatus(importActionStatus("Session library build", result));
       await refreshAfterImportAction();
+      return result;
     } catch (error) {
       setStatus(`Session library build failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;

@@ -13,6 +13,7 @@ export type AdapterScanResult = {
   state: "connected" | "degraded" | "not_detected" | "planned";
   maturity: AdapterMaturity;
   discoveredSessions: number;
+  discoveredSourceUnits?: number;
   checkedPaths: SourcePreflightDto[];
   diagnostics: AdapterDiagnostic[];
   sources: DiscoveredSource[];
@@ -38,11 +39,13 @@ export async function scanLocalSources(context: DiscoveryContext): Promise<Sourc
       .filter((adapter) => adapter.enabled)
       .map((capability) => {
         const runtimeSources = sources.filter((source) => source.runtime === capability.runtime);
+        const distinctSessions = new Set(runtimeSources.map((source) => source.sourceSessionId ?? source.sourceId)).size;
         const preflight = preflights.find((item) => item.runtime === capability.runtime);
         return {
           checkedPaths: preflight?.checkedPaths ?? [],
           diagnostics: preflight?.diagnostics ?? [],
-          discoveredSessions: preflight?.discoveredCount ?? runtimeSources.length,
+          discoveredSessions: distinctSessions,
+          discoveredSourceUnits: runtimeSources.length,
           label: capability.label,
           maturity: capability.maturity,
           runtime: capability.runtime,

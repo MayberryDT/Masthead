@@ -39,7 +39,7 @@ export type WorkbenchQueueSessionDto = {
   runtime: string;
   lifecycle: string;
   lastActivityAt: string;
-  publicationStatus: "publish_path";
+  publicationStatus: "publish_path" | "published";
   nextAction: WorkbenchNextAction;
   transcriptStatus: string;
   qualityStatus: string;

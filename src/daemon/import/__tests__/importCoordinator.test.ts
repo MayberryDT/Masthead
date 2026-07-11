@@ -8,8 +8,9 @@ import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts"
 import {
   cancelImportJob,
   deriveImportVisibilityState,
-  markInterruptedImportJobs,
+  recoverInterruptedImportJobs,
   queueImportJob,
+  resumeImportJob,
   type ImportJobControls,
   type ImportWorkResult
 } from "../importCoordinator.ts";
@@ -136,7 +137,7 @@ describe("import coordinator", () => {
     db.close();
   });
 
-  test("marks active jobs from a previous daemon run as interrupted", async () => {
+  test("recovers and resumes an interrupted job without creating a replacement job", async () => {
     const db = await openTestDatabase();
     seedSource(db);
     db.prepare(
@@ -154,15 +155,40 @@ describe("import coordinator", () => {
         updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run("import_job:interrupted", "opencode-sessions", "metadata", "running", 10, 10, 10, 0, 0, "/tmp/import.jsonl", fixedNow());
+    db.prepare(
+      `INSERT INTO import_manifests (
+        manifest_id, import_job_id, source_id, runtime_kind, import_kind, scope_json,
+        generated_at, total_units, included_units, excluded_units, total_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("manifest:interrupted", "import_job:interrupted", "opencode-sessions", "opencode", "metadata", "{\"mode\":\"metadata_all\",\"includeChangedSinceCursor\":true}", fixedNow(), 2, 2, 0, 20);
+    const insertUnit = db.prepare(
+      `INSERT INTO import_work_units (
+        work_unit_id, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
+        confidence, unit_kind, source_path, status, processed_records, imported_records
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertUnit.run("unit:succeeded", "manifest:interrupted", "import_job:interrupted", "opencode-sessions", "opencode", "jsonl", "authoritative", "metadata_source", "/tmp/one.jsonl", "succeeded", 1, 1);
+    insertUnit.run("unit:running", "manifest:interrupted", "import_job:interrupted", "opencode-sessions", "opencode", "jsonl", "authoritative", "metadata_source", "/tmp/two.jsonl", "running", 0, 0);
 
-    const interrupted = markInterruptedImportJobs(db, fixedNow);
-    expect(interrupted).toBe(1);
+    const interrupted = recoverInterruptedImportJobs(db, fixedNow);
+    expect(interrupted).toEqual(["import_job:interrupted"]);
     expect(getImportJob(db, "import_job:interrupted")).toMatchObject({
-      failureCount: 1,
-      failureMessage: "Import was interrupted by a previous daemon shutdown. Re-run the import to continue.",
-      finishedAt: fixedNow(),
-      status: "failed"
+      failureCount: 0,
+      status: "queued"
     });
+    expect(getImportJob(db, "import_job:interrupted")?.finishedAt).toBeUndefined();
+    expect(db.prepare("SELECT status FROM import_work_units WHERE work_unit_id = ?").get("unit:succeeded")).toEqual({ status: "succeeded" });
+    expect(db.prepare("SELECT status FROM import_work_units WHERE work_unit_id = ?").get("unit:running")).toEqual({ status: "queued" });
+
+    resumeImportJob(db, "import_job:interrupted", async () => ({
+      discoveredCount: 10,
+      failureCount: 0,
+      importedCount: 10,
+      processedCount: 10,
+      queuedCount: 0
+    }), fixedNow);
+    await waitForJobStatus(db, "import_job:interrupted", "succeeded");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM import_jobs").get()).toEqual({ count: 1 });
     db.close();
   });
 
@@ -221,6 +247,23 @@ describe("import coordinator", () => {
 
     await waitForJobStatus(db, job.importJobId, "succeeded_with_issues");
     expect(getImportJob(db, job.importJobId)?.status).toBe("succeeded_with_issues");
+    db.close();
+  });
+
+  test("marks a job failed when every processed record failed", async () => {
+    const db = await openTestDatabase();
+    seedSource(db);
+
+    const job = queueImportJob(db, { importKind: "transcript", sourceId: "opencode-sessions", now: fixedNow }, async () => ({
+      discoveredCount: 3,
+      failureCount: 3,
+      importedCount: 0,
+      processedCount: 3,
+      queuedCount: 0
+    }));
+
+    await waitForJobStatus(db, job.importJobId, "failed");
+    expect(getImportJob(db, job.importJobId)?.status).toBe("failed");
     db.close();
   });
 

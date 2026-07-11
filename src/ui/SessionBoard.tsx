@@ -31,6 +31,12 @@ type ActiveLayoutAnimation = {
   inlineStyle?: InlineLayoutStyleSnapshot;
   timers: number[];
 };
+type ActiveGridLayoutAnimation = {
+  alignContent: string;
+  minHeight: string;
+  timers: number[];
+  transition: string;
+};
 
 export const SESSION_CARD_LAYOUT_DURATION_MS = 760;
 export const SESSION_CARD_LAYOUT_COMPACT_PHASE_MS = 420;
@@ -41,6 +47,7 @@ export const SESSION_CARD_LAYOUT_STAGGER_MS = 32;
 export const SESSION_CARD_LAYOUT_EASING = "cubic-bezier(0.24, 0.08, 0.18, 1)";
 
 const activeLayoutAnimations = new WeakMap<HTMLElement, ActiveLayoutAnimation>();
+const activeGridLayoutAnimations = new WeakMap<HTMLElement, ActiveGridLayoutAnimation>();
 
 type Props = {
   cards: SessionCardView[];
@@ -215,10 +222,14 @@ function ObservabilityCardGrid({
     previousDensityRef.current = density;
 
     if (!previousLayout || previousLayoutSignature === null || previousLayoutSignature === layoutSignature || prefersReducedMotion()) {
-      if (prefersReducedMotion()) cancelActiveCardLayoutAnimations(grid);
+      if (prefersReducedMotion()) {
+        cancelActiveCardLayoutAnimations(grid);
+        cancelGridLayoutAnimation(grid);
+      }
       return;
     }
 
+    preserveGridExtentDuringShrink(grid, previousLayout, nextLayout, layoutChangeKind);
     animateCardLayoutFrom(grid, previousLayout, layoutChangeKind);
   });
 
@@ -227,6 +238,68 @@ function ObservabilityCardGrid({
       {children}
     </div>
   );
+}
+
+function preserveGridExtentDuringShrink(
+  grid: HTMLElement,
+  previousLayout: CardLayoutSnapshot,
+  nextLayout: CardLayoutSnapshot,
+  changeKind: CardLayoutChangeKind
+): void {
+  cancelGridLayoutAnimation(grid);
+  if (changeKind !== "shrinking") return;
+
+  const previousExtent = cardLayoutExtent(previousLayout);
+  const nextExtent = cardLayoutExtent(nextLayout);
+  if (previousExtent <= nextExtent + 0.5) return;
+
+  const activeAnimation: ActiveGridLayoutAnimation = {
+    alignContent: grid.style.alignContent,
+    minHeight: grid.style.minHeight,
+    timers: [],
+    transition: grid.style.transition
+  };
+  activeGridLayoutAnimations.set(grid, activeAnimation);
+  grid.style.alignContent = "start";
+  grid.style.minHeight = `${roundLayoutNumber(previousExtent)}px`;
+
+  const lastCardDelay = Math.max(0, nextLayout.size - 1) * SESSION_CARD_LAYOUT_STAGGER_MS;
+  activeAnimation.timers.push(
+    window.setTimeout(() => {
+      if (activeGridLayoutAnimations.get(grid) !== activeAnimation) return;
+      grid.style.transition = `min-height ${SESSION_CARD_LAYOUT_EXPAND_DURATION_MS}ms ${SESSION_CARD_LAYOUT_EASING}`;
+      grid.style.minHeight = `${roundLayoutNumber(nextExtent)}px`;
+      activeAnimation.timers.push(
+        window.setTimeout(
+          () => completeGridLayoutAnimation(grid, activeAnimation),
+          SESSION_CARD_LAYOUT_EXPAND_DURATION_MS + SESSION_CARD_LAYOUT_CLEANUP_BUFFER_MS
+        )
+      );
+    }, SESSION_CARD_LAYOUT_COMPACT_PHASE_MS + SESSION_CARD_LAYOUT_DURATION_MS + lastCardDelay)
+  );
+}
+
+function cardLayoutExtent(layout: CardLayoutSnapshot): number {
+  const rects = Array.from(layout.values());
+  if (rects.length === 0) return 0;
+  const top = Math.min(...rects.map((rect) => rect.top));
+  const bottom = Math.max(...rects.map((rect) => rect.bottom));
+  return Math.max(0, bottom - top);
+}
+
+function completeGridLayoutAnimation(grid: HTMLElement, activeAnimation: ActiveGridLayoutAnimation): void {
+  if (activeGridLayoutAnimations.get(grid) !== activeAnimation) return;
+  activeGridLayoutAnimations.delete(grid);
+  for (const timer of activeAnimation.timers) window.clearTimeout(timer);
+  grid.style.alignContent = activeAnimation.alignContent;
+  grid.style.minHeight = activeAnimation.minHeight;
+  grid.style.transition = activeAnimation.transition;
+}
+
+function cancelGridLayoutAnimation(grid: HTMLElement): void {
+  const activeAnimation = activeGridLayoutAnimations.get(grid);
+  if (!activeAnimation) return;
+  completeGridLayoutAnimation(grid, activeAnimation);
 }
 
 function captureCardLayout(container: HTMLElement): CardLayoutSnapshot {

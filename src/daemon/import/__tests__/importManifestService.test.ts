@@ -15,6 +15,37 @@ afterEach(async () => {
 });
 
 describe("import manifest service", () => {
+  test("Everything schedules every discovered transcript beyond the internal 500-unit page size", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-everything-"));
+    tempDirs.push(tempDir);
+    const transcriptRoot = join(tempDir, "sessions");
+    await mkdir(transcriptRoot, { recursive: true });
+    await Promise.all(
+      Array.from({ length: 1_570 }, (_, index) =>
+        writeFile(join(transcriptRoot, `session-${String(index).padStart(4, "0")}.jsonl`), "{}\n", "utf8")
+      )
+    );
+
+    const plan = await buildImportManifestPlan({
+      generatedAt: "2026-07-01T00:00:00.000Z",
+      importJobId: "everything",
+      importKind: "transcript",
+      runtime: "codex",
+      scope: { includeChangedSinceCursor: true, mode: "transcript_full", unitLimit: 500 },
+      sources: [{
+        confidence: "authoritative",
+        path: transcriptRoot,
+        runtime: "codex",
+        sourceId: "codex-sessions",
+        sourceKind: "jsonl"
+      }]
+    });
+
+    expect(plan.summary).toMatchObject({ excludedUnits: 0, includedUnits: 1_570, totalUnits: 1_570 });
+    expect(plan.units.every((unit) => unit.status === "queued")).toBe(true);
+    expect(plan.units.some((unit) => unit.statusReason === "Outside selected first-run cap.")).toBe(false);
+  });
+
   test("previews recent and changed transcript files without persisting rows", async () => {
     const { sources, cursors, tempDir } = await createTranscriptFixture();
     const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
@@ -73,6 +104,32 @@ describe("import manifest service", () => {
       ])
     );
     db.close();
+  });
+
+  test("deduplicates the same transcript path discovered through parent and child sources", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-dedupe-"));
+    tempDirs.push(tempDir);
+    const path = join(tempDir, "session.jsonl");
+    await writeFile(path, "{}\n", "utf8");
+    const source = {
+      confidence: "authoritative" as const,
+      path,
+      runtime: "codex" as const,
+      sourceId: "codex-session",
+      sourceKind: "jsonl" as const
+    };
+
+    const plan = await buildImportManifestPlan({
+      generatedAt: "2026-07-01T00:00:00.000Z",
+      importJobId: "dedupe",
+      importKind: "transcript",
+      runtime: "codex",
+      scope: { includeChangedSinceCursor: true, mode: "transcript_full" },
+      sources: [source, { ...source, sourceId: "codex-parent" }]
+    });
+
+    expect(plan.summary.totalUnits).toBe(1);
+    expect(plan.units).toHaveLength(1);
   });
 });
 

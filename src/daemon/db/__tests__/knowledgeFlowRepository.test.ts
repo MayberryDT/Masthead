@@ -19,7 +19,7 @@ afterEach(async () => {
 describe("knowledge flow repository", () => {
   test("summarizes current pipeline inventory without deleted or superseded rows", async () => {
     const db = await testDb();
-    for (const sessionId of ["session:one", "session:two", "session:resolved", "session:not-added", "session:deleted"]) {
+    for (const sessionId of ["session:one", "session:two", "session:published-open", "session:resolved", "session:not-added", "session:deleted"]) {
       seedSession(db, {
         lifecycle: "ended",
         model: "gpt-5",
@@ -36,6 +36,9 @@ describe("knowledge flow repository", () => {
     db.prepare(
       "UPDATE workbench_session_state SET publication_status = 'published', resolution_status = 'automatic_resolved' WHERE session_id = ?"
     ).run("session:resolved");
+    db.prepare(
+      "UPDATE workbench_session_state SET publication_status = 'published', resolution_status = 'in_progress' WHERE session_id = ?"
+    ).run("session:published-open");
     db.prepare(
       "UPDATE workbench_session_state SET publication_status = 'not_added_to_logbook' WHERE session_id = ?"
     ).run("session:not-added");
@@ -61,8 +64,8 @@ describe("knowledge flow repository", () => {
     publishArtifact("session:two", "artifact-two");
 
     expect(getKnowledgeFlowSummary(db)).toEqual({
-      capturedSessions: 4,
-      workbenchSessions: 2,
+      capturedSessions: 5,
+      workbenchSessions: 3,
       publishedArtifacts: 2,
       automaticallyResolvedSessions: 1
     });

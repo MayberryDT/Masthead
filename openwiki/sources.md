@@ -1,6 +1,7 @@
 # Sources V2 (live connect)
 
-Sources is the harness connection control plane for **live capture only**. It is not the session import/publish pipeline (Workbench) and not the published archive (Logbook).
+The normal Sources surface is the harness connection control plane for **live capture only**. It is
+not the session import/publish pipeline (Workbench) and not the published archive (Logbook).
 
 **Contract (source of truth):** [docs/reference/sources-v2.md](../docs/reference/sources-v2.md)  
 **Decision:** [ADR 0010](../docs/adr/0010-sources-v2-live-connect-only.md)
@@ -47,13 +48,29 @@ Workbench publishes **artifacts** into Logbook (ADR 0011); Sources never owns Lo
 - Top **Discover** rescan (presence + live status); never silent install.
 - Row CTAs: Enable / Repair / Test / Uninstall as appropriate.
 - Detail: config path, endpoints, activation checklist, advanced checked paths.
-- First-run uses the same loop, not “connect history and queue imports.”
+- First-run begins with the same loop, then the app-level coordinator can hand off a one-time
+  Everything or recent-history import to Workbench and remain open through reconciliation. This
+  does not add import jobs to the persistent Sources surface.
 
 Status model:
 
 - Presence: `not_found` | `found`
 - Live: `not_installed` | `needs_action` | `ready` | `error`
 - Installed ≠ ready when host action remains (especially Codex `/hooks` trust; Hermes plugin enablement).
+
+## Clean-install coordinator
+
+On a fresh Masthead profile, the full-window coordinator runs:
+
+```text
+Discover → Connect → Import history → Reconcile → Ready
+```
+
+Everything is the default history range. Starting it creates one durable transcript job per
+selected runtime, automatically records the source-scoped import policy, and keeps the coordinator
+open while Workbench hydrates and quality-checks complete units. Restart recovery resumes the same
+job ids and restores their progress. The persistent Sources page still exposes only connector
+management.
 
 ## Implementation map
 

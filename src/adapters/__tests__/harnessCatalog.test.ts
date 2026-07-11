@@ -13,8 +13,8 @@ import {
 } from "../harnessCatalog.ts";
 import { LIVE_CONNECTOR_RUNTIMES } from "../liveRuntimes.ts";
 
-const IMPORT_RUNTIMES = ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const;
-const CATALOG_ONBOARDING_RUNTIMES = ["codex", ...IMPORT_RUNTIMES] as const;
+const IMPORT_RUNTIMES = ["codex", "cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"] as const;
+const CATALOG_ONBOARDING_RUNTIMES = IMPORT_RUNTIMES;
 
 describe("harness catalog", () => {
   test("catalog covers every live connector runtime", () => {
@@ -29,10 +29,10 @@ describe("harness catalog", () => {
     expect(codex?.visibility).not.toBe("hidden_legacy");
     expect(codex?.label).toBe("Codex");
     expect(codex?.sourceKinds).toEqual(expect.arrayContaining(["hook", "jsonl"]));
-    expect(codex?.supportLevel).toBe("detector_only");
-    expect(codex?.runtimeStatus).toBe("scan_target");
-    expect(codex?.supportsMetadataImport).toBe(false);
-    expect(codex?.supportsTranscriptImport).toBe(false);
+    expect(codex?.supportLevel).toBe("active_transcript");
+    expect(codex?.runtimeStatus).toBe("import_adapter");
+    expect(codex?.supportsMetadataImport).toBe(true);
+    expect(codex?.supportsTranscriptImport).toBe(true);
     expect(codex?.envOverrides).toEqual(["CODEX_HOME"]);
     expect(codex?.envOverrides).not.toContain("MASTHEAD_CODEX_HOME");
     expect(codex?.knownCandidatePaths).toEqual(["~/.codex/sessions", "~/.codex/hooks.json"]);
@@ -66,11 +66,11 @@ describe("harness catalog", () => {
     expect(omp?.knownCandidatePaths).toEqual(expect.arrayContaining(["~/.omp/agent/sessions", "~/.oh-my-pi/agent/sessions"]));
   });
 
-  test("keeps SessionAdapter-backed imports separate from live-only Codex", () => {
+  test("includes Codex in SessionAdapter-backed imports", () => {
     expect(activeImportRuntimes()).toEqual(IMPORT_RUNTIMES);
     expect(importAdapterHarnesses().map((entry) => entry.runtime)).toEqual(IMPORT_RUNTIMES);
     expect(scanTargetHarnesses().map((entry) => entry.runtime)).toEqual(CATALOG_ONBOARDING_RUNTIMES);
-    expect(canImportHarness(harnessForRuntime("codex")!)).toBe(false);
+    expect(canImportHarness(harnessForRuntime("codex")!)).toBe(true);
     expect(canScanHarness(harnessForRuntime("codex")!)).toBe(true);
     expect(catalogOnlyHarnesses()).toEqual([]);
     expect(cloudReferenceHarnesses()).toEqual([]);

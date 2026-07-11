@@ -56,7 +56,7 @@ describe("multi-adapter import", () => {
 
     expect(rows).toEqual(
       expect.arrayContaining(
-        ["cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"].map((runtime) =>
+        ["codex", "cursor", "claude_code", "opencode", "grok", "hermes", "pi", "omp"].map((runtime) =>
           expect.objectContaining({ messages: 2, runtime, sessions: 1 })
         )
       )
@@ -102,6 +102,7 @@ async function openImportTestDatabase(prefix: string): Promise<{ db: MastheadDat
 
 async function fixtureSources(tempDir: string): Promise<DiscoveredSource[]> {
   const sources: DiscoveredSource[] = [];
+  sources.push(await codexJsonlSource(tempDir));
   sources.push(await sqliteJsonSource(tempDir, "cursor", "cursor.vscdb"));
   sources.push(await jsonlSource(tempDir, "claude_code"));
   sources.push(await jsonlSource(tempDir, "opencode"));
@@ -110,6 +111,20 @@ async function fixtureSources(tempDir: string): Promise<DiscoveredSource[]> {
   sources.push(await jsonlSource(tempDir, "pi"));
   sources.push(await ompJsonlSource(tempDir));
   return sources;
+}
+
+async function codexJsonlSource(tempDir: string): Promise<DiscoveredSource> {
+  const path = join(tempDir, "codex.jsonl");
+  await writeFile(
+    path,
+    [
+      JSON.stringify({ type: "session_meta", timestamp: "2026-06-27T10:00:00.000Z", payload: { id: "codex-session", cwd: tempDir } }),
+      JSON.stringify({ type: "response_item", timestamp: "2026-06-27T10:00:01.000Z", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "codex user prompt" }] } }),
+      JSON.stringify({ type: "response_item", timestamp: "2026-06-27T10:00:02.000Z", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "codex assistant reply" }] } })
+    ].join("\n") + "\n",
+    "utf8"
+  );
+  return makeSource("codex", path, "jsonl", "codex-rollout-jsonl");
 }
 
 async function jsonlSource(tempDir: string, runtime: RuntimeKind, schemaVersion?: string): Promise<DiscoveredSource> {

@@ -16,6 +16,7 @@ export function isWeakSessionTitle(value: string | null | undefined, context: Se
   const cleaned = cleanSessionText(value);
   const normalized = cleaned?.toLowerCase();
   if (!cleaned || !normalized) return true;
+  if (!/[a-z0-9]/i.test(cleaned)) return true;
   if (context.sessionId && normalized === context.sessionId.toLowerCase()) return true;
   if (context.sourceSessionId && normalized === context.sourceSessionId.toLowerCase()) return true;
   if (isInstructionWrapper(cleaned)) return true;
@@ -48,7 +49,8 @@ export function isWeakLiveSummary(value: string | null | undefined): boolean {
   if (looksLikeSerializedPayload(cleaned)) return true;
   if (containsSensitiveMarker(cleaned)) return true;
   if (looksLikeRawCommand(cleaned)) return true;
-  if (/\bcodex hook event\b/i.test(cleaned)) return true;
+  if (/\b(?:codex|claude code|opencode|hermes|grok build|oh my pi|pi) (?:hook|plugin) event\b/i.test(cleaned)) return true;
+  if (!/[a-z0-9]/i.test(cleaned)) return true;
   if (/\bwaiting for LLM\b/i.test(cleaned) || /\bLLM headline access\b/i.test(cleaned)) return true;
   if (/^session narrative\s*:/i.test(cleaned)) return true;
   if (/^board headlines\s*:\s*waiting for LLM\b/i.test(cleaned)) return true;
@@ -83,6 +85,7 @@ function isGenericSessionTitle(value: string, project: string | undefined): bool
     "untitled session",
     "new session",
     "session",
+    "session work",
     "chat session",
     "recent activity",
     "session narrative",
@@ -110,6 +113,8 @@ function isWeakGeneratedTitle(value: string): boolean {
 
 function isOpaqueIdentifier(value: string): boolean {
   const normalized = value.trim();
+  const withoutSessionSuffix = normalized.replace(/\s+session$/i, "").trim();
+  if (withoutSessionSuffix !== normalized) return isOpaqueIdentifier(withoutSessionSuffix);
   if (
     /^[0-9a-f]{12,}$/i.test(normalized) ||
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)

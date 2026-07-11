@@ -7,6 +7,7 @@ import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 import {
   claimWorkbenchSessions,
+  countWorkbenchQueue,
   enrollMissingWorkbenchSessions,
   enrollWorkbenchSession,
   ensureWorkbenchSessionState,
@@ -162,10 +163,11 @@ describe("workbench pipeline repository", () => {
     expect(second.state.updatedAt).toBe(first.state.updatedAt);
   });
 
-  test("lists only publish-path sessions in the default queue", async () => {
+  test("lists publish-path and unresolved published sessions in the default queue", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:publish", title: "Publish path" });
-    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:published", title: "Published" });
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:published", title: "Published but unresolved" });
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:resolved", title: "Automatically resolved" });
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:not-added", title: "Not added" });
     ensureWorkbenchSessionState(db, "session:publish");
     markWorkbenchPublished(db, {
@@ -173,13 +175,27 @@ describe("workbench pipeline repository", () => {
       publishedVia: "test",
       sessionId: "session:published"
     });
+    markWorkbenchPublished(db, {
+      actor: { kind: "system", id: "test" },
+      publishedVia: "test",
+      sessionId: "session:resolved"
+    });
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET resolution_status = 'automatic_resolved', next_action = 'none'
+       WHERE session_id = ?`
+    ).run("session:resolved");
     markWorkbenchNotAdded(db, {
       actor: { kind: "system", id: "test" },
       reason: "no_messages",
       sessionId: "session:not-added"
     });
 
-    expect(listWorkbenchQueue(db, { limit: 10 }).map((state) => state.sessionId)).toEqual(["session:publish"]);
+    expect(listWorkbenchQueue(db, { limit: 10 }).map((state) => state.sessionId).sort()).toEqual([
+      "session:publish",
+      "session:published"
+    ]);
+    expect(countWorkbenchQueue(db)).toBe(2);
   });
 
   test("claims are short-lived and do not change publication state", async () => {

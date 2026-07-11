@@ -5,9 +5,11 @@ import type { MastheadDatabase } from "./sqlite.ts";
 export type ImportSessionImpactKind = "created" | "updated" | "transcript_added" | "enriched";
 
 export type ImportSessionImpactSummary = {
+  sessionsAffected: number;
   sessionsCreated: number;
   sessionsUpdated: number;
   transcriptsAdded: number;
+  transcriptSessions: number;
   enrichedSessions: number;
 };
 
@@ -61,15 +63,38 @@ export function summarizeImportSessionImpacts(db: MastheadDatabase, importJobId:
     .all(importJobId) as Array<{ impact_kind: ImportSessionImpactKind; sessions: number; records: number }>;
   const summary: ImportSessionImpactSummary = {
     enrichedSessions: 0,
+    sessionsAffected: countDistinctImpactSessions(db, importJobId),
     sessionsCreated: 0,
     sessionsUpdated: 0,
-    transcriptsAdded: 0
+    transcriptsAdded: 0,
+    transcriptSessions: 0
   };
   for (const row of rows) {
     if (row.impact_kind === "created") summary.sessionsCreated = row.sessions;
     if (row.impact_kind === "updated") summary.sessionsUpdated = row.sessions;
-    if (row.impact_kind === "transcript_added") summary.transcriptsAdded = row.records;
+    if (row.impact_kind === "transcript_added") {
+      summary.transcriptsAdded = row.records;
+      summary.transcriptSessions = row.sessions;
+    }
     if (row.impact_kind === "enriched") summary.enrichedSessions = row.sessions;
   }
   return summary;
+}
+
+export function listImportImpactSessionIds(db: MastheadDatabase, importJobId: string): string[] {
+  return (db.prepare(
+    `SELECT DISTINCT session_id
+    FROM import_session_impacts
+    WHERE import_job_id = ?
+    ORDER BY session_id`
+  ).all(importJobId) as Array<{ session_id: string }>).map((row) => row.session_id);
+}
+
+function countDistinctImpactSessions(db: MastheadDatabase, importJobId: string): number {
+  const row = db.prepare(
+    `SELECT COUNT(DISTINCT session_id) AS count
+    FROM import_session_impacts
+    WHERE import_job_id = ?`
+  ).get(importJobId) as { count: number } | undefined;
+  return row?.count ?? 0;
 }

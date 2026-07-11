@@ -49,7 +49,8 @@ import {
   type ImportJobKind,
   type ImportJobListStatus
 } from "./db/importJobRepository.ts";
-import { listImportFailureGroups, listImportWorkUnits } from "./db/importLedgerRepository.ts";
+import { getImportManifestSummary, listAllImportWorkUnits, listImportFailureGroups, listImportWorkUnits } from "./db/importLedgerRepository.ts";
+import { listImportImpactSessionIds } from "./db/importSessionImpactRepository.ts";
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
 import { liveProjectionTranscriptFacts } from "./db/liveTranscriptFactsRepository.ts";
@@ -103,8 +104,9 @@ import { setSourcePolicy, sourcePolicyExplicitlyEnabled, type SourcePolicyKind }
 import {
   cancelImportJob,
   getImportQueueState,
-  markInterruptedImportJobs,
+  recoverInterruptedImportJobs,
   queueImportJob,
+  resumeImportJob,
   type ImportJobControls,
   type ImportWorkResult
 } from "./import/importCoordinator.ts";
@@ -112,6 +114,7 @@ import { buildImportCompletionReport } from "./import/importCompletionReport.ts"
 import { buildImportManifestPlan, createManifestForJob } from "./import/importManifestService.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { runImportWorkUnit } from "./import/importWorkUnitRunner.ts";
+import { reconcileImportedTranscript } from "../workbench/transcriptQualityReconciler.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { recordRequestDiagnostic, recordRuntimeDiagnostic, runtimeDiagnosticsSnapshot } from "./diagnostics.ts";
 import { discoverSourceSnapshot, type SourceDiscoverySnapshot } from "./sources/sourceDiscoveryService.ts";
@@ -119,7 +122,7 @@ import { scanLocalSources, type SourceScanResult } from "./sources/sourceScanSer
 import { connectSelectedSources, type ConnectSourcesRequest } from "./sources/sourceConnectService.ts";
 import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/sourceSetupService.ts";
 import { clearConnectorActivation } from "./sources/connectorActivationStore.ts";
-import { discoverHarnessConnectors, listHarnessConnectors } from "./sources/harnessConnectorService.ts";
+import { discoverHarnessConnectors, listHarnessConnectors, withHistoryDiscovery } from "./sources/harnessConnectorService.ts";
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
 import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier.ts";
 import type {
@@ -224,7 +227,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       if (pendingMigrations && !config.skipMigrationQuickCheck) quickCheckMastheadDatabase(database);
       runLegacyWorkbenchPublicationBackfill(database);
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
-      markInterruptedImportJobs(database);
+      const interruptedImportJobIds = recoverInterruptedImportJobs(database);
 
     const defaultLiveRuntime: RuntimeKind = "claude_code";
     const defaultLiveSource = liveHookSourceForRuntime(defaultLiveRuntime);
@@ -1193,7 +1196,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   async function importTranscriptSourcesWithLedger(
     sources: DiscoveredSource[],
     controls: ImportJobControls,
-    scope: ImportScopeDto = defaultTranscriptImportScope()
+    scope: ImportScopeDto = defaultTranscriptImportScope(),
+    queueEnrichmentForImport = true
   ): Promise<ImportWorkResult> {
     const result = emptyImportResult();
     const runtime = sources[0]?.runtime ?? defaultLiveRuntime;
@@ -1204,18 +1208,23 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     controls.updateProgress({
       currentPath: sources[0]?.path ?? sources[0]?.sourceId ?? runtime,
       heartbeatAt: new Date().toISOString(),
+      scope,
       stage: "manifest"
     });
-    const manifest = await createManifestForJob(database, {
-      cursors,
-      generatedAt: new Date().toISOString(),
-      importJobId: controls.importJobId,
-      importKind: "transcript",
-      runtime,
-      scope,
-      sourceId: sources[0]?.sourceId,
-      sources: transcriptFiles
-    });
+    const existingUnits = listAllImportWorkUnits(database, { importJobId: controls.importJobId });
+    const existingSummary = existingUnits[0] ? getImportManifestSummary(database, existingUnits[0].manifestId) : undefined;
+    const manifest = existingUnits.length > 0 && existingSummary
+      ? { summary: existingSummary, units: existingUnits }
+      : await createManifestForJob(database, {
+          cursors,
+          generatedAt: new Date().toISOString(),
+          importJobId: controls.importJobId,
+          importKind: "transcript",
+          runtime,
+          scope,
+          sourceId: sources[0]?.sourceId,
+          sources: transcriptFiles
+        });
     controls.updateProgress({
       stage: "transcript",
       totalWorkUnits: manifest.units.length,
@@ -1224,6 +1233,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     for (const unit of manifest.units) {
       controls.throwIfCancelled();
+      if (["succeeded", "succeeded_with_issues", "cancelled"].includes(unit.status)) continue;
       if (unit.status === "skipped") {
         result.queuedCount += 1;
         continue;
@@ -1243,7 +1253,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         hostId: `host:${config.host}`,
         hostname: config.host,
         now: () => new Date().toISOString(),
-        onSessionImported: (sessionId) => queueSessionEnrichment(sessionId),
+        onSessionImported: undefined,
+        onSessionHydrated: (sessionId) => reconcileImportedTranscript(database, sessionId),
         runtimeKind: unit.runtime,
         workUnitId: unit.workUnitId,
         indexSession: queueSessionSearchIndex
@@ -1252,22 +1263,38 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       result.processedCount += unitResult.processed;
       result.importedCount += unitResult.imported;
       result.failureCount += unitResult.failed;
+      if (queueEnrichmentForImport && unitResult.failed === 0) {
+        for (const sessionId of unitResult.sessionIds) queueSessionEnrichment(sessionId);
+      }
       if (unit.sourcePath) await updateCursorAfterWorkUnit(unit);
+      const progressUnits = listAllImportWorkUnits(database, { manifestId: unit.manifestId });
       controls.updateProgress({
-        completedWorkUnits: listImportWorkUnits(database, { manifestId: unit.manifestId, status: "succeeded", limit: 100_000 }).length,
+        completedWorkUnits: progressUnits.filter((candidate) => ["succeeded", "succeeded_with_issues"].includes(candidate.status)).length,
         currentPath: unit.sourcePath ?? unit.sourceSessionId ?? unit.workUnitId,
-        failedWorkUnits: listImportWorkUnits(database, { manifestId: unit.manifestId, status: "failed", limit: 100_000 }).length,
+        failedWorkUnits: progressUnits.filter((candidate) => candidate.status === "failed").length,
         failureCount: result.failureCount,
         heartbeatAt: new Date().toISOString(),
         importedCount: result.importedCount,
         processedCount: result.processedCount,
-        skippedWorkUnits: listImportWorkUnits(database, { manifestId: unit.manifestId, status: "skipped", limit: 100_000 }).length,
+        skippedWorkUnits: progressUnits.filter((candidate) => candidate.status === "skipped").length,
         stage: "transcript"
       });
     }
 
-    const failedUnits = listImportWorkUnits(database, { importJobId: controls.importJobId, status: "failed", limit: 100_000 }).length;
-    const skippedUnits = listImportWorkUnits(database, { importJobId: controls.importJobId, status: "skipped", limit: 100_000 }).length;
+    const finalUnits = listAllImportWorkUnits(database, { importJobId: controls.importJobId });
+    result.processedCount = finalUnits.reduce((total, unit) => total + unit.processedRecords, 0);
+    result.discoveredCount = result.processedCount + finalUnits.filter((unit) => ["queued", "running", "skipped"].includes(unit.status)).length;
+    result.importedCount = finalUnits.reduce((total, unit) => total + unit.importedRecords, 0);
+    result.failureCount = finalUnits.reduce((total, unit) => total + unit.failedRecords, 0);
+    result.queuedCount = finalUnits.filter((unit) => ["queued", "running", "skipped"].includes(unit.status)).length;
+    const failedUnits = finalUnits.filter((unit) => unit.status === "failed").length;
+    const skippedUnits = finalUnits.filter((unit) => unit.status === "skipped").length;
+    const remainingUnits = finalUnits.filter((unit) => ["queued", "running"].includes(unit.status)).length;
+    if (failedUnits === 0 && remainingUnits === 0) {
+      for (const sessionId of listImportImpactSessionIds(database, controls.importJobId)) {
+        reconcileImportedTranscript(database, sessionId, { finalizeNoise: true });
+      }
+    }
     const report = buildImportCompletionReport(database, {
       failedUnits,
       generatedAt: new Date().toISOString(),
@@ -1277,7 +1304,15 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       recordsSkipped: result.queuedCount,
       runtime,
       skippedUnits,
-      status: result.failureCount > 0 && result.importedCount > 0 ? "succeeded_with_issues" : "succeeded",
+      sourceUnitsDiscovered: finalUnits.length,
+      sourceUnitsHydrated: finalUnits.filter((unit) => ["succeeded", "succeeded_with_issues"].includes(unit.status)).length,
+      sourceUnitsRemaining: remainingUnits,
+      status:
+        result.failureCount > 0
+          ? result.importedCount > 0
+            ? "succeeded_with_issues"
+            : "failed"
+          : "succeeded",
       transcriptsImported: result.importedCount
     });
     updateImportJob(database, controls.importJobId, {
@@ -1291,9 +1326,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return result;
   }
 
-  function runImportWorkerForSource(importKind: ImportJobKind, source: DiscoveredSource, controls: ImportJobControls): Promise<ImportWorkResult> {
+  function runImportWorkerForSource(
+    importKind: ImportJobKind,
+    source: DiscoveredSource,
+    controls: ImportJobControls,
+    scope: ImportScopeDto = defaultTranscriptImportScope()
+  ): Promise<ImportWorkResult> {
     if (importKind === "metadata") return importMetadataSources([source], controls);
-    if (importKind === "transcript") return importTranscriptSourcesWithLedger([source], controls);
+    if (importKind === "transcript") return importTranscriptSourcesWithLedger([source], controls, scope);
     return Promise.resolve(emptyImportResult());
   }
 
@@ -1315,11 +1355,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     runtime: RuntimeKind,
     sources: DiscoveredSource[],
     controls: ImportJobControls,
-    scope: ImportScopeDto = defaultTranscriptImportScope()
+    scope: ImportScopeDto = defaultTranscriptImportScope(),
+    queueEnrichment = true
   ): Promise<ImportWorkResult> {
     const runtimeSources = sources.filter((source) => source.runtime === runtime);
     if (importKind === "metadata") return importMetadataSources(runtimeSources, controls);
-    if (importKind === "transcript") return importTranscriptSourcesWithLedger(runtimeSources, controls, scope);
+    if (importKind === "transcript") return importTranscriptSourcesWithLedger(runtimeSources, controls, scope, queueEnrichment);
     return Promise.resolve(emptyImportResult());
   }
 
@@ -1329,6 +1370,36 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       queueImportJob(database, { importKind: "metadata", sourceId: source.sourceId }, (controls) => importMetadataSources([source], controls))
     );
     return { jobs, sources: sources.length };
+  }
+
+  async function resumeInterruptedImports(): Promise<void> {
+    for (const importJobId of interruptedImportJobIds) {
+      const job = getImportJob(database, importJobId);
+      if (!job) continue;
+      const source = await sourceById(job.sourceId);
+      if (!source) {
+        const failedAt = new Date().toISOString();
+        updateImportJob(database, importJobId, {
+          failureCount: Math.max(1, job.failureCount),
+          failureMessage: `Cannot resume import because source ${job.sourceId} is no longer discoverable.`,
+          finishedAt: failedAt,
+          status: "failed",
+          updatedAt: failedAt
+        });
+        continue;
+      }
+      resumeImportJob(
+        database,
+        importJobId,
+        (controls) => runImportWorkerForSource(job.importKind, source, controls, job.scope ?? defaultTranscriptImportScope())
+      );
+    }
+  }
+
+  if (interruptedImportJobIds.length > 0) {
+    setImmediate(() => {
+      void resumeInterruptedImports();
+    });
   }
 
   function scheduleHookTranscriptCatchup(event: NormalizedEvent): Promise<void> | undefined {
@@ -1531,10 +1602,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   function importScopeFromBody(body: Record<string, unknown>): ImportScopeDto {
     const candidate = objectRecord(body.importScope);
     const mode = typeof candidate.mode === "string" ? candidate.mode : undefined;
+    const normalizedMode = mode === "metadata_all" || mode === "transcript_full" || mode === "enrichment_missing" ? mode : "transcript_recent";
+    if (normalizedMode === "transcript_full") {
+      return { includeChangedSinceCursor: true, mode: "transcript_full" };
+    }
     return {
       days: typeof candidate.days === "number" && candidate.days > 0 ? candidate.days : 30,
       includeChangedSinceCursor: candidate.includeChangedSinceCursor !== false,
-      mode: mode === "metadata_all" || mode === "transcript_full" || mode === "enrichment_missing" ? mode : "transcript_recent",
+      mode: normalizedMode,
       unitLimit: typeof candidate.unitLimit === "number" && candidate.unitLimit >= 0 ? candidate.unitLimit : 500
     };
   }
@@ -1814,8 +1889,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/sources/connectors/discover") {
       try {
-        const snapshot = await discoverHarnessConnectors(database, config);
-        sendJson(request, response, config.allowedOrigins, 202, { ok: true, ...snapshot });
+        const [snapshot, scan] = await Promise.all([
+          discoverHarnessConnectors(database, config),
+          scanSourcesAndPersist()
+        ]);
+        const discovered = withHistoryDiscovery(snapshot, scan.adapters);
+        sendJson(request, response, config.allowedOrigins, 202, { ok: true, ...discovered });
       } catch (error) {
         sendJson(request, response, config.allowedOrigins, 500, {
           ok: false,
@@ -1998,7 +2077,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             sourceIds: sourceIdsFromBody(body)
           },
           async (kind, runtime, sources, controls) => {
-            return runImportWorkerForSources(kind, runtime, sources, controls, importScope);
+            return runImportWorkerForSources(kind, runtime, sources, controls, importScope, body.queueEnrichment === true);
           }
         );
         sendJson(request, response, config.allowedOrigins, 202, {
@@ -2370,8 +2449,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: `unsupported Workbench scope: ${scope}` });
         return;
       }
-      const total = countWorkbenchQueue(database, { publicationStatus: "publish_path" });
-      const states = listWorkbenchQueue(database, { limit, offset, publicationStatus: "publish_path" });
+      const total = countWorkbenchQueue(database);
+      const states = listWorkbenchQueue(database, { limit, offset });
       const body: WorkbenchSessionsResponse = {
         ok: true,
         generatedAt: new Date().toISOString(),
@@ -2804,7 +2883,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_offset" });
         return;
       }
-      if (adapterId && !(RUNTIME_KINDS as readonly string[]).includes(adapterId)) {
+      if (adapterId && !(ALL_RUNTIME_KINDS as readonly string[]).includes(adapterId)) {
         sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_adapter" });
         return;
       }
@@ -2929,8 +3008,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "source not found" });
         return;
       }
-      const job = queueImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId }, (controls) =>
-        runImportWorkerForSource(existing.importKind, source, controls)
+      const job = resumeImportJob(
+        database,
+        existing.importJobId,
+        (controls) => runImportWorkerForSource(existing.importKind, source, controls, existing.scope ?? defaultTranscriptImportScope())
       );
       sendJson(request, response, config.allowedOrigins, 202, { ok: true, importJobId: job.importJobId, job });
       return;
@@ -2964,7 +3045,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         const body = JSON.parse(await readBody(request)) as ConnectSourcesRequest;
         const scan = latestScan ?? (await scanSourcesAndPersist());
         const result = connectSelectedSources(database, scan, body, async (kind, runtime, sources, controls) => {
-          return runImportWorkerForSources(kind, runtime, sources, controls, body.importScope ?? defaultTranscriptImportScope());
+          return runImportWorkerForSources(
+            kind,
+            runtime,
+            sources,
+            controls,
+            body.importScope ?? defaultTranscriptImportScope(),
+            body.queueEnrichment === true
+          );
         });
         recordRuntimeDiagnostic({
           details: {
@@ -4322,7 +4410,7 @@ function workbenchQueueSessionDtos(database: MastheadDatabase, states: Workbench
         lifecycle: session.lifecycle,
         nextAction: state.nextAction,
         project: session.project ?? undefined,
-        publicationStatus: "publish_path",
+        publicationStatus: state.publicationStatus === "published" ? "published" : "publish_path",
         qualityStatus: state.qualityStatus,
         resolutionStatus: state.resolutionStatus,
         runbookStatus: state.runbookStatus,

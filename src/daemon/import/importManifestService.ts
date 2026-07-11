@@ -105,16 +105,25 @@ async function candidateUnits(
   generatedAt: string,
   cursors: Map<string, IngestCursor>
 ): Promise<PlannedImportWorkUnit[]> {
-  const units = (await Promise.all(sources.flatMap((source) => unitsForSource(source, importKind, scope, generatedAt, cursors)))).flat();
+  const discovered = (await Promise.all(sources.flatMap((source) => unitsForSource(source, importKind, scope, generatedAt, cursors)))).flat();
+  const units = Array.from(
+    new Map(
+      discovered.map((unit) => [
+        `${unit.unitKind}\0${unit.sourcePath ?? unit.sourceId}\0${unit.sourceSessionId ?? ""}`,
+        unit
+      ])
+    ).values()
+  );
   const included = units
     .filter((unit) => unit.status !== "skipped")
     .toSorted((a, b) => String(b.modifiedAt ?? "").localeCompare(String(a.modifiedAt ?? "")));
   const excluded = units.filter((unit) => unit.status === "skipped");
-  const limited = typeof scope.unitLimit === "number" && scope.unitLimit >= 0 ? included.slice(0, scope.unitLimit) : included;
+  const appliesBoundedPage = scope.mode === "transcript_recent" && typeof scope.unitLimit === "number" && scope.unitLimit >= 0;
+  const limited = appliesBoundedPage ? included.slice(0, scope.unitLimit) : included;
   const limitedIds = new Set(limited.map((unit) => `${unit.sourceId}\0${unit.sourcePath ?? ""}\0${unit.sourceSessionId ?? ""}`));
   const capped = included
     .filter((unit) => !limitedIds.has(`${unit.sourceId}\0${unit.sourcePath ?? ""}\0${unit.sourceSessionId ?? ""}`))
-    .map((unit) => ({ ...unit, status: "skipped" as const, statusReason: "Outside selected first-run cap." }));
+    .map((unit) => ({ ...unit, status: "skipped" as const, statusReason: "Deferred by the selected recent-history range." }));
   return [...limited, ...capped, ...excluded].toSorted((a, b) => String(a.sourcePath ?? a.sourceId).localeCompare(String(b.sourcePath ?? b.sourceId)));
 }
 

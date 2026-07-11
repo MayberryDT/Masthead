@@ -22,6 +22,7 @@ import {
   writeStoredSessionEndedNotificationsEnabled
 } from "../ui/motionPreference";
 import { emitSessionTransitionNotifications } from "./liveSessionEndedNotifications";
+import { readOnboardingDismissed } from "./onboardingPreference";
 import {
   applyIdlePresentationToProjection,
   markIdleDoneSeen,
@@ -102,7 +103,7 @@ const emptyLiveBoard: LiveBoardProjection = {
 };
 
 export function App() {
-  const [activeSurface, setActiveSurface] = useState<AppSurface>("now");
+  const [activeSurface, setActiveSurface] = useState<AppSurface>(() => readOnboardingDismissed() ? "now" : "sources");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<BoardFilter>("all");
@@ -643,8 +644,8 @@ export function App() {
           connectorsSnapshot={sourcesConnectors.snapshot}
           selectedConnectorRuntime={sourcesConnectors.selectedRuntime}
           onSelectConnectorRuntime={sourcesConnectors.setSelectedRuntime}
-          onDiscoverConnectors={() => void sourcesConnectors.discover()}
-          onEnableConnector={(runtime) => void sourcesConnectors.enable(runtime)}
+          onDiscoverConnectors={() => sourcesConnectors.discover()}
+          onEnableConnector={(runtime) => sourcesConnectors.enable(runtime)}
           onEnableAllDetectedConnectors={() => void sourcesConnectors.enableAllDetected()}
           onTestConnector={(runtime) => void sourcesConnectors.test(runtime)}
           onUninstallConnector={(runtime) => void sourcesConnectors.uninstall(runtime)}

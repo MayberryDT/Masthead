@@ -16,9 +16,10 @@ describe("SidebarKnowledgeFlow", () => {
     const html = renderToStaticMarkup(<SidebarKnowledgeFlow summary={summary} />);
 
     expect(html).toContain('aria-label="Knowledge flow"');
-    expect(html).toContain("Captured sessions");
-    expect(html).toContain("In Workbench");
-    expect(html).toContain("Published artifacts");
+    expect(html).toContain("Capture sessions");
+    expect(html).toContain("Workbench");
+    expect(html).toContain("Publish artifacts");
+    expect(html).not.toContain("sidebar-knowledge-flow-title");
     expect(html).toContain(">17<");
     expect(html).toContain(">6<");
     expect(html).toContain(">11<");

@@ -92,12 +92,11 @@
   flex-direction: row-reverse;
 }
 
-.settings-spine-detail {
+.settings-spine-sections {
+  display: grid;
   margin-top: 10px;
   border-top: 1px solid var(--line, rgba(194, 221, 241, 0.13));
   padding-top: 10px;
-  transform-origin: top center;
-  animation: forged-plate-in var(--dropdown-open-dur) var(--dropdown-weight-ease) both;
 }
 
 .settings-spine-note {
@@ -124,7 +123,7 @@
   padding: 14px;
 }
 
-.settings-panel .settings-spine-detail > .settings-section {
+.settings-panel .settings-spine-sections > .settings-section {
   position: relative;
   isolation: auto;
   overflow: visible;
@@ -139,25 +138,25 @@
   transition: none;
 }
 
-.settings-panel .settings-spine-detail > .settings-section:hover {
+.settings-panel .settings-spine-sections > .settings-section:hover {
   border-color: transparent;
   background: transparent;
   box-shadow: none;
   transform: none;
 }
 
-.settings-panel .settings-spine-detail > .settings-section::before,
-.settings-panel .settings-spine-detail > .settings-section::after {
+.settings-panel .settings-spine-sections > .settings-section::before,
+.settings-panel .settings-spine-sections > .settings-section::after {
   content: none;
   display: none;
 }
 
-.settings-panel .settings-spine-detail > .settings-section > * {
+.settings-panel .settings-spine-sections > .settings-section > * {
   position: static;
   z-index: auto;
 }
 
-.settings-panel .settings-spine-detail > .settings-section-danger {
+.settings-panel .settings-spine-sections > .settings-section-danger {
   box-shadow: inset 2px 0 0 rgba(255, 72, 62, 0.72);
 }
 
@@ -210,20 +209,20 @@
   display: grid;
 }
 
-.settings-panel .settings-spine-detail .settings-section-head h2 {
+.settings-panel .settings-spine-sections .settings-section-head h2 {
   margin: 0;
 }
 
-.settings-panel .settings-spine-detail .settings-section-head .mono-label {
+.settings-panel .settings-spine-sections .settings-section-head .mono-label {
   margin: 0 0 4px;
   text-transform: none;
 }
 
-.settings-panel .settings-spine-detail .settings-section-head p {
+.settings-panel .settings-spine-sections .settings-section-head p {
   margin: 5px 0 0;
 }
 
-.settings-panel .settings-spine-detail .settings-section-body {
+.settings-panel .settings-spine-sections .settings-section-body {
   margin-top: 9px;
 }
 
@@ -236,7 +235,7 @@
   padding: 8px 0;
 }
 
-.settings-panel .settings-spine-detail .settings-row {
+.settings-panel .settings-spine-sections .settings-row {
   grid-template-columns: minmax(0, 1fr) minmax(180px, 360px);
   align-items: center;
   border-top: 1px solid rgba(194, 221, 241, 0.1);
@@ -268,7 +267,7 @@
   display: contents;
 }
 
-.settings-panel .settings-spine-detail .settings-row-detail {
+.settings-panel .settings-spine-sections .settings-row-detail {
   grid-column: 2;
   display: flex;
   align-items: center;
@@ -289,7 +288,7 @@
   overflow-wrap: anywhere;
 }
 
-.settings-panel .settings-spine-detail .settings-row-value {
+.settings-panel .settings-spine-sections .settings-row-value {
   font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
   justify-self: auto;
 }
@@ -300,7 +299,7 @@
   justify-self: stretch;
 }
 
-.settings-panel .settings-spine-detail .settings-row-control {
+.settings-panel .settings-spine-sections .settings-row-control {
   grid-column: auto;
   justify-self: auto;
 }
@@ -819,23 +818,23 @@
     padding: 12px;
   }
 
-  .settings-panel .settings-spine-detail .settings-row {
+  .settings-panel .settings-spine-sections .settings-row {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
   }
 
-  .settings-panel .settings-spine-detail .settings-row-copy,
-  .settings-panel .settings-spine-detail .settings-row-detail {
+  .settings-panel .settings-spine-sections .settings-row-copy,
+  .settings-panel .settings-spine-sections .settings-row-detail {
     grid-column: 1;
     justify-self: stretch;
     max-width: none;
   }
 
-  .settings-panel .settings-spine-detail .settings-row-detail {
+  .settings-panel .settings-spine-sections .settings-row-detail {
     justify-content: flex-start;
   }
 
-  .settings-panel .settings-spine-detail .settings-row-value {
+  .settings-panel .settings-spine-sections .settings-row-value {
     text-align: left;
   }
 
@@ -846,7 +845,7 @@
     text-align: left;
   }
 
-  .settings-panel .settings-spine-detail .settings-inline-actions,
+  .settings-panel .settings-spine-sections .settings-inline-actions,
   .confirm-dialog-actions {
     justify-content: flex-start;
     justify-self: stretch;
@@ -854,7 +853,7 @@
     text-align: left;
   }
 
-  .settings-panel .settings-spine-detail .settings-inline-feedback {
+  .settings-panel .settings-spine-sections .settings-inline-feedback {
     max-width: none;
     text-align: left;
   }
@@ -866,18 +865,12 @@
 }
 
 @media (max-width: 390px) {
-  .settings-panel .settings-spine-detail .settings-delete-controls {
+  .settings-panel .settings-spine-sections .settings-delete-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .settings-panel .settings-spine-detail .settings-row-control > .app-button,
-  .settings-panel .settings-spine-detail .settings-inline-actions .app-button {
+  .settings-panel .settings-spine-sections .settings-row-control > .app-button,
+  .settings-panel .settings-spine-sections .settings-inline-actions .app-button {
     width: 100%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .settings-spine-detail {
-    animation: none;
   }
 }

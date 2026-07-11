@@ -889,16 +889,20 @@ export function countWorkbenchQueue(
   db: MastheadDatabase,
   options: { publicationStatus?: WorkbenchPublicationStatus } = {}
 ): number {
-  const publicationStatus = options.publicationStatus ?? "publish_path";
+  const publicationFilter = options.publicationStatus
+    ? "workbench_session_state.publication_status = ?"
+    : `(workbench_session_state.publication_status = 'publish_path'
+       OR (workbench_session_state.publication_status = 'published'
+           AND workbench_session_state.resolution_status <> 'automatic_resolved'))`;
   const row = db
     .prepare(
       `SELECT COUNT(*) AS count
       FROM workbench_session_state
       JOIN sessions ON sessions.session_id = workbench_session_state.session_id
-      WHERE workbench_session_state.publication_status = ?
+      WHERE ${publicationFilter}
         AND sessions.deleted_at IS NULL`
     )
-    .get(publicationStatus) as { count: number };
+    .get(...(options.publicationStatus ? [options.publicationStatus] : [])) as { count: number };
   return Number(row?.count ?? 0);
 }
 
@@ -906,7 +910,11 @@ export function listWorkbenchQueue(
   db: MastheadDatabase,
   options: { limit: number; offset?: number; publicationStatus?: WorkbenchPublicationStatus }
 ): WorkbenchSessionStateRecord[] {
-  const publicationStatus = options.publicationStatus ?? "publish_path";
+  const publicationFilter = options.publicationStatus
+    ? "workbench_session_state.publication_status = ?"
+    : `(workbench_session_state.publication_status = 'publish_path'
+       OR (workbench_session_state.publication_status = 'published'
+           AND workbench_session_state.resolution_status <> 'automatic_resolved'))`;
   const limit = Math.max(1, Math.min(Math.trunc(options.limit), 500));
   const offset = Math.max(0, Math.trunc(options.offset ?? 0));
   const rows = db
@@ -933,13 +941,13 @@ export function listWorkbenchQueue(
         workbench_session_state.updated_at AS updatedAt
       FROM workbench_session_state
       JOIN sessions ON sessions.session_id = workbench_session_state.session_id
-      WHERE workbench_session_state.publication_status = ?
+      WHERE ${publicationFilter}
         AND sessions.deleted_at IS NULL
       ORDER BY COALESCE(workbench_session_state.last_activity_at, sessions.last_activity_at, workbench_session_state.updated_at) DESC,
         workbench_session_state.session_id DESC
       LIMIT ? OFFSET ?`
     )
-    .all(publicationStatus, limit, offset) as WorkbenchSessionStateRow[];
+    .all(...(options.publicationStatus ? [options.publicationStatus] : []), limit, offset) as WorkbenchSessionStateRow[];
   return rows.map((row) => stateRowToRecord(db, row));
 }
 

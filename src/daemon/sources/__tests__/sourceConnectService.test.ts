@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { DiscoveredSource } from "../../../adapters/types.ts";
 import { listImportJobs, type ImportJobKind } from "../../db/importJobRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
-import { transcriptImportApproved } from "../../db/sourceRepository.ts";
+import { sourcePolicyExplicitlyEnabled } from "../../db/sourcePolicyRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
 import { connectSelectedSources } from "../sourceConnectService.ts";
 import type { AdapterScanResult, SourceScanResult } from "../sourceScanService.ts";
@@ -55,7 +55,7 @@ describe("source connect service", () => {
     db.close();
   });
 
-  test("does not queue transcript imports or global transcript approval from Sources connect", async () => {
+  test("explicit Everything history setup queues one full transcript job with source-scoped approval", async () => {
     const { db } = await openSourceConnectTestDatabase("masthead-source-connect-transcripts-");
     const scan = scanResult([adapterResult("opencode", [source("opencode", "opencode-session-a")])]);
     seedSources(db, scan.adapters.flatMap((adapter) => adapter.sources));
@@ -65,14 +65,15 @@ describe("source connect service", () => {
       scan,
       {
         importMetadata: true,
+        importScope: { includeChangedSinceCursor: true, mode: "transcript_full" },
         queueEnrichment: true,
         runtimes: ["opencode"]
       },
       async () => ({ discoveredCount: 1, failureCount: 0, importedCount: 1, processedCount: 1, queuedCount: 0 })
     );
 
-    expect(result.jobs.map((job) => job.importKind)).toEqual(["metadata"]);
-    expect(transcriptImportApproved(db)).toBe(false);
+    expect(result.jobs.map((job) => job.importKind)).toEqual(["transcript"]);
+    expect(sourcePolicyExplicitlyEnabled(db, "transcript_import", "opencode-session-a")).toBe(true);
     db.close();
   });
 

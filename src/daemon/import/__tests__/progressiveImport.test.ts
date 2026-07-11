@@ -4,10 +4,11 @@ import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../../config.ts";
-import { createImportJob, getImportJob, type ImportJobDto } from "../../db/importJobRepository.ts";
+import { createImportJob, getImportJob, listImportJobs, updateImportJob, type ImportJobDto } from "../../db/importJobRepository.ts";
 import { setSourcePolicy } from "../../db/sourcePolicyRepository.ts";
 import { markWorkbenchPublished } from "../../db/workbenchPipelineRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../../server.ts";
+import { createManifestForJob } from "../importManifestService.ts";
 
 const daemons: MastheadDaemon[] = [];
 const tempDirs: string[] = [];
@@ -97,6 +98,59 @@ describe("progressive OpenCode imports", () => {
 
     expect(countRows(daemon.database, "sessions")).toBe(1);
     expect(countRows(daemon.database, "messages")).toBe(1);
+  });
+
+  test("resumes durable transcript work after daemon restart without duplicating the job", async () => {
+    const { daemon, opencodeRoot, tempDir } = await createTestHarness();
+    const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "restart.jsonl");
+    await writeJsonl(transcriptPath, [
+      {
+        type: "session_meta",
+        timestamp: "2026-06-25T12:00:00.000Z",
+        payload: { session_id: "restart-session", cwd: "/tmp/restart", model: "gpt-5" }
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-06-25T12:01:00.000Z",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Resume me" }] }
+      }
+    ]);
+    const baseUrl = await listen(daemon);
+    const sourceId = await approveTranscriptSource(baseUrl, daemon, opencodeRoot);
+    const job = createImportJob(daemon.database, {
+      importKind: "transcript",
+      sourceId,
+      updatedAt: "2026-06-25T12:02:00.000Z"
+    });
+    updateImportJob(daemon.database, job.importJobId, {
+      scope: { includeChangedSinceCursor: true, mode: "transcript_full" },
+      status: "running",
+      updatedAt: "2026-06-25T12:03:00.000Z"
+    });
+    const manifest = await createManifestForJob(daemon.database, {
+      generatedAt: "2026-06-25T12:03:00.000Z",
+      importJobId: job.importJobId,
+      importKind: "transcript",
+      runtime: "opencode",
+      scope: { includeChangedSinceCursor: true, mode: "transcript_full" },
+      sourceId,
+      sources: [{
+        confidence: "authoritative",
+        path: transcriptPath,
+        runtime: "opencode",
+        sourceId,
+        sourceKind: "jsonl"
+      }]
+    });
+    daemon.database.prepare("UPDATE import_work_units SET status = 'running' WHERE work_unit_id = ?").run(manifest.units[0].workUnitId);
+
+    await closeTrackedDaemon(daemon);
+    const restarted = await createTestHarness({ tempDir });
+    await waitFor(() => getImportJob(restarted.daemon.database, job.importJobId)?.status === "succeeded");
+
+    expect(listImportJobs(restarted.daemon.database)).toHaveLength(1);
+    expect(countRows(restarted.daemon.database, "sessions")).toBe(1);
+    expect(countRows(restarted.daemon.database, "messages")).toBe(1);
   });
 
   test("imports transcript token counts onto existing hook sessions", async () => {

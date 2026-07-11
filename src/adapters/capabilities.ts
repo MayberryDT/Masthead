@@ -23,7 +23,7 @@ export type AdapterCapabilityProfile = AdapterCapability & {
   runtimeStatus: HarnessRuntimeStatus;
 };
 
-const RUNTIME_ORDER = new Map<string, number>(RUNTIME_KINDS.map((runtime, index) => [runtime, index]));
+const RUNTIME_ORDER = new Map<string, number>(["codex", ...RUNTIME_KINDS].map((runtime, index) => [runtime, index]));
 
 export const ADAPTER_CAPABILITY_PROFILES: AdapterCapabilityProfile[] = [...HARNESS_CATALOG].sort(
   (a, b) => (RUNTIME_ORDER.get(a.runtime) ?? Number.MAX_SAFE_INTEGER) - (RUNTIME_ORDER.get(b.runtime) ?? Number.MAX_SAFE_INTEGER)

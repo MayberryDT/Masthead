@@ -15,14 +15,6 @@ export function buildPendingBoardHeadlineView(_input: BoardHeadlineInput): Board
   };
 }
 
-export function buildWaitingForTranscriptBoardHeadlineView(_input: BoardHeadlineInput): BoardHeadlineView {
-  return {
-    headline: "Waiting for transcript...",
-    source: "pending",
-    status: "pending"
-  };
-}
-
 export function buildOfflineBoardHeadlineView(input: BoardHeadlineInput): BoardHeadlineView {
   const candidate = offlineFrame(input);
   const validated = validateBoardHeadlineFrame(candidate);
@@ -227,7 +219,7 @@ function normalizeSubject(value: string | undefined): string | undefined {
 
 function isGenericSubject(value: string): boolean {
   const normalized = value.toLowerCase();
-  return /^(masthead|ui|changes?|updates?|sessions?|work|recent activity|ui changes?|board headlines?|session narrative(?: work)?|unknown project)$/.test(
+  return /^(masthead|ui|changes?|updates?|sessions?|work|recent activity|ui changes?|board headlines?|session narrative(?: work)?|(?:codex|claude code|opencode|hermes|grok build|oh my pi|pi) (?:hook|plugin) event|unknown project)$/.test(
     normalized
   );
 }

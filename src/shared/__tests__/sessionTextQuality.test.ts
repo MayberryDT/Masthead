@@ -21,6 +21,7 @@ describe("session text quality", () => {
     expect(isWeakSessionTitle("Masthead session", context)).toBe(true);
     expect(isWeakSessionTitle("Untitled session", context)).toBe(true);
     expect(isWeakSessionTitle("019f1ebf-3f79-75c3-b20a-41de26b0f46e", context)).toBe(true);
+    expect(isWeakSessionTitle("019f1ebf-3f79-75c3-b20a-41de26b0f46e session", context)).toBe(true);
     expect(isWeakSessionTitle("Project session for session narrative. Commands: shell.", context)).toBe(true);
     expect(isWeakSessionTitle("Halla session for Codex hook event.", context)).toBe(true);
     expect(isWeakSessionTitle("Project codex hook event", context)).toBe(true);
@@ -43,6 +44,8 @@ describe("session text quality", () => {
   test("detects weak review-template live summaries", () => {
     expect(isWeakLiveSummary("Title quality work is ready for review.")).toBe(true);
     expect(isWeakLiveSummary("Fixed mcp for Codex hook event.")).toBe(true);
+    expect(isWeakLiveSummary("Claude Code hook event: stalled with no new turns.")).toBe(true);
+    expect(isWeakLiveSummary("???: .")).toBe(true);
     expect(isWeakLiveSummary("Headline refresh data enrichment has validation coverage.")).toBe(false);
   });
 

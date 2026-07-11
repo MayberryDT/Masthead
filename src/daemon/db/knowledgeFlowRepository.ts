@@ -15,7 +15,9 @@ export function getKnowledgeFlowSummary(db: MastheadDatabase): KnowledgeFlowSumm
       (SELECT COUNT(*)
        FROM workbench_session_state
        JOIN sessions ON sessions.session_id = workbench_session_state.session_id
-       WHERE workbench_session_state.publication_status = 'publish_path'
+       WHERE (workbench_session_state.publication_status = 'publish_path'
+          OR (workbench_session_state.publication_status = 'published'
+              AND workbench_session_state.resolution_status <> 'automatic_resolved'))
          AND sessions.deleted_at IS NULL) AS workbenchSessions,
       (SELECT COUNT(*)
        FROM session_artifacts
