@@ -1,7 +1,7 @@
 {
   "name": "masthead",
   "version": "0.1.0",
-  "description": "Local-first session data layer and session manager.",
+  "description": "Local-first AI session data layer for evidence-backed engineering knowledge.",
   "private": true,
   "license": "MIT",
   "type": "module",

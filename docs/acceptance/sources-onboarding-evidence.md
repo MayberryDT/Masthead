@@ -18,7 +18,7 @@ Generated for the Sources onboarding completion slice.
 | Import history modal | Not run by this worker | Verify harness selection, age selection, preview counts, and visible start action in the Sources tab. |
 | Visible import progress | Not run by this worker | Start a Codex transcript import and record parent job stage, heartbeat, current path, child work units, grouped failures, cancel/retry, and completion report. |
 | Advanced diagnostics | Not run by this worker | Record scan freshness, checked paths, detector-only entries, failures, unrecognized schemas, and repair recommendations. |
-| Harness catalog copy | Docs updated | Active import, detector-only, cloud-reference, and legacy categories are documented in `docs/reference/sources.md` and `docs/reference/adapters.md`. |
+| Harness catalog copy | Docs updated | Adapter support categories are documented in `docs/reference/adapters.md`; current Sources ownership is documented in `docs/reference/sources-v2.md`. |
 | No whole-home scan guarantee | Docs updated | Sources docs state bounded known-location scanning and no unbounded recursive home-directory crawl. |
 
 ## Notes

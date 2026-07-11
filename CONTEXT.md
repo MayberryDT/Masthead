@@ -130,18 +130,18 @@ session can proceed toward enrichment and publication or should move to suppress
 _Avoid_: Capture quality precheck, Logbook filter
 
 **Non-publication reason**:
-The Workbench explanation for why a captured session is not eligible for Logbook, such as missing
-transcript, hook-only capture, no messages, duplicate noise, low evidence, or user-suppressed. The
-reason must be visible to both the user and the agent-facing tools.
-_Avoid_: Error, failure, hidden filter
+The Workbench explanation for why a captured session is kept off the artifact publish path, such as
+missing transcript, hook-only capture, no messages, duplicate noise, low evidence, or
+user-suppressed. The reason must be visible to both the user and agent-facing tools.
+_Avoid_: Logbook eligibility, error, failure, hidden filter
 
-**Unpublished session**:
-A captured session that has not passed the publication gates. Unpublished sessions remain visible
-in Workbench for import, cleanup, enrichment, suppression, purge review, or agent action.
-_Avoid_: Logbook session, published session
+**Unresolved captured session**:
+A captured session whose automatic artifact work is not resolved. It remains visible in Workbench
+for import, cleanup, enrichment, suppression, purge review, compile, or agent action.
+_Avoid_: Unpublished session, Logbook session, published session
 
 **Suppressed session**:
-An unpublished session that Workbench intentionally keeps out of the publish path because it is
+A captured session that Workbench intentionally keeps out of the publish path because it is
 noise or below the quality floor. Suppression is visible to the user in Workbench review surfaces,
 but hidden from default agent-facing queues unless the user explicitly asks an agent to inspect it.
 _Avoid_: Deleted session, failed session
@@ -210,7 +210,7 @@ _Avoid_: Separate agent workflow, CLI-only state, UI-only state
 **Default agent queue**:
 The agent-facing Workbench queue shown when the user asks an agent to work on Masthead without
 special instructions. It includes only publish-path sessions with actionable next steps and excludes
-suppressed, purge-candidate, published, permission-blocked, and Not Added to Logbook items,
+suppressed, purge-candidate, automatic-work-resolved, permission-blocked, and Not Added to Logbook items,
 including their session IDs and details.
 _Avoid_: Full Workbench queue, suppressed-session review, Logbook
 
@@ -227,10 +227,11 @@ The explicit reason a session appears in the Workbench queue, such as missing en
 memory, low confidence, or artifact candidate.
 _Avoid_: Priority, assignment
 
-**Memory kind**:
-The type of durable session memory being inspected or produced, such as session enrichment,
-session dossier, or bug-fix trace.
-_Avoid_: Command, workflow
+**Artifact kind**:
+The type of durable knowledge being inspected or produced. The V1 published kinds are session
+dossier, runbook, ADR, and incident timeline; session enrichment is upstream derived data rather
+than a Logbook kind.
+_Avoid_: Memory kind, command, workflow, legacy bug-fix trace
 
 **Evidence coverage**:
 A compact summary of how much useful evidence is available for a queue item, including transcript,

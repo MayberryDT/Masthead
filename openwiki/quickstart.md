@@ -48,7 +48,7 @@ These are the main existing docs this wiki synthesizes:
 - `CONTEXT.md` — ubiquitous language (artifact-first).
 - `README.md` — repo-level overview and run/verify entrypoints.
 - `design.md` — master design source (Logbook section refined by ADR 0011).
-- `prd.md` — product scope; **read with ADR 0011 supersession note** for Logbook unit of search.
+- `prd.md` — current product scope and release boundary.
 - `docs/adr/0011-artifact-first-logbook.md` — Logbook is an artifact book.
 - `docs/adr/0009-logbook-only-shows-published-sessions.md` — Workbench pipeline ownership (Logbook unit refined by 0011).
 - `docs/architecture/data-paths.md` — runtime data directory and store ownership.
@@ -56,7 +56,7 @@ These are the main existing docs this wiki synthesizes:
 - `docs/reference/mcp-tools.md` — MCP tools (prefer `search_artifacts` / `get_artifact`).
 - `docs/reference/sources-v2.md` — Sources V2 live-connect contract (current).
 - `docs/reference/artifact-first-logbook-cutover.md` — wipe/rebuild published artifact state.
-- `docs/superpowers/plans/` — **implementation history only**, not current visual/product SoT.
+- Git history and merged pull requests — implementation history, not current visual/product truth.
 
 ## Run and verify
 
@@ -87,7 +87,7 @@ Dogfood Logbook may be **empty after artifact cutover** until Workbench republis
 ## Notes for future agents
 
 - Read `design.md` before visual work; read `CONTEXT.md` + ADR 0011 before Logbook/Workbench product work.
-- Treat `prd.md` as scope history with a supersession banner — do not reintroduce session-as-Logbook-row.
+- Treat `prd.md` as current product scope; use ADR history to understand superseded directions.
 - Do not read or document `.env` files or secrets.
 - Keep the `src/core`/`src/daemon` boundary clear: core is transformation logic; daemon owns runtime state and persistence.
 - Logbook has **no** bulk enrich UI; bulk/session-library chrome is deleted. Workbench owns compile and publish.

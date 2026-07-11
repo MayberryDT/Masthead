@@ -1,120 +1,137 @@
-# Workbench Enrichment
+# Workbench Enrichment and Artifact Authoring
 
-Masthead V1 enrichment is agent-authored. The app Workbench is the
-user-facing coordination surface; the CLI Workbench is the agent-facing write
-path.
+Masthead V1 uses the user's coding agent to deepen captured sessions. The Workbench app is the
+human coordination surface; `mastheadctl workbench` is the agent-facing write path. MCP remains
+read-only.
 
-The app imports and normalizes local sessions into the canonical SQLite graph. MCP
-remains read-only for retrieval. Writes for enrichment and local artifacts happen
-through the CLI Workbench, using evidence packets and schema-validated JSON.
+## Ownership split
 
-## UI/CLI Split
+The Workbench app shows a dense publish-path table with transcript, quality, enrichment, package,
+runbook, ADR, timeline, resolution, claim, next-action, and Activity state. It can generate a
+disposable plain-language handoff for selected sessions. It does not expose CLI command recipes or
+become an in-app artifact editor.
 
-The Workbench app surface is for people reviewing publish-path sessions before
-they enter Logbook. It shows the pipeline queue as a dense table with next
-action, transcript, quality, enrichment, dossier, bug-fix, claim, and latest
-Activity state. A side rail shows recent Workbench Activity and aggregate Not
-Added to Logbook counts. The top action bar generates disposable
-plain-language handoffs for a coding agent.
-It must not present command-copy instructions or expose CLI tokens in visible UI.
+The coding agent uses the CLI to:
 
-The CLI is for the coding agent that receives that handoff. It supplies the
-repeatable loop for reading evidence, writing an output file, validating that
-file, and applying the result to the local canonical store.
+- inspect queue state and claim work,
+- check/import transcript evidence under exact source-scoped permission,
+- read kind-specific instructions and schemas,
+- build bounded single- or multi-session evidence packets,
+- validate evidence refs and provenance,
+- apply derived enrichment and artifact bodies,
+- publish individual artifacts,
+- resolve optional kinds as N/A or contribution when appropriate,
+- leave durable Workbench Activity receipts.
 
-## Agent-Facing CLI Runbook
+## Output kinds
 
-Workbench UI should not ask users to run these commands. The user-facing surface
-generates disposable handoffs that tell a coding agent what needs enrichment.
-The agent-facing CLI supplies the repeatable enrichment loop.
+`mastheadctl` supports:
+
+| Kind | Role | Logbook row |
+| --- | --- | --- |
+| `session_enrichment` | Derived capsule, live summary, and search projection used upstream | No |
+| `session_dossier` | Single-session artifact body; required session package | When published |
+| `runbook` | Reproducible fix/operation recipe; multi-session-capable | When published |
+| `adr` | Architecture/design decision; multi-session-capable | When published |
+| `incident_timeline` | Time-ordered failure/remediation narrative; multi-session-capable | When published |
+
+The former `bug_fix_trace` product kind has evolved into `runbook`; agents must not author both in
+parallel.
+
+## Agent loop
+
+For each selected seed session:
+
+1. Claim the session and inspect its next action.
+2. Check transcript availability; import only with exact source-scoped permission or explicit user
+   direction.
+3. Complete the deterministic quality gate.
+4. Fetch instructions and schema for the output kind.
+5. Build the evidence packet. For runbook, ADR, or incident timeline, inspect provenance candidates
+   and declare the full provenance set when more than the seed session is justified.
+6. Write one schema-valid JSON output using only evidence refs in the packet.
+7. Validate with the seed session and declared provenance.
+8. Apply the output. Apply writes a current working artifact version; it does not publish.
+9. Publish each valid artifact independently.
+10. Mark unsupported optional automatic kinds N/A, or rely on contribution satisfaction when the
+    session already belongs to a published multi-session artifact of that kind.
+11. Release the claim and inspect Activity receipts.
+
+The automatic path is resolved when the session package is published and runbook, ADR, and incident
+timeline are each published, N/A, or satisfied by contribution.
+
+## Core commands
+
+Workbench UI should not ask people to run these commands. They are the agent-facing contract behind
+the disposable handoff.
 
 ```bash
 mastheadctl workbench status --json
+mastheadctl workbench enroll --missing --json
 mastheadctl workbench queue --kind session_enrichment --scope missing --json
 mastheadctl workbench next --kind session_enrichment --scope missing --json
 mastheadctl workbench claim --session session:abc --by codex --json
+
 mastheadctl workbench transcript check --session session:abc --json
 mastheadctl workbench transcript preview --session session:abc --source source:abc --json
 mastheadctl workbench transcript import --session session:abc --source source:abc --json
-mastheadctl workbench instructions --kind session_enrichment --scope missing
-mastheadctl workbench schema session_enrichment --json
-mastheadctl workbench evidence --kind session_enrichment --session session:abc --json
-mastheadctl workbench validate --kind session_enrichment --session session:abc --file output.json --json
-mastheadctl workbench apply --kind session_enrichment --session session:abc --file output.json --json
-mastheadctl workbench publish --session session:abc --json
+mastheadctl workbench quality precheck --session session:abc --json
+
+mastheadctl workbench instructions --kind runbook --scope candidates
+mastheadctl workbench schema runbook --json
+mastheadctl workbench provenance-candidates --session session:abc --json
+mastheadctl workbench evidence --kind runbook --session session:abc --provenance session:abc,session:def --json
+mastheadctl workbench validate --kind runbook --session session:abc --provenance session:abc,session:def --file runbook.json --json
+mastheadctl workbench apply --kind runbook --session session:abc --provenance session:abc,session:def --file runbook.json --json
+
+mastheadctl workbench artifacts --session session:abc --json
+mastheadctl workbench publish --artifact artifact:abc --json
+mastheadctl workbench not-applicable --kind adr --session session:abc --reason no_decision_evidence --json
 mastheadctl workbench activity --session session:abc --json
 ```
 
-Use `next` when an agent needs one complete packet: queue item, schema,
-kind-specific instructions, evidence packet, and apply command. For batch work,
-prepare a directory of per-session packets:
+`publish --session <id>` publishes the required session package when its gates pass. Multi-kind
+artifacts use `publish --artifact <id>` after validation and apply.
+
+For batch enrichment or artifact work:
 
 ```bash
 mastheadctl workbench batch prepare --kind session_enrichment --scope missing --limit 10 --out .masthead/workbench/batch-001 --json
 mastheadctl workbench batch apply .masthead/workbench/batch-001 --json
 ```
 
-The same loop applies to all V1 output kinds:
+## Provenance rules
 
-```text
-session_enrichment
-session_dossier
-bug_fix_trace
-```
+- A session dossier always has exactly one provenance session.
+- Runbook, ADR, and incident timeline may have one or more provenance sessions.
+- Multi-session apply requires a declared provenance set and a join rationale.
+- Every evidence ref must resolve inside the declared provenance packet.
+- Same project, topic, time window, or generic file overlap is not a sufficient automatic join by
+  itself. Prefer a strong single-session artifact over a weak merge.
+- A published multi-session artifact can satisfy a contributing seed session without a duplicate
+  per-session artifact.
 
-`mastheadctl workbench instructions --kind <kind> --scope <scope>` returns the
-agent guidance contract for that kind: evidence rules, confidence rubric,
-field-by-field rules, output discipline, and validation expectations.
+## Apply, publish, and N/A
 
-## Agent Loop
+- **Validate** checks schema, evidence refs, kind rules, and provenance.
+- **Apply** stores a current artifact version and Workbench receipt.
+- **Publish** admits that artifact capsule/body into Logbook and artifact-primary MCP retrieval.
+- **N/A** resolves one optional kind for one seed session without creating an artifact row.
+- **Contribution** resolves a seed session because a published shared artifact already includes it.
 
-For each selected session, the coding agent should:
-
-1. Claim the selected session and check transcript availability.
-2. Import transcripts only when exact source-scoped permission exists or the
-   user explicitly directs the agent to request it.
-3. Fetch the kind-specific instructions and schema for the target output kind.
-4. Fetch the evidence packet for the session and use only cited evidence refs.
-5. Produce one schema-valid JSON output for the chosen kind.
-6. Validate the output with the session id before applying it.
-7. Apply only after validation succeeds.
-8. Publish only after transcript, quality, session enrichment, dossier, and
-   bug-fix readiness gates are satisfied.
-
-For `session_enrichment`, start with the current session capsule prompt version
-and produce concise fields that improve Logbook, search, Now, dossier, and MCP
-retrieval: title, summary, topics, technologies, search phrases, unresolved
-items, missing evidence, confidence, and evidence refs.
-
-For `session_dossier`, produce a durable local artifact about the session's
-objective, outcome, important decisions, verification, unresolved items, and
-lessons learned. Include only conclusions supported by evidence refs.
-
-For `bug_fix_trace`, produce a durable local artifact that captures the observed
-symptom, root cause when supported, fix, files or subsystems involved,
-verification, failed hypotheses, and follow-up risk.
-
-## Output Kinds
-
-- `session_enrichment` writes current `session_capsule`, `live_summary`, and
-  `search_projection` rows using the current session capsule prompt version, so
-  Logbook, Now, dossier, search, and MCP reads can see the result.
-- `session_dossier` creates a local `session_artifacts` row with
-  current/superseded semantics.
-- `bug_fix_trace` creates a local `session_artifacts` row for bug-fix evidence.
-  When evidence does not support a bug-fix trace, Workbench records the artifact
-  kind as not applicable in pipeline state instead of creating a fake artifact.
+No enrichment or import action implicitly publishes a Logbook row.
 
 ## Privacy
 
-Workbench evidence packets are local database reads. No native remote model key
-is required for V1. Agents should use only the evidence packet, cite evidence
-refs, validate output with `--session`, and apply through the CLI. Session
-enrichment and artifacts both validate evidence refs against the session packet
-before apply.
+Workbench evidence packets are bounded local database reads. No native remote model key is required
+for the V1 handoff path. Agents must cite evidence refs, validate against the correct session and
+provenance packet, and write only through `mastheadctl`.
 
-## Legacy Native Hooks
+Transcript contents remain governed by source-scoped permission and exclusions. Multi-session
+authoring does not broaden that permission boundary.
+
+## Legacy native hooks
 
 Daemon endpoints such as `POST /enrichment/rebuild`,
-`POST /sessions/:id/dossier/enrich`, and provider settings endpoints are
-compatibility/dev hooks, not the V1 launch enrichment path.
+`POST /sessions/:id/dossier/enrich`, and provider-settings endpoints are compatibility/development
+hooks, not the V1 launch authoring path.

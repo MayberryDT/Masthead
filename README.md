@@ -11,8 +11,8 @@ published artifacts** (session dossiers, runbooks, ADRs, incident timelines),
 not session table rows. Live Now is a shallow view over collected session data,
 not the product category.
 
-Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
-`docs/adr/0011-artifact-first-logbook.md`.
+Start with [OpenWiki](openwiki/quickstart.md), [product language](CONTEXT.md), and
+[the artifact-first decision](docs/adr/0011-artifact-first-logbook.md).
 
 ## Stable Today
 
@@ -118,9 +118,10 @@ See [docs/architecture/data-paths.md](docs/architecture/data-paths.md).
 
 ## MCP Boundary
 
-The launch MCP server is read-only. It can search sessions, return bounded
-session evidence, list project history, and report coverage. It cannot mutate
-files, Git, shell state, harness sessions, source imports, settings, or
+The launch MCP server is read-only. For knowledge reuse it searches and opens
+published artifacts with provenance. Session, excerpt, transcript, project, and
+coverage tools remain available for bounded evidence and compile work. MCP cannot
+mutate files, Git, shell state, harness sessions, source imports, settings, or
 Masthead data.
 
 See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md).
@@ -131,10 +132,10 @@ See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md).
 - Import existing Codex history: [docs/how-to/import-codex-history.md](docs/how-to/import-codex-history.md)
 - Reset local Masthead data: [docs/how-to/reset-local-data.md](docs/how-to/reset-local-data.md)
 - Daemon API reference: [docs/reference/daemon-api.md](docs/reference/daemon-api.md)
-- Sources reference: [docs/reference/sources.md](docs/reference/sources.md)
+- Sources V2 contract: [docs/reference/sources-v2.md](docs/reference/sources-v2.md)
 - Adapter reference: [docs/reference/adapters.md](docs/reference/adapters.md)
-- Workbench enrichment reference: [docs/reference/enrichment.md](docs/reference/enrichment.md)
-- Session dossier reference: [docs/reference/session-dossier.md](docs/reference/session-dossier.md)
+- Workbench and artifact authoring: [docs/reference/enrichment.md](docs/reference/enrichment.md)
+- Session evidence and dossier artifacts: [docs/reference/session-dossier.md](docs/reference/session-dossier.md)
 - Configuration reference: [docs/reference/configuration.md](docs/reference/configuration.md)
-- Release gates: [docs/release-gates.md](docs/release-gates.md)
+- Release gate: [docs/acceptance/product-release-gate.md](docs/acceptance/product-release-gate.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)

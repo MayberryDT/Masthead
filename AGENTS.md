@@ -47,7 +47,10 @@ explicitly excludes them.
 
 Read `design.md` before Masthead UI work. It is the single master design source for this repo and follows Google's DESIGN.md structure while preserving this project's lowercase filename.
 
-`prd.md` remains the product/source-of-scope document. Historical files under `docs/superpowers/plans/` are implementation history, not current visual direction. Do not resurrect the old Raycast-inspired design file or use archived screenshots as the current design contract unless Tyler explicitly asks for that.
+`prd.md` remains the product/source-of-scope document. Git history and merged pull requests preserve
+implementation history; they are not current visual direction. Do not resurrect the old
+Raycast-inspired design file or use archived screenshots as the current design contract unless Tyler
+explicitly asks for that.
 
 Sessions, Workbench, Logbook, Sources, and Settings share one visual language, but
 each surface must use the information architecture best suited to its job. Do not force all

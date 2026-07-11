@@ -2,7 +2,7 @@
 
 Date: 2026-07-08  
 Worktree: `/home/tyler/.codex/worktrees/f503/Masthead`  
-Plan: `docs/superpowers/plans/2026-07-08-workbench-ui-harness-neutrality.md`
+Implementation plan is preserved in Git history; this file is the retained acceptance receipt.
 
 ## Commits (plan range)
 

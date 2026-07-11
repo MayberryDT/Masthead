@@ -1,8 +1,10 @@
 # Import Codex History
 
-Codex is the first supported source adapter. Masthead imports Codex history into the canonical local SQLite session graph while preserving source provenance.
+Masthead imports Codex history into the canonical local SQLite session graph while preserving
+source provenance. Import creates captured session evidence for Workbench; it does not publish
+Logbook rows.
 
-## Start the Daemon
+## Start Masthead
 
 ```bash
 npm run dev
@@ -14,47 +16,54 @@ For a non-default Codex home:
 MASTHEAD_CODEX_HOME=/path/to/home npm run dev
 ```
 
-## Discover Sources
+## Inspect sources
 
-Use the Sources surface or call:
+Use Sources for Codex live-connector discovery and health. For adapter/import diagnostics, call:
 
 ```bash
 curl http://127.0.0.1:17373/sources
 ```
 
-The response lists discovered Codex sources, adapter state, source paths, import state, and policy state.
+The response reports observed source paths, adapter state, import state, and policy state. Sources
+UI remains live-connect only; import diagnostics support the canonical capture pipeline.
 
-## Import Metadata
+## Import metadata
 
 ```bash
 curl -X POST http://127.0.0.1:17373/sources/codex/import-metadata
 ```
 
-Metadata import is the normal first pass. It creates canonical session records without requiring transcript approval.
+Metadata import creates or updates canonical session records without importing transcript contents.
 
-## Transcript Work
-
-Transcript import is no longer a broad Sources step. Use Workbench to review
-captured sessions, run lightweight transcript checks, and hand selected sessions
-to an agent. The agent can use the Workbench CLI:
-
-```bash
-mastheadctl workbench transcript check --session session:abc --json
-mastheadctl workbench transcript preview --session session:abc --source source:abc --json
-mastheadctl workbench transcript import --session session:abc --source source:abc --json
-```
-
-Transcript import requires exact source-scoped permission and the requested
-source must be linked to the session. Use source exclusions before transcript
-import when a source, project, or path should not be ingested.
-
-## Check Jobs
+## Check import jobs
 
 ```bash
 curl http://127.0.0.1:17373/imports
 curl http://127.0.0.1:17373/imports/<importJobId>/units
 curl http://127.0.0.1:17373/imports/<importJobId>/report
-curl http://127.0.0.1:17373/sessions?q=Logbook
 ```
 
-Imported sessions should appear in Logbook and become available to read-only MCP tools according to MCP access policies.
+Use session search only to inspect captured evidence or locate Workbench candidates:
+
+```bash
+curl "http://127.0.0.1:17373/sessions?q=<project-or-session-term>"
+```
+
+## Continue in Workbench
+
+Transcript import is a per-session Workbench action. A user-directed agent can run:
+
+```bash
+mastheadctl workbench enroll --missing --json
+mastheadctl workbench transcript check --session session:abc --json
+mastheadctl workbench transcript preview --session session:abc --source source:abc --json
+mastheadctl workbench transcript import --session session:abc --source source:abc --json
+mastheadctl workbench quality precheck --session session:abc --json
+```
+
+Transcript import requires exact source-scoped permission, and the requested source must be linked
+to the session. Source, project, and path exclusions remain authoritative.
+
+After transcript and quality prerequisites pass, use the Workbench disposable handoff to compile
+the session package and evidence-conditional runbook, ADR, and incident timeline. Published
+artifacts—not imported sessions—then appear in Logbook and artifact-primary MCP search.

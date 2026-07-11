@@ -213,7 +213,9 @@ x-motion:
 
 This is the master design source for Masthead. The repo intentionally uses the lowercase filename `design.md`; tools or agents that expect Google's uppercase `DESIGN.md` format should be pointed at this file.
 
-Product requirements live in `prd.md`. Historical implementation plans under `docs/superpowers/plans/` are not current visual direction. Do not use deleted files, old screenshots, generic dashboard examples, or the previous Raycast-inspired document as design authority.
+Product requirements live in `prd.md`. Git history and prior pull requests preserve implementation
+history; they are not current visual direction. Do not use deleted files, old screenshots, generic
+dashboard examples, or the previous Raycast-inspired document as design authority.
 
 ## Overview
 
@@ -293,9 +295,9 @@ recur across views, but each surface may use the structure that fits its job:
 
 - Now: live cards.
 - Workbench: dense publish-path table + Activity console rail + metal ops toolbar.
-  Human ops cover transcript check/import, quality review, claim/release, publish,
-  and Not Added inspection. Agent-authored enrichment/dossier/bug-fix work is
-  requested via Copy Agent Prompt, never via an in-app enrichment editor.
+  Human ops cover transcript check/import, quality review, claim/release, package publish,
+  and Not Added inspection. Agent-authored session package, runbook, ADR, and incident-timeline
+  work is requested via Copy Agent Prompt, never via an in-app artifact editor.
 - Logbook: dense table plus inspector.
 - Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
 - Settings: one centered compact steel card with direct controls for everyday preferences and one
@@ -494,7 +496,7 @@ Any UI change that touches the visual system should pass these gates before bein
 
 1. Run the relevant unit tests and `npm run build`.
 2. Open the rendered app with the Codex in-app Browser at the active local URL.
-3. Verify Sessions, Logbook, and Sources against live or fixture data.
+3. Verify Now, Workbench, Logbook, and Sources against live or fixture data.
 4. Check desktop, tablet, and a narrow mobile width around 390px.
 5. Confirm no `No live connection` state appears when a healthy connector or bridge is expected.
 6. Confirm dropdowns, layout changes, card hover/press states, and modals visibly transition.

@@ -392,7 +392,6 @@ Honest sentence for detail panels:
 | `docs/adr/0010-sources-v2-live-connect-only.md` | Decision record |
 | `design.md` | Visual/archetype source of truth |
 | `openwiki/sources.md` | Agent-facing summary of V2 |
-| `docs/reference/sources.md` | Legacy reference; import sections are historical / Workbench-bound |
 | `docs/adr/0008-…` | Bounded scan + catalog still apply; import onboarding UI superseded |
 | `docs/adr/0009-…` | Workbench/Logbook ownership unchanged |
 | `docs/reference/live-connectors.md` | Technical install paths for hooks/plugins |

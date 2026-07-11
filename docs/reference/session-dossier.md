@@ -1,55 +1,76 @@
-# Session Dossier
+# Session Evidence and Dossier Artifacts
 
-The session dossier is the shared detail surface for Board and Logbook sessions. It is backed by the canonical SQLite session graph and is exposed through:
+Masthead has two related but distinct session-dossier views:
+
+1. **Canonical session evidence detail** supports Now, Workbench, compile, and deep inspection.
+2. **Published `session_dossier` artifact body** is the session-scoped knowledge object opened from
+   a Logbook artifact capsule.
+
+They may share underlying evidence, but they are not the same product row. Sessions never appear as
+Logbook rows.
+
+## Canonical session evidence detail
 
 ```http
 GET /sessions/:sessionId/dossier
 ```
 
-`sessionId` is the canonical Masthead session id, not the runtime/source session id. Board cards carry `canonicalSessionId` so live cards can open the same dossier as Logbook rows.
+`sessionId` is the canonical Masthead session ID, not the runtime/source session ID. Now cards carry
+`canonicalSessionId` so a live card can request canonical evidence when it exists.
 
-## Contents
+The response may contain:
 
-The dossier response contains:
+- `identity`: canonical/source IDs, project, runtime, model, lifecycle, worktree, timing, confidence,
+- `coverage`: transcript/evidence coverage and missing-data warnings,
+- `narrative`: objective, prompts, outcome, topics, technologies, and narrative provenance,
+- `files`, `tools`, `verification`, and `attention`,
+- `timeline`: messages, tools, file effects, checkpoints, runtime signals, and attention events,
+- `reuse`: bounded context and source identity,
+- `usage`: canonical token counts,
+- current local artifact/enrichment provenance when available.
 
-- `identity`: canonical id, source id, project, runtime, model, lifecycle, worktree, timing, and source confidence.
-- `coverage`: complete, partial, hook-only, or metadata-only coverage state with transcript counts and missing-data warnings.
-- `narrative`: objective, prompts, outcome, topics, technologies, unresolved claims, and narrative provenance when enrichment exists.
-- `files`: canonical file effects with display paths and change counts when available.
-- `tools`: captured tool calls/results with status and output previews.
-- `verification`: derived status and verification commands.
-- `attention`: command failures, runtime warnings/errors, and missing-verification signals.
-- `timeline`: messages, tools, file effects, checkpoints, runtime signals, and attention events.
-- `reuse`: copyable context packet, MCP inclusion, source runtime/id, and canonical id.
-- `usage`: input, output, and total token counts from canonical usage rows.
+This route is evidence-facing. It may include unpublished session material and does not make the
+session searchable in Logbook.
 
-## Transcript-first behavior
-
-The detail surface shows canonical transcript messages when available. The transcript section reads from:
+## Transcript evidence
 
 ```http
 GET /sessions/:sessionId/transcript
 ```
 
-Transcript items are role/type filterable and paginated. Hook-only sessions show a coverage warning instead of presenting repeated hook metadata as conversation text.
+Transcript rows are role/type filterable and paginated. Hook-only sessions show a coverage warning
+instead of presenting repeated runtime metadata as conversation text.
 
-## Coverage states
+Coverage states are:
 
-- `complete`: usable transcript, tool activity, and file effects are present.
-- `partial`: at least one useful evidence class is present, but some coverage is missing.
-- `hook_only`: live hook or runtime metadata exists, but the conversation transcript is missing.
-- `metadata_only`: only sparse session identity metadata is available.
+- `complete`: usable transcript, tool activity, and file effects are present,
+- `partial`: some useful evidence is present but coverage is missing,
+- `hook_only`: live/runtime evidence exists without conversation transcript,
+- `metadata_only`: only sparse identity metadata is available.
 
-## Transcript import
+If transcript evidence is missing, use Workbench to check availability and request import for the
+exact session/source. Detail views do not import transcripts automatically.
 
-If the transcript is missing, use Workbench to check transcript availability and request transcript import for the specific session/source. The detail view does not automatically import transcripts or open source applications.
+## Published session-dossier artifact
 
-## Enrichment Provenance
+```http
+GET /logbook/artifacts/:artifactId
+```
 
-Advanced dossier provenance shows enrichment provider, model, prompt version, provider status, confidence, missing evidence, source references, and latest failed enrichment attempt when available. If remote enrichment fails, the dossier should state the failure instead of presenting local deterministic copy as a successful model result.
+A published artifact whose kind is `session_dossier` has provenance of exactly one canonical
+session. Its capsule is the Logbook search hit; its body records objective, context, approach,
+decisions, files, tools, outcome, verification, risks, lessons, confidence, missing evidence, and
+evidence refs.
 
-## UI Rules
+The published artifact has its own opaque artifact ID, publication state, current/superseded
+lineage, and provenance record. Opening it does not call the session dossier route as the primary
+Logbook detail path.
 
-Board and Logbook use the same `SessionDossier` component inside their existing modal shells. Unsupported source-opening actions are intentionally hidden. The dossier can copy context or ids, but it does not open source apps, mutate Git, run commands, approve requests, or steer agents.
+## UI rules
 
-If canonical dossier data is unavailable, Board can render a live-only fallback from the selected card. Logbook should treat missing dossier data as a fetch error because Logbook rows already use canonical ids.
+- Now may show a shallow live fallback when canonical evidence is unavailable.
+- Workbench may inspect canonical session evidence before any artifact exists.
+- Logbook opens artifact bodies and always shows provenance.
+- Unsupported source-opening actions remain hidden.
+- Neither detail path opens source apps, mutates Git, runs commands, approves requests, or steers
+  agents.

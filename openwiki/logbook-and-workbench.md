@@ -2,8 +2,7 @@
 
 **Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).  
 **Language:** `CONTEXT.md`.  
-**Cutover:** [artifact-first-logbook-cutover.md](../docs/reference/artifact-first-logbook-cutover.md).  
-**UI plan (history):** `docs/superpowers/plans/2026-07-09-logbook-workbench-artifact-ui.md`.
+**Cutover:** [artifact-first-logbook-cutover.md](../docs/reference/artifact-first-logbook-cutover.md).
 
 ## One-line split
 
@@ -74,4 +73,3 @@ Session tools (`search_sessions`, `get_session`, transcript/excerpts) remain for
 - Do not treat “published session” as a Logbook search hit.
 - Do not document Logbook as a session library or dual session/artifact browser.
 - Do not put Workbench process tracking into Logbook.
-- Plans under `docs/superpowers/plans/` are history, not the live product contract.

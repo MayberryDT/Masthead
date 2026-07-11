@@ -1,6 +1,9 @@
 # Live Connectors
 
-Live connectors feed Masthead's canonical local session database. The Now view, Logbook, search, dossiers, usage summaries, and read-only MCP access are downstream views over that collected data.
+Live connectors feed Masthead's canonical local session database. Now shows shallow live state;
+Workbench deepens selected sessions; Logbook and artifact-primary MCP expose only knowledge that
+Workbench has compiled and published. Session search, evidence detail, and usage summaries remain
+downstream evidence views over collected data.
 
 ## Release Targets
 
@@ -22,7 +25,8 @@ Connectors post two local signals when available:
 - `/ingest` records what happened as canonical event evidence.
 - `/live/state` records the current runtime state as `working`, `blocked`, `idle`, or `unknown`.
 
-Board prefers fresh explicit live-state reports over inferred historical events. Completed turn/stop signals become runtime idle state; they do not mean Masthead owns or closes a terminal session.
+Now prefers fresh explicit live-state reports over inferred historical events. Completed turn/stop
+signals become runtime idle state; they do not mean Masthead owns or closes a terminal session.
 
 ## Install And Test
 
@@ -75,4 +79,7 @@ npm run doctor
 npm run doctor:json
 ```
 
-`smoke:live` posts synthetic events and live-state reports for all eight target runtimes, verifies working/blocked/idle Board overlays, and verifies runtime-scoped canonical sessions. Doctor reports connector install status, live-state endpoint health, latest state-report metadata, and live-capture kill switches.
+`smoke:live` posts synthetic events and live-state reports for all eight target runtimes, verifies
+working/blocked/idle Now overlays, and verifies runtime-scoped canonical sessions. Doctor reports
+connector install status, live-state endpoint health, latest state-report metadata, and live-capture
+kill switches.

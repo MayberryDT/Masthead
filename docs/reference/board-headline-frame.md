@@ -1,5 +1,8 @@
 # Board Headline Frame Contract
 
+`BoardHeadlineFrame` is the internal protocol/type name for headlines rendered on the product's
+Now cards. “Board” in this reference does not name a separate product surface.
+
 Masthead Board cards render a single headline from a structured `BoardHeadlineFrame`:
 
 ```text
