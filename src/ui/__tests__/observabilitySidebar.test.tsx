@@ -64,4 +64,22 @@ describe("ObservabilitySidebar", () => {
     expect(html).toContain("4 automatically resolved");
     expect(html.indexOf('aria-label="Knowledge flow"')).toBeGreaterThan(html.indexOf('aria-label="Masthead sections"'));
   });
+
+  test("renders active history imports as compact background activity", () => {
+    const html = renderToStaticMarkup(
+      <ObservabilitySidebar
+        version={APP_VERSION_LABEL}
+        activeCount={0}
+        imports={[
+          { importJobId: "codex-job", importKind: "transcript", sourceId: "codex:one", status: "running", discoveredCount: 0, processedCount: 18151, importedCount: 18151, queuedCount: 0, failureCount: 0, totalWorkUnits: 1701, completedWorkUnits: 3, skippedWorkUnits: 1201, updatedAt: "2026-07-11T00:45:00.000Z" },
+          { importJobId: "claude-job", importKind: "transcript", sourceId: "claude_code:one", status: "queued", discoveredCount: 0, importedCount: 0, queuedCount: 0, failureCount: 0, updatedAt: "2026-07-11T00:42:00.000Z" }
+        ]}
+      />
+    );
+    expect(html).toContain("Updating history");
+    expect(html).toContain("Codex");
+    expect(html).toContain("3 / 500 units");
+    expect(html).toContain("1 harness waiting");
+    expect(html).not.toContain("Claude Code 0");
+  });
 });

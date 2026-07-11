@@ -225,6 +225,16 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     }
   }, [imports, loadInventory, onLibraryChanged]);
 
+  const activeImportCount = imports.filter(
+    (job) => job.status === "queued" || job.status === "running" || job.status === "cancelling"
+  ).length;
+
+  useEffect(() => {
+    if (!isLive || activeImportCount === 0) return undefined;
+    const timer = window.setInterval(() => void pollActiveImports(), 1_500);
+    return () => window.clearInterval(timer);
+  }, [activeImportCount, isLive, pollActiveImports]);
+
   const refreshAfterImportAction = useCallback(async () => {
     await loadInventory();
     onLibraryChanged();

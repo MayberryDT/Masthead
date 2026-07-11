@@ -77,7 +77,7 @@ export function useSourcesConnectorsController(
   const [selectedRuntime, setSelectedRuntime] = useState<string | undefined>();
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => readOnboardingDismissed());
   const [manualOnboardingOpen, setManualOnboardingOpen] = useState(false);
-  const [autoOnboardingEligible, setAutoOnboardingEligible] = useState(false);
+  const [autoOnboardingEligible, setAutoOnboardingEligible] = useState(() => !readOnboardingDismissed());
 
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;

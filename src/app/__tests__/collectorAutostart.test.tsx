@@ -136,7 +136,7 @@ describe("collector autostart", () => {
 
     expect(container.querySelector(".sources-onboarding-modal")).not.toBeNull();
     expect(container.textContent).toContain("OpenCode");
-    expect(container.textContent).toContain("Continue");
+    expect(container.textContent).toContain("Connect selected");
     expect(container.textContent).not.toContain("ADAPTERS");
     expect(container.textContent).not.toContain("Import data");
     expect(connectorFetch.requests).toContainEqual({ method: "GET", pathname: "/sources/connectors" });

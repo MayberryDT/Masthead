@@ -37,7 +37,7 @@ function renderApp(): string {
   );
 }
 describe("Live Board UI", () => {
-  test("renders final observability shell without prototype dashboard panels", () => {
+  test("renders the initial Sources shell without prototype dashboard panels", () => {
     const html = renderApp();
 
     expect(html).toContain("Masthead");
@@ -46,18 +46,14 @@ describe("Live Board UI", () => {
     expect(html).toContain('aria-label="Masthead session manager"');
     expect(html).toContain('aria-label="Primary navigation"');
     expect(html).toContain('aria-label="Session workspace"');
-    expect(html).toContain('aria-label="Board controls"');
+    expect(html).toContain('aria-label="Connections"');
     expect(html).not.toContain('aria-label="Agent health metrics"');
     expect(html).not.toContain("Total Tokens (24h)");
     expect(html).not.toContain("Top Models (24h)");
     expect(html).not.toContain("Tokens / Min");
     expect(html).not.toContain("Resource Utilization");
     expect(html).not.toContain("Recent Errors");
-    expect(html).toContain("All Harnesses");
-    expect(html).toContain("All Lifecycles");
-    expect(html).toContain("Last week");
-    expect(html).toContain("10s");
-    expect(html).toContain("Priority");
+    expect(html).toContain("No connection data yet");
     expect(html).not.toContain("Live ingestion");
     expect(html).not.toContain("Demo");
     expect(html).not.toContain("Offline");
@@ -65,7 +61,7 @@ describe("Live Board UI", () => {
     expect(html).not.toContain('aria-label="Filters"');
     expect(html).not.toContain("History");
     expect(html).not.toContain("Ended to review");
-    expect(html).toContain("Board will switch to live sessions when the local collector responds.");
+    expect(html).toContain("Press Refresh to scan for harnesses.");
     expect(html).not.toContain("Fix Google OAuth callback");
     expect(html).not.toContain("Approve request");
     expect(html).not.toContain("Run command");
@@ -78,11 +74,11 @@ describe("Live Board UI", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  test("renders calm single-line headline without direct-address language", () => {
+  test("renders calm initial Sources language without direct-address language", () => {
     const html = renderApp();
 
     expect(html).not.toContain("System status:");
-    expect(html).toContain("Connecting to Masthead collector");
+    expect(html).toContain("No connection data yet");
     expect(html).not.toMatch(/\byou|your|urgent|critical|dangerous/i);
   });
 

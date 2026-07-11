@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
+import type { ImportJob } from "../app/daemonClient";
 import type { KnowledgeFlowSummaryDto } from "../shared/knowledgeFlow";
 import sailLogoUrl from "./assets/masthead-logo-sail.png";
 import { Icon, type IconName } from "./icons/Icon";
 import { iconWeights } from "./icons/icon-tokens";
 import { SidebarKnowledgeFlow } from "./SidebarKnowledgeFlow";
+import { SidebarImportActivity } from "./SidebarImportActivity";
 
 type Props = {
   version: string;
@@ -12,6 +14,7 @@ type Props = {
   knowledgeFlowSummary?: KnowledgeFlowSummaryDto;
   knowledgeFlowLoading?: boolean;
   knowledgeFlowError?: string;
+  imports?: ImportJob[];
   onSurfaceChange?: (surface: AppSurface) => void;
 };
 
@@ -24,6 +27,7 @@ export function ObservabilitySidebar({
   knowledgeFlowSummary,
   knowledgeFlowLoading,
   knowledgeFlowError,
+  imports = [],
   onSurfaceChange
 }: Props) {
   return (
@@ -71,6 +75,7 @@ export function ObservabilitySidebar({
           />
         </SidebarGroup>
       </nav>
+      <SidebarImportActivity imports={imports} />
       <SidebarKnowledgeFlow
         summary={knowledgeFlowSummary}
         loading={knowledgeFlowLoading}

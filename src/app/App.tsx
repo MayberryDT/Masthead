@@ -652,7 +652,10 @@ export function App() {
           onConfirmConnectorActivation={(runtime) => void sourcesConnectors.confirmActivation(runtime)}
           onCancelImport={handleCancelImport}
           onClearImportJobsFilter={handleClearImportJobsFilter}
-          onCloseOnboarding={sourcesConnectors.closeOnboarding}
+          onCloseOnboarding={() => {
+            sourcesConnectors.closeOnboarding();
+            setActiveSurface("workbench");
+          }}
           onRuntimeHookAction={handleRuntimeHookAction}
           onConnectSelected={handleConnectSelectedSources}
           onExcludePath={handleExcludeSourcePath}
@@ -844,6 +847,7 @@ export function App() {
             knowledgeFlowSummary={knowledgeFlow.summary}
             knowledgeFlowLoading={knowledgeFlow.loading}
             knowledgeFlowError={knowledgeFlow.error}
+            imports={imports}
             onSurfaceChange={setActiveSurface}
           />
         }

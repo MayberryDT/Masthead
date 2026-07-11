@@ -64,6 +64,15 @@ beforeEach(() => {
 });
 
 describe("useSourcesConnectorsController", () => {
+  test("opens first-run onboarding immediately before connector inventory resolves", async () => {
+    vi.mocked(listHarnessConnectors).mockImplementation(() => new Promise(() => undefined));
+
+    await renderHarness({ activeProjectionUrl: baseUrl });
+
+    expect(latest().snapshot).toBeUndefined();
+    expect(latest().onboardingOpen).toBe(true);
+  });
+
   test("auto-loads connectors and opens first-run onboarding when none are ready but some are found", async () => {
     vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 0, found: true }));
 

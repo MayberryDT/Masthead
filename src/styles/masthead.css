@@ -4326,6 +4326,104 @@ body {
   color: var(--ash);
 }
 
+.sidebar-import-activity {
+  position: absolute;
+  right: 16px;
+  bottom: 186px;
+  left: 16px;
+  border: 1px solid rgba(46, 167, 255, 0.2);
+  border-radius: 4px;
+  background: #03121c;
+  padding: 11px 12px;
+  color: #d8eaf6;
+  font-family: var(--font-mono);
+  box-shadow: inset 0 1px 0 rgba(210, 237, 252, 0.035);
+}
+
+.sidebar-import-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #f2f9fd;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sidebar-import-live,
+.sources-discovery-indicator {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 8px rgba(46, 167, 255, 0.62);
+  animation: masthead-status-pulse 1.4s ease-in-out infinite;
+}
+
+.sidebar-import-command {
+  margin: 9px 0 0;
+  color: #9dd9ff;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.sidebar-import-detail,
+.sidebar-import-waiting {
+  margin: 4px 0 0;
+  color: #8ea9bb;
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+
+.sidebar-import-progress {
+  height: 2px;
+  margin-top: 9px;
+  overflow: hidden;
+  background: rgba(46, 167, 255, 0.12);
+}
+
+.sidebar-import-progress span {
+  display: block;
+  min-width: 3px;
+  height: 100%;
+  background: var(--blue);
+  transition: width 320ms var(--layout-ease);
+}
+
+.sources-discovery-status {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  border: 1px solid rgba(46, 167, 255, 0.2);
+  border-radius: 4px;
+  background: #03121c;
+  padding: 10px 12px;
+  color: #c9e0ee;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.sources-discovery-status.is-complete .sources-discovery-indicator {
+  background: var(--green);
+  box-shadow: none;
+  animation: none;
+}
+
+@keyframes masthead-status-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-import-live,
+  .sources-discovery-indicator {
+    animation: none;
+  }
+}
+
 .search-icon {
   width: var(--icon-toolbar);
   height: var(--icon-toolbar);
@@ -7095,6 +7193,11 @@ body {
 }
 
 @media (max-width: 760px) {
+  .sidebar-import-activity {
+    position: static;
+    margin: 18px 16px 0;
+  }
+
   .observability-console .sidebar-knowledge-flow,
   .masthead-shell .sidebar-knowledge-flow {
     position: static;

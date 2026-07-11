@@ -13,7 +13,72 @@ import { SourcesConnectOnboarding } from "../SourcesConnectOnboarding";
 const noop = () => undefined;
 
 describe("SourcesConnectOnboarding", () => {
-  test("shows the five-stage live-connect and history-import coordinator", () => {
+  test("blocks Continue while automatic discovery is running and reports the completed count", async () => {
+    let finishDiscovery: (() => void) | undefined;
+    const onDiscover = vi.fn(() => new Promise<void>((resolve) => { finishDiscovery = resolve; }));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<SourcesConnectOnboarding open snapshot={sampleSnapshot()} onClose={noop} onSkip={noop} onDiscover={onDiscover} onEnable={noop} />);
+    });
+
+    expect(container.textContent).toContain("Looking for local sources");
+    const continueButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Continue");
+    expect(continueButton?.disabled).toBe(true);
+
+    await act(async () => { finishDiscovery?.(); await Promise.resolve(); });
+    expect(container.textContent).toContain("Discovered 2 sources");
+    expect(continueButton?.disabled).toBe(false);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("connects selected harnesses in one step without redundant enable or empty activation screens", async () => {
+    const onEnable = vi.fn(async () => undefined);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<SourcesConnectOnboarding open snapshot={sampleSnapshot()} onClose={noop} onSkip={noop} onDiscover={noop} onEnable={onEnable} />);
+      await Promise.resolve();
+    });
+    const firstContinue = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Continue");
+    await act(async () => firstContinue?.click());
+    expect(container.textContent).toContain("Connect selected");
+    expect(container.textContent).not.toContain("Enable selected connectors");
+    const connect = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Connect selected");
+    await act(async () => { connect?.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(onEnable).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Import local history");
+    expect(container.textContent).not.toContain("No host activation remaining");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("starts durable imports and exits onboarding instead of waiting on reconciliation", async () => {
+    const onClose = vi.fn();
+    const onImportHistory = vi.fn(async () => ({ jobs: [{ importJobId: "job-1", importKind: "transcript", sourceId: "codex:one", status: "queued" }] }));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<SourcesConnectOnboarding open snapshot={sampleSnapshot()} onClose={onClose} onSkip={noop} onDiscover={noop} onEnable={noop} onImportHistory={onImportHistory} />);
+      await Promise.resolve();
+    });
+    for (const label of ["Continue", "Connect selected"]) {
+      const button = Array.from(container.querySelectorAll("button")).find((candidate) => candidate.textContent === label);
+      await act(async () => { button?.click(); await Promise.resolve(); await Promise.resolve(); });
+    }
+    const start = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Start history import");
+    await act(async () => { start?.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain("Import and reconciliation progress");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("shows the streamlined discovery, connect, background import, and ready stages", () => {
     const html = renderToStaticMarkup(
       <SourcesConnectOnboarding
         open
@@ -28,13 +93,12 @@ describe("SourcesConnectOnboarding", () => {
     );
 
     expect(html).toContain("Capture local session history");
-    expect(html).toContain("Find local harnesses and their history");
+    expect(html).toContain("Looking for local sources");
     expect(html).toContain("Discover");
     expect(html).toContain("Connect");
     expect(html).toContain("Import history");
-    expect(html).toContain("Reconcile");
     expect(html).toContain("Ready");
-    expect(html).toContain("live capture");
+    expect(html).not.toContain("Reconcile");
     expect(html).not.toContain("bulk transcript");
     expect(html).not.toContain("Check local sources");
   });
@@ -57,17 +121,17 @@ describe("SourcesConnectOnboarding", () => {
     );
 
     expect(html).toContain("Capture local session history");
-    expect(html).toContain("Find local harnesses and their history");
+    expect(html).toContain("Looking for local sources");
     expect(html).toContain("Discover");
-    expect(html).toContain("Enable");
+    expect(html).toContain("Connect");
     expect(html).toContain("Import history");
-    expect(html).toContain("Reconcile");
+    expect(html).not.toContain("Reconcile");
     expect(html).not.toContain("Set up sources");
     expect(html).not.toContain("Check local sources");
     expect(html).not.toContain("import selected session history");
   });
 
-  test("auto-discovers on open and defaults selected found harnesses on select step", async () => {
+  test("auto-discovers on open and defaults found harnesses to selected", async () => {
     const onDiscover = vi.fn();
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -90,7 +154,7 @@ describe("SourcesConnectOnboarding", () => {
       });
 
       expect(onDiscover).toHaveBeenCalledTimes(1);
-      expect(container.textContent).toContain("Find local harnesses and their history");
+      expect(container.textContent).toContain("Discovered 2 sources");
 
       const continueButton = Array.from(container.querySelectorAll("button")).find(
         (button) => button.textContent === "Continue"
@@ -100,7 +164,7 @@ describe("SourcesConnectOnboarding", () => {
         continueButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
 
-      expect(container.textContent).toContain("Select found harnesses");
+      expect(container.textContent).toContain("Connect found harnesses");
       expect(container.textContent).toContain("Codex");
       expect(container.textContent).toContain("Claude Code");
       expect(container.textContent).toContain("Import history");
@@ -114,180 +178,6 @@ describe("SourcesConnectOnboarding", () => {
     }
   });
 
-  test("defaults history capture to Everything and stays open on durable progress", async () => {
-    const onImportHistory = vi.fn(async () => ({
-      jobs: [
-        {
-          importJobId: "job-transcript",
-          importKind: "transcript",
-          sourceId: "codex-sessions",
-          status: "queued"
-        }
-      ]
-    }));
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    let root: Root | undefined;
-
-    try {
-      root = createRoot(container);
-      await act(async () => {
-        root?.render(
-          <SourcesConnectOnboarding
-            open
-            snapshot={sampleSnapshot()}
-            busy={false}
-            imports={[]}
-            onClose={noop}
-            onSkip={noop}
-            onDiscover={noop}
-            onEnable={noop}
-            onImportHistory={onImportHistory}
-          />
-        );
-      });
-
-      for (const label of ["Continue", "Continue", "Enable selected", "Continue"]) {
-        const button = Array.from(container.querySelectorAll("button")).find((candidate) => candidate.textContent === label);
-        expect(button, label).toBeTruthy();
-        await act(async () => {
-          button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-          await Promise.resolve();
-        });
-      }
-
-      expect(container.textContent).toContain("Import local history");
-      const everything = container.querySelector<HTMLInputElement>('input[value="everything"]');
-      expect(everything?.checked).toBe(true);
-      const start = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Start history import");
-      await act(async () => {
-        start?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-        await Promise.resolve();
-      });
-
-      expect(onImportHistory).toHaveBeenCalledWith(expect.objectContaining({
-        importMetadata: true,
-        importScope: { includeChangedSinceCursor: true, mode: "transcript_full" },
-        runtimes: ["codex", "claude_code"]
-      }));
-      expect(container.textContent).toContain("Import and reconciliation progress");
-      expect(container.querySelector(".sources-onboarding-modal")).not.toBeNull();
-    } finally {
-      await act(async () => root?.unmount());
-      container.remove();
-    }
-  });
-
-  test("reopens directly on durable reconciliation progress after an app restart", async () => {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(<SourcesConnectOnboarding
-        open
-        snapshot={sampleSnapshot()}
-        busy={false}
-        imports={[
-          {
-            importJobId: "job-resume",
-            importKind: "transcript",
-            sourceId: "codex-sessions",
-            status: "running",
-            discoveredCount: 1_570,
-            processedCount: 400,
-            importedCount: 400,
-            queuedCount: 1_170,
-            failureCount: 0,
-            totalWorkUnits: 1_570,
-            completedWorkUnits: 400,
-            failedWorkUnits: 0,
-            skippedWorkUnits: 0,
-            scope: { includeChangedSinceCursor: true, mode: "transcript_full" },
-            updatedAt: "2026-07-10T00:00:00.000Z"
-          }
-        ]}
-        onClose={noop}
-        onSkip={noop}
-        onDiscover={noop}
-        onEnable={noop}
-      />);
-      await Promise.resolve();
-    });
-
-    expect(container.textContent).toContain("Import and reconciliation progress");
-    expect(container.textContent).toContain("1170");
-    expect(container.textContent).toContain("running");
-    await act(async () => root.unmount());
-    container.remove();
-  });
-
-  test("offers Import remaining after a bounded recent import defers units", async () => {
-    const onImportHistory = vi.fn(async () => ({
-      jobs: [{ importJobId: "job-full", importKind: "transcript", sourceId: "codex-sessions", status: "queued" }]
-    }));
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(<SourcesConnectOnboarding
-        open
-        snapshot={sampleSnapshot()}
-        imports={[{
-          importJobId: "job-recent",
-          importKind: "transcript",
-          sourceId: "codex-sessions",
-          status: "succeeded",
-          discoveredCount: 500,
-          importedCount: 500,
-          queuedCount: 0,
-          failureCount: 0,
-          skippedWorkUnits: 1_070,
-          scope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
-          completionReport: {
-            importJobId: "job-recent",
-            runtime: "codex",
-            status: "succeeded",
-            generatedAt: "2026-07-10T00:00:00.000Z",
-            sessionsDiscovered: 500,
-            sessionsCreated: 500,
-            sessionsUpdated: 0,
-            transcriptsImported: 500,
-            recordsImported: 500,
-            recordsSkipped: 1_070,
-            recordsFailed: 0,
-            logbookSearchableSessions: 0,
-            dossierReadySessions: 500,
-            enrichedSessions: 0,
-            mcpVisibleSessions: 500,
-            failedUnits: 0,
-            skippedUnits: 1_070,
-            nextActions: ["import_full_archive"]
-          },
-          updatedAt: "2026-07-10T00:00:00.000Z"
-        }]}
-        onClose={noop}
-        onSkip={noop}
-        onDiscover={noop}
-        onEnable={noop}
-        onImportHistory={onImportHistory}
-      />);
-      await Promise.resolve();
-    });
-
-    const importRemaining = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Import remaining");
-    expect(importRemaining).toBeTruthy();
-    await act(async () => {
-      importRemaining?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(onImportHistory).toHaveBeenCalledWith(expect.objectContaining({
-      importScope: { includeChangedSinceCursor: true, mode: "transcript_full" },
-      queueEnrichment: false,
-      runtimes: ["codex"]
-    }));
-    await act(async () => root.unmount());
-    container.remove();
-  });
 });
 
 afterEach(() => {
