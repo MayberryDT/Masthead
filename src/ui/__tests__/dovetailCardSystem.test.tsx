@@ -364,6 +364,7 @@ describe("dovetail card system", () => {
     expect(logbookCss).toContain(".logbook-col-kind");
     expect(logbookCss).toContain(".logbook-col-confidence");
     expect(logbookCss).toContain(".logbook-col-provenance");
+    expect(cssRuleBody(logbookCss, ".logbook-panel > .logbook-toolbar")).toContain("margin-block-end: var(--space-sm);");
   });
 });
 

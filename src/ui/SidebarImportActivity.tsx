@@ -6,7 +6,9 @@ export function SidebarImportActivity({ imports }: { imports: ImportJob[] }) {
 
   const current = active.find((job) => job.status === "running" || job.status === "cancelling");
   const waiting = active.filter((job) => job.status === "queued").length;
-  const selectedTotal = current ? Math.max(0, (current.totalWorkUnits ?? 0) - (current.skippedWorkUnits ?? 0)) : 0;
+  const discoveredTotal = current?.totalWorkUnits ?? 0;
+  const outsideThisPass = current?.skippedWorkUnits ?? 0;
+  const selectedTotal = Math.max(0, discoveredTotal - outsideThisPass);
   const completed = current?.completedWorkUnits ?? 0;
   const remaining = Math.max(0, selectedTotal - completed - (current?.failedWorkUnits ?? 0));
   const progress = selectedTotal > 0 ? Math.min(100, (completed / selectedTotal) * 100) : 0;
@@ -19,10 +21,11 @@ export function SidebarImportActivity({ imports }: { imports: ImportJob[] }) {
       </div>
       {current ? (
         <>
-          <p className="sidebar-import-command">$ {runtimeLabel(current.sourceId)} {completed.toLocaleString()} / {selectedTotal.toLocaleString()} units</p>
+          <p className="sidebar-import-command">$ {runtimeLabel(current.sourceId)} {completed.toLocaleString()} / {(discoveredTotal || selectedTotal).toLocaleString()} discovered</p>
           <p className="sidebar-import-detail">
-            {(current.processedCount ?? current.importedCount).toLocaleString()} records · {remaining.toLocaleString()} remaining
+            {selectedTotal.toLocaleString()} scheduled · {remaining.toLocaleString()} remaining
           </p>
+          {outsideThisPass > 0 ? <p className="sidebar-import-scope">{outsideThisPass.toLocaleString()} outside this pass</p> : null}
           <div className="sidebar-import-progress" aria-hidden="true">
             <span style={{ width: `${progress}%` }} />
           </div>

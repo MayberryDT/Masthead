@@ -21,7 +21,7 @@
 }
 
 .logbook-panel > .logbook-toolbar {
-  margin-block-end: 0;
+  margin-block-end: var(--space-sm);
 }
 
 .logbook-toolbar-row {

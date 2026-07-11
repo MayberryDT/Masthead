@@ -159,7 +159,8 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("Copy Agent Prompt");
     expect(html).toContain("app-button-primary");
     expect(html).toContain("workbench-copy-agent");
-    expect(html).toContain("Enrichment and dossier work is agent-only");
+    expect(html).not.toContain("Enrichment and dossier work is agent-only");
+    expect(html).not.toContain("workbench-agent-hint");
     expect(html).toContain("Needs enrichment");
     expect(html).toContain("enrich");
     expect(html).toContain("Pipeline");

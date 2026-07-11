@@ -60,6 +60,7 @@ export async function runImportWorkUnit(input: {
   let processed = 0;
   let imported = 0;
   let failed = 0;
+  let recordsSinceYield = 0;
   const sessionIds = new Set<string>();
   const source: DiscoveredSource = {
     confidence: unit.confidence,
@@ -73,6 +74,7 @@ export async function runImportWorkUnit(input: {
   try {
     for await (const record of input.adapterBackfill(source)) {
       processed += 1;
+      recordsSinceYield += 1;
       if (record.diagnostics.length > 0) {
         failed += 1;
         const diagnostic = record.diagnostics[0];
@@ -94,6 +96,7 @@ export async function runImportWorkUnit(input: {
           processedRecords: processed,
           status: "running"
         });
+        recordsSinceYield = await yieldToRequestHandling(recordsSinceYield);
         continue;
       }
 
@@ -103,6 +106,7 @@ export async function runImportWorkUnit(input: {
           processedRecords: processed,
           status: "running"
         });
+        recordsSinceYield = await yieldToRequestHandling(recordsSinceYield);
         continue;
       }
 
@@ -137,6 +141,7 @@ export async function runImportWorkUnit(input: {
         processedRecords: processed,
         status: "running"
       });
+      recordsSinceYield = await yieldToRequestHandling(recordsSinceYield);
     }
     for (const sessionId of sessionIds) {
       if (input.indexSession) {
@@ -179,6 +184,12 @@ export async function runImportWorkUnit(input: {
     });
     return { failed: Math.max(1, failed), imported, processed, sessionIds: [...sessionIds] };
   }
+}
+
+async function yieldToRequestHandling(recordsSinceYield: number): Promise<number> {
+  if (recordsSinceYield < 25) return recordsSinceYield;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  return 0;
 }
 
 function failureKindForDiagnostic(code: string): "unreadable" | "locked" | "malformed" | "schema_drift" | "normalization" | "unknown" {

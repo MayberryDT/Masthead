@@ -691,7 +691,6 @@ export function App() {
             detailLoading={logbook.detailLoading}
             filterOptions={logbook.filterOptions}
             filters={logbook.filters}
-            imports={imports}
             importBusy={sourcesBusy}
             pageIndex={logbook.pageIndex}
             pageSize={logbook.pageSize}

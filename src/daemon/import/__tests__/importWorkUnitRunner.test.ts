@@ -157,6 +157,46 @@ describe("import work unit runner", () => {
     expect(indexedSessionIds).toHaveLength(1);
   });
 
+  test("yields to request handling while importing a large work unit", async () => {
+    const sourcePath = join(tempDir, "large-thread.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+    let eventLoopYielded = false;
+    let yieldObservedDuringBackfill = false;
+    setImmediate(() => {
+      eventLoopYielded = true;
+    });
+
+    await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        for (let offset = 1; offset <= 50; offset += 1) {
+          if (offset === 26) yieldObservedDuringBackfill = eventLoopYielded;
+          yield {
+            diagnostics: [],
+            normalized: {
+              confidence: "authoritative",
+              kind: "session",
+              sourceRef: { sourceKind: "jsonl", sourcePath },
+              value: { observedAt: "2026-07-01T00:00:00.000Z", sessionId: "large-session" }
+            },
+            observedAt: "2026-07-01T00:00:00.000Z",
+            payload: { id: "large-session", offset },
+            payloadHash: `large-hash-${offset}`,
+            source: sourceForPath(sourcePath),
+            sourceRecordKey: `${sourcePath}:${offset}`
+          };
+        }
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(yieldObservedDuringBackfill).toBe(true);
+  });
+
   test("groups diagnostic records and marks the unit failed", async () => {
     const sourcePath = join(tempDir, "bad.jsonl");
     const unitId = seedWorkUnit(db, sourcePath);

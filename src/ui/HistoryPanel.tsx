@@ -3,7 +3,6 @@ import { searchHistory, type HistorySearchFilters, type HistorySession } from ".
 import type { StoreRecord } from "../core/store";
 import type {
   AdapterStatus,
-  ImportJob,
   LogbookSort,
   SourceStatus
 } from "../app/daemonClient";
@@ -38,7 +37,6 @@ type Props = {
   onCloseDetail?: () => void;
   sources?: SourceStatus[];
   adapters?: AdapterStatus[];
-  imports?: ImportJob[];
   connectionState?: "live" | "offline" | "incompatible" | "connecting";
   importBusy?: boolean;
   onFilterChange?: (filters: LogbookFilterState) => void;
@@ -98,7 +96,7 @@ export type LogbookFilterOptions = {
   projects?: string[];
 };
 
-type EmptyReason = "no_sessions" | "sources_detected_not_imported" | "import_running" | "query_no_results" | "incompatible" | "offline";
+type EmptyReason = "no_sessions" | "sources_detected_not_imported" | "query_no_results" | "incompatible" | "offline";
 
 type EmptyAction = {
   label: string;
@@ -121,7 +119,6 @@ export function HistoryPanel({
   filterOptions,
   filters = {},
   importBusy = false,
-  imports = [],
   loadState,
   loading = false,
   nextCursor,
@@ -194,7 +191,6 @@ export function HistoryPanel({
     if (!isOptimisticPaging || errorState) setOptimisticPageIndex(undefined);
   }, [errorState, isOptimisticPaging, optimisticPageIndex]);
   const emptyReason = emptyReasonFor({
-    activeImports: hasActiveImports(imports),
     connectionState,
     hasActiveFilters,
     sourceSummary,
@@ -454,14 +450,12 @@ function EmptyPanel({ actions = [], message, reason, support, title }: { reason:
 }
 
 function emptyReasonFor({
-  activeImports,
   connectionState,
   hasActiveFilters,
   sourceSummary,
   usesLogbookStore,
   visibleTotal
 }: {
-  activeImports: boolean;
   connectionState: Props["connectionState"];
   hasActiveFilters: boolean;
   sourceSummary: SourceImportSummary;
@@ -470,7 +464,6 @@ function emptyReasonFor({
 }): EmptyReason {
   if (connectionState === "offline") return "offline";
   if (connectionState === "incompatible") return "incompatible";
-  if (activeImports) return "import_running";
   if (usesLogbookStore && visibleTotal === 0 && hasActiveFilters) return "query_no_results";
   if (sourceSummary.detectedSources > 0 && sourceSummary.importedSessions === 0) return "sources_detected_not_imported";
   return "no_sessions";
@@ -506,16 +499,6 @@ function emptyStateFor(
       title: "Logbook API is incompatible.",
       message: "The UI reached a daemon, but the canonical Logbook API shape does not match this build.",
       actions: [{ label: "Retry", onClick: options.onRetry, variant: "primary" }]
-    };
-  }
-
-  if (reason === "import_running") {
-    return {
-      reason,
-      title: "Import is building the Logbook.",
-      message: "Session metadata is queued or importing. Published artifacts will appear here after compile and publish from Workbench.",
-      support: "Use Sources to inspect job progress or cancel a stuck import.",
-      actions: [{ label: "Open Sources", onClick: options.onOpenSources, variant: "primary" }]
     };
   }
 
@@ -627,10 +610,6 @@ function sourceImportSummary(sources: SourceStatus[], adapters: AdapterStatus[])
     adapters.find((adapter) => adapter.policies.metadataImport)?.runtime ??
     sourceRows[0]?.runtime;
   return { detectedSources, discoveredSessions, importedSessions, metadataRuntime };
-}
-
-function hasActiveImports(imports: ImportJob[]): boolean {
-  return imports.some((job) => job.status === "queued" || job.status === "running");
 }
 
 function legacyToLogbookSession(session: HistorySession): LogbookSession {

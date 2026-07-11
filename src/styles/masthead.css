@@ -2073,7 +2073,6 @@ main {
 .workbench-panel > .workbench-toolbar,
 .workbench-panel > .workbench-error,
 .workbench-panel > .workbench-action-summary,
-.workbench-panel > .workbench-agent-hint,
 .workbench-panel > .workbench-not-added-panel {
   flex: 0 0 auto;
 }
@@ -2531,18 +2530,13 @@ main {
   outline: none;
 }
 
-.workbench-action-summary,
-.workbench-agent-hint {
+.workbench-action-summary {
   margin: 0;
   min-width: 0;
   color: var(--mute);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.4;
-}
-
-.workbench-agent-hint {
-  color: #a9d7ff;
 }
 
 .workbench-not-added-panel {
@@ -4369,11 +4363,16 @@ body {
 }
 
 .sidebar-import-detail,
+.sidebar-import-scope,
 .sidebar-import-waiting {
   margin: 4px 0 0;
   color: #8ea9bb;
   font-size: 9.5px;
   line-height: 1.35;
+}
+
+.sidebar-import-scope {
+  color: #6f8da1;
 }
 
 .sidebar-import-progress {

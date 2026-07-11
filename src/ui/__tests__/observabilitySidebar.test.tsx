@@ -78,7 +78,9 @@ describe("ObservabilitySidebar", () => {
     );
     expect(html).toContain("Updating history");
     expect(html).toContain("Codex");
-    expect(html).toContain("3 / 500 units");
+    expect(html).toContain("3 / 1,701 discovered");
+    expect(html).toContain("500 scheduled");
+    expect(html).toContain("1,201 outside this pass");
     expect(html).toContain("1 harness waiting");
     expect(html).not.toContain("Claude Code 0");
   });

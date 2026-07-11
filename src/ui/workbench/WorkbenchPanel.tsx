@@ -118,9 +118,6 @@ export function WorkbenchPanel({
   const publishPathLabel = loading ? "…" : String(queueTotal);
   const notAddedTotal = notAddedSummary?.total;
   const notAddedLabel = notAddedTotal != null ? String(notAddedTotal) : undefined;
-  const showAgentPromptEmphasis = selectedSessions.some(
-    (session) => session.nextAction === "enrich" || session.nextAction === "create_dossier"
-  );
   const pageCount = Math.max(1, Math.ceil(queueTotal / Math.max(1, pageSize)));
   const safePage = Math.min(page, pageCount - 1);
   const rangeStart = queueTotal === 0 ? 0 : safePage * pageSize + 1;
@@ -317,12 +314,6 @@ export function WorkbenchPanel({
           ) : null}
         </dl>
       </div>
-
-      {showAgentPromptEmphasis ? (
-        <p className="workbench-agent-hint" aria-live="polite">
-          Enrichment and dossier work is agent-only — use Copy Agent Prompt
-        </p>
-      ) : null}
 
       {toastMessage ? (
         <div className={`workbench-toast is-${toastTone}`} role="status" aria-live="polite" aria-atomic="true">
