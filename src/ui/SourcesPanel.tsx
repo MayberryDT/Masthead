@@ -49,9 +49,10 @@ type Props = {
   selectedConnectorRuntime?: string;
   onSelectConnectorRuntime?: (runtime: string | undefined) => void;
   onDiscoverConnectors?: () => Promise<void> | void;
-  onEnableConnector?: (runtime: string) => Promise<void> | void;
+  onDiscoverHistory?: () => Promise<void> | void;
+  onEnableConnector?: (runtime: string) => Promise<boolean> | boolean | void;
   onEnableAllDetectedConnectors?: () => void;
-  onTestConnector?: (runtime: string) => void;
+  onTestConnector?: (runtime: string) => Promise<boolean | { verified: boolean; needsAction: boolean }> | boolean | { verified: boolean; needsAction: boolean } | void;
   onUninstallConnector?: (runtime: string) => void;
   onConfirmConnectorActivation?: (runtime: string) => void;
   /** Toolbar status next to Refresh only. */
@@ -226,11 +227,12 @@ function SourcesPanelV2(props: Props) {
         onClose={() => props.onCloseOnboarding?.()}
         onSkip={() => props.onSkipOnboarding?.()}
         onDiscover={async () => {
-          await props.onDiscoverConnectors?.();
+          await (props.onDiscoverHistory ?? props.onDiscoverConnectors)?.();
         }}
         onEnable={async (runtime) => {
           await props.onEnableConnector?.(runtime);
         }}
+        onTest={async (runtime) => (await props.onTestConnector?.(runtime)) ?? false}
         onImportHistory={props.onRunSetup}
         onPollImports={props.onPollImports}
         onRetryImport={props.onRetryImport}

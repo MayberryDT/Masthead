@@ -1,7 +1,13 @@
 import { getTranscriptCoverage } from "../daemon/db/sessionTranscriptRepository.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 
-export type CaptureQualityFailureReason = "no_messages" | "hook_only" | "metadata_only" | "duplicate_noise" | "missing_identity";
+export type CaptureQualityFailureReason =
+  | "no_messages"
+  | "hook_only"
+  | "metadata_only"
+  | "duplicate_noise"
+  | "low_evidence"
+  | "missing_identity";
 export type CaptureQualityPassReason = "meaningful_message" | "usable_transcript";
 
 export type CaptureQualityPrecheckResult =
@@ -36,14 +42,24 @@ export function runCaptureQualityPrecheck(db: MastheadDatabase, sessionId: strin
   const totalTranscriptItems = coverage.messages + nonMessageItems;
 
   if (totalTranscriptItems === 0) return { ok: false, reason: "metadata_only", sessionId };
-  if (coverage.hasUsableTranscript) {
-    return { ok: true, reason: coverage.userMessages > 0 ? "meaningful_message" : "usable_transcript", sessionId };
-  }
   if (coverage.messages === 0 && coverage.lowValueItems >= totalTranscriptItems) return { ok: false, reason: "hook_only", sessionId };
-  if (coverage.messages === 0 && nonMessageItems > coverage.lowValueItems) {
-    return { ok: true, reason: "usable_transcript", sessionId };
+  if (coverage.messages === 0) {
+    const meaningfulNonMessageItems = Math.max(0, nonMessageItems - coverage.lowValueItems);
+    const hasDurableWorkEvidence = coverage.fileEffects > 0 || coverage.checkpoints > 0 || meaningfulNonMessageItems >= 4;
+    return hasDurableWorkEvidence
+      ? { ok: true, reason: "usable_transcript", sessionId }
+      : { ok: false, reason: "no_messages", sessionId };
   }
-  if (coverage.messages === 0) return { ok: false, reason: "no_messages", sessionId };
   if (coverage.lowValueItems >= totalTranscriptItems) return { ok: false, reason: "duplicate_noise", sessionId };
-  return { ok: false, reason: "duplicate_noise", sessionId };
+  if (!coverage.hasUsableTranscript) return { ok: false, reason: "duplicate_noise", sessionId };
+
+  const hasGroundedConversation =
+    coverage.userMessages >= 2 &&
+    coverage.assistantMessages >= 2 &&
+    (coverage.fileEffects > 0 || coverage.checkpoints > 0 || coverage.toolCalls + coverage.toolResults >= 4);
+  const hasSubstantialConversation =
+    coverage.userMessages >= 3 && coverage.assistantMessages >= 3 && coverage.messages >= 20;
+  return hasGroundedConversation || hasSubstantialConversation
+    ? { ok: true, reason: "meaningful_message", sessionId }
+    : { ok: false, reason: "low_evidence", sessionId };
 }

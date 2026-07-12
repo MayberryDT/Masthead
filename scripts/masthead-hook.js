@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import http from "node:http";
 import https from "node:https";
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   resolveHookRuntime,
   withRuntimeOnIngestUrl
@@ -11,15 +12,25 @@ const DEFAULT_URL = "http://127.0.0.1:17373/ingest";
 const DEFAULT_TIMEOUT_MS = 750;
 const DEFAULT_MAX_BYTES = 256 * 1024;
 
-const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isMainModule();
 
 if (isMain) {
   main().catch(() => {
-    process.exit(0);
+    process.exit(process.env.MASTHEAD_VERIFY_CONNECTOR === "1" ? 1 : 0);
   });
 }
 
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
 async function main() {
+  const verifyConnector = process.env.MASTHEAD_VERIFY_CONNECTOR === "1";
   const maxBytes = Number.parseInt(process.env.MASTHEAD_HOOK_MAX_BYTES || "", 10) || DEFAULT_MAX_BYTES;
   const raw = await readStdin(maxBytes);
   if (!isValidJsonObject(raw)) {
@@ -45,15 +56,17 @@ async function main() {
   const timeoutMs = Number.parseInt(process.env.MASTHEAD_HOOK_TIMEOUT_MS || "", 10) || DEFAULT_TIMEOUT_MS;
 
   try {
-    await post(url, body, timeoutMs, resolvedRuntime);
-  } catch {
+    await post(url, body, timeoutMs, resolvedRuntime, verifyConnector);
+  } catch (error) {
+    if (verifyConnector) throw error;
     // Fail open: hook execution must never block or fail the source session.
   }
   const stateBody = stateReportBody(payload, resolvedRuntime);
   if (stateUrl && stateBody) {
     try {
-      await post(stateUrl, JSON.stringify(stateBody), timeoutMs, resolvedRuntime);
-    } catch {
+      await post(stateUrl, JSON.stringify(stateBody), timeoutMs, resolvedRuntime, verifyConnector);
+    } catch (error) {
+      if (verifyConnector) throw error;
       // Fail open: live state is opportunistic and must not affect hook execution.
     }
   }
@@ -88,7 +101,7 @@ function isValidJsonObject(raw) {
   }
 }
 
-function post(target, body, timeoutMs, runtime) {
+function post(target, body, timeoutMs, runtime, requireSuccess = false) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(target);
     const client = parsed.protocol === "https:" ? https : http;
@@ -106,12 +119,22 @@ function post(target, body, timeoutMs, runtime) {
       },
       (response) => {
         response.resume();
-        response.on("end", resolve);
+        response.on("end", () => {
+          if ((response.statusCode || 500) >= 300) {
+            reject(new Error(`masthead connector verification returned ${response.statusCode || "unknown status"}`));
+            return;
+          }
+          if (requireSuccess) resolve();
+        });
       }
     );
-    request.on("timeout", () => {
-      request.destroy(new Error("masthead hook timeout"));
-    });
+    if (requireSuccess) {
+      request.on("timeout", () => {
+        request.destroy(new Error("masthead hook timeout"));
+      });
+    } else {
+      request.on("finish", resolve);
+    }
     request.on("error", reject);
     request.end(body);
   });

@@ -58,10 +58,11 @@ describe("ObservabilitySidebar", () => {
         }}
       />
     );
+    const text = html.replace(/<[^>]+>/g, "");
 
     expect(html).toContain('aria-label="Knowledge flow"');
     expect(html).toContain("Capture sessions");
-    expect(html).toContain("4 automatically resolved");
+    expect(text).toContain("4 automatically resolved");
     expect(html.indexOf('aria-label="Knowledge flow"')).toBeGreaterThan(html.indexOf('aria-label="Masthead sections"'));
   });
 

@@ -20,7 +20,7 @@ describe("SourcesConnectOnboarding", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     await act(async () => {
-      root.render(<SourcesConnectOnboarding open snapshot={sampleSnapshot()} onClose={noop} onSkip={noop} onDiscover={onDiscover} onEnable={noop} />);
+      root.render(<SourcesConnectOnboarding open snapshot={sampleSnapshot()} onClose={noop} onSkip={noop} onDiscover={onDiscover} onEnable={noop} onTest={async () => true} />);
     });
 
     expect(container.textContent).toContain("Looking for local sources");
@@ -36,11 +36,12 @@ describe("SourcesConnectOnboarding", () => {
 
   test("connects selected harnesses in one step without redundant enable or empty activation screens", async () => {
     const onEnable = vi.fn(async () => undefined);
+    const onTest = vi.fn(async () => true);
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
     await act(async () => {
-      root.render(<SourcesConnectOnboarding open snapshot={sampleSnapshot()} onClose={noop} onSkip={noop} onDiscover={noop} onEnable={onEnable} />);
+      root.render(<SourcesConnectOnboarding open snapshot={sampleSnapshot()} onClose={noop} onSkip={noop} onDiscover={noop} onEnable={onEnable} onTest={onTest} />);
       await Promise.resolve();
     });
     const firstContinue = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Continue");
@@ -50,8 +51,82 @@ describe("SourcesConnectOnboarding", () => {
     const connect = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Connect selected");
     await act(async () => { connect?.click(); await Promise.resolve(); await Promise.resolve(); });
     expect(onEnable).toHaveBeenCalledTimes(2);
+    expect(onTest).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain("Import local history");
     expect(container.textContent).not.toContain("No host activation remaining");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("keeps import history locked when a selected connector command fails verification", async () => {
+    const onTest = vi.fn(async (runtime: string) => runtime !== "codex");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <SourcesConnectOnboarding
+          open
+          snapshot={sampleSnapshot()}
+          onClose={noop}
+          onSkip={noop}
+          onDiscover={noop}
+          onEnable={noop}
+          onTest={onTest}
+        />
+      );
+      await Promise.resolve();
+    });
+    const firstContinue = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Continue");
+    await act(async () => firstContinue?.click());
+    const connect = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Connect selected");
+    await act(async () => { connect?.click(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain("Verification failed");
+    expect(container.textContent).toContain("Connect found harnesses");
+    expect(container.textContent).not.toContain("Import local history");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("keeps import history locked until selected connectors emit a real host event", async () => {
+    const codexChecks = { count: 0 };
+    const onEnable = vi.fn(async () => undefined);
+    const onTest = vi.fn(async (runtime: string) => {
+      if (runtime !== "codex") return { verified: true, needsAction: false };
+      codexChecks.count += 1;
+      return { verified: true, needsAction: codexChecks.count === 1 };
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <SourcesConnectOnboarding
+          open
+          snapshot={sampleSnapshot()}
+          onClose={noop}
+          onSkip={noop}
+          onDiscover={noop}
+          onEnable={onEnable}
+          onTest={onTest}
+        />
+      );
+      await Promise.resolve();
+    });
+    const firstContinue = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Continue");
+    await act(async () => firstContinue?.click());
+    const connect = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Connect selected");
+    await act(async () => { connect?.click(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain("host action still required");
+    expect(container.textContent).toContain("Check connections");
+    expect(container.textContent).toContain("Connect found harnesses");
+    expect(container.textContent).not.toContain("Import local history");
+    const check = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Check connections");
+    await act(async () => { check?.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(onEnable).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Import local history");
     await act(async () => root.unmount());
     container.remove();
   });
@@ -63,7 +138,7 @@ describe("SourcesConnectOnboarding", () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     await act(async () => {
-      root.render(<SourcesConnectOnboarding open snapshot={sampleSnapshot()} onClose={onClose} onSkip={noop} onDiscover={noop} onEnable={noop} onImportHistory={onImportHistory} />);
+      root.render(<SourcesConnectOnboarding open snapshot={sampleSnapshot()} onClose={onClose} onSkip={noop} onDiscover={noop} onEnable={noop} onTest={async () => true} onImportHistory={onImportHistory} />);
       await Promise.resolve();
     });
     for (const label of ["Continue", "Connect selected"]) {
@@ -88,6 +163,7 @@ describe("SourcesConnectOnboarding", () => {
         onSkip={noop}
         onDiscover={noop}
         onEnable={noop}
+        onTest={async () => true}
         onConfirmActivation={noop}
       />
     );
@@ -149,6 +225,7 @@ describe("SourcesConnectOnboarding", () => {
             onSkip={noop}
             onDiscover={onDiscover}
             onEnable={noop}
+            onTest={async () => true}
           />
         );
       });

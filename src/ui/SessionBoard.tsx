@@ -4,6 +4,7 @@ import type { CardDensity } from "./toolbarOptions";
 import { sessionDemoTelemetry } from "./observabilityDemo";
 import { SessionCard } from "./SessionCard";
 import { prefersReducedMotion } from "./motionPreference";
+import { AppButton } from "./primitives/AppButton";
 
 type CardLayoutSnapshot = Map<string, DOMRect>;
 type CardLayoutChangeKind = "reorder" | "shrinking" | "growing";
@@ -59,6 +60,7 @@ type Props = {
   variant?: "lanes" | "observability";
   showDemoTelemetry?: boolean;
   density?: CardDensity;
+  emptyAction?: { label: string; onClick: () => void };
 };
 
 export function SessionBoard({
@@ -69,7 +71,8 @@ export function SessionBoard({
   emptyMessage = "No sessions are available for the current view.",
   variant = "lanes",
   showDemoTelemetry = false,
-  density = "comfortable"
+  density = "comfortable",
+  emptyAction
 }: Props) {
   const seenSessionIdsRef = useRef<Set<string> | null>(null);
   const semanticHeadlineSignaturesRef = useRef<Map<string, string> | null>(null);
@@ -114,6 +117,7 @@ export function SessionBoard({
             <p className="mono-label">Sessions</p>
             <h2>{emptyTitle}</h2>
             <p>{emptyMessage}</p>
+            {emptyAction ? <AppButton variant="primary" onClick={emptyAction.onClick}>{emptyAction.label}</AppButton> : null}
           </div>
         ) : (
           <ObservabilityCardGrid cards={cards} density={density}>
@@ -154,6 +158,7 @@ export function SessionBoard({
           <p className="mono-label">Sessions</p>
           <h2>{emptyTitle}</h2>
           <p>{emptyMessage}</p>
+          {emptyAction ? <AppButton variant="primary" onClick={emptyAction.onClick}>{emptyAction.label}</AppButton> : null}
         </div>
       ) : (
         visibleLanes.map((lane) => (

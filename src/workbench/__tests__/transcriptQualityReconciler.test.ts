@@ -24,10 +24,7 @@ describe("transcript quality reconciliation", () => {
       reason: "metadata_only",
       sessionId: "session:hydrate"
     });
-    db.prepare(
-      `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run("message:hydrate", "session:hydrate", "user", "Implement clean import recovery", "hash", "2026-07-10T00:00:00.000Z", "{}", "authoritative");
+    insertSubstantialDiscussion(db, "session:hydrate");
 
     const result = reconcileImportedTranscript(db, "session:hydrate");
 
@@ -41,7 +38,7 @@ describe("transcript quality reconciliation", () => {
     db.close();
   });
 
-  test("does not terminally exclude a metadata shell when hydration produced no evidence", async () => {
+  test("adds a metadata shell to Not Added when its hydration unit produced no evidence", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:pending", title: "Pending" });
     removeEvidence(db, "session:pending");
@@ -50,14 +47,15 @@ describe("transcript quality reconciliation", () => {
 
     expect(result.quality).toMatchObject({ ok: false, reason: "metadata_only" });
     expect(readWorkbenchSessionState(db, "session:pending")).toMatchObject({
-      publicationStatus: "publish_path",
-      qualityStatus: "unchecked",
+      nonPublicationReason: "metadata_only",
+      publicationStatus: "not_added_to_logbook",
+      qualityStatus: "failed",
       transcriptStatus: "missing"
     });
     db.close();
   });
 
-  test("defers terminal hook-only exclusion until the complete import scope is finalized", async () => {
+  test("adds hook-only evidence to Not Added when its hydration unit completes", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:hook", title: "Hook" });
     db.prepare("DELETE FROM messages WHERE session_id = ?").run("session:hook");
@@ -67,16 +65,24 @@ describe("transcript quality reconciliation", () => {
     db.prepare("UPDATE tool_calls SET tool_name = ? WHERE session_id = ?").run("tool call", "session:hook");
     db.prepare("UPDATE tool_results SET status = ? WHERE session_id = ?").run("unknown", "session:hook");
 
-    const incremental = reconcileImportedTranscript(db, "session:hook");
-    expect(incremental.quality).toMatchObject({ ok: false, reason: "hook_only" });
-    expect(readWorkbenchSessionState(db, "session:hook")).toMatchObject({
-      publicationStatus: "publish_path",
-      qualityStatus: "unchecked"
-    });
-
-    reconcileImportedTranscript(db, "session:hook", { finalizeNoise: true });
+    const result = reconcileImportedTranscript(db, "session:hook");
+    expect(result.quality).toMatchObject({ ok: false, reason: "hook_only" });
     expect(readWorkbenchSessionState(db, "session:hook")).toMatchObject({
       nonPublicationReason: "hook_only",
+      publicationStatus: "not_added_to_logbook",
+      qualityStatus: "failed"
+    });
+    db.close();
+  });
+
+  test("records a low-evidence exclusion when the session hydration unit completes", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:shallow", title: "Shallow" });
+
+    const result = reconcileImportedTranscript(db, "session:shallow");
+    expect(result.quality).toMatchObject({ ok: false, reason: "low_evidence" });
+    expect(readWorkbenchSessionState(db, "session:shallow")).toMatchObject({
+      nonPublicationReason: "low_evidence",
       publicationStatus: "not_added_to_logbook",
       qualityStatus: "failed"
     });
@@ -95,5 +101,22 @@ async function testDb(): Promise<MastheadDatabase> {
 function removeEvidence(db: MastheadDatabase, sessionId: string): void {
   for (const table of ["messages", "tool_results", "tool_calls", "file_effects", "runtime_signals", "checkpoints"]) {
     db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sessionId);
+  }
+}
+
+function insertSubstantialDiscussion(db: MastheadDatabase, sessionId: string): void {
+  for (let index = 0; index < 20; index += 1) {
+    db.prepare(
+      "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      `${sessionId}:message:${index}`,
+      sessionId,
+      index % 2 === 0 ? "user" : "assistant",
+      `Detailed import recovery discussion ${index}`,
+      `${sessionId}:hash:${index}`,
+      `2026-07-10T00:00:${String(index).padStart(2, "0")}.000Z`,
+      "{}",
+      "authoritative"
+    );
   }
 }

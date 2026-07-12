@@ -20,6 +20,20 @@ import { stateClassName } from "../format";
 import { sessionDemoTelemetry } from "../observabilityDemo";
 
 describe("observability session card", () => {
+  test("offers Sources setup from the empty Now board", () => {
+    const html = renderToStaticMarkup(
+      <SessionBoard
+        cards={[]}
+        variant="observability"
+        emptyTitle="No active sessions"
+        emptyMessage="Connect a harness to see live work."
+        emptyAction={{ label: "Open Sources", onClick: () => undefined }}
+      />
+    );
+
+    expect(html).toContain("Open Sources");
+  });
+
   test("renders compact reference facts without prototype telemetry rows", () => {
     const referenceSession = session();
     const expectedHeaderTime = new Date(referenceSession.lastActivity).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });

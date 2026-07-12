@@ -42,6 +42,7 @@ type Props = {
   onFilterChange?: (filters: LogbookFilterState) => void;
   onImportMetadata?: (runtime: string) => void;
   onOpenSources?: () => void;
+  onOpenWorkbench?: () => void;
   onPageChange?: (pageIndex: number) => void;
   onQueryChange: (query: string) => void;
   onRetry?: () => void;
@@ -125,6 +126,7 @@ export function HistoryPanel({
   onFilterChange,
   onImportMetadata,
   onOpenSources,
+  onOpenWorkbench,
   onPageChange,
   onQueryChange,
   onRetry,
@@ -207,6 +209,7 @@ export function HistoryPanel({
     },
     onImportMetadata,
     onOpenSources,
+    onOpenWorkbench,
     onRetry,
     sourceSummary
   });
@@ -477,6 +480,7 @@ function emptyStateFor(
     onClearFilters: () => void;
     onImportMetadata?: (runtime: string) => void;
     onOpenSources?: () => void;
+    onOpenWorkbench?: () => void;
     onRetry?: () => void;
     sourceSummary: SourceImportSummary;
   }
@@ -488,7 +492,7 @@ function emptyStateFor(
       message: "Masthead needs the local daemon before it can read published artifacts.",
       actions: [
         { label: "Retry connection", onClick: options.onRetry, variant: "primary" },
-        { label: "Open Sources", onClick: options.onOpenSources }
+        { label: "Open Workbench", onClick: options.onOpenWorkbench }
       ]
     };
   }
@@ -521,7 +525,7 @@ function emptyStateFor(
       support: `${formatCount(options.sourceSummary.detectedSources)} sources detected; ${formatCount(options.sourceSummary.discoveredSessions)} sessions available to import.`,
       actions: [
         { label: "Import metadata", onClick: runtime && options.onImportMetadata ? () => options.onImportMetadata?.(runtime) : undefined, disabled: options.importBusy, variant: "primary" },
-        { label: "Open Sources", onClick: options.onOpenSources }
+        { label: "Open Workbench", onClick: options.onOpenWorkbench }
       ]
     };
   }
@@ -530,7 +534,7 @@ function emptyStateFor(
     reason,
     title: "No published artifacts yet.",
     message: "Compile and publish from Workbench.",
-    actions: [{ label: "Open Sources", onClick: options.onOpenSources, variant: "primary" }]
+    actions: [{ label: "Open Workbench", onClick: options.onOpenWorkbench, variant: "primary" }]
   };
 }
 

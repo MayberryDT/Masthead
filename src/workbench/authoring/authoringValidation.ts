@@ -1013,6 +1013,10 @@ function displayPath(path: string): string {
 }
 
 function containsUnredactedSecret(value: unknown): boolean {
-  const serialized = JSON.stringify(value);
+  const serialized = JSON.stringify(value, (key, entry) =>
+    key === "evidenceRefs" && Array.isArray(entry)
+      ? entry.map(() => "[canonical-evidence-ref]")
+      : entry
+  );
   return Boolean(serialized && redactText(serialized) !== serialized);
 }

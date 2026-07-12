@@ -1,4 +1,5 @@
 import type { KnowledgeFlowSummaryDto } from "../shared/knowledgeFlow";
+import { AnimatedNumber } from "./motion/AnimatedNumber";
 
 type Props = {
   summary?: KnowledgeFlowSummaryDto;
@@ -6,10 +7,10 @@ type Props = {
   error?: string;
 };
 
-export function SidebarKnowledgeFlow({ summary, loading = false, error }: Props) {
+export function SidebarKnowledgeFlow({ summary, error }: Props) {
   const unavailable = Boolean(error);
   const value = (count: number | undefined) =>
-    loading || unavailable || count === undefined ? "—" : formatCount(count);
+    unavailable || count === undefined ? undefined : count;
 
   return (
     <section className={`sidebar-knowledge-flow ${unavailable ? "unavailable" : ""}`} aria-label="Knowledge flow">
@@ -21,22 +22,22 @@ export function SidebarKnowledgeFlow({ summary, loading = false, error }: Props)
       <p className="sidebar-knowledge-resolved">
         {unavailable
           ? "Summary unavailable"
-          : `${value(summary?.automaticallyResolvedSessions)} automatically resolved`}
+          : summary?.automaticallyResolvedSessions === undefined
+            ? "— automatically resolved"
+            : <><AnimatedNumber className="sidebar-knowledge-inline-value" value={summary.automaticallyResolvedSessions} /> automatically resolved</>}
       </p>
     </section>
   );
 }
 
-function FlowRow({ index, label, value }: { index: string; label: string; value: string }) {
+function FlowRow({ index, label, value }: { index: string; label: string; value?: number }) {
   return (
     <div className="sidebar-knowledge-spine-row">
       <span className="sidebar-knowledge-node">{index}</span>
       <span className="sidebar-knowledge-stage-name">{label}</span>
-      <strong className="sidebar-knowledge-stage-value">{value}</strong>
+      {value === undefined
+        ? <strong className="sidebar-knowledge-stage-value">—</strong>
+        : <AnimatedNumber className="sidebar-knowledge-stage-value" value={value} />}
     </div>
   );
-}
-
-function formatCount(value: number): string {
-  return value.toLocaleString();
 }

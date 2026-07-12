@@ -90,6 +90,7 @@ export type ImportWorkUnitDto = {
   startedAt?: string;
   finishedAt?: string;
   failureGroupId?: string;
+  cursorAfter?: unknown;
 };
 
 export type ImportFailureGroupDto = {

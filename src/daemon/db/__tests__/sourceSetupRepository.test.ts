@@ -36,6 +36,7 @@ describe("source setup repository", () => {
     saveSourceSetupState(db, readyState);
 
     expect(getLatestSourceSetupState(db)).toEqual(readyState);
+    expect((db.prepare("SELECT COUNT(*) AS count FROM source_setup_state").get() as { count: number }).count).toBe(1);
     db.close();
   });
 });

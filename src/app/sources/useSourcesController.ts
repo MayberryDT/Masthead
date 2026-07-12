@@ -213,17 +213,32 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
         .map((job) => job.importJobId)
     );
     try {
-      const result = await loadInventory();
-      if (result.imports?.some((job) =>
+      const result = await loadImportsForRuntime(importFilterRuntime);
+      const progressChanged = result.imports.some((job) => {
+        const previous = imports.find((candidate) => candidate.importJobId === job.importJobId);
+        if (!previous) return false;
+        return (
+          previous.status !== job.status ||
+          previous.processedCount !== job.processedCount ||
+          previous.importedCount !== job.importedCount ||
+          previous.failureCount !== job.failureCount ||
+          previous.completedWorkUnits !== job.completedWorkUnits
+        );
+      });
+      const reachedTerminal = result.imports.some((job) =>
         activeImportIds.has(job.importJobId) &&
         (job.status === "failed" || job.status === "cancelled" || job.status === "succeeded" || job.status === "succeeded_with_issues")
-      )) {
+      );
+      if (reachedTerminal) {
+        await loadInventory();
+      }
+      if (progressChanged || reachedTerminal) {
         onLibraryChanged();
       }
     } catch (error) {
       console.error("[masthead] Active import poll failed", error);
     }
-  }, [imports, loadInventory, onLibraryChanged]);
+  }, [importFilterRuntime, imports, loadImportsForRuntime, loadInventory, onLibraryChanged]);
 
   const activeImportCount = imports.filter(
     (job) => job.status === "queued" || job.status === "running" || job.status === "cancelling"

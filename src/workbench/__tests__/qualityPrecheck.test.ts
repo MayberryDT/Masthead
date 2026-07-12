@@ -15,14 +15,28 @@ afterEach(async () => {
 });
 
 describe("Workbench capture quality precheck", () => {
-  test("passes a session with a meaningful user message", async () => {
+  test("passes a grounded multi-turn session", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:good", title: "Good work" });
+    insertMessage(db, "session:good", 1, "assistant", "I will inspect the import pipeline.");
+    insertMessage(db, "session:good", 2, "user", "Please fix the candidate admission boundary.");
+    insertMessage(db, "session:good", 3, "assistant", "The gate now runs after canonical evidence is stored.");
 
     expect(runCaptureQualityPrecheck(db, "session:good")).toMatchObject({
       ok: true,
       reason: "meaningful_message",
       sessionId: "session:good"
+    });
+  });
+
+  test("fails a shallow exchange even when it has incidental tool evidence", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:shallow", title: "Shallow" });
+
+    expect(runCaptureQualityPrecheck(db, "session:shallow")).toMatchObject({
+      ok: false,
+      reason: "low_evidence",
+      sessionId: "session:shallow"
     });
   });
 
@@ -53,7 +67,7 @@ describe("Workbench capture quality precheck", () => {
     });
   });
 
-  test("passes assistant-only transcript as usable transcript", async () => {
+  test("fails a shallow assistant-only transcript", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:assistant", title: "Assistant transcript" });
     db.prepare("UPDATE messages SET role = ?, text_redacted = ?, text_hash = ? WHERE session_id = ?").run(
@@ -64,9 +78,30 @@ describe("Workbench capture quality precheck", () => {
     );
 
     expect(runCaptureQualityPrecheck(db, "session:assistant")).toMatchObject({
-      ok: true,
-      reason: "usable_transcript",
+      ok: false,
+      reason: "low_evidence",
       sessionId: "session:assistant"
+    });
+  });
+
+  test("passes a substantial discussion without tool or file evidence", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:discussion", title: "Design discussion" });
+    removeTranscriptRows(db, "session:discussion");
+    for (let index = 0; index < 20; index += 1) {
+      insertMessage(
+        db,
+        "session:discussion",
+        index,
+        index % 2 === 0 ? "user" : "assistant",
+        `Detailed architecture discussion turn ${index}`
+      );
+    }
+
+    expect(runCaptureQualityPrecheck(db, "session:discussion")).toMatchObject({
+      ok: true,
+      reason: "meaningful_message",
+      sessionId: "session:discussion"
     });
   });
 
@@ -124,4 +159,19 @@ function removeTranscriptRows(db: MastheadDatabase, sessionId: string): void {
   db.prepare("DELETE FROM file_effects WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM runtime_signals WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM checkpoints WHERE session_id = ?").run(sessionId);
+}
+
+function insertMessage(db: MastheadDatabase, sessionId: string, index: number, role: "assistant" | "user", text: string): void {
+  db.prepare(
+    "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    `${sessionId}:message:${index}`,
+    sessionId,
+    role,
+    text,
+    `${sessionId}:hash:${index}`,
+    `2026-06-25T12:00:${String(index).padStart(2, "0")}.000Z`,
+    "{}",
+    "authoritative"
+  );
 }

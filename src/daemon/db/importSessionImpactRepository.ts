@@ -81,13 +81,14 @@ export function summarizeImportSessionImpacts(db: MastheadDatabase, importJobId:
   return summary;
 }
 
-export function listImportImpactSessionIds(db: MastheadDatabase, importJobId: string): string[] {
+export function listImportImpactSessionIds(db: MastheadDatabase, importJobId: string, sourceId?: string): string[] {
   return (db.prepare(
     `SELECT DISTINCT session_id
     FROM import_session_impacts
     WHERE import_job_id = ?
+      AND (? IS NULL OR source_id = ?)
     ORDER BY session_id`
-  ).all(importJobId) as Array<{ session_id: string }>).map((row) => row.session_id);
+  ).all(importJobId, sourceId ?? null, sourceId ?? null) as Array<{ session_id: string }>).map((row) => row.session_id);
 }
 
 function countDistinctImpactSessions(db: MastheadDatabase, importJobId: string): number {

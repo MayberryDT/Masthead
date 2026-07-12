@@ -14,16 +14,17 @@ const summary: KnowledgeFlowSummaryDto = {
 describe("SidebarKnowledgeFlow", () => {
   test("renders loaded inventory values in the approved flow order", () => {
     const html = renderToStaticMarkup(<SidebarKnowledgeFlow summary={summary} />);
+    const text = visibleText(html);
 
     expect(html).toContain('aria-label="Knowledge flow"');
     expect(html).toContain("Capture sessions");
     expect(html).toContain("Workbench");
     expect(html).toContain("Publish artifacts");
     expect(html).not.toContain("sidebar-knowledge-flow-title");
-    expect(html).toContain(">17<");
-    expect(html).toContain(">6<");
-    expect(html).toContain(">11<");
-    expect(html).toContain("4 automatically resolved");
+    expect(text).toContain("Capture sessions17");
+    expect(text).toContain("Workbench6");
+    expect(text).toContain("Publish artifacts11");
+    expect(text).toContain("4 automatically resolved");
   });
 
   test("renders zero as valid inventory", () => {
@@ -37,9 +38,12 @@ describe("SidebarKnowledgeFlow", () => {
         }}
       />
     );
+    const text = visibleText(html);
 
-    expect(html.match(/>0</g)).toHaveLength(3);
-    expect(html).toContain("0 automatically resolved");
+    expect(text).toContain("Capture sessions0");
+    expect(text).toContain("Workbench0");
+    expect(text).toContain("Publish artifacts0");
+    expect(text).toContain("0 automatically resolved");
     expect(html).not.toContain("Summary unavailable");
   });
 
@@ -49,6 +53,17 @@ describe("SidebarKnowledgeFlow", () => {
     expect(html.match(/>—</g)).toHaveLength(3);
     expect(html).toContain("— automatically resolved");
     expect(html).not.toContain("Summary unavailable");
+  });
+
+  test("keeps loaded values visible during a background refresh", () => {
+    const html = renderToStaticMarkup(<SidebarKnowledgeFlow summary={summary} loading />);
+    const text = visibleText(html);
+
+    expect(text).toContain("Capture sessions17");
+    expect(text).toContain("Workbench6");
+    expect(text).toContain("Publish artifacts11");
+    expect(text).toContain("4 automatically resolved");
+    expect(html).not.toContain(">—<");
   });
 
   test("renders the unavailable state without stale values", () => {
@@ -84,6 +99,10 @@ describe("SidebarKnowledgeFlow", () => {
     expect(bottomEdgeRule).toContain("border-bottom: 2px solid rgba(46, 167, 255, 0.42);");
   });
 });
+
+function visibleText(html: string): string {
+  return html.replace(/<[^>]+>/g, "");
+}
 
 function cssRuleBody(css: string, selector: string): string {
   const selectorIndex = findCssSelectorIndex(css, selector);

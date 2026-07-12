@@ -295,25 +295,27 @@ describe("ingest server live projection", () => {
         }
       }
     });
-    expect(rawJournalRows(databasePath).map((row) => row.source_record_key)).toEqual([
-      "event:claude_code:claude-server-prompt"
-    ]);
-    expect(ingestSourceRows(databasePath)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          adapter: "claude_code",
-          endpoint: "http://127.0.0.1:17373/ingest",
-          source_id: "claude-code-hook-local",
-          source_kind: "hook"
-        })
-      ])
-    );
-    expect(sessionRuntimeRows(databasePath)).toEqual([
-      {
-        runtime_kind: "claude_code",
-        source_session_id: "claude-server-live"
-      }
-    ]);
+    await waitFor(() => {
+      expect(rawJournalRows(databasePath).map((row) => row.source_record_key)).toEqual([
+        "event:claude_code:claude-server-prompt"
+      ]);
+      expect(ingestSourceRows(databasePath)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            adapter: "claude_code",
+            endpoint: "http://127.0.0.1:17373/ingest",
+            source_id: "claude-code-hook-local",
+            source_kind: "hook"
+          })
+        ])
+      );
+      expect(sessionRuntimeRows(databasePath)).toEqual([
+        {
+          runtime_kind: "claude_code",
+          source_session_id: "claude-server-live"
+        }
+      ]);
+    });
 
     await stopServer(firstServer.child);
     servers.length = 0;

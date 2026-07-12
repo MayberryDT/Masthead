@@ -1,5 +1,5 @@
 import type { SourcesOnboardingScanDto, SourcesSetupDto } from "../../shared/sourcesSetup.ts";
-import type { MastheadDatabase } from "./sqlite.ts";
+import { type MastheadDatabase, withImmediateTransaction } from "./sqlite.ts";
 
 type SourceScanRunRow = {
   result_json: string;
@@ -33,13 +33,16 @@ export function getLatestSourceScanRun(db: MastheadDatabase): SourcesOnboardingS
 }
 
 export function saveSourceSetupState(db: MastheadDatabase, setup: SourcesSetupDto): void {
-  db.prepare(
-    `INSERT INTO source_setup_state (setup_id, updated_at, state_json)
-    VALUES (?, ?, ?)
-    ON CONFLICT(setup_id) DO UPDATE SET
-      updated_at = excluded.updated_at,
-      state_json = excluded.state_json`
-  ).run(setup.setupId, setup.updatedAt, JSON.stringify(setup));
+  withImmediateTransaction(db, () => {
+    db.prepare(
+      `INSERT INTO source_setup_state (setup_id, updated_at, state_json)
+      VALUES ('current', ?, ?)
+      ON CONFLICT(setup_id) DO UPDATE SET
+        updated_at = excluded.updated_at,
+        state_json = excluded.state_json`
+    ).run(setup.updatedAt, JSON.stringify(setup));
+    db.prepare("DELETE FROM source_setup_state WHERE setup_id <> 'current'").run();
+  });
 }
 
 export function getLatestSourceSetupState(db: MastheadDatabase): SourcesSetupDto | undefined {

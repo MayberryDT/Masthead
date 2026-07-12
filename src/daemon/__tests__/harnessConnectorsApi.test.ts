@@ -56,6 +56,17 @@ describe("harness connectors API", () => {
     const body = await postJson(baseUrl, "/sources/connectors/discover");
     expect(body.ok).toBe(true);
     expect(body.connectors).toHaveLength(8);
+    expect(body.connectors.every((connector: { historyFound?: boolean }) => connector.historyFound === false)).toBe(true);
+  });
+
+  test("POST /sources/connectors/discover-history is the explicit count-bearing onboarding scan", async () => {
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+
+    const body = await postJson(baseUrl, "/sources/connectors/discover-history");
+    expect(body.ok).toBe(true);
+    expect(body.connectors).toHaveLength(8);
+    expect(body.connectors.every((connector: { historySessionCount?: number }) => typeof connector.historySessionCount === "number")).toBe(true);
   });
 
   test("enable codex marks needs_action (trust_hooks) after install", async () => {
@@ -73,7 +84,7 @@ describe("harness connectors API", () => {
     });
   });
 
-  test("confirm-activation clears stored activation for runtime", async () => {
+  test("Codex remains needs_action until a real live event is observed", async () => {
     const { daemon, databasePath } = await createTestHarness();
     const baseUrl = await listen(daemon);
 
@@ -94,9 +105,9 @@ describe("harness connectors API", () => {
     const afterCodex = after.connectors.find((connector: { runtime: string }) => connector.runtime === "codex");
     expect(afterCodex).toMatchObject({
       runtime: "codex",
-      live: "ready"
+      live: "needs_action",
+      actionRequired: "trust_hooks"
     });
-    expect(afterCodex.actionRequired).toBeUndefined();
   });
 
   test("rejects unknown runtime actions", async () => {

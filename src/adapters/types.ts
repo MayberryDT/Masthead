@@ -67,6 +67,8 @@ export type AdapterRecord = {
   payload: unknown;
   normalized: NormalizedAdapterPayload;
   diagnostics: AdapterDiagnostic[];
+  /** Durable source position immediately after this record was read. */
+  cursorAfter?: Omit<IngestCursor, "cursorId">;
 };
 
 export type NormalizedAdapterPayload = {

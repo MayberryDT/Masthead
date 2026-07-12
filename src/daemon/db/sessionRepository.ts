@@ -4,6 +4,7 @@ import type { AdapterRecord } from "../../adapters/types.ts";
 import { redactJsonValue, redactText } from "../../core/redaction.ts";
 import type { LiveBoardProjection, NormalizedEvent } from "../../core/types.ts";
 import { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
+import { runCaptureQualityPrecheck } from "../../workbench/qualityPrecheck.ts";
 import { upsertSessionSource } from "./sessionSourceRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 import { deriveTranscriptFileEffects } from "./transcriptEffects.ts";
@@ -32,6 +33,7 @@ export type AdapterIngestionContext = SessionRepositoryContext & {
 export type AdapterIngestionResult = {
   sessionId?: string;
   created?: boolean;
+  recordInserted: boolean;
 };
 
 export type SessionRepository = {
@@ -609,18 +611,20 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
 export function ingestAdapterRecord(db: MastheadDatabase, record: AdapterRecord, context: AdapterIngestionContext): AdapterIngestionResult {
   const repository = createSessionRepository(db, context);
   let sessionId: string | undefined;
+  let recordInserted = false;
   const predictedSessionId = predictedCanonicalSessionId(record, context);
   const sessionExistedBefore = predictedSessionId ? sessionExists(db, predictedSessionId) : undefined;
 
   db.exec("BEGIN IMMEDIATE;");
   try {
     upsertAdapterSource(db, record);
-    insertRawAdapterRecord(db, record);
-    sessionId =
-      record.normalized.kind === "event" || record.normalized.kind === "session"
+    recordInserted = insertRawAdapterRecord(db, record);
+    sessionId = recordInserted
+      ? record.normalized.kind === "event" || record.normalized.kind === "session"
         ? repository.upsertMetadataRecord(record)
-        : repository.upsertTranscriptRecord(record);
-    if (sessionId) {
+        : repository.upsertTranscriptRecord(record)
+      : predictedSessionId;
+    if (sessionId && recordInserted) {
       upsertSessionSource(db, {
         importedRecordCount: 1,
         observedAt: record.observedAt,
@@ -635,19 +639,20 @@ export function ingestAdapterRecord(db: MastheadDatabase, record: AdapterRecord,
     throw error;
   }
 
-  if (sessionId) {
-    afterSessionMaterialized(db, sessionId, "session_materialize");
-  }
-
-  return { created: sessionId ? !sessionExistedBefore : undefined, sessionId };
+  return {
+    created: sessionId ? !sessionExistedBefore : undefined,
+    recordInserted,
+    sessionId
+  };
 }
 
-/** Auto-enroll a newly materialized session onto the Workbench publish path (idempotent). */
+/** Admit a materialized session to Workbench once it has artifact-candidate evidence. */
 function afterSessionMaterialized(
   db: MastheadDatabase,
   sessionId: string,
-  actorId: "live_ingest" | "session_materialize"
+  actorId: "live_ingest"
 ): void {
+  if (!runCaptureQualityPrecheck(db, sessionId).ok) return;
   enrollWorkbenchSession(db, { actor: { kind: "system", id: actorId }, sessionId });
 }
 
@@ -809,8 +814,8 @@ function upsertAdapterSource(db: MastheadDatabase, record: AdapterRecord): void 
   );
 }
 
-function insertRawAdapterRecord(db: MastheadDatabase, record: AdapterRecord): void {
-  db.prepare(
+function insertRawAdapterRecord(db: MastheadDatabase, record: AdapterRecord): boolean {
+  const result = db.prepare(
     `INSERT INTO raw_events (
       raw_event_id,
       source_id,
@@ -836,7 +841,9 @@ function insertRawAdapterRecord(db: MastheadDatabase, record: AdapterRecord): vo
     JSON.stringify(record.payload),
     record.diagnostics.length > 0 ? JSON.stringify(record.diagnostics) : null
   );
+  return result.changes > 0;
 }
+
 
 function upsertAdapterCursor(
   db: MastheadDatabase,

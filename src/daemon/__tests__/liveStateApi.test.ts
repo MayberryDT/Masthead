@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +19,45 @@ afterEach(async () => {
 });
 
 describe("live state API", () => {
+  test("acknowledges live ingest before slow canonical persistence", async () => {
+    const daemon = await createTestDaemon();
+    const baseUrl = await listen(daemon);
+    const resultDir = await mkdtemp(join(tmpdir(), "masthead-live-ack-"));
+    tempDirs.push(resultDir);
+    const resultPath = join(resultDir, "elapsed.txt");
+    daemon.database.function("masthead_test_pause", () => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+      return 0;
+    });
+    daemon.database.exec(`
+      CREATE TRIGGER pause_live_session_insert
+      BEFORE INSERT ON sessions
+      WHEN NEW.source_session_id = 'slow-live-ack'
+      BEGIN
+        SELECT masthead_test_pause();
+      END;
+    `);
+
+    const childScript = `
+      import { writeFile } from "node:fs/promises";
+      const started = Date.now();
+      const response = await fetch(process.argv[1], {
+        body: JSON.stringify({ event: "session_start", session_id: "slow-live-ack", timestamp: new Date().toISOString() }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      await response.text();
+      await writeFile(process.argv[2], String(Date.now() - started));
+      process.exit(response.status === 202 ? 0 : 1);
+    `;
+    await childExit(spawn(process.execPath, ["--input-type=module", "-e", childScript, `${baseUrl}/ingest?runtime=codex`, resultPath]));
+
+    expect(Number(await readFile(resultPath, "utf8"))).toBeLessThan(150);
+    expect(
+      daemon.database.prepare("SELECT source_session_id FROM sessions WHERE source_session_id = ?").get("slow-live-ack")
+    ).toEqual({ source_session_id: "slow-live-ack" });
+  });
+
   test("accepts live state reports and returns latest reports", async () => {
     const daemon = await createTestDaemon();
     const baseUrl = await listen(daemon);
@@ -248,6 +288,16 @@ async function postJson(baseUrl: string, path: string, body: Record<string, unkn
   const payload = await response.json();
   expect(payload).toBeTypeOf("object");
   return payload as Record<string, any>;
+}
+
+function childExit(child: ReturnType<typeof spawn>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`live ingest probe exited with ${code ?? "unknown"}`));
+    });
+  });
 }
 
 async function getJson(baseUrl: string, path: string): Promise<Record<string, any>> {

@@ -83,7 +83,7 @@ describe("session repository", () => {
     db.close();
   });
 
-  test("live upsert auto-enrolls session onto publish_path", async () => {
+  test("does not enroll a shallow live capture onto the publish path", async () => {
     const db = await openMigratedDatabase();
     const repository = createSessionRepository(db, {
       hostId: "host:test",
@@ -95,30 +95,24 @@ describe("session repository", () => {
     const sessionId = repository.upsertLiveEvent(
       liveEvent("start", "session.started", {
         project: "Masthead",
-        title: "Live capture enrolls to workbench"
+        title: "Live capture awaits candidate evidence"
       })
     );
     expect(sessionId).toBeDefined();
 
-    const state = readWorkbenchSessionState(db, sessionId!);
-    expect(state).toMatchObject({
-      nextAction: "check_transcript",
-      publicationStatus: "publish_path",
-      sessionId
-    });
+    expect(readWorkbenchSessionState(db, sessionId!)).toBeUndefined();
 
-    // Idempotent: second live event for same session does not demote or re-create
     repository.upsertLiveEvent(
-      liveEvent("question", "user.question", { message: "Still on publish path?" })
+      liveEvent("question", "user.question", { message: "Is this enough evidence yet?" })
     );
-    expect(readWorkbenchSessionState(db, sessionId!)?.publicationStatus).toBe("publish_path");
+    expect(readWorkbenchSessionState(db, sessionId!)).toBeUndefined();
     db.close();
   });
 
-  test("adapter ingest auto-enrolls session onto publish_path", async () => {
+  test("does not enroll a shallow adapter transcript onto the publish path", async () => {
     const db = await openMigratedDatabase();
     const record = transcriptMessageRecord({
-      content: "Adapter materialize should enroll.",
+      content: "Adapter materialize should await more evidence.",
       cwd: "/workspace/masthead",
       role: "user",
       session_id: "adapter-enroll-session",
@@ -133,11 +127,37 @@ describe("session repository", () => {
     });
 
     expect(result.sessionId).toBeDefined();
-    expect(readWorkbenchSessionState(db, result.sessionId!)).toMatchObject({
-      nextAction: "check_transcript",
-      publicationStatus: "publish_path",
-      sessionId: result.sessionId
-    });
+    expect(readWorkbenchSessionState(db, result.sessionId!)).toBeUndefined();
+    db.close();
+  });
+
+  test("defers artifact candidate evaluation until an adapter session is hydrated", async () => {
+    const db = await openMigratedDatabase();
+    let sessionId: string | undefined;
+    for (let index = 0; index < 20; index += 1) {
+      const record = transcriptMessageRecord({
+        content: `Detailed implementation discussion turn ${index}`,
+        cwd: "/workspace/masthead",
+        role: index % 2 === 0 ? "user" : "assistant",
+        session_id: "adapter-candidate-session",
+        timestamp: `2026-06-24T12:10:${String(index).padStart(2, "0")}.000Z`
+      });
+      record.sourceRecordKey = `/tmp/historical-session.jsonl:${index}`;
+      const result = ingestAdapterRecord(
+        db,
+        record,
+        {
+          hostId: "host:test",
+          hostname: "masthead-test-host",
+          runtimeKind: "opencode",
+          runtimeVersion: "local-jsonl"
+        }
+      );
+      sessionId = result.sessionId;
+    }
+
+    expect(sessionId).toBeDefined();
+    expect(readWorkbenchSessionState(db, sessionId!)).toBeUndefined();
     db.close();
   });
 

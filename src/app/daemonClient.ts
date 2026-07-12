@@ -1571,6 +1571,18 @@ export async function discoverHarnessConnectors(
   return postHarnessConnectorAction(baseUrl, "/sources/connectors/discover", "discover harness connectors", options);
 }
 
+export async function discoverHarnessConnectorHistory(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<HarnessConnectorsSnapshotDto> {
+  return postHarnessConnectorAction(
+    baseUrl,
+    "/sources/connectors/discover-history",
+    "discover harness connector history",
+    options
+  );
+}
+
 export async function enableHarnessConnector(
   runtime: string,
   baseUrl = defaultLiveProjectionUrl(),

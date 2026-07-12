@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   confirmHarnessConnectorActivation,
+  discoverHarnessConnectorHistory,
   discoverHarnessConnectors,
   enableHarnessConnector,
   listHarnessConnectors,
@@ -33,9 +34,10 @@ export type UseSourcesConnectorsControllerResult = {
   skipOnboarding: () => void;
   load: () => Promise<void>;
   discover: () => Promise<void>;
-  enable: (runtime: string) => Promise<void>;
+  discoverHistory: () => Promise<void>;
+  enable: (runtime: string) => Promise<boolean>;
   enableAllDetected: () => Promise<void>;
-  test: (runtime: string) => Promise<void>;
+  test: (runtime: string) => Promise<{ verified: boolean; needsAction: boolean }>;
   uninstall: (runtime: string) => Promise<void>;
   confirmActivation: (runtime: string) => Promise<void>;
 };
@@ -132,9 +134,25 @@ export function useSourcesConnectorsController(
     }
   }, [activeProjectionUrl, applySnapshot]);
 
+  const discoverHistory = useCallback(async () => {
+    setBusy(true);
+    setActionRuntime(undefined);
+    setRefreshStatus("Discovering local history…");
+    try {
+      const next = await discoverHarnessConnectorHistory(activeProjectionUrl);
+      applySnapshot(next);
+      setRefreshStatus(`Discovered history for ${next.connectors.filter((connector) => connector.historyFound).length} harnesses.`);
+    } catch (error) {
+      setRefreshStatus(`History discovery failed: ${errorMessage(error)}`);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }, [activeProjectionUrl, applySnapshot]);
+
   const enable = useCallback(
     async (runtime: string) => {
-      if (!guardWritable()) return;
+      if (!guardWritable()) return false;
       setBusy(true);
       setActionRuntime(runtime);
       setCardStatus(setCardActionStatus, runtime, "Enabling…");
@@ -163,8 +181,10 @@ export function useSourcesConnectorsController(
         } else {
           setCardStatus(setCardActionStatus, runtime, "Not installed.");
         }
+        return connector?.live === "ready" || connector?.live === "needs_action" || false;
       } catch (error) {
         setCardStatus(setCardActionStatus, runtime, `Enable failed: ${errorMessage(error)}`);
+        return false;
       } finally {
         setActionRuntime(undefined);
         setBusy(false);
@@ -222,7 +242,7 @@ export function useSourcesConnectorsController(
 
   const test = useCallback(
     async (runtime: string) => {
-      if (!guardWritable()) return;
+      if (!guardWritable()) return { verified: false, needsAction: false };
       setBusy(true);
       setActionRuntime(runtime);
       setCardStatus(setCardActionStatus, runtime, "Testing…");
@@ -233,13 +253,16 @@ export function useSourcesConnectorsController(
         const lastTest = connector?.lastTest;
         if (lastTest?.status === "passed") {
           setCardStatus(setCardActionStatus, runtime, `Test passed — ${lastTest.message}`);
+          return { verified: true, needsAction: connector?.live === "needs_action" };
         } else if (lastTest?.status === "failed") {
           setCardStatus(setCardActionStatus, runtime, `Test failed — ${lastTest.message}`);
         } else {
           setCardStatus(setCardActionStatus, runtime, "Test finished with no result payload.");
         }
+        return { verified: false, needsAction: connector?.live === "needs_action" };
       } catch (error) {
         setCardStatus(setCardActionStatus, runtime, `Test failed: ${errorMessage(error)}`);
+        return { verified: false, needsAction: false };
       } finally {
         setActionRuntime(undefined);
         setBusy(false);
@@ -334,6 +357,7 @@ export function useSourcesConnectorsController(
     skipOnboarding,
     load,
     discover,
+    discoverHistory,
     enable,
     enableAllDetected,
     test,

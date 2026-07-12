@@ -277,6 +277,7 @@ export function recordImportFailureGroup(
     retryable: boolean;
     observedAt: string;
     samplePath?: string;
+    count?: number;
   }
 ): ImportFailureGroupDto {
   const existing = db
@@ -293,11 +294,11 @@ export function recordImportFailureGroup(
     const samples = uniqueJsonStrings(nullableString(existing.sample_paths_json), input.samplePath);
     db.prepare(
       `UPDATE import_failure_groups
-      SET count = count + 1,
+      SET count = count + ?,
         last_seen_at = ?,
         sample_paths_json = ?
       WHERE failure_group_id = ?`
-    ).run(input.observedAt, JSON.stringify(samples), stringValue(existing.failure_group_id));
+    ).run(input.count ?? 1, input.observedAt, JSON.stringify(samples), stringValue(existing.failure_group_id));
     const updated = db
       .prepare("SELECT * FROM import_failure_groups WHERE failure_group_id = ?")
       .get(stringValue(existing.failure_group_id)) as Record<string, unknown>;
@@ -334,7 +335,7 @@ export function recordImportFailureGroup(
     input.code,
     input.message,
     input.retryable ? 1 : 0,
-    1,
+    input.count ?? 1,
     input.observedAt,
     input.observedAt,
     JSON.stringify(input.samplePath ? [input.samplePath] : [])
@@ -392,8 +393,18 @@ function workUnitFromRow(row: Record<string, unknown>): ImportWorkUnitDto {
     unitKind: stringValue(row.unit_kind) as ImportWorkUnitKind,
     workUnitId: stringValue(row.work_unit_id),
     estimatedRecords: optionalNumber(row.estimated_records),
+    cursorAfter: parseOptionalJson(row.cursor_after_json),
     failureGroupId: nullableString(row.failure_group_id) ?? undefined
   };
+}
+
+function parseOptionalJson(value: unknown): unknown {
+  if (typeof value !== "string" || !value) return undefined;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 function failureGroupFromRow(row: Record<string, unknown>): ImportFailureGroupDto {

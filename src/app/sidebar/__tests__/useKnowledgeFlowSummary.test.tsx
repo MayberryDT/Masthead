@@ -172,7 +172,7 @@ describe("useKnowledgeFlowSummary", () => {
     expect(current().summary?.capturedSessions).toBe(19);
   });
 
-  test("exposes request failures without retaining stale values", async () => {
+  test("exposes request failures while retaining the last successful values", async () => {
     vi.mocked(getKnowledgeFlowSummary)
       .mockResolvedValueOnce(summary)
       .mockRejectedValueOnce(new Error("summary endpoint unavailable"));
@@ -185,7 +185,7 @@ describe("useKnowledgeFlowSummary", () => {
     expect(current()).toMatchObject({
       loading: false,
       error: "summary endpoint unavailable",
-      summary: undefined
+      summary
     });
   });
 });

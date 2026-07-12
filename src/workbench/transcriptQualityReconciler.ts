@@ -11,7 +11,7 @@ import { runCaptureQualityPrecheck, type CaptureQualityPrecheckResult } from "./
 
 export type TranscriptQualityReconciliationResult = {
   quality: CaptureQualityPrecheckResult;
-  state: WorkbenchSessionStateRecord;
+  state?: WorkbenchSessionStateRecord;
 };
 
 export function reconcileImportedTranscript(
@@ -20,6 +20,13 @@ export function reconcileImportedTranscript(
   options: { finalizeNoise?: boolean } = {}
 ): TranscriptQualityReconciliationResult {
   const actor = { kind: "system" as const, id: "transcript_import" };
+  const finalizeNoise = options.finalizeNoise ?? true;
+  const quality = runCaptureQualityPrecheck(db, sessionId);
+  let state = readWorkbenchSessionState(db, sessionId);
+  if (!state && !quality.ok && !finalizeNoise) return { quality };
+  if (!state && quality.reason === "missing_identity") return { quality };
+  state ??= ensureWorkbenchSessionState(db, sessionId);
+
   const coverage = getTranscriptCoverage(db, sessionId);
   const totalEvidence =
     coverage.messages +
@@ -28,7 +35,6 @@ export function reconcileImportedTranscript(
     coverage.fileEffects +
     coverage.runtimeSignals +
     coverage.checkpoints;
-  let state = readWorkbenchSessionState(db, sessionId) ?? ensureWorkbenchSessionState(db, sessionId);
   const transcriptStatus = totalEvidence > 0 ? "imported" : "missing";
   if (state.transcriptStatus !== transcriptStatus) {
     state = markWorkbenchTranscriptStatus(db, {
@@ -41,12 +47,11 @@ export function reconcileImportedTranscript(
     }).state;
   }
 
-  const quality = runCaptureQualityPrecheck(db, sessionId);
   if (quality.ok) {
     if (state.qualityStatus !== "passed" || state.publicationStatus === "not_added_to_logbook") {
       state = markWorkbenchQuality(db, { actor, sessionId, status: "passed" }).state;
     }
-  } else if (options.finalizeNoise && ["duplicate_noise", "hook_only"].includes(quality.reason)) {
+  } else if (finalizeNoise) {
     if (state.qualityStatus !== "failed" || state.nonPublicationReason !== quality.reason) {
       state = markWorkbenchQuality(db, { actor, reason: quality.reason, sessionId, status: "failed" }).state;
     }

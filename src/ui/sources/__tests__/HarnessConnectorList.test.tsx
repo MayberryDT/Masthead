@@ -23,6 +23,8 @@ describe("HarnessConnectorList", () => {
     expect(listHtml).toContain("Claude Code");
     expect(listHtml).toContain("Codex");
     expect(listHtml).toContain("Needs action");
+    expect(listHtml).toContain("Ready after Masthead observes a live Codex event");
+    expect(listHtml).not.toContain("Confirm trusted");
     expect(listHtml).toContain("Details");
     expect(listHtml).not.toContain("Import jobs");
     expect(listHtml).not.toContain("Live harness inventory");

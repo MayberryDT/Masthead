@@ -49,7 +49,7 @@ import {
   type ImportJobKind,
   type ImportJobListStatus
 } from "./db/importJobRepository.ts";
-import { getImportManifestSummary, listAllImportWorkUnits, listImportFailureGroups, listImportWorkUnits } from "./db/importLedgerRepository.ts";
+import { getImportManifestSummary, getImportWorkUnit, listAllImportWorkUnits, listImportFailureGroups, listImportWorkUnits } from "./db/importLedgerRepository.ts";
 import { listImportImpactSessionIds } from "./db/importSessionImpactRepository.ts";
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
@@ -121,7 +121,7 @@ import { discoverSourceSnapshot, type SourceDiscoverySnapshot } from "./sources/
 import { scanLocalSources, type SourceScanResult } from "./sources/sourceScanService.ts";
 import { connectSelectedSources, type ConnectSourcesRequest } from "./sources/sourceConnectService.ts";
 import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/sourceSetupService.ts";
-import { clearConnectorActivation } from "./sources/connectorActivationStore.ts";
+import { clearConnectorActivation, setConnectorActivation } from "./sources/connectorActivationStore.ts";
 import { discoverHarnessConnectors, listHarnessConnectors, withHistoryDiscovery } from "./sources/harnessConnectorService.ts";
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
 import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier.ts";
@@ -686,6 +686,46 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
     }
   });
+  let immediateLiveIngestPersistence: Promise<void> = Promise.resolve();
+
+  function scheduleImmediateLiveIngestPersistence(
+    event: NormalizedEvent,
+    liveStateReportInput: ReturnType<typeof liveStateReportFromHookPayload>
+  ): void {
+    immediateLiveIngestPersistence = immediateLiveIngestPersistence
+      .catch(() => undefined)
+      .then(
+        () =>
+          new Promise<void>((resolve) => {
+            setImmediate(() => {
+              try {
+                persistHookLiveStateReport(database, liveStateReportInput);
+                const sessionId = liveSessionRepositoryForEvent(event).upsertLiveEvent(event);
+                if (sessionId) {
+                  rememberCompletedLiveSession(event);
+                  queueSessionSearchIndex(sessionId);
+                  if (!shouldDeferLiveEnrichmentToHookTranscript(event)) queueSessionEnrichment(sessionId);
+                }
+                appendStoreRecordToRawJournal({
+                  recordId: `event:${event.eventId}`,
+                  recordType: "event",
+                  observedAt: event.occurredAt,
+                  value: event
+                });
+              } catch (error) {
+                recordRuntimeDiagnostic({
+                  details: { error, eventId: event.eventId, sourceSessionId: event.sessionId },
+                  kind: "immediate_live_ingest_persistence_failed",
+                  message: `Immediate live ingest persistence failed for ${event.sessionId ?? event.eventId}.`,
+                  severity: "warning"
+                });
+              } finally {
+                resolve();
+              }
+            });
+          })
+      );
+  }
 
   let closed = false;
   let closePromise: Promise<void> | undefined;
@@ -1003,8 +1043,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return latestScan;
   }
 
+  function buildSourcesSetup() {
+    return buildSourcesSetupState(database, { now: new Date().toISOString() });
+  }
+
   function buildAndPersistSourcesSetup() {
-    const setup = buildSourcesSetupState(database, { now: new Date().toISOString() });
+    const setup = buildSourcesSetup();
     saveSourceSetupState(database, setup);
     return setup;
   }
@@ -1067,7 +1111,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           queuedCount: result.queuedCount
         });
         recordsSinceYield += 1;
-        if (recordsSinceYield >= 25) {
+        if (recordsSinceYield >= 1) {
           recordsSinceYield = 0;
           await new Promise<void>((resolve) => {
             setImmediate(resolve);
@@ -1120,7 +1164,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         let recordsSinceYield = 0;
         for await (const record of adapter.backfill(transcriptSource, cursor)) {
           controls?.throwIfCancelled();
-          const nextOffset = offsetFromSourceRecordKey(record.sourceRecordKey) ?? latestOffset;
+          const nextCursor = record.cursorAfter;
+          const nextOffset = nextCursor?.byteOffset ?? latestOffset;
           if (sourceRecordIsExcluded(database, record)) {
             latestOffset = nextOffset;
             countImportedRecord(result, record, false);
@@ -1134,10 +1179,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             });
             continue;
           }
-          cursorContext = cursorContextFromRecord(record, cursorContext);
+          cursorContext = nextCursor
+            ? { cwd: nextCursor.cwd, model: nextCursor.model, sourceSessionId: nextCursor.sourceSessionId }
+            : cursorContextFromRecord(record, cursorContext);
           const { sessionId } = ingestAdapterRecord(database, record, {
             cursor: {
               byteOffset: nextOffset,
+              contentFingerprint: nextCursor?.contentFingerprint,
+              modifiedAt: nextCursor?.modifiedAt,
               ...cursorContext
             },
             hostId: `host:${config.host}`,
@@ -1170,7 +1219,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             });
           }
         }
-        for (const sessionId of enrichmentSessionIds) queueSessionSearchIndex(sessionId);
+        for (const sessionId of enrichmentSessionIds) {
+          reconcileImportedTranscript(database, sessionId);
+          queueSessionSearchIndex(sessionId);
+        }
         if (queueEnrichmentForImport && !result.limited) {
           for (const sessionId of enrichmentSessionIds) queueSessionEnrichment(sessionId);
         }
@@ -1246,6 +1298,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       });
       const adapter = adapterForRuntime(unit.runtime);
       if (!adapter) throw new Error(`No adapter for runtime ${unit.runtime}`);
+      const checkpointBaseUnits = listAllImportWorkUnits(database, { manifestId: unit.manifestId })
+        .filter((candidate) => candidate.workUnitId !== unit.workUnitId);
+      const checkpointBase = {
+        failed: checkpointBaseUnits.reduce((total, candidate) => total + candidate.failedRecords, 0),
+        imported: checkpointBaseUnits.reduce((total, candidate) => total + candidate.importedRecords, 0),
+        processed: checkpointBaseUnits.reduce((total, candidate) => total + candidate.processedRecords, 0)
+      };
       const unitResult = await runImportWorkUnit({
         adapterBackfill: (source) => adapter.backfill(source, source.path ? readCursor(database, source.sourceId, source.path) : undefined),
         approvedSourceIds: sources.map((source) => source.sourceId),
@@ -1253,21 +1312,33 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         hostId: `host:${config.host}`,
         hostname: config.host,
         now: () => new Date().toISOString(),
+        onCheckpoint: (checkpoint) => controls.updateProgress({
+          currentPath: unit.sourcePath ?? unit.sourceSessionId ?? unit.workUnitId,
+          failureCount: checkpointBase.failed + checkpoint.failed,
+          heartbeatAt: new Date().toISOString(),
+          importedCount: checkpointBase.imported + checkpoint.imported,
+          processedCount: checkpointBase.processed + checkpoint.processed,
+          stage: "transcript",
+          totalWorkUnits: manifest.units.length
+        }),
         onSessionImported: undefined,
         onSessionHydrated: (sessionId) => reconcileImportedTranscript(database, sessionId),
         runtimeKind: unit.runtime,
         workUnitId: unit.workUnitId,
         indexSession: queueSessionSearchIndex
       });
-      result.discoveredCount += unit.estimatedRecords ?? unitResult.processed;
-      result.processedCount += unitResult.processed;
-      result.importedCount += unitResult.imported;
-      result.failureCount += unitResult.failed;
       if (queueEnrichmentForImport && unitResult.failed === 0) {
         for (const sessionId of unitResult.sessionIds) queueSessionEnrichment(sessionId);
       }
-      if (unit.sourcePath) await updateCursorAfterWorkUnit(unit);
+      const completedUnit = getImportWorkUnit(database, unit.workUnitId);
+      if (unit.sourcePath && completedUnit && ["succeeded", "succeeded_with_issues"].includes(completedUnit.status)) {
+        await updateCursorAfterWorkUnit(unit);
+      }
       const progressUnits = listAllImportWorkUnits(database, { manifestId: unit.manifestId });
+      result.processedCount = progressUnits.reduce((total, candidate) => total + candidate.processedRecords, 0);
+      result.importedCount = progressUnits.reduce((total, candidate) => total + candidate.importedRecords, 0);
+      result.failureCount = progressUnits.reduce((total, candidate) => total + candidate.failedRecords, 0);
+      result.discoveredCount = manifest.summary.estimatedRecords ?? result.processedCount;
       controls.updateProgress({
         completedWorkUnits: progressUnits.filter((candidate) => ["succeeded", "succeeded_with_issues"].includes(candidate.status)).length,
         currentPath: unit.sourcePath ?? unit.sourceSessionId ?? unit.workUnitId,
@@ -1283,7 +1354,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     const finalUnits = listAllImportWorkUnits(database, { importJobId: controls.importJobId });
     result.processedCount = finalUnits.reduce((total, unit) => total + unit.processedRecords, 0);
-    result.discoveredCount = result.processedCount + finalUnits.filter((unit) => ["queued", "running", "skipped"].includes(unit.status)).length;
+    result.discoveredCount = manifest.summary.estimatedRecords ?? result.processedCount;
     result.importedCount = finalUnits.reduce((total, unit) => total + unit.importedRecords, 0);
     result.failureCount = finalUnits.reduce((total, unit) => total + unit.failedRecords, 0);
     result.queuedCount = finalUnits.filter((unit) => ["queued", "running", "skipped"].includes(unit.status)).length;
@@ -1861,14 +1932,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (request.method === "GET" && url.pathname === "/sources/setup") {
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
-        setup: buildAndPersistSourcesSetup()
+        setup: buildSourcesSetup()
       });
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/sources/advanced") {
       sendJson(request, response, config.allowedOrigins, 200, {
-        advanced: buildAndPersistSourcesSetup().advanced,
+        advanced: buildSourcesSetup().advanced,
         ok: true
       });
       return;
@@ -1888,6 +1959,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "POST" && url.pathname === "/sources/connectors/discover") {
+      try {
+        const snapshot = await discoverHarnessConnectors(database, config);
+        sendJson(request, response, config.allowedOrigins, 202, { ok: true, ...snapshot });
+      } catch (error) {
+        sendJson(request, response, config.allowedOrigins, 500, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/sources/connectors/discover-history") {
       try {
         const [snapshot, scan] = await Promise.all([
           discoverHarnessConnectors(database, config),
@@ -1926,7 +2010,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         } else if (action === "uninstall") {
           await uninstallRuntimeHooks(database, config, runtime);
         } else if (action === "confirm-activation") {
-          await clearConnectorActivation(dirname(config.databasePath), runtime);
+          if (runtime === "codex") {
+            await setConnectorActivation(dirname(config.databasePath), runtime, {
+              required: "trust_hooks",
+              message: "Trust Masthead hooks in Codex, then start or restart a Codex session. Masthead marks this connection Ready after it observes a real live event."
+            });
+          } else {
+            await clearConnectorActivation(dirname(config.databasePath), runtime);
+          }
         }
 
         const snapshot = await listHarnessConnectors(database, config);
@@ -3406,23 +3497,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const result = ingestNormalizedEvent(event, state);
 
       if (result.status === "accepted") {
-        persistHookLiveStateReport(database, liveStateReportInput);
         if (eventLiveProcessingMode(result.event) === "deferred") {
           removeEventFromLiveProjectionState(state, result.event);
+          persistHookLiveStateReport(database, liveStateReportInput);
           deferredLiveIngestQueue.enqueue(result.event);
         } else {
-          const sessionId = liveSessionRepositoryForEvent(result.event).upsertLiveEvent(result.event);
-          if (sessionId) {
-            rememberCompletedLiveSession(result.event);
-            queueSessionSearchIndex(sessionId);
-            if (!shouldDeferLiveEnrichmentToHookTranscript(result.event)) queueSessionEnrichment(sessionId);
-          }
-          appendStoreRecordToRawJournal({
-            recordId: `event:${result.event.eventId}`,
-            recordType: "event",
-            observedAt: result.event.occurredAt,
-            value: result.event
-          });
+          scheduleImmediateLiveIngestPersistence(result.event, liveStateReportInput);
         }
       }
 
@@ -3470,6 +3550,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         }
         let deferredQueueError: unknown;
         try {
+          await immediateLiveIngestPersistence;
           await deferredLiveIngestQueue.close();
         } catch (error) {
           deferredQueueError = error;
@@ -4052,11 +4133,6 @@ async function jsonlFiles(directory: string): Promise<string[]> {
     }
   }
   return files.toSorted();
-}
-
-function offsetFromSourceRecordKey(sourceRecordKey: string): number | undefined {
-  const offset = Number.parseInt(sourceRecordKey.split(":").at(-1) ?? "", 10);
-  return Number.isFinite(offset) ? offset : undefined;
 }
 
 type TranscriptCursorContext = {

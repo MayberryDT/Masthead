@@ -492,6 +492,23 @@ describe("validateAuthoringBundle", () => {
     );
   });
 
+  test("accepts canonical evidence refs containing 64-hex item IDs", () => {
+    const sessionId = "session:a";
+    const originalRef = messageRef(sessionId);
+    const canonicalRef = `message:${"a".repeat(64)}`;
+    const bundle = JSON.parse(
+      JSON.stringify(validAuthoringBundle()).replaceAll(originalRef, canonicalRef)
+    ) as WorkbenchAuthoringBundle;
+    const input = validValidationInput(bundle);
+    input.evidenceByRef.delete(originalRef);
+    input.evidenceByRef.set(canonicalRef, { kind: "message", sessionId });
+
+    const result = validateAuthoringBundle(input);
+
+    expect(result.findings).not.toContainEqual(expect.objectContaining({ code: "secret_detected" }));
+    expect(result.ok).toBe(true);
+  });
+
   test("rejects own properties whose names exist only on Object.prototype", () => {
     const bundle = validAuthoringBundle();
     Object.defineProperty(bundle, "constructor", { enumerable: true, value: "unexpected" });

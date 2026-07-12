@@ -231,7 +231,8 @@ function importJobFilters(options: ListImportJobsOptions): { joins: string; para
 }
 
 function importJobFromRow(row: ImportJobRow): ImportJobDto {
-  const progressTotal = row.discovered_count > 0 ? row.discovered_count : undefined;
+  const transcriptStillDiscovering = row.import_kind === "transcript" && ["queued", "running", "cancelling"].includes(row.status);
+  const progressTotal = !transcriptStillDiscovering && row.discovered_count > 0 ? row.discovered_count : undefined;
   const progressPercent = progressTotal
     ? Math.min(100, Math.max(0, Math.round((row.processed_count / progressTotal) * 100)))
     : undefined;

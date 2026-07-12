@@ -14,6 +14,7 @@ export type SourcesConnectOnboardingProps = {
   onSkip: () => void;
   onDiscover: () => Promise<void> | void;
   onEnable: (runtime: string) => Promise<void> | void;
+  onTest: (runtime: string) => Promise<boolean | { verified: boolean; needsAction: boolean }> | boolean | { verified: boolean; needsAction: boolean };
   onConfirmActivation?: (runtime: string) => Promise<void> | void;
   imports?: ImportJob[];
   onImportHistory?: (input: SourcesSetupRunInput) => Promise<unknown> | unknown;
@@ -40,12 +41,14 @@ export function SourcesConnectOnboarding({
   onSkip,
   onDiscover,
   onEnable,
+  onTest,
   onImportHistory
 }: SourcesConnectOnboardingProps) {
   const [step, setStep] = useState<Step>("intro");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [discoverStarted, setDiscoverStarted] = useState(false);
   const [enableRunning, setEnableRunning] = useState(false);
+  const [connectionStates, setConnectionStates] = useState<Record<string, "enabling" | "verifying" | "verified" | "needs_action" | "failed">>({});
   const [discoverAttempted, setDiscoverAttempted] = useState(false);
   const [historyChoice, setHistoryChoice] = useState<HistoryChoice>("everything");
   const [importRunning, setImportRunning] = useState(false);
@@ -63,6 +66,9 @@ export function SourcesConnectOnboarding({
   );
   const activeStage = stageForStep(step);
   const discoveryComplete = discoverAttempted && !discoverStarted && !busy && snapshot !== undefined;
+  const hasPendingActivation = selectedConnectors.some(
+    (connector) => connectionStates[connector.runtime] === "needs_action"
+  );
 
   useEffect(() => {
     if (!open) {
@@ -70,6 +76,7 @@ export function SourcesConnectOnboarding({
       setSelected(new Set());
       setDiscoverStarted(false);
       setEnableRunning(false);
+      setConnectionStates({});
       setDiscoverAttempted(false);
       setHistoryChoice("everything");
       setImportRunning(false);
@@ -107,16 +114,36 @@ export function SourcesConnectOnboarding({
   };
 
   const handleConnectSelected = async () => {
-    const targets = selectedConnectors.filter((connector) => connector.live !== "ready");
     setEnableRunning(true);
+    let failed = false;
     try {
-      for (const target of targets) {
-        await onEnable(target.runtime);
+      for (const target of selectedConnectors) {
+        const alreadyInstalled = connectionStates[target.runtime] === "needs_action" || connectionStates[target.runtime] === "verified";
+        if (!alreadyInstalled) {
+          setConnectionStates((current) => ({ ...current, [target.runtime]: "enabling" }));
+          await onEnable(target.runtime);
+        }
+        setConnectionStates((current) => ({ ...current, [target.runtime]: "verifying" }));
+        const verification = await onTest(target.runtime);
+        const verified = typeof verification === "boolean" ? verification : verification.verified;
+        const needsAction = typeof verification === "boolean" ? false : verification.needsAction;
+        if (!verified) {
+          failed = true;
+          setConnectionStates((current) => ({ ...current, [target.runtime]: "failed" }));
+          continue;
+        }
+        setConnectionStates((current) => ({
+          ...current,
+          [target.runtime]: needsAction ? "needs_action" : "verified"
+        }));
+        if (needsAction) failed = true;
       }
+    } catch {
+      failed = true;
     } finally {
       setEnableRunning(false);
     }
-    setStep("history");
+    if (!failed) setStep("history");
   };
 
   const handleRediscover = async () => {
@@ -222,6 +249,11 @@ export function SourcesConnectOnboarding({
                   {connector.actionMessage ? (
                     <span className="surface-status source-card-path">{connector.actionMessage}</span>
                   ) : null}
+                  {connectionStates[connector.runtime] ? (
+                    <span className={`surface-status source-connection-verification is-${connectionStates[connector.runtime]}`} role="status">
+                      {connectionStateLabel(connectionStates[connector.runtime])}
+                    </span>
+                  ) : null}
                 </label>
               ))}
             </div>
@@ -248,7 +280,7 @@ export function SourcesConnectOnboarding({
               disabled={busy || enableRunning || selected.size === 0}
               onClick={() => void handleConnectSelected()}
             >
-              {enableRunning ? "Connecting…" : "Connect selected"}
+              {enableRunning ? "Connecting…" : hasPendingActivation ? "Check connections" : "Connect selected"}
             </AppButton>
           </div>
         </div>
@@ -355,6 +387,14 @@ export function SourcesConnectOnboarding({
       </section>
     </div>
   );
+}
+
+function connectionStateLabel(state: "enabling" | "verifying" | "verified" | "needs_action" | "failed"): string {
+  if (state === "enabling") return "Installing connector…";
+  if (state === "verifying") return "Executing connector command…";
+  if (state === "verified") return "Connector command verified";
+  if (state === "needs_action") return "Connector command verified — host action still required";
+  return "Verification failed — repair the connector and try again";
 }
 
 function historyCountLabel(connector: HarnessConnectorDto): string {

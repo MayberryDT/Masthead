@@ -283,10 +283,12 @@ describe("HistoryPanel", () => {
 
   test("renders artifact-first empty and filter-miss copy", () => {
     const empty = renderToStaticMarkup(
-      <HistoryPanel loadState={{ state: "ready", sessions: [], total: 0 }} loading={false} query="" onQueryChange={() => {}} />
+      <HistoryPanel loadState={{ state: "ready", sessions: [], total: 0 }} loading={false} query="" onQueryChange={() => {}} onOpenWorkbench={() => {}} />
     );
     expect(empty).toContain("No published artifacts yet.");
     expect(empty).toContain("Compile and publish from Workbench.");
+    expect(empty).toContain("Open Workbench");
+    expect(empty).not.toContain("Open Sources");
     expect(empty).not.toContain("No sessions imported yet.");
 
     const filtered = renderToStaticMarkup(
@@ -382,4 +384,3 @@ function records(): StoreRecord[] {
     }
   ];
 }
-

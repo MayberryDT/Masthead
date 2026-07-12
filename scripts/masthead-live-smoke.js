@@ -73,8 +73,8 @@ try {
 
   const workbench = await getJson(server.baseUrl, "/workbench/sessions?limit=50");
   assert(
-    workbench.sessions?.some((session) => session.title === "Live smoke approval"),
-    "workbench queue missing captured live smoke session"
+    !workbench.sessions?.some((session) => session.title === "Live smoke approval"),
+    "shallow live smoke session bypassed the artifact candidate gate"
   );
 
   const logbook = await getJson(server.baseUrl, "/logbook/artifacts?q=Live%20smoke");

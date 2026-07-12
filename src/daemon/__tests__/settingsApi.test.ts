@@ -678,7 +678,7 @@ describe("settings API", () => {
 
     const tested = await postJson(baseUrl, "/settings/hooks/claude_code/test");
     expect(tested.hooks.lastTest).toMatchObject({
-      message: expect.stringContaining("Masthead accepted synthetic live events and state reports"),
+      message: expect.stringContaining("Connector command verified"),
       status: "passed"
     });
     const syntheticRows = daemon.database
@@ -692,7 +692,7 @@ describe("settings API", () => {
       .all() as Array<{ runtime: string; sourceSessionId: string }>;
     expect(syntheticRows).toEqual([]);
     const stateRows = daemon.database
-      .prepare("SELECT runtime, state FROM live_state_reports WHERE source LIKE 'masthead:%:settings-test' ORDER BY runtime")
+      .prepare("SELECT runtime, state FROM live_state_reports WHERE source = 'masthead:claude_code-hook' AND source_session_id LIKE 'masthead-hook-test-%' ORDER BY runtime")
       .all() as Array<{ runtime: string; state: string }>;
     expect(stateRows).toEqual([expect.objectContaining({ runtime: "claude_code", state: "working" })]);
     const projection = await getJson(baseUrl, "/projection");

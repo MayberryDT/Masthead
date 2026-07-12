@@ -64,8 +64,12 @@ try {
 
 async function writeTranscriptFixture(targetDir) {
   const rows = [
-    { session_id: "import-smoke-basic", timestamp: "2026-06-25T00:00:00.000Z", role: "user", content: "Logbook import smoke basic" },
-    { session_id: "import-smoke-basic", timestamp: "2026-06-25T00:01:00.000Z", role: "assistant", content: "Imported basic transcript" },
+    ...Array.from({ length: 20 }, (_, index) => ({
+      session_id: "import-smoke-basic",
+      timestamp: `2026-06-25T00:00:${String(index).padStart(2, "0")}.000Z`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `Detailed import smoke discussion turn ${index}`
+    })),
     { session_id: "import-smoke-tools", timestamp: "2026-06-25T00:02:00.000Z", role: "user", content: "Logbook import smoke tools" },
     { session_id: "import-smoke-tools", timestamp: "2026-06-25T00:03:00.000Z", toolName: "read_file" },
     { session_id: "import-smoke-compacted", timestamp: "2026-06-25T00:04:00.000Z", role: "assistant", content: "Logbook import smoke compacted" },
@@ -92,7 +96,9 @@ async function assertSearch(baseUrl) {
   const sessions = await getJson(baseUrl, "/sessions?q=Logbook&limit=10");
   assert(sessions.total === 0, "unpublished imported sessions should not appear in published session evidence search");
   const workbench = await getJson(baseUrl, "/workbench/sessions?limit=10");
-  assert(workbench.sessions?.length >= 4, "expected imported sessions in Workbench");
+  assert(workbench.total === 1, `expected one artifact candidate in Workbench, got ${workbench.total}`);
+  const notAdded = await getJson(baseUrl, "/workbench/not-added-summary");
+  assert(notAdded.total === 3, `expected three low-evidence imports outside the default queue, got ${notAdded.total}`);
   const logbook = await getJson(baseUrl, "/logbook/artifacts?q=Logbook&limit=10");
   assert(logbook.total === 0, "unpublished imported sessions should not appear in artifact-first Logbook");
 }

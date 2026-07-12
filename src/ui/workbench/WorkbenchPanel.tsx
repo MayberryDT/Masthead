@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
+import { useNewItemIds } from "../motion/useNewItemIds";
 import { formatWorkbenchActivityTime, workbenchActivityTone } from "./workbenchActivity";
 import { sanitizeWorkbenchVisibleText } from "./workbenchHandoff";
 
@@ -115,7 +116,7 @@ export function WorkbenchPanel({
   const selectionCount = selectedSessionIds.size;
   const selectedSessions = sessions.filter((session) => selectedSessionIds.has(session.sessionId));
   const queueTotal = typeof total === "number" ? total : sessions.length;
-  const publishPathLabel = loading ? "…" : String(queueTotal);
+  const publishPathLabel = typeof total === "number" ? String(total) : loading ? "…" : String(queueTotal);
   const notAddedTotal = notAddedSummary?.total;
   const notAddedLabel = notAddedTotal != null ? String(notAddedTotal) : undefined;
   const pageCount = Math.max(1, Math.ceil(queueTotal / Math.max(1, pageSize)));
@@ -130,6 +131,8 @@ export function WorkbenchPanel({
   const toastTone = actionError ? "error" : "ok";
 
   const pageSessionIds = sessions.map((session) => session.sessionId);
+  const newSessionIds = useNewItemIds(pageSessionIds, page);
+  const newActivityIds = useNewItemIds(activity.map((item) => item.activityId));
   const pageSelectedCount = pageSessionIds.filter((id) => selectedSessionIds.has(id)).length;
   const allPageSelected = pageSessionIds.length > 0 && pageSelectedCount === pageSessionIds.length;
   const somePageSelected = pageSelectedCount > 0 && !allPageSelected;
@@ -468,7 +471,10 @@ export function WorkbenchPanel({
                     return (
                       <tr
                         key={session.sessionId}
-                        className={selected ? "is-selected" : undefined}
+                        className={[
+                          selected ? "is-selected" : "",
+                          newSessionIds.has(session.sessionId) ? "is-new" : ""
+                        ].filter(Boolean).join(" ") || undefined}
                         onClick={() => onToggleSession?.(session.sessionId)}
                       >
                         <td className="workbench-select-col" onClick={(event) => event.stopPropagation()}>
@@ -568,7 +574,7 @@ export function WorkbenchPanel({
                 {activity.map((item) => (
                   <li
                     key={item.activityId}
-                    className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)}`}
+                    className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
                   >
                     <span className="workbench-activity-gutter" aria-hidden="true" />
                     <div className="workbench-activity-body">

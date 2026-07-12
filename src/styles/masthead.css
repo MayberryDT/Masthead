@@ -2499,6 +2499,30 @@ main {
   cursor: pointer;
 }
 
+@keyframes workbench-row-seat {
+  from {
+    transform: translateY(2px);
+    opacity: 0.86;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes workbench-row-edge {
+  from { box-shadow: inset 2px 0 0 rgba(46, 167, 255, 0.44); }
+  to { box-shadow: inset 2px 0 0 rgba(46, 167, 255, 0); }
+}
+
+.workbench-session-table tbody tr.is-new {
+  animation: workbench-row-seat 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workbench-session-table tbody tr.is-new td:first-child {
+  animation: workbench-row-edge 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .workbench-fact-toggle {
   appearance: none;
   display: flex;
@@ -3044,6 +3068,18 @@ main {
   min-width: 0;
   padding: 8px 0;
   border-top: 1px solid rgba(194, 221, 241, 0.06);
+}
+
+.workbench-activity-item.is-new {
+  animation: workbench-row-seat 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-session-table tbody tr.is-new,
+  .workbench-session-table tbody tr.is-new td:first-child,
+  .workbench-activity-item.is-new {
+    animation: none !important;
+  }
 }
 
 .workbench-activity-item:first-child {
@@ -4249,6 +4285,44 @@ body {
   color: var(--body);
   padding: 12px;
 }
+
+:root {
+  --digit-dur: 500ms;
+  --digit-distance: 8px;
+  --digit-stagger: 70ms;
+  --digit-blur: 2px;
+  --digit-ease: cubic-bezier(0.34, 1.45, 0.64, 1);
+  --digit-dir-x: 0;
+  --digit-dir-y: 1;
+}
+
+.masthead-shell {
+  --digit-dur: 200ms;
+  --digit-distance: 2px;
+  --digit-stagger: 12ms;
+  --digit-blur: 0px;
+  --digit-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes t-digit-pop-in {
+  0% {
+    transform: translate(calc(var(--digit-distance) * var(--digit-dir-x)), calc(var(--digit-distance) * var(--digit-dir-y)));
+    opacity: 0;
+    filter: blur(var(--digit-blur));
+  }
+  100% {
+    transform: translate(0, 0);
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+.t-digit-group { display:inline-flex; align-items:baseline; }
+.t-digit { display:inline-block; will-change:transform,opacity,filter; }
+.t-digit-group.is-animating .t-digit { animation:t-digit-pop-in var(--digit-dur) var(--digit-ease) both; }
+.t-digit-group.is-animating .t-digit[data-stagger="1"] { animation-delay:var(--digit-stagger); }
+.t-digit-group.is-animating .t-digit[data-stagger="2"] { animation-delay:calc(var(--digit-stagger) * 2); }
+@media (prefers-reduced-motion: reduce) { .t-digit-group .t-digit { animation:none !important; } }
 
 .sidebar-knowledge-spine {
   display: grid;

@@ -57,6 +57,14 @@ function allow(...kinds: WorkbenchActionKind[]) {
 }
 
 describe("WorkbenchPanel", () => {
+  test("keeps a known package-path total visible during refresh", () => {
+    const html = renderToStaticMarkup(<WorkbenchPanel loading total={144} />);
+
+    expect(html).toContain("Package path");
+    expect(html).toContain(">144<");
+    expect(html).not.toContain(">…<");
+  });
+
   test("labels unchecked capture as awaiting transcript instead of a terminal exclusion", () => {
     const html = renderToStaticMarkup(
       <WorkbenchPanel

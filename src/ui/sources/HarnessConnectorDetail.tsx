@@ -35,7 +35,7 @@ export function HarnessConnectorDetail({
   const disabled = busy || readOnly || !connector.supportsActions;
   const showConfirm =
     connector.live === "needs_action" &&
-    (connector.actionRequired === "trust_hooks" || connector.actionRequired === "confirm_activation");
+    connector.actionRequired === "confirm_activation";
   const showRepair =
     connector.live === "error" ||
     (connector.live === "needs_action" && connector.actionRequired === "repair");

@@ -1,4 +1,4 @@
-import { open, readFile, stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import type {
   AdapterRecord,
@@ -12,6 +12,7 @@ import type {
 import { adapterPayload, hash, isRecord, normalizeRole, readNumber, readPath, readString } from "../generic/jsonlAdapterKit.ts";
 import { discoverLocalSources } from "../generic/localAdapterFactory.ts";
 import { codexCandidatePaths } from "./discovery.ts";
+import { streamJsonlLines } from "../generic/streamJsonl.ts";
 
 export const codexAdapter: SessionAdapter = {
   runtime: "codex",
@@ -63,23 +64,24 @@ async function inspectCodexSource(source: DiscoveredSource): Promise<SourceInven
   };
 }
 
-async function* backfillCodexSource(source: DiscoveredSource, _cursor?: IngestCursor): AsyncIterable<AdapterRecord> {
+async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCursor): AsyncIterable<AdapterRecord> {
   if (!source.path) return;
-  const text = await readFile(source.path, "utf8");
-  let sourceSessionId = sessionIdFromPath(source.path);
-  let cwd: string | undefined;
-  let model: string | undefined;
-  let lineNumber = 0;
+  const info = await stat(source.path);
+  const contentFingerprint = `${info.size}:${Math.trunc(info.mtimeMs)}`;
+  const modifiedAt = info.mtime.toISOString();
+  let sourceSessionId = cursor?.sourceSessionId ?? sessionIdFromPath(source.path);
+  let cwd = cursor?.cwd;
+  let model = cursor?.model;
 
-  for (const line of text.split("\n")) {
-    lineNumber += 1;
-    const trimmed = line.trim();
+  const resumeOffset = cursor && cursor.byteOffset <= info.size ? cursor.byteOffset : 0;
+  for await (const line of streamJsonlLines(source.path, resumeOffset)) {
+    const trimmed = line.raw.trim();
     if (!trimmed) continue;
     let payload: unknown;
     try {
       payload = JSON.parse(trimmed);
     } catch {
-      yield diagnosticRecord(source, lineNumber, trimmed, "codex_jsonl_invalid_line");
+      yield diagnosticRecord(source, line.lineNumber, trimmed, "codex_jsonl_invalid_line", cursorAfter(line.byteOffsetAfter));
       continue;
     }
     if (!isRecord(payload)) continue;
@@ -90,19 +92,23 @@ async function* backfillCodexSource(source: DiscoveredSource, _cursor?: IngestCu
       sourceSessionId = readString(body, ["id", "session_id", "sessionId"]) ?? sourceSessionId;
       cwd = readString(body, ["cwd", "repo_root", "repoRoot"]);
       model = readString(body, ["model", "model_provider"]);
-      yield record(source, lineNumber, observedAt, payload, adapterPayload("session", source.confidence, source, {
+      yield record(source, line.lineNumber, observedAt, payload, adapterPayload("session", source.confidence, source, {
         cwd,
         model,
         observedAt,
         sessionId: sourceSessionId,
         title: cwd ? basename(cwd) : "Codex session"
-      }));
+      }), cursorAfter(line.byteOffsetAfter));
       continue;
     }
     if (!sourceSessionId || !isRecord(body)) continue;
 
     const normalized = normalizedCodexPayload(source, sourceSessionId, observedAt, body, { cwd, model });
-    if (normalized) yield record(source, lineNumber, observedAt, payload, normalized);
+    if (normalized) yield record(source, line.lineNumber, observedAt, payload, normalized, cursorAfter(line.byteOffsetAfter));
+  }
+
+  function cursorAfter(byteOffset: number): Omit<IngestCursor, "cursorId"> {
+    return { byteOffset, contentFingerprint, cwd, model, modifiedAt, sourceId: source.sourceId, sourcePath: source.path, sourceSessionId };
   }
 }
 
@@ -163,11 +169,13 @@ function record(
   lineNumber: number,
   observedAt: string,
   payload: unknown,
-  normalized: NormalizedAdapterPayload
+  normalized: NormalizedAdapterPayload,
+  cursorAfter?: Omit<IngestCursor, "cursorId">
 ): AdapterRecord {
   const serialized = JSON.stringify(payload);
   return {
     diagnostics: [],
+    cursorAfter,
     normalized,
     observedAt,
     payload,
@@ -177,10 +185,11 @@ function record(
   };
 }
 
-function diagnosticRecord(source: DiscoveredSource, lineNumber: number, line: string, code: string): AdapterRecord {
+function diagnosticRecord(source: DiscoveredSource, lineNumber: number, line: string, code: string, cursorAfter?: Omit<IngestCursor, "cursorId">): AdapterRecord {
   const observedAt = new Date().toISOString();
   return {
     diagnostics: [{ code, message: "Codex transcript line could not be parsed.", observedAt, severity: "warning" }],
+    cursorAfter,
     normalized: adapterPayload("runtime_signal", "heuristic", source, {
       message: "Codex transcript line could not be parsed.",
       observedAt,

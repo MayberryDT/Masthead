@@ -99,7 +99,7 @@ describe("collector autostart", () => {
     expect(container.textContent).not.toContain("ADAPTERS");
     expect(container.textContent).not.toContain("Import data");
     expect(connectorFetch.requests).toContainEqual({ method: "GET", pathname: "/sources/connectors" });
-    expect(connectorFetch.requests).toContainEqual({ method: "POST", pathname: "/sources/connectors/discover" });
+    expect(connectorFetch.requests).toContainEqual({ method: "POST", pathname: "/sources/connectors/discover-history" });
 
     root.unmount();
   });
@@ -140,7 +140,7 @@ describe("collector autostart", () => {
     expect(container.textContent).not.toContain("ADAPTERS");
     expect(container.textContent).not.toContain("Import data");
     expect(connectorFetch.requests).toContainEqual({ method: "GET", pathname: "/sources/connectors" });
-    expect(connectorFetch.requests).toContainEqual({ method: "POST", pathname: "/sources/connectors/discover" });
+    expect(connectorFetch.requests).toContainEqual({ method: "POST", pathname: "/sources/connectors/discover-history" });
 
     root.unmount();
   });
@@ -443,7 +443,7 @@ function createDetectedConnectorFetch() {
       requests.push({ method, pathname });
       return jsonResponse({ ok: true, ...listedHarnessConnectors() });
     }
-    if (method === "POST" && pathname === "/sources/connectors/discover") {
+    if (method === "POST" && pathname === "/sources/connectors/discover-history") {
       requests.push({ method, pathname });
       return jsonResponse({ ok: true, ...discoveredHarnessConnectors() });
     }

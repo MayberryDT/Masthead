@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import type { AdapterRecord, DiscoveredSource, NormalizedAdapterPayload, SourceConfidence } from "../types.ts";
+import { stat } from "node:fs/promises";
+import type { AdapterRecord, DiscoveredSource, IngestCursor, NormalizedAdapterPayload, SourceConfidence } from "../types.ts";
+import { streamJsonlLines } from "./streamJsonl.ts";
 
 export type JsonlShapeProfile = {
   runtime: string;
@@ -23,38 +24,47 @@ export type JsonlShapeProfile = {
 export async function* backfillJsonlSource(
   source: DiscoveredSource,
   profile: JsonlShapeProfile,
-  options: { confidence?: SourceConfidence } = {}
+  options: { confidence?: SourceConfidence; cursor?: IngestCursor } = {}
 ): AsyncIterable<AdapterRecord> {
   if (!source.path) return;
-  const text = await readFile(source.path, "utf8");
+  const info = await stat(source.path);
+  const contentFingerprint = `${info.size}:${Math.trunc(info.mtimeMs)}`;
+  const modifiedAt = info.mtime.toISOString();
   const confidence = options.confidence ?? "heuristic";
-  let lineNumber = 0;
 
-  for (const line of text.split("\n")) {
-    lineNumber += 1;
-    const trimmed = line.trim();
+  const resumeOffset = options.cursor && options.cursor.byteOffset <= info.size ? options.cursor.byteOffset : 0;
+  for await (const line of streamJsonlLines(source.path, resumeOffset)) {
+    const trimmed = line.raw.trim();
     if (!trimmed) continue;
+    const cursorAfter = {
+      byteOffset: line.byteOffsetAfter,
+      contentFingerprint,
+      modifiedAt,
+      sourceId: source.sourceId,
+      sourcePath: source.path
+    };
     let payload: unknown;
     try {
       payload = JSON.parse(trimmed);
     } catch {
-      yield diagnosticRecord(source, lineNumber, trimmed, "jsonl_invalid_line");
+      yield { ...diagnosticRecord(source, line.lineNumber, trimmed, "jsonl_invalid_line"), cursorAfter };
       continue;
     }
     const normalized = normalizeJsonlPayload(payload, profile, source, confidence);
     if (!normalized) {
       if (profile.ignoreUnrecognizedRecords) continue;
-      yield diagnosticRecord(source, lineNumber, trimmed, `${source.runtime}_schema_not_recognized`);
+      yield { ...diagnosticRecord(source, line.lineNumber, trimmed, `${source.runtime}_schema_not_recognized`), cursorAfter };
       continue;
     }
     yield {
       diagnostics: [],
+      cursorAfter,
       normalized,
       observedAt: readString(payload, profile.observedAtKeys) ?? new Date(0).toISOString(),
       payload,
       payloadHash: hash(trimmed),
       source,
-      sourceRecordKey: `${source.path}:${lineNumber}`
+      sourceRecordKey: `${source.path}:${line.lineNumber}`
     };
   }
 }

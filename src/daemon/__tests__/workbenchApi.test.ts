@@ -349,6 +349,26 @@ describe("workbench API", () => {
       sessionId: "session:quality",
       title: "Quality candidate"
     });
+    for (const [index, role, text] of [
+      [1, "assistant", "I will inspect the candidate pipeline."],
+      [2, "user", "Please implement and verify the gate."],
+      [3, "assistant", "The implementation now uses canonical evidence."]
+    ] as const) {
+      daemon.database
+        .prepare(
+          "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .run(
+          `session:quality:message:${index}`,
+          "session:quality",
+          role,
+          text,
+          `session:quality:hash:${index}`,
+          `2026-06-25T12:00:0${index}.000Z`,
+          "{}",
+          "authoritative"
+        );
+    }
     ensureWorkbenchSessionState(daemon.database, "session:quality");
     daemon.database
       .prepare(
@@ -388,7 +408,7 @@ describe("workbench API", () => {
       })
     });
 
-    // Re-admit to publish path, then exercise precheck (seedSession includes a meaningful user message).
+    // Re-admit to publish path, then exercise precheck with grounded multi-turn evidence.
     await postJson(baseUrl, "/workbench/sessions/session%3Aquality/quality", { status: "passed" });
     const precheckPass = await postJson(baseUrl, "/workbench/sessions/session%3Aquality/quality", { mode: "precheck" });
     expect(precheckPass).toMatchObject({

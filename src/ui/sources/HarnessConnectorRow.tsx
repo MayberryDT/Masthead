@@ -156,7 +156,10 @@ export function resolvePrimaryCta(
       ? { kind: "button", label: "Enable", action: "enable", variant: "primary" }
       : { kind: "message", label: connector.actionMessage ?? "Enable unavailable" };
   }
-  if (required === "trust_hooks" || required === "confirm_activation") {
+  if (required === "trust_hooks") {
+    return { kind: "message", label: "Ready after Masthead observes a live Codex event" };
+  }
+  if (required === "confirm_activation") {
     if (handlers.onConfirm) {
       return { kind: "button", label: "Confirm trusted", action: "confirm", variant: "primary" };
     }

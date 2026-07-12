@@ -1,6 +1,9 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseLiveHookPayload } from "../liveHookAdapter";
 import {
@@ -173,6 +176,51 @@ describe("hook ingestion", () => {
     expect(received).not.toContain("secret-token-value");
   });
 
+  test("hook helper executes when launched through the packaged current symlink", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-hook-symlink-"));
+    const symlinkPath = join(tempDir, "masthead-hook.js");
+    await symlink(hookScript.pathname, symlinkPath);
+    try {
+      const { posted, exitCode } = await runHookWithServer(JSON.stringify(hookPayload), {
+        MASTHEAD_HOOK_TIMEOUT_MS: "500"
+      }, symlinkPath);
+
+      expect(exitCode).toBe(0);
+      expect(posted()).toHaveLength(1);
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  test("hook helper does not wait for the daemon response during normal host capture", async () => {
+    let received = false;
+    const server = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        received = true;
+        setTimeout(() => {
+          response.writeHead(202, { "content-type": "application/json" });
+          response.end(JSON.stringify({ ok: true }));
+        }, 500);
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("expected tcp server");
+
+    const startedAt = Date.now();
+    const exitCode = await runHook(JSON.stringify(hookPayload), {
+      MASTHEAD_INGEST_URL: `http://127.0.0.1:${address.port}/ingest`,
+      MASTHEAD_HOOK_TIMEOUT_MS: "1000"
+    });
+
+    expect(exitCode).toBe(0);
+    expect(received).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(250);
+  });
+
   test("hook helper exits zero when Masthead is unavailable", async () => {
     const exitCode = await runHook(JSON.stringify(hookPayload), {
       MASTHEAD_INGEST_URL: "http://127.0.0.1:9/ingest",
@@ -294,7 +342,8 @@ describe("hook ingestion", () => {
 
 async function runHookWithServer(
   stdin: string,
-  env: Record<string, string>
+  env: Record<string, string>,
+  scriptPath = hookScript.pathname
 ): Promise<{ posted: () => string[]; exitCode: number | null }> {
   const received: string[] = [];
   const server = createServer((request, response) => {
@@ -317,7 +366,7 @@ async function runHookWithServer(
   const exitCode = await runHook(stdin, {
     ...env,
     MASTHEAD_INGEST_URL: `http://127.0.0.1:${address.port}/ingest`
-  });
+  }, scriptPath);
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
@@ -328,8 +377,8 @@ async function runHookWithServer(
   };
 }
 
-async function runHook(stdin: string, env: Record<string, string>): Promise<number | null> {
-  const child = spawn(process.execPath, [hookScript.pathname], {
+async function runHook(stdin: string, env: Record<string, string>, scriptPath = hookScript.pathname): Promise<number | null> {
+  const child = spawn(process.execPath, [scriptPath], {
     env: {
       ...process.env,
       ...env

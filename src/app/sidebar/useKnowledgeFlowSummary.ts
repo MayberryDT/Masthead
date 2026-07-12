@@ -40,7 +40,6 @@ export function useKnowledgeFlowSummary({
       const currentRequestId = requestId + 1;
       requestId = currentRequestId;
       if (showLoading) {
-        setSummary(undefined);
         setLoading(true);
         setError(undefined);
       }
@@ -51,7 +50,6 @@ export function useKnowledgeFlowSummary({
         setError(undefined);
       } catch (loadError) {
         if (controller.signal.aborted || currentRequestId !== requestId) return;
-        setSummary(undefined);
         setError(loadError instanceof Error ? loadError.message : String(loadError));
       } finally {
         if (!controller.signal.aborted && currentRequestId === requestId) setLoading(false);

@@ -20,6 +20,9 @@ describe("legacy Workbench publication backfill", () => {
   test("publishes meaningful legacy sessions and sends low-quality sessions to Not Added", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:good", title: "Good work" });
+    insertMessage(db, "session:good", 1, "assistant", "I will inspect the legacy candidate.");
+    insertMessage(db, "session:good", 2, "user", "Please preserve meaningful historical work.");
+    insertMessage(db, "session:good", 3, "assistant", "This session has grounded multi-turn evidence.");
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:hook", title: "Hook residue" });
     db.prepare("DELETE FROM messages WHERE session_id = ?").run("session:hook");
     db.prepare("DELETE FROM file_effects WHERE session_id = ?").run("session:hook");
@@ -61,4 +64,19 @@ async function testDb(): Promise<MastheadDatabase> {
   const db = await openMastheadDatabase(join(dir, "masthead.sqlite"));
   migrateDatabase(db);
   return db;
+}
+
+function insertMessage(db: MastheadDatabase, sessionId: string, index: number, role: "assistant" | "user", text: string): void {
+  db.prepare(
+    "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    `${sessionId}:message:${index}`,
+    sessionId,
+    role,
+    text,
+    `${sessionId}:hash:${index}`,
+    `2026-06-25T12:00:0${index}.000Z`,
+    "{}",
+    "authoritative"
+  );
 }

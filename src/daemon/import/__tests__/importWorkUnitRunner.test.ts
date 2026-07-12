@@ -11,8 +11,11 @@ import {
 } from "../../db/importLedgerRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
 import { addSourceExclusion } from "../../db/sourceRepository.ts";
+import { readCursor } from "../../db/cursorRepository.ts";
 import { setSourcePolicy } from "../../db/sourcePolicyRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
+import { readWorkbenchSessionState } from "../../db/workbenchPipelineRepository.ts";
+import { reconcileImportedTranscript } from "../../../workbench/transcriptQualityReconciler.ts";
 import { runImportWorkUnit } from "../importWorkUnitRunner.ts";
 
 const tempDirs: string[] = [];
@@ -77,6 +80,49 @@ describe("import work unit runner", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
     expect(hydratedSessionIds).toHaveLength(1);
     expect(hydratedSessionIds[0]).toMatch(/^session:/);
+  });
+
+  test("adds a filtered session to Not Added as soon as its hydration unit completes", async () => {
+    const sourcePath = join(tempDir, "shallow-thread.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+
+    const result = await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        yield {
+          diagnostics: [],
+          normalized: {
+            confidence: "authoritative",
+            kind: "message",
+            sourceRef: { sourceKind: "jsonl", sourcePath },
+            value: {
+              observedAt: "2026-07-01T00:00:00.000Z",
+              role: "user",
+              sessionId: "shallow-session",
+              text: "Short request"
+            }
+          },
+          observedAt: "2026-07-01T00:00:00.000Z",
+          payload: { role: "user", text: "Short request" },
+          payloadHash: "shallow-hash",
+          source: sourceForPath(sourcePath),
+          sourceRecordKey: `${sourcePath}:1`
+        };
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      onSessionHydrated: (sessionId) => reconcileImportedTranscript(db, sessionId),
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(result.sessionIds).toHaveLength(1);
+    expect(readWorkbenchSessionState(db, result.sessionIds[0])).toMatchObject({
+      nonPublicationReason: "low_evidence",
+      publicationStatus: "not_added_to_logbook",
+      qualityStatus: "failed"
+    });
   });
 
   test("skips records whose project metadata is excluded", async () => {
@@ -157,7 +203,7 @@ describe("import work unit runner", () => {
     expect(indexedSessionIds).toHaveLength(1);
   });
 
-  test("yields to request handling while importing a large work unit", async () => {
+  test("yields to live request handling at a bounded record interval", async () => {
     const sourcePath = join(tempDir, "large-thread.jsonl");
     const unitId = seedWorkUnit(db, sourcePath);
     let eventLoopYielded = false;
@@ -168,7 +214,7 @@ describe("import work unit runner", () => {
 
     await runImportWorkUnit({
       adapterBackfill: async function* () {
-        for (let offset = 1; offset <= 50; offset += 1) {
+        for (let offset = 1; offset <= 26; offset += 1) {
           if (offset === 26) yieldObservedDuringBackfill = eventLoopYielded;
           yield {
             diagnostics: [],
@@ -195,6 +241,143 @@ describe("import work unit runner", () => {
     });
 
     expect(yieldObservedDuringBackfill).toBe(true);
+  });
+
+  test("persists batched intra-file checkpoints and reports live progress", async () => {
+    const sourcePath = join(tempDir, "checkpointed.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+    const checkpoints: number[] = [];
+
+    const result = await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        for (let offset = 1; offset <= 251; offset += 1) {
+          yield {
+            cursorAfter: {
+              byteOffset: offset * 10,
+              sourceId: "opencode-sessions:thread.jsonl",
+              sourcePath,
+              sourceSessionId: "checkpoint-session"
+            },
+            diagnostics: [],
+            normalized: {
+              confidence: "authoritative",
+              kind: "session",
+              sourceRef: { sourceKind: "jsonl", sourcePath },
+              value: { observedAt: "2026-07-01T00:00:00.000Z", sessionId: "checkpoint-session" }
+            },
+            observedAt: "2026-07-01T00:00:00.000Z",
+            payload: { offset },
+            payloadHash: `checkpoint-${offset}`,
+            source: sourceForPath(sourcePath),
+            sourceRecordKey: `${sourcePath}:${offset}`
+          };
+        }
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      onCheckpoint: (checkpoint) => checkpoints.push(checkpoint.processed),
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(result.processed).toBe(251);
+    expect(checkpoints).toEqual([250, 251]);
+    expect(readCursor(db, "opencode-sessions:thread.jsonl", sourcePath)).toMatchObject({
+      byteOffset: 2510,
+      sourceSessionId: "checkpoint-session"
+    });
+  });
+
+  test("flushes grouped diagnostic failures and their cursor in batches", async () => {
+    const sourcePath = join(tempDir, "diagnostics.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+    const checkpoints: number[] = [];
+
+    await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        for (let offset = 1; offset <= 251; offset += 1) {
+          yield {
+            cursorAfter: { byteOffset: offset * 8, sourceId: "opencode-sessions:thread.jsonl", sourcePath },
+            diagnostics: [{ code: "malformed_json", message: "Malformed JSON.", observedAt: "2026-07-01T00:00:00.000Z", severity: "error" }],
+            normalized: { confidence: "heuristic", kind: "runtime_signal", sourceRef: { sourceKind: "jsonl", sourcePath }, value: {} },
+            observedAt: "2026-07-01T00:00:00.000Z",
+            payload: {},
+            payloadHash: `diagnostic-${offset}`,
+            source: sourceForPath(sourcePath),
+            sourceRecordKey: `${sourcePath}:${offset}:diagnostic`
+          };
+        }
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      onCheckpoint: (checkpoint) => checkpoints.push(checkpoint.processed),
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(checkpoints).toEqual([250, 251]);
+    expect(listImportFailureGroups(db, "import-1")).toEqual([
+      expect.objectContaining({ code: "malformed_json", count: 251 })
+    ]);
+    expect(readCursor(db, "opencode-sessions:thread.jsonl", sourcePath)).toMatchObject({ byteOffset: 2008 });
+  });
+
+  test("resumes a failed unit from its last durable checkpoint without regressing counts", async () => {
+    const sourcePath = join(tempDir, "resume.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+    const makeRecord = (offset: number): AdapterRecord => ({
+      cursorAfter: { byteOffset: offset * 10, sourceId: "opencode-sessions:thread.jsonl", sourcePath, sourceSessionId: "resume-session" },
+      diagnostics: [],
+      normalized: {
+        confidence: "authoritative",
+        kind: "session",
+        sourceRef: { sourceKind: "jsonl", sourcePath },
+        value: { observedAt: "2026-07-01T00:00:00.000Z", sessionId: "resume-session" }
+      },
+      observedAt: "2026-07-01T00:00:00.000Z",
+      payload: { offset },
+      payloadHash: `resume-${offset}`,
+      source: sourceForPath(sourcePath),
+      sourceRecordKey: `${sourcePath}:${offset}`
+    });
+
+    const first = await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        for (let offset = 1; offset <= 250; offset += 1) yield makeRecord(offset);
+        throw new Error("interrupted");
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+    expect(first.processed).toBe(250);
+    expect(readCursor(db, "opencode-sessions:thread.jsonl", sourcePath)).toMatchObject({ byteOffset: 2500 });
+    db.prepare("UPDATE import_work_units SET status = 'queued', finished_at = NULL WHERE work_unit_id = ?").run(unitId);
+
+    const second = await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        expect(readCursor(db, "opencode-sessions:thread.jsonl", sourcePath)?.byteOffset).toBe(2500);
+        yield makeRecord(251);
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(second).toMatchObject({ failed: 1, imported: 251, processed: 251 });
+    expect(listImportWorkUnits(db, { importJobId: "import-1" })[0]).toMatchObject({
+      importedRecords: 251,
+      processedRecords: 251,
+      status: "succeeded_with_issues"
+    });
   });
 
   test("groups diagnostic records and marks the unit failed", async () => {

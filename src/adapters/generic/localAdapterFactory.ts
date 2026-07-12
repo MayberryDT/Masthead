@@ -62,14 +62,14 @@ async function inspectLocalSource(source: DiscoveredSource): Promise<SourceInven
   };
 }
 
-async function* backfillLocalSource(source: DiscoveredSource, _cursor: IngestCursor | undefined, options: LocalAdapterOptions): AsyncIterable<AdapterRecord> {
+async function* backfillLocalSource(source: DiscoveredSource, cursor: IngestCursor | undefined, options: LocalAdapterOptions): AsyncIterable<AdapterRecord> {
   if (!source.path) return;
   if (source.sourceKind === "jsonl" && options.jsonlProfile) {
     if (source.path.endsWith(".json") && !source.path.endsWith(".jsonl")) {
       yield* backfillJsonDocumentSource(source, options.jsonlProfile);
       return;
     }
-    yield* backfillJsonlSource(source, options.jsonlProfile, { confidence: source.confidence });
+    yield* backfillJsonlSource(source, options.jsonlProfile, { confidence: source.confidence, cursor });
     return;
   }
   if (options.markdown && (source.path.endsWith(".md") || source.path.endsWith(".markdown") || source.path.includes("history"))) {

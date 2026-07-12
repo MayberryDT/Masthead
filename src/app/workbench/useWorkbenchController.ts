@@ -33,6 +33,7 @@ type UseWorkbenchControllerOptions = {
   active: boolean;
   refreshKey: number;
   isLive: boolean;
+  onLibraryChanged?: () => void;
 };
 
 export type WorkbenchActionKind =
@@ -80,7 +81,8 @@ export function useWorkbenchController({
   activeProjectionUrl,
   active,
   refreshKey,
-  isLive
+  isLive,
+  onLibraryChanged
 }: UseWorkbenchControllerOptions): UseWorkbenchControllerResult {
   const [sessions, setSessions] = useState<WorkbenchQueueSessionDto[]>([]);
   const [activity, setActivity] = useState<WorkbenchActivityDto[]>([]);
@@ -276,6 +278,7 @@ export function useWorkbenchController({
               : `Enrolled ${result.enrolled} session${result.enrolled === 1 ? "" : "s"}`
           );
           await load();
+          onLibraryChanged?.();
           return;
         }
 
@@ -342,13 +345,14 @@ export function useWorkbenchController({
         }
 
         await load();
+        onLibraryChanged?.();
       } catch (runError) {
         setActionError(formatActionError(runError));
       } finally {
         setActionBusy(false);
       }
     },
-    [activeProjectionUrl, canRun, load, selectedSessionIds, sessions]
+    [activeProjectionUrl, canRun, load, onLibraryChanged, selectedSessionIds, sessions]
   );
 
   const retry = useCallback(() => {

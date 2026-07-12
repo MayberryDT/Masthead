@@ -261,7 +261,8 @@ export function App() {
     active: activeSurface === "workbench",
     activeProjectionUrl,
     isLive: effectiveLiveConnection.state === "live",
-    refreshKey: sourceLibraryRefreshKey
+    refreshKey: sourceLibraryRefreshKey,
+    onLibraryChanged: handleSourceLibraryChanged
   });
   const handleReviewDispositionsChanged = useCallback((dispositions: ReviewDisposition[]) => setReviewDispositions(dispositions), []);
   const handleMotionDisabledChange = useCallback((disabled: boolean) => setMotionDisabled(disabled), []);
@@ -645,9 +646,10 @@ export function App() {
           selectedConnectorRuntime={sourcesConnectors.selectedRuntime}
           onSelectConnectorRuntime={sourcesConnectors.setSelectedRuntime}
           onDiscoverConnectors={() => sourcesConnectors.discover()}
+          onDiscoverHistory={() => sourcesConnectors.discoverHistory()}
           onEnableConnector={(runtime) => sourcesConnectors.enable(runtime)}
           onEnableAllDetectedConnectors={() => void sourcesConnectors.enableAllDetected()}
-          onTestConnector={(runtime) => void sourcesConnectors.test(runtime)}
+          onTestConnector={(runtime) => sourcesConnectors.test(runtime)}
           onUninstallConnector={(runtime) => void sourcesConnectors.uninstall(runtime)}
           onConfirmConnectorActivation={(runtime) => void sourcesConnectors.confirmActivation(runtime)}
           onCancelImport={handleCancelImport}
@@ -706,6 +708,7 @@ export function App() {
             onFilterChange={logbook.changeFilters}
             onImportMetadata={handleImportMetadata}
             onOpenSources={() => setActiveSurface("sources")}
+            onOpenWorkbench={() => setActiveSurface("workbench")}
             onQueryChange={logbook.changeQuery}
             onPageChange={logbook.changePage}
             onRetry={logbook.retry}
@@ -812,6 +815,11 @@ export function App() {
             variant="observability"
             emptyTitle={emptyBoardTitle({ showDemoData, hasActiveToolbarFilters, liveConnection: effectiveLiveConnection })}
             emptyMessage={emptyBoardMessage({ showDemoData, hasActiveToolbarFilters, liveConnection: effectiveLiveConnection })}
+            emptyAction={
+              !showDemoData && !hasActiveToolbarFilters && effectiveLiveConnection.state === "live"
+                ? { label: "Open Sources", onClick: () => setActiveSurface("sources") }
+                : undefined
+            }
             onDoneSeen={(sessionId) => {
               markIdleDoneSeen(idlePresentationTracksRef.current, sessionId);
               setLiveProjection((current) => {

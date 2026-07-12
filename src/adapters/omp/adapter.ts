@@ -1,8 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { adapterPayload, hash, isRecord, normalizeRole } from "../generic/jsonlAdapterKit.ts";
 import { createLocalAdapter, genericCodingProfile } from "../generic/localAdapterFactory.ts";
-import type { AdapterRecord, DiscoveredSource, SourceConfidence } from "../types.ts";
+import type { AdapterRecord, DiscoveredSource, IngestCursor, SourceConfidence } from "../types.ts";
+import { streamJsonlLines } from "../generic/streamJsonl.ts";
 import { ompCandidatePaths } from "./discovery.ts";
 
 const baseOmpAdapter = createLocalAdapter({
@@ -22,25 +23,28 @@ type OmpSessionIdentity = {
   childSessionId?: string;
 };
 
-async function* backfillOmpSource(source: DiscoveredSource): AsyncIterable<AdapterRecord> {
+async function* backfillOmpSource(source: DiscoveredSource, cursor?: IngestCursor): AsyncIterable<AdapterRecord> {
   if (!source.path) return;
   const identity = ompSessionIdentityFromSourcePath(source.path);
   if (!identity.sessionId) return;
-  const text = await readFile(source.path, "utf8");
-  let lineNumber = 0;
-  for (const line of text.split("\n")) {
-    lineNumber += 1;
-    const trimmed = line.trim();
+  const info = await stat(source.path);
+  const contentFingerprint = `${info.size}:${Math.trunc(info.mtimeMs)}`;
+  const modifiedAt = info.mtime.toISOString();
+  const resumeOffset = cursor && cursor.byteOffset <= info.size ? cursor.byteOffset : 0;
+  for await (const line of streamJsonlLines(source.path, resumeOffset)) {
+    const trimmed = line.raw.trim();
     if (!trimmed) continue;
+    const cursorAfter = { byteOffset: line.byteOffsetAfter, contentFingerprint, modifiedAt, sourceId: source.sourceId, sourcePath: source.path };
     let payload: unknown;
     try {
       payload = JSON.parse(trimmed);
     } catch {
-      yield diagnosticRecord(source, lineNumber, trimmed, "jsonl_invalid_line");
+      yield { ...diagnosticRecord(source, line.lineNumber, trimmed, "jsonl_invalid_line"), cursorAfter };
       continue;
     }
     if (!isRecord(payload)) continue;
-    const records = ompRecordsFromPayload(source, identity, lineNumber, trimmed, payload);
+    const records = ompRecordsFromPayload(source, identity, line.lineNumber, trimmed, payload);
+    if (records.length > 0) records[records.length - 1].cursorAfter = cursorAfter;
     for (const record of records) yield record;
   }
 }

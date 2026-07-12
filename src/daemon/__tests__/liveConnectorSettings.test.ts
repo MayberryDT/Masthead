@@ -11,6 +11,8 @@ import {
   installLiveConnector,
   isHermesPluginEnabledInConfig,
   liveConnectorCommand,
+  resolveLiveConnectorCommandPaths,
+  runLiveConnectorRoundTrip,
   uninstallLiveConnector
 } from "../liveConnectorSettings";
 
@@ -45,6 +47,41 @@ describe("live connector settings", () => {
       expect(command).toContain(`/ingest?runtime=${runtime}`);
       expect(command).toContain("MASTHEAD_STATE_URL=");
     }
+  });
+
+  test("packaged connector paths expand a tilde home before shell quoting", () => {
+    const resolved = resolveLiveConnectorCommandPaths({
+      execPath: "/home/test/.local/share/masthead-production/build/resources/daemon/node",
+      exists: () => true,
+      homeDir: "~"
+    });
+
+    expect(resolved.nodePath).toMatch(/^\//);
+    expect(resolved.nodePath).not.toContain("/~");
+    expect(resolved.scriptPath).toMatch(/^\//);
+  });
+
+  test("connector verification fails when the managed hook command cannot launch", async () => {
+    const originalHookScript = process.env.MASTHEAD_HOOK_SCRIPT;
+    process.env.MASTHEAD_HOOK_SCRIPT = "/definitely-missing/masthead-hook.js";
+    try {
+      const result = await runLiveConnectorRoundTrip(configFor("/tmp/masthead-command-verification"), {
+        runtimes: ["codex"]
+      });
+      expect(result.status).toBe("failed");
+      expect(result.message).toContain("managed connector command");
+    } finally {
+      if (originalHookScript === undefined) delete process.env.MASTHEAD_HOOK_SCRIPT;
+      else process.env.MASTHEAD_HOOK_SCRIPT = originalHookScript;
+    }
+  });
+
+  test("connector verification fails when the managed command cannot reach Masthead", async () => {
+    const config = { ...configFor("/tmp/masthead-command-network-verification"), port: 65_534 };
+    const result = await runLiveConnectorRoundTrip(config, { runtimes: ["codex"] });
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("managed connector command failed");
   });
 
   test("Hermes install writes a Python plugin and enables it in config.yaml", async () => {

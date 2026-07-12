@@ -18,8 +18,10 @@ export function ImportProgressPanel({
   units = []
 }: Props) {
   const visibility = deriveImportVisibilityState(job, nowMs, stalledAfterMs);
-  const current = job.progressCurrent ?? job.processedCount ?? job.importedCount ?? 0;
-  const rawTotal = job.progressTotal ?? job.discoveredCount;
+  const recordsProcessed = job.processedCount ?? job.importedCount ?? 0;
+  const useUnitProgress = job.importKind === "transcript" && (job.totalWorkUnits ?? 0) > 0;
+  const current = useUnitProgress ? job.completedWorkUnits ?? 0 : job.progressCurrent ?? recordsProcessed;
+  const rawTotal = useUnitProgress ? job.totalWorkUnits ?? 0 : job.progressTotal ?? job.discoveredCount;
   const active = job.status === "queued" || job.status === "running" || job.status === "cancelling";
   const determinate = rawTotal > 0 && (!active || rawTotal > current || job.progressTotal !== undefined);
   const progressPct = determinate ? Math.min(100, job.progressPercent ?? Math.round((current / rawTotal) * 100)) : undefined;
@@ -37,18 +39,18 @@ export function ImportProgressPanel({
         <StatusBadge tone={visibility === "failed" ? "danger" : visibility === "stalled" ? "warning" : visibility === "running" ? "info" : "active"}>{visibility.replaceAll("_", " ")}</StatusBadge>
       </div>
       {determinate ? (
-        <div className="import-progress-bar" role="progressbar" aria-valuenow={current} aria-valuemin={0} aria-valuemax={rawTotal} aria-label="Records processed">
+        <div className="import-progress-bar" role="progressbar" aria-valuenow={current} aria-valuemin={0} aria-valuemax={rawTotal} aria-label={useUnitProgress ? "Import units completed" : "Records processed"}>
           <div className="import-progress-bar-fill" style={{ width: `${progressPct ?? 0}%` }} />
           <span className="import-progress-bar-label">{progressPct}%</span>
         </div>
       ) : active ? (
-        <div className="import-progress-bar is-indeterminate" role="progressbar" aria-valuemin={0} aria-label="Records processed">
+        <div className="import-progress-bar is-indeterminate" role="progressbar" aria-valuemin={0} aria-label={useUnitProgress ? "Import units completed" : "Records processed"}>
           <div className="import-progress-bar-fill" />
           <span className="import-progress-bar-label">Discovering…</span>
         </div>
       ) : null}
       <dl className="import-progress-grid">
-        <ProgressMetric label="Records" value={`${current} / ${determinate ? rawTotal : "?"}`} />
+        <ProgressMetric label="Records" value={useUnitProgress ? `${recordsProcessed} processed` : `${current} / ${determinate ? rawTotal : "?"}`} />
         <ProgressMetric label="Units" value={`${job.completedWorkUnits ?? 0} / ${job.totalWorkUnits ?? 0}`} />
         <ProgressMetric label="Failed" value={String(job.failedWorkUnits ?? job.failureCount ?? 0)} />
         <ProgressMetric label="Heartbeat" value={job.heartbeatAt ? formatTime(job.heartbeatAt) : "Waiting"} />

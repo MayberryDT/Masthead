@@ -19,6 +19,17 @@ afterEach(async () => {
 });
 
 describe("Masthead daemon startup", () => {
+  test("source setup reads do not persist derived snapshots", async () => {
+    const daemon = await createTestDaemon();
+    const baseUrl = await listen(daemon);
+
+    expect((await fetch(`${baseUrl}/sources/setup`)).status).toBe(200);
+    expect((await fetch(`${baseUrl}/sources/setup`)).status).toBe(200);
+    expect((await fetch(`${baseUrl}/sources/advanced`)).status).toBe(200);
+
+    expect(countRows(daemon, "source_setup_state")).toBe(0);
+  });
+
   test("does not create the SQLite database when legacy store initialization fails", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-daemon-startup-"));
     tempDirs.push(tempDir);
