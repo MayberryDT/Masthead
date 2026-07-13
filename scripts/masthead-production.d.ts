@@ -2,11 +2,14 @@ export type ProductionConfig = {
   bundleDigest: string;
   dataDirectory: string;
   databasePath: string;
+  expectedDatabaseId?: string;
+  expectedSchemaVersion?: number;
   gitSha?: string;
   lifecycleLeasePath?: string;
   port: number;
   productionRoot: string;
   target: string;
+  transitionNonce?: string;
   version?: string;
 };
 
@@ -20,15 +23,19 @@ export type ProductionProcessRecord = {
 
 export function acquireLifecycleLease(path: string): Promise<{ release(): Promise<void> }>;
 export function productionHealthPollPolicy(): { intervalMs: 250; maxAttempts: 1200; timeoutMs: 300000 };
-export function productionShutdownTimeout(migrationActive: boolean): 30000 | 1800000;
 export function waitForProductionHealth(
   config: { port: number },
   adapters?: {
     delay?: (milliseconds: number) => Promise<void>;
     fetchHealth?: (port: number, timeoutMs: number) => Promise<unknown>;
-    migrationActive?: () => Promise<boolean>;
     now?: () => number;
   }
+): Promise<unknown>;
+export function waitForMaintenanceChild(
+  child: import("node:child_process").ChildProcess,
+  action: string,
+  timeoutMs: number,
+  exitGraceMs?: number
 ): Promise<unknown>;
 export function classifyProductionProcess(
   record: ProductionProcessRecord,

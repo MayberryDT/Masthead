@@ -125,6 +125,20 @@ const migrations = [
 
 export const CURRENT_SCHEMA_VERSION = migrations[migrations.length - 1]?.version ?? 0;
 
+export function validateCurrentDatabaseSchema(db: MastheadDatabase): void {
+  const applied = db.prepare("SELECT version, name FROM schema_migrations ORDER BY version").all() as Array<{
+    name: string;
+    version: number;
+  }>;
+  if (
+    applied.length !== migrations.length ||
+    applied.some((row, index) => row.version !== migrations[index]?.version || row.name !== migrations[index]?.name)
+  ) {
+    throw new Error("Database schema migration ledger does not exactly match the current target schema.");
+  }
+  validateCriticalTables(db);
+}
+
 const criticalTables = [
   "raw_events",
   "ingest_sources",

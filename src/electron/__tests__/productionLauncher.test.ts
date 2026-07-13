@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,11 +10,11 @@ import {
   classifyProductionProcess,
   installProductionLauncher,
   productionHealthPollPolicy,
-  productionShutdownTimeout,
   waitForProductionHealth,
   startProduction,
   stopProduction,
-  transitionProduction
+  transitionProduction,
+  waitForMaintenanceChild
 } from "../../../scripts/masthead-production.js";
 
 const cleanup: string[] = [];
@@ -41,6 +43,7 @@ async function fixture() {
   await writeFile(join(daemonRoot, "scripts", "masthead-hook.js"), "hook");
   await writeFile(join(daemonRoot, "scripts", "resolve-hook-runtime.js"), "resolver");
   await writeFile(join(daemonRoot, "dist", "src", "daemon", "main.js"), "daemon");
+  await writeFile(join(daemonRoot, "dist", "src", "daemon", "productionTransitionMaintenance.js"), "maintenance");
   await writeFile(join(target, "resources", "app.asar"), "app");
   await writeFile(join(daemonRoot, "release.json"), JSON.stringify({
     gitSha: "a".repeat(40),
@@ -80,7 +83,7 @@ function processRecord(overrides: Record<string, unknown> = {}) {
 }
 
 describe("production lifecycle launcher", () => {
-  test("allows five bounded minutes for migration health without reverting to the old 30 second window", () => {
+  test("allows five bounded minutes for activation health without extending for maintenance", () => {
     expect(productionHealthPollPolicy()).toEqual({
       intervalMs: 250,
       maxAttempts: 1_200,
@@ -117,21 +120,47 @@ describe("production lifecycle launcher", () => {
     expect(now).toBe(300_001);
   });
 
-  test("extends startup only for an active migration and accepts health after the normal deadline", async () => {
+  test("never extends ordinary startup to the former migration-aware window", async () => {
     let now = 0;
-    const health = { ok: true };
     await expect(waitForProductionHealth({ port: 17383 }, {
       delay: async (milliseconds: number) => { now += milliseconds; },
       fetchHealth: async (_port: number, timeoutMs: number) => {
         now += timeoutMs;
-        return now >= 360_000 ? health : undefined;
+        return now >= 360_000 ? { ok: true } : undefined;
       },
-      migrationActive: async () => true,
       now: () => now
-    })).resolves.toBe(health);
-    expect(now).toBeGreaterThanOrEqual(360_000);
-    expect(productionShutdownTimeout(false)).toBe(30_000);
-    expect(productionShutdownTimeout(true)).toBe(1_800_000);
+    })).rejects.toThrow("within 5 minutes");
+    expect(now).toBe(300_000);
+  });
+
+  test("bounds the external maintenance child at 30 minutes with SIGTERM only", async () => {
+    const source = await readFile("scripts/masthead-production.js", "utf8");
+    expect(source).toContain("PRODUCTION_MAINTENANCE_TIMEOUT_MS = 1_800_000");
+    expect(source).toContain('child.kill("SIGTERM")');
+    expect(source).not.toContain('child.kill("SIGKILL")');
+    expect(source).not.toContain("migrationStageActive");
+
+    const child = spawn(process.execPath, ["-e", [
+      'process.on("SIGTERM", () => setTimeout(() => process.exit(0), 75))',
+      "setInterval(() => undefined, 1000)"
+    ].join(";")], { stdio: ["ignore", "pipe", "pipe"] });
+    await once(child, "spawn");
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    const startedAt = Date.now();
+    await expect(waitForMaintenanceChild(child, "test", 10, 500)).rejects.toThrow("exited after SIGTERM");
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(70);
+    expect(child.exitCode).toBe(0);
+
+    const unproven = spawn(process.execPath, ["-e", [
+      'process.on("SIGTERM", () => setTimeout(() => process.exit(0), 100))',
+      "setInterval(() => undefined, 1000)"
+    ].join(";")], { stdio: ["ignore", "pipe", "pipe"] });
+    await once(unproven, "spawn");
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    await expect(waitForMaintenanceChild(unproven, "test", 10, 20))
+      .rejects.toMatchObject({ code: "maintenance_child_exit_unproven" });
+    expect(unproven.exitCode).toBeNull();
+    await once(unproven, "close");
   });
 
   test("reads proc executable symlink text so deleted kernel identities remain observable", async () => {
@@ -230,11 +259,13 @@ describe("production lifecycle launcher", () => {
         staged: true
       }; },
       start: async () => { calls.push("start"); return { started: true }; },
+      prepareMaintenance: async () => { calls.push("maintenance"); return { nonce: "transition" }; },
+      completeMaintenance: async () => { calls.push("complete-maintenance"); },
       stop: async () => { calls.push("stop"); return { stopped: true }; },
       swapCurrent: async () => { calls.push("swap"); }
     });
     expect(receipt).toMatchObject({ started: { started: true }, stopped: { stopped: true } });
-    expect(calls).toEqual(["stage", "stop", "swap", "activate-launchers", "start", "release"]);
+    expect(calls).toEqual(["stage", "stop", "maintenance", "swap", "activate-launchers", "start", "complete-maintenance", "release"]);
     const { access } = await import("node:fs/promises");
     await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -344,6 +375,26 @@ describe("production lifecycle launcher", () => {
     })).rejects.toThrow("port 17383");
     expect(spawned).toBe(false);
   });
+
+  test.each(["snapshot_ready", "ready_to_activate", "restoring", "restore_failed", "restored"])(
+    "start refuses the %s crash journal before inspecting or spawning processes",
+    async (state) => {
+      const { config } = await fixture();
+      await mkdir(config.dataDirectory, { recursive: true });
+      await writeFile(`${config.databasePath}.production-transition.json`, JSON.stringify({
+        newBundle: { target: config.target },
+        nonce: "11111111-1111-4111-8111-111111111111",
+        oldBundle: { target: config.target },
+        state
+      }));
+      let inspected = false;
+      await expect(startProduction(config, {
+        acquireLease: async () => ({ release: async () => undefined }),
+        currentTarget: async () => { inspected = true; return config.target; }
+      })).rejects.toThrow("incomplete transition journal");
+      expect(inspected).toBe(false);
+    }
+  );
 
   test("start accepts only matching pinned health and passes pinned environment to Electron", async () => {
     const { config, target } = await fixture();
@@ -467,6 +518,13 @@ describe("production lifecycle launcher", () => {
     expect(spawned).toBe(false);
     await expect(startProduction({ ...config, gitSha: "b".repeat(40), version: "0.1.0" }, dependencies))
       .rejects.toThrow("health does not match pinned");
+    await expect(startProduction({
+      ...config,
+      expectedDatabaseId: "database-from-maintenance-receipt",
+      expectedSchemaVersion: 23,
+      gitSha: "a".repeat(40),
+      version: "0.1.0"
+    }, dependencies)).rejects.toThrow("database identity/schema");
     expect(spawned).toBe(false);
   });
 
@@ -573,8 +631,11 @@ describe("production lifecycle launcher", () => {
       activateLaunchers: async () => calls.push("activate-launchers"),
       currentTarget: async () => oldTarget,
       cleanupCandidate: async () => calls.push("cleanup-candidate"),
+      completeMaintenance: async () => calls.push("complete-rollback"),
       restoreCurrent: async () => calls.push("restore-current"),
       restoreLaunchers: async () => calls.push("restore-launchers"),
+      prepareMaintenance: async () => ({ nonce: "transition" }),
+      restoreMaintenance: async () => { calls.push("restore-database"); return { databaseId: "db", sourceSchemaVersion: 22 }; },
       stageLaunchers: async () => { calls.push("stage"); return {
         previousLauncher: { body: Buffer.from(`MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`), exists: true },
         staged: true
@@ -585,8 +646,54 @@ describe("production lifecycle launcher", () => {
     })).rejects.toThrow("rollback restarted=true");
     expect(calls).toEqual([
       "stage", "stop", "swap", "activate-launchers", "start-new",
-      "cleanup-candidate", "restore-current", "restore-launchers", "restart-old", "release"
+      "cleanup-candidate", "restore-database", "restore-current", "restore-launchers", "restart-old", "complete-rollback", "release"
     ]);
+  });
+
+  test("maintenance failure never swaps and only restarts the unchanged old target after child rollback", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+    const calls: string[] = [];
+    await expect(transitionProduction({
+      bundleDigest: config.bundleDigest, bundlePath: target, dataDirectory: config.dataDirectory, homeDir, productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      currentTarget: async () => target,
+      completeMaintenance: async () => calls.push("complete-rollback"),
+      prepareMaintenance: async () => { calls.push("maintenance"); throw new Error("partial migration restored"); },
+      restoreMaintenance: async () => { calls.push("restore-database"); return { databaseId: "db", sourceSchemaVersion: 23 }; },
+      stageLaunchers: async () => ({
+        previousLauncher: { body: Buffer.from(`MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`), exists: true },
+        staged: true
+      }),
+      start: async () => calls.push("restart-old"),
+      stop: async () => calls.push("stop"),
+      swapCurrent: async () => calls.push("swap")
+    })).rejects.toThrow("pre-activation restart=true");
+    expect(calls).toEqual(["stop", "maintenance", "restore-database", "restart-old", "complete-rollback", "release"]);
+  });
+
+  test("unproven maintenance child exit fails closed without restore, restart, or swap", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+    const calls: string[] = [];
+    const unproven = Object.assign(new Error("maintenance child exit unproven"), {
+      code: "maintenance_child_exit_unproven"
+    });
+    await expect(transitionProduction({
+      bundleDigest: config.bundleDigest, bundlePath: target, dataDirectory: config.dataDirectory, homeDir, productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      currentTarget: async () => target,
+      prepareMaintenance: async () => { calls.push("maintenance"); throw unproven; },
+      restoreMaintenance: async () => calls.push("restore-database"),
+      stageLaunchers: async () => ({
+        previousLauncher: { body: Buffer.from(`MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`), exists: true },
+        staged: true
+      }),
+      start: async () => calls.push("restart-old"),
+      stop: async () => calls.push("stop"),
+      swapCurrent: async () => calls.push("swap")
+    })).rejects.toThrow("pre-activation recovery skipped");
+    expect(calls).toEqual(["stop", "maintenance", "release"]);
   });
 
   test("transition never rolls current back while immutable candidate cleanup is unresolved", async () => {
@@ -601,12 +708,44 @@ describe("production lifecycle launcher", () => {
       currentTarget: async () => target,
       restoreCurrent: async () => calls.push("restore-current"),
       restoreLaunchers: async () => calls.push("restore-launchers"),
-      stageLaunchers: async () => ({ staged: true }),
+      prepareMaintenance: async () => ({ nonce: "transition" }),
+      restoreMaintenance: async () => { calls.push("restore-database"); return { databaseId: "db", sourceSchemaVersion: 22 }; },
+      stageLaunchers: async () => ({
+        previousLauncher: { body: Buffer.from(`MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`), exists: true },
+        staged: true
+      }),
       start: async () => { throw new Error("health timeout; cleanup stopped=false; cleanup error=daemon blocked"); },
       stop: async () => undefined,
       swapCurrent: async () => calls.push("swap")
     })).rejects.toThrow("rollback skipped; candidate cleanup error=daemon still verifying backup");
     expect(calls).toEqual(["swap", "activate-launchers", "cleanup-candidate", "release"]);
+  });
+
+  test("transition fails closed before current/launcher rollback when receipt-bound database restore fails", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+    const calls: string[] = [];
+    await expect(transitionProduction({
+      bundleDigest: config.bundleDigest, bundlePath: target, dataDirectory: config.dataDirectory, homeDir, productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      activateLaunchers: async () => calls.push("activate-launchers"),
+      cleanupCandidate: async () => calls.push("cleanup-candidate"),
+      currentTarget: async () => target,
+      prepareMaintenance: async () => ({ databaseId: "db", targetSchemaVersion: 23 }),
+      restoreCurrent: async () => calls.push("restore-current"),
+      restoreLaunchers: async () => calls.push("restore-launchers"),
+      restoreMaintenance: async () => { calls.push("restore-database"); throw new Error("snapshot hash mismatch"); },
+      stageLaunchers: async () => ({
+        previousLauncher: { body: Buffer.from(`MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`), exists: true },
+        staged: true
+      }),
+      start: async () => { throw new Error("candidate health failed"); },
+      stop: async () => undefined,
+      swapCurrent: async () => calls.push("swap")
+    })).rejects.toThrow("rollback restarted=false");
+    expect(calls).toEqual([
+      "swap", "activate-launchers", "cleanup-candidate", "restore-database", "release"
+    ]);
   });
 
   test("failed start reports the exact cleanup error detail", async () => {

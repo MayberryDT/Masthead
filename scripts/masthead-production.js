@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
   access,
@@ -26,8 +27,9 @@ import { verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
 const DEFAULT_PORT = 17383;
 const PRODUCTION_HEALTH_INTERVAL_MS = 250;
 const PRODUCTION_HEALTH_TIMEOUT_MS = 300_000;
-const PRODUCTION_MIGRATION_TIMEOUT_MS = 1_800_000;
 const PRODUCTION_SHUTDOWN_TIMEOUT_MS = 30_000;
+const PRODUCTION_MAINTENANCE_TIMEOUT_MS = 1_800_000;
+const PRODUCTION_MAINTENANCE_EXIT_GRACE_MS = 30_000;
 const VERSIONED_TARGET = /^Masthead-linux-x64-[A-Za-z0-9][A-Za-z0-9._+-]*$/u;
 
 export function productionHealthPollPolicy() {
@@ -36,10 +38,6 @@ export function productionHealthPollPolicy() {
     maxAttempts: PRODUCTION_HEALTH_TIMEOUT_MS / PRODUCTION_HEALTH_INTERVAL_MS,
     timeoutMs: PRODUCTION_HEALTH_TIMEOUT_MS
   };
-}
-
-export function productionShutdownTimeout(migrationActive) {
-  return migrationActive ? PRODUCTION_MIGRATION_TIMEOUT_MS : PRODUCTION_SHUTDOWN_TIMEOUT_MS;
 }
 
 export async function acquireLifecycleLease(leasePath) {
@@ -98,7 +96,8 @@ export async function installProductionLauncher(input) {
     access(runtime.executable, constants.X_OK),
     access(runtime.node, constants.X_OK),
     access(runtime.lifecycle, constants.R_OK),
-    access(runtime.daemonEntry, constants.R_OK)
+    access(runtime.daemonEntry, constants.R_OK),
+    access(runtime.maintenanceEntry, constants.R_OK)
   ]);
 
   const homeDir = resolve(input.homeDir || homedir());
@@ -159,7 +158,8 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
     access(runtime.executable, constants.X_OK),
     access(runtime.node, constants.X_OK),
     access(runtime.lifecycle, constants.R_OK),
-    access(runtime.daemonEntry, constants.R_OK)
+    access(runtime.daemonEntry, constants.R_OK),
+    access(runtime.maintenanceEntry, constants.R_OK)
   ]);
   const dataDirectory = resolve(input.dataDirectory || join(homeDir, ".config", "masthead-production"));
   const config = await completeConfig({
@@ -178,9 +178,12 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
     acquireLease: () => acquireLifecycleLease(config.lifecycleLeasePath),
     activateLaunchers: (staged) => activateStagedLaunchers(staged),
     cleanupCandidate: (candidate) => stopProduction(candidate, { acquireLease: noLifecycleLease }),
+    completeMaintenance: (request) => runMaintenanceChild(config, "complete", request),
     currentTarget: () => realpath(join(productionRoot, "current")).catch(() => undefined),
+    prepareMaintenance: (request) => runMaintenanceChild(config, "prepare", request),
     restoreCurrent: (_oldTarget) => swapCurrentTarget(productionRoot, _oldTarget),
     restoreLaunchers: (staged) => restoreStagedLaunchers(staged),
+    restoreMaintenance: (request) => runMaintenanceChild(config, "restore", request),
     cleanupBundles: () => cleanupOldProductionBundles(productionRoot, target),
     stageLaunchers: () => stageProductionLaunchers({ ...input, bundlePath: target, homeDir, productionRoot }),
     start: (candidate = config) => startProduction(candidate, { acquireLease: noLifecycleLease }),
@@ -193,14 +196,65 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   let oldTarget;
   try {
     oldTarget = await dependencies.currentTarget();
+    if (!oldTarget) throw new Error("Production transition requires an existing current target.");
     staged = await dependencies.stageLaunchers(config);
+    const oldRelease = await readRelease(oldTarget);
+    const oldDigest = pinnedDigestFromLauncherSnapshot(staged.previousLauncher);
+    await verifyPinnedBundle(oldTarget, oldDigest);
+    const maintenanceRequest = {
+      databasePath: config.databasePath,
+      newBundle: bundleIdentity(config),
+      nonce: randomUUID(),
+      oldBundle: { bundleDigest: oldDigest, gitSha: oldRelease.gitSha, target: oldTarget, version: oldRelease.version }
+    };
     const stopReceipt = await dependencies.stop(config);
+    let maintenanceReceipt;
+    try {
+      maintenanceReceipt = await dependencies.prepareMaintenance(maintenanceRequest);
+    } catch (error) {
+      if (error?.code === "maintenance_child_exit_unproven") {
+        throw new Error(`${error.message}; pre-activation recovery skipped`, { cause: error });
+      }
+      let restored;
+      try {
+        restored = await dependencies.restoreMaintenance(maintenanceRequest);
+      } catch {
+        restored = undefined;
+      }
+      let restarted = false;
+      try {
+        await dependencies.start({
+          ...config,
+          bundleDigest: oldDigest,
+          expectedDatabaseId: restored?.databaseId,
+          expectedSchemaVersion: restored?.sourceSchemaVersion,
+          gitSha: oldRelease.gitSha,
+          target: oldTarget,
+          transitionNonce: restored ? maintenanceRequest.nonce : undefined,
+          version: oldRelease.version
+        });
+        if (restored) await dependencies.completeMaintenance(maintenanceRequest);
+        restarted = true;
+      } catch {
+        restarted = false;
+      }
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; pre-activation restart=${restarted}`, { cause: error });
+    }
     let started;
     try {
       await dependencies.swapCurrent(productionRoot, target);
       await dependencies.activateLaunchers(staged);
-      started = await dependencies.start(config);
+      started = await dependencies.start({
+        ...config,
+        expectedDatabaseId: maintenanceReceipt.databaseId,
+        expectedSchemaVersion: maintenanceReceipt.targetSchemaVersion,
+        transitionNonce: maintenanceRequest.nonce
+      });
+      await dependencies.completeMaintenance(maintenanceRequest);
     } catch (error) {
+      if (error?.code === "maintenance_child_exit_unproven") {
+        throw new Error(`${error.message}; rollback skipped`, { cause: error });
+      }
       try {
         await dependencies.cleanupCandidate(config);
       } catch (cleanupError) {
@@ -211,15 +265,22 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
       }
       let restarted = false;
       try {
-        if (oldTarget) await dependencies.restoreCurrent(oldTarget);
+        const restored = await dependencies.restoreMaintenance(maintenanceRequest);
+        await dependencies.restoreCurrent(oldTarget);
         await dependencies.restoreLaunchers(staged);
-        if (oldTarget) {
-          const oldRelease = await readRelease(oldTarget);
-          const oldDigest = pinnedDigestFromLauncherSnapshot(staged.previousLauncher);
-          const oldConfig = { ...config, bundleDigest: oldDigest, gitSha: oldRelease.gitSha, target: oldTarget, version: oldRelease.version };
-          await dependencies.start(oldConfig);
-          restarted = true;
-        }
+        const oldConfig = {
+          ...config,
+          bundleDigest: oldDigest,
+          expectedDatabaseId: restored.databaseId,
+          expectedSchemaVersion: restored.sourceSchemaVersion,
+          gitSha: oldRelease.gitSha,
+          target: oldTarget,
+          transitionNonce: maintenanceRequest.nonce,
+          version: oldRelease.version
+        };
+        await dependencies.start(oldConfig);
+        await dependencies.completeMaintenance(maintenanceRequest);
+        restarted = true;
       } catch {
         restarted = false;
       }
@@ -278,6 +339,7 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
   const lease = await dependencies.acquireLease();
   try {
+    await dependencies.transitionGuard();
     const current = await dependencies.currentTarget();
     if (current !== config.target) throw new Error(`Production current target changed: expected ${config.target}, found ${current || "missing"}.`);
     const processes = await classifiedProcesses(config, dependencies);
@@ -482,7 +544,6 @@ function defaultDependencies(config) {
     captureSpawned: (pid) => captureSpawnedProcess(pid, config),
     currentTarget: () => realpath(join(config.productionRoot, "current")).catch(() => undefined),
     fetchHealth: () => fetchHealth(config.port),
-    migrationActive: () => migrationStageActive(config),
     ownershipProbe: () => probeExclusiveOwnership(config),
     portBindable: () => portBindable(config.port),
     readProcess,
@@ -498,6 +559,7 @@ function defaultDependencies(config) {
       child.unref();
       return child.pid;
     },
+    transitionGuard: () => assertTransitionJournalAllowsStart(config),
     waitForExit: waitForExit,
     waitForHealth: () => waitForHealth(config)
   };
@@ -547,7 +609,7 @@ async function stopInsideLifecycleLease(config, dependencies, excludedPids = new
     dependencies.signal(processRecord.pid, "SIGTERM");
     signalled.push(processRecord);
   }
-  const exitTimeout = productionShutdownTimeout(await dependencies.migrationActive());
+  const exitTimeout = PRODUCTION_SHUTDOWN_TIMEOUT_MS;
   for (const processRecord of signalled) {
     if (!(await dependencies.waitForExit(processRecord.pid, processRecord.starttime, exitTimeout))) {
       throw new Error(`Production PID ${processRecord.pid} did not stop after SIGTERM within ${exitTimeout}ms; no SIGKILL was sent.`);
@@ -595,11 +657,14 @@ async function completeConfig(input) {
     bundleDigest: validateDigest(input.bundleDigest),
     dataDirectory,
     databasePath: resolve(input.databasePath || join(dataDirectory, "masthead.sqlite")),
+    expectedDatabaseId: input.expectedDatabaseId,
+    expectedSchemaVersion: input.expectedSchemaVersion,
     gitSha: validateSha(release.gitSha),
     lifecycleLeasePath: resolve(input.lifecycleLeasePath || join(homedir(), ".local", "state", "masthead-production", "launcher.lease.sqlite")),
     port: validPort(input.port ?? DEFAULT_PORT),
     productionRoot,
     target,
+    transitionNonce: input.transitionNonce,
     version: required(release.version, "release version")
   };
 }
@@ -616,6 +681,7 @@ function productionRuntimePaths(target) {
     daemonEntry: join(daemonRoot, "dist", "src", "daemon", "main.js"),
     executable: join(target, process.platform === "win32" ? "masthead.exe" : "masthead"),
     lifecycle: join(daemonRoot, "scripts", "masthead-production.js"),
+    maintenanceEntry: join(daemonRoot, "dist", "src", "daemon", "productionTransitionMaintenance.js"),
     node: join(daemonRoot, process.platform === "win32" ? "node.exe" : "node")
   };
 }
@@ -684,7 +750,7 @@ async function fetchHealth(port, timeoutMs = 750) {
 }
 
 async function waitForHealth(config) {
-  return waitForProductionHealth(config, { migrationActive: () => migrationStageActive(config) });
+  return waitForProductionHealth(config);
 }
 
 export async function waitForProductionHealth(config, adapters = {}) {
@@ -692,45 +758,20 @@ export async function waitForProductionHealth(config, adapters = {}) {
   const now = adapters.now || monotonicMilliseconds;
   const fetchAdapter = adapters.fetchHealth || fetchHealth;
   const delayAdapter = adapters.delay || delay;
-  const migrationActive = adapters.migrationActive || (async () => false);
   const startedAt = now();
-  let deadline = startedAt + policy.timeoutMs;
-  let migrationExtended = false;
+  const deadline = startedAt + policy.timeoutMs;
   while (true) {
-    if (now() >= deadline) {
-      if (!migrationExtended && await migrationActive()) {
-        migrationExtended = true;
-        deadline = startedAt + PRODUCTION_MIGRATION_TIMEOUT_MS;
-      }
-      if (now() >= deadline) break;
-    }
+    if (now() >= deadline) break;
     const requestBudget = Math.min(750, deadline - now());
     if (requestBudget <= 0) break;
     const health = await fetchAdapter(config.port, requestBudget);
-    if (now() >= deadline) {
-      if (!migrationExtended && await migrationActive()) {
-        migrationExtended = true;
-        deadline = startedAt + PRODUCTION_MIGRATION_TIMEOUT_MS;
-      }
-      if (now() >= deadline) break;
-    }
+    if (now() >= deadline) break;
     if (health) return health;
     const sleepBudget = Math.min(policy.intervalMs, deadline - now());
     if (sleepBudget <= 0) break;
     await delayAdapter(sleepBudget);
   }
-  throw new Error(
-    migrationExtended
-      ? "Pinned Masthead production health did not become available within the migration-aware 30 minute deadline."
-      : "Pinned Masthead production health did not become available within 5 minutes."
-  );
-}
-
-async function migrationStageActive(config) {
-  const databaseName = basename(config.databasePath);
-  const prefix = `.${databaseName}.migration-backup-stage-`;
-  const entries = await readdir(dirname(config.databasePath), { withFileTypes: true }).catch(() => []);
-  return entries.some((entry) => entry.isFile() && entry.name.startsWith(prefix));
+  throw new Error("Pinned Masthead production health did not become available within 5 minutes.");
 }
 
 function monotonicMilliseconds() {
@@ -756,6 +797,8 @@ function healthMatches(health, config) {
     health.buildSha === config.gitSha &&
     resolve(health.data?.dataDirectory || "") === config.dataDirectory &&
     resolve(health.data?.databasePath || "") === config.databasePath &&
+    (config.expectedDatabaseId === undefined || health.data?.databaseId === config.expectedDatabaseId) &&
+    (config.expectedSchemaVersion === undefined || health.schemaVersion === config.expectedSchemaVersion) &&
     health.runtime?.port === config.port &&
     health.runtime?.writable === true
   );
@@ -763,7 +806,7 @@ function healthMatches(health, config) {
 
 function assertMatchingHealth(health, config) {
   if (!healthMatches(health, config)) {
-    throw new Error(`Production health does not match pinned version, SHA, data directory, database, writable mode, and port.`);
+    throw new Error(`Production health does not match pinned version, SHA, data directory, database identity/schema, writable mode, and port.`);
   }
 }
 
@@ -780,6 +823,118 @@ async function portBindable(port) {
   } finally {
     if (server.listening) await new Promise((resolvePromise) => server.close(resolvePromise));
   }
+}
+
+function bundleIdentity(config) {
+  return {
+    bundleDigest: config.bundleDigest,
+    gitSha: config.gitSha,
+    target: config.target,
+    version: config.version
+  };
+}
+
+async function assertTransitionJournalAllowsStart(config) {
+  const journalPath = `${config.databasePath}.production-transition.json`;
+  let receipt;
+  try {
+    receipt = JSON.parse(await readFile(journalPath, "utf8"));
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return;
+    throw new Error(`Refusing production start because transition journal is invalid: ${journalPath}.`, { cause: error });
+  }
+  const expectedBundle = bundleIdentity(config);
+  const candidateAllowed = receipt.state === "ready_to_activate" && sameBundleIdentity(receipt.newBundle, expectedBundle) &&
+    receipt.databaseId === config.expectedDatabaseId && receipt.targetSchemaVersion === config.expectedSchemaVersion;
+  const restoredAllowed = receipt.state === "restored" && sameBundleIdentity(receipt.oldBundle, expectedBundle) &&
+    receipt.databaseId === config.expectedDatabaseId && receipt.sourceSchemaVersion === config.expectedSchemaVersion;
+  if (
+    receipt.databasePath !== config.databasePath || !config.transitionNonce ||
+    receipt.nonce !== config.transitionNonce || (!candidateAllowed && !restoredAllowed)
+  ) {
+    throw new Error(`Refusing production start while an incomplete transition journal exists: ${journalPath}.`);
+  }
+}
+
+function sameBundleIdentity(left, right) {
+  return Boolean(
+    left && left.bundleDigest === right.bundleDigest && left.gitSha === right.gitSha &&
+    left.target === right.target && left.version === right.version
+  );
+}
+
+async function runMaintenanceChild(config, action, request) {
+  const runtime = productionRuntimePaths(config.target);
+  const child = spawn(runtime.node, [runtime.maintenanceEntry, action, "--request", JSON.stringify(request)], {
+    env: {
+      ...process.env,
+      MASTHEAD_DATA_DIR: config.dataDirectory,
+      MASTHEAD_DB_PATH: config.databasePath
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  return waitForMaintenanceChild(child, action, PRODUCTION_MAINTENANCE_TIMEOUT_MS, PRODUCTION_MAINTENANCE_EXIT_GRACE_MS);
+}
+
+export function waitForMaintenanceChild(child, action, timeoutMs, exitGraceMs = PRODUCTION_MAINTENANCE_EXIT_GRACE_MS) {
+  return new Promise((resolvePromise, reject) => {
+    let settled = false;
+    let timedOut = false;
+    let exitGraceTimer;
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => { stdout += chunk; });
+    child.stderr?.on("data", (chunk) => { stderr += chunk; });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      child.kill("SIGTERM");
+      exitGraceTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        child.unref();
+        const error = new Error(
+          `Production maintenance child exceeded ${timeoutMs}ms and exact exit was not proven within ${exitGraceMs}ms after SIGTERM; no SIGKILL was sent.`
+        );
+        error.code = "maintenance_child_exit_unproven";
+        reject(error);
+      }, exitGraceMs);
+    }, timeoutMs);
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(exitGraceTimer);
+      if (timedOut) {
+        reject(new Error(`Production maintenance child exceeded ${timeoutMs}ms and exited after SIGTERM; no SIGKILL was sent.`));
+        return;
+      }
+      reject(error);
+    });
+    child.once("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(exitGraceTimer);
+      if (timedOut) {
+        reject(new Error(`Production maintenance child exceeded ${timeoutMs}ms and exited after SIGTERM; no SIGKILL was sent.`));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error(`Production maintenance ${action} failed (code=${code}, signal=${signal || "none"}): ${stderr.trim() || "no diagnostic"}`));
+        return;
+      }
+      try {
+        resolvePromise(JSON.parse(stdout));
+      } catch (error) {
+        reject(new Error(`Production maintenance ${action} returned an invalid receipt.`, { cause: error }));
+      }
+    });
+  });
 }
 
 async function probeExclusiveOwnership(config) {
