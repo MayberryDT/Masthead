@@ -76,6 +76,15 @@ deadline; the measured full-integrity runtime supports an initial strict
 30-minute maintenance ceiling. Candidate `a2ea13d4` implements those conditions
 and passed independent review before the next package was built.
 
+A later 6.6GB cold prepare exhausted that initial 30-minute whole-operation
+ceiling before producing a journal. Prepare performs at least three full-size
+passes (backup, integrity and SHA-256) before migration, and failure handling
+may require another verified restore. The reviewed ceiling is therefore four
+hours per prepare or restore operation. Exact-child timeout remains SIGTERM-only;
+the parent may clear a resulting stale compatibility sentinel only from
+live-child-captured inode/token/content evidence while holding both canonical
+SQLite leases and repeating the offline and ownership proofs.
+
 ## Step 1 — Installed V2 identity and current counts
 
 While the installed writable daemon is still running, capture the health,

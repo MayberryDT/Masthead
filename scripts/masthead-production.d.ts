@@ -27,6 +27,18 @@ export function assertColdProductionOffline(
   dependencies?: Record<string, unknown>
 ): Promise<void>;
 export function productionHealthPollPolicy(): { intervalMs: 250; maxAttempts: 1200; timeoutMs: 300000 };
+export function productionMaintenanceTimeoutPolicy(): { exitGraceMs: 30000; timeoutMs: 14400000 };
+export function captureMaintenanceSentinel(
+  config: { dataDirectory: string },
+  childIdentity: { pid: number; starttime: string },
+  adapters?: Record<string, unknown>
+): Promise<Record<string, unknown>>;
+export function clearExactMaintenanceSentinel(
+  config: { dataDirectory: string; databasePath: string },
+  childIdentity: { pid: number; starttime: string },
+  evidence: Record<string, unknown>,
+  adapters?: Record<string, unknown>
+): Promise<void>;
 export function readProductionProcesses(adapters?: {
   concurrency?: number;
   entries?: () => Promise<string[]>;
@@ -62,7 +74,11 @@ export function waitForMaintenanceChild(
   timeoutMs: number,
   exitGraceMs?: number,
   identity?: Promise<{ pid: number; starttime: string }>,
-  identityReader?: (pid: number) => Promise<{ pid: number; starttime: string } | undefined>
+  identityReader?: (pid: number) => Promise<{ pid: number; starttime: string } | undefined>,
+  timeoutRecovery?: {
+    capture(identity: { pid: number; starttime: string }): Promise<Record<string, unknown>>;
+    cleanup(identity: { pid: number; starttime: string }, evidence: Record<string, unknown>): Promise<void>;
+  }
 ): Promise<unknown>;
 export function stopColdMaintenanceChildren(
   config: ProductionConfig,

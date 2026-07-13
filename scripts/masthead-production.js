@@ -5,8 +5,10 @@ import { constants } from "node:fs";
 import {
   access,
   chmod,
+  link,
   lstat,
   mkdir,
+  open,
   readFile,
   readlink,
   readdir,
@@ -29,7 +31,7 @@ const DEFAULT_PORT = 17383;
 const PRODUCTION_HEALTH_INTERVAL_MS = 250;
 const PRODUCTION_HEALTH_TIMEOUT_MS = 300_000;
 const PRODUCTION_SHUTDOWN_TIMEOUT_MS = 30_000;
-const PRODUCTION_MAINTENANCE_TIMEOUT_MS = 1_800_000;
+const PRODUCTION_MAINTENANCE_TIMEOUT_MS = 14_400_000;
 const PRODUCTION_MAINTENANCE_EXIT_GRACE_MS = 30_000;
 const VERSIONED_TARGET = /^Masthead-linux-x64-[A-Za-z0-9][A-Za-z0-9._+-]*$/u;
 
@@ -38,6 +40,13 @@ export function productionHealthPollPolicy() {
     intervalMs: PRODUCTION_HEALTH_INTERVAL_MS,
     maxAttempts: PRODUCTION_HEALTH_TIMEOUT_MS / PRODUCTION_HEALTH_INTERVAL_MS,
     timeoutMs: PRODUCTION_HEALTH_TIMEOUT_MS
+  };
+}
+
+export function productionMaintenanceTimeoutPolicy() {
+  return {
+    exitGraceMs: PRODUCTION_MAINTENANCE_EXIT_GRACE_MS,
+    timeoutMs: PRODUCTION_MAINTENANCE_TIMEOUT_MS
   };
 }
 
@@ -908,13 +917,17 @@ async function assertLegacyTargetIdentity(expected, productionRoot) {
 
 export async function assertColdProductionOffline(config, dependencyOverrides = {}) {
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
+  await assertColdRuntimeOffline(config, dependencies);
+  await dependencies.ownershipProbe();
+}
+
+async function assertColdRuntimeOffline(config, dependencies) {
   const processes = await productionRootProcesses(config, dependencies);
   if (processes.length > 0) {
     throw new Error(`Cold activation requires an empty production process set: ${formatProcesses(processes)}.`);
   }
   if (await dependencies.fetchHealth()) throw new Error("Cold activation requires production health to be absent.");
   if (!(await dependencies.portBindable())) throw new Error(`Cold activation requires port ${config.port} to be bindable.`);
-  await dependencies.ownershipProbe();
 }
 
 async function stopColdCandidate(config) {
@@ -1547,6 +1560,254 @@ async function assertTransitionJournalAllowsStart(config) {
   }
 }
 
+export async function captureMaintenanceSentinel(config, childIdentity, adapters = {}) {
+  if (
+    !Number.isSafeInteger(childIdentity?.pid) || childIdentity.pid <= 0 ||
+    typeof childIdentity.starttime !== "string" || !childIdentity.starttime
+  ) {
+    throw new Error("Maintenance sentinel capture requires an exact child PID/start identity.");
+  }
+  const path = join(resolve(config.dataDirectory), "runtime", "database.lock");
+  const snapshot = await readMaintenanceSentinelSnapshot(path, adapters);
+  if (!snapshot.exists) return { ...snapshot, childStarttime: childIdentity.starttime, pid: childIdentity.pid };
+  if (snapshot.pid !== childIdentity.pid) {
+    throw new Error("Maintenance compatibility sentinel is not owned by the exact child PID.");
+  }
+  return { ...snapshot, childStarttime: childIdentity.starttime };
+}
+
+export async function clearExactMaintenanceSentinel(config, childIdentity, evidence, adapters = {}) {
+  const expectedPath = join(resolve(config.dataDirectory), "runtime", "database.lock");
+  if (
+    !evidence || evidence.path !== expectedPath || evidence.childStarttime !== childIdentity?.starttime ||
+    evidence.pid !== childIdentity?.pid
+  ) {
+    throw new Error("Timed-out maintenance sentinel evidence does not match the exact child identity.");
+  }
+  const acquireLeases = adapters.acquireLeases || (() => acquireMaintenanceCleanupLeases(config));
+  const assertRuntimeOffline = adapters.assertRuntimeOffline || (async () => {
+    const dependencies = defaultDependencies(config);
+    await assertColdRuntimeOffline(config, dependencies);
+  });
+  const assertFullyOffline = adapters.assertFullyOffline || (() => assertColdProductionOffline(config));
+  const statProcess = adapters.statProcess || ((pid) => stat(join("/proc", String(pid))));
+  const remove = adapters.remove || ((path) => rm(path));
+  const leases = await acquireLeases();
+  try {
+    await assertMaintenancePidAbsent(childIdentity.pid, statProcess);
+    await assertRuntimeOffline();
+    const current = await readMaintenanceSentinelSnapshot(expectedPath, adapters);
+    if (!evidence.exists) {
+      if (current.exists) throw new Error("Maintenance sentinel appeared after an absent live-child capture.");
+    } else if (current.exists) {
+      if (!sameMaintenanceSentinelEvidence(current, evidence)) {
+        throw new Error("Maintenance sentinel identity changed after exact child exit; cleanup refused.");
+      }
+      await quarantineAndRemoveExactMaintenanceSentinel(expectedPath, evidence, { ...adapters, remove });
+      const afterRemoval = await readMaintenanceSentinelSnapshot(expectedPath, adapters);
+      if (afterRemoval.exists) {
+        throw new Error("Maintenance sentinel replacement appeared during exact cleanup.");
+      }
+    }
+    await assertRuntimeOffline();
+  } finally {
+    await leases.release();
+  }
+  await assertFullyOffline();
+}
+
+async function readMaintenanceSentinelSnapshot(path, adapters = {}) {
+  const lstatAdapter = adapters.lstat || ((value) => lstat(value, { bigint: true }));
+  const openAdapter = adapters.open || ((value, flags) => open(value, flags));
+  const currentUid = adapters.currentUid ?? (typeof process.geteuid === "function"
+    ? process.geteuid()
+    : typeof process.getuid === "function" ? process.getuid() : undefined);
+  if (!Number.isSafeInteger(currentUid) || currentUid < 0) {
+    throw new Error("Maintenance sentinel cleanup current effective UID is unavailable.");
+  }
+  let before;
+  try {
+    before = await lstatAdapter(path);
+  } catch (error) {
+    if (errnoIs(error, "ENOENT")) return { exists: false, path };
+    throw error;
+  }
+  if (
+    !before.isFile() || before.isSymbolicLink() || String(before.nlink) !== "1" ||
+    String(before.uid) !== String(currentUid)
+  ) {
+    throw new Error("Maintenance compatibility sentinel path identity is unsafe.");
+  }
+  let handle;
+  let body;
+  let beforeIdentity;
+  try {
+    handle = await openAdapter(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const descriptorBefore = await handle.stat({ bigint: true });
+    beforeIdentity = maintenanceFileIdentity(descriptorBefore);
+    if (JSON.stringify(maintenanceFileIdentity(before)) !== JSON.stringify(beforeIdentity)) {
+      throw new Error("Maintenance compatibility sentinel pathname is not bound to its opened inode.");
+    }
+    body = await handle.readFile({ encoding: "utf8" });
+    const descriptorAfter = await handle.stat({ bigint: true });
+    const pathAfter = await lstatAdapter(path);
+    if (
+      !descriptorAfter.isFile() || descriptorAfter.isSymbolicLink() || String(descriptorAfter.nlink) !== "1" ||
+      !pathAfter.isFile() || pathAfter.isSymbolicLink() || String(pathAfter.nlink) !== "1" ||
+      JSON.stringify(beforeIdentity) !== JSON.stringify(maintenanceFileIdentity(descriptorAfter)) ||
+      JSON.stringify(beforeIdentity) !== JSON.stringify(maintenanceFileIdentity(pathAfter)) ||
+      String(Buffer.byteLength(body)) !== beforeIdentity.size
+    ) {
+      throw new Error("Maintenance compatibility sentinel changed during exact fd-bound capture.");
+    }
+  } finally {
+    await handle?.close();
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error("Maintenance compatibility sentinel content is invalid.");
+  }
+  if (
+    !Number.isSafeInteger(parsed?.pid) || parsed.pid <= 0 ||
+    parsed.protocol !== "canonical-data-directory-lock-v4" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(parsed.token || "") ||
+    typeof parsed.createdAt !== "string" || Number.isNaN(Date.parse(parsed.createdAt))
+  ) {
+    throw new Error("Maintenance compatibility sentinel ownership content is invalid.");
+  }
+  return {
+    ...beforeIdentity,
+    body,
+    createdAt: parsed.createdAt,
+    exists: true,
+    path,
+    pid: parsed.pid,
+    protocol: parsed.protocol,
+    token: parsed.token
+  };
+}
+
+async function assertMaintenancePidAbsent(pid, statProcess) {
+  try {
+    await statProcess(pid);
+  } catch (error) {
+    if (errnoIs(error, "ENOENT") || errnoIs(error, "ESRCH")) return;
+    throw error;
+  }
+  throw new Error("Timed-out maintenance PID is present; stale sentinel cleanup refused.");
+}
+
+async function quarantineAndRemoveExactMaintenanceSentinel(path, evidence, adapters = {}) {
+  const renameAdapter = adapters.rename || rename;
+  const linkAdapter = adapters.link || link;
+  const remove = adapters.remove || ((value) => rm(value));
+  const quarantinePath = join(dirname(path), `.database.lock.maintenance-cleanup-${randomUUID()}`);
+  try {
+    await lstat(quarantinePath);
+    throw new Error("Maintenance sentinel cleanup quarantine path already exists.");
+  } catch (error) {
+    if (!errnoIs(error, "ENOENT")) throw error;
+  }
+  try {
+    await renameAdapter(path, quarantinePath);
+  } catch (error) {
+    if (errnoIs(error, "ENOENT")) return;
+    throw error;
+  }
+  const moved = await readMaintenanceSentinelSnapshot(quarantinePath, adapters);
+  if (moved.exists && sameMaintenanceSentinelEvidence(moved, evidence, true)) {
+    await remove(quarantinePath);
+    return;
+  }
+  try {
+    await linkAdapter(quarantinePath, path);
+    await remove(quarantinePath);
+  } catch (error) {
+    if (errnoIs(error, "EEXIST")) {
+      throw new Error(
+        `Maintenance sentinel replacement was preserved at ${quarantinePath}; a new canonical sentinel also exists.`,
+        { cause: error }
+      );
+    }
+    throw error;
+  }
+  throw new Error("Maintenance sentinel identity changed at atomic quarantine; replacement restored and cleanup refused.");
+}
+
+function maintenanceFileIdentity(info) {
+  return {
+    device: String(info.dev),
+    inode: String(info.ino),
+    mode: String(info.mode),
+    nlink: String(info.nlink),
+    size: String(info.size),
+    uid: String(info.uid)
+  };
+}
+
+function sameMaintenanceSentinelEvidence(left, right, ignorePath = false) {
+  return [
+    "body", "createdAt", "device", "inode", "mode", "nlink", "path", "pid", "protocol", "size", "token", "uid"
+  ].every((field) => (ignorePath && field === "path") || left[field] === right[field]);
+}
+
+async function acquireMaintenanceCleanupLeases(config) {
+  const canonicalDataDirectory = await realpath(config.dataDirectory);
+  const canonicalDatabasePath = await realpath(config.databasePath);
+  if (dirname(canonicalDatabasePath) !== canonicalDataDirectory) {
+    throw new Error("Maintenance sentinel cleanup database is outside its canonical data directory.");
+  }
+  const runtimeDirectory = await realpath(join(canonicalDataDirectory, "runtime"));
+  if (dirname(runtimeDirectory) !== canonicalDataDirectory) {
+    throw new Error("Maintenance sentinel cleanup runtime directory identity is invalid.");
+  }
+  const databaseLease = acquireCleanupSqliteLease(`${canonicalDatabasePath}.lease.sqlite`);
+  let runtimeLease;
+  try {
+    runtimeLease = acquireCleanupSqliteLease(join(runtimeDirectory, "database.lease.sqlite"));
+  } catch (error) {
+    await databaseLease.release();
+    throw error;
+  }
+  return {
+    release: async () => {
+      try {
+        await runtimeLease.release();
+      } finally {
+        await databaseLease.release();
+      }
+    }
+  };
+}
+
+function acquireCleanupSqliteLease(path) {
+  const database = new DatabaseSync(path);
+  try {
+    database.exec("PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;");
+  } catch (error) {
+    database.close();
+    throw new Error(`Maintenance sentinel cleanup could not acquire exclusive lease ${path}.`, { cause: error });
+  }
+  let released = false;
+  return {
+    release: async () => {
+      if (released) return;
+      released = true;
+      try {
+        database.exec("ROLLBACK;");
+      } finally {
+        database.close();
+      }
+    }
+  };
+}
+
+function errnoIs(error, code) {
+  return Boolean(error && typeof error === "object" && error.code === code);
+}
+
 function sameBundleIdentity(left, right) {
   return Boolean(
     left && left.bundleDigest === right.bundleDigest && left.gitSha === right.gitSha &&
@@ -1565,12 +1826,22 @@ async function runMaintenanceChild(config, action, request) {
     stdio: ["ignore", "pipe", "pipe"]
   });
   const identity = captureMaintenanceChildIdentity(child);
+  const identityReader = async (pid) => {
+    const record = await readProcess(pid, true);
+    return record ? { pid, starttime: record.starttime } : undefined;
+  };
+  const timeoutRecovery = action === "complete" ? undefined : {
+    capture: (childIdentity) => captureMaintenanceSentinel(config, childIdentity),
+    cleanup: (childIdentity, evidence) => clearExactMaintenanceSentinel(config, childIdentity, evidence)
+  };
   return waitForMaintenanceChild(
     child,
     action,
     PRODUCTION_MAINTENANCE_TIMEOUT_MS,
     PRODUCTION_MAINTENANCE_EXIT_GRACE_MS,
-    identity
+    identity,
+    identityReader,
+    timeoutRecovery
   );
 }
 
@@ -1583,7 +1854,8 @@ export function waitForMaintenanceChild(
   identityReader = async (pid) => {
     const record = await readProcess(pid);
     return record ? { pid, starttime: record.starttime } : undefined;
-  }
+  },
+  timeoutRecovery
 ) {
   const observedIdentityPromise = Promise.resolve(identityPromise).then(
     (value) => ({ value }),
@@ -1592,6 +1864,9 @@ export function waitForMaintenanceChild(
   return new Promise((resolvePromise, reject) => {
     let settled = false;
     let timedOut = false;
+    let timeoutEvidence;
+    let timeoutRecoveryError;
+    let timeoutPreparation;
     let childError;
     let exitObserved = false;
     let exitGraceTimer;
@@ -1612,7 +1887,7 @@ export function waitForMaintenanceChild(
         reject(maintenanceChildExitUnproven(message));
       }, exitGraceMs);
     };
-    const timer = setTimeout(async () => {
+    const handleTimeout = async () => {
       if (settled) return;
       const graceMessage = `Production maintenance child exceeded ${timeoutMs}ms and exact exit was not proven within ${exitGraceMs}ms; no SIGKILL was sent.`;
       if (exitObserved) {
@@ -1650,6 +1925,9 @@ export function waitForMaintenanceChild(
       }
       if (settled) return;
       if (exitObserved || !current) {
+        if (timeoutRecovery) {
+          timeoutRecoveryError = new Error("maintenance child exited before sentinel capture could be bound to its live PID identity");
+        }
         scheduleExitGrace(graceMessage);
         return;
       }
@@ -1658,8 +1936,55 @@ export function waitForMaintenanceChild(
         reject(maintenanceChildExitUnproven("Production maintenance child PID/start identity changed before SIGTERM; no signal was sent."));
         return;
       }
+      if (timeoutRecovery?.capture) {
+        try {
+          timeoutEvidence = await promiseWithTimeout(
+            timeoutRecovery.capture(captured),
+            Math.min(5_000, exitGraceMs),
+            "maintenance sentinel capture exceeded its bounded deadline"
+          );
+        } catch (error) {
+          timeoutRecoveryError = error;
+        }
+      }
+      if (timeoutRecovery) {
+        let postCaptureIdentity;
+        try {
+          postCaptureIdentity = await promiseWithTimeout(
+            identityReader(child.pid),
+            Math.min(5_000, exitGraceMs),
+            "maintenance child post-capture identity revalidation exceeded its bounded deadline"
+          );
+        } catch (error) {
+          settled = true;
+          reject(maintenanceChildExitUnproven(
+            `Production maintenance child post-capture identity revalidation failed: ${error instanceof Error ? error.message : String(error)}; no signal was sent.`
+          ));
+          return;
+        }
+        if (exitObserved || !postCaptureIdentity) {
+          timeoutRecoveryError = new Error("maintenance child exited before sentinel capture could be revalidated against its live PID identity");
+          scheduleExitGrace(graceMessage);
+          return;
+        }
+        if (postCaptureIdentity.pid !== captured.pid || postCaptureIdentity.starttime !== captured.starttime) {
+          settled = true;
+          reject(maintenanceChildExitUnproven("Production maintenance child PID/start identity changed after sentinel capture; no signal was sent."));
+          return;
+        }
+      }
       child.kill("SIGTERM");
       scheduleExitGrace(`${graceMessage} SIGTERM was sent to the exact child identity.`);
+    };
+    const timer = setTimeout(() => {
+      timeoutPreparation = handleTimeout().catch((error) => {
+        timeoutRecoveryError = error;
+        if (settled) return;
+        settled = true;
+        reject(maintenanceChildExitUnproven(
+          `Production maintenance child timeout handling failed: ${error instanceof Error ? error.message : String(error)}.`
+        ));
+      });
     }, timeoutMs);
     child.once("exit", () => { exitObserved = true; });
     child.once("error", (error) => {
@@ -1668,6 +1993,7 @@ export function waitForMaintenanceChild(
       scheduleExitGrace(`Production maintenance child emitted an error but exact exit was not proven within ${exitGraceMs}ms.`);
     });
     child.once("close", async (code, signal) => {
+      if (timeoutPreparation) await timeoutPreparation;
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -1690,6 +2016,22 @@ export function waitForMaintenanceChild(
         return;
       }
       if (timedOut) {
+        if (timeoutRecovery) {
+          if (timeoutRecoveryError) {
+            reject(new Error(
+              `Production maintenance child exceeded ${timeoutMs}ms and exited after SIGTERM; exact stale sentinel capture failed: ${timeoutRecoveryError instanceof Error ? timeoutRecoveryError.message : String(timeoutRecoveryError)}.`
+            ));
+            return;
+          }
+          try {
+            await timeoutRecovery.cleanup(identity, timeoutEvidence);
+          } catch (error) {
+            reject(new Error(
+              `Production maintenance child exceeded ${timeoutMs}ms and exited after SIGTERM; exact stale sentinel cleanup failed: ${error instanceof Error ? error.message : String(error)}.`
+            ));
+            return;
+          }
+        }
         reject(new Error(`Production maintenance child exceeded ${timeoutMs}ms and exited after SIGTERM; no SIGKILL was sent.`));
         return;
       }

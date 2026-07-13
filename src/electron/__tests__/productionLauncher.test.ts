@@ -2,20 +2,24 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
 import { writePackagedBundleManifest } from "../../../scripts/packaged-bundle-manifest.js";
 import {
   acquireLifecycleLease,
   assertColdProductionOffline,
+  captureMaintenanceSentinel,
   captureLegacyTargetIdentity,
   classifyProductionProcess,
   coldActivateProduction,
+  clearExactMaintenanceSentinel,
   installDisabledProductionSurface,
   installProductionLauncher,
   productionHealthPollPolicy,
+  productionMaintenanceTimeoutPolicy,
   readOwnedProcessStrict,
   readProductionProcesses,
   waitForProductionHealth,
@@ -186,9 +190,12 @@ describe("production lifecycle launcher", () => {
     expect(now).toBe(300_000);
   });
 
-  test("bounds the external maintenance child at 30 minutes with SIGTERM only", async () => {
+  test("bounds the external maintenance child at four hours with SIGTERM only", async () => {
     const source = await readFile("scripts/masthead-production.js", "utf8");
-    expect(source).toContain("PRODUCTION_MAINTENANCE_TIMEOUT_MS = 1_800_000");
+    const coldActivationReference = await readFile("docs/reference/production-cold-activation.md", "utf8");
+    expect(productionMaintenanceTimeoutPolicy()).toEqual({ exitGraceMs: 30_000, timeoutMs: 14_400_000 });
+    expect(source).toContain("PRODUCTION_MAINTENANCE_TIMEOUT_MS = 14_400_000");
+    expect(coldActivationReference).toContain("four-hour hard deadline");
     expect(source).toContain('child.kill("SIGTERM")');
     expect(source).not.toContain('child.kill("SIGKILL")');
     expect(source).not.toContain("migrationStageActive");
@@ -331,6 +338,314 @@ describe("production lifecycle launcher", () => {
       async () => ({ pid: 4444, starttime: "replacement" })
     )).rejects.toMatchObject({ code: "maintenance_child_exit_unproven" });
     expect(reusedKillCount).toBe(0);
+  });
+
+  test("captures a timed-out maintenance sentinel before SIGTERM and clears it only after exact close", async () => {
+    const calls: string[] = [];
+    const child = Object.assign(new EventEmitter(), {
+      kill: () => {
+        calls.push("kill");
+        setTimeout(() => {
+          child.emit("exit", null, "SIGTERM");
+          child.stdout.end();
+          child.stderr.end();
+          child.emit("close", null, "SIGTERM");
+        }, 5);
+        return true;
+      },
+      pid: 4545,
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
+      unref: () => undefined
+    });
+    await expect(waitForMaintenanceChild(
+      child as any,
+      "prepare",
+      10,
+      100,
+      Promise.resolve({ pid: 4545, starttime: "child-start" }),
+      async () => ({ pid: 4545, starttime: "child-start" }),
+      {
+        capture: async (identity) => {
+          calls.push(`capture:${identity.pid}:${identity.starttime}`);
+          return { exact: true };
+        },
+        cleanup: async (identity, evidence) => {
+          calls.push(`cleanup:${identity.pid}:${identity.starttime}:${String(evidence.exact)}`);
+        }
+      }
+    )).rejects.toThrow("exited after SIGTERM");
+    expect(calls).toEqual([
+      "capture:4545:child-start",
+      "kill",
+      "cleanup:4545:child-start:true"
+    ]);
+  });
+
+  test("does not signal when the maintenance PID identity changes after sentinel capture", async () => {
+    let identityReads = 0;
+    let killCount = 0;
+    const child = Object.assign(new EventEmitter(), {
+      kill: () => { killCount += 1; return true; },
+      pid: 4646,
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
+      unref: () => undefined
+    });
+    await expect(waitForMaintenanceChild(
+      child as any,
+      "prepare",
+      10,
+      100,
+      Promise.resolve({ pid: 4646, starttime: "child-start" }),
+      async () => {
+        identityReads += 1;
+        return { pid: 4646, starttime: identityReads === 1 ? "child-start" : "replacement-start" };
+      },
+      {
+        capture: async () => ({ exact: true }),
+        cleanup: async () => undefined
+      }
+    )).rejects.toMatchObject({ code: "maintenance_child_exit_unproven" });
+    expect(killCount).toBe(0);
+  });
+
+  test("serializes exact close behind timeout sentinel capture and fails closed when the child exits during capture", async () => {
+    let captureStartedResolve!: () => void;
+    let releaseCapture!: (value: { exact: boolean }) => void;
+    const captureStarted = new Promise<void>((resolve) => { captureStartedResolve = resolve; });
+    const capturePending = new Promise<{ exact: boolean }>((resolve) => { releaseCapture = resolve; });
+    let identityReads = 0;
+    let killCount = 0;
+    let cleanupCount = 0;
+    const child = Object.assign(new EventEmitter(), {
+      kill: () => { killCount += 1; return true; },
+      pid: 4747,
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
+      unref: () => undefined
+    });
+    const wait = waitForMaintenanceChild(
+      child as any,
+      "prepare",
+      10,
+      200,
+      Promise.resolve({ pid: 4747, starttime: "child-start" }),
+      async () => {
+        identityReads += 1;
+        return identityReads === 1 ? { pid: 4747, starttime: "child-start" } : undefined;
+      },
+      {
+        capture: async () => {
+          captureStartedResolve();
+          return capturePending;
+        },
+        cleanup: async () => { cleanupCount += 1; }
+      }
+    );
+    await captureStarted;
+    child.emit("exit", 0, null);
+    child.stdout.end();
+    child.stderr.end();
+    child.emit("close", 0, null);
+    releaseCapture({ exact: true });
+
+    await expect(wait).rejects.toThrow("exited before sentinel capture could be revalidated");
+    expect(killCount).toBe(0);
+    expect(cleanupCount).toBe(0);
+  });
+
+  test("clears only the exact captured maintenance compatibility sentinel under offline leases", async () => {
+    const root = await mkdtemp(join(tmpdir(), "masthead-maintenance-sentinel-"));
+    cleanup.push(root);
+    const dataDirectory = join(root, "data");
+    const runtimeDirectory = join(dataDirectory, "runtime");
+    const databasePath = join(dataDirectory, "masthead.sqlite");
+    const lockPath = join(runtimeDirectory, "database.lock");
+    const identity = { pid: 7777, starttime: "child-start" };
+    const body = `${JSON.stringify({
+      createdAt: "2026-07-13T12:00:00.000Z",
+      pid: identity.pid,
+      protocol: "canonical-data-directory-lock-v4",
+      token: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }, null, 2)}\n`;
+    await mkdir(runtimeDirectory, { recursive: true });
+    await writeFile(databasePath, "database", "utf8");
+    await writeFile(lockPath, body, "utf8");
+    const evidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
+    const calls: string[] = [];
+    await clearExactMaintenanceSentinel({ dataDirectory, databasePath }, identity, evidence, {
+      assertFullyOffline: async () => { calls.push("fully-offline"); },
+      assertRuntimeOffline: async () => { calls.push("runtime-offline"); },
+      statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); },
+      remove: async (path: string) => {
+        for (const leasePath of [
+          `${databasePath}.lease.sqlite`,
+          join(runtimeDirectory, "database.lease.sqlite")
+        ]) {
+          const contender = new DatabaseSync(leasePath);
+          try {
+            expect(() => contender.exec("PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;")).toThrow(/locked|busy/iu);
+          } finally {
+            contender.close();
+          }
+        }
+        calls.push("leases-held");
+        await rm(path);
+      }
+    });
+    await expect(lstat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(calls).toEqual(["runtime-offline", "leases-held", "runtime-offline", "fully-offline"]);
+  });
+
+  test("refuses stale-sentinel cleanup after replacement, content drift, live PID reuse, or offline failure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "masthead-maintenance-sentinel-races-"));
+    cleanup.push(root);
+    const dataDirectory = join(root, "data");
+    const runtimeDirectory = join(dataDirectory, "runtime");
+    const databasePath = join(dataDirectory, "masthead.sqlite");
+    const lockPath = join(runtimeDirectory, "database.lock");
+    const replacementPath = join(runtimeDirectory, "replacement.lock");
+    const identity = { pid: 8888, starttime: "child-start" };
+    const exact = JSON.stringify({
+      createdAt: "2026-07-13T12:00:00.000Z",
+      pid: identity.pid,
+      protocol: "canonical-data-directory-lock-v4",
+      token: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    });
+    const replacement = JSON.stringify({
+      createdAt: "2026-07-13T12:01:00.000Z",
+      pid: 9999,
+      protocol: "canonical-data-directory-lock-v4",
+      token: "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    });
+    await mkdir(runtimeDirectory, { recursive: true });
+    await writeFile(databasePath, "database", "utf8");
+    const adapters = {
+      acquireLeases: async () => ({ release: async () => undefined }),
+      assertFullyOffline: async () => undefined,
+      assertRuntimeOffline: async () => undefined,
+      statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); }
+    };
+
+    await writeFile(lockPath, exact, "utf8");
+    const replacedEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
+    await writeFile(replacementPath, replacement, "utf8");
+    await rename(replacementPath, lockPath);
+    await expect(clearExactMaintenanceSentinel(
+      { dataDirectory, databasePath }, identity, replacedEvidence, adapters
+    )).rejects.toThrow("sentinel identity changed");
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(replacement);
+
+    await writeFile(lockPath, exact, "utf8");
+    const driftEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
+    const sameInodeTokenDrift = exact.replace(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    );
+    await writeFile(lockPath, sameInodeTokenDrift, "utf8");
+    await expect(clearExactMaintenanceSentinel(
+      { dataDirectory, databasePath }, identity, driftEvidence, adapters
+    )).rejects.toThrow("sentinel identity changed");
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(sameInodeTokenDrift);
+
+    await writeFile(lockPath, exact, "utf8");
+    const liveEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
+    await expect(clearExactMaintenanceSentinel(
+      { dataDirectory, databasePath }, identity, liveEvidence,
+      { ...adapters, statProcess: async () => ({}) }
+    )).rejects.toThrow("maintenance PID is present");
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(exact);
+
+    await expect(clearExactMaintenanceSentinel(
+      { dataDirectory, databasePath }, identity, liveEvidence,
+      { ...adapters, assertRuntimeOffline: async () => { throw new Error("runtime not offline"); } }
+    )).rejects.toThrow("runtime not offline");
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(exact);
+  });
+
+  test("atomically quarantines a final-boundary replacement instead of deleting it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "masthead-maintenance-quarantine-race-"));
+    cleanup.push(root);
+    const dataDirectory = join(root, "data");
+    const runtimeDirectory = join(dataDirectory, "runtime");
+    const databasePath = join(dataDirectory, "masthead.sqlite");
+    const lockPath = join(runtimeDirectory, "database.lock");
+    const replacementPath = join(runtimeDirectory, "replacement.lock");
+    const identity = { pid: 8989, starttime: "child-start" };
+    const sentinel = (pid: number, token: string) => JSON.stringify({
+      createdAt: "2026-07-13T12:00:00.000Z",
+      pid,
+      protocol: "canonical-data-directory-lock-v4",
+      token
+    });
+    const exact = sentinel(identity.pid, "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
+    const replacement = sentinel(9999, "ffffffff-ffff-4fff-8fff-ffffffffffff");
+    await mkdir(runtimeDirectory, { recursive: true });
+    await writeFile(databasePath, "database", "utf8");
+    await writeFile(lockPath, exact, "utf8");
+    const evidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
+    await writeFile(replacementPath, replacement, "utf8");
+    await expect(clearExactMaintenanceSentinel({ dataDirectory, databasePath }, identity, evidence, {
+      acquireLeases: async () => ({ release: async () => undefined }),
+      assertFullyOffline: async () => undefined,
+      assertRuntimeOffline: async () => undefined,
+      rename: async (source: string, destination: string) => {
+        await rename(replacementPath, source);
+        await rename(source, destination);
+      },
+      statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); }
+    })).rejects.toThrow("atomic quarantine");
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(replacement);
+    expect((await readdir(runtimeDirectory)).filter((name) => name.includes("maintenance-cleanup"))).toEqual([]);
+
+    await writeFile(lockPath, exact, "utf8");
+    const secondEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
+    await writeFile(replacementPath, replacement, "utf8");
+    const newer = sentinel(10_000, "11111111-1111-4111-8111-111111111111");
+    await expect(clearExactMaintenanceSentinel({ dataDirectory, databasePath }, identity, secondEvidence, {
+      acquireLeases: async () => ({ release: async () => undefined }),
+      assertFullyOffline: async () => undefined,
+      assertRuntimeOffline: async () => undefined,
+      rename: async (source: string, destination: string) => {
+        await rename(replacementPath, source);
+        await rename(source, destination);
+        await writeFile(source, newer, "utf8");
+      },
+      statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); }
+    })).rejects.toThrow("replacement was preserved");
+    await expect(readFile(lockPath, "utf8")).resolves.toBe(newer);
+    const quarantines = (await readdir(runtimeDirectory)).filter((name) => name.includes("maintenance-cleanup"));
+    expect(quarantines).toHaveLength(1);
+    await expect(readFile(join(runtimeDirectory, quarantines[0]), "utf8")).resolves.toBe(replacement);
+  });
+
+  test("binds sentinel bytes to an O_NOFOLLOW file descriptor", async () => {
+    const root = await mkdtemp(join(tmpdir(), "masthead-maintenance-nofollow-"));
+    cleanup.push(root);
+    const dataDirectory = join(root, "data");
+    const runtimeDirectory = join(dataDirectory, "runtime");
+    const lockPath = join(runtimeDirectory, "database.lock");
+    const movedPath = join(runtimeDirectory, "moved.lock");
+    const targetPath = join(runtimeDirectory, "target.lock");
+    const identity = { pid: 9090, starttime: "child-start" };
+    const body = JSON.stringify({
+      createdAt: "2026-07-13T12:00:00.000Z",
+      pid: identity.pid,
+      protocol: "canonical-data-directory-lock-v4",
+      token: "22222222-2222-4222-8222-222222222222"
+    });
+    await mkdir(runtimeDirectory, { recursive: true });
+    await writeFile(lockPath, body, "utf8");
+    await writeFile(targetPath, body, "utf8");
+    await expect(captureMaintenanceSentinel({ dataDirectory }, identity, {
+      open: async (path: string, flags: number) => {
+        await rename(path, movedPath);
+        await symlink(targetPath, path);
+        return openFile(path, flags);
+      }
+    })).rejects.toMatchObject({ code: "ELOOP" });
+    await expect(readFile(movedPath, "utf8")).resolves.toBe(body);
   });
 
   test("reads proc executable symlink text so deleted kernel identities remain observable", async () => {
