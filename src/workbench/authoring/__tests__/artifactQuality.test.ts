@@ -166,6 +166,36 @@ describe("artifact claim support", () => {
     })).not.toContainEqual(expect.objectContaining({ code: "invalid_support_kind_evidence", path: "validationChecks[0]" }));
   });
 
+  test("rejects checkpoint labels that only contain a positive verification substring", () => {
+    for (const label of ["not_verified", "verification_failed_then_verified"]) {
+      const ref = `checkpoint:session:a:${label}`;
+      const evidenceByRef = fixtureEvidence();
+      evidenceByRef.set(ref, {
+        ...evidenceByRef.get("checkpoint:session:a:passed")!,
+        label
+      });
+      const supports = validRunbookSupports().map((entry) => entry.supportKind === "verification"
+        ? support(
+            "validationChecks[0]",
+            ref,
+            "Focused callback regression checkpoint verified the repaired behavior.",
+            "verification"
+          )
+        : entry);
+
+      expect(validateArtifactQuality({
+        evidenceByRef,
+        kind: "runbook",
+        output: validRunbook(),
+        provenanceSessionIds: ["session:a"],
+        supports
+      })).toContainEqual(expect.objectContaining({
+        code: "invalid_support_kind_evidence",
+        path: "validationChecks[0]"
+      }));
+    }
+  });
+
   test("accepts a passed verification tool result when exit code is unavailable", () => {
     const evidenceByRef = fixtureEvidence();
     evidenceByRef.set("tool_result:session:a:no-exit", {
@@ -273,6 +303,32 @@ describe("artifact claim support", () => {
       provenanceSessionIds: ["session:a"],
       supports: validRunbookSupports().filter((entry) => entry.supportKind !== "root_cause")
     })).toContainEqual(expect.objectContaining({ code: "missing_root_cause_support", path: "rootCause" }));
+  });
+
+  test("rejects a blank root cause even when direct root_cause support is supplied", () => {
+    for (const kind of ["runbook", "incident_timeline"] as const) {
+      const output = kind === "runbook" ? validRunbook() : validIncident();
+      output.rootCause = "   ";
+      const supports = kind === "runbook"
+        ? validRunbookSupports()
+        : [
+            ...validIncidentSupports(),
+            support(
+              "rootCause",
+              MESSAGE,
+              "The prior validator accepted unsupported root cause claims.",
+              "root_cause"
+            )
+          ];
+
+      expect(validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind,
+        output,
+        provenanceSessionIds: ["session:a"],
+        supports
+      })).toContainEqual(expect.objectContaining({ code: "missing_root_cause_support", path: "rootCause" }));
+    }
   });
 
   test("does not treat an unknown causal mechanism as an explicit uncertainty statement", () => {

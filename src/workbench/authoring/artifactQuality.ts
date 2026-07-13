@@ -7,6 +7,13 @@ import type { WorkbenchValidationEvidence } from "../types.ts";
 
 const MIN_SUPPORT_EXCERPT_LENGTH = 20;
 const PASSED_STATUSES = new Set(["completed", "passed", "success", "succeeded"]);
+const PASSED_CHECKPOINT_LABELS = new Set([
+  "passed",
+  "succeeded",
+  "verification_passed",
+  "verification_verified",
+  "verified"
+]);
 const PROTOCOL_PHRASES = [
   "cursor pagination",
   "canonical evidence",
@@ -158,11 +165,8 @@ export function validateArtifactQuality(input: {
   const hasRootCauseSupport = validSupports.some(
     (support) => support.path === "rootCause" && support.supportKind === "root_cause"
   );
-  if (
-    (input.kind === "runbook" || input.kind === "incident_timeline") &&
-    !hasRootCauseSupport &&
-    (!rootCause || !isExplicitlyUnknown(rootCause))
-  ) {
+  const requiresRootCause = input.kind === "runbook" || input.kind === "incident_timeline";
+  if (requiresRootCause && (!rootCause || (!hasRootCauseSupport && !isExplicitlyUnknown(rootCause)))) {
     findings.push({
       code: "missing_root_cause_support",
       message: "A causal root-cause assertion requires direct root_cause support; otherwise state that root cause is unknown.",
@@ -276,9 +280,10 @@ function supportKindMatchesEvidence(
         /\b(?:build|check|health|lint|smoke|test|tests|verif(?:y|ied|ication))\b/i.test(semanticText) &&
         !hasNegativeVerificationOutcome(evidence.text);
     }
+    const checkpointLabel = evidence.label?.trim().toLowerCase() ?? "";
     return evidence.kind === "checkpoint" &&
-      /(?:verification_)?(?:passed|verified|succeeded)/i.test(evidence.label ?? "") &&
-      !hasNegativeVerificationOutcome(evidence.text);
+      PASSED_CHECKPOINT_LABELS.has(checkpointLabel) &&
+      !hasNegativeVerificationOutcome(`${checkpointLabel} ${evidence.text}`);
   }
   if (support.supportKind === "timeline") return Boolean(parseTimestamp(evidence.observedAt));
   if (support.supportKind === "change") {
