@@ -1,6 +1,6 @@
 # Logbook and Workbench (artifact-first)
 
-**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (authoring seam), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
+**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (daemon seam), [ADR 0013](../docs/adr/0013-canonical-dossier-and-candidate-authoring.md) (canonical dossier and candidate-driven V2), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
 
 **Language:** `CONTEXT.md`.
 
@@ -49,15 +49,18 @@ only complete duplicate or hook-only units are terminal noise.
 | Store | `src/daemon/db/sessionArtifactRepository.ts`, `logbookArtifactRepository.ts` |
 | HTTP | `GET /logbook/artifacts`, `GET /logbook/artifacts/:artifactId` |
 
-## Workbench (package + multi-kind)
+## Workbench (canonical dossier + artifact candidates)
 
-Default automatic kind set for a seed session:
+The dossier and optional-artifact paths are intentionally different:
 
-1. **Session package** (dossier capsule) — always on the package path.
-2. **Runbook**, **ADR**, **incident timeline** — when evidence supports them; else **N/A** (no Logbook row).
+1. **Session dossier** — the daemon publishes an immutable snapshot of the original canonical
+   dossier. Agents never write or replace its body.
+2. **Runbook**, **ADR**, **incident timeline** — the daemon creates an artifact candidate only when
+   positive canonical evidence supports reusable knowledge. No candidate means no authoring work
+   and no generated N/A prose.
 
-User-visible session states: **compile-ready** vs **automatic work resolved**
-(package published + kinds published, N/A, or contributed).
+Candidates may form a group only through a strong join key. A V2 authoring run owns one candidate
+group, contains at most 12 provenance sessions, and produces one optional artifact.
 
 ### Daemon-owned automatic authoring
 
@@ -66,23 +69,21 @@ them a CLI recipe. Whether that handoff is copied verbatim or the user directs
 the agent conversationally, one daemon-owned authoring module enforces the same
 quality behavior:
 
-1. discover capabilities and the active database identity;
-2. open or reuse one durable run and its claims;
-3. read every canonical redacted evidence item named by the manifest;
-4. submit one complete grounded bundle, revising structured findings without
-   creating output rows;
-5. atomically finish the accepted bundle, publishing the dossier plus every
-   supported automatic artifact and recording N/A or contribution for the rest.
+1. discover capabilities, the active database identity, and positive-evidence candidates;
+2. open or reuse one durable V2 run for one candidate group;
+3. read the canonical redacted evidence for that bounded group;
+4. submit one optional artifact whose substantive claims each carry a verbatim supporting excerpt;
+5. reject unsupported claims, protocol leakage, weak joins, or template duplication; and
+6. atomically publish the accepted artifact and complete the candidate group.
 
-The immutable completion report is the proof of success. Applied optional
-artifacts remain compile-ready until published; they do not count as automatic
-resolution. A finish retry returns the same report.
+The immutable completion report is the proof of success, and a finish retry returns the same
+report. V1 runs remain audit-only and are never reused by V2.
 
 ### Locked UI vocabulary
 
-- Columns include enrichment, dossier, **package**, runbook, adr, timeline, **resolution**.
-- Primary publish control: **Publish package** (dossier capsule when gates pass). Automatic kinds still need apply/publish or N/A for full resolution.
-- Handoff opens with multi-kind framing (session package always; runbook/ADR/timeline when evidence supports them). No CLI recipes in handoff body.
+- Columns include enrichment, canonical dossier publication, and candidate status by optional kind.
+- Primary dossier control publishes the daemon-built canonical snapshot when gates pass.
+- Handoff names one candidate group and one expected optional artifact. No CLI recipes appear in the handoff body.
 - Apply ≠ publish.
 
 ### Code map

@@ -207,22 +207,54 @@ _Avoid_: User workflow, visible controls
 
 **Authoring module**:
 The daemon-owned Workbench domain module that controls authoring runs, complete canonical redacted
-evidence access, grounded bundle validation, atomic publication, optional-kind resolution, claims,
-and idempotent completion receipts. It is reached through daemon HTTP; the CLI is only an adapter.
+evidence access, candidate discovery, grounded bundle validation, atomic publication, claims, and
+idempotent completion receipts. It is reached through daemon HTTP; the CLI is only an adapter.
 _Avoid_: CLI implementation, direct database script, MCP writer, native model service
 
+**Canonical dossier snapshot**:
+The immutable, versioned publication form of the original dossier returned by
+`getSessionDossier()`. It preserves the original human-facing identity, coverage, narrative, files,
+tools, verification, attention, excerpts, timeline, reuse, and usage sections and excludes only the
+recursive artifact listing. A dossier artifact is an immutable canonical dossier snapshot.
+Agents never author a session dossier body; the daemon snapshots canonical session data.
+_Avoid_: Agent-authored dossier, generated session summary, authoring-protocol report
+
+**Artifact candidate**:
+A daemon-discovered opportunity to create one reusable runbook, ADR, or incident timeline from
+positive canonical evidence.
+Optional artifact work begins from a positive-evidence artifact candidate. Missing signals produce
+no candidate and require no generated not-applicable response.
+_Avoid_: Per-session artifact obligation, empty artifact slot, generic topic match
+
+**Candidate group**:
+One artifact candidate or a small set of candidates joined by the same strong evidence-backed key.
+One authoring contract V2 run owns exactly one candidate group with at most 12 provenance sessions.
+_Avoid_: Arbitrary session batch, project-wide cluster, weak topic grouping
+
+**Claim support**:
+The canonical session id, evidence reference, and verbatim evidence excerpt that support one
+substantive optional-artifact claim. The daemon verifies the excerpt against canonical evidence
+before publication.
+_Avoid_: Unsupported assertion, evidence id without quoted support, generic citation list
+
+**Authoring contract V2**:
+The candidate-driven daemon contract in which an agent authors one optional artifact for one
+candidate group. A V2 bundle cannot contain a dossier body or blanket per-session N/A resolutions,
+and V1 bundles or completed runs are never reusable by V2.
+_Avoid_: Session-batch authoring, agent-authored dossier, V1 run reuse
+
 **Authoring run**:
-One durable daemon-owned attempt by an actor to author an exact selected session set against an
-exact database identity and evidence revision. It owns the selected-session claims, latest bundle,
-structured findings, state, and eventual completion report. Reopening the same exact set for the
-same actor reuses the run.
+One durable daemon-owned attempt by an actor to author one candidate group against an exact database
+identity and evidence revision. It owns the candidate claim, latest bundle, structured findings,
+state, and eventual completion report. Reopening is idempotent only for the same V2 candidate group,
+actor, database identity, and evidence revision.
 _Avoid_: Workbench Activity row, agent chat, shell process, disposable handoff
 
 **Artifact bundle**:
-The complete grounded submission for an authoring run: exactly one enrichment plus session dossier
-package per selected session, zero or more automatic artifacts, and exactly one published/N/A/
-contributed resolution path for every runbook, ADR, and incident-timeline obligation. Submit stores
-and validates the bundle without creating output rows; finish applies it atomically.
+The complete grounded optional-artifact submission for one V2 candidate group. It contains one
+runbook, ADR, or incident timeline plus claim support and provenance. It never contains a session
+dossier body or blanket per-session applicability resolutions. Submit stores and validates the
+bundle without creating output rows; finish applies it atomically.
 _Avoid_: Individual output file, partial draft, command batch, ungrounded JSON
 
 **Authoring finding**:
@@ -260,8 +292,8 @@ _Avoid_: Full Workbench queue, suppressed-session review, Logbook
 The agent-facing protocol, bundle schema, evidence manifest, validation, and atomic finish behavior that
 together make enrichment and artifact compile repeatable. This contract must be clear enough that a
 coding agent can finish the automatic handoff path without the user knowing CLI details. V1
-first-class guidance targets are the session package plus runbook, ADR, and incident timeline
-(with applicability / N/A rules).
+compatibility is audit-only. V2 guidance begins from a candidate group and targets exactly one
+supported runbook, ADR, or incident timeline; the canonical dossier is daemon-owned.
 _Avoid_: Prompt hint, UI copy, user handoff, legacy bug_fix_trace as the product name
 
 **Queue reason**:
@@ -344,10 +376,10 @@ artifact, not the dossier itself and not a separate product category from other 
 _Avoid_: Session dossier, session row, generic enrichment blob
 
 **Session dossier**:
-The full session-scoped artifact body for exactly one session: objective, context, approach,
-decisions, files, tools, outcome, verification, risks, lessons, and evidence. In Logbook, the
-session capsule lists it; opening the listing shows this body. A session dossier never spans
-sessions.
+The original full session reading experience returned by `getSessionDossier()` for exactly one
+session: identity, coverage, narrative, files, tools, verification, attention, excerpts, timeline,
+reuse, and usage. In Logbook, the session capsule lists an immutable canonical snapshot of this
+body. A session dossier never spans sessions and is never authored by an artifact agent.
 _Avoid_: Session capsule, session row, bug-fix trace, runbook, multi-session summary
 
 **Session-scoped artifact**:
@@ -416,11 +448,11 @@ Directed-agent work may stop earlier or change scope when the human instructs it
 _Avoid_: Human publish click as default, partial handoff that only drafts, silent backend publish without agent tools
 
 **Default automatic kind set**:
-The kinds the disposable-handoff path always attempts: session capsule plus session dossier
-(required session package), and when evidence supports them, runbook, ADR, and incident timeline
-(each publish, mark not applicable, or satisfy through a published contribution). Environment
-recipes and eval packs are out of the default automatic set until a later phase.
-_Avoid_: Attempt every research kind, session package only, settings-only kind sets as V1 default
+The daemon always publishes the canonical session dossier when its session is ready. It discovers
+runbook, ADR, and incident-timeline candidates only when positive evidence supports them. No
+candidate means no optional authoring work and no generated N/A artifact or paragraph. Environment
+recipes and eval packs are out of the default set until a later phase.
+_Avoid_: Attempt every kind per session, mandatory N/A resolution, agent-authored session package
 
 **Runbook**:
 A multi-session-capable artifact body that captures a reproducible fix recipe. V1 body shape is the
