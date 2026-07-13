@@ -723,6 +723,7 @@ export function App() {
           actionBusy={workbench.actionBusy}
           actionError={workbench.actionError}
           activity={workbench.activity}
+          candidates={workbench.candidates}
           canRun={workbench.canRun}
           clearActionFeedback={workbench.clearActionFeedback}
           error={workbench.error}
@@ -740,6 +741,9 @@ export function App() {
           page={workbench.page}
           pageSize={workbench.pageSize}
           runAction={workbench.runAction}
+          selectCandidate={workbench.selectCandidate}
+          selectedCandidate={workbench.selectedCandidate}
+          selectedCandidateId={workbench.selectedCandidateId}
           selectedSessionIds={workbench.selectedSessionIds}
           sessions={workbench.sessions}
           setNotAddedOpen={workbench.setNotAddedOpen}

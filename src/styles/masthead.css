@@ -2073,6 +2073,7 @@ main {
 .workbench-panel > .workbench-toolbar,
 .workbench-panel > .workbench-error,
 .workbench-panel > .workbench-action-summary,
+.workbench-panel > .workbench-candidate-band,
 .workbench-panel > .workbench-not-added-panel {
   flex: 0 0 auto;
 }
@@ -2125,13 +2126,97 @@ main {
   font-size: 12px;
 }
 
-.workbench-copy-agent.app-button-primary {
+.workbench-author-candidate.app-button-primary {
   border-color: rgba(90, 190, 255, 0.55);
   box-shadow:
     0 0 0 1px rgba(46, 167, 255, 0.28),
     inset 0 1px 0 rgba(205, 232, 246, 0.08),
     inset 0 -1px 0 rgba(0, 0, 0, 0.42),
     0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.workbench-candidate-band {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.85fr) auto minmax(260px, 1.25fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 58px;
+  border: 1px solid rgba(92, 153, 187, 0.16);
+  border-radius: 5px;
+  background: #061925;
+  padding: 8px 10px;
+}
+
+.workbench-candidate-picker {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.workbench-candidate-picker select {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid rgba(92, 153, 187, 0.2);
+  border-radius: 3px;
+  background: var(--control-raised, #081d2a);
+  color: var(--body);
+  font-family: var(--font-sans, "IBM Plex Sans", sans-serif);
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+.workbench-candidate-facts {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+}
+
+.workbench-candidate-facts div {
+  display: grid;
+  gap: 4px;
+}
+
+.workbench-candidate-facts dt,
+.workbench-candidate-signal span {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.workbench-candidate-facts dd {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workbench-candidate-signal,
+.workbench-candidate-empty {
+  min-width: 0;
+  margin: 0;
+  color: var(--body);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workbench-candidate-signal {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.workbench-candidate-empty {
+  color: var(--mute);
 }
 
 .workbench-toolbar-divider {
@@ -3215,6 +3300,15 @@ main {
   .workbench-layout {
     grid-template-columns: 1fr;
   }
+
+  .workbench-candidate-band {
+    grid-template-columns: minmax(240px, 1fr) auto;
+  }
+
+  .workbench-candidate-signal,
+  .workbench-candidate-empty {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 920px) {
@@ -3249,6 +3343,16 @@ main {
   .workbench-error {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .workbench-candidate-band,
+  .workbench-candidate-picker,
+  .workbench-candidate-signal {
+    grid-template-columns: 1fr;
+  }
+
+  .workbench-candidate-facts {
+    justify-content: space-between;
   }
 }
 

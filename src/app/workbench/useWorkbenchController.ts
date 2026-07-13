@@ -1,6 +1,7 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getWorkbenchAuthoringCapabilities,
+  getWorkbenchArtifactCandidates,
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
@@ -10,6 +11,7 @@ import {
   postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
   postWorkbenchPublish,
+  postWorkbenchPublishCanonicalDossiers,
   postWorkbenchQuality,
   postWorkbenchReleaseClaim
 } from "../daemonClient";
@@ -19,7 +21,10 @@ import type {
   WorkbenchNotAddedSummaryDto,
   WorkbenchQueueSessionDto
 } from "../../shared/workbench";
-import type { WorkbenchAuthoringCapabilitiesDto } from "../../shared/workbenchAuthoring";
+import type {
+  WorkbenchArtifactCandidateDto,
+  WorkbenchAuthoringCapabilitiesDto
+} from "../../shared/workbenchAuthoring";
 import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
 
 const TRANSCRIPT_PERMISSION_ERROR =
@@ -44,14 +49,16 @@ export type WorkbenchActionKind =
   | "quality_fail"
   | "quality_precheck"
   | "publish"
+  | "publish_canonical_dossiers"
   | "claim"
   | "release"
-  | "copy_agent_prompt";
+  | "author_candidate";
 
 export type UseWorkbenchControllerResult = {
   actionBusy: boolean;
   actionError?: string;
   activity: WorkbenchActivityDto[];
+  candidates: WorkbenchArtifactCandidateDto[];
   canRun: (kind: WorkbenchActionKind) => boolean;
   clearActionFeedback: () => void;
   clearSelection: () => void;
@@ -70,6 +77,9 @@ export type UseWorkbenchControllerResult = {
   selectAll: () => Promise<void>;
   selectPage: () => void;
   selectedSessionIds: Set<string>;
+  selectedCandidate?: WorkbenchArtifactCandidateDto;
+  selectedCandidateId?: string;
+  selectCandidate: (candidateId: string) => void;
   sessions: WorkbenchQueueSessionDto[];
   setNotAddedOpen: (open: boolean) => void;
   setPage: (page: number) => void;
@@ -89,6 +99,8 @@ export function useWorkbenchController({
   const [notAddedSummary, setNotAddedSummary] = useState<WorkbenchNotAddedSummaryDto>();
   const [notAddedSessions, setNotAddedSessions] = useState<WorkbenchNotAddedSessionDto[]>([]);
   const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringCapabilitiesDto>();
+  const [candidates, setCandidates] = useState<WorkbenchArtifactCandidateDto[]>([]);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string>();
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState(() => new Set<string>());
   const [loading, setLoading] = useState(false);
@@ -111,7 +123,11 @@ export function useWorkbenchController({
       const capabilitiesPromise = getWorkbenchAuthoringCapabilities(activeProjectionUrl, {
         signal: options.signal
       }).catch(() => undefined);
-      const [response, activityResponse, notAdded, capabilities] = await Promise.all([
+      const candidatesPromise = getWorkbenchArtifactCandidates(activeProjectionUrl, {
+        limit: 100,
+        signal: options.signal
+      }).catch(() => ({ candidates: [] }));
+      const [response, activityResponse, notAdded, capabilities, candidatePage] = await Promise.all([
         getWorkbenchSessions(activeProjectionUrl, {
           limit: pageSize,
           offset: pageIndex * pageSize,
@@ -119,7 +135,8 @@ export function useWorkbenchController({
         }),
         getWorkbenchActivity(activeProjectionUrl, { limit: 30, signal: options.signal }),
         getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal }),
-        capabilitiesPromise
+        capabilitiesPromise,
+        candidatesPromise
       ]);
       if (options.signal?.aborted || requestId !== loadRequestId.current) return;
       setSessions(response.sessions);
@@ -127,6 +144,12 @@ export function useWorkbenchController({
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
       setAuthoringCapabilities(capabilities);
+      const nextCandidates = candidatePage?.candidates ?? [];
+      setCandidates(nextCandidates);
+      setSelectedCandidateId((current) => {
+        if (current && nextCandidates.some((candidate) => candidate.candidateId === current)) return current;
+        return nextCandidates.find(isActionableCandidate)?.candidateId ?? nextCandidates[0]?.candidateId;
+      });
       setSelectedSessionIds((current) => {
         const visibleIds = new Set(response.sessions.map((session) => session.sessionId));
         return new Set(Array.from(current).filter((sessionId) => visibleIds.has(sessionId)));
@@ -176,6 +199,8 @@ export function useWorkbenchController({
     if (!active || !isLive) {
       loadRequestId.current += 1;
       setAuthoringCapabilities(undefined);
+      setCandidates([]);
+      setSelectedCandidateId(undefined);
       return;
     }
     const controller = new AbortController();
@@ -189,35 +214,29 @@ export function useWorkbenchController({
     [selectedSessionIds, sessions]
   );
 
-  // Handoff text can lag a frame when selection is large — keep checkbox paint snappy.
-  const deferredSelectedSessionIds = useDeferredValue(selectedSessionIds);
-  const handoffSessions = useMemo(
-    () =>
-      deferredSelectedSessionIds === selectedSessionIds
-        ? selectedSessions
-        : sessions.filter((session) => deferredSelectedSessionIds.has(session.sessionId)),
-    [deferredSelectedSessionIds, selectedSessionIds, selectedSessions, sessions]
+  const selectedCandidate = useMemo(
+    () => candidates.find((candidate) => candidate.candidateId === selectedCandidateId),
+    [candidates, selectedCandidateId]
   );
 
   const handoffText = useMemo(
     () =>
-      authoringCapabilities
+      authoringCapabilities && selectedCandidate
         ? buildWorkbenchHandoff({
             authoringCommand: authoringCapabilities.command,
-            databaseId: authoringCapabilities.databaseId,
-            sessionIds: Array.from(selectedSessionIds),
-            sessions: handoffSessions
+            candidate: selectedCandidate,
+            databaseId: authoringCapabilities.databaseId
           })
         : "",
-    [authoringCapabilities, handoffSessions, selectedSessionIds]
+    [authoringCapabilities, selectedCandidate]
   );
 
   const canRun = useCallback(
     (kind: WorkbenchActionKind): boolean => {
       if (!isLive || actionBusy) return false;
       if (kind === "enroll_missing") return true;
-      if (kind === "copy_agent_prompt") {
-        return Boolean(authoringCapabilities) && selectedSessionIds.size > 0;
+      if (kind === "author_candidate") {
+        return Boolean(authoringCapabilities) && Boolean(selectedCandidate && isActionableCandidate(selectedCandidate));
       }
       if (selectedSessions.length === 0) return false;
 
@@ -246,6 +265,8 @@ export function useWorkbenchController({
           );
         case "publish":
           return selectedSessions.some((session) => session.nextAction === "publish");
+        case "publish_canonical_dossiers":
+          return selectedSessions.some((session) => session.sessionDossierStatus !== "satisfied");
         case "claim":
           return selectedSessions.some((session) => !session.activeClaim);
         case "release":
@@ -254,16 +275,16 @@ export function useWorkbenchController({
           return false;
       }
     },
-    [actionBusy, authoringCapabilities, isLive, selectedSessionIds, selectedSessions]
+    [actionBusy, authoringCapabilities, isLive, selectedCandidate, selectedSessions]
   );
 
   const runAction = useCallback(
     async (kind: WorkbenchActionKind) => {
       if (!canRun(kind)) return;
 
-      if (kind === "copy_agent_prompt") {
+      if (kind === "author_candidate") {
         setActionError(undefined);
-        setLastActionSummary("Agent prompt ready to copy");
+        setLastActionSummary("Candidate prompt ready to copy");
         return;
       }
 
@@ -285,7 +306,14 @@ export function useWorkbenchController({
         const ids = Array.from(selectedSessionIds);
         let acted = 0;
 
-        if (kind === "check_transcript") {
+        if (kind === "publish_canonical_dossiers") {
+          const result = await postWorkbenchPublishCanonicalDossiers(activeProjectionUrl, {
+            actorId: "workbench_ui",
+            sessionIds: ids
+          });
+          acted = result.receipt.sessionIds.length;
+          setLastActionSummary(`Published ${acted} canonical dossier${acted === 1 ? "" : "s"}`);
+        } else if (kind === "check_transcript") {
           for (const sessionId of ids) {
             await postWorkbenchCheckTranscript(activeProjectionUrl, sessionId);
             acted += 1;
@@ -405,10 +433,15 @@ export function useWorkbenchController({
     setSelectedSessionIds(new Set());
   }, []);
 
+  const selectCandidate = useCallback((candidateId: string) => {
+    setSelectedCandidateId(candidateId);
+  }, []);
+
   return {
     actionBusy,
     actionError,
     activity,
+    candidates,
     canRun,
     clearActionFeedback,
     clearSelection,
@@ -429,12 +462,19 @@ export function useWorkbenchController({
     selectAll,
     selectPage,
     selectedSessionIds,
+    selectCandidate,
+    selectedCandidate,
+    selectedCandidateId,
     sessions,
     setNotAddedOpen,
     setPage,
     total,
     toggleSession
   };
+}
+
+function isActionableCandidate(candidate: WorkbenchArtifactCandidateDto): boolean {
+  return candidate.status === "pending" || candidate.status === "claimed";
 }
 
 function formatActionError(error: unknown): string {

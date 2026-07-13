@@ -1,176 +1,102 @@
 import { expect, test } from "vitest";
-import type { WorkbenchQueueSessionDto } from "../../../shared/workbench";
+import type { WorkbenchArtifactCandidateDto } from "../../../shared/workbenchAuthoring";
 import { buildWorkbenchHandoff } from "../workbenchHandoff";
 
-const forbiddenTokenParts = [
-  ["mast", "head", "ctl"],
-  ["np", "m", " run"],
-  ["out", "put", ".json"],
-  ["sch", "ema", ".json"],
-  ["app", "ly", ".sh"]
-] as const;
-
-function forbiddenToken(index: number): string {
-  return forbiddenTokenParts[index].join("");
-}
-
-test("builds an agent handoff for automatic artifact completion without CLI recipes", () => {
+test("handoff asks for one reusable candidate artifact and never asks for dossier prose", () => {
   const text = buildWorkbenchHandoff({
     authoringCommand: "/home/test/.local/bin/mastheadctl",
-    databaseId: "database:test",
-    sessionIds: ["session:abc"],
-    sessions: [
-      session({
-        lifecycle: "ended",
-        lastActivityAt: "2026-07-08T12:00:00.000Z",
-        project: "Masthead",
-        runtime: "codex",
-        sessionId: "session:abc",
-        title: "Raw import session"
-      })
-    ]
+    candidate: candidate(),
+    databaseId: "database:test"
   });
 
-  expect(text.startsWith("Complete this Masthead Workbench authoring request end to end")).toBe(true);
-  expect(text).toContain("masthead.workbench.authoring/v1");
-  expect(text).toContain("complete this request end to end without pausing for routine approval");
-  expect(text).toContain("use all available canonical redacted session evidence");
-  expect(text).toContain("evidence manifest");
-  expect(text).toContain("complete cursor pagination");
-  expect(text).not.toContain("evidence packet");
-  expect(text).toContain("produce the strongest justified artifacts");
-  expect(text).toContain('"sessionIds":["session:abc"]');
-  expect(text).toContain('"databaseId":"database:test"');
-  expect(text).toContain('"command":"/home/test/.local/bin/mastheadctl"');
-  expect(text).toContain("session package always");
-  expect(text).toContain("Logbook stores published artifacts only");
-  expect(text).toContain("Masthead is running locally");
-  expect(text).toContain("report results only after completion");
-  expect(text).toContain("session package");
-  expect(text).toContain("runbook");
-  expect(text).toContain("adr");
-  expect(text).toContain("incident timeline");
-  expect(text).toContain("strong join key");
-  expect(text).toContain("session:abc");
-  expect(text).toContain("Raw import session");
-  expect(text).toContain("Apply is not publish");
-  expect(text).not.toMatch(/permission/i);
-  expect(text).not.toContain("be conservative");
-  expect(text).not.toContain("--db");
-  expect(text).not.toContain("node dist/daemon");
+  expect(text).toContain("candidate:runbook:oauth");
+  expect(text).toContain("Author one reusable runbook");
+  expect(text).toContain("Repeated OAuth refresh failures were fixed and verified");
+  expect(text).toContain("2 provenance sessions");
+  expect(text).toContain("verbatim claim excerpt");
+  expect(text).not.toContain("read every item named by every session evidence manifest");
+  expect(text).not.toMatch(/session dossier/i);
+  expect(text).not.toContain("otherwise resolve them as N/A");
 });
 
-test("sanitizes forbidden substrings from selected session metadata in handoff text", () => {
+test("keeps candidate protocol mechanics in one exact machine request", () => {
   const text = buildWorkbenchHandoff({
     authoringCommand: "/home/test/.local/bin/mastheadctl",
-    databaseId: "database:test",
-    sessionIds: [`session:${forbiddenToken(0)}-${forbiddenToken(2)}`],
-    sessions: [
-      session({
-        lifecycle: "ended",
-        lastActivityAt: "2026-07-08T12:00:00.000Z",
-        project: `${forbiddenToken(3)} ${forbiddenToken(4)} follow-up`,
-        runtime: "codex",
-        sessionId: `session:${forbiddenToken(0)}-${forbiddenToken(2)}`,
-        title: `${forbiddenToken(1)} import review`
-      })
-    ]
+    candidate: candidate(),
+    databaseId: "database:test"
   });
+  const machineLine = text.split("\n").find((line) => line.startsWith("{"));
+  const request = JSON.parse(machineLine ?? "{}") as Record<string, unknown>;
 
-  expect(text).toContain("Selected session metadata available on the current Workbench page");
-  expect(text).toContain("Session:");
-  expect(text).toContain("project:");
-  const selectedSection = text.slice(text.indexOf("Selected session metadata"));
-  expect(selectedSection).not.toContain(forbiddenToken(1));
-  expect(selectedSection).not.toContain(forbiddenToken(2));
-  expect(selectedSection).not.toContain(forbiddenToken(3));
-  expect(selectedSection).not.toContain(forbiddenToken(4));
+  expect(request).toEqual({
+    protocol: "masthead.workbench.authoring/v1",
+    bundleVersion: "workbench-authoring-v2",
+    capability: "artifact_authoring",
+    databaseId: "database:test",
+    evidencePolicy: "candidate_scoped_canonical_evidence",
+    transport: "daemon_http",
+    candidateId: "candidate:runbook:oauth",
+    kind: "runbook",
+    evidenceRevision: "revision:oauth",
+    provenanceSessionIds: ["session:oauth-a", "session:oauth-b"],
+    authoringTool: {
+      command: "/home/test/.local/bin/mastheadctl",
+      kind: "cli"
+    }
+  });
+  const visible = text.slice(0, text.indexOf("Machine request:"));
+  expect(visible).not.toContain("/home/test/.local/bin");
+  expect(visible).not.toContain("protocol");
+  expect(visible).not.toContain("bundleVersion");
 });
 
-test("sanitizes forbidden substrings case-insensitively", () => {
+test("formats each candidate kind as one requested reusable artifact", () => {
+  for (const [kind, label] of [
+    ["runbook", "runbook"],
+    ["adr", "adr"],
+    ["incident_timeline", "incident timeline"]
+  ] as const) {
+    const text = buildWorkbenchHandoff({
+      authoringCommand: "/home/test/.local/bin/mastheadctl",
+      candidate: candidate({ kind }),
+      databaseId: "database:test"
+    });
+    expect(text).toContain(`Author one reusable ${label}`);
+  }
+});
+
+test("sanitizes untrusted candidate text in the visible request while preserving the exact machine identity", () => {
   const text = buildWorkbenchHandoff({
     authoringCommand: "/home/test/.local/bin/mastheadctl",
-    databaseId: "database:test",
-    sessionIds: ["session:abc"],
-    sessions: [
-      session({
-        lifecycle: "ended",
-        lastActivityAt: "2026-07-08T12:00:00.000Z",
-        project: "Masthead",
-        runtime: "codex",
-        sessionId: "session:abc",
-        title: `${forbiddenToken(1).toUpperCase()} import review`
-      })
-    ]
+    candidate: candidate({
+      candidateId: "candidate:npm run",
+      signalSummary: "Use schema.json then apply.sh"
+    }),
+    databaseId: "database:test"
   });
-  const selectedSection = text.slice(text.indexOf("Selected session metadata"));
-  expect(selectedSection).not.toMatch(new RegExp(forbiddenToken(1), "i"));
+  const visible = text.slice(0, text.indexOf("Machine request:"));
+  const machine = text.slice(text.indexOf("Machine request:"));
+
+  expect(visible).not.toContain("npm run");
+  expect(visible).not.toContain("schema.json");
+  expect(visible).not.toContain("apply.sh");
+  expect(machine).toContain('"candidateId":"candidate:npm run"');
 });
 
-test("uses sorted deduplicated authoritative IDs when metadata covers only some selections", () => {
-  const text = buildWorkbenchHandoff({
-    authoringCommand: "/home/test/.local/bin/mastheadctl",
-    databaseId: "database:test",
-    sessionIds: ["session:z", "session:a", "session:z"],
-    sessions: [
-      session({
-        lifecycle: "ended",
-        lastActivityAt: "2026-07-08T12:00:00.000Z",
-        runtime: "codex",
-        sessionId: "session:a",
-        title: "Visible metadata"
-      })
-    ]
-  });
-
-  expect(text).toContain('"sessionIds":["session:a","session:z"]');
-  expect(text).toContain("machine request sessionIds is authoritative");
-  expect(text).toContain("Visible metadata");
-  expect(text).not.toContain("Session: session:z");
-});
-
-test("omits stale or duplicate metadata rows outside the authoritative selection", () => {
-  const selected = session({
-    lifecycle: "ended",
-    lastActivityAt: "2026-07-08T12:00:00.000Z",
-    runtime: "codex",
-    sessionId: "session:b",
-    title: "Current selection"
-  });
-  const text = buildWorkbenchHandoff({
-    authoringCommand: "/home/test/.local/bin/mastheadctl",
-    databaseId: "database:test",
-    sessionIds: ["session:b"],
-    sessions: [
-      session({
-        lifecycle: "ended",
-        lastActivityAt: "2026-07-08T12:00:00.000Z",
-        runtime: "codex",
-        sessionId: "session:a",
-        title: "Stale deferred selection"
-      }),
-      selected,
-      selected
-    ]
-  });
-
-  const metadata = text.slice(text.indexOf("Selected session metadata"));
-  expect(metadata).not.toContain("Stale deferred selection");
-  expect(metadata.match(/Current selection/g)).toHaveLength(1);
-});
-
-function session(input: Partial<WorkbenchQueueSessionDto> & Pick<WorkbenchQueueSessionDto, "sessionId" | "title" | "runtime" | "lifecycle" | "lastActivityAt">): WorkbenchQueueSessionDto {
+function candidate(overrides: Partial<WorkbenchArtifactCandidateDto> = {}): WorkbenchArtifactCandidateDto {
   return {
-    bugFixTraceStatus: "unknown",
-    nextAction: "check_transcript",
-    publicationStatus: "publish_path",
-    qualityStatus: "unchecked",
-    runbookStatus: "unknown",
-    adrStatus: "unknown",
-    incidentTimelineStatus: "unknown",
-    sessionDossierStatus: "missing",
-    sessionEnrichmentStatus: "missing",
-    transcriptStatus: "unchecked",
-    ...input
+    candidateId: "candidate:runbook:oauth",
+    createdAt: "2026-07-12T12:00:00.000Z",
+    evidenceRevision: "revision:oauth",
+    kind: "runbook",
+    origin: "automatic",
+    provenanceSessionIds: ["session:oauth-a", "session:oauth-b"],
+    seedSessionId: "session:oauth-a",
+    signalEvidenceRefs: ["evidence:problem", "evidence:change", "evidence:verification"],
+    signalSummary: "Repeated OAuth refresh failures were fixed and verified",
+    signatureKey: "oauth-refresh-failure",
+    status: "pending",
+    updatedAt: "2026-07-12T12:00:00.000Z",
+    ...overrides
   };
 }

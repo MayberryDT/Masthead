@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   getWorkbenchMissingSessions,
   getWorkbenchAuthoringCapabilities,
+  getWorkbenchArtifactCandidates,
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
@@ -23,6 +24,7 @@ import {
   postWorkbenchImportTranscript,
   postWorkbenchImportTranscriptPreview,
   postWorkbenchPublish,
+  postWorkbenchPublishCanonicalDossiers,
   postWorkbenchQuality,
   postWorkbenchReleaseClaim,
   previewSourcesImport,
@@ -370,12 +372,17 @@ describe("daemon client review dispositions", () => {
 
   test("loads authoring capabilities relative to the active connector", async () => {
     const capabilities = {
-      bundleVersion: "workbench-authoring-v1",
+      bundleVersion: "workbench-authoring-v2",
       capability: "artifact_authoring",
       command: "/home/test/.local/bin/mastheadctl",
       databaseId: "database:test",
-      evidencePolicy: "all_canonical_redacted_evidence",
-      operations: ["open", "status", "evidence", "submit", "finish"],
+      evidencePolicy: "candidate_scoped_canonical_evidence",
+      evidenceRequirements: {
+        adr: ["context", "decision", "alternatives"],
+        incident_timeline: ["symptom", "ordered_events", "remediation"],
+        runbook: ["problem", "change", "verification"]
+      },
+      operations: ["candidates", "open", "status", "evidence", "submit", "finish"],
       protocol: "masthead.workbench.authoring/v1",
       transport: "daemon_http"
     };
@@ -388,6 +395,38 @@ describe("daemon client review dispositions", () => {
       "http://127.0.0.1:17374/workbench/authoring/capabilities",
       expect.objectContaining({ headers: { accept: "application/json" } })
     );
+  });
+
+  test("loads a bounded artifact candidate page from the active connector", async () => {
+    const page = { candidates: [], nextCursor: "cursor:next" };
+    vi.stubGlobal("fetch", vi.fn(async () => response(page)));
+
+    await expect(
+      getWorkbenchArtifactCandidates("http://127.0.0.1:17374/projection?stale=true", {
+        kind: "runbook",
+        limit: 25,
+        status: "pending"
+      })
+    ).resolves.toEqual(page);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:17374/workbench/authoring/candidates?kind=runbook&limit=25&status=pending",
+      expect.objectContaining({ headers: { accept: "application/json" } })
+    );
+  });
+
+  test("publishes canonical dossiers with one daemon-owned batch request", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true, receipt: { artifactIds: [], sessionIds: [] } })));
+
+    await postWorkbenchPublishCanonicalDossiers("http://127.0.0.1:17373/projection", {
+      actorId: "workbench_ui",
+      sessionIds: ["session:1", "session:2"]
+    });
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/workbench/dossiers/publish", {
+      body: JSON.stringify({ actorId: "workbench_ui", sessionIds: ["session:1", "session:2"] }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined
+    });
   });
 
   test("rejects authoring capabilities that do not identify an absolute installed command", async () => {

@@ -26,6 +26,9 @@ import type {
 } from "../shared/workbench";
 import {
   isWorkbenchAuthoringCapabilitiesDto,
+  type WorkbenchArtifactCandidatePageDto,
+  type WorkbenchArtifactCandidateStatus,
+  type WorkbenchAutomaticArtifactKind,
   type WorkbenchAuthoringCapabilitiesDto
 } from "../shared/workbenchAuthoring";
 
@@ -1300,6 +1303,28 @@ export async function getWorkbenchAuthoringCapabilities(
     );
   }
   return capabilities;
+}
+
+export async function getWorkbenchArtifactCandidates(
+  activeProjectionUrl: string,
+  options: {
+    cursor?: string;
+    kind?: WorkbenchAutomaticArtifactKind;
+    limit?: number;
+    signal?: AbortSignal;
+    status?: WorkbenchArtifactCandidateStatus;
+  } = {}
+): Promise<WorkbenchArtifactCandidatePageDto> {
+  return getJson<WorkbenchArtifactCandidatePageDto>(activeProjectionUrl, "/workbench/authoring/candidates", {
+    label: "workbench artifact candidates",
+    query: {
+      cursor: options.cursor,
+      kind: options.kind,
+      limit: options.limit,
+      status: options.status
+    },
+    signal: options.signal
+  });
 }
 
 export async function getWorkbenchActivity(

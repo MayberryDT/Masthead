@@ -1,4 +1,4 @@
-import type { WorkbenchQueueSessionDto } from "../../shared/workbench";
+import type { WorkbenchArtifactCandidateDto } from "../../shared/workbenchAuthoring";
 
 const FORBIDDEN_HANDOFF_SUBSTRINGS = [
   ["mast", "head", "ctl"].join(""),
@@ -21,68 +21,40 @@ function escapeRegExp(value: string): string {
 
 export function buildWorkbenchHandoff(input: {
   authoringCommand: string;
+  candidate: WorkbenchArtifactCandidateDto;
   databaseId: string;
-  sessionIds: string[];
-  sessions: WorkbenchQueueSessionDto[];
 }): string {
-  const sessionIds = [...new Set(input.sessionIds)].sort();
-  const authoritativeIds = new Set(sessionIds);
-  const metadataIds = new Set<string>();
-  const rows = input.sessions.filter((session) => {
-    if (!authoritativeIds.has(session.sessionId) || metadataIds.has(session.sessionId)) return false;
-    metadataIds.add(session.sessionId);
-    return true;
-  }).map((session) => {
-    const title = sanitizeWorkbenchVisibleText(session.title);
-    const sessionId = sanitizeWorkbenchVisibleText(session.sessionId);
-    const runtime = sanitizeWorkbenchVisibleText(session.runtime);
-    const lifecycle = sanitizeWorkbenchVisibleText(session.lifecycle);
-    const lastActivityAt = sanitizeWorkbenchVisibleText(session.lastActivityAt);
-    const project = session.project ? `; project: ${sanitizeWorkbenchVisibleText(session.project)}` : "";
-    const nextAction = sanitizeWorkbenchVisibleText(session.nextAction);
-    const resolution = sanitizeWorkbenchVisibleText(session.resolutionStatus ?? "in_progress");
-    return `- Session: ${title} (id: ${sessionId}; runtime: ${runtime}${project}; lifecycle: ${lifecycle}; last activity: ${lastActivityAt}; next action: ${nextAction}; resolution: ${resolution}; transcript: ${sanitizeWorkbenchVisibleText(session.transcriptStatus)}; quality: ${sanitizeWorkbenchVisibleText(session.qualityStatus)}; enrichment: ${sanitizeWorkbenchVisibleText(session.sessionEnrichmentStatus)}; dossier: ${sanitizeWorkbenchVisibleText(session.sessionDossierStatus)}; runbook: ${sanitizeWorkbenchVisibleText(session.runbookStatus ?? session.bugFixTraceStatus)}; adr: ${sanitizeWorkbenchVisibleText(session.adrStatus ?? "unknown")}; incident timeline: ${sanitizeWorkbenchVisibleText(session.incidentTimelineStatus ?? "unknown")})`;
-  });
-  const request = {
+  const candidate = input.candidate;
+  const provenanceCount = candidate.provenanceSessionIds.length;
+  const machineRequest = {
     protocol: "masthead.workbench.authoring/v1",
+    bundleVersion: "workbench-authoring-v2",
+    capability: "artifact_authoring",
     databaseId: input.databaseId,
-    completion: "publish_and_resolve",
-    evidencePolicy: "all_canonical_redacted_evidence",
+    evidencePolicy: "candidate_scoped_canonical_evidence",
+    transport: "daemon_http",
+    candidateId: candidate.candidateId,
+    kind: candidate.kind,
+    evidenceRevision: candidate.evidenceRevision,
+    provenanceSessionIds: candidate.provenanceSessionIds,
     authoringTool: {
-      kind: "cli",
       command: input.authoringCommand,
-      capability: "artifact_authoring"
-    },
-    sessionIds
+      kind: "cli"
+    }
   };
 
   return [
-    "Complete this Masthead Workbench authoring request end to end. This is an unattended automatic handoff: complete this request end to end without pausing for routine approval or asking the user to perform intermediate steps.",
-    "Masthead is running locally. Use the installed Masthead Workbench authoring interface identified below and verify its artifact_authoring capability and exact database identity before opening the selected sessions.",
-    "For this request, use all available canonical redacted session evidence by reading every item named by every session evidence manifest through complete cursor pagination in either order, then produce the strongest justified artifacts while keeping every existing evidence, schema, provenance, and publication quality gate intact.",
-    "Resolve deterministic validation findings yourself: revise and resubmit until the bundle is ready, then finish publication and resolve every automatic artifact kind; report results only after completion.",
-    "The session package always resolves through publication. Publish runbook, ADR, and incident timeline when evidence supports them; otherwise resolve them as N/A or an existing published contribution. Sessions stay the capture and pipeline unit; Logbook stores published artifacts only.",
+    `Author one reusable ${formatKind(candidate.kind)} from this nominated Masthead candidate.`,
+    `Candidate: ${sanitizeWorkbenchVisibleText(candidate.candidateId)} · ${provenanceCount} provenance ${provenanceCount === 1 ? "session" : "sessions"}.`,
+    `Positive signals: ${sanitizeWorkbenchVisibleText(candidate.signalSummary)}`,
+    "Ground every substantive claim in the candidate's canonical redacted evidence. Every claim must include its evidence reference and a verbatim claim excerpt from that evidence.",
+    "Revise deterministic validation findings until the artifact is accepted, then finish publication and report the completed artifact.",
     "",
     "Machine request:",
-    JSON.stringify(request),
-    "",
-    "Artifact kinds:",
-    "- session package: enrichment capsule fields + session dossier (exactly one session provenance).",
-    "- runbook: multi-session-capable reusable fix recipe with problem signature, repro, dead ends, fix steps, validation.",
-    "- adr: multi-session-capable decision record (context, decision, alternatives, consequences).",
-    "- incident timeline: multi-session-capable ordered failure narrative with evidence refs.",
-    "",
-    "Rules:",
-    "- Apply is not publish. Fail closed on invalid schema, unknown evidence refs, or weak multi-session joins.",
-    "- Cite only evidence named by the authoring run's evidence manifests.",
-    "- Do not invent files, commands, outcomes, or root causes.",
-    "- Do not copy secrets into artifact bodies.",
-    "- High-confidence runbook fix claims need supporting validation checks.",
-    "- Prefer strong single-session artifacts over weak multi-session merges.",
-    "- Expand beyond the selected sessions only with a strong join key; record the join rationale for every multi-session artifact.",
-    "- A session package is resolved only after publication; runbook, ADR, and incident timeline each resolve through publication, N/A, or an existing published contribution.",
-    "",
-    "Selected session metadata available on the current Workbench page (machine request sessionIds is authoritative):",
-    ...rows
+    JSON.stringify(machineRequest)
   ].join("\n");
+}
+
+function formatKind(kind: WorkbenchArtifactCandidateDto["kind"]): string {
+  return kind.replaceAll("_", " ");
 }
