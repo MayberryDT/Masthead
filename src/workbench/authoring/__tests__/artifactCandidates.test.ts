@@ -848,6 +848,69 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("refills a capped signature group from more than one hundred stored members without rereading them", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    seedAdditionalStrongSignatureSessions(db, 99);
+    let cursor: string | undefined;
+    do {
+      const page = discoverArtifactCandidatePage(db, {
+        ...(cursor ? { afterSessionId: cursor } : {}),
+        limit: 100
+      });
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    const original = listWorkbenchArtifactCandidates(db).find(
+      (candidate) =>
+        candidate.signatureKey === "error:ssh:codex-command-not-found" && candidate.status === "pending"
+    )!;
+    const memberRows = db
+      .prepare(
+        `SELECT session_id AS sessionId
+         FROM workbench_artifact_candidate_signature_members
+         WHERE kind = 'runbook' AND signature_key = 'error:ssh:codex-command-not-found'
+         ORDER BY session_id`
+      )
+      .all() as Array<{ sessionId: string }>;
+    expect(memberRows).toHaveLength(101);
+
+    const invalidatedSessionId = original.provenanceSessionIds[0]!;
+    const priorOverflowSessionId = memberRows[12]!.sessionId;
+    db.prepare("DELETE FROM checkpoints WHERE session_id = ?").run(invalidatedSessionId);
+    db.prepare("DELETE FROM tool_results WHERE session_id = ? AND status = 'succeeded'").run(
+      invalidatedSessionId
+    );
+
+    // These sessions are deliberately outside the one-row scan below. Their persisted
+    // eligibility snapshot must be sufficient; reconciliation must not inspect their
+    // canonical transcript rows while processing the requested session.
+    const unrequested = memberRows
+      .map((row) => row.sessionId)
+      .filter((sessionId) => sessionId !== invalidatedSessionId);
+    const placeholders = unrequested.map(() => "?").join(", ");
+    db.prepare(`DELETE FROM checkpoints WHERE session_id IN (${placeholders})`).run(...unrequested);
+    db.prepare(`DELETE FROM file_effects WHERE session_id IN (${placeholders})`).run(...unrequested);
+    db.prepare(`DELETE FROM tool_results WHERE session_id IN (${placeholders})`).run(...unrequested);
+    db.prepare(`DELETE FROM tool_calls WHERE session_id IN (${placeholders})`).run(...unrequested);
+
+    const refillPage = discoverArtifactCandidatePage(db, {
+      afterSessionId: "session:repeated-error:0",
+      limit: 1
+    });
+    const refilled = listWorkbenchArtifactCandidates(db).find(
+      (candidate) =>
+        candidate.signatureKey === "error:ssh:codex-command-not-found" && candidate.status === "pending"
+    )!;
+
+    expect(refillPage.scannedSessionIds).toEqual([invalidatedSessionId]);
+    expect(getWorkbenchArtifactCandidate(db, original.candidateId)?.status).toBe("superseded");
+    expect(refilled.provenanceSessionIds).toHaveLength(12);
+    expect(refilled.provenanceSessionIds).toContain(priorOverflowSessionId);
+    expect(refilled.provenanceSessionIds).not.toContain(invalidatedSessionId);
+    db.close();
+  });
+
   test("retains separate incident signature triggers from every joined provenance session", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);

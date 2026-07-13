@@ -2,7 +2,7 @@ import { stableRecordId } from "../../daemon/identity.ts";
 import {
   hasWorkbenchArtifactCandidateScan,
   getWorkbenchArtifactCandidate,
-  listWorkbenchArtifactSignatureMemberSessionIds,
+  listWorkbenchArtifactSignatureMembersForIdentities,
   listWorkbenchArtifactSignatureMembersForSessions,
   listWorkbenchArtifactCandidates,
   recordWorkbenchArtifactCandidateScan,
@@ -259,7 +259,7 @@ function reconcileArtifactCandidates(
   const previousSignatureMembers = listWorkbenchArtifactSignatureMembersForSessions(db, requested);
   const preliminaryIndividual = individualCandidateSeedsForSessions(db, requested);
   const preliminarySignatureMembers = signatureMembersFromSeeds(preliminaryIndividual);
-  const preliminarySeeds = candidateSeedsForSessions(db, requested);
+  const preliminarySeeds = groupCandidateSeeds(preliminaryIndividual);
   const allCandidates = listWorkbenchArtifactCandidates(db);
   const current = allCandidates.filter((candidate) =>
     candidate.status === "pending" || candidate.status === "claimed" || candidate.status === "published"
@@ -309,7 +309,7 @@ function reconcileArtifactCandidates(
   if (acknowledgedSessionIds.length === 0) return { acknowledgedSessionIds, candidates: [] };
 
   const activeIndividual = individualCandidateSeedsForSessions(db, acknowledgedSessionIds);
-  const activePreliminary = groupCandidateSeeds(db, activeIndividual);
+  const activePreliminary = groupCandidateSeeds(activeIndividual);
   const affectedSignatureIdentities = uniqueSignatureIdentities([
     ...previousSignatureMembers.filter((member) => acknowledgedSessionIds.includes(member.sessionId)),
     ...signatureMembersFromSeeds(activeIndividual)
@@ -318,7 +318,7 @@ function reconcileArtifactCandidates(
     sessionIds: acknowledgedSessionIds,
     members: signatureMembersFromSeeds(activeIndividual)
   });
-  const signatureMemberSessionIds = listWorkbenchArtifactSignatureMemberSessionIds(
+  const storedSignatureMembers = listWorkbenchArtifactSignatureMembersForIdentities(
     db,
     affectedSignatureIdentities
   );
@@ -334,12 +334,10 @@ function reconcileArtifactCandidates(
             )
         ))
   );
-  const reconciliationSessionIds = normalizedStrings([
-    ...acknowledgedSessionIds,
-    ...relevantMutable.flatMap((candidate) => candidate.provenanceSessionIds),
-    ...signatureMemberSessionIds
-  ]);
-  const finalSeeds = candidateSeedsForSessions(db, reconciliationSessionIds);
+  const finalSeeds = [
+    ...activeIndividual.filter((seed) => !seed.signatureKey),
+    ...signatureCandidateSeeds(storedSignatureMembers)
+  ].sort(compareSeeds);
   for (const candidate of relevantMutable) {
     if (
       finalSeeds.some(
@@ -376,15 +374,11 @@ function candidateMatchesSeedRevision(candidate: WorkbenchArtifactCandidate, see
   );
 }
 
-function candidateSeedsForSessions(db: MastheadDatabase, sessionIds: string[]): CandidateSeed[] {
-  return groupCandidateSeeds(db, individualCandidateSeedsForSessions(db, sessionIds));
-}
-
 function individualCandidateSeedsForSessions(db: MastheadDatabase, sessionIds: string[]): CandidateSeed[] {
   return sessionIds.flatMap((sessionId) => seedsForSignals(db, extractSessionSignals(db, sessionId)));
 }
 
-function groupCandidateSeeds(db: MastheadDatabase, ungrouped: CandidateSeed[]): CandidateSeed[] {
+function groupCandidateSeeds(ungrouped: CandidateSeed[]): CandidateSeed[] {
   const groups = new Map<string, CandidateSeed[]>();
   for (const seed of ungrouped) {
     const key = `${seed.kind}\0${seed.signatureKey ?? `session:${seed.seedSessionId}`}`;
@@ -403,10 +397,55 @@ function groupCandidateSeeds(db: MastheadDatabase, ungrouped: CandidateSeed[]): 
         provenanceSessionIds,
         signalEvidenceRefs: normalizedStrings(selected.flatMap((seed) => seed.signalEvidenceRefs)),
         signalSummary: signalSummary(first.kind, provenanceSessionIds.length),
-        evidenceRevision: authoringEvidenceRevision(db, provenanceSessionIds)
+        evidenceRevision: first.signatureKey
+          ? signatureGroupEvidenceRevision(selected)
+          : first.evidenceRevision
       };
     })
     .sort(compareSeeds);
+}
+
+function signatureCandidateSeeds(members: WorkbenchArtifactSignatureMember[]): CandidateSeed[] {
+  const groups = new Map<string, WorkbenchArtifactSignatureMember[]>();
+  for (const member of members) {
+    const key = `${member.kind}\0${member.signatureKey}`;
+    groups.set(key, [...(groups.get(key) ?? []), member]);
+  }
+  return [...groups.values()]
+    .map((group) => {
+      const selected = [...group]
+        .sort((left, right) => left.sessionId.localeCompare(right.sessionId))
+        .slice(0, 12);
+      const first = selected[0]!;
+      const provenanceSessionIds = selected.map((member) => member.sessionId);
+      return {
+        kind: first.kind,
+        seedSessionId: provenanceSessionIds[0]!,
+        provenanceSessionIds,
+        signalEvidenceRefs: normalizedStrings(selected.flatMap((member) => member.signalEvidenceRefs)),
+        signalSummary: signalSummary(first.kind, provenanceSessionIds.length),
+        signatureKey: first.signatureKey,
+        evidenceRevision: signatureGroupEvidenceRevision(selected)
+      };
+    })
+    .sort(compareSeeds);
+}
+
+function signatureGroupEvidenceRevision(
+  members: Array<
+    { seedSessionId: string; evidenceRevision: string } | { sessionId: string; evidenceRevision: string }
+  >
+): string {
+  const selectedRevisions = members
+    .map((member) => ({
+      evidenceRevision: member.evidenceRevision,
+      sessionId: "sessionId" in member ? member.sessionId : member.seedSessionId
+    }))
+    .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
+  return stableRecordId(
+    "artifact-candidate-signature-revision",
+    selectedRevisions.flatMap((member) => [member.sessionId, member.evidenceRevision])
+  );
 }
 
 function uniqueSignatureIdentities(

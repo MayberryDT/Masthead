@@ -50,6 +50,14 @@ type CandidateRow = {
   updatedAt: string;
 };
 
+type SignatureMemberRow = {
+  kind: WorkbenchAutomaticKind;
+  signatureKey: string;
+  sessionId: string;
+  evidenceRevision: string;
+  signalEvidenceRefsJson: string;
+};
+
 const CANDIDATE_SELECT = `SELECT
   candidate_id AS candidateId,
   kind,
@@ -239,38 +247,38 @@ export function listWorkbenchArtifactSignatureMembersForSessions(
          WHERE session_id IN (${placeholders})
          ORDER BY kind, signature_key, session_id`
       )
-      .all(...normalized) as Array<{
-        kind: WorkbenchAutomaticKind;
-        signatureKey: string;
-        sessionId: string;
-        evidenceRevision: string;
-        signalEvidenceRefsJson: string;
-      }>
-  ).map((row) => ({
-    kind: row.kind,
-    signatureKey: row.signatureKey,
-    sessionId: row.sessionId,
-    evidenceRevision: row.evidenceRevision,
-    signalEvidenceRefs: JSON.parse(row.signalEvidenceRefsJson) as string[]
-  }));
+      .all(...normalized) as SignatureMemberRow[]
+  ).map(rowToSignatureMember);
 }
 
-export function listWorkbenchArtifactSignatureMemberSessionIds(
+export function listWorkbenchArtifactSignatureMembersForIdentities(
   db: MastheadDatabase,
   identities: Array<{ kind: WorkbenchAutomaticKind; signatureKey: string }>
-): string[] {
-  const sessionIds = identities.flatMap((identity) =>
+): WorkbenchArtifactSignatureMember[] {
+  const uniqueIdentities = [
+    ...new Map(
+      identities.map((identity) => [`${identity.kind}\0${identity.signatureKey}`, identity])
+    ).values()
+  ].sort(
+    (left, right) =>
+      left.kind.localeCompare(right.kind) || left.signatureKey.localeCompare(right.signatureKey)
+  );
+  return uniqueIdentities.flatMap((identity) =>
     (
       db
         .prepare(
-          `SELECT session_id AS sessionId
+          `SELECT kind,
+            signature_key AS signatureKey,
+            session_id AS sessionId,
+            evidence_revision AS evidenceRevision,
+            signal_evidence_refs_json AS signalEvidenceRefsJson
            FROM workbench_artifact_candidate_signature_members
-           WHERE kind = ? AND signature_key = ?`
+           WHERE kind = ? AND signature_key = ?
+           ORDER BY session_id`
         )
-        .all(identity.kind, identity.signatureKey) as Array<{ sessionId: string }>
-    ).map((row) => row.sessionId)
+        .all(identity.kind, identity.signatureKey) as SignatureMemberRow[]
+    ).map(rowToSignatureMember)
   );
-  return normalizedStrings(sessionIds);
 }
 
 export function replaceWorkbenchArtifactSignatureMembersForSessions(
@@ -340,6 +348,16 @@ function rowToCandidate(row: CandidateRow): StoredWorkbenchArtifactCandidate {
       : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
+  };
+}
+
+function rowToSignatureMember(row: SignatureMemberRow): WorkbenchArtifactSignatureMember {
+  return {
+    kind: row.kind,
+    signatureKey: row.signatureKey,
+    sessionId: row.sessionId,
+    evidenceRevision: row.evidenceRevision,
+    signalEvidenceRefs: JSON.parse(row.signalEvidenceRefsJson) as string[]
   };
 }
 
