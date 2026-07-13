@@ -8,6 +8,7 @@ import {
   classifyProductionProcess,
   installProductionLauncher,
   productionHealthPollPolicy,
+  waitForProductionHealth,
   startProduction,
   stopProduction,
   transitionProduction
@@ -85,6 +86,21 @@ describe("production lifecycle launcher", () => {
       timeoutMs: 300_000
     });
     expect(productionHealthPollPolicy().maxAttempts).toBeGreaterThan(120);
+  });
+
+  test("enforces the five minute wall-clock deadline including request time and sleep", async () => {
+    let now = 0;
+    let requests = 0;
+    const sleeps: number[] = [];
+    await expect(waitForProductionHealth({ port: 17383 }, {
+      delay: async (milliseconds: number) => { sleeps.push(milliseconds); now += milliseconds; },
+      fetchHealth: async (_port: number, timeoutMs: number) => { requests += 1; now += timeoutMs; return undefined; },
+      now: () => now
+    })).rejects.toThrow("within 5 minutes");
+    expect(now).toBe(300_000);
+    expect(requests).toBe(300);
+    expect(sleeps).toHaveLength(300);
+    expect(Math.max(...sleeps)).toBe(250);
   });
 
   test("reads proc executable symlink text so deleted kernel identities remain observable", async () => {

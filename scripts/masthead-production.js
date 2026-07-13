@@ -659,20 +659,37 @@ function nulFields(buffer) {
   return buffer.toString("utf8").split("\0").filter(Boolean);
 }
 
-async function fetchHealth(port) {
-  return fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(750) })
+async function fetchHealth(port, timeoutMs = 750) {
+  const boundedTimeout = Math.max(1, Math.floor(timeoutMs));
+  return fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(boundedTimeout) })
     .then((response) => response.ok ? response.json() : undefined)
     .catch(() => undefined);
 }
 
 async function waitForHealth(config) {
+  return waitForProductionHealth(config);
+}
+
+export async function waitForProductionHealth(config, adapters = {}) {
   const policy = productionHealthPollPolicy();
-  for (let attempt = 0; attempt < policy.maxAttempts; attempt += 1) {
-    const health = await fetchHealth(config.port);
+  const now = adapters.now || monotonicMilliseconds;
+  const fetchAdapter = adapters.fetchHealth || fetchHealth;
+  const delayAdapter = adapters.delay || delay;
+  const deadline = now() + policy.timeoutMs;
+  while (now() < deadline) {
+    const requestBudget = Math.min(750, deadline - now());
+    if (requestBudget <= 0) break;
+    const health = await fetchAdapter(config.port, requestBudget);
     if (health) return health;
-    await delay(policy.intervalMs);
+    const sleepBudget = Math.min(policy.intervalMs, deadline - now());
+    if (sleepBudget <= 0) break;
+    await delayAdapter(sleepBudget);
   }
   throw new Error("Pinned Masthead production health did not become available within 5 minutes.");
+}
+
+function monotonicMilliseconds() {
+  return Number(process.hrtime.bigint() / 1_000_000n);
 }
 
 async function waitForExit(pid, starttime, timeoutMs) {

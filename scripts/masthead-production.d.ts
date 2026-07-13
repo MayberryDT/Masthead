@@ -20,6 +20,14 @@ export type ProductionProcessRecord = {
 
 export function acquireLifecycleLease(path: string): Promise<{ release(): Promise<void> }>;
 export function productionHealthPollPolicy(): { intervalMs: 250; maxAttempts: 1200; timeoutMs: 300000 };
+export function waitForProductionHealth(
+  config: { port: number },
+  adapters?: {
+    delay?: (milliseconds: number) => Promise<void>;
+    fetchHealth?: (port: number, timeoutMs: number) => Promise<unknown>;
+    now?: () => number;
+  }
+): Promise<unknown>;
 export function classifyProductionProcess(
   record: ProductionProcessRecord,
   config: ProductionConfig
