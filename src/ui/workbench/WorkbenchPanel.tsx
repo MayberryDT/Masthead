@@ -11,6 +11,8 @@ type WorkbenchPanelProps = Partial<
     | "actionBusy"
     | "actionError"
     | "activity"
+    | "candidateError"
+    | "candidateLoading"
     | "candidates"
     | "canRun"
     | "clearActionFeedback"
@@ -24,6 +26,7 @@ type WorkbenchPanelProps = Partial<
     | "page"
     | "pageSize"
     | "runAction"
+    | "retryCandidates"
     | "selectedSessionIds"
     | "selectedCandidate"
     | "selectedCandidateId"
@@ -93,6 +96,8 @@ export function WorkbenchPanel({
   actionBusy = false,
   actionError,
   activity = EMPTY_ACTIVITY,
+  candidateError,
+  candidateLoading = false,
   candidates = EMPTY_CANDIDATES,
   canRun = defaultCanRun,
   clearActionFeedback,
@@ -111,6 +116,7 @@ export function WorkbenchPanel({
   page = 0,
   pageSize = 100,
   runAction,
+  retryCandidates,
   selectCandidate,
   selectedCandidate,
   selectedCandidateId,
@@ -337,7 +343,7 @@ export function WorkbenchPanel({
           <span>Candidate</span>
           <select
             value={selectedCandidateId ?? ""}
-            disabled={candidates.length === 0 || actionBusy}
+            disabled={candidates.length === 0 || actionBusy || candidateLoading}
             onChange={(event) => selectCandidate?.(event.target.value)}
           >
             {candidates.length === 0 ? <option value="">No artifact candidates</option> : null}
@@ -372,9 +378,22 @@ export function WorkbenchPanel({
               {sanitizeWorkbenchVisibleText(selectedCandidate.signalSummary)}
             </p>
           </>
-        ) : (
+        ) : candidateLoading ? (
+          <p className="workbench-candidate-empty">Loading artifact candidates…</p>
+        ) : candidateError ? null : (
           <p className="workbench-candidate-empty">No positive-evidence artifact candidates are ready to author.</p>
         )}
+        {candidateError ? (
+          <div className="workbench-candidate-error" role="alert">
+            <div>
+              <p className="mono-label">Artifact candidates unavailable</p>
+              <p>{sanitizeWorkbenchVisibleText(candidateError)}</p>
+            </div>
+            <AppButton onClick={() => void retryCandidates?.()} disabled={candidateLoading}>
+              Retry candidates
+            </AppButton>
+          </div>
+        ) : null}
       </section>
 
       {toastMessage ? (

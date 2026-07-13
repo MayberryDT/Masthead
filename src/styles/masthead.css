@@ -2219,6 +2219,33 @@ main {
   color: var(--mute);
 }
 
+.workbench-candidate-error {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border-top: 1px solid rgba(255, 72, 62, 0.2);
+  padding-top: 8px;
+}
+
+.workbench-candidate-error .mono-label,
+.workbench-candidate-error p {
+  margin: 0;
+}
+
+.workbench-candidate-error .mono-label {
+  color: #ffaaa5;
+}
+
+.workbench-candidate-error p:not(.mono-label) {
+  margin-top: 3px;
+  color: var(--body);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .workbench-toolbar-divider {
   display: inline-block;
   width: 1px;
@@ -3343,6 +3370,11 @@ main {
   .workbench-error {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .workbench-candidate-error {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .workbench-candidate-band,

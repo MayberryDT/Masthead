@@ -93,6 +93,116 @@ afterEach(async () => {
 });
 
 describe("useWorkbenchController", () => {
+  test("loads every bounded pending and claimed candidate page without scanning published history", async () => {
+    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
+    daemonClientMocks.getWorkbenchArtifactCandidates.mockImplementation(async (_base: string, options: Record<string, unknown>) => {
+      if (options.status === "pending" && options.cursor === undefined) {
+        return { candidates: [artifactCandidate({ candidateId: "candidate:pending:1" })], nextCursor: "pending:2" };
+      }
+      if (options.status === "pending" && options.cursor === "pending:2") {
+        return { candidates: [artifactCandidate({ candidateId: "candidate:pending:2" })] };
+      }
+      if (options.status === "claimed" && options.cursor === undefined) {
+        return {
+          candidates: [artifactCandidate({ candidateId: "candidate:claimed:1", status: "claimed" })],
+          nextCursor: "claimed:2"
+        };
+      }
+      if (options.status === "claimed" && options.cursor === "claimed:2") {
+        return { candidates: [artifactCandidate({ candidateId: "candidate:claimed:2", status: "claimed" })] };
+      }
+      throw new Error(`unexpected candidate query ${JSON.stringify(options)}`);
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().candidates.length === 4);
+
+    expect(latest().candidates.map((candidate) => candidate.candidateId)).toEqual([
+      "candidate:pending:1",
+      "candidate:pending:2",
+      "candidate:claimed:1",
+      "candidate:claimed:2"
+    ]);
+    expect(daemonClientMocks.getWorkbenchArtifactCandidates).toHaveBeenCalledTimes(4);
+    expect(daemonClientMocks.getWorkbenchArtifactCandidates.mock.calls.every(([, options]) =>
+      options.status === "pending" || options.status === "claimed"
+    )).toBe(true);
+  });
+
+  test("fails visibly when the final permitted actionable page still has a next cursor", async () => {
+    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
+    daemonClientMocks.getWorkbenchArtifactCandidates.mockImplementation(async (_base: string, options: Record<string, unknown>) => ({
+      candidates: [artifactCandidate({
+        candidateId: `candidate:${String(options.status)}:${String(options.cursor ?? "first")}`,
+        status: options.status as "pending" | "claimed"
+      })],
+      nextCursor: `${String(options.status)}:${String(options.cursor ?? "first")}:next`
+    }));
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => Boolean(latest().candidateError));
+
+    expect(daemonClientMocks.getWorkbenchArtifactCandidates).toHaveBeenCalledTimes(10);
+    expect(latest().candidateError).toContain("Artifact candidate safety limit reached");
+    expect(latest().candidates).toEqual([]);
+  });
+
+  test("keeps sessions usable when candidate loading fails and retries candidates independently", async () => {
+    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
+    daemonClientMocks.getWorkbenchArtifactCandidates.mockRejectedValue(new Error("candidate API unavailable"));
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().candidateError === "candidate API unavailable");
+
+    expect(latest().sessions).toHaveLength(1);
+    expect(latest().error).toBeUndefined();
+    expect(latest().candidates).toEqual([]);
+    expect(latest().handoffText).toBe("");
+    expect(latest().canRun("author_candidate")).toBe(false);
+
+    daemonClientMocks.getWorkbenchArtifactCandidates.mockResolvedValue({ candidates: [artifactCandidate()] });
+    await act(async () => latest().retryCandidates());
+    await waitFor(() => latest().candidateError === undefined && latest().candidates.length === 1);
+
+    expect(latest().selectedCandidateId).toBe("candidate:runbook:oauth");
+    expect(latest().canRun("author_candidate")).toBe(true);
+    expect(getWorkbenchSessions).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps the current actionable candidates visible when a retry fails", async () => {
+    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().candidates.length === 1);
+
+    daemonClientMocks.getWorkbenchArtifactCandidates.mockRejectedValue(new Error("temporary candidate outage"));
+    await act(async () => latest().retryCandidates());
+    await waitFor(() => latest().candidateError === "temporary candidate outage");
+
+    expect(latest().candidates.map((candidate) => candidate.candidateId)).toEqual(["candidate:runbook:oauth"]);
+    expect(latest().selectedCandidateId).toBe("candidate:runbook:oauth");
+    expect(latest().canRun("author_candidate")).toBe(true);
+  });
+
+  test("replaces a stale candidate selection after a paged refresh", async () => {
+    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
+    daemonClientMocks.getWorkbenchArtifactCandidates
+      .mockResolvedValueOnce({ candidates: [artifactCandidate({ candidateId: "candidate:first" }), artifactCandidate({ candidateId: "candidate:stale" })] })
+      .mockResolvedValueOnce({ candidates: [] })
+      .mockResolvedValueOnce({ candidates: [artifactCandidate({ candidateId: "candidate:replacement" })] })
+      .mockResolvedValueOnce({ candidates: [] });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().candidates.length === 2);
+    await act(async () => latest().selectCandidate("candidate:stale"));
+    expect(latest().selectedCandidateId).toBe("candidate:stale");
+
+    await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 2 });
+    await waitFor(() => latest().selectedCandidateId === "candidate:replacement");
+
+    expect(latest().candidates.map((candidate) => candidate.candidateId)).toEqual(["candidate:replacement"]);
+    expect(machineRequest().candidateId).toBe("candidate:replacement");
+  });
+
   test("loads artifact candidates and authors exactly the selected candidate", async () => {
     mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
     daemonClientMocks.getWorkbenchArtifactCandidates.mockResolvedValue({
@@ -125,7 +235,7 @@ describe("useWorkbenchController", () => {
       kind: "adr",
       provenanceSessionIds: ["session:adr"],
       signalSummary: "A durable storage tradeoff was decided",
-      status: "published"
+      status: "claimed"
     });
     daemonClientMocks.getWorkbenchArtifactCandidates.mockResolvedValue({
       candidates: [adrCandidate, artifactCandidate()]
@@ -143,7 +253,7 @@ describe("useWorkbenchController", () => {
     expect(latest().selectedCandidate?.candidateId).toBe("candidate:adr:storage");
     expect(machineRequest().candidateId).toBe("candidate:adr:storage");
     expect(latest().handoffText).toContain("Author one reusable adr");
-    expect(latest().canRun("author_candidate")).toBe(false);
+    expect(latest().canRun("author_candidate")).toBe(true);
   });
 
   test("publishes canonical dossiers through the daemon without creating a candidate handoff", async () => {

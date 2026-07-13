@@ -32,6 +32,8 @@ const TRANSCRIPT_PERMISSION_ERROR =
 
 /** Page size for the package-path table. Large libraries paginate; never load thousands at once. */
 export const WORKBENCH_PAGE_SIZE = 100;
+const WORKBENCH_CANDIDATE_PAGE_SIZE = 100;
+const WORKBENCH_CANDIDATE_MAX_PAGES_PER_STATUS = 5;
 
 type UseWorkbenchControllerOptions = {
   activeProjectionUrl: string;
@@ -58,6 +60,8 @@ export type UseWorkbenchControllerResult = {
   actionBusy: boolean;
   actionError?: string;
   activity: WorkbenchActivityDto[];
+  candidateError?: string;
+  candidateLoading: boolean;
   candidates: WorkbenchArtifactCandidateDto[];
   canRun: (kind: WorkbenchActionKind) => boolean;
   clearActionFeedback: () => void;
@@ -73,6 +77,7 @@ export type UseWorkbenchControllerResult = {
   page: number;
   pageSize: number;
   retry: () => void;
+  retryCandidates: () => Promise<void>;
   runAction: (kind: WorkbenchActionKind) => Promise<void>;
   selectAll: () => Promise<void>;
   selectPage: () => void;
@@ -100,6 +105,8 @@ export function useWorkbenchController({
   const [notAddedSessions, setNotAddedSessions] = useState<WorkbenchNotAddedSessionDto[]>([]);
   const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringCapabilitiesDto>();
   const [candidates, setCandidates] = useState<WorkbenchArtifactCandidateDto[]>([]);
+  const [candidateError, setCandidateError] = useState<string>();
+  const [candidateLoading, setCandidateLoading] = useState(false);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>();
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState(() => new Set<string>());
@@ -112,6 +119,28 @@ export function useWorkbenchController({
   const [total, setTotal] = useState(0);
   const pageSize = WORKBENCH_PAGE_SIZE;
   const loadRequestId = useRef(0);
+  const candidateLoadRequestId = useRef(0);
+
+  const loadCandidates = useCallback(async (options: { signal?: AbortSignal } = {}) => {
+    const requestId = ++candidateLoadRequestId.current;
+    setCandidateLoading(true);
+    setCandidateError(undefined);
+    try {
+      const nextCandidates = await loadActionableCandidatePages(activeProjectionUrl, options.signal);
+      if (options.signal?.aborted || requestId !== candidateLoadRequestId.current) return;
+      setCandidates(nextCandidates);
+      setSelectedCandidateId((current) => {
+        if (current && nextCandidates.some((candidate) => candidate.candidateId === current)) return current;
+        return nextCandidates[0]?.candidateId;
+      });
+    } catch (loadError) {
+      if (!options.signal?.aborted && requestId === candidateLoadRequestId.current) {
+        setCandidateError(loadError instanceof Error ? loadError.message : String(loadError));
+      }
+    } finally {
+      if (!options.signal?.aborted && requestId === candidateLoadRequestId.current) setCandidateLoading(false);
+    }
+  }, [activeProjectionUrl]);
 
   const load = useCallback(async (options: { signal?: AbortSignal; page?: number } = {}) => {
     const requestId = ++loadRequestId.current;
@@ -123,11 +152,8 @@ export function useWorkbenchController({
       const capabilitiesPromise = getWorkbenchAuthoringCapabilities(activeProjectionUrl, {
         signal: options.signal
       }).catch(() => undefined);
-      const candidatesPromise = getWorkbenchArtifactCandidates(activeProjectionUrl, {
-        limit: 100,
-        signal: options.signal
-      }).catch(() => ({ candidates: [] }));
-      const [response, activityResponse, notAdded, capabilities, candidatePage] = await Promise.all([
+      void loadCandidates({ signal: options.signal });
+      const [response, activityResponse, notAdded, capabilities] = await Promise.all([
         getWorkbenchSessions(activeProjectionUrl, {
           limit: pageSize,
           offset: pageIndex * pageSize,
@@ -135,8 +161,7 @@ export function useWorkbenchController({
         }),
         getWorkbenchActivity(activeProjectionUrl, { limit: 30, signal: options.signal }),
         getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal }),
-        capabilitiesPromise,
-        candidatesPromise
+        capabilitiesPromise
       ]);
       if (options.signal?.aborted || requestId !== loadRequestId.current) return;
       setSessions(response.sessions);
@@ -144,12 +169,6 @@ export function useWorkbenchController({
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
       setAuthoringCapabilities(capabilities);
-      const nextCandidates = candidatePage?.candidates ?? [];
-      setCandidates(nextCandidates);
-      setSelectedCandidateId((current) => {
-        if (current && nextCandidates.some((candidate) => candidate.candidateId === current)) return current;
-        return nextCandidates.find(isActionableCandidate)?.candidateId ?? nextCandidates[0]?.candidateId;
-      });
       setSelectedSessionIds((current) => {
         const visibleIds = new Set(response.sessions.map((session) => session.sessionId));
         return new Set(Array.from(current).filter((sessionId) => visibleIds.has(sessionId)));
@@ -161,7 +180,7 @@ export function useWorkbenchController({
     } finally {
       if (!options.signal?.aborted && requestId === loadRequestId.current) setLoading(false);
     }
-  }, [activeProjectionUrl, page, pageSize]);
+  }, [activeProjectionUrl, loadCandidates, page, pageSize]);
 
   const setPage = useCallback(
     (nextPage: number) => {
@@ -198,8 +217,11 @@ export function useWorkbenchController({
   useEffect(() => {
     if (!active || !isLive) {
       loadRequestId.current += 1;
+      candidateLoadRequestId.current += 1;
       setAuthoringCapabilities(undefined);
       setCandidates([]);
+      setCandidateError(undefined);
+      setCandidateLoading(false);
       setSelectedCandidateId(undefined);
       return;
     }
@@ -388,6 +410,11 @@ export function useWorkbenchController({
     void load();
   }, [active, isLive, load]);
 
+  const retryCandidates = useCallback(async () => {
+    if (!active || !isLive) return;
+    await loadCandidates();
+  }, [active, isLive, loadCandidates]);
+
   const toggleSession = useCallback((sessionId: string) => {
     setSelectedSessionIds((current) => {
       const next = new Set(current);
@@ -441,6 +468,8 @@ export function useWorkbenchController({
     actionBusy,
     actionError,
     activity,
+    candidateError,
+    candidateLoading,
     candidates,
     canRun,
     clearActionFeedback,
@@ -458,6 +487,7 @@ export function useWorkbenchController({
     page,
     pageSize,
     retry,
+    retryCandidates,
     runAction,
     selectAll,
     selectPage,
@@ -475,6 +505,41 @@ export function useWorkbenchController({
 
 function isActionableCandidate(candidate: WorkbenchArtifactCandidateDto): boolean {
   return candidate.status === "pending" || candidate.status === "claimed";
+}
+
+async function loadActionableCandidatePages(
+  activeProjectionUrl: string,
+  signal?: AbortSignal
+): Promise<WorkbenchArtifactCandidateDto[]> {
+  const pages = await Promise.all(
+    (["pending", "claimed"] as const).map(async (status) => {
+      const candidates: WorkbenchArtifactCandidateDto[] = [];
+      const seenCursors = new Set<string>();
+      let cursor: string | undefined;
+      for (let pageIndex = 0; pageIndex < WORKBENCH_CANDIDATE_MAX_PAGES_PER_STATUS; pageIndex += 1) {
+        const page = await getWorkbenchArtifactCandidates(activeProjectionUrl, {
+          ...(cursor ? { cursor } : {}),
+          limit: WORKBENCH_CANDIDATE_PAGE_SIZE,
+          signal,
+          status
+        });
+        candidates.push(...page.candidates.filter((candidate) => candidate.status === status));
+        const nextCursor = page.nextCursor?.trim();
+        if (!nextCursor || seenCursors.has(nextCursor)) break;
+        if (pageIndex === WORKBENCH_CANDIDATE_MAX_PAGES_PER_STATUS - 1) {
+          throw new Error(
+            `Artifact candidate safety limit reached for ${status}; more than ${WORKBENCH_CANDIDATE_PAGE_SIZE * WORKBENCH_CANDIDATE_MAX_PAGES_PER_STATUS} actionable candidates are available.`
+          );
+        }
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+      }
+      return candidates;
+    })
+  );
+  const deduplicated = new Map<string, WorkbenchArtifactCandidateDto>();
+  for (const candidate of pages.flat()) deduplicated.set(candidate.candidateId, candidate);
+  return Array.from(deduplicated.values());
 }
 
 function formatActionError(error: unknown): string {

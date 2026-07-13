@@ -58,6 +58,27 @@ function allow(...kinds: WorkbenchActionKind[]) {
 }
 
 describe("WorkbenchPanel", () => {
+  test("shows a retryable candidate error instead of claiming the actionable queue is empty", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        candidateError="candidate API unavailable"
+        candidateLoading={false}
+        retryCandidates={async () => undefined}
+      />
+    );
+
+    expect(html).toContain("Artifact candidates unavailable");
+    expect(html).toContain("candidate API unavailable");
+    expect(html).toContain("Retry candidates");
+    expect(html).not.toContain("No positive-evidence artifact candidates are ready to author");
+  });
+
+  test("shows candidate loading without rendering a false empty state", () => {
+    const html = renderToStaticMarkup(<WorkbenchPanel candidateLoading />);
+
+    expect(html).toContain("Loading artifact candidates");
+    expect(html).not.toContain("No positive-evidence artifact candidates are ready to author");
+  });
   test("shows one selected candidate and keeps dossier publication separate from authoring", () => {
     const selectedCandidate = candidate();
     const html = renderToStaticMarkup(
