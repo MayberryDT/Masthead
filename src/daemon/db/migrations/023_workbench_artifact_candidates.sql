@@ -6,6 +6,8 @@ CREATE TABLE workbench_artifact_candidates (
   signal_evidence_refs_json TEXT NOT NULL,
   signal_summary TEXT NOT NULL,
   signature_key TEXT,
+  evidence_revision TEXT NOT NULL,
+  supersedes_candidate_id TEXT REFERENCES workbench_artifact_candidates(candidate_id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   dismissal_reason TEXT,
   dismissal_evidence_refs_json TEXT,
@@ -36,6 +38,9 @@ CREATE UNIQUE INDEX idx_workbench_candidates_current_session
 
 CREATE INDEX idx_workbench_candidates_status_updated
   ON workbench_artifact_candidates(status, updated_at DESC, candidate_id);
+
+CREATE INDEX idx_workbench_candidates_lineage
+  ON workbench_artifact_candidates(supersedes_candidate_id);
 
 CREATE TABLE workbench_artifact_candidate_scans (
   session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,

@@ -246,28 +246,29 @@ function toolCallSelectPart(sessionId: string, query?: string): TranscriptSelect
 }
 
 function toolResultSelectPart(sessionId: string, query?: string, preserveFullText = false): TranscriptSelectPart {
-  const clauses = ["session_id = ?"];
+  const clauses = ["tool_results.session_id = ?"];
   const params: Array<number | string> = [sessionId];
-  addTextQuery(clauses, params, query, "COALESCE(output_redacted, status)");
+  addTextQuery(clauses, params, query, "COALESCE(tool_results.output_redacted, tool_results.status)");
   return {
     params,
-    sql: `SELECT tool_result_id AS itemId,
-        session_id AS sessionId,
+    sql: `SELECT tool_results.tool_result_id AS itemId,
+        tool_results.session_id AS sessionId,
         'tool_result' AS kind,
         'tool' AS role,
-        status AS label,
-        ${preserveFullText ? "COALESCE(output_redacted, status, '')" : "SUBSTR(COALESCE(output_redacted, status, ''), 1, 801)"} AS text,
-        COALESCE(completed_at, '') AS observedAt,
-        source_ref_json AS sourceRefJson,
-        status,
-        exit_code AS exitCode,
-        NULL AS toolName,
+        tool_results.status AS label,
+        ${preserveFullText ? "COALESCE(tool_results.output_redacted, tool_results.status, '')" : "SUBSTR(COALESCE(tool_results.output_redacted, tool_results.status, ''), 1, 801)"} AS text,
+        COALESCE(tool_results.completed_at, '') AS observedAt,
+        tool_results.source_ref_json AS sourceRefJson,
+        tool_results.status,
+        tool_results.exit_code AS exitCode,
+        tool_calls.tool_name AS toolName,
         NULL AS argumentsRedactedJson,
         NULL AS detailsJson,
         NULL AS staged,
         NULL AS additions,
         NULL AS deletions
       FROM tool_results
+      JOIN tool_calls ON tool_calls.tool_call_id = tool_results.tool_call_id
       WHERE ${clauses.join(" AND ")}`
   };
 }

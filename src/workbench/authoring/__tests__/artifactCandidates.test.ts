@@ -19,6 +19,7 @@ import {
   discoverArtifactCandidates,
   proposeArtifactCandidate
 } from "../artifactCandidates.ts";
+import { getAuthoringEvidencePage } from "../evidenceCatalog.ts";
 import {
   corpusSessionIds,
   dossierOnlyQuestion,
@@ -58,6 +59,12 @@ describe("artifact candidate discovery", () => {
     );
 
     expect(repeated?.provenanceSessionIds).toEqual([repeatedErrorPartOne.id, repeatedErrorPartTwo.id]);
+    expect(repeated?.signalEvidenceRefs).toEqual(
+      expect.arrayContaining([
+        "tool_result:repeated-error:1:failure",
+        "tool_result:repeated-error:2:failure"
+      ])
+    );
     expect(
       candidates.some(
         (candidate) =>
@@ -295,6 +302,69 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("rejects non-positive proposal refs and requires every joined signature trigger", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    db.prepare(
+      `INSERT INTO messages (
+        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+      ) VALUES ('oauth:comment', 'session:oauth-fixed', 'assistant', 'Unrelated commentary.', 'hash',
+        '2026-07-01T12:01:30.000Z', '{}', 'authoritative')`
+    ).run();
+
+    expect(() =>
+      proposeArtifactCandidate(db, {
+        kind: "runbook",
+        provenanceSessionIds: ["session:oauth-fixed"],
+        seedSessionId: "session:oauth-fixed",
+        signalEvidenceRefs: [
+          "tool_result:oauth:failure",
+          "file:oauth:change",
+          "checkpoint:oauth:verified",
+          "message:oauth:comment"
+        ],
+        signalSummary: "An unrelated exact ref must not be persisted as positive support."
+      })
+    ).toThrow("candidate_proposal_signal_evidence_extra:message:oauth:comment");
+
+    expect(() =>
+      proposeArtifactCandidate(db, {
+        kind: "runbook",
+        provenanceSessionIds: [repeatedErrorPartOne.id, repeatedErrorPartTwo.id],
+        seedSessionId: repeatedErrorPartOne.id,
+        signalEvidenceRefs: [
+          "tool_result:repeated-error:1:failure",
+          "file:repeated-error:1:change",
+          "checkpoint:repeated-error:1:verified"
+        ],
+        signalSummary: "A join cannot omit the second provenance session's signature trigger.",
+        signatureKey: "error:ssh:codex-command-not-found"
+      })
+    ).toThrow("candidate_proposal_signature_not_in_evidence");
+
+    const joined = proposeArtifactCandidate(db, {
+      kind: "runbook",
+      provenanceSessionIds: [repeatedErrorPartOne.id, repeatedErrorPartTwo.id],
+      seedSessionId: repeatedErrorPartOne.id,
+      signalEvidenceRefs: [
+        "tool_result:repeated-error:1:failure",
+        "file:repeated-error:1:change",
+        "checkpoint:repeated-error:1:verified",
+        "tool_result:repeated-error:2:failure"
+      ],
+      signalSummary: "A verified chain is joined by the exact signature trigger from both sessions.",
+      signatureKey: "error:ssh:codex-command-not-found"
+    });
+    expect(joined.signalEvidenceRefs).toEqual([
+      "checkpoint:repeated-error:1:verified",
+      "file:repeated-error:1:change",
+      "tool_result:repeated-error:1:failure",
+      "tool_result:repeated-error:2:failure"
+    ]);
+
+    db.close();
+  });
+
   test("requires real passed-verification semantics and retains only the earning chain", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
@@ -311,6 +381,35 @@ describe("artifact candidate discovery", () => {
       "file:oauth:change",
       "tool_result:oauth:failure"
     ]);
+    db.close();
+  });
+
+  test("rejects failed-verification prose and successful file-read results even when they say tests passed", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    db.prepare(
+      "UPDATE tool_results SET output_redacted = ? WHERE session_id = ? AND status = 'succeeded'"
+    ).run("Verification tests failed; failure reproduced successfully", "session:migration-fixed");
+    expect(discoverArtifactCandidates(db, ["session:migration-fixed"])).toEqual([]);
+
+    db.prepare(
+      "UPDATE tool_results SET output_redacted = 'tests passed' WHERE session_id = ? AND status = 'succeeded'"
+    ).run("session:migration-fixed");
+    db.prepare(
+      "UPDATE tool_calls SET tool_name = 'read_file' WHERE session_id = ? AND tool_call_id LIKE '%verified%call'"
+    ).run("session:migration-fixed");
+    const verificationResult = getAuthoringEvidencePage(db, {
+      sessionId: "session:migration-fixed"
+    }).items.find((item) => item.itemId === "tool_result:migration:verified");
+
+    expect(verificationResult?.toolName).toBe("read_file");
+    expect(discoverArtifactCandidates(db, ["session:migration-fixed"])).toEqual([]);
+
+    db.prepare("UPDATE checkpoints SET summary = ? WHERE session_id = ?").run(
+      "Verification tests failed; failure reproduced successfully",
+      "session:oauth-fixed"
+    );
+    expect(discoverArtifactCandidates(db, ["session:oauth-fixed"])).toEqual([]);
     db.close();
   });
 
@@ -359,7 +458,7 @@ describe("artifact candidate discovery", () => {
         ],
         signalSummary: "Unrelated dossier evidence cannot pad valid runbook provenance."
       })
-    ).toThrow("candidate_proposal_unrelated_provenance:session:dossier-question");
+    ).toThrow("candidate_proposal_signal_evidence_extra:message:dossier-question:1");
     db.close();
   });
 
@@ -454,7 +553,7 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
-  test("preserves a published candidate as terminal when its source evidence changes", async () => {
+  test("supersedes a published candidate and creates a distinct pending revision when evidence changes", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
     const published = discoverArtifactCandidates(db, ["session:oauth-fixed"])[0]!;
@@ -466,8 +565,65 @@ describe("artifact candidate discovery", () => {
     const result = discoverArtifactCandidates(db, ["session:oauth-fixed"]);
 
     expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ candidateId: published.candidateId, status: "published" });
+    expect(getWorkbenchArtifactCandidate(db, published.candidateId)?.status).toBe("superseded");
+    expect(result[0]).toMatchObject({
+      status: "pending",
+      supersedesCandidateId: published.candidateId
+    });
+    expect(result[0]!.candidateId).not.toBe(published.candidateId);
+    expect(result[0]!.evidenceRevision).not.toBe(published.evidenceRevision);
+    db.close();
+  });
+
+  test("creates a lineage-distinct candidate for A to B to A evidence revisions", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const originalSummary = (
+      db.prepare("SELECT summary FROM checkpoints WHERE session_id = ?").get("session:oauth-fixed") as {
+        summary: string;
+      }
+    ).summary;
+    const revisionA = discoverArtifactCandidates(db, ["session:oauth-fixed"])[0]!;
+    const unchangedA = discoverArtifactCandidates(db, ["session:oauth-fixed"])[0]!;
+    expect(unchangedA.candidateId).toBe(revisionA.candidateId);
     expect(listWorkbenchArtifactCandidates(db)).toHaveLength(1);
+
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Revision B.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    const revisionB = discoverArtifactCandidates(db, ["session:oauth-fixed"])[0]!;
+    db.prepare("UPDATE checkpoints SET summary = ? WHERE session_id = ?").run(
+      originalSummary,
+      "session:oauth-fixed"
+    );
+    const revisionA2 = discoverArtifactCandidates(db, ["session:oauth-fixed"])[0]!;
+
+    expect(new Set([revisionA.candidateId, revisionB.candidateId, revisionA2.candidateId]).size).toBe(3);
+    expect(revisionB.supersedesCandidateId).toBe(revisionA.candidateId);
+    expect(revisionA2.supersedesCandidateId).toBe(revisionB.candidateId);
+    expect(revisionA2.evidenceRevision).toBe(revisionA.evidenceRevision);
+    expect(listWorkbenchArtifactCandidates(db).map((candidate) => candidate.status).sort()).toEqual([
+      "pending",
+      "superseded",
+      "superseded"
+    ]);
+    db.close();
+  });
+
+  test("caps a strong-signature group at twelve while acknowledging every scanned session", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const addedIds = seedAdditionalStrongSignatureSessions(db, 11);
+
+    const page = discoverArtifactCandidatePage(db, { limit: 100 });
+    const repeated = page.candidates.find(
+      (candidate) => candidate.signatureKey === "error:ssh:codex-command-not-found"
+    )!;
+    const allRepeatedIds = [repeatedErrorPartOne.id, repeatedErrorPartTwo.id, ...addedIds].sort();
+
+    expect(repeated.provenanceSessionIds).toEqual(allRepeatedIds.slice(0, 12));
+    expect(repeated.provenanceSessionIds).toHaveLength(12);
+    expect(page.scannedSessionIds).toEqual(expect.arrayContaining(allRepeatedIds));
     db.close();
   });
 
@@ -536,4 +692,67 @@ function seedToolHeavySessions(db: MastheadDatabase, sessionCount: number, tools
       }
     }
   });
+}
+
+function seedAdditionalStrongSignatureSessions(db: MastheadDatabase, count: number): string[] {
+  const sessionIds: string[] = [];
+  const insertSession = db.prepare(
+    `INSERT INTO sessions (
+      session_id, host_id, runtime_id, source_session_id, project_label, title, lifecycle,
+      started_at, last_activity_at, ended_at, source_confidence, created_at, updated_at
+    ) VALUES (?, 'host:corpus', 'runtime:corpus', ?, 'Masthead', ?, 'ended', ?, ?, ?, 'authoritative', ?, ?)`
+  );
+  const insertState = db.prepare(
+    "INSERT INTO workbench_session_state (session_id, publication_status) VALUES (?, 'publish_path')"
+  );
+  const insertCall = db.prepare(
+    "INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, 'exec_command', ?, '{}')"
+  );
+  const insertResult = db.prepare(
+    `INSERT INTO tool_results (
+      tool_result_id, tool_call_id, session_id, status, exit_code, output_redacted, completed_at, source_ref_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, '{}')`
+  );
+  const insertFile = db.prepare(
+    `INSERT INTO file_effects (
+      file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json
+    ) VALUES (?, ?, 'remote/path-bootstrap.sh', 'modified', ?, '{}')`
+  );
+  const insertCheckpoint = db.prepare(
+    `INSERT INTO checkpoints (
+      checkpoint_id, session_id, checkpoint_kind, summary, observed_at, source_ref_json
+    ) VALUES (?, ?, 'verification_passed', 'Remote verification check passed.', ?, '{}')`
+  );
+  withImmediateTransaction(db, () => {
+    for (let index = 0; index < count; index += 1) {
+      const suffix = String(index).padStart(2, "0");
+      const sessionId = `session:repeated-error:extra:${suffix}`;
+      sessionIds.push(sessionId);
+      insertSession.run(
+        sessionId,
+        sessionId,
+        `Repeated error ${suffix}`,
+        "2026-07-01T12:00:00.000Z",
+        "2026-07-01T12:02:00.000Z",
+        "2026-07-01T12:02:00.000Z",
+        "2026-07-01T12:00:00.000Z",
+        "2026-07-01T12:02:00.000Z"
+      );
+      insertState.run(sessionId);
+      const failureCall = `${sessionId}:failure:call`;
+      insertCall.run(failureCall, sessionId, "2026-07-01T12:00:00.000Z");
+      insertResult.run(
+        `${sessionId}:failure`,
+        failureCall,
+        sessionId,
+        "failed",
+        127,
+        "ssh: codex: command not found. ERROR_SIGNATURE: ssh codex command not found",
+        "2026-07-01T12:00:00.000Z"
+      );
+      insertFile.run(`${sessionId}:change`, sessionId, "2026-07-01T12:01:00.000Z");
+      insertCheckpoint.run(`${sessionId}:verified`, sessionId, "2026-07-01T12:02:00.000Z");
+    }
+  });
+  return sessionIds;
 }

@@ -123,6 +123,7 @@ describe("daemon database schema", () => {
         "idx_workbench_candidates_current_signature",
         "idx_workbench_candidates_current_session",
         "idx_workbench_candidates_status_updated",
+        "idx_workbench_candidates_lineage",
         "idx_workbench_candidate_scans_session_time"
       ])
     );
@@ -139,6 +140,25 @@ describe("daemon database schema", () => {
           notnull: 1
         }),
         expect.objectContaining({ dflt_value: null, name: "candidate_id" })
+      ])
+    );
+    const candidateColumns = db.prepare("PRAGMA table_info(workbench_artifact_candidates)").all() as Array<{
+      name: string;
+      notnull: number;
+    }>;
+    expect(candidateColumns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "evidence_revision", notnull: 1 }),
+        expect.objectContaining({ name: "supersedes_candidate_id" })
+      ])
+    );
+    expect(db.prepare("PRAGMA foreign_key_list(workbench_artifact_candidates)").all()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: "supersedes_candidate_id",
+          table: "workbench_artifact_candidates",
+          to: "candidate_id"
+        })
       ])
     );
     const frameColumns = db.prepare("PRAGMA table_info(board_headline_frames)").all() as Array<{ name: string }>;
@@ -172,8 +192,9 @@ describe("daemon database schema", () => {
     const insertCandidate = db.prepare(
       `INSERT INTO workbench_artifact_candidates (
         candidate_id, kind, seed_session_id, provenance_session_ids_json,
-        signal_evidence_refs_json, signal_summary, signature_key, status, created_at, updated_at
-      ) VALUES (?, 'runbook', 'session:candidate-schema', ?, ?, ?, ?, ?, ?, ?)`
+        signal_evidence_refs_json, signal_summary, signature_key, evidence_revision,
+        status, created_at, updated_at
+      ) VALUES (?, 'runbook', 'session:candidate-schema', ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const now = "2026-07-12T00:00:00.000Z";
     insertCandidate.run(
@@ -182,6 +203,7 @@ describe("daemon database schema", () => {
       JSON.stringify(["message:session:candidate-schema:message"]),
       "Grounded reusable procedure candidate.",
       "error:ssh:missing-command",
+      "sha256:candidate-one",
       "pending",
       now,
       now
@@ -194,6 +216,7 @@ describe("daemon database schema", () => {
         JSON.stringify(["message:session:candidate-schema:message"]),
         "Duplicate current signature.",
         "error:ssh:missing-command",
+        "sha256:candidate-duplicate",
         "claimed",
         now,
         now
@@ -222,6 +245,7 @@ describe("daemon database schema", () => {
       JSON.stringify(["message:session:candidate-schema:message"]),
       "Changed evidence creates a new current candidate.",
       "error:ssh:missing-command",
+      "sha256:candidate-replacement",
       "pending",
       now,
       now

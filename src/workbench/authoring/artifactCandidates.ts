@@ -1,6 +1,7 @@
 import { stableRecordId } from "../../daemon/identity.ts";
 import {
   hasWorkbenchArtifactCandidateScan,
+  getWorkbenchArtifactCandidate,
   listWorkbenchArtifactCandidates,
   recordWorkbenchArtifactCandidateScan,
   saveWorkbenchArtifactCandidate,
@@ -35,6 +36,7 @@ type SessionSignals = {
   alternativeRefs: SignalRef[];
   timelineEventRefs: SignalRef[];
   signatures: string[];
+  signatureRefs: Array<SignalRef & { signatureKey: string }>;
   evidenceRefs: Set<string>;
 };
 
@@ -140,20 +142,33 @@ export function proposeArtifactCandidate(
   if (!proposalHasKindSignals(proposal.kind, signals, selected)) {
     throw new Error("candidate_proposal_kind_signals_missing");
   }
+  const signatureKey = proposal.signatureKey
+    ? normalizeProposedSignature(proposal.signatureKey, signals, selected)
+    : undefined;
+  const allowedEvidenceRefs = proposalAllowedEvidenceRefs(proposal.kind, signals, selected, signatureKey);
+  const extraEvidenceRef = signalEvidenceRefs.find((ref) => !allowedEvidenceRefs.has(ref));
+  if (extraEvidenceRef) {
+    throw new Error(`candidate_proposal_signal_evidence_extra:${extraEvidenceRef}`);
+  }
   const unrelatedSession = signals.find(
-    (session) => !sessionContributesKindSignal(proposal.kind, session, selected)
+    (session) =>
+      !sessionContributesKindSignal(proposal.kind, session, selected) &&
+      !(
+        signatureKey &&
+        session.signatureRefs.some(
+          (entry) => entry.signatureKey === signatureKey && selected.has(entry.ref)
+        )
+      )
   );
   if (unrelatedSession) {
     throw new Error(`candidate_proposal_unrelated_provenance:${unrelatedSession.sessionId}`);
   }
-  const signatureKey = proposal.signatureKey
-    ? normalizeProposedSignature(proposal.signatureKey, signals)
-    : undefined;
+  const evidenceRevision = authoringEvidenceRevision(db, provenanceSessionIds);
   return saveWorkbenchArtifactCandidate(db, {
     candidateId: candidateId(
       proposal.kind,
       proposal.seedSessionId,
-      authoringEvidenceRevision(db, provenanceSessionIds),
+      evidenceRevision,
       signatureKey
     ),
     kind: proposal.kind,
@@ -161,8 +176,41 @@ export function proposeArtifactCandidate(
     seedSessionId: proposal.seedSessionId,
     signalEvidenceRefs,
     signalSummary: proposal.signalSummary,
+    evidenceRevision,
     ...(signatureKey ? { signatureKey } : {})
   });
+}
+
+function proposalAllowedEvidenceRefs(
+  kind: WorkbenchAutomaticKind,
+  signals: SessionSignals[],
+  selected: Set<string>,
+  signatureKey?: string
+): Set<string> {
+  const allowed = new Set<string>();
+  if (kind === "runbook") {
+    for (const entry of runbookChain(signals, selected) ?? []) allowed.add(entry.ref);
+  } else if (kind === "adr") {
+    for (const entry of signals.flatMap((signal) => [
+      ...signal.explicitDecisionRefs,
+      ...signal.alternativeRefs
+    ])) {
+      if (selected.has(entry.ref)) allowed.add(entry.ref);
+    }
+  } else {
+    for (const entry of signals.flatMap((signal) => [
+      ...signal.failureRefs,
+      ...signal.timelineEventRefs
+    ])) {
+      if (selected.has(entry.ref)) allowed.add(entry.ref);
+    }
+  }
+  if (signatureKey) {
+    for (const entry of signals.flatMap((signal) => signal.signatureRefs)) {
+      if (entry.signatureKey === signatureKey) allowed.add(entry.ref);
+    }
+  }
+  return allowed;
 }
 
 function reconcileArtifactCandidates(
@@ -173,7 +221,8 @@ function reconcileArtifactCandidates(
 
   const requested = normalizedStrings(requestedSessionIds);
   const preliminarySeeds = candidateSeedsForSessions(db, requested);
-  const current = listWorkbenchArtifactCandidates(db).filter((candidate) =>
+  const allCandidates = listWorkbenchArtifactCandidates(db);
+  const current = allCandidates.filter((candidate) =>
     candidate.status === "pending" || candidate.status === "claimed" || candidate.status === "published"
   );
   const relevantClaimed = current.filter(
@@ -185,7 +234,7 @@ function reconcileArtifactCandidates(
   const deferred = new Set<string>();
   for (const candidate of relevantClaimed) {
     const exactSeed = preliminarySeeds.find(
-      (seed) => candidateIdentityMatches(candidate, seed) && seedCandidateId(seed) === candidate.candidateId
+      (seed) => candidateIdentityMatches(candidate, seed) && candidateMatchesSeedRevision(candidate, seed)
     );
     if (exactSeed) continue;
     for (const sessionId of candidate.provenanceSessionIds) {
@@ -203,20 +252,25 @@ function reconcileArtifactCandidates(
   if (acknowledgedSessionIds.length === 0) return { acknowledgedSessionIds, candidates: [] };
 
   const activePreliminary = candidateSeedsForSessions(db, acknowledgedSessionIds);
-  const relevantPending = current.filter(
+  const relevantMutable = current.filter(
     (candidate) =>
-      candidate.status === "pending" &&
+      (candidate.status === "pending" || candidate.status === "published") &&
       (candidate.provenanceSessionIds.some((sessionId) => acknowledgedSessionIds.includes(sessionId)) ||
         activePreliminary.some((seed) => candidateIdentityMatches(candidate, seed)))
   );
   const reconciliationSessionIds = normalizedStrings([
     ...acknowledgedSessionIds,
-    ...relevantPending.flatMap((candidate) => candidate.provenanceSessionIds)
+    ...relevantMutable.flatMap((candidate) => candidate.provenanceSessionIds)
   ]);
   const finalSeeds = candidateSeedsForSessions(db, reconciliationSessionIds);
-  const finalIds = new Set(finalSeeds.map(seedCandidateId));
-  for (const candidate of relevantPending) {
-    if (finalIds.has(candidate.candidateId)) continue;
+  for (const candidate of relevantMutable) {
+    if (
+      finalSeeds.some(
+        (seed) => candidateIdentityMatches(candidate, seed) && candidateMatchesSeedRevision(candidate, seed)
+      )
+    ) {
+      continue;
+    }
     setWorkbenchArtifactCandidateStatus(db, {
       candidateId: candidate.candidateId,
       status: "superseded"
@@ -224,7 +278,7 @@ function reconcileArtifactCandidates(
   }
   return {
     acknowledgedSessionIds,
-    candidates: persistSeeds(db, finalSeeds)
+    candidates: persistSeeds(db, finalSeeds, allCandidates)
   };
 }
 
@@ -237,33 +291,37 @@ function candidateIdentityMatches(
   return candidate.seedSessionId === seed.seedSessionId;
 }
 
-function seedCandidateId(seed: CandidateSeed): string {
-  return candidateId(seed.kind, seed.seedSessionId, seed.evidenceRevision, seed.signatureKey);
+function candidateMatchesSeedRevision(candidate: WorkbenchArtifactCandidate, seed: CandidateSeed): boolean {
+  return (
+    candidate.evidenceRevision === seed.evidenceRevision &&
+    arraysEqual(candidate.provenanceSessionIds, seed.provenanceSessionIds) &&
+    arraysEqual(candidate.signalEvidenceRefs, seed.signalEvidenceRefs)
+  );
 }
 
 function candidateSeedsForSessions(db: MastheadDatabase, sessionIds: string[]): CandidateSeed[] {
   const ungrouped = sessionIds.flatMap((sessionId) => seedsForSignals(db, extractSessionSignals(db, sessionId)));
-  const groups = new Map<string, CandidateSeed>();
+  const groups = new Map<string, CandidateSeed[]>();
   for (const seed of ungrouped) {
     const key = `${seed.kind}\0${seed.signatureKey ?? `session:${seed.seedSessionId}`}`;
-    const existing = groups.get(key);
-    if (!existing) {
-      groups.set(key, seed);
-      continue;
-    }
-    existing.provenanceSessionIds = normalizedStrings([
-      ...existing.provenanceSessionIds,
-      ...seed.provenanceSessionIds
-    ]);
-    existing.signalEvidenceRefs = normalizedStrings([...existing.signalEvidenceRefs, ...seed.signalEvidenceRefs]);
-    existing.seedSessionId = existing.provenanceSessionIds[0]!;
-    existing.signalSummary = signalSummary(existing.kind, existing.provenanceSessionIds.length);
+    groups.set(key, [...(groups.get(key) ?? []), seed]);
   }
   return [...groups.values()]
-    .map((seed) => ({
-      ...seed,
-      evidenceRevision: authoringEvidenceRevision(db, seed.provenanceSessionIds)
-    }))
+    .map((seeds) => {
+      // A current signature has one bounded candidate. Prefer the lexicographically
+      // smallest session IDs so selection is deterministic regardless of scan order.
+      const selected = [...seeds].sort((left, right) => left.seedSessionId.localeCompare(right.seedSessionId)).slice(0, 12);
+      const first = selected[0]!;
+      const provenanceSessionIds = normalizedStrings(selected.flatMap((seed) => seed.provenanceSessionIds));
+      return {
+        ...first,
+        seedSessionId: provenanceSessionIds[0]!,
+        provenanceSessionIds,
+        signalEvidenceRefs: normalizedStrings(selected.flatMap((seed) => seed.signalEvidenceRefs)),
+        signalSummary: signalSummary(first.kind, provenanceSessionIds.length),
+        evidenceRevision: authoringEvidenceRevision(db, provenanceSessionIds)
+      };
+    })
     .sort(compareSeeds);
 }
 
@@ -272,11 +330,16 @@ function seedsForSignals(db: MastheadDatabase, signals: SessionSignals): Candida
   const signatureKey = signals.signatures.length === 1 ? signals.signatures[0] : undefined;
   const chain = runbookChain([signals]);
   if (chain) {
+    const signatureEvidenceRefs = signatureKey
+      ? signals.signatureRefs
+          .filter((entry) => entry.signatureKey === signatureKey)
+          .map(refValue)
+      : [];
     seeds.push({
       kind: "runbook",
       seedSessionId: signals.sessionId,
       provenanceSessionIds: [signals.sessionId],
-      signalEvidenceRefs: normalizedStrings(chain.map(refValue)),
+      signalEvidenceRefs: normalizedStrings([...chain.map(refValue), ...signatureEvidenceRefs]),
       signalSummary: signalSummary("runbook", 1),
       evidenceRevision: authoringEvidenceRevision(db, [signals.sessionId]),
       ...(signatureKey ? { signatureKey } : {})
@@ -322,6 +385,7 @@ function extractSessionSignals(db: MastheadDatabase, sessionId: string): Session
     alternativeRefs: [],
     timelineEventRefs: [],
     signatures: [],
+    signatureRefs: [],
     evidenceRefs: new Set<string>()
   };
   let index = 0;
@@ -336,7 +400,10 @@ function extractSessionSignals(db: MastheadDatabase, sessionId: string): Session
     if (isRejectedAlternative(normalized)) result.alternativeRefs.push(ref);
     if (isIncidentTimelineEvent(item, normalized)) result.timelineEventRefs.push(ref);
     const signature = strongSignature(item.text);
-    if (signature) result.signatures.push(signature);
+    if (signature) {
+      result.signatures.push(signature);
+      result.signatureRefs.push({ ...ref, signatureKey: signature });
+    }
     index += 1;
   }
   result.signatures = normalizedStrings(result.signatures);
@@ -444,13 +511,25 @@ function isChange(item: SessionTranscriptItem, normalized: string): boolean {
 }
 
 function isPassedVerification(item: SessionTranscriptItem, normalized: string): boolean {
+  const toolName = (item.toolName ?? "").toLowerCase();
+  const verificationText = `${toolName} ${normalized}`.replace(/[_-]+/g, " ");
   const verificationSemantics =
-    /\b(?:verification|verify|verified|tests?|checks?|typecheck|lint|build|smoke|health|probe)\b/.test(normalized);
-  const passedSemantics = /\b(?:pass|passed|succeed|succeeded|success|successful|ok|verified)\b/.test(normalized);
+    /\b(?:verification|verify|verified|tests?|checks?|typecheck|lint|build|smoke|health|probe)\b/.test(
+      verificationText
+    );
+  const passedSemantics = /\b(?:pass|passed|succeed|succeeded|success|successful|ok|verified)\b/.test(
+    verificationText
+  );
+  const negativeOutcome =
+    /\b(?:failed|failure|failing|errors?|exceptions?|false|not|no|0\s+tests?\s+passed|zero\s+tests?\s+passed)\b/.test(
+      verificationText
+    );
+  if (negativeOutcome) return false;
   if (
     item.kind === "tool_result" &&
     item.status === "succeeded" &&
     (item.exitCode ?? 0) === 0 &&
+    !/(?:^|[._-])(?:read|cat|open|list|search|find|view)(?:[._-]|$)/.test(toolName) &&
     verificationSemantics &&
     passedSemantics
   ) {
@@ -491,40 +570,100 @@ function strongSignature(text: string): string | undefined {
   return tokens.length >= 2 ? `error:${tokens[0]}:${tokens.slice(1).join("-")}` : undefined;
 }
 
-function normalizeProposedSignature(signatureKey: string, signals: SessionSignals[]): string {
+function normalizeProposedSignature(
+  signatureKey: string,
+  signals: SessionSignals[],
+  selected: Set<string>
+): string {
   const normalized = signatureKey.trim().toLowerCase();
   if (
     !/^error:[a-z0-9]+:[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized) ||
-    signals.some((signal) => !signal.signatures.includes(normalized))
+    signals.some(
+      (signal) =>
+        !signal.signatureRefs.some(
+          (entry) => entry.signatureKey === normalized && selected.has(entry.ref)
+        )
+    )
   ) {
     throw new Error("candidate_proposal_signature_not_in_evidence");
   }
   return normalized;
 }
 
-function persistSeeds(db: MastheadDatabase, seeds: CandidateSeed[]): WorkbenchArtifactCandidate[] {
+function persistSeeds(
+  db: MastheadDatabase,
+  seeds: CandidateSeed[],
+  lineageCandidates: WorkbenchArtifactCandidate[] = []
+): WorkbenchArtifactCandidate[] {
   return seeds
-    .map((seed) =>
-      saveWorkbenchArtifactCandidate(db, {
-        candidateId: candidateId(seed.kind, seed.seedSessionId, seed.evidenceRevision, seed.signatureKey),
+    .map((seed) => {
+      const unchanged = lineageCandidates.find(
+        (candidate) =>
+          candidate.status !== "superseded" &&
+          candidateIdentityMatches(candidate, seed) &&
+          candidateMatchesSeedRevision(candidate, seed)
+      );
+      if (unchanged) return getStoredCandidate(db, unchanged.candidateId);
+      const predecessor = lineageCandidates
+        .filter(
+          (candidate) =>
+            candidateIdentityMatches(candidate, seed) ||
+            candidate.provenanceSessionIds.some((sessionId) => seed.provenanceSessionIds.includes(sessionId))
+        )
+        .sort(compareLineageCandidates)[0];
+      return saveWorkbenchArtifactCandidate(db, {
+        candidateId: candidateId(
+          seed.kind,
+          seed.seedSessionId,
+          seed.evidenceRevision,
+          seed.signatureKey,
+          predecessor?.candidateId
+        ),
         kind: seed.kind,
         provenanceSessionIds: seed.provenanceSessionIds,
         seedSessionId: seed.seedSessionId,
         signalEvidenceRefs: seed.signalEvidenceRefs,
         signalSummary: seed.signalSummary,
+        evidenceRevision: seed.evidenceRevision,
+        ...(predecessor ? { supersedesCandidateId: predecessor.candidateId } : {}),
         ...(seed.signatureKey ? { signatureKey: seed.signatureKey } : {})
-      })
-    )
+      });
+    })
     .sort(compareCandidates);
+}
+
+function compareLineageCandidates(
+  left: WorkbenchArtifactCandidate,
+  right: WorkbenchArtifactCandidate
+): number {
+  const rank = (candidate: WorkbenchArtifactCandidate): number =>
+    candidate.status === "pending" || candidate.status === "claimed" || candidate.status === "published" ? 0 : 1;
+  return (
+    rank(left) - rank(right) ||
+    right.updatedAt.localeCompare(left.updatedAt) ||
+    left.candidateId.localeCompare(right.candidateId)
+  );
+}
+
+function getStoredCandidate(db: MastheadDatabase, candidateIdValue: string): WorkbenchArtifactCandidate {
+  const candidate = getWorkbenchArtifactCandidate(db, candidateIdValue);
+  if (!candidate) throw new Error(`artifact_candidate_not_found:${candidateIdValue}`);
+  return candidate;
 }
 
 function candidateId(
   kind: WorkbenchAutomaticKind,
   seedSessionId: string,
   evidenceRevision: string,
-  signatureKey?: string
+  signatureKey?: string,
+  supersedesCandidateId?: string
 ): string {
-  return stableRecordId("artifact-candidate", [kind, signatureKey ?? seedSessionId, evidenceRevision]);
+  return stableRecordId("artifact-candidate", [
+    kind,
+    signatureKey ?? seedSessionId,
+    evidenceRevision,
+    supersedesCandidateId ?? "root"
+  ]);
 }
 
 function signalSummary(kind: WorkbenchAutomaticKind, sessionCount: number): string {
@@ -540,6 +679,10 @@ function normalizedItemText(item: SessionTranscriptItem): string {
 
 function normalizedStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
+}
+
+function arraysEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function refValue(value: SignalRef): string {

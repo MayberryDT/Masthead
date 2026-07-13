@@ -16,6 +16,8 @@ export type StoredWorkbenchArtifactCandidate = {
   signalEvidenceRefs: string[];
   signalSummary: string;
   signatureKey?: string;
+  evidenceRevision: string;
+  supersedesCandidateId?: string;
   status: WorkbenchArtifactCandidateStatus;
   dismissalReason?: string;
   dismissalEvidenceRefs?: string[];
@@ -31,6 +33,8 @@ type CandidateRow = {
   signalEvidenceRefsJson: string;
   signalSummary: string;
   signatureKey: string | null;
+  evidenceRevision: string;
+  supersedesCandidateId: string | null;
   status: WorkbenchArtifactCandidateStatus;
   dismissalReason: string | null;
   dismissalEvidenceRefsJson: string | null;
@@ -46,6 +50,8 @@ const CANDIDATE_SELECT = `SELECT
   signal_evidence_refs_json AS signalEvidenceRefsJson,
   signal_summary AS signalSummary,
   signature_key AS signatureKey,
+  evidence_revision AS evidenceRevision,
+  supersedes_candidate_id AS supersedesCandidateId,
   status,
   dismissal_reason AS dismissalReason,
   dismissal_evidence_refs_json AS dismissalEvidenceRefsJson,
@@ -92,8 +98,9 @@ export function saveWorkbenchArtifactCandidate(
   db.prepare(
     `INSERT INTO workbench_artifact_candidates (
       candidate_id, kind, seed_session_id, provenance_session_ids_json,
-      signal_evidence_refs_json, signal_summary, signature_key, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      signal_evidence_refs_json, signal_summary, signature_key, evidence_revision,
+      supersedes_candidate_id, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.candidateId,
     input.kind,
@@ -102,6 +109,8 @@ export function saveWorkbenchArtifactCandidate(
     JSON.stringify(signalEvidenceRefs),
     input.signalSummary.trim(),
     input.signatureKey ?? null,
+    input.evidenceRevision,
+    input.supersedesCandidateId ?? null,
     input.status ?? "pending",
     now,
     now
@@ -137,7 +146,8 @@ export function setWorkbenchArtifactCandidateStatus(
   if (!existing) throw new Error(`artifact_candidate_not_found:${input.candidateId}`);
   const allowed: Partial<Record<WorkbenchArtifactCandidateStatus, WorkbenchArtifactCandidateStatus[]>> = {
     pending: ["claimed", "published", "superseded"],
-    claimed: ["pending", "published", "superseded"]
+    claimed: ["pending", "published", "superseded"],
+    published: ["superseded"]
   };
   if (!(allowed[existing.status] ?? []).includes(input.status)) {
     throw new Error(`artifact_candidate_transition_invalid:${existing.status}:${input.status}`);
@@ -232,6 +242,8 @@ function rowToCandidate(row: CandidateRow): StoredWorkbenchArtifactCandidate {
     signalEvidenceRefs: JSON.parse(row.signalEvidenceRefsJson) as string[],
     signalSummary: row.signalSummary,
     ...(row.signatureKey ? { signatureKey: row.signatureKey } : {}),
+    evidenceRevision: row.evidenceRevision,
+    ...(row.supersedesCandidateId ? { supersedesCandidateId: row.supersedesCandidateId } : {}),
     status: row.status,
     ...(row.dismissalReason ? { dismissalReason: row.dismissalReason } : {}),
     ...(row.dismissalEvidenceRefsJson
