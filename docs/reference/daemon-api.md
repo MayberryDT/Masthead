@@ -119,6 +119,7 @@ maintenance and every command requires an explicit database path:
 mastheadctl workbench audit-v1-generation --db <path> --json
 mastheadctl workbench prepare-v1-recovery --db <path> --json
 mastheadctl workbench invalidate-v1-generation --db <path> --audit-hash <sha256> --confirm --json
+mastheadctl workbench restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current> --audit-hash <sha256> --confirm --json
 ```
 
 `audit` opens the database read-only and fails closed unless the exact known V1
@@ -137,3 +138,26 @@ statuses to unknown; releases matching claims; and records one recovery Activity
 The 66 completed V1 runs and their receipts remain audit history. Production use
 is prohibited until fixture recovery readiness, a temporary-copy rehearsal, and
 a separately authorized human-reviewed canary have passed.
+
+`restore-v1-recovery` is the only supported rollback executable. It refuses
+unless the backup is the exact non-symlink sibling `masthead.sqlite.backup-current`,
+the active and backup database identities match, both databases and the staged
+copy pass integrity checks, and the backup audit hash matches `--audit-hash`.
+While holding daemon-equivalent exclusive ownership it stages and verifies the
+backup, removes active WAL/SHM/journal sidecars, atomically promotes the stage,
+and verifies the restored active identity, integrity, and audit hash. It never
+deletes or renames the backup.
+
+The successful JSON object has exactly `databasePath`, `ok`, and `receipt` at
+the top level. `receipt` has exactly these fields:
+
+| Field | Successful value |
+|---|---|
+| `artifactsRestored` | `1283` |
+| `auditHash` | exact requested SHA-256 |
+| `backupPath` | exact sibling `masthead.sqlite.backup-current` |
+| `backupPreserved` | `true` |
+| `databaseId` | active/backup database identity |
+| `integrityResult` | `ok` |
+| `runsRestored` | `66` |
+| `sessionsRestored` | `1283` |

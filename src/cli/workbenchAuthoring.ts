@@ -8,7 +8,12 @@ export type WorkbenchCliOptions = {
 };
 
 const authoringCommands = new Set(["capabilities", "candidates", "open", "status", "evidence", "submit", "finish"]);
-const recoveryCommands = new Set(["audit-v1-generation", "prepare-v1-recovery", "invalidate-v1-generation"]);
+const recoveryCommands = new Set([
+  "audit-v1-generation",
+  "prepare-v1-recovery",
+  "invalidate-v1-generation",
+  "restore-v1-recovery"
+]);
 const evidenceKinds = new Set(["all", "user", "assistant", "tools", "checkpoints", "files", "signals"]);
 const candidateKinds = new Set(["runbook", "adr", "incident_timeline"]);
 
@@ -24,7 +29,7 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
   if (recoveryCommands.has(command)) {
     const { runFailedV1RecoveryMaintenance } = await import("./workbenchMaintenance.ts");
     return runFailedV1RecoveryMaintenance(
-      command as "audit-v1-generation" | "prepare-v1-recovery" | "invalidate-v1-generation",
+      command as "audit-v1-generation" | "prepare-v1-recovery" | "invalidate-v1-generation" | "restore-v1-recovery",
       args,
       options,
       json
@@ -156,6 +161,7 @@ export function workbenchHelp(): string {
     "  mastheadctl workbench audit-v1-generation --db <path> --json",
     "  mastheadctl workbench prepare-v1-recovery --db <path> --json",
     "  mastheadctl workbench invalidate-v1-generation --db <path> --audit-hash <sha256> --confirm --json",
+    "  mastheadctl workbench restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current> --audit-hash <sha256> --confirm --json",
     "  mastheadctl workbench wipe-published --db <path> --confirm --json",
     "",
     "The daemon owns evidence, validation, claims, publication, and database identity checks."

@@ -1,6 +1,6 @@
 # Durable artifact production recovery and canary evidence
 
-Status: **not authorized; not executed**
+Status: **authorized; release candidate preparation in progress**
 
 This is the signed evidence record for Task 14 of the durable artifact recovery
 plan. It is deliberately incomplete until the production recovery is explicitly
@@ -12,13 +12,18 @@ session IDs, bounded claim excerpts, review scores, and receipt paths only.
 
 ## Authorization boundary
 
-- Explicit production authorization received: [ ]
-- Authorizing message/task: `pending`
-- Authorized operator: `pending`
-- Authorized at: `pending`
-- Production database path confirmed by operator: `pending`
-- V1 authoring stopped: [ ]
-- Writable daemon stopped before offline maintenance: [ ]
+- Explicit production authorization received: [x]
+- Authorizing message/task: `"i approve"` in the current Codex task, in direct
+  response to the exact production recovery/canary scope
+- Authorized operator: `Tyler`
+- Authorized at: `2026-07-13T08:19:26-06:00`
+- Production database path confirmed under authorization:
+  `/home/tyler/.config/masthead-production/masthead.sqlite`
+- V1 authoring stopped: [x] — the exact old production Electron and daemon
+  processes were gracefully stopped with `SIGTERM` at
+  `2026-07-13T08:54:43-06:00`
+- Writable daemon stopped and lifecycle ownership verified: [x] — same time;
+  the ownership probe reported `stoppedPids: []`
 
 No command below may be run against production until the first checkbox is
 signed. Temporary-copy rehearsal does not authorize production invalidation.
@@ -263,7 +268,7 @@ invalidation.
 | Rehearsal reviewer | `pending` |
 | Production daemon stop command | `pending` |
 | Production daemon start command | `pending` |
-| Exclusive-ownership restore command | `pending` |
+| Exclusive-ownership restore command | `<installed-mastheadctl> workbench restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current> --audit-hash <sha256> --confirm --json` |
 | Restore rehearsal receipt | `pending` |
 | Frozen sample hash / label hash | `pending` |
 
@@ -416,9 +421,18 @@ Run rollback in this order:
 
 1. Stop all authoring, stop the production writable daemon with the recorded
    command, and verify its health URL is unavailable.
-2. Run the recorded exclusive-ownership restore command. It must refuse if
-   daemon-equivalent writer ownership cannot be acquired and must hold that
-   ownership through replacement and verification.
+2. Run the executable restore command below. It must refuse if daemon-equivalent
+   writer ownership cannot be acquired and must hold that ownership through
+   replacement and verification.
+
+   ```bash
+   <installed-mastheadctl> workbench restore-v1-recovery \
+     --db "$PRODUCTION_DB_PATH" \
+     --backup "$PRODUCTION_DB_PATH.backup-current" \
+     --audit-hash "$AUDIT_HASH" \
+     --confirm \
+     --json
+   ```
 3. While ownership is held, verify the backup is the Step 2 self-contained
    `masthead.sqlite.backup-current`, its database ID matches Step 1, and its
    `PRAGMA integrity_check` result is exactly `ok`.
@@ -434,6 +448,20 @@ Run rollback in this order:
    health, capabilities, and four kind-filtered artifact receipts and require
    the same build and database identities plus restored counts. Keep authoring
    stopped until a reviewer signs the rollback receipt.
+
+The successful command object has exactly `databasePath`, `ok`, and `receipt`.
+The restore `receipt` must match this exact field set and expected values:
+
+| Receipt field | Expected |
+|---|---|
+| `artifactsRestored` | `1283` |
+| `auditHash` | exact Step 3 SHA-256 |
+| `backupPath` | exact sibling `masthead.sqlite.backup-current` |
+| `backupPreserved` | `true` |
+| `databaseId` | exact Step 1 database ID |
+| `integrityResult` | `ok` |
+| `runsRestored` | `66` |
+| `sessionsRestored` | `1283` |
 
 Any missing command, ownership refusal, backup mismatch, sidecar ambiguity,
 failed atomic replacement, identity mismatch, integrity failure, or count drift

@@ -9,6 +9,7 @@ import {
 } from "../daemon/db/sessionArtifactRepository.ts";
 import {
   createSingleConsistentBackupInsideExclusiveMaintenance,
+  restoreFailedV1RecoveryBackupInsideExclusiveMaintenance,
   withExclusiveDatabaseMaintenance
 } from "../daemon/databaseBackup.ts";
 import { migrateDatabase } from "../daemon/db/schema.ts";
@@ -33,7 +34,7 @@ export async function runWipePublishedMaintenance(
 }
 
 export async function runFailedV1RecoveryMaintenance(
-  command: "audit-v1-generation" | "prepare-v1-recovery" | "invalidate-v1-generation",
+  command: "audit-v1-generation" | "prepare-v1-recovery" | "invalidate-v1-generation" | "restore-v1-recovery",
   args: string[],
   options: { env?: NodeJS.ProcessEnv },
   json: boolean
@@ -73,6 +74,28 @@ export async function runFailedV1RecoveryMaintenance(
           backupDb.close();
         }
       });
+    }
+
+    if (command === "restore-v1-recovery") {
+      const backupPath = optionValue(args, "--backup");
+      if (!backupPath) return errorResult("missing_argument", "Missing required option: --backup", json);
+      const expectedAuditHash = optionValue(args, "--audit-hash");
+      if (!expectedAuditHash) return errorResult("missing_argument", "Missing required option: --audit-hash", json);
+      if (!args.includes("--confirm")) {
+        return errorResult("missing_argument", "Pass --confirm to restore the exact audited failed V1 generation", json);
+      }
+      return await withExclusiveDatabaseMaintenance(databasePath, async (ownership) =>
+        jsonResult({
+          databasePath,
+          ok: true,
+          receipt: await restoreFailedV1RecoveryBackupInsideExclusiveMaintenance(
+            databasePath,
+            backupPath,
+            expectedAuditHash,
+            ownership
+          )
+        })
+      );
     }
 
     const expectedAuditHash = optionValue(args, "--audit-hash");

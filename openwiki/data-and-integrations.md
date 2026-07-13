@@ -83,6 +83,10 @@ exclusive writer ownership and retains one verified SQLite-consistent backup.
 re-audits and removes only the hash-matched artifact/search/provenance rows in one
 transaction, resets affected sessions for canonical dossier publication and V2
 candidate discovery, releases matching claims, and preserves V1 runs and receipts.
+`restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current>
+--audit-hash <sha256> --confirm --json` is the offline rollback command. It holds
+daemon-equivalent ownership through staged verification, atomic replacement, and
+post-restore verification while preserving the verified backup.
 Production recovery requires separate authorization after the fixture release gate
 and temporary-copy rehearsal.
 

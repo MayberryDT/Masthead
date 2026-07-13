@@ -120,6 +120,7 @@ requires the exact SHA-256 audit hash and `--confirm`:
 mastheadctl workbench audit-v1-generation --db <path> --json
 mastheadctl workbench prepare-v1-recovery --db <path> --json
 mastheadctl workbench invalidate-v1-generation --db <path> --audit-hash <sha256> --confirm --json
+mastheadctl workbench restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current> --audit-hash <sha256> --confirm --json
 ```
 
 The audit fails closed unless the exact known population is present: 1,283 V1
@@ -131,6 +132,12 @@ sessions for canonical dossier publication and V2 candidate discovery, releases
 matching claims, and preserves V1 runs and receipts as audit history. Never run
 production invalidation before the fixture gate, temporary-copy rehearsal, and
 separately authorized 25-session human-reviewed canary pass.
+
+Restore is offline and fail-closed. It accepts only the exact sibling
+`masthead.sqlite.backup-current`, requires daemon-equivalent exclusive ownership,
+verifies identity, integrity, and the audited hash before staging, atomically
+replaces the active database, then verifies the restored active database before
+releasing ownership. The verified backup is preserved.
 
 ## Verify
 

@@ -39,6 +39,7 @@ describe("artifact authoring product contract", () => {
       "docs/reference/mcp-tools.md",
       "docs/adr/0013-canonical-dossier-and-candidate-authoring.md",
       "docs/acceptance/product-release-gate.md",
+      "docs/acceptance/durable-artifact-production-canary.md",
       "docs/acceptance/workbench-v1-evidence.md",
       "docs/acceptance/workbench-enroll-evidence.md",
       "openwiki/quickstart.md",
@@ -81,6 +82,8 @@ describe("artifact authoring product contract", () => {
     const readme = byPath["README.md"]!;
     const adr = byPath["docs/adr/0013-canonical-dossier-and-candidate-authoring.md"]!;
     const daemonApi = byPath["docs/reference/daemon-api.md"]!;
+    const productionCanary = byPath["docs/acceptance/durable-artifact-production-canary.md"]!;
+    const openwikiData = byPath["openwiki/data-and-integrations.md"]!;
     const v1Evidence = byPath["docs/acceptance/workbench-v1-evidence.md"]!;
     const enrollmentEvidence = byPath["docs/acceptance/workbench-enroll-evidence.md"]!;
 
@@ -96,6 +99,23 @@ describe("artifact authoring product contract", () => {
     expect(adr).not.toMatch(/claim support:[^.]*session id/i);
     expect(daemonApi).toContain("with 1–100 canonical session IDs");
     expect(daemonApi).not.toContain("1–100 unique canonical");
+    for (const document of [readme, daemonApi, productionCanary, openwikiData]) {
+      expect(document).toContain("restore-v1-recovery");
+      expect(document).toContain("--backup");
+    }
+    for (const field of [
+      "artifactsRestored",
+      "auditHash",
+      "backupPath",
+      "backupPreserved",
+      "databaseId",
+      "integrityResult",
+      "runsRestored",
+      "sessionsRestored",
+    ]) {
+      expect(daemonApi).toContain(field);
+      expect(productionCanary).toContain(field);
+    }
     expect(v1Evidence).toMatch(/^# Historical:/);
     expect(v1Evidence.slice(0, 600)).toMatch(/superseded/i);
     expect(v1Evidence.slice(0, 600)).toContain("ADR 0013");

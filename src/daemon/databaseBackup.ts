@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, readdir, rename, rm, stat } from "node:fs/promises";
+import { access, lstat, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import {
@@ -7,6 +7,7 @@ import {
   acquireLegacyDataDirectoryGuard,
   assertWritableDatabaseLocation
 } from "../core/daemonOwnership.ts";
+import { auditFailedV1Generation } from "./db/sessionArtifactRepository.ts";
 
 export type ConsistentDatabaseBackupReceipt = {
   backupPath: string;
@@ -14,6 +15,30 @@ export type ConsistentDatabaseBackupReceipt = {
   integrityResult: "ok";
   pagesCopied: number;
   sizeBytes: number;
+};
+
+export type MigrationDatabaseBackupReceipt = {
+  backupPath: string;
+  integrityResult: "ok";
+  pagesCopied: number;
+  sizeBytes: number;
+};
+
+export type FailedV1RecoveryRestoreReceipt = {
+  artifactsRestored: number;
+  auditHash: string;
+  backupPath: string;
+  backupPreserved: true;
+  databaseId: string;
+  integrityResult: "ok";
+  runsRestored: number;
+  sessionsRestored: number;
+};
+
+export type DatabaseRestoreBoundary = "stage" | "verify_stage" | "before_promotion" | "verify_active";
+
+export type DatabaseRestoreOptions = {
+  onBoundary?: (boundary: DatabaseRestoreBoundary) => void;
 };
 
 export type DatabaseBackupBoundary = "backup" | "normalize" | "verify" | "finalize";
@@ -85,12 +110,7 @@ export async function createSingleConsistentBackupInsideExclusiveMaintenance(
     const pagesCopied = await backup(source, stagePath);
 
     options.onBoundary?.("normalize");
-    const normalizer = new DatabaseSync(stagePath);
-    try {
-      normalizer.exec("PRAGMA journal_mode = DELETE;");
-    } finally {
-      normalizer.close();
-    }
+    normalizeBackupJournal(stagePath);
 
     options.onBoundary?.("verify");
     const verified = verifyStagedBackup(stagePath);
@@ -99,7 +119,7 @@ export async function createSingleConsistentBackupInsideExclusiveMaintenance(
     options.onBoundary?.("finalize");
     await rename(stagePath, finalPath);
     promoted = true;
-    await removeStaleFinalSnapshots(directory, finalPrefix, basename(finalPath));
+    await retainNewestFinalSnapshots(directory, finalPrefix, 1);
     return {
       backupPath: finalPath,
       databaseId: verified.databaseId,
@@ -120,15 +140,113 @@ export async function createSingleConsistentBackupInsideExclusiveMaintenance(
   }
 }
 
+/** Caller must already hold the daemon startup writer lease and legacy directory guard. */
+export async function createVerifiedMigrationBackupInsideDaemonStartup(
+  databasePath: string,
+  options: DatabaseBackupOptions = {}
+): Promise<MigrationDatabaseBackupReceipt> {
+  const directory = dirname(resolve(databasePath));
+  const databaseName = basename(databasePath);
+  const finalPrefix = `${databaseName}.backup-`;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const finalPath = join(directory, `${finalPrefix}${timestamp}`);
+  const stagePath = join(directory, `.${databaseName}.migration-backup-stage-${randomUUID()}`);
+  let source: DatabaseSync | undefined;
+  let promoted = false;
+  try {
+    options.onBoundary?.("backup");
+    source = new DatabaseSync(databasePath, { readOnly: true });
+    const pagesCopied = await backup(source, stagePath);
+
+    options.onBoundary?.("normalize");
+    normalizeBackupJournal(stagePath);
+
+    options.onBoundary?.("verify");
+    verifyStagedIntegrity(stagePath);
+    const sizeBytes = (await stat(stagePath)).size;
+
+    options.onBoundary?.("finalize");
+    await rename(stagePath, finalPath);
+    promoted = true;
+    await retainNewestFinalSnapshots(directory, finalPrefix, 1);
+    return { backupPath: finalPath, integrityResult: "ok", pagesCopied, sizeBytes };
+  } finally {
+    source?.close();
+    await removeDatabaseAndSidecars(stagePath);
+    if (promoted) await removeSidecars(finalPath);
+  }
+}
+
+/** Restores the one verified V1 recovery snapshot while daemon-equivalent ownership is held. */
+export async function restoreFailedV1RecoveryBackupInsideExclusiveMaintenance(
+  databasePath: string,
+  backupPath: string,
+  expectedAuditHash: string,
+  ownership: ExclusiveDatabaseMaintenance,
+  options: DatabaseRestoreOptions = {}
+): Promise<FailedV1RecoveryRestoreReceipt> {
+  const activePath = resolve(databasePath);
+  if (ownership.databasePath !== activePath || ownership[exclusiveMaintenanceBrand] !== true) {
+    throw new Error("database_restore_exclusive_ownership_required");
+  }
+  if (!/^[a-f0-9]{64}$/u.test(expectedAuditHash)) throw new Error("failed_v1_recovery_audit_hash_invalid");
+  await assertRegularNonSymlinkPath(activePath, activePath, "database_restore_active_path_invalid");
+  const expectedBackupPath = join(dirname(activePath), `${basename(activePath)}.backup-current`);
+  await assertRegularNonSymlinkPath(backupPath, expectedBackupPath, "database_restore_backup_path_invalid");
+
+  const active = verifyRecoveryDatabase(activePath, false);
+  const backupVerification = verifyRecoveryDatabase(expectedBackupPath, true);
+  if (active.databaseId !== backupVerification.databaseId) {
+    throw new Error("database_restore_identity_mismatch");
+  }
+  if (backupVerification.audit?.auditHash !== expectedAuditHash) {
+    throw new Error("database_restore_audit_hash_mismatch");
+  }
+
+  const stagePath = join(dirname(activePath), `.${basename(activePath)}.restore-stage-${randomUUID()}`);
+  try {
+    options.onBoundary?.("stage");
+    const backupSource = new DatabaseSync(expectedBackupPath, { readOnly: true });
+    try {
+      await backup(backupSource, stagePath);
+    } finally {
+      backupSource.close();
+    }
+    normalizeBackupJournal(stagePath);
+
+    options.onBoundary?.("verify_stage");
+    const staged = verifyRecoveryDatabase(stagePath, true);
+    if (staged.databaseId !== active.databaseId) throw new Error("database_restore_staged_identity_mismatch");
+    if (staged.audit?.auditHash !== expectedAuditHash) throw new Error("database_restore_staged_audit_hash_mismatch");
+
+    options.onBoundary?.("before_promotion");
+    await removeSidecars(activePath);
+    await rename(stagePath, activePath);
+
+    options.onBoundary?.("verify_active");
+    const restored = verifyRecoveryDatabase(activePath, true);
+    if (restored.databaseId !== active.databaseId) throw new Error("database_restore_active_identity_mismatch");
+    if (restored.audit?.auditHash !== expectedAuditHash) throw new Error("database_restore_active_audit_hash_mismatch");
+    return {
+      artifactsRestored: restored.audit.totalArtifacts,
+      auditHash: restored.audit.auditHash,
+      backupPath: expectedBackupPath,
+      backupPreserved: true,
+      databaseId: restored.databaseId,
+      integrityResult: "ok",
+      runsRestored: restored.audit.totalRuns,
+      sessionsRestored: restored.audit.totalSessions
+    };
+  } finally {
+    await removeDatabaseAndSidecars(stagePath);
+  }
+}
+
 function verifyStagedBackup(stagePath: string): { databaseId: string } {
   let verified: DatabaseSync | undefined;
   try {
     verified = new DatabaseSync(stagePath, { readOnly: true });
-    const integrity = verified.prepare("PRAGMA integrity_check;").all() as Array<Record<string, unknown>>;
-    const results = integrity.flatMap((row) => Object.values(row));
-    if (results.length !== 1 || results[0] !== "ok") {
-      throw new Error(`database_backup_integrity_failed:${results.join(";")}`);
-    }
+    verifyOpenDatabaseIntegrity(verified);
     const identityRow = verified.prepare(
       "SELECT setting_json AS value FROM app_settings WHERE setting_key = 'database_identity'"
     ).get() as { value: string } | undefined;
@@ -138,24 +256,85 @@ function verifyStagedBackup(stagePath: string): { databaseId: string } {
   }
 }
 
-async function removeStaleFinalSnapshots(
+function verifyRecoveryDatabase(
+  path: string,
+  requireFailedV1Audit: boolean
+): {
+  audit?: ReturnType<typeof auditFailedV1Generation>;
+  databaseId: string;
+} {
+  const database = new DatabaseSync(path, { readOnly: true });
+  try {
+    verifyOpenDatabaseIntegrity(database);
+    const identityRow = database.prepare(
+      "SELECT setting_json AS value FROM app_settings WHERE setting_key = 'database_identity'"
+    ).get() as { value: string } | undefined;
+    return {
+      audit: requireFailedV1Audit ? auditFailedV1Generation(database) : undefined,
+      databaseId: parseDatabaseId(identityRow?.value)
+    };
+  } finally {
+    database.close();
+  }
+}
+
+async function assertRegularNonSymlinkPath(path: string, expectedPath: string, errorCode: string): Promise<void> {
+  const absolutePath = resolve(path);
+  if (absolutePath !== expectedPath) throw new Error(errorCode);
+  const info = await lstat(absolutePath);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error(errorCode);
+  if ((await realpath(absolutePath)) !== absolutePath) throw new Error(errorCode);
+}
+
+function normalizeBackupJournal(path: string): void {
+  const normalizer = new DatabaseSync(path);
+  try {
+    normalizer.exec("PRAGMA journal_mode = DELETE;");
+  } finally {
+    normalizer.close();
+  }
+}
+
+function verifyStagedIntegrity(stagePath: string): void {
+  const verified = new DatabaseSync(stagePath, { readOnly: true });
+  try {
+    verifyOpenDatabaseIntegrity(verified);
+  } finally {
+    verified.close();
+  }
+}
+
+function verifyOpenDatabaseIntegrity(database: DatabaseSync): void {
+  const integrity = database.prepare("PRAGMA integrity_check;").all() as Array<Record<string, unknown>>;
+  const results = integrity.flatMap((row) => Object.values(row));
+  if (results.length !== 1 || results[0] !== "ok") {
+    throw new Error(`database_backup_integrity_failed:${results.join(";")}`);
+  }
+}
+
+async function retainNewestFinalSnapshots(
   directory: string,
   prefix: string,
-  retainedName: string
+  retainedCount: number
 ): Promise<void> {
-  const stale = (await readdir(directory, { withFileTypes: true }))
-    .filter((entry) => entry.isFile() && entry.name.startsWith(prefix) && entry.name !== retainedName)
-    .map((entry) => join(directory, entry.name));
+  const snapshots = await Promise.all(
+    (await readdir(directory, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name.startsWith(prefix))
+      .map(async (entry) => ({
+        path: join(directory, entry.name),
+        mtimeMs: (await stat(join(directory, entry.name))).mtimeMs
+      }))
+  );
+  const stale = snapshots.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(retainedCount).map((entry) => entry.path);
   await Promise.all(stale.map((path) => rm(path, { force: true })));
 }
 
 async function removeDatabaseAndSidecars(path: string): Promise<void> {
-  await Promise.all([
-    rm(path, { force: true }),
-    rm(`${path}-journal`, { force: true }),
-    rm(`${path}-shm`, { force: true }),
-    rm(`${path}-wal`, { force: true })
-  ]);
+  await Promise.all([rm(path, { force: true }), removeSidecars(path)]);
+}
+
+async function removeSidecars(path: string): Promise<void> {
+  await Promise.all([rm(`${path}-journal`, { force: true }), rm(`${path}-shm`, { force: true }), rm(`${path}-wal`, { force: true })]);
 }
 
 function parseDatabaseId(value: string | undefined): string {

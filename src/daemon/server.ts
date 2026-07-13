@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { AdapterMaturity } from "../adapters/capabilities.ts";
 import { adapterRecordFromLiveHook, liveHookSourceForRuntime } from "../adapters/live/hookAdapter.ts";
 import { LIVE_CONNECTOR_RUNTIMES } from "../adapters/liveRuntimes.ts";
@@ -32,6 +32,7 @@ import type { PruneLocalDataResult, RetentionPolicy } from "../core/retention.ts
 import { liveStateReportFromHookPayload, type LiveHookDiagnostic } from "../core/liveHookAdapter.ts";
 import type { GitSnapshot, LiveBoardProjection, NormalizedEvent, SessionCardView } from "../core/types.ts";
 import type { DaemonConfig } from "./config.ts";
+import { createVerifiedMigrationBackupInsideDaemonStartup } from "./databaseBackup.ts";
 import {
   applyDefaultRetention,
   deleteAllMastheadData,
@@ -3647,21 +3648,7 @@ async function backupDatabaseBeforeMigration(databasePath: string): Promise<void
     return;
   }
 
-  const directory = dirname(databasePath);
-  const prefix = `${basename(databasePath)}.backup-`;
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  await copyFile(databasePath, join(directory, `${prefix}${timestamp}`));
-
-  const backups = await Promise.all(
-    (await readdir(directory))
-      .filter((entry) => entry.startsWith(prefix))
-      .map(async (entry) => ({
-        entry,
-        mtimeMs: (await stat(join(directory, entry))).mtimeMs
-      }))
-  );
-  const staleBackups = backups.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(3);
-  await Promise.all(staleBackups.map((backup) => rm(join(directory, backup.entry), { force: true })));
+  await createVerifiedMigrationBackupInsideDaemonStartup(databasePath);
 }
 
 
