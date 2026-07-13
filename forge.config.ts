@@ -1,8 +1,14 @@
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
+import { writeForgePackagedBundleManifests } from "./scripts/packaged-bundle-manifest.js";
 
 const config: ForgeConfig = {
+  hooks: {
+    postPackage: async (_forgeConfig, packageResult) => {
+      await writeForgePackagedBundleManifests(packageResult);
+    }
+  },
   packagerConfig: {
     asar: true,
     executableName: "masthead",

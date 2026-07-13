@@ -8,6 +8,7 @@ describe("packaged authoring CLI smoke coverage", () => {
     expect(source).toContain("await access(nodeTarget, constants.X_OK)");
     expect(source).toContain("await access(cliTarget, constants.R_OK)");
     expect(source).toContain("masthead-production.js");
+    expect(source).toContain("packaged-bundle-manifest.js");
     expect(source).toContain("release.json");
     expect(source).toContain('execFileSync("git", ["rev-parse", "HEAD"]');
   });
@@ -41,7 +42,16 @@ describe("packaged authoring CLI smoke coverage", () => {
     expect(source).toContain("await rm(dataDir");
     expect(source).toContain("await rm(homeDir");
     expect(source).toContain('join(resources, "release.json")');
+    expect(source).toContain("verifyPackagedBundleManifest");
+    expect(source).toContain("release-manifest.json");
     expect(source).toContain("health?.buildVersion");
     expect(source).toContain("health?.buildSha");
+  });
+
+  test("Forge writes the final content manifest after packaging", async () => {
+    const source = await readFile("forge.config.ts", "utf8");
+
+    expect(source).toContain("writeForgePackagedBundleManifests");
+    expect(source).toContain("postPackage");
   });
 });

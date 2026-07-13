@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, win32 } from "node:path";
 import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { buildPackagedCliInvocation } from "./packaged-cli-command.js";
+import { verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
 import {
   buildWindowsProcessSnapshotInvocation,
   buildWindowsTaskkillInvocation,
@@ -40,10 +41,16 @@ async function main() {
   await access(join(resources, "dist", "src", "cli", "mastheadctl.js"), constants.R_OK);
   await access(join(resources, "scripts", "masthead-hook.js"), constants.R_OK);
   await access(join(resources, "scripts", "masthead-production.js"), constants.R_OK);
+  await access(join(resourceRoot, "release-manifest.json"), constants.R_OK);
   const release = JSON.parse(await readFile(join(resources, "release.json"), "utf8"));
   if (!/^[a-f0-9]{40}$/u.test(release.gitSha) || typeof release.version !== "string" || !release.version) {
     throw new Error(`Packaged release identity is invalid: ${JSON.stringify(release)}`);
   }
+  await verifyPackagedBundleManifest({
+    bundleRoot: dirname(binary),
+    executablePath: binary,
+    resourcesPath: resourceRoot
+  });
 
   const fuseWire = await getCurrentFuseWire(binary);
   assertFuse(fuseWire, FuseV1Options.RunAsNode, false, "RunAsNode");
