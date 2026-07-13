@@ -761,7 +761,7 @@ function defaultDependencies(config) {
     ownershipProbe: () => probeExclusiveOwnership(config),
     portBindable: () => portBindable(config.port),
     readProcess,
-    readProcesses,
+    readProcesses: () => readProcesses(config),
     readMaintenanceJournal: () => readTransitionJournal(config.databasePath),
     recoverStartSurface: async (request) => {
       await swapCurrentTarget(config.productionRoot, request.oldBundle.target);
@@ -1066,8 +1066,8 @@ async function classifiedProcesses(config, dependencies) {
     });
 }
 
-async function readProcesses() {
-  return readProductionProcesses();
+async function readProcesses(config) {
+  return readProductionProcesses({ scanContext: config });
 }
 
 export async function readProductionProcesses(adapters = {}) {
@@ -1080,7 +1080,9 @@ export async function readProductionProcesses(adapters = {}) {
   const concurrency = adapters.concurrency ?? 32;
   const now = adapters.now || monotonicMilliseconds;
   const deadline = now() + (adapters.timeoutMs ?? 30_000);
-  const readAdapter = adapters.readProcess || readOwnedProcessStrict;
+  const readAdapter = adapters.readProcess || ((pid) => readOwnedProcessStrict(pid, {
+    scanContext: adapters.scanContext
+  }));
   if (numericEntries.length > maxEntries) {
     throw new Error(`Production process scan exceeded its ${maxEntries} entry budget.`);
   }
@@ -1152,7 +1154,52 @@ export async function readOwnedProcessStrict(pid, adapters = {}) {
     throw new Error(`Production process ${pid} effective UID could not be established.`);
   }
   if (effectiveUid !== currentUid) return undefined;
-  return inspectProcess(pid);
+  const readCommandLine = adapters.readCommandLine || (() => readFile(join(processRoot, "cmdline")));
+  let commandLine;
+  try {
+    commandLine = await readCommandLine();
+  } catch (error) {
+    if (error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code)) return undefined;
+    // Unreadable command lines cannot prove irrelevance. Continue through the
+    // exact process reader, which preserves fail-closed exe/environ handling.
+    return inspectProcess(pid);
+  }
+  const command = parseProcCommandLine(commandLine);
+  const provenUnrelatedCommand = command.valid &&
+    !commandCouldBelongToProduction(command.argv, adapters.scanContext);
+  try {
+    return await inspectProcess(pid);
+  } catch (error) {
+    if (error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code)) return undefined;
+    if (
+      provenUnrelatedCommand && error && typeof error === "object" &&
+      ["EACCES", "EPERM"].includes(error.code)
+    ) return undefined;
+    throw error;
+  }
+}
+
+function parseProcCommandLine(commandLine) {
+  const bytes = Buffer.isBuffer(commandLine) ? commandLine : Buffer.from(commandLine || "");
+  if (bytes.length === 0 || bytes.at(-1) !== 0) return { argv: [], valid: false };
+  const argv = nulFields(bytes);
+  if (argv.length === 0 || argv.some((argument) => argument.includes("\u0000"))) return { argv: [], valid: false };
+  return { argv, valid: true };
+}
+
+function commandCouldBelongToProduction(argv, scanContext) {
+  if (!scanContext) return true;
+  const identifiers = [
+    scanContext.productionRoot,
+    scanContext.target,
+    scanContext.dataDirectory,
+    scanContext.databasePath
+  ].filter((value) => typeof value === "string" && value.length > 0).map((value) => resolve(value));
+  if (identifiers.length < 4) return true;
+  return argv.some((argument) => identifiers.some((identifier) =>
+    argument === identifier || argument.includes(`${identifier}/`) || argument.includes(`${identifier}\\`) ||
+    argument.includes(`=${identifier}`) || argument.includes(`\"${identifier}`)
+  ));
 }
 
 async function readProcess(pid, strict = false) {

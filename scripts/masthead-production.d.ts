@@ -33,13 +33,16 @@ export function readProductionProcesses(adapters?: {
   maxEntries?: number;
   now?: () => number;
   readProcess?: (pid: number) => Promise<ProductionProcessRecord | undefined>;
+  scanContext?: Pick<ProductionConfig, "dataDirectory" | "databasePath" | "productionRoot" | "target">;
   timeoutMs?: number;
 }): Promise<ProductionProcessRecord[]>;
 export function readOwnedProcessStrict(pid: number, adapters?: {
   currentUid?: number;
   processRoot?: string;
+  readCommandLine?: () => Promise<Buffer>;
   readProcess?: (pid: number) => Promise<ProductionProcessRecord | undefined>;
   readStatus?: () => Promise<string>;
+  scanContext?: Pick<ProductionConfig, "dataDirectory" | "databasePath" | "productionRoot" | "target">;
   stat?: () => Promise<{ uid: number }>;
 }): Promise<ProductionProcessRecord | undefined>;
 export function waitForProductionHealth(

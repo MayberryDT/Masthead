@@ -385,6 +385,7 @@ describe("production lifecycle launcher", () => {
       `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}`,
       ""
     ].join("\n"));
+    await writeFile(join(procRoot, "1491", "cmdline"), Buffer.from("/production/Masthead-linux-x64-new/masthead\0"));
     await expect(readOwnedProcessStrict(1491, {
       currentUid,
       processRoot: procRoot,
@@ -406,6 +407,109 @@ describe("production lifecycle launcher", () => {
       readStatus: async () => "Name:\tmissing-uid\n",
       stat: async () => ({ uid: currentUid })
     })).rejects.toThrow("effective UID could not be established");
+  });
+
+  test("recovers unrelated same-UID systemd user process discovery after unreadable exe inspection", async () => {
+    const procRoot = await mkdtemp(join(tmpdir(), "masthead-proc-systemd-user-"));
+    cleanup.push(procRoot);
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    await mkdir(join(procRoot, "1490"));
+    await writeFile(join(procRoot, "1490", "status"), [
+      "Name:\tsystemd",
+      `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}`,
+      ""
+    ].join("\n"));
+    await writeFile(join(procRoot, "1490", "cmdline"), Buffer.from("/usr/lib/systemd/systemd\0--user\0"));
+    let strictInspection = false;
+    await expect(readOwnedProcessStrict(1490, {
+      currentUid,
+      processRoot: procRoot,
+      readCommandLine: () => readFile(join(procRoot, "1490", "cmdline")),
+      readProcess: async () => {
+        strictInspection = true;
+        throw Object.assign(new Error("permission denied reading exe"), { code: "EACCES" });
+      },
+      scanContext: {
+        dataDirectory: "/home/user/.config/masthead-production",
+        databasePath: "/home/user/.config/masthead-production/masthead.sqlite",
+        productionRoot: "/home/user/.local/share/masthead-production",
+        target: "/home/user/.local/share/masthead-production/Masthead-linux-x64-candidate"
+      }
+    })).resolves.toBeUndefined();
+    expect(strictInspection).toBe(true);
+  });
+
+  test("keeps a readable production-root executable even when its same-UID command line looks unrelated", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    const record = processRecord({
+      argv: ["./helper", "--quiet"],
+      exe: "/production/Masthead-linux-x64-old/resources/helper",
+      pid: 1496,
+      starttime: "helper-start"
+    });
+    let inspected = 0;
+    await expect(readOwnedProcessStrict(1496, {
+      currentUid,
+      readCommandLine: async () => Buffer.from("./helper\0--quiet\0"),
+      readProcess: async () => { inspected += 1; return record as any; },
+      readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+      scanContext: {
+        dataDirectory: "/data",
+        databasePath: "/data/masthead.sqlite",
+        productionRoot: "/production",
+        target: "/production/Masthead-linux-x64-new"
+      }
+    })).resolves.toEqual(record);
+    expect(inspected).toBe(1);
+  });
+
+  test.each([
+    ["old Electron", ["/production/Masthead-linux-x64-old/masthead", "--user-data-dir=/data"]],
+    ["new Electron", ["/production/Masthead-linux-x64-new/masthead", "--user-data-dir=/data"]],
+    ["deleted Electron command", ["/production/Masthead-linux-x64-old/masthead", "--type=renderer"]],
+    ["daemon", ["/production/Masthead-linux-x64-old/resources/daemon/node", "/production/Masthead-linux-x64-old/resources/daemon/dist/src/daemon/main.js"]],
+    ["maintenance", ["/production/Masthead-linux-x64-new/resources/daemon/node", "/production/Masthead-linux-x64-new/resources/daemon/dist/src/daemon/productionTransitionMaintenance.js", "restore", "--request", "{\"databasePath\":\"/data/masthead.sqlite\"}"]],
+    ["production identifier", ["/usr/bin/node", "worker.js", "/data/masthead.sqlite"]]
+  ])("routes candidate-looking %s command lines through strict inspection", async (_label, argv) => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    let strictInspections = 0;
+    const record = processRecord({ argv, pid: 1494 });
+    await expect(readOwnedProcessStrict(1494, {
+      currentUid,
+      readCommandLine: async () => Buffer.from(`${argv.join("\0")}\0`),
+      readProcess: async () => { strictInspections += 1; return record as any; },
+      readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+      scanContext: {
+        dataDirectory: "/data",
+        databasePath: "/data/masthead.sqlite",
+        productionRoot: "/production",
+        target: "/production/Masthead-linux-x64-new"
+      }
+    })).resolves.toEqual(record);
+    expect(strictInspections).toBe(1);
+  });
+
+  test("fails closed when a candidate-looking or malformed same-UID command has unreadable exe", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    const context = {
+      dataDirectory: "/data",
+      databasePath: "/data/masthead.sqlite",
+      productionRoot: "/production",
+      target: "/production/Masthead-linux-x64-new"
+    };
+    const denied = () => Object.assign(new Error("permission denied reading exe"), { code: "EACCES" });
+    for (const commandLine of [
+      Buffer.from("/production/Masthead-linux-x64-new/masthead\0--user-data-dir=/data\0"),
+      Buffer.alloc(0)
+    ]) {
+      await expect(readOwnedProcessStrict(1495, {
+        currentUid,
+        readCommandLine: async () => commandLine,
+        readProcess: async () => { throw denied(); },
+        readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+        scanContext: context
+      })).rejects.toMatchObject({ code: "EACCES" });
+    }
   });
 
   test("installs an atomic wrapper and desktop entry pinned to the immutable target and release identity", async () => {
