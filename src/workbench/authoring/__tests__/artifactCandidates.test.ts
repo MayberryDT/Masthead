@@ -365,6 +365,105 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("atomically supersedes changed pending and published proposal revisions", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const pendingA = proposeOauthRunbook(db);
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Pending B.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    db.exec(
+      `CREATE TRIGGER fail_proposed_replacement
+       BEFORE INSERT ON workbench_artifact_candidates
+       WHEN NEW.kind = 'runbook'
+       BEGIN
+         SELECT RAISE(ABORT, 'injected proposed replacement failure');
+       END;`
+    );
+    expect(() => proposeOauthRunbook(db)).toThrow("injected proposed replacement failure");
+    expect(getWorkbenchArtifactCandidate(db, pendingA.candidateId)?.status).toBe("pending");
+    db.exec("DROP TRIGGER fail_proposed_replacement;");
+    const pendingB = proposeOauthRunbook(db);
+    expect(getWorkbenchArtifactCandidate(db, pendingA.candidateId)?.status).toBe("superseded");
+    expect(pendingB).toMatchObject({ status: "pending", supersedesCandidateId: pendingA.candidateId });
+
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: pendingB.candidateId, status: "published" });
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Published C.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    const pendingC = proposeOauthRunbook(db);
+    expect(getWorkbenchArtifactCandidate(db, pendingB.candidateId)?.status).toBe("superseded");
+    expect(pendingC).toMatchObject({ status: "pending", supersedesCandidateId: pendingB.candidateId });
+    db.close();
+  });
+
+  test("freezes a claimed proposal when its evidence revision changes", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const claimed = proposeOauthRunbook(db);
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: claimed.candidateId, status: "claimed" });
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Changed while claimed.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+
+    expect(() => proposeOauthRunbook(db)).toThrow(
+      `candidate_proposal_reconciliation_deferred:${claimed.candidateId}`
+    );
+    expect(getWorkbenchArtifactCandidate(db, claimed.candidateId)).toMatchObject({
+      evidenceRevision: claimed.evidenceRevision,
+      status: "claimed"
+    });
+    db.close();
+  });
+
+  test("gives proposal A to B to A revisions distinct predecessor lineage", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const originalSummary = (
+      db.prepare("SELECT summary FROM checkpoints WHERE session_id = ?").get("session:oauth-fixed") as {
+        summary: string;
+      }
+    ).summary;
+    const revisionA = proposeOauthRunbook(db);
+    expect(proposeOauthRunbook(db).candidateId).toBe(revisionA.candidateId);
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Proposal B.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    const revisionB = proposeOauthRunbook(db);
+    db.prepare("UPDATE checkpoints SET summary = ? WHERE session_id = ?").run(
+      originalSummary,
+      "session:oauth-fixed"
+    );
+    const revisionA2 = proposeOauthRunbook(db);
+
+    expect(new Set([revisionA.candidateId, revisionB.candidateId, revisionA2.candidateId]).size).toBe(3);
+    expect(revisionB.supersedesCandidateId).toBe(revisionA.candidateId);
+    expect(revisionA2.supersedesCandidateId).toBe(revisionB.candidateId);
+    expect(revisionA2.evidenceRevision).toBe(revisionA.evidenceRevision);
+    db.close();
+  });
+
+  test("supersedes same-revision proposal support changes instead of returning stale refs", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    db.prepare(
+      `INSERT INTO checkpoints (
+        checkpoint_id, session_id, checkpoint_kind, summary, observed_at, source_ref_json
+      ) VALUES ('oauth:verified-alternate', 'session:oauth-fixed', 'verification_passed',
+        'Alternate OAuth verification test passed.', '2026-07-01T12:03:00.000Z', '{}')`
+    ).run();
+    const original = proposeOauthRunbook(db);
+    const alternate = proposeOauthRunbook(db, "checkpoint:oauth:verified-alternate");
+
+    expect(alternate.evidenceRevision).toBe(original.evidenceRevision);
+    expect(alternate.candidateId).not.toBe(original.candidateId);
+    expect(alternate.supersedesCandidateId).toBe(original.candidateId);
+    expect(alternate.signalEvidenceRefs).toContain("checkpoint:oauth:verified-alternate");
+    expect(alternate.signalEvidenceRefs).not.toContain("checkpoint:oauth:verified");
+    expect(getWorkbenchArtifactCandidate(db, original.candidateId)?.status).toBe("superseded");
+    db.close();
+  });
+
   test("requires real passed-verification semantics and retains only the earning chain", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
@@ -627,6 +726,51 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("retains separate incident signature triggers from every joined provenance session", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const sessions = ["session:incident-root-cause", "session:incident-unproven-cause"];
+    for (const [index, sessionId] of sessions.entries()) {
+      db.prepare(
+        `INSERT INTO messages (
+          message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+        ) VALUES (?, ?, 'assistant', 'ERROR_SIGNATURE: database writer exhausted', ?,
+          '2026-07-01T12:00:30.000Z', '{}', 'authoritative')`
+      ).run(`incident-signature:${index}`, sessionId, `incident-signature:${index}:hash`);
+    }
+
+    const joined = discoverArtifactCandidates(db, sessions).find(
+      (candidate) => candidate.kind === "incident_timeline"
+    )!;
+
+    expect(joined.signatureKey).toBe("error:database:writer-exhausted");
+    expect(joined.provenanceSessionIds).toEqual(sessions.sort());
+    expect(joined.signalEvidenceRefs).toEqual(
+      expect.arrayContaining([
+        "message:incident-signature:0",
+        "message:incident-signature:1"
+      ])
+    );
+    db.close();
+  });
+
+  test("never uses a different artifact kind as candidate lineage", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const adr = discoverArtifactCandidates(db, ["session:decision-local-first"]).find(
+      (candidate) => candidate.kind === "adr"
+    )!;
+    seedRunbookSignals(db, "session:decision-local-first");
+
+    const runbook = discoverArtifactCandidates(db, ["session:decision-local-first"]).find(
+      (candidate) => candidate.kind === "runbook"
+    )!;
+
+    expect(adr.status).toBe("pending");
+    expect(runbook.supersedesCandidateId).toBeUndefined();
+    db.close();
+  });
+
   test("caps a discovery page at 100 tool-heavy publish-path sessions and completes within two seconds", async () => {
     const db = await testDb();
     seedToolHeavySessions(db, 101, 60);
@@ -755,4 +899,42 @@ function seedAdditionalStrongSignatureSessions(db: MastheadDatabase, count: numb
     }
   });
   return sessionIds;
+}
+
+function proposeOauthRunbook(
+  db: MastheadDatabase,
+  verificationRef = "checkpoint:oauth:verified"
+): ReturnType<typeof proposeArtifactCandidate> {
+  return proposeArtifactCandidate(db, {
+    kind: "runbook",
+    provenanceSessionIds: ["session:oauth-fixed"],
+    seedSessionId: "session:oauth-fixed",
+    signalEvidenceRefs: ["tool_result:oauth:failure", "file:oauth:change", verificationRef],
+    signalSummary: "OAuth callback failure recovery with an exact verified chain."
+  });
+}
+
+function seedRunbookSignals(db: MastheadDatabase, sessionId: string): void {
+  db.prepare(
+    `INSERT INTO tool_calls (
+      tool_call_id, session_id, tool_name, started_at, source_ref_json
+    ) VALUES ('decision-runbook:failure:call', ?, 'exec_command', '2026-07-01T12:02:00.000Z', '{}')`
+  ).run(sessionId);
+  db.prepare(
+    `INSERT INTO tool_results (
+      tool_result_id, tool_call_id, session_id, status, exit_code, output_redacted, completed_at, source_ref_json
+    ) VALUES ('decision-runbook:failure', 'decision-runbook:failure:call', ?, 'failed', 1,
+      'Configuration test failed.', '2026-07-01T12:02:00.000Z', '{}')`
+  ).run(sessionId);
+  db.prepare(
+    `INSERT INTO file_effects (
+      file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json
+    ) VALUES ('decision-runbook:change', ?, 'config/runtime.ts', 'modified', '2026-07-01T12:03:00.000Z', '{}')`
+  ).run(sessionId);
+  db.prepare(
+    `INSERT INTO checkpoints (
+      checkpoint_id, session_id, checkpoint_kind, summary, observed_at, source_ref_json
+    ) VALUES ('decision-runbook:verified', ?, 'verification_passed',
+      'Configuration verification test passed.', '2026-07-01T12:04:00.000Z', '{}')`
+  ).run(sessionId);
 }

@@ -112,6 +112,13 @@ export function proposeArtifactCandidate(
   db: MastheadDatabase,
   proposal: ArtifactCandidateProposal
 ): WorkbenchArtifactCandidate {
+  return withImmediateTransaction(db, () => proposeArtifactCandidateInTransaction(db, proposal));
+}
+
+function proposeArtifactCandidateInTransaction(
+  db: MastheadDatabase,
+  proposal: ArtifactCandidateProposal
+): WorkbenchArtifactCandidate {
   const provenanceSessionIds = normalizedStrings(proposal.provenanceSessionIds);
   const signalEvidenceRefs = normalizedStrings(proposal.signalEvidenceRefs);
   if (provenanceSessionIds.length < 1 || provenanceSessionIds.length > 12) {
@@ -164,13 +171,7 @@ export function proposeArtifactCandidate(
     throw new Error(`candidate_proposal_unrelated_provenance:${unrelatedSession.sessionId}`);
   }
   const evidenceRevision = authoringEvidenceRevision(db, provenanceSessionIds);
-  return saveWorkbenchArtifactCandidate(db, {
-    candidateId: candidateId(
-      proposal.kind,
-      proposal.seedSessionId,
-      evidenceRevision,
-      signatureKey
-    ),
+  return reconcileProposedCandidate(db, {
     kind: proposal.kind,
     provenanceSessionIds,
     seedSessionId: proposal.seedSessionId,
@@ -179,6 +180,23 @@ export function proposeArtifactCandidate(
     evidenceRevision,
     ...(signatureKey ? { signatureKey } : {})
   });
+}
+
+function reconcileProposedCandidate(db: MastheadDatabase, seed: CandidateSeed): WorkbenchArtifactCandidate {
+  const allCandidates = listWorkbenchArtifactCandidates(db);
+  const current = allCandidates.find(
+    (candidate) =>
+      (candidate.status === "pending" || candidate.status === "claimed" || candidate.status === "published") &&
+      candidateIdentityMatches(candidate, seed)
+  );
+  if (current && candidateMatchesSeedRevision(current, seed)) return getStoredCandidate(db, current.candidateId);
+  if (current?.status === "claimed") {
+    throw new Error(`candidate_proposal_reconciliation_deferred:${current.candidateId}`);
+  }
+  if (current) {
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: current.candidateId, status: "superseded" });
+  }
+  return persistSeeds(db, [seed], allCandidates)[0]!;
 }
 
 function proposalAllowedEvidenceRefs(
@@ -365,7 +383,12 @@ function seedsForSignals(db: MastheadDatabase, signals: SessionSignals): Candida
       provenanceSessionIds: [signals.sessionId],
       signalEvidenceRefs: normalizedStrings([
         ...signals.failureRefs.map(refValue),
-        ...signals.timelineEventRefs.map(refValue)
+        ...signals.timelineEventRefs.map(refValue),
+        ...(signatureKey
+          ? signals.signatureRefs
+              .filter((entry) => entry.signatureKey === signatureKey)
+              .map(refValue)
+          : [])
       ]),
       signalSummary: signalSummary("incident_timeline", 1),
       evidenceRevision: authoringEvidenceRevision(db, [signals.sessionId]),
@@ -607,8 +630,9 @@ function persistSeeds(
       const predecessor = lineageCandidates
         .filter(
           (candidate) =>
-            candidateIdentityMatches(candidate, seed) ||
-            candidate.provenanceSessionIds.some((sessionId) => seed.provenanceSessionIds.includes(sessionId))
+            candidate.kind === seed.kind &&
+            (candidateIdentityMatches(candidate, seed) ||
+              candidate.provenanceSessionIds.some((sessionId) => seed.provenanceSessionIds.includes(sessionId)))
         )
         .sort(compareLineageCandidates)[0];
       return saveWorkbenchArtifactCandidate(db, {
