@@ -7,6 +7,7 @@ import {
   acquireLifecycleLease,
   classifyProductionProcess,
   installProductionLauncher,
+  productionHealthPollPolicy,
   startProduction,
   stopProduction,
   transitionProduction
@@ -77,6 +78,15 @@ function processRecord(overrides: Record<string, unknown> = {}) {
 }
 
 describe("production lifecycle launcher", () => {
+  test("allows five bounded minutes for migration health without reverting to the old 30 second window", () => {
+    expect(productionHealthPollPolicy()).toEqual({
+      intervalMs: 250,
+      maxAttempts: 1_200,
+      timeoutMs: 300_000
+    });
+    expect(productionHealthPollPolicy().maxAttempts).toBeGreaterThan(120);
+  });
+
   test("reads proc executable symlink text so deleted kernel identities remain observable", async () => {
     const source = await readFile("scripts/masthead-production.js", "utf8");
     expect(source).toContain('readlink(join(processRoot, "exe"))');

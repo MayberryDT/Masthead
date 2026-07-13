@@ -24,7 +24,17 @@ import { DatabaseSync } from "node:sqlite";
 import { verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
 
 const DEFAULT_PORT = 17383;
+const PRODUCTION_HEALTH_INTERVAL_MS = 250;
+const PRODUCTION_HEALTH_TIMEOUT_MS = 300_000;
 const VERSIONED_TARGET = /^Masthead-linux-x64-[A-Za-z0-9][A-Za-z0-9._+-]*$/u;
+
+export function productionHealthPollPolicy() {
+  return {
+    intervalMs: PRODUCTION_HEALTH_INTERVAL_MS,
+    maxAttempts: PRODUCTION_HEALTH_TIMEOUT_MS / PRODUCTION_HEALTH_INTERVAL_MS,
+    timeoutMs: PRODUCTION_HEALTH_TIMEOUT_MS
+  };
+}
 
 export async function acquireLifecycleLease(leasePath) {
   await mkdir(dirname(leasePath), { recursive: true });
@@ -656,12 +666,13 @@ async function fetchHealth(port) {
 }
 
 async function waitForHealth(config) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const policy = productionHealthPollPolicy();
+  for (let attempt = 0; attempt < policy.maxAttempts; attempt += 1) {
     const health = await fetchHealth(config.port);
     if (health) return health;
-    await delay(250);
+    await delay(policy.intervalMs);
   }
-  throw new Error("Pinned Masthead production health did not become available within 30 seconds.");
+  throw new Error("Pinned Masthead production health did not become available within 5 minutes.");
 }
 
 async function waitForExit(pid, starttime, timeoutMs) {
