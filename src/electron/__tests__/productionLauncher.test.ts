@@ -16,6 +16,7 @@ import {
   installDisabledProductionSurface,
   installProductionLauncher,
   productionHealthPollPolicy,
+  readOwnedProcessStrict,
   readProductionProcesses,
   waitForProductionHealth,
   startProduction,
@@ -355,6 +356,56 @@ describe("production lifecycle launcher", () => {
       timeoutMs: 10
     })).rejects.toThrow("bounded deadline");
     expect(Date.now() - startedAt).toBeLessThan(100);
+  });
+
+  test("skips proven other-effective-UID proc entries before EACCES but fails closed for same-UID EACCES", async () => {
+    const procRoot = await mkdtemp(join(tmpdir(), "masthead-proc-uid-filter-"));
+    cleanup.push(procRoot);
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    const otherUid = currentUid === 0 ? 1 : 0;
+    const permissionDenied = () => Object.assign(new Error("permission denied reading proc executable"), { code: "EACCES" });
+
+    await mkdir(join(procRoot, "1490"));
+    await writeFile(join(procRoot, "1490", "status"), [
+      "Name:\troot-owned",
+      `Uid:\t${otherUid}\t${otherUid}\t${otherUid}\t${otherUid}`,
+      ""
+    ].join("\n"));
+    let otherInspected = false;
+    await expect(readOwnedProcessStrict(1490, {
+      currentUid,
+      processRoot: procRoot,
+      readProcess: async () => { otherInspected = true; throw permissionDenied(); }
+    })).resolves.toBeUndefined();
+    expect(otherInspected).toBe(false);
+
+    await mkdir(join(procRoot, "1491"));
+    await writeFile(join(procRoot, "1491", "status"), [
+      "Name:\tsame-user",
+      `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}`,
+      ""
+    ].join("\n"));
+    await expect(readOwnedProcessStrict(1491, {
+      currentUid,
+      processRoot: procRoot,
+      readProcess: async () => { throw permissionDenied(); }
+    })).rejects.toMatchObject({ code: "EACCES" });
+  });
+
+  test("fails closed when effective UID cannot be established, except a stat-proven other owner", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    const otherUid = currentUid === 0 ? 1 : 0;
+    const denied = Object.assign(new Error("status permission denied"), { code: "EACCES" });
+    await expect(readOwnedProcessStrict(1492, {
+      currentUid,
+      readStatus: async () => { throw denied; },
+      stat: async () => ({ uid: otherUid })
+    })).resolves.toBeUndefined();
+    await expect(readOwnedProcessStrict(1493, {
+      currentUid,
+      readStatus: async () => "Name:\tmissing-uid\n",
+      stat: async () => ({ uid: currentUid })
+    })).rejects.toThrow("effective UID could not be established");
   });
 
   test("installs an atomic wrapper and desktop entry pinned to the immutable target and release identity", async () => {

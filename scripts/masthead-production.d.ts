@@ -35,6 +35,13 @@ export function readProductionProcesses(adapters?: {
   readProcess?: (pid: number) => Promise<ProductionProcessRecord | undefined>;
   timeoutMs?: number;
 }): Promise<ProductionProcessRecord[]>;
+export function readOwnedProcessStrict(pid: number, adapters?: {
+  currentUid?: number;
+  processRoot?: string;
+  readProcess?: (pid: number) => Promise<ProductionProcessRecord | undefined>;
+  readStatus?: () => Promise<string>;
+  stat?: () => Promise<{ uid: number }>;
+}): Promise<ProductionProcessRecord | undefined>;
 export function waitForProductionHealth(
   config: { port: number },
   adapters?: {

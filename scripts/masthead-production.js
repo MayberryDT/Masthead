@@ -1116,17 +1116,43 @@ function promiseWithTimeout(promise, timeoutMs, message) {
   });
 }
 
-async function readOwnedProcessStrict(pid) {
-  const processRoot = `/proc/${pid}`;
-  let info;
+export async function readOwnedProcessStrict(pid, adapters = {}) {
+  const processRoot = join(adapters.processRoot || "/proc", String(pid));
+  const currentUid = adapters.currentUid ?? (typeof process.geteuid === "function"
+    ? process.geteuid()
+    : typeof process.getuid === "function" ? process.getuid() : undefined);
+  if (!Number.isSafeInteger(currentUid) || currentUid < 0) {
+    throw new Error("Production process scan current effective UID could not be established.");
+  }
+  const readStatus = adapters.readStatus || (() => readFile(join(processRoot, "status"), "utf8"));
+  const statProcess = adapters.stat || (() => stat(processRoot));
+  const inspectProcess = adapters.readProcess || ((processPid) => readProcess(processPid, true));
+  let status;
   try {
-    info = await stat(processRoot);
+    status = await readStatus();
   } catch (error) {
     if (error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code)) return undefined;
+    const ownership = await statProcess().catch((statError) => {
+      if (statError && typeof statError === "object" && ["ENOENT", "ESRCH"].includes(statError.code)) return undefined;
+      throw error;
+    });
+    if (!ownership) return undefined;
+    if (Number.isSafeInteger(ownership.uid) && ownership.uid !== currentUid) return undefined;
     throw error;
   }
-  if (typeof process.getuid === "function" && info.uid !== process.getuid()) return undefined;
-  return readProcess(pid, true);
+  const uidMatch = String(status).match(/^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/mu);
+  const effectiveUid = uidMatch ? Number(uidMatch[2]) : undefined;
+  if (!Number.isSafeInteger(effectiveUid) || effectiveUid < 0) {
+    const ownership = await statProcess().catch((error) => {
+      if (error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code)) return undefined;
+      throw error;
+    });
+    if (!ownership) return undefined;
+    if (Number.isSafeInteger(ownership.uid) && ownership.uid !== currentUid) return undefined;
+    throw new Error(`Production process ${pid} effective UID could not be established.`);
+  }
+  if (effectiveUid !== currentUid) return undefined;
+  return inspectProcess(pid);
 }
 
 async function readProcess(pid, strict = false) {
