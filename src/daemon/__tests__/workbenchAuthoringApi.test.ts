@@ -192,6 +192,26 @@ describe("Workbench authoring HTTP API", () => {
       run: { contractVersion: "workbench-authoring-v2", status: "ready_to_finish" }
     });
 
+    const secondCandidate = allRunbooks.body.candidates.find(
+      (entry: any) => entry.seedSessionId === "session:oauth-fixed"
+    );
+    expect(secondCandidate).toBeDefined();
+    const secondOpened = await postJson(
+      baseUrl,
+      "/workbench/authoring/runs",
+      { actorId: "codex-two", candidateId: secondCandidate.candidateId, databaseId },
+      201
+    );
+    const duplicatePending = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(secondOpened.body.run.runId)}/submit`,
+      validCandidateBundle(secondOpened.body.run, secondCandidate)
+    );
+    expect(duplicatePending.body).toMatchObject({ accepted: false, run: { status: "needs_revision" } });
+    expect(duplicatePending.body.findings).toContainEqual(
+      expect.objectContaining({ code: "duplicate_human_content", path: "artifact.output" })
+    );
+
     const arbitrary = await postJson(
       baseUrl,
       "/workbench/authoring/runs",

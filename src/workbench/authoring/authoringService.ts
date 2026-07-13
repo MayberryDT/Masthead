@@ -59,13 +59,14 @@ import {
 import { runCaptureQualityPrecheck } from "../qualityPrecheck.ts";
 import { fingerprintWorkbenchOutput } from "../applyArtifact.ts";
 import type { WorkbenchValidationEvidence } from "../types.ts";
-import { getAuthoringBundleSchema, getAuthoringBundleV2Schema } from "./authoringSchemas.ts";
+import { getAuthoringBundleSchema, getAuthoringBundleV2Schema, parseAuthoringBundleV2 } from "./authoringSchemas.ts";
 import {
   authoringEvidenceRevision,
   getAuthoringEvidenceManifest,
   getAuthoringEvidencePage
 } from "./evidenceCatalog.ts";
 import { findArtifactSignatureFindings, validateAuthoringBundle, validateAuthoringBundleV2 } from "./authoringValidation.ts";
+import type { ArtifactQualityOutput } from "./artifactQuality.ts";
 import { isArtifactCandidateEvidenceCurrent } from "./artifactCandidates.ts";
 import {
   buildPublishedDossierSnapshot,
@@ -355,7 +356,11 @@ export function submitAuthoringBundle(
       selectedSessionIds: renewed.sessionIds
     };
     const validation = input.bundle.bundleVersion === "workbench-authoring-v2"
-      ? validateAuthoringBundleV2({ ...validationInput, bundle: input.bundle })
+      ? validateAuthoringBundleV2({
+          ...validationInput,
+          bundle: input.bundle,
+          otherCandidateOutputs: recentAcceptedCandidateOutputs(db, input.bundle.candidateId)
+        })
       : validateAuthoringBundle({ ...validationInput, bundle: input.bundle });
     const run = saveWorkbenchAuthoringSubmission(db, {
       bundle: input.bundle,
@@ -873,6 +878,36 @@ function recentCurrentOptionalArtifacts(db: MastheadDatabase, limit = 100): Sess
   return rows.flatMap(({ artifactId }) => {
     const artifact = getSessionArtifact(db, artifactId);
     return artifact ? [artifact] : [];
+  });
+}
+
+function recentAcceptedCandidateOutputs(
+  db: MastheadDatabase,
+  candidateId: string,
+  limit = 100
+): ArtifactQualityOutput[] {
+  const rows = db.prepare(
+    `SELECT bundle_json AS bundleJson
+     FROM workbench_authoring_runs
+     WHERE contract_version = 'workbench-authoring-v2'
+       AND candidate_id <> ?
+       AND status = 'ready_to_finish'
+       AND bundle_json IS NOT NULL
+     ORDER BY updated_at DESC, run_id DESC
+     LIMIT ?`
+  ).all(candidateId, limit) as Array<{ bundleJson: string }>;
+  return rows.flatMap(({ bundleJson }) => {
+    try {
+      const bundle = parseAuthoringBundleV2(JSON.parse(bundleJson));
+      return [{
+        candidateId: bundle.candidateId,
+        kind: bundle.artifact.kind,
+        output: bundle.artifact.output,
+        provenanceSessionIds: bundle.artifact.provenanceSessionIds
+      }];
+    } catch {
+      return [];
+    }
   });
 }
 

@@ -119,6 +119,34 @@ describe("artifact claim support", () => {
     })).toContainEqual(expect.objectContaining({ code: "invalid_support_kind_evidence", path: "validationChecks[0]" }));
   });
 
+  test("rejects contradictory verification status, exit code, and nonzero failure counts", () => {
+    const cases: WorkbenchValidationEvidence[] = [
+      { ...fixtureEvidence().get(PASSED)!, exitCode: 1, status: "passed" },
+      { ...fixtureEvidence().get(PASSED)!, exitCode: 0, status: "failed" },
+      { ...fixtureEvidence().get(PASSED)!, text: "Verification tests completed with failures: 2." },
+      { ...fixtureEvidence().get(PASSED)!, text: "Verification did not pass and was not successful." }
+    ];
+
+    for (const [index, evidence] of cases.entries()) {
+      const ref = `tool_result:session:a:contradiction:${index}`;
+      const evidenceByRef = fixtureEvidence();
+      evidenceByRef.set(ref, evidence);
+      const supports = validRunbookSupports().map((entry) => entry.supportKind === "verification"
+        ? support("validationChecks[0]", ref, evidence.text, "verification")
+        : entry);
+      expect(validateArtifactQuality({
+        evidenceByRef,
+        kind: "runbook",
+        output: validRunbook(),
+        provenanceSessionIds: ["session:a"],
+        supports
+      })).toContainEqual(expect.objectContaining({
+        code: "invalid_support_kind_evidence",
+        path: "validationChecks[0]"
+      }));
+    }
+  });
+
   test("accepts an explicit positive verification checkpoint", () => {
     const supports = validRunbookSupports().map((entry) => entry.supportKind === "verification"
       ? support(
@@ -131,6 +159,31 @@ describe("artifact claim support", () => {
 
     expect(validateArtifactQuality({
       evidenceByRef: fixtureEvidence(),
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports
+    })).not.toContainEqual(expect.objectContaining({ code: "invalid_support_kind_evidence", path: "validationChecks[0]" }));
+  });
+
+  test("accepts a passed verification tool result when exit code is unavailable", () => {
+    const evidenceByRef = fixtureEvidence();
+    evidenceByRef.set("tool_result:session:a:no-exit", {
+      ...evidenceByRef.get(PASSED)!,
+      exitCode: undefined,
+      status: "passed"
+    });
+    const supports = validRunbookSupports().map((entry) => entry.supportKind === "verification"
+      ? support(
+          "validationChecks[0]",
+          "tool_result:session:a:no-exit",
+          "Focused authoring validation tests passed with 24 assertions.",
+          "verification"
+        )
+      : entry);
+
+    expect(validateArtifactQuality({
+      evidenceByRef,
       kind: "runbook",
       output: validRunbook(),
       provenanceSessionIds: ["session:a"],
@@ -186,6 +239,22 @@ describe("artifact claim support", () => {
     ]));
   });
 
+  test("requires each timeline support ref to be visible on that exact timeline entry", () => {
+    const output = validIncident();
+    output.timeline[0]!.evidenceRefs = ["message:session:a:remediation"];
+
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "incident_timeline",
+      output,
+      provenanceSessionIds: ["session:a"],
+      supports: validIncidentSupports()
+    })).toContainEqual(expect.objectContaining({
+      code: "invalid_timeline_support",
+      path: "timeline[0].evidenceRefs"
+    }));
+  });
+
   test("allows an explicit unknown root cause but requires root_cause support for a causal assertion", () => {
     const unknown = validRunbook();
     unknown.rootCause = "Unknown from the available canonical evidence.";
@@ -204,6 +273,64 @@ describe("artifact claim support", () => {
       provenanceSessionIds: ["session:a"],
       supports: validRunbookSupports().filter((entry) => entry.supportKind !== "root_cause")
     })).toContainEqual(expect.objectContaining({ code: "missing_root_cause_support", path: "rootCause" }));
+  });
+
+  test("does not treat an unknown causal mechanism as an explicit uncertainty statement", () => {
+    const causal = validRunbook();
+    causal.rootCause = "An unknown cache defect caused the callback failure.";
+
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "runbook",
+      output: causal,
+      provenanceSessionIds: ["session:a"],
+      supports: validRunbookSupports().filter((entry) => entry.supportKind !== "root_cause")
+    })).toContainEqual(expect.objectContaining({ code: "missing_root_cause_support", path: "rootCause" }));
+  });
+
+  test("does not allow a causal assertion after an uncertainty sentence", () => {
+    const causal = validRunbook();
+    causal.rootCause = "Root cause is unknown. A cache defect caused the callback failure.";
+
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "runbook",
+      output: causal,
+      provenanceSessionIds: ["session:a"],
+      supports: validRunbookSupports().filter((entry) => entry.supportKind !== "root_cause")
+    })).toContainEqual(expect.objectContaining({ code: "missing_root_cause_support", path: "rootCause" }));
+  });
+
+  test("requires incidents without root-cause support to state that root cause is unknown", () => {
+    const incident = validIncident();
+
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "incident_timeline",
+      output: incident,
+      provenanceSessionIds: ["session:a"],
+      supports: validIncidentSupports()
+    })).toContainEqual(expect.objectContaining({ code: "missing_root_cause_support", path: "rootCause" }));
+  });
+
+  test("does not impose a root-cause field on ADRs", () => {
+    const evidenceByRef = fixtureEvidence();
+    const output = {
+      alternatives: ["Keep the legacy claim envelope unchanged."],
+      decision: "Require exact claim support on every V2 artifact.",
+      title: "Require exact V2 claim support"
+    };
+
+    expect(validateArtifactQuality({
+      evidenceByRef,
+      kind: "adr",
+      output,
+      provenanceSessionIds: ["session:a"],
+      supports: [
+        support("decision", MESSAGE, "The prior validator accepted unsupported root cause claims.", "decision"),
+        support("alternatives[0]", MESSAGE, "OAuth callback state validation rejected the request.", "alternative")
+      ]
+    })).not.toContainEqual(expect.objectContaining({ code: "missing_root_cause_support" }));
   });
 
   test("permits real Masthead authoring language when that exact field is directly supported", () => {
@@ -340,13 +467,23 @@ function validRunbookSupports(): WorkbenchClaimSupport[] {
   ];
 }
 
-function validIncident(): Record<string, unknown> & { timeline: Array<{ at: string; summary: string }> } {
+function validIncident(): Record<string, unknown> & {
+  timeline: Array<{ at: string; evidenceRefs: string[]; summary: string }>;
+} {
   return {
     remediation: ["Remediation added deterministic callback state validation before token exchange."],
     symptom: "OAuth callback state validation rejected the request.",
     timeline: [
-      { at: "2026-07-12T12:00:00.000Z", summary: "OAuth callback state validation rejected the request." },
-      { at: "2026-07-12T12:15:00.000Z", summary: "Remediation added deterministic callback state validation before token exchange." }
+      {
+        at: "2026-07-12T12:00:00.000Z",
+        evidenceRefs: [MESSAGE],
+        summary: "OAuth callback state validation rejected the request."
+      },
+      {
+        at: "2026-07-12T12:15:00.000Z",
+        evidenceRefs: ["message:session:a:remediation"],
+        summary: "Remediation added deterministic callback state validation before token exchange."
+      }
     ],
     title: "OAuth callback validation incident"
   };

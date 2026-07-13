@@ -12,7 +12,11 @@ import {
   getWorkbenchAuthoringOutputSchema,
   getWorkbenchAuthoringOutputV2Schema
 } from "./authoringSchemas.ts";
-import { findDuplicateHumanContent, validateArtifactQuality } from "./artifactQuality.ts";
+import {
+  findDuplicateHumanContent,
+  validateArtifactQuality,
+  type ArtifactQualityOutput
+} from "./artifactQuality.ts";
 import type {
   WorkbenchAuthoringFindingCode,
   WorkbenchAuthoringFindingV2,
@@ -90,6 +94,7 @@ export function validateAuthoringBundleV2(input: {
   evidenceByRef: WorkbenchAuthoringValidationInput["evidenceByRef"];
   coverageWarningsBySession: WorkbenchAuthoringValidationInput["coverageWarningsBySession"];
   publishedArtifacts: WorkbenchAuthoringValidationInput["publishedArtifacts"];
+  otherCandidateOutputs?: ArtifactQualityOutput[];
 }): WorkbenchAuthoringValidationResult {
   const findings: WorkbenchAuthoringFindingV2[] = [];
   validateSchemaValue(input.bundle, getAuthoringBundleV2Schema(), "", findings);
@@ -106,14 +111,14 @@ export function validateAuthoringBundleV2(input: {
     const artifact = input.bundle.artifact;
     if (automaticKind(artifact.kind) && isRecord(artifact.output)) {
       for (const finding of findDuplicateHumanContent(
-        [{
+        [...(input.otherCandidateOutputs ?? []), {
           candidateId: input.bundle.candidateId,
           kind: artifact.kind,
           output: artifact.output,
           provenanceSessionIds: artifact.provenanceSessionIds
         }],
         input.publishedArtifacts
-      )) {
+      ).filter((finding) => finding.candidateId === input.bundle.candidateId)) {
         addFinding(findings, {
           artifactKind: artifact.kind,
           code: finding.code,

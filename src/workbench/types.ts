@@ -111,6 +111,7 @@ export type WorkbenchAuthoringFindingCode =
   | "unsupported_claim_excerpt"
   | "invalid_support_kind_evidence"
   | "invalid_timeline_order"
+  | "invalid_timeline_support"
   | "duplicate_human_content"
   | "unresolved_automatic_kind"
   | "weak_join"

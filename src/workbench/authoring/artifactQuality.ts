@@ -27,6 +27,7 @@ export type ArtifactQualityFinding = {
   code:
     | "duplicate_human_content"
     | "invalid_support_kind_evidence"
+    | "invalid_timeline_support"
     | "invalid_timeline_order"
     | "missing_claim_support"
     | "missing_required_support_kind"
@@ -154,10 +155,13 @@ export function validateArtifactQuality(input: {
   }
 
   const rootCause = typeof input.output.rootCause === "string" ? input.output.rootCause.trim() : "";
+  const hasRootCauseSupport = validSupports.some(
+    (support) => support.path === "rootCause" && support.supportKind === "root_cause"
+  );
   if (
-    rootCause &&
-    !isExplicitlyUnknown(rootCause) &&
-    !validSupports.some((support) => support.path === "rootCause" && support.supportKind === "root_cause")
+    (input.kind === "runbook" || input.kind === "incident_timeline") &&
+    !hasRootCauseSupport &&
+    (!rootCause || !isExplicitlyUnknown(rootCause))
   ) {
     findings.push({
       code: "missing_root_cause_support",
@@ -260,15 +264,21 @@ function supportKindMatchesEvidence(
   if (evidence.lowValue) return false;
   if (support.supportKind === "verification") {
     if (evidence.kind === "tool_result") {
-      const succeeded = evidence.exitCode === 0 || PASSED_STATUSES.has(evidence.status?.trim().toLowerCase() ?? "");
+      const normalizedStatus = evidence.status?.trim().toLowerCase();
+      const exitSucceeded = evidence.exitCode === undefined ? undefined : evidence.exitCode === 0;
+      const statusSucceeded = normalizedStatus ? PASSED_STATUSES.has(normalizedStatus) : undefined;
+      const succeeded =
+        exitSucceeded !== false &&
+        statusSucceeded !== false &&
+        (exitSucceeded === true || statusSucceeded === true);
       const semanticText = `${evidence.toolName ?? ""} ${evidence.label ?? ""} ${evidence.text}`;
       return succeeded &&
         /\b(?:build|check|health|lint|smoke|test|tests|verif(?:y|ied|ication))\b/i.test(semanticText) &&
-        !/\b(?:error|fail(?:ed|ure|ing)?|unsuccessful)\b/i.test(evidence.text);
+        !hasNegativeVerificationOutcome(evidence.text);
     }
     return evidence.kind === "checkpoint" &&
       /(?:verification_)?(?:passed|verified|succeeded)/i.test(evidence.label ?? "") &&
-      !/\b(?:error|fail(?:ed|ure|ing)?|unsuccessful)\b/i.test(evidence.text);
+      !hasNegativeVerificationOutcome(evidence.text);
   }
   if (support.supportKind === "timeline") return Boolean(parseTimestamp(evidence.observedAt));
   if (support.supportKind === "change") {
@@ -283,7 +293,7 @@ function supportKindMatchesPath(support: WorkbenchClaimSupport): boolean {
     alternative: /^alternatives\[\d+\]$/,
     change: /^(?:changedFiles|commands|fixSteps)\[\d+\]$/,
     decision: /^decision$/,
-    problem: /^(?:impact|problemSignature(?:\.|$)|reproSteps\[\d+\]|symptom)$/,
+    problem: /^(?:impact|problemSignature(?:\..+)?|reproSteps\[\d+\]|symptom)$/,
     remediation: /^(?:prevention|remediation)\[\d+\]$/,
     root_cause: /^rootCause$/,
     timeline: /^timeline\[\d+\]\.summary$/,
@@ -312,6 +322,16 @@ function validateTimelineOrder(
     const entrySupports = supports.filter(
       (support) => support.supportKind === "timeline" && support.path.startsWith(`timeline[${index}].`)
     );
+    const visibleEvidenceRefs = isRecord(entry) && Array.isArray(entry.evidenceRefs)
+      ? entry.evidenceRefs.filter((ref): ref is string => typeof ref === "string")
+      : [];
+    if (entrySupports.some((support) => !visibleEvidenceRefs.includes(support.evidenceRef))) {
+      findings.push({
+        code: "invalid_timeline_support",
+        message: "Each timeline claim support ref must be visible on that exact timeline entry.",
+        path: `timeline[${index}].evidenceRefs`
+      });
+    }
     if (
       at !== undefined &&
       entrySupports.some((support) => parseTimestamp(evidenceByRef.get(support.evidenceRef)?.observedAt) !== at)
@@ -374,7 +394,16 @@ function normalizeWhitespace(value: string): string {
 }
 
 function isExplicitlyUnknown(value: string): boolean {
-  return /\b(?:unknown|undetermined|not (?:known|established|determined)|insufficient evidence)\b/i.test(value);
+  const normalized = normalizeWhitespace(value);
+  return /^(?:(?:the )?root cause (?:is|remains) (?:unknown|undetermined|not (?:known|established|determined))(?: (?:from|based on) (?:the )?(?:available |current )?(?:canonical )?evidence)?|unknown (?:from|based on) (?:the )?(?:available |current )?(?:canonical )?evidence|(?:the )?(?:available |current )?(?:canonical )?evidence (?:does not establish|is insufficient to establish|cannot determine) (?:the )?root cause)[.!]?$/i.test(normalized);
+}
+
+function hasNegativeVerificationOutcome(value: string): boolean {
+  const withoutZeroCounts = value
+    .replace(/\b(?:0|zero)\s+(?:errors?|failures?)\b/gi, "")
+    .replace(/\b(?:errors?|failures?)\s*[:=]\s*0\b/gi, "");
+  return /\b(?:did not pass|not successful|unsuccessful|error|failed|failing|failure)\b/i.test(withoutZeroCounts) ||
+    /\b(?:[1-9]\d*\s+(?:errors?|failures?)|(?:errors?|failures?)\s*[:=]\s*[1-9]\d*)\b/i.test(withoutZeroCounts);
 }
 
 function arrayPaths(value: unknown, path: string): string[] {
