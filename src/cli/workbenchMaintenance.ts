@@ -1,6 +1,5 @@
 import { access } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { acquireDatabaseWriterLock } from "../core/daemonOwnership.ts";
 import { resolveWorkbenchDatabasePath } from "./dbPath.ts";
 import { errorResult, jsonResult, type CliResult } from "./output.ts";
 import {
@@ -8,7 +7,10 @@ import {
   invalidateFailedV1Generation,
   wipePublishedArtifactState
 } from "../daemon/db/sessionArtifactRepository.ts";
-import { createSingleConsistentBackup } from "../daemon/databaseBackup.ts";
+import {
+  createSingleConsistentBackupInsideExclusiveMaintenance,
+  withExclusiveDatabaseMaintenance
+} from "../daemon/databaseBackup.ts";
 import { migrateDatabase } from "../daemon/db/schema.ts";
 import { openMastheadDatabase } from "../daemon/db/sqlite.ts";
 
@@ -51,29 +53,26 @@ export async function runFailedV1RecoveryMaintenance(
     }
 
     if (command === "prepare-v1-recovery") {
-      const sourceDb = new DatabaseSync(databasePath, { readOnly: true });
-      let sourceAudit;
-      try {
-        sourceAudit = auditFailedV1Generation(sourceDb);
-      } finally {
-        sourceDb.close();
-      }
-      const backup = await createSingleConsistentBackup(databasePath);
-      const backupDb = new DatabaseSync(backup.backupPath, { readOnly: true });
-      try {
-        const backupAudit = auditFailedV1Generation(backupDb);
-        if (backupAudit.auditHash !== sourceAudit.auditHash) {
-          throw new Error("failed_v1_generation_changed_during_prepare");
+      return await withExclusiveDatabaseMaintenance(databasePath, async (ownership) => {
+        const sourceDb = new DatabaseSync(databasePath, { readOnly: true });
+        let sourceAudit;
+        try {
+          sourceAudit = auditFailedV1Generation(sourceDb);
+        } finally {
+          sourceDb.close();
         }
-        return jsonResult({
-          databasePath,
-          ok: true,
-          audit: backupAudit,
-          backup
-        });
-      } finally {
-        backupDb.close();
-      }
+        const backup = await createSingleConsistentBackupInsideExclusiveMaintenance(databasePath, ownership);
+        const backupDb = new DatabaseSync(backup.backupPath, { readOnly: true });
+        try {
+          const backupAudit = auditFailedV1Generation(backupDb);
+          if (backupAudit.auditHash !== sourceAudit.auditHash) {
+            throw new Error("failed_v1_generation_changed_during_prepare");
+          }
+          return jsonResult({ databasePath, ok: true, audit: backupAudit, backup });
+        } finally {
+          backupDb.close();
+        }
+      });
     }
 
     const expectedAuditHash = optionValue(args, "--audit-hash");
@@ -85,20 +84,19 @@ export async function runFailedV1RecoveryMaintenance(
         json
       );
     }
-    const writerLease = await acquireDatabaseWriterLock(databasePath);
-    let db: DatabaseSync | undefined;
-    try {
-      db = new DatabaseSync(databasePath);
-      db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;");
-      return jsonResult({
-        databasePath,
-        ok: true,
-        receipt: invalidateFailedV1Generation(db, expectedAuditHash)
-      });
-    } finally {
-      db?.close();
-      await writerLease.release();
-    }
+    return await withExclusiveDatabaseMaintenance(databasePath, () => {
+      const db = new DatabaseSync(databasePath);
+      try {
+        db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;");
+        return jsonResult({
+          databasePath,
+          ok: true,
+          receipt: invalidateFailedV1Generation(db, expectedAuditHash)
+        });
+      } finally {
+        db.close();
+      }
+    });
   } catch (error) {
     return errorResult(
       "v1_recovery_refused",

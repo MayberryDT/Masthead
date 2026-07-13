@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +20,7 @@ import {
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 import { createSingleConsistentBackup } from "../../databaseBackup.ts";
-import { acquireDatabaseWriterLock } from "../../../core/daemonOwnership.ts";
+import { acquireDatabaseWriterLock, acquireLegacyDataDirectoryGuard } from "../../../core/daemonOwnership.ts";
 import { fingerprintWorkbenchOutput } from "../../../workbench/applyArtifact.ts";
 import {
   buildPublishedDossierSnapshot,
@@ -466,12 +466,20 @@ describe("session artifact repository", () => {
       incidentTimelines: 0,
       runbooks: 0,
       totalArtifacts: FAILED_V1_DOSSIER_COUNT,
+      totalRuns: 66,
       totalSessions: FAILED_V1_DOSSIER_COUNT
     });
     expect(audit.counts.byKind).toEqual({ session_dossier: FAILED_V1_DOSSIER_COUNT });
     expect(audit.counts.byStatus).toEqual({ "current/published": FAILED_V1_DOSSIER_COUNT });
     expect(audit.auditHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(totalChanges(db)).toBe(changesBefore);
+  }, 60_000);
+
+  test("refuses an otherwise exact 1,283-dossier and 66-run population with useful non-template dossiers", async () => {
+    const db = await testDb();
+    seedExactFailedV1Generation(db, { usefulDossiers: true });
+
+    expect(() => auditFailedV1Generation(db)).toThrow("template_signature");
   }, 60_000);
 
   test("refuses mixed V1 populations and detects relevant state changes by audit hash", async () => {
@@ -596,7 +604,7 @@ describe("session artifact repository", () => {
     });
     const second = await createSingleConsistentBackup(databasePath);
     expect(second).toMatchObject({ databaseId, integrityResult: "ok", sizeBytes: expect.any(Number) });
-    expect(second.backupPath).not.toBe(first.backupPath);
+    expect(second.backupPath).toBe(first.backupPath);
     expect((await readdir(tempDir)).filter((name) => name.startsWith("masthead.sqlite.backup-"))).toEqual([
       second.backupPath.split("/").at(-1)
     ]);
@@ -612,13 +620,90 @@ describe("session artifact repository", () => {
       db.close();
     }
   });
+
+  test("backup preserves the prior verified snapshot across every staged failure and releases both ownership layers", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-recovery-backup-failure-"));
+    tempDirs.push(tempDir);
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const db = await openMastheadDatabase(databasePath);
+    migrateDatabase(db);
+    getOrCreateDatabaseIdentity(db);
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:old", title: "Old" });
+    const prior = await createSingleConsistentBackup(databasePath);
+    const priorBytes = await readFile(prior.backupPath);
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:new", title: "New" });
+
+    for (const failedBoundary of ["backup", "normalize", "verify", "finalize"] as const) {
+      await expect(createSingleConsistentBackup(databasePath, {
+        onBoundary(boundary) {
+          if (boundary === failedBoundary) throw new Error(`injected:${boundary}`);
+        }
+      })).rejects.toThrow(`injected:${failedBoundary}`);
+      expect(await readFile(prior.backupPath)).toEqual(priorBytes);
+      const entries = await readdir(tempDir);
+      expect(entries.filter((name) => name.startsWith("masthead.sqlite.backup-"))).toEqual([
+        prior.backupPath.split("/").at(-1)
+      ]);
+      expect(entries.some((name) => name.includes("recovery-stage"))).toBe(false);
+    }
+
+    const retry = await createSingleConsistentBackup(databasePath);
+    const retryDb = new DatabaseSync(retry.backupPath, { readOnly: true });
+    expect(retryDb.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 2 });
+    retryDb.close();
+    db.close();
+  });
+
+  test("backup mirrors full daemon ownership and rejects legacy guards, alternate writers, and outside symlink targets", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-recovery-ownership-"));
+    const outsideDir = await mkdtemp(join(tmpdir(), "masthead-recovery-outside-"));
+    tempDirs.push(tempDir, outsideDir);
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const db = await openMastheadDatabase(databasePath);
+    migrateDatabase(db);
+    getOrCreateDatabaseIdentity(db);
+    db.close();
+
+    const legacyGuard = await acquireLegacyDataDirectoryGuard(tempDir);
+    try {
+      await expect(createSingleConsistentBackup(databasePath)).rejects.toThrow("owns canonical data directory");
+    } finally {
+      await legacyGuard.release();
+    }
+
+    const alternatePath = join(tempDir, "alternate.sqlite");
+    const alternateWriter = await acquireDatabaseWriterLock(alternatePath);
+    const alternateGuard = await acquireLegacyDataDirectoryGuard(tempDir);
+    try {
+      await expect(createSingleConsistentBackup(databasePath)).rejects.toThrow("owns canonical data directory");
+    } finally {
+      await alternateGuard.release();
+      await alternateWriter.release();
+    }
+
+    const outsidePath = join(outsideDir, "outside.sqlite");
+    const outsideDb = await openMastheadDatabase(outsidePath);
+    migrateDatabase(outsideDb);
+    getOrCreateDatabaseIdentity(outsideDb);
+    outsideDb.close();
+    const aliasPath = join(tempDir, "alias.sqlite");
+    await symlink(outsidePath, aliasPath, "file");
+    await expect(createSingleConsistentBackup(aliasPath)).rejects.toThrow("outside");
+    await expect(access(`${aliasPath}.lease.sqlite`)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const final = await createSingleConsistentBackup(databasePath);
+    expect(final.integrityResult).toBe("ok");
+  });
 });
 
 const FAILED_CREATED_AT = "2026-07-11T08:00:00.000Z";
 const FAILED_PUBLISHED_AT = "2026-07-11T08:30:00.000Z";
 const FAILED_COMPLETED_AT = "2026-07-11T09:00:00.000Z";
 
-function seedExactFailedV1Generation(db: MastheadDatabase): void {
+function seedExactFailedV1Generation(
+  db: MastheadDatabase,
+  options: { usefulDossiers?: boolean } = {}
+): void {
   db.prepare("INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
     "host:failed-v1", "fixture", FAILED_CREATED_AT, FAILED_COMPLETED_AT
   );
@@ -676,16 +761,14 @@ function seedExactFailedV1Generation(db: MastheadDatabase): void {
     const resolvedSessionIds: string[] = [];
     const notApplicable: Array<Record<string, unknown>> = [];
     const members: Array<{ claimId: string; sessionId: string }> = [];
-    for (let runOrdinal = 0; runOrdinal < 20 && ordinal < FAILED_V1_DOSSIER_COUNT; runOrdinal += 1, ordinal += 1) {
+    const remaining = FAILED_V1_DOSSIER_COUNT - ordinal;
+    const batchSize = remaining === 3 ? 2 : Math.min(20, remaining);
+    for (let runOrdinal = 0; runOrdinal < batchSize; runOrdinal += 1, ordinal += 1) {
       const suffix = String(ordinal).padStart(4, "0");
       const sessionId = `session:failed-v1:${suffix}`;
       const claimId = `claim:failed-v1:${suffix}`;
       const artifactId = `artifact:failed-v1:${suffix}`;
-      const dossier = {
-        approach: ["Read every canonical evidence item through cursor pagination."],
-        outcome: `Keep package ${suffix} single provenance and avoid weak multi-session joins.`,
-        title: `Failed dossier ${suffix}`
-      };
+      const dossier = options.usefulDossiers ? usefulDossier(suffix) : failedTemplateDossier(suffix);
       insertSession.run(sessionId, sessionId, `Failed dossier ${suffix}`, FAILED_PUBLISHED_AT, FAILED_CREATED_AT, FAILED_PUBLISHED_AT);
       insertState.run(sessionId, FAILED_PUBLISHED_AT, FAILED_CREATED_AT, FAILED_PUBLISHED_AT);
       insertClaim.run(
@@ -747,6 +830,32 @@ function seedExactFailedV1Generation(db: MastheadDatabase): void {
     );
     members.forEach((member, index) => insertRunSession.run(runId, member.sessionId, member.claimId, index));
   }
+}
+
+function failedTemplateDossier(suffix: string): Record<string, unknown> & { title: string } {
+  return {
+    approach: ["Read every canonical evidence item through cursor pagination."],
+    commandsAndTools: [{ label: "Workbench evidence reader", purpose: "Read canonical evidence", status: "completed" }],
+    filesTouched: [{ label: "No file effects captured", role: "No file evidence" }],
+    keyDecisions: ["Keep the package single provenance and avoid weak multi-session joins."],
+    missingEvidence: ["Missing evidence prevented session-specific conclusions."],
+    outcome: "Kept the package single provenance and avoided weak multi-session joins.",
+    problemStatement: "Generic problem: review the selected session's canonical evidence.",
+    title: `Failed dossier ${suffix}`
+  };
+}
+
+function usefulDossier(suffix: string): Record<string, unknown> & { title: string } {
+  return {
+    approach: [`Traced OAuth callback ${suffix} through nonce validation and corrected its state comparison.`],
+    commandsAndTools: [{ label: "npm test -- auth-callback", purpose: "Verify the concrete repair", status: "passed" }],
+    filesTouched: [{ label: `src/auth/callback-${suffix}.ts`, role: "Corrected callback state validation" }],
+    keyDecisions: [`Compare callback ${suffix} against the server-issued nonce before exchanging the code.`],
+    missingEvidence: [],
+    outcome: `OAuth callback ${suffix} now rejects mismatched state and passes its focused regression test.`,
+    problemStatement: `OAuth callback ${suffix} accepted a mismatched state nonce.`,
+    title: `Useful OAuth dossier ${suffix}`
+  };
 }
 
 function recoveryCounts(db: MastheadDatabase) {

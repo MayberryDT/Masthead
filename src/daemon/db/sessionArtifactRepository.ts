@@ -82,6 +82,7 @@ export type SearchPublishedArtifactsQuery = {
 };
 
 export const FAILED_V1_DOSSIER_COUNT = 1_283;
+export const FAILED_V1_RUN_COUNT = 66;
 
 export type FailedGenerationAudit = {
   auditHash: string;
@@ -94,8 +95,12 @@ export type FailedGenerationAudit = {
   totalRuns: number;
   totalSessions: number;
   publicationWindow: { from: string; to: string };
+  generationWindow: { from: string; to: string };
+  actorId: string;
   createdBy: string[];
   schemaVersions: string[];
+  templateFingerprint: string;
+  generationFingerprint: string;
   counts: {
     byKind: Record<string, number>;
     byRun: Record<string, number>;
@@ -578,6 +583,7 @@ function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelecti
   const sessionIds = new Set<string>();
   const claimIds = new Set<string>();
   const runIds: string[] = [];
+  let expectedTemplateSignature: Record<string, unknown> | undefined;
 
   for (const run of candidateRuns) {
     const bundle = parseRecoveryObject(run.bundleJson, `bundle:${run.runId}`);
@@ -623,6 +629,14 @@ function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelecti
       const sessionPackage = recoveryObject(packageEntry);
       const sessionId = recoveryString(sessionPackage.sessionId);
       const dossier = recoveryObject(sessionPackage.dossier);
+      const templateSignature = failedV1TemplateSignature(dossier);
+      if (
+        expectedTemplateSignature &&
+        stableRecoveryStringify(templateSignature) !== stableRecoveryStringify(expectedTemplateSignature)
+      ) {
+        throw new Error("failed_v1_generation_template_signature_mismatch");
+      }
+      expectedTemplateSignature ??= templateSignature;
       const expectedFingerprint = recoveryFingerprint(dossier);
       const artifact = receiptArtifactIds
         .map((artifactId) => artifactsById.get(artifactId))
@@ -697,7 +711,7 @@ function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelecti
   if (
     sessionIds.size !== FAILED_V1_DOSSIER_COUNT ||
     claimIds.size !== FAILED_V1_DOSSIER_COUNT ||
-    runIds.length === 0
+    runIds.length !== FAILED_V1_RUN_COUNT
   ) {
     throw new Error("failed_v1_generation_membership_not_exact");
   }
@@ -754,17 +768,35 @@ function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelecti
   const publishedAt = artifacts.map((artifact) => recoveryString(artifact.publishedAt)).sort();
   const createdBy = [...new Set(artifacts.map((artifact) => recoveryString(artifact.createdBy)))].sort();
   const schemaVersions = [...new Set(artifacts.map((artifact) => recoveryString(artifact.schemaVersion)))].sort();
+  const actorIds = [...new Set(selectedRuns.map((run) => recoveryString(run.actorId)))];
+  if (actorIds.length !== 1 || createdBy.length !== 1 || createdBy[0] !== `workbench_authoring:${actorIds[0]}`) {
+    throw new Error("failed_v1_generation_actor_not_exact");
+  }
+  const generationWindow = validateFailedV1GenerationWindow(selectedRuns);
+  if (!expectedTemplateSignature) throw new Error("failed_v1_generation_template_signature_missing");
+  const templateFingerprint = recoveryFingerprint(expectedTemplateSignature);
+  const generationFingerprint = recoveryFingerprint({
+    actorId: actorIds[0],
+    createdBy: createdBy[0],
+    generationWindow,
+    runIds: [...runIds].sort(),
+    templateFingerprint
+  });
   const audit: FailedGenerationAudit = {
+    actorId: actorIds[0]!,
     adrs: byKind.adr ?? 0,
     auditHash,
     contractVersion: "workbench-authoring-v1",
     counts: { byKind, byRun, bySession, byStatus },
     createdBy,
     dossiers: byKind.session_dossier ?? 0,
+    generationFingerprint,
+    generationWindow,
     incidentTimelines: byKind.incident_timeline ?? 0,
     publicationWindow: { from: publishedAt[0]!, to: publishedAt.at(-1)! },
     runbooks: byKind.runbook ?? 0,
     schemaVersions,
+    templateFingerprint,
     totalArtifacts: artifacts.length,
     totalRuns: runIds.length,
     totalSessions: sessionIds.size
@@ -776,6 +808,79 @@ function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelecti
     runIds: [...runIds].sort(),
     sessionIds: selectedSessionIds
   };
+}
+
+function failedV1TemplateSignature(dossier: Record<string, unknown>): Record<string, unknown> {
+  const approach = recoveryStringArray(dossier.approach).map(normalizeRecoveryText);
+  const keyDecisions = recoveryStringArray(dossier.keyDecisions).map(normalizeRecoveryText);
+  const outcome = normalizeRecoveryText(recoveryString(dossier.outcome));
+  const problemStatement = normalizeRecoveryText(recoveryString(dossier.problemStatement));
+  const missingEvidence = recoveryStringArray(dossier.missingEvidence).map(normalizeRecoveryText);
+  const filesTouched = recoveryArray(dossier.filesTouched).map(recoveryObject);
+  const commandsAndTools = recoveryArray(dossier.commandsAndTools).map(recoveryObject);
+  const approachText = approach.join(" ");
+  const decisionText = keyDecisions.join(" ");
+  const filesText = normalizeRecoveryText(stableRecoveryStringify(filesTouched));
+  const toolsText = normalizeRecoveryText(stableRecoveryStringify(commandsAndTools));
+  if (
+    !approachText.includes("read every canonical evidence item through cursor pagination") ||
+    !decisionText.includes("single provenance") ||
+    !decisionText.includes("weak multi-session join") ||
+    !outcome.includes("single provenance") ||
+    !outcome.includes("weak multi-session join") ||
+    !problemStatement ||
+    missingEvidence.length === 0 ||
+    !missingEvidence.join(" ").includes("missing evidence") ||
+    !/\bno\b.{0,40}\bfiles?\b/u.test(filesText) ||
+    !toolsText.includes("workbench") ||
+    !toolsText.includes("evidence") ||
+    !toolsText.includes("reader")
+  ) {
+    throw new Error("failed_v1_generation_template_signature_mismatch");
+  }
+  return {
+    approach,
+    commandsAndTools,
+    filesTouched,
+    keyDecisions,
+    missingEvidence,
+    outcome,
+    problemPrefix: problemStatement.slice(0, 96)
+  };
+}
+
+function validateFailedV1GenerationWindow(
+  runs: Array<Record<string, unknown>>
+): { from: string; to: string } {
+  const intervals = runs.map((run) => {
+    const from = recoveryString(run.createdAt);
+    const to = recoveryString(run.completedAt);
+    const fromMs = Date.parse(from);
+    const toMs = Date.parse(to);
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs < fromMs) {
+      throw new Error("failed_v1_generation_window_invalid");
+    }
+    return { from, fromMs, to, toMs };
+  }).sort((left, right) => left.fromMs - right.fromMs || left.toMs - right.toMs);
+  const fromMs = intervals[0]!.fromMs;
+  const toMs = Math.max(...intervals.map((interval) => interval.toMs));
+  const durations = intervals.map((interval) => Math.max(1, interval.toMs - interval.fromMs));
+  const maxDuration = Math.max(...durations);
+  const totalDuration = durations.reduce((total, duration) => total + duration, 0);
+  let runningEnd = intervals[0]!.toMs;
+  let maxGap = 0;
+  for (const interval of intervals.slice(1)) {
+    maxGap = Math.max(maxGap, interval.fromMs - runningEnd);
+    runningEnd = Math.max(runningEnd, interval.toMs);
+  }
+  if (maxGap > maxDuration || toMs - fromMs > totalDuration * 2) {
+    throw new Error("failed_v1_generation_window_not_tightly_bounded");
+  }
+  return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() };
+}
+
+function normalizeRecoveryText(value: string): string {
+  return value.trim().replace(/\s+/gu, " ").toLowerCase();
 }
 
 function parseRecoveryObject(json: string, label: string): Record<string, unknown> {

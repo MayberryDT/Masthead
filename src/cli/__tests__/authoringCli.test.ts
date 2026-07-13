@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createMastheadDaemon, type MastheadDaemon } from "../../daemon/server.ts";
+import { acquireLegacyDataDirectoryGuard } from "../../core/daemonOwnership.ts";
 import type { DaemonConfig } from "../../daemon/config.ts";
 import { seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
@@ -416,7 +417,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     expect(audited.exitCode).toBe(0);
     const audit = JSON.parse(audited.stdout).audit as { auditHash: string; dossiers: number };
     expect(audit).toMatchObject({ dossiers: 1_283, auditHash: expect.stringMatching(/^[a-f0-9]{64}$/u) });
-    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 1 });
+    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
 
     const prepared = await runMastheadCli(
       ["workbench", "prepare-v1-recovery", "--db", dbPath, "--json"],
@@ -429,7 +430,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       ok: true
     });
     expect((await readdir(tempDir)).filter((name) => name.startsWith("masthead.sqlite.backup-"))).toHaveLength(1);
-    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 1 });
+    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
 
     const missingHash = await runMastheadCli(
       ["workbench", "invalidate-v1-generation", "--db", dbPath, "--confirm", "--json"],
@@ -441,12 +442,23 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       { env: {} }
     );
     expect(JSON.parse(missingConfirmation.stderr)).toMatchObject({ error: { code: "missing_argument" }, ok: false });
+    const legacyGuard = await acquireLegacyDataDirectoryGuard(tempDir);
+    try {
+      const blockedByOwner = await runMastheadCli(
+        ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", audit.auditHash, "--confirm", "--json"],
+        { env: {} }
+      );
+      expect(JSON.parse(blockedByOwner.stderr)).toMatchObject({ error: { code: "v1_recovery_refused" }, ok: false });
+      expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
+    } finally {
+      await legacyGuard.release();
+    }
     const mismatched = await runMastheadCli(
       ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", "0".repeat(64), "--confirm", "--json"],
       { env: {} }
     );
     expect(JSON.parse(mismatched.stderr)).toMatchObject({ error: { code: "v1_recovery_refused" }, ok: false });
-    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 1 });
+    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
 
     const invalidated = await runMastheadCli(
       ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", audit.auditHash, "--confirm", "--json"],
@@ -457,7 +469,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       ok: true,
       receipt: { artifactsInvalidated: 1_283, auditHash: audit.auditHash, sessionsReset: 1_283 }
     });
-    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 0, runs: 1 });
+    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 0, runs: 66 });
     const verified = new DatabaseSync(dbPath, { readOnly: true });
     expect(verified.prepare(
       "SELECT adr_status AS adrStatus, session_dossier_status AS dossierStatus FROM workbench_session_state WHERE session_id = 'session:cli-failed:0000'"
@@ -511,7 +523,6 @@ function seedCliFailedV1Generation(db: Awaited<ReturnType<typeof openMastheadDat
   const createdAt = "2026-07-11T08:00:00.000Z";
   const publishedAt = "2026-07-11T08:30:00.000Z";
   const completedAt = "2026-07-11T09:00:00.000Z";
-  const runId = "run:cli-failed-v1";
   db.prepare("INSERT INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
     "host:cli-failed", "fixture", createdAt, completedAt
   );
@@ -561,7 +572,12 @@ function seedCliFailedV1Generation(db: Awaited<ReturnType<typeof openMastheadDat
     const artifactId = `artifact:cli-failed:${suffix}`;
     const dossier = {
       approach: ["Read every canonical evidence item through cursor pagination."],
-      outcome: `Keep CLI package ${suffix} single provenance and avoid weak multi-session joins.`,
+      commandsAndTools: [{ label: "Workbench evidence reader", purpose: "Read canonical evidence", status: "completed" }],
+      filesTouched: [{ label: "No file effects captured", role: "No file evidence" }],
+      keyDecisions: ["Keep the package single provenance and avoid weak multi-session joins."],
+      missingEvidence: ["Missing evidence prevented session-specific conclusions."],
+      outcome: "Kept the package single provenance and avoided weak multi-session joins.",
+      problemStatement: "Generic problem: review the selected session's canonical evidence.",
       title: `CLI failed dossier ${suffix}`
     };
     session.run(sessionId, sessionId, publishedAt, createdAt, publishedAt);
@@ -582,21 +598,36 @@ function seedCliFailedV1Generation(db: Awaited<ReturnType<typeof openMastheadDat
       notApplicable.push({ evidenceRefs: [], kind, reason: "No reusable output", sessionId });
     }
   }
-  const bundle = {
-    artifacts: [], bundleVersion: "workbench-authoring-v1", contributions: [], evidenceRevision: "cli-revision",
-    notApplicable, runId, sessionPackages: packages
-  };
-  const receipt = {
-    completedAt, contributions: [], notApplicable: notApplicable.map(({ kind, sessionId }) => ({ kind, sessionId })),
-    publishedArtifactIds, resolvedSessionIds, runId
-  };
-  db.prepare(
+  const insertRun = db.prepare(
     `INSERT INTO workbench_authoring_runs (run_id, actor_id, database_id, status, evidence_revision,
       bundle_json, findings_json, receipt_json, created_at, updated_at, completed_at, contract_version,
       candidate_id) VALUES (?, 'failed-agent', 'fixture-db', 'completed', 'cli-revision', ?, '[]', ?, ?, ?, ?,
       'workbench-authoring-v1', NULL)`
-  ).run(runId, JSON.stringify(bundle), JSON.stringify(receipt), createdAt, completedAt, completedAt);
-  members.forEach((member, index) => runSession.run(runId, member.sessionId, member.claimId, index));
+  );
+  let offset = 0;
+  for (let runIndex = 0; offset < packages.length; runIndex += 1) {
+    const remaining = packages.length - offset;
+    const size = remaining === 3 ? 2 : Math.min(20, remaining);
+    const runId = `run:cli-failed-v1:${String(runIndex).padStart(3, "0")}`;
+    const runPackages = packages.slice(offset, offset + size);
+    const runMembers = members.slice(offset, offset + size);
+    const runArtifactIds = publishedArtifactIds.slice(offset, offset + size);
+    const runSessionIds = resolvedSessionIds.slice(offset, offset + size);
+    const runNotApplicable = notApplicable.filter((decision) =>
+      runSessionIds.includes(decision.sessionId as string)
+    );
+    const bundle = {
+      artifacts: [], bundleVersion: "workbench-authoring-v1", contributions: [], evidenceRevision: "cli-revision",
+      notApplicable: runNotApplicable, runId, sessionPackages: runPackages
+    };
+    const receipt = {
+      completedAt, contributions: [], notApplicable: runNotApplicable.map(({ kind, sessionId }) => ({ kind, sessionId })),
+      publishedArtifactIds: runArtifactIds, resolvedSessionIds: runSessionIds, runId
+    };
+    insertRun.run(runId, JSON.stringify(bundle), JSON.stringify(receipt), createdAt, completedAt, completedAt);
+    runMembers.forEach((member, index) => runSession.run(runId, member.sessionId, member.claimId, index));
+    offset += size;
+  }
 }
 
 function readCliRecoveryCounts(databasePath: string): { artifacts: number; runs: number } {
