@@ -83,7 +83,7 @@ describe("Workbench authoring HTTP API", () => {
     expect(groupedOpen.body.run.sessionIds).toEqual(grouped.provenanceSessionIds);
 
     const candidate = allRunbooks.body.candidates.find(
-      (entry: any) => entry.seedSessionId !== "session:oauth-fixed" && entry.provenanceSessionIds.length === 1
+      (entry: any) => entry.seedSessionId === "session:migration-fixed"
     );
     expect(candidate).toBeDefined();
     const opened = await postJson(
@@ -102,6 +102,69 @@ describe("Workbench authoring HTTP API", () => {
         .prepare("SELECT status FROM workbench_artifact_candidates WHERE candidate_id = ?")
         .get(candidate.candidateId)
     ).toEqual({ status: "claimed" });
+    const claimsBeforeDismiss = daemon.database
+      .prepare(
+        `SELECT claim_id AS claimId, released_at AS releasedAt
+         FROM workbench_claims
+         WHERE claim_id IN (
+           SELECT claim_id FROM workbench_authoring_run_sessions WHERE run_id = ?
+         )
+         ORDER BY claim_id`
+      )
+      .all(opened.body.run.runId);
+    const claimedDismissal = await postJson(
+      baseUrl,
+      `/workbench/authoring/candidates/${encodeURIComponent(candidate.candidateId)}/dismiss`,
+      {
+        reason: "An active authoring run must keep ownership of this candidate.",
+        signalEvidenceRefs: candidate.signalEvidenceRefs
+      },
+      409
+    );
+    expect(claimedDismissal.body).toMatchObject({
+      error: { code: "artifact_candidate_transition_invalid" },
+      ok: false
+    });
+    expect(
+      daemon.database
+        .prepare("SELECT status FROM workbench_artifact_candidates WHERE candidate_id = ?")
+        .get(candidate.candidateId)
+    ).toEqual({ status: "claimed" });
+    expect(
+      daemon.database
+        .prepare(
+          `SELECT claim_id AS claimId, released_at AS releasedAt
+           FROM workbench_claims
+           WHERE claim_id IN (
+             SELECT claim_id FROM workbench_authoring_run_sessions WHERE run_id = ?
+           )
+           ORDER BY claim_id`
+        )
+        .all(opened.body.run.runId)
+    ).toEqual(claimsBeforeDismiss);
+    expect((await getJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}`)).body)
+      .toMatchObject({ run: { status: "open" } });
+
+    const mismatched = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}/submit`,
+      validBundle(opened.body.run.runId, opened.body.run.evidenceRevision, candidate.seedSessionId),
+      409
+    );
+    expect(mismatched.body).toMatchObject({
+      error: { code: "unsupported_authoring_bundle_version" },
+      ok: false
+    });
+    const submittedV2 = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}/submit`,
+      validCandidateBundle(opened.body.run, candidate)
+    );
+    expect(submittedV2.body).toMatchObject({
+      accepted: true,
+      ok: true,
+      run: { contractVersion: "workbench-authoring-v2", status: "ready_to_finish" }
+    });
 
     const arbitrary = await postJson(
       baseUrl,
@@ -546,6 +609,53 @@ function validBundle(runId: string, evidenceRevision: string, sessionId: string)
         sessionId
       }
     ]
+  };
+}
+
+function validCandidateBundle(run: any, candidate: any) {
+  const failureRef = candidate.signalEvidenceRefs.find((ref: string) => ref.startsWith("tool_result:"));
+  const changeRef = candidate.signalEvidenceRefs.find((ref: string) => ref.startsWith("file:"));
+  const verificationRef = candidate.signalEvidenceRefs.find(
+    (ref: string) => ref.startsWith("checkpoint:") || ref.includes(":verified")
+  );
+  return {
+    artifact: {
+      kind: candidate.kind,
+      output: {
+        changedFiles: ["src/workbench/authoring/authoringService.ts"],
+        claimEvidence: [
+          { evidenceRefs: [changeRef], path: "fixSteps[0]" },
+          { evidenceRefs: [failureRef], path: "rootCause" },
+          { evidenceRefs: [verificationRef], path: "validationChecks[0]" }
+        ],
+        commands: ["npm test"],
+        confidence: "low",
+        deadEnds: [],
+        environmentRequirements: ["Node.js"],
+        evidenceRefs: candidate.signalEvidenceRefs,
+        fixSteps: ["Apply the evidence-backed corrective change."],
+        missingEvidence: ["Only the candidate-scoped canonical evidence was reviewed."],
+        preconditions: ["The observed failure is reproducible."],
+        preventionNotes: ["Keep the focused verification check in regression coverage."],
+        problemSignature: {
+          affectedScope: "The candidate's affected runtime scope",
+          errorStrings: ["The exact observed failure signature"],
+          symptoms: ["The recorded operation failed before the corrective change"]
+        },
+        provenanceSessionIds: candidate.provenanceSessionIds,
+        reproSteps: ["Reproduce the recorded failure under the same preconditions."],
+        risksOrGaps: [],
+        rootCause: "The cited failure evidence identifies the pre-change behavior.",
+        title: "Recover the verified candidate failure",
+        validationChecks: ["The cited post-change verification completed successfully."]
+      },
+      provenanceSessionIds: candidate.provenanceSessionIds,
+      seedSessionId: candidate.seedSessionId
+    },
+    bundleVersion: "workbench-authoring-v2",
+    candidateId: candidate.candidateId,
+    evidenceRevision: run.evidenceRevision,
+    runId: run.runId
   };
 }
 

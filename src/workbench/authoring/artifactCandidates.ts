@@ -174,6 +174,7 @@ export function dismissArtifactCandidate(
   return withImmediateTransaction(db, () => {
     const candidate = getWorkbenchArtifactCandidate(db, input.candidateId);
     if (!candidate) throw new Error(`artifact_candidate_not_found:${input.candidateId}`);
+    if (candidate.status !== "pending") return dismissWorkbenchArtifactCandidate(db, input);
     const signals = candidate.provenanceSessionIds.map((sessionId) => extractSessionSignals(db, sessionId));
     const selected = new Set(normalizedStrings(input.signalEvidenceRefs));
     const allEvidenceRefs = new Set(signals.flatMap((session) => [...session.evidenceRefs]));

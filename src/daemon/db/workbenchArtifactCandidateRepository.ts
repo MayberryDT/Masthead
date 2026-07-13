@@ -330,7 +330,7 @@ export function dismissWorkbenchArtifactCandidate(
 ): StoredWorkbenchArtifactCandidate {
   const existing = getWorkbenchArtifactCandidate(db, input.candidateId);
   if (!existing) throw new Error(`artifact_candidate_not_found:${input.candidateId}`);
-  if (existing.status !== "pending" && existing.status !== "claimed") {
+  if (existing.status !== "pending") {
     throw new Error(`artifact_candidate_transition_invalid:${existing.status}:dismissed`);
   }
   const reason = input.reason.trim();

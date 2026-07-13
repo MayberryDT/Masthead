@@ -1,7 +1,7 @@
-import type { WorkbenchAutomaticArtifactKind, WorkbenchClaimEvidence } from "../../shared/workbenchAuthoring.ts";
+import type { WorkbenchAutomaticArtifactKind, WorkbenchAuthoringBundleV2, WorkbenchClaimEvidence } from "../../shared/workbenchAuthoring.ts";
 import { redactText } from "../../core/redaction.ts";
 import { normalizeSessionArtifactSignatureKey } from "../../daemon/db/sessionArtifactRepository.ts";
-import { getAuthoringBundleSchema, getWorkbenchAuthoringOutputSchema } from "./authoringSchemas.ts";
+import { getAuthoringBundleSchema, getAuthoringBundleV2Schema, getWorkbenchAuthoringOutputSchema } from "./authoringSchemas.ts";
 import type {
   WorkbenchAuthoringFindingCode,
   WorkbenchAuthoringFindingV2,
@@ -34,6 +34,7 @@ const WEAK_JOIN_PATTERNS = [
   /^similar vibe/i
 ];
 const PASSED_STATUSES = new Set(["completed", "passed", "success", "succeeded"]);
+type WorkbenchAuthoringValidationContext = Omit<WorkbenchAuthoringValidationInput, "bundle">;
 
 export function validateAuthoringBundle(
   input: WorkbenchAuthoringValidationInput
@@ -72,11 +73,33 @@ export function validateAuthoringBundle(
   return result(findings);
 }
 
+export function validateAuthoringBundleV2(input: {
+  bundle: WorkbenchAuthoringBundleV2;
+  selectedSessionIds: string[];
+  evidenceByRef: WorkbenchAuthoringValidationInput["evidenceByRef"];
+  coverageWarningsBySession: WorkbenchAuthoringValidationInput["coverageWarningsBySession"];
+  publishedArtifacts: WorkbenchAuthoringValidationInput["publishedArtifacts"];
+}): WorkbenchAuthoringValidationResult {
+  const findings: WorkbenchAuthoringFindingV2[] = [];
+  validateSchemaValue(input.bundle, getAuthoringBundleV2Schema(), "", findings);
+  const selectedSessions = new Set(input.selectedSessionIds);
+  if (isRecord(input.bundle.artifact)) {
+    validateArtifact(
+      input.bundle.artifact,
+      0,
+      selectedSessions,
+      input,
+      findings
+    );
+  }
+  return result(findings);
+}
+
 function validateSessionPackages(
   packages: unknown[],
   selectedSessionIds: string[],
   selectedSessions: Set<string>,
-  input: WorkbenchAuthoringValidationInput,
+  input: WorkbenchAuthoringValidationContext,
   findings: WorkbenchAuthoringFindingV2[]
 ): void {
   for (const sessionId of selectedSessionIds) {
@@ -153,7 +176,7 @@ function validateArtifact(
   artifact: Record<string, unknown>,
   index: number,
   selectedSessions: Set<string>,
-  input: WorkbenchAuthoringValidationInput,
+  input: WorkbenchAuthoringValidationContext,
   findings: WorkbenchAuthoringFindingV2[]
 ): void {
   const kind = automaticKind(artifact.kind);
@@ -246,7 +269,7 @@ function validateGroundedOutput(
   output: Record<string, unknown>,
   basePath: string,
   provenance: Set<string>,
-  input: WorkbenchAuthoringValidationInput,
+  input: WorkbenchAuthoringValidationContext,
   findings: WorkbenchAuthoringFindingV2[],
   requireSparseEvidenceNote: boolean,
   explicitSessionId?: string
@@ -437,7 +460,7 @@ function validateClaimEvidence(
   evidenceRefs: string[],
   provenance: Set<string>,
   basePath: string,
-  input: WorkbenchAuthoringValidationInput,
+  input: WorkbenchAuthoringValidationContext,
   findings: WorkbenchAuthoringFindingV2[],
   artifactKind: WorkbenchOutputKind,
   sessionId: string | undefined
@@ -503,7 +526,7 @@ function validateNotApplicable(
   decision: Record<string, unknown>,
   index: number,
   selectedSessions: Set<string>,
-  input: WorkbenchAuthoringValidationInput,
+  input: WorkbenchAuthoringValidationContext,
   findings: WorkbenchAuthoringFindingV2[]
 ): void {
   const sessionId = stringValue(decision.sessionId);
@@ -547,7 +570,7 @@ function validateContribution(
   decision: Record<string, unknown>,
   index: number,
   selectedSessions: Set<string>,
-  input: WorkbenchAuthoringValidationInput,
+  input: WorkbenchAuthoringValidationContext,
   findings: WorkbenchAuthoringFindingV2[]
 ): void {
   const sessionId = stringValue(decision.sessionId);
@@ -698,7 +721,7 @@ function validateEvidenceRefs(
   refs: string[],
   path: string,
   provenance: Set<string>,
-  input: WorkbenchAuthoringValidationInput,
+  input: WorkbenchAuthoringValidationContext,
   findings: WorkbenchAuthoringFindingV2[],
   artifactKind: WorkbenchOutputKind,
   sessionId: string | undefined

@@ -1,6 +1,7 @@
 import type { SessionTranscriptOrder } from "../shared/sessionTranscript.ts";
 import type {
   WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV2,
   WorkbenchArtifactCandidateStatus,
   WorkbenchAutomaticArtifactKind,
   WorkbenchAuthoringCapabilitiesDto
@@ -18,6 +19,7 @@ import {
   proposeArtifactCandidate
 } from "../workbench/authoring/artifactCandidates.ts";
 import { listWorkbenchArtifactCandidatePage } from "./db/workbenchArtifactCandidateRepository.ts";
+import { parseAuthoringBundleV2 } from "../workbench/authoring/authoringSchemas.ts";
 import type { SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import { getOrCreateDatabaseIdentity } from "./db/schema.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
@@ -211,7 +213,13 @@ export function authoringInvalidJsonResult(error: unknown): WorkbenchAuthoringHt
 function authoringErrorResult(error: unknown): WorkbenchAuthoringHttpResult {
   const message = error instanceof Error ? error.message : String(error);
   const code = errorCode(message);
-  if (code === "invalid_request" || authoringBadRequestCodes.has(code) || code.startsWith("candidate_proposal_")) {
+  if (
+    code === "invalid_request" ||
+    authoringBadRequestCodes.has(code) ||
+    code.startsWith("candidate_proposal_") ||
+    code.startsWith("invalid_authoring_bundle") ||
+    code.startsWith("unexpected_authoring_bundle_property")
+  ) {
     return { body: { error: { code, message }, ok: false }, status: 400 };
   }
   if (code === "authoring_run_not_found" || code === "authoring_session_not_found" || code === "session_not_found" || code === "artifact_candidate_not_found") {
@@ -254,10 +262,13 @@ const authoringConflictCodes = new Set([
   "artifact_candidate_transition_invalid",
   "candidate_dismissal_evidence_changed",
   "candidate_evidence_revision_changed",
+  "authoring_candidate_artifact_mismatch",
+  "authoring_candidate_mismatch",
   "database_identity_mismatch",
   "evidence_revision_changed",
   "evidence_revision_mismatch",
-  "missing_canonical_evidence"
+  "missing_canonical_evidence",
+  "unsupported_authoring_bundle_version"
 ]);
 
 function methodNotAllowed(): WorkbenchAuthoringHttpResult {
@@ -267,10 +278,11 @@ function methodNotAllowed(): WorkbenchAuthoringHttpResult {
   };
 }
 
-function requireBundleEnvelope(value: unknown): WorkbenchAuthoringBundle {
+function requireBundleEnvelope(value: unknown): WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2 {
   const bundle = requireRecord(value);
+  if (bundle.bundleVersion === "workbench-authoring-v2") return parseAuthoringBundleV2(bundle);
   if (bundle.bundleVersion !== "workbench-authoring-v1") {
-    throw invalidRequest("bundleVersion must be workbench-authoring-v1");
+    throw invalidRequest("bundleVersion must be workbench-authoring-v1 or workbench-authoring-v2");
   }
   requireNonBlankString(bundle.runId, "runId");
   requireNonBlankString(bundle.evidenceRevision, "evidenceRevision");

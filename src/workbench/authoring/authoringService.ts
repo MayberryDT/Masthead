@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { SessionTranscriptOrder } from "../../shared/sessionTranscript.ts";
 import type {
   WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV2,
   WorkbenchAuthoringEvidenceManifest,
   WorkbenchAuthoringEvidencePage,
   WorkbenchAuthoringFinding,
@@ -63,7 +64,7 @@ import {
   getAuthoringEvidenceManifest,
   getAuthoringEvidencePage
 } from "./evidenceCatalog.ts";
-import { findArtifactSignatureFindings, validateAuthoringBundle } from "./authoringValidation.ts";
+import { findArtifactSignatureFindings, validateAuthoringBundle, validateAuthoringBundleV2 } from "./authoringValidation.ts";
 import { isArtifactCandidateEvidenceCurrent } from "./artifactCandidates.ts";
 import {
   buildPublishedDossierSnapshot,
@@ -319,12 +320,21 @@ export function getAuthoringRunEvidence(
 
 export function submitAuthoringBundle(
   db: MastheadDatabase,
-  input: { bundle: WorkbenchAuthoringBundle; runId: string }
+  input: { bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2; runId: string }
 ): SubmitAuthoringBundleResult {
   return withImmediateTransaction(db, () => {
     const existing = requireAuthoringRun(db, input.runId);
     if (existing.status === "completed") throw new Error(`authoring_run_completed:${input.runId}`);
     if (input.bundle.runId !== input.runId) throw new Error("authoring_run_mismatch");
+    if (input.bundle.bundleVersion !== existing.contractVersion) {
+      throw new Error("unsupported_authoring_bundle_version");
+    }
+    const candidate = existing.contractVersion === "workbench-authoring-v2"
+      ? requireClaimedAuthoringCandidate(db, existing)
+      : undefined;
+    if (candidate && input.bundle.bundleVersion === "workbench-authoring-v2") {
+      assertCandidateArtifactMatches(candidate, input.bundle);
+    }
 
     const renewed = renewOrReacquireAuthoringClaimsInTransaction(db, {
       actorId: existing.actorId,
@@ -335,13 +345,15 @@ export function submitAuthoringBundle(
     if (currentEvidenceRevision !== renewed.evidenceRevision) throw new Error("evidence_revision_changed");
     if (input.bundle.evidenceRevision !== renewed.evidenceRevision) throw new Error("evidence_revision_mismatch");
 
-    const validation = validateAuthoringBundle({
-      bundle: input.bundle,
+    const validationInput = {
       coverageWarningsBySession: coverageWarningsBySession(db, renewed.sessionIds),
       evidenceByRef: evidenceByRef(db, renewed.sessionIds),
       publishedArtifacts: currentArtifacts(db, renewed.sessionIds),
       selectedSessionIds: renewed.sessionIds
-    });
+    };
+    const validation = input.bundle.bundleVersion === "workbench-authoring-v2"
+      ? validateAuthoringBundleV2({ ...validationInput, bundle: input.bundle })
+      : validateAuthoringBundle({ ...validationInput, bundle: input.bundle });
     const run = saveWorkbenchAuthoringSubmission(db, {
       bundle: input.bundle,
       evidenceRevision: currentEvidenceRevision,
@@ -356,6 +368,33 @@ export function submitAuthoringBundle(
       run
     };
   });
+}
+
+function requireClaimedAuthoringCandidate(
+  db: MastheadDatabase,
+  run: WorkbenchAuthoringRunDto
+): StoredWorkbenchArtifactCandidate {
+  if (!run.candidateId) throw new Error("authoring_v2_candidate_required");
+  const candidate = getWorkbenchArtifactCandidate(db, run.candidateId);
+  if (!candidate) throw new Error(`artifact_candidate_not_found:${run.candidateId}`);
+  if (candidate.status !== "claimed") {
+    throw new Error(`artifact_candidate_transition_invalid:${candidate.status}:submit`);
+  }
+  return candidate;
+}
+
+function assertCandidateArtifactMatches(
+  candidate: StoredWorkbenchArtifactCandidate,
+  bundle: WorkbenchAuthoringBundleV2
+): void {
+  if (bundle.candidateId !== candidate.candidateId) throw new Error("authoring_candidate_mismatch");
+  if (
+    bundle.artifact.kind !== candidate.kind ||
+    bundle.artifact.seedSessionId !== candidate.seedSessionId ||
+    !sameOrderedStrings(bundle.artifact.provenanceSessionIds, candidate.provenanceSessionIds)
+  ) {
+    throw new Error("authoring_candidate_artifact_mismatch");
+  }
 }
 
 export function finishAuthoringRun(
@@ -705,6 +744,10 @@ function requireAuthoringRun(db: MastheadDatabase, runId: string): WorkbenchAuth
 
 function normalizeSessionIds(sessionIds: string[]): string[] {
   return [...new Set(sessionIds.map((sessionId) => sessionId.trim()).filter(Boolean))].sort();
+}
+
+function sameOrderedStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function assertSessionExists(db: MastheadDatabase, sessionId: string): void {
