@@ -13,6 +13,11 @@ import type { CanonicalDossierPublicationReceipt } from "../../shared/workbench.
 import { hasSemanticRedactedText } from "../../core/redaction.ts";
 import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepository.ts";
 import {
+  getWorkbenchArtifactCandidate,
+  setWorkbenchArtifactCandidateStatus,
+  type StoredWorkbenchArtifactCandidate,
+} from "../../daemon/db/workbenchArtifactCandidateRepository.ts";
+import {
   applySessionArtifactInTransaction,
   indexSessionArtifactSearch,
   listSessionArtifacts,
@@ -52,13 +57,14 @@ import {
 import { runCaptureQualityPrecheck } from "../qualityPrecheck.ts";
 import { fingerprintWorkbenchOutput } from "../applyArtifact.ts";
 import type { WorkbenchValidationEvidence } from "../types.ts";
-import { getAuthoringBundleSchema } from "./authoringSchemas.ts";
+import { getAuthoringBundleSchema, getAuthoringBundleV2Schema } from "./authoringSchemas.ts";
 import {
   authoringEvidenceRevision,
   getAuthoringEvidenceManifest,
   getAuthoringEvidencePage
 } from "./evidenceCatalog.ts";
 import { findArtifactSignatureFindings, validateAuthoringBundle } from "./authoringValidation.ts";
+import { isArtifactCandidateEvidenceCurrent } from "./artifactCandidates.ts";
 import {
   buildPublishedDossierSnapshot,
   dossierEvidenceRefs,
@@ -78,6 +84,26 @@ export type OpenAuthoringRunResult = {
     automaticKinds: ["runbook", "adr", "incident_timeline"];
     completion: "publish_and_resolve";
     evidencePolicy: "all_canonical_redacted_evidence";
+  };
+  currentArtifacts: SessionArtifactRecord[];
+};
+
+export type OpenCandidateAuthoringRunResult = {
+  ok: true;
+  run: WorkbenchAuthoringRunDto;
+  evidence: WorkbenchAuthoringEvidenceManifest;
+  bundleSchema: Record<string, unknown>;
+  contract: {
+    contractVersion: "workbench-authoring-v2";
+    candidateId: string;
+    candidateKind: StoredWorkbenchArtifactCandidate["kind"];
+    completion: "publish_candidate_and_canonical_dossiers";
+    evidencePolicy: "candidate_scoped_canonical_evidence";
+    evidenceRequirements: {
+      runbook: ["problem", "change", "verification"];
+      adr: ["context", "decision", "alternatives"];
+      incident_timeline: ["symptom", "ordered_events", "remediation"];
+    };
   };
   currentArtifacts: SessionArtifactRecord[];
 };
@@ -187,6 +213,82 @@ export function openAuthoringRun(
       });
     }
     return openResult(db, run, evidence);
+  });
+}
+
+export function openCandidateAuthoringRun(
+  db: MastheadDatabase,
+  input: { actorId: string; candidateId: string; databaseId: string }
+): OpenCandidateAuthoringRunResult {
+  return withImmediateTransaction(db, () => {
+    const databaseId = getOrCreateDatabaseIdentity(db);
+    if (input.databaseId !== databaseId) throw new Error("database_identity_mismatch");
+    const candidate = getWorkbenchArtifactCandidate(db, input.candidateId);
+    if (!candidate) throw new Error(`artifact_candidate_not_found:${input.candidateId}`);
+    const sessionIds = normalizeSessionIds(candidate.provenanceSessionIds);
+    if (sessionIds.length < 1 || sessionIds.length > 12) throw new Error("candidate_provenance_count_invalid");
+    if (candidate.status === "dismissed" || candidate.status === "superseded" || candidate.status === "published") {
+      throw new Error(`artifact_candidate_not_openable:${candidate.status}`);
+    }
+    for (const sessionId of sessionIds) assertSessionExists(db, sessionId);
+    const evidence = authoringEvidenceManifestWithWarnings(db, sessionIds);
+    if (!isArtifactCandidateEvidenceCurrent(db, candidate)) {
+      throw new Error("candidate_evidence_revision_changed");
+    }
+    const reusable = findReusableWorkbenchAuthoringRun(db, {
+      actorId: input.actorId,
+      candidateId: candidate.candidateId,
+      contractVersion: "workbench-authoring-v2",
+      databaseId,
+      sessionIds
+    });
+    if (reusable) {
+      const run = renewOrReacquireAuthoringClaimsInTransaction(db, {
+        actorId: input.actorId,
+        expiresAt: authoringLeaseExpiry(),
+        runId: reusable.runId
+      });
+      return openCandidateResult(db, candidate, run, evidence);
+    }
+    if (candidate.status !== "pending") throw new Error("artifact_candidate_claim_conflict");
+    assertSessionsOnPublishPath(db, sessionIds);
+    assertCanonicalEvidence(db, evidence);
+    assertSessionsUnclaimed(db, sessionIds);
+    const actor = { id: input.actorId, kind: "agent" } as const;
+    for (const sessionId of sessionIds) {
+      ensureWorkbenchSessionState(db, sessionId);
+      markWorkbenchTranscriptAvailableInTransaction(db, { actor, sessionId });
+      markWorkbenchQualityPassedInTransaction(db, { actor, sessionId });
+    }
+
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: candidate.candidateId, status: "claimed" });
+    const claims = claimWorkbenchSessionsInTransaction(db, {
+      claimedBy: input.actorId,
+      expiresAt: authoringLeaseExpiry(),
+      sessionIds
+    }).claims;
+    const runId = `authoring:${randomUUID()}`;
+    const run = createWorkbenchAuthoringRunInTransaction(db, {
+      actorId: input.actorId,
+      candidateId: candidate.candidateId,
+      contractVersion: "workbench-authoring-v2",
+      databaseId,
+      evidenceRevision: evidence.evidenceRevision,
+      runId,
+      sessions: claims.map((claim, ordinal) => ({ claimId: claim.claimId, ordinal, sessionId: claim.sessionId }))
+    });
+    for (const claim of claims) {
+      recordWorkbenchActivity(db, {
+        actor,
+        details: { candidateId: candidate.candidateId, evidenceRevision: evidence.evidenceRevision },
+        eventType: "authoring_opened",
+        relatedClaimId: claim.claimId,
+        relatedRunId: runId,
+        sessionId: claim.sessionId,
+        summary: `Workbench ${candidate.kind} candidate authoring opened`
+      });
+    }
+    return openCandidateResult(db, candidate, run, evidence);
   });
 }
 
@@ -560,6 +662,33 @@ function openResult(
       contractVersion: "workbench-authoring-v1",
       evidencePolicy: "all_canonical_redacted_evidence",
       sessionPackageRequired: true
+    },
+    currentArtifacts: currentArtifacts(db, run.sessionIds),
+    evidence,
+    ok: true,
+    run
+  };
+}
+
+function openCandidateResult(
+  db: MastheadDatabase,
+  candidate: StoredWorkbenchArtifactCandidate,
+  run: WorkbenchAuthoringRunDto,
+  evidence: WorkbenchAuthoringEvidenceManifest
+): OpenCandidateAuthoringRunResult {
+  return {
+    bundleSchema: getAuthoringBundleV2Schema(),
+    contract: {
+      candidateId: candidate.candidateId,
+      candidateKind: candidate.kind,
+      completion: "publish_candidate_and_canonical_dossiers",
+      contractVersion: "workbench-authoring-v2",
+      evidencePolicy: "candidate_scoped_canonical_evidence",
+      evidenceRequirements: {
+        adr: ["context", "decision", "alternatives"],
+        incident_timeline: ["symptom", "ordered_events", "remediation"],
+        runbook: ["problem", "change", "verification"]
+      }
     },
     currentArtifacts: currentArtifacts(db, run.sessionIds),
     evidence,

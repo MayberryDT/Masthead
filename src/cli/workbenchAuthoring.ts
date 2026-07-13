@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { WorkbenchAuthoringBundle } from "../shared/workbenchAuthoring.ts";
+import type { WorkbenchAuthoringBundle, WorkbenchAuthoringBundleV2 } from "../shared/workbenchAuthoring.ts";
 import { MastheadAuthoringClient, MastheadAuthoringClientError } from "./authoringClient.ts";
 import { errorResult, jsonResult, textResult, type CliResult } from "./output.ts";
 
@@ -7,8 +7,9 @@ export type WorkbenchCliOptions = {
   env?: NodeJS.ProcessEnv;
 };
 
-const authoringCommands = new Set(["capabilities", "open", "status", "evidence", "submit", "finish"]);
+const authoringCommands = new Set(["capabilities", "candidates", "open", "status", "evidence", "submit", "finish"]);
 const evidenceKinds = new Set(["all", "user", "assistant", "tools", "checkpoints", "files", "signals"]);
+const candidateKinds = new Set(["runbook", "adr", "incident_timeline"]);
 
 export async function runWorkbenchAuthoringCli(args: string[], options: WorkbenchCliOptions = {}): Promise<CliResult> {
   const command = args[0];
@@ -29,12 +30,33 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
       return jsonResult({ ok: true, ...(await client.capabilities()) });
     }
 
+    if (command === "candidates") {
+      for (const option of ["--cursor", "--limit", "--kind", "--status"]) {
+        if (optionHasMissingValue(args, option)) return missingOptionValue(option, json);
+      }
+      const kind = optionValue(args, "--kind");
+      const status = optionValue(args, "--status") ?? "pending";
+      const limit = optionValue(args, "--limit");
+      if (kind && !candidateKinds.has(kind)) return errorResult("invalid_argument", `Invalid --kind: ${kind}`, json);
+      if (!["pending", "claimed", "published", "dismissed", "superseded"].includes(status)) {
+        return errorResult("invalid_argument", `Invalid --status: ${status}`, json);
+      }
+      if (limit && (!Number.isInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 100)) {
+        return errorResult("invalid_argument", "--limit must be between 1 and 100", json);
+      }
+      const query = new URLSearchParams({ status });
+      const cursor = optionValue(args, "--cursor");
+      if (cursor) query.set("cursor", cursor);
+      if (kind) query.set("kind", kind);
+      if (limit) query.set("limit", limit);
+      return jsonResult({ ok: true, ...(await client.candidates(query)) });
+    }
+
     if (command === "open") {
       const databaseId = requiredOption(args, "--database-id", json);
       if (isCliResult(databaseId)) return databaseId;
-      if (optionHasMissingValue(args, "--session")) return missingOptionValue("--session", json);
-      const sessionIds = optionValues(args, "--session");
-      if (sessionIds.length === 0) return missingArgument("--session", json);
+      const candidateId = requiredOption(args, "--candidate", json);
+      if (isCliResult(candidateId)) return candidateId;
       const capabilities = await client.capabilities();
       if (databaseId !== capabilities.databaseId) {
         return errorResult(
@@ -47,8 +69,8 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
       return jsonResult(
         await client.open({
           actorId: options.env?.MASTHEAD_ACTOR_ID?.trim() || "mastheadctl",
+          candidateId,
           databaseId,
-          sessionIds
         })
       );
     }
@@ -87,7 +109,7 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
     if (command === "submit") {
       const file = requiredOption(args, "--file", json);
       if (isCliResult(file)) return file;
-      let bundle: WorkbenchAuthoringBundle;
+      let bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2;
       try {
         bundle = JSON.parse(await readFile(file, "utf8")) as WorkbenchAuthoringBundle;
       } catch (error) {
@@ -113,7 +135,8 @@ export function workbenchHelp(): string {
     "",
     "Daemon-owned artifact authoring:",
     "  mastheadctl workbench capabilities --json",
-    "  mastheadctl workbench open --database-id <id> --session <id> [--session <id>] --json",
+    "  mastheadctl workbench candidates [--kind runbook|adr|incident_timeline] [--status pending|claimed|published|dismissed|superseded] [--cursor <cursor>] [--limit 100] --json",
+    "  mastheadctl workbench open --database-id <id> --candidate <candidate-id> --json",
     "  mastheadctl workbench status --run <run-id> --json",
     "  mastheadctl workbench evidence --run <run-id> --session <id> [--cursor <cursor>] [--limit 100] [--order asc|desc] [--kind all|user|assistant|tools|checkpoints|files|signals] [--query <text>] --json",
     "  mastheadctl workbench submit --run <run-id> --file <bundle.json> --json",

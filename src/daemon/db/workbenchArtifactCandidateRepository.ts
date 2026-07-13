@@ -160,6 +160,42 @@ export function listWorkbenchArtifactCandidates(
   return rows.map(rowToCandidate);
 }
 
+export function listWorkbenchArtifactCandidatePage(
+  db: MastheadDatabase,
+  input: {
+    cursor?: { candidateId: string; updatedAt: string };
+    kind?: WorkbenchAutomaticKind;
+    limit: number;
+    status?: WorkbenchArtifactCandidateStatus;
+  }
+): { candidates: StoredWorkbenchArtifactCandidate[]; nextCursor?: { candidateId: string; updatedAt: string } } {
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+  if (input.status) {
+    conditions.push("status = ?");
+    params.push(input.status);
+  }
+  if (input.kind) {
+    conditions.push("kind = ?");
+    params.push(input.kind);
+  }
+  if (input.cursor) {
+    conditions.push("(updated_at < ? OR (updated_at = ? AND candidate_id > ?))");
+    params.push(input.cursor.updatedAt, input.cursor.updatedAt, input.cursor.candidateId);
+  }
+  const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+  const rows = db
+    .prepare(`${CANDIDATE_SELECT}${where} ORDER BY updated_at DESC, candidate_id LIMIT ?`)
+    .all(...params, input.limit + 1) as CandidateRow[];
+  const hasMore = rows.length > input.limit;
+  const page = rows.slice(0, input.limit).map(rowToCandidate);
+  const last = page.at(-1);
+  return {
+    candidates: page,
+    ...(hasMore && last ? { nextCursor: { candidateId: last.candidateId, updatedAt: last.updatedAt } } : {})
+  };
+}
+
 export function listCurrentWorkbenchArtifactCandidatesForReconciliation(
   db: MastheadDatabase,
   input: {

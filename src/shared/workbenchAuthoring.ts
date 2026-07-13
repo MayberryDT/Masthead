@@ -28,18 +28,55 @@ export type WorkbenchAuthoringContractVersion =
   | "workbench-authoring-v1"
   | "workbench-authoring-v2";
 
-export type WorkbenchAuthoringCapabilitiesDto = {
+type WorkbenchAuthoringCapabilitiesBase = {
   capability: "artifact_authoring";
   protocol: "masthead.workbench.authoring/v1";
   transport: "daemon_http";
   command: string;
   databaseId: string;
+};
+
+export type WorkbenchAuthoringCapabilitiesDto = WorkbenchAuthoringCapabilitiesBase & ({
+  operations: ["candidates", "open", "status", "evidence", "submit", "finish"];
+  bundleVersion: "workbench-authoring-v2";
+  evidencePolicy: "candidate_scoped_canonical_evidence";
+  evidenceRequirements: {
+    runbook: ["problem", "change", "verification"];
+    adr: ["context", "decision", "alternatives"];
+    incident_timeline: ["symptom", "ordered_events", "remediation"];
+  };
+} | {
   operations: ["open", "status", "evidence", "submit", "finish"];
   bundleVersion: "workbench-authoring-v1";
   evidencePolicy: "all_canonical_redacted_evidence";
+});
+
+export const WORKBENCH_AUTHORING_OPERATIONS = ["candidates", "open", "status", "evidence", "submit", "finish"] as const;
+
+export type WorkbenchArtifactCandidateStatus = "pending" | "claimed" | "published" | "dismissed" | "superseded";
+
+export type WorkbenchArtifactCandidateDto = {
+  candidateId: string;
+  kind: WorkbenchAutomaticArtifactKind;
+  origin: "automatic" | "proposal";
+  seedSessionId: string;
+  provenanceSessionIds: string[];
+  signalEvidenceRefs: string[];
+  signalSummary: string;
+  signatureKey?: string;
+  evidenceRevision: string;
+  supersedesCandidateId?: string;
+  status: WorkbenchArtifactCandidateStatus;
+  dismissalReason?: string;
+  dismissalEvidenceRefs?: string[];
+  createdAt: string;
+  updatedAt: string;
 };
 
-export const WORKBENCH_AUTHORING_OPERATIONS = ["open", "status", "evidence", "submit", "finish"] as const;
+export type WorkbenchArtifactCandidatePageDto = {
+  candidates: WorkbenchArtifactCandidateDto[];
+  nextCursor?: string;
+};
 
 export function isWorkbenchAuthoringCapabilitiesDto(
   value: unknown,
@@ -52,8 +89,9 @@ export function isWorkbenchAuthoringCapabilitiesDto(
     capabilities.capability === "artifact_authoring" &&
     capabilities.protocol === "masthead.workbench.authoring/v1" &&
     capabilities.transport === "daemon_http" &&
-    capabilities.bundleVersion === "workbench-authoring-v1" &&
-    capabilities.evidencePolicy === "all_canonical_redacted_evidence" &&
+    capabilities.bundleVersion === "workbench-authoring-v2" &&
+    capabilities.evidencePolicy === "candidate_scoped_canonical_evidence" &&
+    hasExactEvidenceRequirements(capabilities.evidenceRequirements) &&
     typeof capabilities.databaseId === "string" &&
     Boolean(capabilities.databaseId.trim()) &&
     capabilities.databaseId === capabilities.databaseId.trim() &&
@@ -62,6 +100,20 @@ export function isWorkbenchAuthoringCapabilitiesDto(
     (!options.expectedCommand || command === options.expectedCommand) &&
     hasExactAuthoringOperations(capabilities.operations)
   );
+}
+
+function hasExactEvidenceRequirements(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const requirements = value as Record<string, unknown>;
+  return (
+    hasExactStrings(requirements.runbook, ["problem", "change", "verification"]) &&
+    hasExactStrings(requirements.adr, ["context", "decision", "alternatives"]) &&
+    hasExactStrings(requirements.incident_timeline, ["symptom", "ordered_events", "remediation"])
+  );
+}
+
+function hasExactStrings(value: unknown, expected: readonly string[]): boolean {
+  return Array.isArray(value) && value.length === expected.length && expected.every((item, index) => value[index] === item);
 }
 
 export function isAbsoluteAuthoringCommand(command: string | undefined): boolean {

@@ -11,6 +11,12 @@ import { getOrCreateDatabaseIdentity } from "../db/schema.ts";
 import { applySessionArtifact, publishSessionArtifact } from "../db/sessionArtifactRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
+import { authoringEvidenceRevision } from "../../workbench/authoring/evidenceCatalog.ts";
+import { openAuthoringRun } from "../../workbench/authoring/authoringService.ts";
+import { saveWorkbenchArtifactCandidate } from "../db/workbenchArtifactCandidateRepository.ts";
+import {
+  seedDurableArtifactCorpus
+} from "../../workbench/authoring/__fixtures__/durableArtifactCorpus.ts";
 import {
   getWorkbenchAuthoringBodyLimit,
   isWorkbenchAuthoringPath,
@@ -28,18 +34,115 @@ afterEach(async () => {
 });
 
 describe("Workbench authoring HTTP API", () => {
+  test("lists, proposes, dismisses, and opens only evidence-sized artifact candidates", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedDurableArtifactCorpus(daemon.database);
+    const databaseId = getOrCreateDatabaseIdentity(daemon.database);
+
+    const capabilities = await getJson(baseUrl, "/workbench/authoring/capabilities");
+    expect(capabilities.body).toMatchObject({
+      bundleVersion: "workbench-authoring-v2",
+      evidencePolicy: "candidate_scoped_canonical_evidence",
+      evidenceRequirements: {
+        adr: ["context", "decision", "alternatives"],
+        incident_timeline: ["symptom", "ordered_events", "remediation"],
+        runbook: ["problem", "change", "verification"]
+      },
+      operations: ["candidates", "open", "status", "evidence", "submit", "finish"]
+    });
+
+    const page = await getJson(
+      baseUrl,
+      "/workbench/authoring/candidates?status=pending&kind=runbook&limit=2"
+    );
+    expect(page.body.candidates).toHaveLength(2);
+    expect(page.body.candidates.every((candidate: any) => candidate.kind === "runbook")).toBe(true);
+    expect(page.body.nextCursor).toEqual(expect.any(String));
+    const next = await getJson(
+      baseUrl,
+      `/workbench/authoring/candidates?status=pending&kind=runbook&limit=2&cursor=${encodeURIComponent(page.body.nextCursor)}`
+    );
+    expect(next.body.candidates.map((candidate: any) => candidate.candidateId)).not.toEqual(
+      expect.arrayContaining(page.body.candidates.map((candidate: any) => candidate.candidateId))
+    );
+
+    const allRunbooks = await getJson(
+      baseUrl,
+      "/workbench/authoring/candidates?status=pending&kind=runbook&limit=100"
+    );
+    const grouped = allRunbooks.body.candidates.find(
+      (entry: any) => entry.provenanceSessionIds.length > 1
+    );
+    expect(grouped).toBeDefined();
+    const groupedOpen = await postJson(
+      baseUrl,
+      "/workbench/authoring/runs",
+      { actorId: "codex", candidateId: grouped.candidateId, databaseId },
+      201
+    );
+    expect(groupedOpen.body.run.sessionIds).toEqual(grouped.provenanceSessionIds);
+
+    const candidate = allRunbooks.body.candidates.find(
+      (entry: any) => entry.seedSessionId !== "session:oauth-fixed" && entry.provenanceSessionIds.length === 1
+    );
+    expect(candidate).toBeDefined();
+    const opened = await postJson(
+      baseUrl,
+      "/workbench/authoring/runs",
+      { actorId: "codex", candidateId: candidate.candidateId, databaseId },
+      201
+    );
+    expect(opened.body.run).toMatchObject({
+      candidateId: candidate.candidateId,
+      contractVersion: "workbench-authoring-v2",
+      sessionIds: candidate.provenanceSessionIds
+    });
+    expect(
+      daemon.database
+        .prepare("SELECT status FROM workbench_artifact_candidates WHERE candidate_id = ?")
+        .get(candidate.candidateId)
+    ).toEqual({ status: "claimed" });
+
+    const arbitrary = await postJson(
+      baseUrl,
+      "/workbench/authoring/runs",
+      { actorId: "codex", databaseId, sessionIds: ["session:oauth-fixed"] },
+      400
+    );
+    expect(arbitrary.body).toMatchObject({ error: { code: "candidate_id_required" }, ok: false });
+
+    const proposed = await postJson(baseUrl, "/workbench/authoring/candidates", {
+      kind: "runbook",
+      provenanceSessionIds: ["session:oauth-fixed"],
+      seedSessionId: "session:oauth-fixed",
+      signalEvidenceRefs: ["tool_result:oauth:failure", "file:oauth:change", "checkpoint:oauth:verified"],
+      signalSummary: "OAuth callback failure recovery with an exact verified chain."
+    }, 201);
+    expect(proposed.body.candidate).toMatchObject({ kind: "runbook", origin: "proposal", status: "pending" });
+
+    const dismissed = await postJson(
+      baseUrl,
+      `/workbench/authoring/candidates/${encodeURIComponent(proposed.body.candidate.candidateId)}/dismiss`,
+      {
+        reason: "This exact signal chain is a false positive for reusable guidance.",
+        signalEvidenceRefs: proposed.body.candidate.signalEvidenceRefs
+      }
+    );
+    expect(dismissed.body.candidate).toMatchObject({ status: "dismissed" });
+  });
+
   test("runs the complete daemon-owned authoring lifecycle", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:a");
 
     const capabilities = await getJson(baseUrl, "/workbench/authoring/capabilities");
     expect(capabilities.body).toMatchObject({
-      bundleVersion: "workbench-authoring-v1",
+      bundleVersion: "workbench-authoring-v2",
       capability: "artifact_authoring",
       command: expect.any(String),
       databaseId: getOrCreateDatabaseIdentity(daemon.database),
-      evidencePolicy: "all_canonical_redacted_evidence",
-      operations: ["open", "status", "evidence", "submit", "finish"],
+      evidencePolicy: "candidate_scoped_canonical_evidence",
+      operations: ["candidates", "open", "status", "evidence", "submit", "finish"],
       protocol: "masthead.workbench.authoring/v1",
       transport: "daemon_http"
     });
@@ -70,16 +173,7 @@ describe("Workbench authoring HTTP API", () => {
       else process.env.MASTHEAD_CLI_COMMAND = previousCommand;
     }
 
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      {
-        actorId: "codex",
-        databaseId: capabilities.body.databaseId,
-        sessionIds: ["session:a"]
-      },
-      201
-    );
+    const opened = openLegacyRun(daemon, "session:a", "codex");
     expect(opened.status).toBe(201);
     expect(opened.body).toMatchObject({ ok: true, run: { sessionIds: ["session:a"], status: "open" } });
     const runId = opened.body.run.runId as string;
@@ -115,12 +209,7 @@ describe("Workbench authoring HTTP API", () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:revision");
     const databaseId = getOrCreateDatabaseIdentity(daemon.database);
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      { actorId: "codex", databaseId, sessionIds: ["session:revision"] },
-      201
-    );
+    const opened = openLegacyRun(daemon, "session:revision", "codex");
     const runId = opened.body.run.runId as string;
 
     const submitted = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`, {
@@ -156,7 +245,7 @@ describe("Workbench authoring HTTP API", () => {
         await postJson(
           baseUrl,
           "/workbench/authoring/runs",
-          { actorId: "codex", databaseId: "wrong", sessionIds: ["session:errors"] },
+          { actorId: "codex", candidateId: "candidate:any", databaseId: "wrong" },
           409
         )
       ).body
@@ -166,23 +255,18 @@ describe("Workbench authoring HTTP API", () => {
         await postJson(
           baseUrl,
           "/workbench/authoring/runs",
-          { actorId: "codex", databaseId: getOrCreateDatabaseIdentity(daemon.database), sessionIds: ["session:missing"] },
+          { actorId: "codex", candidateId: "candidate:missing", databaseId: getOrCreateDatabaseIdentity(daemon.database) },
           404
         )
       ).body
-    ).toMatchObject({ ok: false, error: { code: "session_not_found" } });
+    ).toMatchObject({ ok: false, error: { code: "artifact_candidate_not_found" } });
     expect((await getJson(baseUrl, "/workbench/authoring/runs/missing", 404)).body).toMatchObject({
       ok: false,
       error: { code: "authoring_run_not_found" }
     });
 
     const databaseId = getOrCreateDatabaseIdentity(daemon.database);
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      { actorId: "codex", databaseId, sessionIds: ["session:errors"] },
-      201
-    );
+    const opened = openLegacyRun(daemon, "session:errors", "codex");
     expect(
       (
         await postJson(
@@ -198,12 +282,22 @@ describe("Workbench authoring HTTP API", () => {
     for (const table of ["messages", "tool_results", "tool_calls", "file_effects"]) {
       daemon.database.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run("session:no-evidence");
     }
+    saveWorkbenchArtifactCandidate(daemon.database, {
+      candidateId: "candidate:no-evidence",
+      evidenceRevision: authoringEvidenceRevision(daemon.database, ["session:no-evidence"]),
+      kind: "runbook",
+      origin: "automatic",
+      provenanceSessionIds: ["session:no-evidence"],
+      seedSessionId: "session:no-evidence",
+      signalEvidenceRefs: ["message:deleted"],
+      signalSummary: "A deliberately empty candidate exercises the canonical evidence gate."
+    });
     expect(
       (
         await postJson(
           baseUrl,
           "/workbench/authoring/runs",
-          { actorId: "codex", databaseId, sessionIds: ["session:no-evidence"] },
+          { actorId: "codex", candidateId: "candidate:no-evidence", databaseId },
           409
         )
       ).body
@@ -263,16 +357,7 @@ describe("Workbench authoring HTTP API", () => {
   test("returns sanitized 500 responses for corrupted run invariants and unexpected adapter errors", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:corrupted");
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      {
-        actorId: "codex",
-        databaseId: getOrCreateDatabaseIdentity(daemon.database),
-        sessionIds: ["session:corrupted"]
-      },
-      201
-    );
+    const opened = openLegacyRun(daemon, "session:corrupted", "codex");
     const runId = opened.body.run.runId as string;
     daemon.database
       .prepare("UPDATE workbench_authoring_runs SET status = 'ready_to_finish', bundle_json = NULL WHERE run_id = ?")
@@ -331,16 +416,7 @@ describe("Workbench authoring HTTP API", () => {
       validation: { ok: true }
     });
     publishSessionArtifact(daemon.database, existing.artifactId);
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      {
-        actorId: "codex",
-        databaseId: getOrCreateDatabaseIdentity(daemon.database),
-        sessionIds: ["session:contribution"]
-      },
-      201
-    );
+    const opened = openLegacyRun(daemon, "session:contribution", "codex");
     const runId = opened.body.run.runId as string;
     const bundle = validBundle(runId, opened.body.run.evidenceRevision, "session:contribution");
     bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
@@ -405,6 +481,17 @@ function seedAuthoringSession(daemon: MastheadDaemon, sessionId: string): void {
     sessionId,
     title: `Authoring ${sessionId}`
   });
+}
+
+function openLegacyRun(daemon: MastheadDaemon, sessionId: string, actorId: string) {
+  return {
+    body: openAuthoringRun(daemon.database, {
+      actorId,
+      databaseId: getOrCreateDatabaseIdentity(daemon.database),
+      sessionIds: [sessionId]
+    }),
+    status: 201
+  };
 }
 
 function validBundle(runId: string, evidenceRevision: string, sessionId: string): WorkbenchAuthoringBundle {

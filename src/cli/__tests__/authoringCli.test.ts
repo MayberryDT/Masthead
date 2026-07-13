@@ -12,6 +12,10 @@ import { getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { runMastheadCli } from "../mastheadctl.ts";
+import { openAuthoringRun } from "../../workbench/authoring/authoringService.ts";
+import {
+  seedDurableArtifactCorpus
+} from "../../workbench/authoring/__fixtures__/durableArtifactCorpus.ts";
 
 const tempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
@@ -26,13 +30,46 @@ afterEach(async () => {
 });
 
 describe("mastheadctl daemon-owned Workbench authoring", () => {
+  test("discovers candidates by kind and opens exactly one candidate", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedDurableArtifactCorpus(daemon.database);
+    const env = { MASTHEAD_DAEMON_URL: baseUrl };
+    const databaseId = getOrCreateDatabaseIdentity(daemon.database);
+
+    const listed = await runMastheadCli(
+      ["workbench", "candidates", "--kind", "runbook", "--limit", "2", "--json"],
+      { env }
+    );
+    expect(listed.exitCode).toBe(0);
+    const listedBody = JSON.parse(listed.stdout);
+    expect(listedBody.candidates).toHaveLength(2);
+    expect(listedBody.candidates.every((candidate: any) => candidate.kind === "runbook")).toBe(true);
+
+    const candidateId = listedBody.candidates[0].candidateId as string;
+    const opened = await runMastheadCli(
+      ["workbench", "open", "--database-id", databaseId, "--candidate", candidateId, "--json"],
+      { env }
+    );
+    expect(opened.exitCode).toBe(0);
+    expect(JSON.parse(opened.stdout)).toMatchObject({
+      run: { candidateId, contractVersion: "workbench-authoring-v2" }
+    });
+
+    const arbitrary = await runMastheadCli(
+      ["workbench", "open", "--database-id", databaseId, "--session", "session:oauth-fixed", "--json"],
+      { env }
+    );
+    expect(arbitrary.exitCode).toBe(1);
+    expect(JSON.parse(arbitrary.stderr)).toMatchObject({ error: { code: "missing_argument" } });
+  });
+
   test("advertises only daemon authoring commands plus explicit wipe maintenance", async () => {
     const top = await runMastheadCli(["--help"], { env: {} });
     expect(top.stdout).toContain("mastheadctl workbench");
     expect(top.stdout).toContain("workbench open");
 
     const result = await runMastheadCli(["workbench", "--help"], { env: {} });
-    for (const command of ["capabilities", "open", "status", "evidence", "submit", "finish", "wipe-published"]) {
+    for (const command of ["capabilities", "candidates", "open", "status", "evidence", "submit", "finish", "wipe-published"]) {
       expect(result.stdout).toContain(`workbench ${command}`);
     }
     for (const removed of ["queue", "next", "apply", "publish", "not-applicable", "batch"]) {
@@ -60,13 +97,11 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       databaseId
     });
 
-    const opened = await runMastheadCli(
-      ["workbench", "open", "--database-id", databaseId, "--session", "session:a", "--json"],
-      { env }
-    );
-    expect(opened.exitCode).toBe(0);
-    expect(opened.stderr).toBe("");
-    const openedBody = JSON.parse(opened.stdout);
+    const openedBody = openAuthoringRun(daemon.database, {
+      actorId: "mastheadctl",
+      databaseId,
+      sessionIds: ["session:a"]
+    });
     expect(openedBody).toMatchObject({ ok: true, run: { sessionIds: ["session:a"], status: "open" } });
     const runId = openedBody.run.runId as string;
 
@@ -133,7 +168,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       title: "Identity boundary"
     });
     const result = await runMastheadCli(
-      ["workbench", "open", "--database-id", "wrong", "--session", "session:identity", "--json"],
+      ["workbench", "open", "--database-id", "wrong", "--candidate", "candidate:any", "--json"],
       { env: { MASTHEAD_DAEMON_URL: baseUrl } }
     );
     expect(result.exitCode).toBe(1);
@@ -157,8 +192,8 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
   });
 
   test.each([
-    { args: ["workbench", "open", "--database-id", "--session", "session:a", "--json"], option: "--database-id" },
-    { args: ["workbench", "open", "--database-id", "database", "--session", "--json"], option: "--session" },
+    { args: ["workbench", "open", "--database-id", "--candidate", "candidate:any", "--json"], option: "--database-id" },
+    { args: ["workbench", "open", "--database-id", "database", "--candidate", "--json"], option: "--candidate" },
     { args: ["workbench", "status", "--run", "--json"], option: "--run" },
     { args: ["workbench", "submit", "--run", "run", "--file", "--json"], option: "--file" },
     { args: ["workbench", "evidence", "--run", "run", "--session", "--json"], option: "--session" },
@@ -184,12 +219,17 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
-          bundleVersion: "workbench-authoring-v1",
+          bundleVersion: "workbench-authoring-v2",
           capability: "artifact_authoring",
           command: "mastheadctl",
           databaseId: "database",
-          evidencePolicy: "all_canonical_redacted_evidence",
-          operations: ["open", "status", "evidence", "submit", "finish"],
+          evidencePolicy: "candidate_scoped_canonical_evidence",
+          evidenceRequirements: {
+            adr: ["context", "decision", "alternatives"],
+            incident_timeline: ["symptom", "ordered_events", "remediation"],
+            runbook: ["problem", "change", "verification"]
+          },
+          operations: ["candidates", "open", "status", "evidence", "submit", "finish"],
           protocol: "masthead.workbench.authoring/v1",
           transport: "daemon_http"
         }),

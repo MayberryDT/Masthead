@@ -1,6 +1,7 @@
 import { stableRecordId } from "../../daemon/identity.ts";
 import {
   hasWorkbenchArtifactCandidateScan,
+  dismissWorkbenchArtifactCandidate,
   getWorkbenchArtifactCandidate,
   getWorkbenchArtifactCandidateSourceRevision,
   findBestWorkbenchArtifactCandidatePredecessor,
@@ -88,7 +89,54 @@ export function discoverArtifactCandidatePage(
     )
     .all(input.afterSessionId ?? "", limit) as Array<{ sessionId: string }>;
 
-  const reconciled = withImmediateTransaction(db, () => {
+  const reconciled = reconcileCandidateScanRows(db, rows);
+  const result: {
+    candidates: WorkbenchArtifactCandidate[];
+    scannedSessionIds: string[];
+    nextCursor?: string;
+  } = {
+    candidates: reconciled.candidates,
+    scannedSessionIds: reconciled.acknowledgedSessionIds
+  };
+  if (rows.length === limit) result.nextCursor = rows.at(-1)!.sessionId;
+  return result;
+}
+
+export function discoverNextArtifactCandidatePage(
+  db: MastheadDatabase,
+  input: { limit?: number } = {}
+): { candidates: WorkbenchArtifactCandidate[]; scannedSessionIds: string[] } {
+  const limit = Math.max(1, Math.min(Math.trunc(input.limit ?? 100), 100));
+  const rows = db
+    .prepare(
+      `SELECT sessions.session_id AS sessionId
+       FROM sessions
+       INNER JOIN workbench_session_state
+         ON workbench_session_state.session_id = sessions.session_id
+       LEFT JOIN workbench_artifact_candidate_source_revisions revisions
+         ON revisions.session_id = sessions.session_id
+       LEFT JOIN workbench_artifact_candidate_scans scans
+         ON scans.session_id = sessions.session_id
+        AND scans.source_revision = COALESCE(revisions.source_revision, 0)
+       WHERE sessions.deleted_at IS NULL
+         AND workbench_session_state.publication_status = 'publish_path'
+         AND scans.session_id IS NULL
+       ORDER BY sessions.session_id
+       LIMIT ?`
+    )
+    .all(limit) as Array<{ sessionId: string }>;
+  const reconciled = reconcileCandidateScanRows(db, rows);
+  return {
+    candidates: reconciled.candidates,
+    scannedSessionIds: reconciled.acknowledgedSessionIds
+  };
+}
+
+function reconcileCandidateScanRows(
+  db: MastheadDatabase,
+  rows: Array<{ sessionId: string }>
+): { acknowledgedSessionIds: string[]; candidates: WorkbenchArtifactCandidate[] } {
+  return withImmediateTransaction(db, () => {
     const changed = rows.flatMap((row) => {
       const sourceRevision = getWorkbenchArtifactCandidateSourceRevision(db, row.sessionId);
       return hasWorkbenchArtifactCandidateScan(db, { sessionId: row.sessionId, sourceRevision })
@@ -110,16 +158,6 @@ export function discoverArtifactCandidatePage(
     }
     return reconciliation;
   });
-  const result: {
-    candidates: WorkbenchArtifactCandidate[];
-    scannedSessionIds: string[];
-    nextCursor?: string;
-  } = {
-    candidates: reconciled.candidates,
-    scannedSessionIds: reconciled.acknowledgedSessionIds
-  };
-  if (rows.length === limit) result.nextCursor = rows.at(-1)!.sessionId;
-  return result;
 }
 
 export function proposeArtifactCandidate(
@@ -127,6 +165,46 @@ export function proposeArtifactCandidate(
   proposal: ArtifactCandidateProposal
 ): WorkbenchArtifactCandidate {
   return withImmediateTransaction(db, () => proposeArtifactCandidateInTransaction(db, proposal));
+}
+
+export function dismissArtifactCandidate(
+  db: MastheadDatabase,
+  input: { candidateId: string; reason: string; signalEvidenceRefs: string[] }
+): WorkbenchArtifactCandidate {
+  return withImmediateTransaction(db, () => {
+    const candidate = getWorkbenchArtifactCandidate(db, input.candidateId);
+    if (!candidate) throw new Error(`artifact_candidate_not_found:${input.candidateId}`);
+    const signals = candidate.provenanceSessionIds.map((sessionId) => extractSessionSignals(db, sessionId));
+    const selected = new Set(normalizedStrings(input.signalEvidenceRefs));
+    const allEvidenceRefs = new Set(signals.flatMap((session) => [...session.evidenceRefs]));
+    if (
+      input.signalEvidenceRefs.some((ref) => !allEvidenceRefs.has(ref)) ||
+      !proposalHasKindSignals(candidate.kind, signals, selected)
+    ) {
+      throw new Error("candidate_dismissal_evidence_changed");
+    }
+    return dismissWorkbenchArtifactCandidate(db, input);
+  });
+}
+
+export function isArtifactCandidateEvidenceCurrent(
+  db: MastheadDatabase,
+  candidate: WorkbenchArtifactCandidate
+): boolean {
+  if (candidate.origin !== "automatic" || !candidate.signatureKey) {
+    return authoringEvidenceRevision(db, candidate.provenanceSessionIds) === candidate.evidenceRevision;
+  }
+  const members = listWorkbenchArtifactSignatureMembersForIdentities(db, [
+    { kind: candidate.kind, signatureKey: candidate.signatureKey }
+  ]).sort((left, right) => left.sessionId.localeCompare(right.sessionId));
+  return (
+    sameStrings(members.map((member) => member.sessionId), candidate.provenanceSessionIds) &&
+    sameStrings(
+      normalizedStrings(members.flatMap((member) => member.signalEvidenceRefs)),
+      candidate.signalEvidenceRefs
+    ) &&
+    signatureGroupEvidenceRevision(members) === candidate.evidenceRevision
+  );
 }
 
 function proposeArtifactCandidateInTransaction(
@@ -962,6 +1040,10 @@ function normalizedItemText(item: SessionTranscriptItem): string {
 
 function normalizedStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function arraysEqual(left: string[], right: string[]): boolean {

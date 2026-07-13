@@ -1,5 +1,8 @@
 import type {
   WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV2,
+  WorkbenchArtifactCandidateDto,
+  WorkbenchArtifactCandidatePageDto,
   WorkbenchAuthoringCapabilitiesDto,
   WorkbenchAuthoringEvidencePage,
   WorkbenchAuthoringReceipt,
@@ -33,7 +36,35 @@ export class MastheadAuthoringClient {
     return this.request("GET", "/workbench/authoring/capabilities");
   }
 
-  open(input: { actorId: string; databaseId: string; sessionIds: string[] }): Promise<{
+  candidates(query: URLSearchParams): Promise<WorkbenchArtifactCandidatePageDto> {
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.request("GET", `/workbench/authoring/candidates${suffix}`);
+  }
+
+  proposeCandidate(input: {
+    kind: WorkbenchArtifactCandidateDto["kind"];
+    provenanceSessionIds: string[];
+    seedSessionId: string;
+    signalEvidenceRefs: string[];
+    signalSummary: string;
+    signatureKey?: string;
+  }): Promise<{ candidate: WorkbenchArtifactCandidateDto; ok: true }> {
+    return this.request("POST", "/workbench/authoring/candidates", input);
+  }
+
+  dismissCandidate(input: {
+    candidateId: string;
+    reason: string;
+    signalEvidenceRefs: string[];
+  }): Promise<{ candidate: WorkbenchArtifactCandidateDto; ok: true }> {
+    return this.request(
+      "POST",
+      `/workbench/authoring/candidates/${encodeURIComponent(input.candidateId)}/dismiss`,
+      { reason: input.reason, signalEvidenceRefs: input.signalEvidenceRefs }
+    );
+  }
+
+  open(input: { actorId: string; candidateId: string; databaseId: string }): Promise<{
     ok: true;
     run: WorkbenchAuthoringRunDto;
     [key: string]: unknown;
@@ -50,7 +81,7 @@ export class MastheadAuthoringClient {
     return this.request("GET", `/workbench/authoring/runs/${encodeURIComponent(runId)}/evidence${suffix}`);
   }
 
-  submit(runId: string, bundle: WorkbenchAuthoringBundle): Promise<{
+  submit(runId: string, bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2): Promise<{
     accepted: boolean;
     findings: unknown[];
     ok: true;
