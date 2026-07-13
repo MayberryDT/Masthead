@@ -463,6 +463,204 @@ describe("production lifecycle launcher", () => {
     expect(inspected).toBe(1);
   });
 
+  test("skips an exact unrelated executable without reading its protected environment even when argv mentions production", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    const deniedEnvironment = Object.assign(new Error("permission denied reading environ"), { code: "EACCES" });
+    let environmentReads = 0;
+    await expect(readOwnedProcessStrict(1497, {
+      currentUid,
+      readCommandLine: async () => Buffer.from("/production/Masthead-linux-x64-new/masthead\0--user-data-dir=/data\0--database=/data/masthead.sqlite\0"),
+      readExecutable: async () => "/usr/bin/codex",
+      readEnvironment: async () => { environmentReads += 1; throw deniedEnvironment; },
+      readProcess: async () => { throw deniedEnvironment; },
+      readStatLine: async () => `1497 (codex) S ${Array(18).fill("0").join(" ")} 1497-start`,
+      readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+      scanContext: {
+        dataDirectory: "/data",
+        databasePath: "/data/masthead.sqlite",
+        productionRoot: "/production",
+        target: "/production/Masthead-linux-x64-new"
+      }
+    })).resolves.toBeUndefined();
+    expect(environmentReads).toBe(0);
+  });
+
+  test.each([
+    ["Electron", "/production/Masthead-linux-x64-old/masthead", ["/production/Masthead-linux-x64-old/masthead", "--user-data-dir=/data"]],
+    ["daemon", "/production/Masthead-linux-x64-old/resources/daemon/node", ["/production/Masthead-linux-x64-old/resources/daemon/node", "/production/Masthead-linux-x64-old/resources/daemon/dist/src/daemon/main.js"]],
+    ["maintenance", "/production/Masthead-linux-x64-new/resources/daemon/node", ["/production/Masthead-linux-x64-new/resources/daemon/node", "/production/Masthead-linux-x64-new/resources/daemon/dist/src/daemon/productionTransitionMaintenance.js", "restore"]],
+    ["bland production-root helper", "/production/Masthead-linux-x64-old/resources/helper", ["./helper", "--quiet"]],
+    ["deleted production-root helper", "/production/Masthead-linux-x64-old/resources/helper (deleted)", ["./helper", "--quiet"]]
+  ])("fails closed for an exact %s executable when its environment is protected", async (_label, exe, argv) => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    const deniedEnvironment = Object.assign(new Error("permission denied reading environ"), { code: "EACCES" });
+    await expect(readOwnedProcessStrict(1498, {
+      currentUid,
+      readCommandLine: async () => Buffer.from(`${argv.join("\0")}\0`),
+      readExecutable: async () => exe,
+      readEnvironment: async () => { throw deniedEnvironment; },
+      readProcess: async () => { throw deniedEnvironment; },
+      readStatLine: async () => `1498 (helper) S ${Array(18).fill("0").join(" ")} 1498-start`,
+      readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+      scanContext: {
+        dataDirectory: "/data",
+        databasePath: "/data/masthead.sqlite",
+        productionRoot: "/production",
+        target: "/production/Masthead-linux-x64-new"
+      }
+    })).rejects.toMatchObject({ code: "EACCES" });
+  });
+
+  test("returns an identity-stable production-root record from granular proc metadata", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    let commandLineReads = 0;
+    let executableReads = 0;
+    let statReads = 0;
+    await expect(readOwnedProcessStrict(1501, {
+      currentUid,
+      readCommandLine: async () => {
+        commandLineReads += 1;
+        return Buffer.from("/production/Masthead-linux-x64-old/masthead\0--user-data-dir=/data\0");
+      },
+      readEnvironment: async () => Buffer.from("MASTHEAD_DATA_DIR=/data\0MASTHEAD_DB_PATH=/data/masthead.sqlite\0"),
+      readExecutable: async () => {
+        executableReads += 1;
+        return "/production/Masthead-linux-x64-old/masthead";
+      },
+      readStatLine: async () => {
+        statReads += 1;
+        return `1501 (masthead) S ${Array(18).fill("0").join(" ")} stable-start`;
+      },
+      readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+      scanContext: {
+        dataDirectory: "/data",
+        databasePath: "/data/masthead.sqlite",
+        productionRoot: "/production",
+        target: "/production/Masthead-linux-x64-new"
+      }
+    })).resolves.toEqual({
+      argv: ["/production/Masthead-linux-x64-old/masthead", "--user-data-dir=/data"],
+      environ: { MASTHEAD_DATA_DIR: "/data", MASTHEAD_DB_PATH: "/data/masthead.sqlite" },
+      exe: "/production/Masthead-linux-x64-old/masthead",
+      pid: 1501,
+      starttime: "stable-start"
+    });
+    expect(commandLineReads).toBe(2);
+    expect(executableReads).toBe(3);
+    expect(statReads).toBe(3);
+  });
+
+  test("does not use exact executable exclusion for a malformed command line or a reused PID", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    const context = {
+      dataDirectory: "/data",
+      databasePath: "/data/masthead.sqlite",
+      productionRoot: "/production",
+      target: "/production/Masthead-linux-x64-new"
+    };
+    const deniedEnvironment = Object.assign(new Error("permission denied reading environ"), { code: "EACCES" });
+    await expect(readOwnedProcessStrict(1499, {
+      currentUid,
+      readCommandLine: async () => Buffer.from("/usr/bin/codex"),
+      readExecutable: async () => "/usr/bin/codex",
+      readEnvironment: async () => { throw deniedEnvironment; },
+      readProcess: async () => { throw deniedEnvironment; },
+      readStatLine: async () => `1499 (codex) S ${Array(18).fill("0").join(" ")} 1499-start`,
+      readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+      scanContext: context
+    })).rejects.toMatchObject({ code: "EACCES" });
+
+    let statReads = 0;
+    await expect(readOwnedProcessStrict(1500, {
+      currentUid,
+      readCommandLine: async () => Buffer.from("/usr/bin/codex\0run\0--database=/data/masthead.sqlite\0"),
+      readExecutable: async () => "/usr/bin/codex",
+      readEnvironment: async () => { throw deniedEnvironment; },
+      readProcess: async () => { throw deniedEnvironment; },
+      readStatLine: async () => {
+        statReads += 1;
+        return `1500 (codex) S ${Array(18).fill("0").join(" ")} 1500-start-${statReads}`;
+      },
+      readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+      scanContext: context
+    })).rejects.toThrow("identity changed during scan");
+  });
+
+  test.each([
+    ["outside-to-production exec", ["/usr/bin/codex", "/production/Masthead-linux-x64-new/masthead"], false, "executable identity changed during scan"],
+    ["production-to-outside exec after environment capture", ["/production/Masthead-linux-x64-new/masthead", "/production/Masthead-linux-x64-new/masthead", "/usr/bin/codex"], true, "executable identity changed during scan"],
+    ["production executable deletion transition", ["/production/Masthead-linux-x64-new/masthead", "/production/Masthead-linux-x64-new/masthead (deleted)"], false, "executable identity changed during scan"]
+  ])("fails closed across a same-PID %s", async (_label, executables, expectEnvironmentRead, expectedError) => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    let executableReads = 0;
+    let environmentReads = 0;
+    await expect(readOwnedProcessStrict(1502, {
+      currentUid,
+      readCommandLine: async () => Buffer.from("/production/Masthead-linux-x64-new/masthead\0--user-data-dir=/data\0"),
+      readEnvironment: async () => {
+        environmentReads += 1;
+        return Buffer.from("MASTHEAD_DATA_DIR=/data\0MASTHEAD_DB_PATH=/data/masthead.sqlite\0");
+      },
+      readExecutable: async () => executables[Math.min(executableReads++, executables.length - 1)],
+      readStatLine: async () => `1502 (process) S ${Array(18).fill("0").join(" ")} stable-start`,
+      readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+      scanContext: {
+        dataDirectory: "/data",
+        databasePath: "/data/masthead.sqlite",
+        productionRoot: "/production",
+        target: "/production/Masthead-linux-x64-new"
+      }
+    })).rejects.toThrow(expectedError);
+    expect(environmentReads > 0).toBe(expectEnvironmentRead);
+  });
+
+  test("fails closed when a repeated exact executable read becomes inaccessible", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    let executableReads = 0;
+    const denied = Object.assign(new Error("permission denied verifying exe"), { code: "EACCES" });
+    await expect(readOwnedProcessStrict(1503, {
+      currentUid,
+      readCommandLine: async () => Buffer.from("/usr/bin/codex\0run\0--database=/data/masthead.sqlite\0"),
+      readExecutable: async () => {
+        executableReads += 1;
+        if (executableReads > 1) throw denied;
+        return "/usr/bin/codex";
+      },
+      readStatLine: async () => `1503 (codex) S ${Array(18).fill("0").join(" ")} stable-start`,
+      readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+      scanContext: {
+        dataDirectory: "/data",
+        databasePath: "/data/masthead.sqlite",
+        productionRoot: "/production",
+        target: "/production/Masthead-linux-x64-new"
+      }
+    })).rejects.toMatchObject({ code: "EACCES" });
+  });
+
+  test("fails closed when argv changes across an otherwise stable production executable identity", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    let commandLineReads = 0;
+    await expect(readOwnedProcessStrict(1504, {
+      currentUid,
+      readCommandLine: async () => {
+        commandLineReads += 1;
+        return Buffer.from(commandLineReads === 1
+          ? "/production/Masthead-linux-x64-new/masthead\0--user-data-dir=/data\0"
+          : "/usr/bin/codex\0run\0");
+      },
+      readEnvironment: async () => Buffer.from("MASTHEAD_DATA_DIR=/data\0MASTHEAD_DB_PATH=/data/masthead.sqlite\0"),
+      readExecutable: async () => "/production/Masthead-linux-x64-new/masthead",
+      readStatLine: async () => `1504 (process) S ${Array(18).fill("0").join(" ")} stable-start`,
+      readStatus: async () => `Uid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n`,
+      scanContext: {
+        dataDirectory: "/data",
+        databasePath: "/data/masthead.sqlite",
+        productionRoot: "/production",
+        target: "/production/Masthead-linux-x64-new"
+      }
+    })).rejects.toThrow("command line changed during scan");
+  });
+
   test.each([
     ["old Electron", ["/production/Masthead-linux-x64-old/masthead", "--user-data-dir=/data"]],
     ["new Electron", ["/production/Masthead-linux-x64-new/masthead", "--user-data-dir=/data"]],

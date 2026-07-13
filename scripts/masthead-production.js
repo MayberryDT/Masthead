@@ -1129,6 +1129,12 @@ export async function readOwnedProcessStrict(pid, adapters = {}) {
   const readStatus = adapters.readStatus || (() => readFile(join(processRoot, "status"), "utf8"));
   const statProcess = adapters.stat || (() => stat(processRoot));
   const inspectProcess = adapters.readProcess || ((processPid) => readProcess(processPid, true));
+  const useGranularInspection = !adapters.readProcess || Boolean(
+    adapters.readExecutable || adapters.readEnvironment || adapters.readStatLine
+  );
+  const readExecutable = adapters.readExecutable || (() => readlink(join(processRoot, "exe")));
+  const readEnvironment = adapters.readEnvironment || (() => readFile(join(processRoot, "environ")));
+  const readStatLine = adapters.readStatLine || (() => readFile(join(processRoot, "stat"), "utf8"));
   let status;
   try {
     status = await readStatus();
@@ -1167,8 +1173,24 @@ export async function readOwnedProcessStrict(pid, adapters = {}) {
   const command = parseProcCommandLine(commandLine);
   const provenUnrelatedCommand = command.valid &&
     !commandCouldBelongToProduction(command.argv, adapters.scanContext);
+  if (!useGranularInspection) {
+    try {
+      return await inspectProcess(pid);
+    } catch (error) {
+      if (error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code)) return undefined;
+      if (
+        provenUnrelatedCommand && error && typeof error === "object" &&
+        ["EACCES", "EPERM"].includes(error.code)
+      ) return undefined;
+      throw error;
+    }
+  }
+  const initialStatLine = await readProcValueOrRace(readStatLine);
+  if (initialStatLine === undefined) return undefined;
+  const initialStarttime = procStatStarttime(initialStatLine, pid);
+  let exe;
   try {
-    return await inspectProcess(pid);
+    exe = await readExecutable();
   } catch (error) {
     if (error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code)) return undefined;
     if (
@@ -1177,6 +1199,49 @@ export async function readOwnedProcessStrict(pid, adapters = {}) {
     ) return undefined;
     throw error;
   }
+  const verifiedStatLine = await readProcValueOrRace(readStatLine);
+  if (verifiedStatLine === undefined) return undefined;
+  const verifiedStarttime = procStatStarttime(verifiedStatLine, pid);
+  if (initialStarttime !== verifiedStarttime) {
+    throw new Error(`Production process ${pid} identity changed during scan.`);
+  }
+  const verifiedExe = await readProcValueOrRace(readExecutable);
+  if (verifiedExe === undefined) return undefined;
+  if (exe !== verifiedExe) {
+    throw new Error(`Production process ${pid} executable identity changed during scan.`);
+  }
+  const exactExecutableIsUnrelated = command.valid && adapters.scanContext &&
+    typeof adapters.scanContext.productionRoot === "string" &&
+    !productionTargetForPath(normalizeProcExecutable(verifiedExe), resolve(adapters.scanContext.productionRoot));
+  if (exactExecutableIsUnrelated) return undefined;
+  const environment = await readProcValueOrRace(readEnvironment);
+  if (environment === undefined) return undefined;
+  const finalStatLine = await readProcValueOrRace(readStatLine);
+  if (finalStatLine === undefined) return undefined;
+  const finalStarttime = procStatStarttime(finalStatLine, pid);
+  if (verifiedStarttime !== finalStarttime) {
+    throw new Error(`Production process ${pid} identity changed during scan.`);
+  }
+  const finalExe = await readProcValueOrRace(readExecutable);
+  if (finalExe === undefined) return undefined;
+  if (verifiedExe !== finalExe) {
+    throw new Error(`Production process ${pid} executable identity changed during scan.`);
+  }
+  const finalCommandLine = await readProcValueOrRace(readCommandLine);
+  if (finalCommandLine === undefined) return undefined;
+  if (!Buffer.from(commandLine).equals(Buffer.from(finalCommandLine))) {
+    throw new Error(`Production process ${pid} command line changed during scan.`);
+  }
+  return {
+    argv: command.argv,
+    environ: Object.fromEntries(nulFields(environment).flatMap((entry) => {
+      const separator = entry.indexOf("=");
+      return separator > 0 ? [[entry.slice(0, separator), entry.slice(separator + 1)]] : [];
+    })),
+    exe: finalExe,
+    pid,
+    starttime: finalStarttime
+  };
 }
 
 function parseProcCommandLine(commandLine) {
@@ -1202,6 +1267,26 @@ function commandCouldBelongToProduction(argv, scanContext) {
   ));
 }
 
+function procStatStarttime(statLine, pid) {
+  const text = String(statLine);
+  const closingParenthesis = text.lastIndexOf(")");
+  const values = closingParenthesis >= 0
+    ? text.slice(closingParenthesis + 2).trim().split(/\s+/u)
+    : [];
+  const starttime = values[19];
+  if (!starttime) throw new Error(`Production process ${pid} stat starttime is malformed.`);
+  return starttime;
+}
+
+async function readProcValueOrRace(reader) {
+  try {
+    return await reader();
+  } catch (error) {
+    if (error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code)) return undefined;
+    throw error;
+  }
+}
+
 async function readProcess(pid, strict = false) {
   const processRoot = `/proc/${pid}`;
   try {
@@ -1211,7 +1296,6 @@ async function readProcess(pid, strict = false) {
       readFile(join(processRoot, "environ")),
       readFile(join(processRoot, "stat"), "utf8")
     ]);
-    const values = statLine.slice(statLine.lastIndexOf(")") + 2).trim().split(/\s+/u);
     return {
       argv: nulFields(commandLine),
       environ: Object.fromEntries(nulFields(environment).flatMap((entry) => {
@@ -1220,7 +1304,7 @@ async function readProcess(pid, strict = false) {
       })),
       exe,
       pid,
-      starttime: values[19]
+      starttime: procStatStarttime(statLine, pid)
     };
   } catch (error) {
     if (strict && !(error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code))) throw error;

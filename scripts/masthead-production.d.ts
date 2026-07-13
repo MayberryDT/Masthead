@@ -40,7 +40,10 @@ export function readOwnedProcessStrict(pid: number, adapters?: {
   currentUid?: number;
   processRoot?: string;
   readCommandLine?: () => Promise<Buffer>;
+  readEnvironment?: () => Promise<Buffer>;
+  readExecutable?: () => Promise<string>;
   readProcess?: (pid: number) => Promise<ProductionProcessRecord | undefined>;
+  readStatLine?: () => Promise<string>;
   readStatus?: () => Promise<string>;
   scanContext?: Pick<ProductionConfig, "dataDirectory" | "databasePath" | "productionRoot" | "target">;
   stat?: () => Promise<{ uid: number }>;
