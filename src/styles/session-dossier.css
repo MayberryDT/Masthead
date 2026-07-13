@@ -944,9 +944,21 @@
 .session-dossier.is-compact-shell .metrics,
 .session-dossier.is-compact-shell .summary-grid,
 .session-dossier.is-compact-shell .advanced,
-.session-dossier.is-compact-shell .evidence-blocks,
-.session-dossier.is-compact-shell .advanced-details-panel {
+.session-dossier.is-compact-shell .evidence-blocks {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.session-dossier.is-compact-shell .advanced-details-panel,
+.session-dossier.is-compact-shell .advanced-list li,
+.session-dossier.is-compact-shell .timeline-list li,
+.session-dossier.is-compact-shell .raw-transcript-list li {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.session-dossier.is-compact-shell .advanced-detail-card.is-wide,
+.session-dossier.is-compact-shell .advanced-detail-card.is-full,
+.session-dossier.is-compact-shell .advanced-detail-card.is-scroll-window {
+  grid-column: 1;
 }
 
 .session-dossier.is-compact-shell .meta-cell:nth-child(even) {

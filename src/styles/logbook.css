@@ -1024,7 +1024,7 @@
   scrollbar-color: rgba(92, 153, 187, 0.26) transparent;
 }
 
-.logbook-inspector header {
+.logbook-inspector > header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1181,6 +1181,16 @@
 
   .logbook-table-wrap {
     height: clamp(220px, 42vh, 320px);
+  }
+
+  .logbook-master-detail.has-detail {
+    height: auto;
+    overflow: visible;
+    grid-template-rows: auto auto;
+  }
+
+  .logbook-master-detail-inspector {
+    overflow: visible;
   }
 
   .logbook-toolbar,
