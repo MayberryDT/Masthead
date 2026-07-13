@@ -27,7 +27,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(22);
+    expect(CURRENT_SCHEMA_VERSION).toBe(23);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -80,7 +80,9 @@ describe("daemon database schema", () => {
         "workbench_activity",
         "workbench_claims",
         "workbench_authoring_runs",
-        "workbench_authoring_run_sessions"
+        "workbench_authoring_run_sessions",
+        "workbench_artifact_candidates",
+        "workbench_artifact_candidate_scans"
       ])
     );
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
@@ -106,7 +108,8 @@ describe("daemon database schema", () => {
       { version: 19, name: "019_workbench_authoring_runs" },
       { version: 20, name: "020_normalize_workbench_optional_statuses" },
       { version: 21, name: "021_artifact_body_search" },
-      { version: 22, name: "022_workbench_authoring_v2" }
+      { version: 22, name: "022_workbench_authoring_v2" },
+      { version: 23, name: "023_workbench_artifact_candidates" }
     ]);
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
     expect(indexes.map((row) => row.name)).toEqual(
@@ -116,7 +119,11 @@ describe("daemon database schema", () => {
         "runtime_signals_session_observed_idx",
         "checkpoints_session_observed_idx",
         "idx_live_state_reports_session",
-        "idx_workbench_authoring_run_contract_candidate"
+        "idx_workbench_authoring_run_contract_candidate",
+        "idx_workbench_candidates_current_signature",
+        "idx_workbench_candidates_current_session",
+        "idx_workbench_candidates_status_updated",
+        "idx_workbench_candidate_scans_session_time"
       ])
     );
     const authoringRunColumns = db.prepare("PRAGMA table_info(workbench_authoring_runs)").all() as Array<{
@@ -147,6 +154,96 @@ describe("daemon database schema", () => {
     expect(db.prepare("SELECT session_id FROM session_search WHERE session_search MATCH ?").all("historical")).toEqual([
       { session_id: "session-1" }
     ]);
+    db.close();
+  });
+
+  test("migration 023 enforces candidate lifecycle, current identity, and revision scans", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v23-candidates-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:candidate-schema",
+      title: "Candidate schema"
+    });
+    const insertCandidate = db.prepare(
+      `INSERT INTO workbench_artifact_candidates (
+        candidate_id, kind, seed_session_id, provenance_session_ids_json,
+        signal_evidence_refs_json, signal_summary, signature_key, status, created_at, updated_at
+      ) VALUES (?, 'runbook', 'session:candidate-schema', ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const now = "2026-07-12T00:00:00.000Z";
+    insertCandidate.run(
+      "candidate:one",
+      JSON.stringify(["session:candidate-schema"]),
+      JSON.stringify(["message:session:candidate-schema:message"]),
+      "Grounded reusable procedure candidate.",
+      "error:ssh:missing-command",
+      "pending",
+      now,
+      now
+    );
+
+    expect(() =>
+      insertCandidate.run(
+        "candidate:duplicate-current",
+        JSON.stringify(["session:candidate-schema"]),
+        JSON.stringify(["message:session:candidate-schema:message"]),
+        "Duplicate current signature.",
+        "error:ssh:missing-command",
+        "claimed",
+        now,
+        now
+      )
+    ).toThrow();
+    expect(() =>
+      db
+        .prepare(
+          `UPDATE workbench_artifact_candidates
+           SET status = 'dismissed', dismissal_reason = 'too short', dismissal_evidence_refs_json = '[]'
+           WHERE candidate_id = 'candidate:one'`
+        )
+        .run()
+    ).toThrow();
+
+    db.prepare(
+      `UPDATE workbench_artifact_candidates
+       SET status = 'dismissed',
+         dismissal_reason = 'The evidence is real but this procedure is not reusable.',
+         dismissal_evidence_refs_json = signal_evidence_refs_json
+       WHERE candidate_id = 'candidate:one'`
+    ).run();
+    insertCandidate.run(
+      "candidate:replacement",
+      JSON.stringify(["session:candidate-schema"]),
+      JSON.stringify(["message:session:candidate-schema:message"]),
+      "Changed evidence creates a new current candidate.",
+      "error:ssh:missing-command",
+      "pending",
+      now,
+      now
+    );
+    db.prepare(
+      `INSERT INTO workbench_artifact_candidate_scans (session_id, evidence_revision, scanned_at)
+       VALUES ('session:candidate-schema', 'sha256:first', ?)`
+    ).run(now);
+    db.prepare(
+      `INSERT INTO workbench_artifact_candidate_scans (session_id, evidence_revision, scanned_at)
+       VALUES ('session:candidate-schema', 'sha256:second', ?)`
+    ).run(now);
+    expect(
+      db
+        .prepare(
+          `SELECT evidence_revision AS evidenceRevision
+           FROM workbench_artifact_candidate_scans
+           WHERE session_id = 'session:candidate-schema'
+           ORDER BY evidence_revision`
+        )
+        .all()
+    ).toEqual([{ evidenceRevision: "sha256:first" }, { evidenceRevision: "sha256:second" }]);
     db.close();
   });
 

@@ -115,6 +115,11 @@ const migrations = [
     version: 22,
     name: "022_workbench_authoring_v2",
     path: resolve(currentDir, "migrations/022_workbench_authoring_v2.sql")
+  },
+  {
+    version: 23,
+    name: "023_workbench_artifact_candidates",
+    path: resolve(currentDir, "migrations/023_workbench_artifact_candidates.sql")
   }
 ];
 
@@ -154,7 +159,9 @@ const criticalTables = [
   "workbench_activity",
   "workbench_claims",
   "workbench_authoring_runs",
-  "workbench_authoring_run_sessions"
+  "workbench_authoring_run_sessions",
+  "workbench_artifact_candidates",
+  "workbench_artifact_candidate_scans"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {
