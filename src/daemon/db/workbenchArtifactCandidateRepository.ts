@@ -68,11 +68,14 @@ export function saveWorkbenchArtifactCandidate(
     throw new Error("candidate_seed_not_in_provenance");
   }
   if (signalEvidenceRefs.length === 0) throw new Error("candidate_positive_evidence_required");
+  for (const sessionId of provenanceSessionIds) {
+    if (!db.prepare("SELECT 1 FROM sessions WHERE session_id = ? AND deleted_at IS NULL").get(sessionId)) {
+      throw new Error(`candidate_provenance_session_not_found:${sessionId}`);
+    }
+  }
 
   const sameRevision = getWorkbenchArtifactCandidate(db, input.candidateId);
-  if (sameRevision?.status === "dismissed" || sameRevision?.status === "superseded") {
-    return sameRevision;
-  }
+  if (sameRevision) return sameRevision;
 
   const existing = findCurrentCandidate(db, {
     kind: input.kind,
@@ -82,18 +85,8 @@ export function saveWorkbenchArtifactCandidate(
   const now = new Date().toISOString();
   if (existing) {
     if (existing.status === "published") return existing;
-    const mergedSessions = normalizedStrings([...existing.provenanceSessionIds, ...provenanceSessionIds]);
-    if (mergedSessions.length > 12) throw new Error("candidate_provenance_count_invalid");
-    const mergedRefs = normalizedStrings([...existing.signalEvidenceRefs, ...signalEvidenceRefs]);
-    db.prepare(
-      `UPDATE workbench_artifact_candidates
-       SET provenance_session_ids_json = ?,
-         signal_evidence_refs_json = ?,
-         signal_summary = ?,
-         updated_at = ?
-       WHERE candidate_id = ?`
-    ).run(JSON.stringify(mergedSessions), JSON.stringify(mergedRefs), input.signalSummary, now, existing.candidateId);
-    return getWorkbenchArtifactCandidate(db, existing.candidateId)!;
+    if (existing.status === "claimed") throw new Error("artifact_candidate_reconciliation_deferred");
+    throw new Error("artifact_candidate_reconciliation_required");
   }
 
   db.prepare(

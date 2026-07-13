@@ -11,6 +11,7 @@ import {
 import {
   dismissWorkbenchArtifactCandidate,
   getWorkbenchArtifactCandidate,
+  listWorkbenchArtifactCandidates,
   setWorkbenchArtifactCandidateStatus
 } from "../../../daemon/db/workbenchArtifactCandidateRepository.ts";
 import {
@@ -87,6 +88,177 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("rolls back candidate reconciliation and scan acknowledgements together", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    db.exec(
+      `CREATE TRIGGER fail_candidate_insert
+       BEFORE INSERT ON workbench_artifact_candidates
+       WHEN NEW.kind = 'runbook'
+       BEGIN
+         SELECT RAISE(ABORT, 'injected candidate persistence failure');
+       END;`
+    );
+
+    expect(() => discoverArtifactCandidatePage(db, { limit: 100 })).toThrow(
+      "injected candidate persistence failure"
+    );
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_artifact_candidates").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_artifact_candidate_scans").get()).toEqual({ count: 0 });
+
+    db.exec("DROP TRIGGER fail_candidate_insert;");
+    const retry = discoverArtifactCandidatePage(db, { limit: 100 });
+    expect(retry.scannedSessionIds).toHaveLength(durableArtifactCorpus.length);
+    expect(retry.candidates).toHaveLength(7);
+    db.close();
+  });
+
+  test("supersedes stale pending candidates and atomically replaces changed evidence", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    discoverArtifactCandidatePage(db, { limit: 100 });
+    const original = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.kind === "runbook" && candidate.seedSessionId === "session:oauth-fixed"
+    )!;
+
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Verified in a clean environment.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    const page = discoverArtifactCandidatePage(db, { limit: 100 });
+    const all = listWorkbenchArtifactCandidates(db);
+    const replacement = all.find(
+      (candidate) =>
+        candidate.kind === "runbook" &&
+        candidate.seedSessionId === "session:oauth-fixed" &&
+        candidate.status === "pending"
+    )!;
+
+    expect(page.scannedSessionIds).toEqual(["session:oauth-fixed"]);
+    expect(replacement.candidateId).not.toBe(original.candidateId);
+    expect(getWorkbenchArtifactCandidate(db, original.candidateId)?.status).toBe("superseded");
+    db.close();
+  });
+
+  test("rolls back supersession and leaves changed evidence unacknowledged when replacement fails", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    discoverArtifactCandidatePage(db, { limit: 100 });
+    const original = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.kind === "runbook" && candidate.seedSessionId === "session:oauth-fixed"
+    )!;
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Changed revision.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    db.exec(
+      `CREATE TRIGGER fail_runbook_replacement
+       BEFORE INSERT ON workbench_artifact_candidates
+       WHEN NEW.kind = 'runbook'
+       BEGIN
+         SELECT RAISE(ABORT, 'injected replacement failure');
+       END;`
+    );
+
+    expect(() => discoverArtifactCandidatePage(db, { limit: 100 })).toThrow("injected replacement failure");
+    expect(getWorkbenchArtifactCandidate(db, original.candidateId)?.status).toBe("pending");
+    expect(
+      listWorkbenchArtifactCandidates(db).filter(
+        (candidate) => candidate.kind === "runbook" && candidate.seedSessionId === "session:oauth-fixed"
+      )
+    ).toHaveLength(1);
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workbench_artifact_candidate_scans WHERE session_id = 'session:oauth-fixed'"
+        )
+        .get()
+    ).toEqual({ count: 1 });
+
+    db.exec("DROP TRIGGER fail_runbook_replacement;");
+    const retry = discoverArtifactCandidatePage(db, { limit: 100 });
+    expect(retry.scannedSessionIds).toEqual(["session:oauth-fixed"]);
+    expect(getWorkbenchArtifactCandidate(db, original.candidateId)?.status).toBe("superseded");
+    db.close();
+  });
+
+  test("removes stale pending candidates when changed evidence no longer earns a seed", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    discoverArtifactCandidatePage(db, { limit: 100 });
+    const original = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.kind === "runbook" && candidate.seedSessionId === "session:oauth-fixed"
+    )!;
+
+    db.prepare("DELETE FROM checkpoints WHERE session_id = ?").run("session:oauth-fixed");
+    const page = discoverArtifactCandidatePage(db, { limit: 100 });
+
+    expect(page.scannedSessionIds).toEqual(["session:oauth-fixed"]);
+    expect(getWorkbenchArtifactCandidate(db, original.candidateId)?.status).toBe("superseded");
+    expect(
+      listWorkbenchArtifactCandidates(db).some(
+        (candidate) =>
+          candidate.kind === "runbook" &&
+          candidate.seedSessionId === "session:oauth-fixed" &&
+          candidate.status === "pending"
+      )
+    ).toBe(false);
+    db.close();
+  });
+
+  test("re-evaluates an entire strong-signature provenance set when one member changes", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    discoverArtifactCandidatePage(db, { limit: 100 });
+    const original = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.signatureKey === "error:ssh:codex-command-not-found"
+    )!;
+
+    db.prepare(
+      "UPDATE tool_results SET output_redacted = output_redacted || ' Verified twice.' WHERE session_id = ? AND status = 'succeeded'"
+    ).run(repeatedErrorPartTwo.id);
+    const page = discoverArtifactCandidatePage(db, { limit: 100 });
+    const replacement = listWorkbenchArtifactCandidates(db).find(
+      (candidate) =>
+        candidate.signatureKey === "error:ssh:codex-command-not-found" && candidate.status === "pending"
+    )!;
+
+    expect(page.scannedSessionIds).toEqual([repeatedErrorPartTwo.id]);
+    expect(getWorkbenchArtifactCandidate(db, original.candidateId)?.status).toBe("superseded");
+    expect(replacement.candidateId).not.toBe(original.candidateId);
+    expect(replacement.provenanceSessionIds).toEqual([repeatedErrorPartOne.id, repeatedErrorPartTwo.id]);
+    db.close();
+  });
+
+  test("freezes claimed evidence and defers the scan until the claim is released", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    discoverArtifactCandidatePage(db, { limit: 100 });
+    const claimed = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.kind === "runbook" && candidate.seedSessionId === "session:oauth-fixed"
+    )!;
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: claimed.candidateId, status: "claimed" });
+    db.prepare("DELETE FROM checkpoints WHERE session_id = ?").run("session:oauth-fixed");
+
+    const deferred = discoverArtifactCandidatePage(db, { limit: 100 });
+    expect(deferred.scannedSessionIds).toEqual([]);
+    expect(getWorkbenchArtifactCandidate(db, claimed.candidateId)).toMatchObject({
+      signalEvidenceRefs: claimed.signalEvidenceRefs,
+      status: "claimed"
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workbench_artifact_candidate_scans WHERE session_id = 'session:oauth-fixed'"
+        )
+        .get()
+    ).toEqual({ count: 1 });
+
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: claimed.candidateId, status: "pending" });
+    const reconciled = discoverArtifactCandidatePage(db, { limit: 100 });
+    expect(reconciled.scannedSessionIds).toEqual(["session:oauth-fixed"]);
+    expect(getWorkbenchArtifactCandidate(db, claimed.candidateId)?.status).toBe("superseded");
+    db.close();
+  });
+
   test("validates directed proposals against exact kind-specific positive evidence", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
@@ -120,6 +292,74 @@ describe("artifact candidate discovery", () => {
         signalSummary: "A reason cannot replace positive signals."
       })
     ).toThrow("candidate_proposal_kind_signals_missing");
+    db.close();
+  });
+
+  test("requires real passed-verification semantics and retains only the earning chain", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    db.prepare("UPDATE tool_results SET output_redacted = 'Command succeeded.' WHERE session_id = ?").run(
+      "session:migration-fixed"
+    );
+
+    const candidates = discoverArtifactCandidates(db, ["session:migration-fixed", "session:oauth-fixed"]);
+    const oauth = candidates.find((candidate) => candidate.seedSessionId === "session:oauth-fixed")!;
+
+    expect(candidates.some((candidate) => candidate.seedSessionId === "session:migration-fixed")).toBe(false);
+    expect(oauth.signalEvidenceRefs).toEqual([
+      "checkpoint:oauth:verified",
+      "file:oauth:change",
+      "tool_result:oauth:failure"
+    ]);
+    db.close();
+  });
+
+  test("rejects incoherent runbook chronology, nonexistent sessions, and unrelated provenance padding", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    db.prepare("UPDATE checkpoints SET observed_at = '2026-07-01T11:59:00.000Z' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+
+    expect(() =>
+      proposeArtifactCandidate(db, {
+        kind: "runbook",
+        provenanceSessionIds: ["session:migration-fixed", "session:oauth-fixed"],
+        seedSessionId: "session:migration-fixed",
+        signalEvidenceRefs: [
+          "tool_result:migration:failure",
+          "file:oauth:change",
+          "checkpoint:oauth:verified"
+        ],
+        signalSummary: "These refs have all categories but no coherent chronological chain."
+      })
+    ).toThrow("candidate_proposal_kind_signals_missing");
+    expect(() =>
+      proposeArtifactCandidate(db, {
+        kind: "adr",
+        provenanceSessionIds: ["session:does-not-exist", "session:decision-local-first"],
+        seedSessionId: "session:decision-local-first",
+        signalEvidenceRefs: [
+          "message:decision-local-first:decision",
+          "message:decision-local-first:alternative"
+        ],
+        signalSummary: "A nonexistent session cannot pad otherwise valid provenance."
+      })
+    ).toThrow("candidate_proposal_session_not_found:session:does-not-exist");
+    expect(() =>
+      proposeArtifactCandidate(db, {
+        kind: "runbook",
+        provenanceSessionIds: ["session:dossier-question", "session:migration-fixed"],
+        seedSessionId: "session:migration-fixed",
+        signalEvidenceRefs: [
+          "message:dossier-question:1",
+          "tool_result:migration:failure",
+          "file:migration:change",
+          "tool_result:migration:verified"
+        ],
+        signalSummary: "Unrelated dossier evidence cannot pad valid runbook provenance."
+      })
+    ).toThrow("candidate_proposal_unrelated_provenance:session:dossier-question");
     db.close();
   });
 
@@ -211,6 +451,23 @@ describe("artifact candidate discovery", () => {
       { status: "dismissed", count: 1 },
       { status: "pending", count: 1 }
     ]);
+    db.close();
+  });
+
+  test("preserves a published candidate as terminal when its source evidence changes", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const published = discoverArtifactCandidates(db, ["session:oauth-fixed"])[0]!;
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: published.candidateId, status: "published" });
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Later wording.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+
+    const result = discoverArtifactCandidates(db, ["session:oauth-fixed"]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ candidateId: published.candidateId, status: "published" });
+    expect(listWorkbenchArtifactCandidates(db)).toHaveLength(1);
     db.close();
   });
 

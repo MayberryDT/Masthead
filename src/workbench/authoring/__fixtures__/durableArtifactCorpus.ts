@@ -262,7 +262,7 @@ export const repeatedErrorPartTwo: DurableArtifactCorpusSession = {
       id: "tool_result:repeated-error:2:verified",
       kind: "tool_result",
       observedAt: at(2),
-      text: "Remote codex --version command succeeded.",
+      text: "Remote codex verification command succeeded.",
       label: "succeeded",
       status: "succeeded",
       exitCode: 0
