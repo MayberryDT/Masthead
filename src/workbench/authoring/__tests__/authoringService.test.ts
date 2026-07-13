@@ -4,13 +4,16 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type {
   WorkbenchAuthoringBundle,
-  WorkbenchAuthoringBundleV2
+  WorkbenchAuthoringBundleV2,
+  WorkbenchAuthoringReceipt,
+  WorkbenchAuthoringReceiptV2
 } from "../../../shared/workbenchAuthoring.ts";
 import { seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
 import { getSessionDossier } from "../../../daemon/db/sessionDossierRepository.ts";
 import {
   applySessionArtifact,
+  getSessionArtifact,
   listSessionArtifacts,
   publishSessionArtifact,
   searchPublishedArtifactCapsules
@@ -614,6 +617,7 @@ describe("Workbench authoring service", () => {
     const second = finishAuthoringRun(db, { runId });
 
     expect(second).toEqual(first);
+    expect(first.contractVersion).toBe("workbench-authoring-v1");
     expect(first.publishedArtifactIds).toHaveLength(2);
     expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
       adrStatus: "not_applicable",
@@ -670,20 +674,21 @@ describe("Workbench authoring service", () => {
   test("finishes one accepted candidate with one optional artifact and canonical dossiers", async () => {
     const { candidate, db, runId } = await submittedCandidateAuthoringDb();
 
-    const first = finishAuthoringRun(db, { runId });
-    const second = finishAuthoringRun(db, { runId });
+    const first = requireV2Receipt(finishAuthoringRun(db, { runId }));
+    const second = requireV2Receipt(finishAuthoringRun(db, { runId }));
 
     expect(second).toEqual(first);
     expect(first).toMatchObject({
       candidateId: candidate.candidateId,
+      contractVersion: "workbench-authoring-v2",
       contributions: [],
       dossierArtifactIds: expect.any(Array),
-      notApplicable: [],
       optionalArtifact: { kind: candidate.kind },
       provenanceSessionIds: candidate.provenanceSessionIds,
       resolvedSessionIds: candidate.provenanceSessionIds,
       runId
     });
+    expect(first).not.toHaveProperty("notApplicable");
     expect(first.dossierArtifactIds).toHaveLength(candidate.provenanceSessionIds.length);
     expect(first.publishedArtifactIds).toEqual([
       ...first.dossierArtifactIds!,
@@ -791,18 +796,15 @@ describe("Workbench authoring service", () => {
       runId: opened.run.runId
     });
     expect(firstSubmitted.accepted, JSON.stringify(firstSubmitted.findings, null, 2)).toBe(true);
-    const first = finishAuthoringRun(db, { runId: opened.run.runId });
+    const firstOutput = (firstSubmitted.run.bundle as WorkbenchAuthoringBundleV2).artifact.output;
+    const first = requireV2Receipt(finishAuthoringRun(db, { runId: opened.run.runId }));
     const firstOptionalId = first.optionalArtifact!.artifactId;
 
-    db.prepare(
-      `INSERT INTO file_effects (
-        file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json
-      ) VALUES (?, ?, ?, 'modified', ?, '{}')`
-    ).run(
-      "repeated-error:revision-change",
+    insertMessage(
+      db,
       candidate.seedSessionId,
-      "remote shell bootstrap retry guard",
-      "2026-07-01T12:04:00.000Z"
+      "candidate-revision",
+      "Additional canonical context was captured after the first artifact publication."
     );
     const revisedCandidate = discoverArtifactCandidates(db, candidate.provenanceSessionIds).find(
       (entry) => entry.kind === candidate.kind && entry.status === "pending"
@@ -814,21 +816,23 @@ describe("Workbench authoring service", () => {
       candidateId: revisedCandidate.candidateId,
       databaseId: testDatabaseId(db)
     });
-    const revisedBundle = validCandidateBundle(revised.run, revisedCandidate, {
-      changeRef: "file:repeated-error:revision-change",
-      title: "Repair remote Codex launch with the retry guard"
-    });
+    const revisedBundle = validCandidateBundle(revised.run, revisedCandidate);
+    expect(revisedBundle.artifact.output).toEqual(firstOutput);
     const revisedSubmitted = submitAuthoringBundle(db, { bundle: revisedBundle, runId: revised.run.runId });
     expect(revisedSubmitted.accepted, JSON.stringify(revisedSubmitted.findings, null, 2)).toBe(true);
 
-    const second = finishAuthoringRun(db, { runId: revised.run.runId });
+    const second = requireV2Receipt(finishAuthoringRun(db, { runId: revised.run.runId }));
 
     expect(listSessionArtifacts(db).find(({ artifactId }) => artifactId === firstOptionalId)?.status).toBe(
       "superseded"
     );
     expect(second.optionalArtifact!.artifactId).not.toBe(firstOptionalId);
+    expect(getSessionArtifact(db, second.optionalArtifact.artifactId)?.validation).toMatchObject({
+      candidateId: revisedCandidate.candidateId,
+      evidenceRevision: revisedCandidate.evidenceRevision
+    });
     expect(
-      searchPublishedArtifactCapsules(db, { q: "retry guard", kind: "runbook" }).artifacts.map(
+      searchPublishedArtifactCapsules(db, { q: "command not found", kind: "runbook" }).artifacts.map(
         ({ artifactId }) => artifactId
       )
     ).toEqual([second.optionalArtifact!.artifactId]);
@@ -1216,6 +1220,7 @@ describe("Workbench authoring service", () => {
     completeWorkbenchAuthoringRun(db, {
       receipt: {
         completedAt: "2026-07-10T12:30:00.000Z",
+        contractVersion: "workbench-authoring-v1",
         contributions: [],
         notApplicable: [],
         publishedArtifactIds: [],
@@ -1247,6 +1252,7 @@ describe("Workbench authoring service", () => {
     completeWorkbenchAuthoringRun(db, {
       receipt: {
         completedAt: "2026-07-10T12:30:00.000Z",
+        contractVersion: "workbench-authoring-v1",
         contributions: [],
         notApplicable: [],
         publishedArtifactIds: [],
@@ -1286,6 +1292,7 @@ describe("Workbench authoring service", () => {
     completeWorkbenchAuthoringRun(db, {
       receipt: {
         completedAt: "2026-07-10T12:30:00.000Z",
+        contractVersion: "workbench-authoring-v1",
         contributions: [],
         notApplicable: [],
         publishedArtifactIds: [],
@@ -1669,6 +1676,13 @@ function candidateFinishRows(db: MastheadDatabase): Record<string, unknown[]> {
     "workbench_authoring_runs"
   ];
   return Object.fromEntries(tables.map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
+}
+
+function requireV2Receipt(receipt: WorkbenchAuthoringReceipt): WorkbenchAuthoringReceiptV2 {
+  if (receipt.contractVersion !== "workbench-authoring-v2") {
+    throw new Error(`expected_v2_receipt:${receipt.contractVersion}`);
+  }
+  return receipt;
 }
 
 function runClaimRows(db: MastheadDatabase, runId: string): Array<{ claimId: string; expiresAt: string; releasedAt: string | null }> {

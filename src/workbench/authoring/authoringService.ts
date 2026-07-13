@@ -7,6 +7,8 @@ import type {
   WorkbenchAuthoringEvidencePage,
   WorkbenchAuthoringFinding,
   WorkbenchAuthoringReceipt,
+  WorkbenchAuthoringReceiptV1,
+  WorkbenchAuthoringReceiptV2,
   WorkbenchAuthoringRunDto
 } from "../../shared/workbenchAuthoring.ts";
 import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
@@ -611,7 +613,7 @@ function finishCandidateInsideTransaction(
   candidate: StoredWorkbenchArtifactCandidate,
   verifyPublished: ((artifactId: string) => boolean) | undefined,
   onMutationBoundary: ((boundary: CandidateFinishMutationBoundary) => void) | undefined
-): WorkbenchAuthoringReceipt {
+): WorkbenchAuthoringReceiptV2 {
   const actor = { id: run.actorId, kind: "agent" } as const;
   const dossierArtifacts = candidate.provenanceSessionIds.map((sessionId) =>
     publishCanonicalDossierInTransaction(db, sessionId, run.actorId)
@@ -689,12 +691,12 @@ function finishCandidateInsideTransaction(
     .filter((sessionId) => sessionId !== candidate.seedSessionId)
     .map((sessionId) => ({ artifactId: publishedOptionalArtifact.artifactId, kind: candidate.kind, sessionId }))
     .sort(compareReceiptResolution);
-  const receipt: WorkbenchAuthoringReceipt = {
+  const receipt: WorkbenchAuthoringReceiptV2 = {
     candidateId: candidate.candidateId,
     completedAt: new Date().toISOString(),
+    contractVersion: "workbench-authoring-v2",
     contributions,
     dossierArtifactIds: dossierArtifacts.map(({ artifactId }) => artifactId),
-    notApplicable: [],
     optionalArtifact: { artifactId: publishedOptionalArtifact.artifactId, kind: candidate.kind },
     provenanceSessionIds: [...candidate.provenanceSessionIds],
     publishedArtifactIds: [
@@ -727,10 +729,10 @@ function finishInsideTransaction(
   db: MastheadDatabase,
   run: WorkbenchAuthoringRunDto & { bundle: WorkbenchAuthoringBundle },
   verifyPublished: ((artifactId: string) => boolean) | undefined
-): WorkbenchAuthoringReceipt {
+): WorkbenchAuthoringReceiptV1 {
   const actor = { id: run.actorId, kind: "agent" } as const;
   const expectedArtifacts: Array<{ artifactId: string; provenanceSessionIds: string[] }> = [];
-  const contributions: WorkbenchAuthoringReceipt["contributions"] = [];
+  const contributions: WorkbenchAuthoringReceiptV1["contributions"] = [];
   const appliedArtifacts: Array<{
     artifact: SessionArtifactRecord;
     kind: SessionArtifactRecord["artifactKind"];
@@ -861,8 +863,9 @@ function finishInsideTransaction(
     }
   }
 
-  const receipt: WorkbenchAuthoringReceipt = {
+  const receipt: WorkbenchAuthoringReceiptV1 = {
     completedAt: new Date().toISOString(),
+    contractVersion: "workbench-authoring-v1",
     contributions: contributions.sort(compareReceiptResolution),
     notApplicable: run.bundle.notApplicable
       .map(({ kind, sessionId }) => ({ kind, sessionId }))
@@ -1184,7 +1187,11 @@ function applyCandidateAuthoringArtifactInTransaction(
     artifactKind: input.candidate.kind,
     confidence: confidenceFromOutput(input.output),
     content: input.output,
-    contentFingerprint: fingerprintWorkbenchOutput(input.output),
+    contentFingerprint: fingerprintWorkbenchOutput({
+      candidateId: input.candidate.candidateId,
+      evidenceRevision: input.candidate.evidenceRevision,
+      output: input.output
+    }),
     createdBy: `workbench_authoring_v2:${input.actorId}`,
     evidenceRefs: stringArrayFromOutput(input.output.evidenceRefs),
     joinRationale: stringFromOutput(input.output.joinRationale),

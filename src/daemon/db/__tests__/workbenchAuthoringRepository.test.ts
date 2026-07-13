@@ -121,6 +121,13 @@ describe("workbench authoring repository", () => {
       receipt,
       status: "completed"
     });
+
+    const { contractVersion: _contractVersion, ...legacyReceipt } = receipt;
+    db.prepare("UPDATE workbench_authoring_runs SET receipt_json = ? WHERE run_id = ?").run(
+      JSON.stringify(legacyReceipt),
+      "authoring:1"
+    );
+    expect(getWorkbenchAuthoringRun(db, "authoring:1")?.receipt).toEqual(receipt);
   });
 
   test("resets changed evidence without reopening a completed run", async () => {
@@ -349,6 +356,7 @@ function validV2Bundle(runId: string, candidateId: string): WorkbenchAuthoringBu
 function receiptFor(runId: string): WorkbenchAuthoringReceipt {
   return {
     completedAt: "2026-07-10T12:10:00.000Z",
+    contractVersion: "workbench-authoring-v1",
     contributions: [],
     notApplicable: [{ kind: "runbook", sessionId: "session:a" }],
     publishedArtifactIds: ["artifact:dossier:a"],

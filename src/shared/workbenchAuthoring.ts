@@ -214,18 +214,28 @@ export type WorkbenchAuthoringFinding = {
   artifactKind?: "session_enrichment" | WorkbenchAuthoredArtifactKind;
 };
 
-export type WorkbenchAuthoringReceipt = {
+type WorkbenchAuthoringReceiptBase = {
   runId: string;
   completedAt: string;
   publishedArtifactIds: string[];
   resolvedSessionIds: string[];
-  notApplicable: Array<{ sessionId: string; kind: WorkbenchAutomaticArtifactKind }>;
   contributions: Array<{ sessionId: string; kind: WorkbenchAutomaticArtifactKind; artifactId: string }>;
-  candidateId?: string;
-  dossierArtifactIds?: string[];
-  optionalArtifact?: { artifactId: string; kind: WorkbenchAutomaticArtifactKind };
-  provenanceSessionIds?: string[];
 };
+
+export type WorkbenchAuthoringReceiptV1 = WorkbenchAuthoringReceiptBase & {
+  contractVersion: "workbench-authoring-v1";
+  notApplicable: Array<{ sessionId: string; kind: WorkbenchAutomaticArtifactKind }>;
+};
+
+export type WorkbenchAuthoringReceiptV2 = WorkbenchAuthoringReceiptBase & {
+  contractVersion: "workbench-authoring-v2";
+  candidateId: string;
+  dossierArtifactIds: string[];
+  optionalArtifact: { artifactId: string; kind: WorkbenchAutomaticArtifactKind };
+  provenanceSessionIds: string[];
+};
+
+export type WorkbenchAuthoringReceipt = WorkbenchAuthoringReceiptV1 | WorkbenchAuthoringReceiptV2;
 
 export type WorkbenchAuthoringRunDto = {
   runId: string;

@@ -167,7 +167,7 @@ export function getWorkbenchAuthoringRun(db: MastheadDatabase, runId: string): W
   };
   if (row.candidateId) dto.candidateId = row.candidateId;
   if (row.bundleJson) dto.bundle = parseJson<WorkbenchStoredAuthoringBundle>(row.bundleJson);
-  if (row.receiptJson) dto.receipt = parseJson<WorkbenchAuthoringReceipt>(row.receiptJson);
+  if (row.receiptJson) dto.receipt = parseWorkbenchAuthoringReceipt(row.receiptJson, row.contractVersion);
   if (row.completedAt) dto.completedAt = row.completedAt;
   return dto;
 }
@@ -267,6 +267,9 @@ export function completeWorkbenchAuthoringRun(
   const existing = getWorkbenchAuthoringRun(db, input.runId);
   if (!existing) throw new Error(`authoring_run_not_found:${input.runId}`);
   if (existing.receipt) return existing.receipt;
+  if (input.receipt.contractVersion !== existing.contractVersion) {
+    throw new Error(`authoring_receipt_contract_mismatch:${existing.contractVersion}`);
+  }
 
   db.prepare(
     `UPDATE workbench_authoring_runs
@@ -296,4 +299,46 @@ function sessionSetsEqual(left: string[], right: string[]): boolean {
 
 function parseJson<T>(json: string): T {
   return JSON.parse(json) as T;
+}
+
+function parseWorkbenchAuthoringReceipt(
+  json: string,
+  contractVersion: WorkbenchAuthoringContractVersion
+): WorkbenchAuthoringReceipt {
+  const receipt = parseJson<Record<string, unknown>>(json);
+  if (receipt.contractVersion === undefined && contractVersion === "workbench-authoring-v1") {
+    receipt.contractVersion = "workbench-authoring-v1";
+  }
+  if (receipt.contractVersion !== contractVersion) {
+    throw new Error(`authoring_receipt_contract_mismatch:${contractVersion}`);
+  }
+  if (!isValidWorkbenchAuthoringReceipt(receipt, contractVersion)) {
+    throw new Error(`authoring_receipt_invalid:${contractVersion}`);
+  }
+  return receipt as WorkbenchAuthoringReceipt;
+}
+
+function isValidWorkbenchAuthoringReceipt(
+  receipt: Record<string, unknown>,
+  contractVersion: WorkbenchAuthoringContractVersion
+): boolean {
+  if (
+    typeof receipt.runId !== "string" ||
+    typeof receipt.completedAt !== "string" ||
+    !Array.isArray(receipt.publishedArtifactIds) ||
+    !Array.isArray(receipt.resolvedSessionIds) ||
+    !Array.isArray(receipt.contributions)
+  ) return false;
+  if (contractVersion === "workbench-authoring-v1") return Array.isArray(receipt.notApplicable);
+  const optionalArtifact = receipt.optionalArtifact;
+  return (
+    typeof receipt.candidateId === "string" &&
+    Array.isArray(receipt.dossierArtifactIds) &&
+    Array.isArray(receipt.provenanceSessionIds) &&
+    typeof optionalArtifact === "object" &&
+    optionalArtifact !== null &&
+    !Array.isArray(optionalArtifact) &&
+    typeof (optionalArtifact as Record<string, unknown>).artifactId === "string" &&
+    typeof (optionalArtifact as Record<string, unknown>).kind === "string"
+  );
 }
