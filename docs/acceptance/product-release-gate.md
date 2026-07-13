@@ -18,7 +18,7 @@
 - [x] Scan this computer checks known local locations only. Evidence: `sourceScanService.test.ts` verifies arbitrary home files are ignored on 2026-06-27.
 - [x] Connect selected queues metadata import jobs. Evidence: `sourceConnectService.test.ts` verifies per-source metadata jobs on 2026-06-27.
 - [x] Transcript import requires exact source-scoped approval and Workbench intent. Evidence: Workbench API/CLI tests cover unrelated approved source rejection; import worker tests cover exact-source policy enforcement.
-- [x] Imported sessions appear in Logbook search. Evidence: focused import tests cover supported adapters.
+- [x] Imported sessions enter canonical storage and Workbench; only their published artifacts appear in Logbook search. Evidence: focused import tests plus artifact-only Logbook contract tests.
 - [x] Unrecognized schemas produce diagnostics and do not create fake transcripts. Evidence: focused import tests cover unrecognized source diagnostics with zero sessions.
 - [x] Harness catalog exposes only active focused harnesses. Evidence: `RUNTIME_KINDS` and `HARNESS_CATALOG` are the seven-runtime support contract.
 - [ ] Advanced diagnostics reviewed in rendered Sources UI.
@@ -28,13 +28,14 @@
 ## Logbook
 - [x] Logbook lists published artifacts only; no session row appears as an entry. Evidence: artifact-first repository/API/UI tests and the authoring dogfoods load only receipt artifact ids.
 - [x] Search covers complete first-class artifact bodies. Evidence: migration 021/repository regressions plus both authoring dogfoods find runbooks by body-only sentinel phrases.
-- [x] Inspector renders every dossier, runbook, ADR, and incident-timeline first-class body field while retaining V1 body compatibility. Evidence: focused artifact body and `LogbookInspector` tests.
+- [x] Inspector renders the exact `canonical-session-dossier-v1` body through the original dossier presentation and renders every optional-artifact first-class body field. Malformed canonical and unknown future schemas are explicit. Evidence: focused artifact body and `LogbookInspector` tests.
 - [x] Logbook table does not own Workbench selection or bulk enrichment. Evidence: App no longer wires Logbook session selection, bulk enrich, or selected detail modal; focused UI tests passed on 2026-07-08.
 - [x] Restart preserves one current artifact per lineage. Evidence: `dogfood-workbench-ops.js` observes two lineages and exactly one current published artifact in each before and after daemon restart.
 
 ## Session dossier
 - [x] Board detail loads canonical dossier when available. Evidence: Board cards carry canonical IDs and `npm run doctor:json` loaded a real canonical dossier on 2026-06-26.
-- [x] Logbook detail uses the same dossier component. Evidence: `SessionLibraryDetail` and `SessionDetailModal` both render `SessionDossier`; focused UI tests passed on 2026-06-26.
+- [x] Logbook canonical dossier artifacts use the original dossier body component. Evidence: `LogbookInspector` routes the exact canonical schema through `SessionDossierContent`; focused UI tests cover all original sections.
+- [x] Dossier publication is daemon-owned and immutable. Evidence: `POST /workbench/dossiers/publish` accepts only actor/session IDs, snapshots `SessionDossierDto`, records one provenance session, and rejects authored body fields.
 - [x] Dossier shows files, tools, verification, excerpts, timeline, provenance, token usage, and MCP reuse status. Evidence: `SessionDossier.test.tsx` and `sessionDossierRepository.test.ts` passed on 2026-06-26.
 - [x] Dossier has live-only fallback. Evidence: `SessionDossier.test.tsx` covers live-only fallback on 2026-06-26.
 - [x] Unsupported source-opening actions are hidden. Evidence: `SessionDossier.test.tsx` verifies source-opening actions are omitted on 2026-06-26.
@@ -47,7 +48,7 @@
 
 ## Session transcript detail
 - [x] Board detail shows a transcript section. Evidence: `SessionDetailModal` passes transcript props into shared `SessionDossier`; focused UI/type checks passed on 2026-06-27.
-- [x] Logbook detail shows the same transcript section. Evidence: `SessionLibraryDetail` passes transcript props into shared `SessionDossier`; focused UI/type checks passed on 2026-06-27.
+- [x] A published dossier is self-contained and does not fetch a live transcript to reconstruct its body. Evidence: Logbook reads the persisted canonical artifact body; raw transcript tools remain separate evidence APIs.
 - [x] Hook-only sessions show a coverage warning. Evidence: `SessionDossier.test.tsx` covers hook-only coverage warning and sparse transcript copy on 2026-06-27.
 - [x] Repeated low-value hook events are collapsed. Evidence: `SessionDossier.test.tsx` covers grouped low-value transcript rows on 2026-06-27.
 - [x] Detail view does not show raw JSON in primary content. Evidence: transcript DTO exposes text, labels, status, and source refs separately; UI renders text rows, not raw JSON.
@@ -64,17 +65,19 @@
 ## Workbench
 - [x] Development and packaged `mastheadctl` launchers are installed beside the app and report the active daemon database identity. Evidence: launcher/daemon/packaged CLI tests, Doctor, and packaged Electron smoke.
 - [x] Normal authoring CLI operations are thin daemon HTTP calls; no authoring command opens SQLite. Evidence: `authoringClient`/CLI tests and long-session dogfood with explicit `MASTHEAD_DAEMON_URL`.
-- [x] Capabilities, open, status, complete evidence, submit, and finish have focused service/API/CLI tests. Open rejects a different database before claims or output writes.
+- [x] V2 capabilities, candidates, open, status, candidate evidence, submit, and finish have focused service/API/CLI tests. Open rejects a different database, arbitrary session arrays, stale candidates, and claim conflicts before output writes.
 - [x] Workbench app surface is a dense operations table plus Activity rail, not command-first. Evidence: Workbench UI/controller/handoff tests cover pipeline sessions, selected-session handoff, Activity, Not Added summary, loading/error/empty states, and absence of user-facing CLI command copy.
 - [x] Workbench human ops toolbar covers check transcript, import, quality precheck/pass/fail, claim/release, publish, and agent handoff without command-first CLI recipes. Evidence: `docs/acceptance/workbench-ops-complete-evidence.md` (Task 10 focused suites + dogfood path; panel/controller tests).
 - [x] Activity rail is a high-contrast console with readable event rows (ok/bad tones, gutter, type, summary). Evidence: `docs/acceptance/workbench-ops-complete-evidence.md` and style commit `02a3d49`; `WorkbenchPanel` Activity tests.
 - [x] Workbench can list publish-path sessions through read-only daemon APIs. Evidence: `/workbench/sessions`, `/workbench/activity`, and Not Added read API daemon/client/bridge tests cover pipeline queue semantics.
-- [x] User handoff stays disposable and plain-language while the CLI command comes from daemon capabilities. Evidence: handoff tests cover immediate selected-session identity, unattended completion, no shell recipe, and no privacy permission prompt.
-- [x] All canonical redacted evidence is authorable. Evidence: evidence catalog tests cover both pagination orders and long text; dogfood reads 500/500 unique items and cites decisive evidence after item 480.
-- [x] Submit stores findings and run state without output rows. Evidence: service/API tests and both dogfoods observe zero artifact/enrichment rows before finish.
-- [x] Finish is atomic and idempotent. Evidence: rollback fault-injection tests plus dogfood immediate/restart retries return the same receipt without duplicates.
-- [x] Every automatic kind is published, N/A, or contributed; applied is not resolved. Evidence: bundle validator/service tests and ops dogfood (`runbookStatus: applied`, `resolutionStatus: compile_ready`).
-- [x] Every receipt artifact is published and reusable through Logbook and artifact-primary MCP. Evidence: long-session receipt publishes dossier+runbook, ADR/timeline N/A, body-only search true, MCP artifact read true.
+- [x] User handoff stays disposable, plain-language, and candidate-sized while the CLI command comes from daemon capabilities. Evidence: handoff tests cover one selected candidate, visible kind/status/summary/provenance count, no arbitrary session manifest, and no dossier prose.
+- [x] Candidate discovery is positive-evidence only. Evidence: the labeled corpus produces exactly three runbooks, two ADRs, and two incident timelines; dossier-only sessions produce no optional candidate; multi-session groups require a strong evidence-backed signature.
+- [x] One V2 run owns one candidate and at most 12 daemon-derived provenance sessions. Evidence: API/service/CLI tests reject arbitrary session lists, mismatched candidate output, stale evidence, and oversized provenance.
+- [x] Submit stores findings and run state without output rows. Evidence: service/API tests observe zero artifacts before finish and reject unsupported claims, protocol leakage, weak joins, and substantive duplicates.
+- [x] Every substantive optional-artifact claim has typed support and a normalized verbatim excerpt of at least 20 characters in canonical evidence. Evidence: semantic quality and persisted-acceptance tests cover the exact field/support-kind matrix.
+- [x] Finish is atomic and idempotent across canonical dossiers, one optional artifact, current-only search, pipeline state, candidate state, claims, Activity, and receipt. Evidence: fault injection rolls back at every mutation boundary and retry returns one V2 receipt.
+- [x] Absence of optional evidence creates no artifact and no per-session N/A work. Evidence: candidate and product-contract tests reject blanket optional-kind resolution semantics.
+- [x] Every receipt artifact is published and reusable through Logbook and artifact-primary MCP. Evidence: the durable fixture completes five `search_artifacts` → `get_artifact` reuse tasks without raw session tools.
 - [x] Local artifacts are visible in session detail. Evidence: dossier UI and repository tests cover current `session_artifacts`.
 - [x] Native remote enrichment is not required for launch. Evidence: Dossier no longer renders a native enrich button; Workbench hands the user’s existing agent to the daemon-owned local authoring module.
 - [x] Logbook correction tools are future scope and MCP remains read-only. Evidence: no authoring/improve/rewrite/remove MCP tools; Doctor and MCP catalog tests enforce read-only permissions.
@@ -92,14 +95,42 @@
 - [x] SQLite is the canonical product store. Evidence: `npm run verify` and SQLite maintenance tests passed on 2026-06-26.
 - [x] Legacy NDJSON is migration/compatibility only and receives no new product writes. Evidence: canonical ownership tests passed through `npm run verify` on 2026-06-26.
 
+## Durable artifact recovery readiness (Gate C)
+
+- [x] Fixture machine gate uses production candidate, validation, publication, Logbook, and MCP paths without opening production data. Run `npm run dogfood:durable-artifacts`.
+- [x] Mandatory fixture thresholds are exact: `dossierFidelity`, `claimSupportCoverage`, `persistedArtifactEquality`, labeled candidate recall/precision, Logbook recall@5, MCP recall@5, and artifact-only reuse pass rate all equal `1.0`; claim-support integrity failures, protocol leaks, duplicate substantive fingerprints, unexpected kinds, missing kinds, and raw session tools used by reuse tasks all equal `0`; candidate provenance never exceeds 12; the 100-session discovery page completes within 2,000 ms.
+- [x] The fixture kind mix is exactly three runbooks, two ADRs, and two incident timelines; the publication slice includes one optional artifact of each kind plus daemon-built canonical dossiers.
+- [x] Recovery audit is read-only and fail-closed on the exact known population: 1,283 V1 dossiers, zero optional artifacts, 66 completed V1 runs, exact membership/template/windows/actor/schema, and one SHA-256 audit hash.
+- [x] Recovery prepare requires an explicit database path and exclusive daemon-equivalent writer ownership, makes a SQLite-consistent backup including WAL state, verifies identity and integrity, refuses audit drift, and retains exactly one backup.
+- [x] Recovery invalidation requires the exact audit hash and `--confirm`, is one transaction, removes only matched artifact/search/provenance rows, resets affected sessions and optional statuses, releases matched claims, records Activity, and preserves V1 runs/receipts.
+- [ ] Workbench candidate and canonical dossier controls have been inspected in the in-app Browser at desktop, tablet, and narrow widths on the release commit. This cannot be replaced by standalone Chrome or Playwright.
+- [ ] Gate C is signed only after the focused contract test, `verify:no-citations`, `dogfood:durable-artifacts`, full `npm run verify`, and the responsive in-app Browser inspection all pass on the same release candidate.
+
+Fixture machine PASS does not authorize production. A separately authorized
+25-session canary must sample five sessions from each evidence band (sparse,
+ordinary, tool-heavy, failure/fix, decision-heavy), publish and visually compare
+all canonical dossiers, author every positive candidate one run at a time, and
+receive human scores for findability, grounding, reusability, specificity, and
+readability. Passing requires 100% review, median overall score at least 4.0, and
+no artifact below 3.0.
+
+Stop and restore the single backup if any dossier section differs materially from
+the original; unsupported authoring-protocol language appears; a claim excerpt
+does not exactly match canonical evidence; unrelated provenance shares a
+substantive fingerprint; any expected kind has zero yield; any V2 run exceeds 12
+provenance sessions; candidate recall is below 90%; candidate precision is below
+80%; any artifact scores below 3/5; or median usefulness is below 4/5. Only after
+human approval may rollout continue in waves of 25 candidates, with a 20%
+stratified review sample and automatic pause on any stop condition.
+
 ## Verification
-- [x] npm run verify passes. Evidence: 220 test files / 1195 tests plus build, endpoint matrix, and live/compatibility/import/MCP smokes passed on 2026-07-06.
+- [x] `npm run verify` passes. Evidence: on 2026-07-13, 269 test files / 1,897 tests, production build, schema-23 endpoint matrix, and live/compatibility/import/MCP smokes passed. The restricted sandbox initially blocked loopback binds with `listen EPERM`; the identical socket-enabled gate passed.
 - [x] cargo tests pass. Evidence: 23 Rust tests passed on 2026-06-26.
 - [x] npm run doctor passes. Evidence: isolated current-branch daemon doctor passed on 2026-06-26.
-- [x] Daemon-owned authoring focused dogfoods pass. Evidence: on 2026-07-10 the 500-item CLI dogfood reported matched database identity, 500 unique evidence items, late evidence observed, zero pre-finish artifacts, two published artifacts, one resolved session, idempotent retry, body-only Logbook search, and MCP read; the operations dogfood preserved one receipt and one current artifact per lineage across restart.
-- [x] Current authoring Doctor passes. Evidence: isolated schema-21 daemon on 2026-07-10 reported `artifact authoring: Installed authoring CLI is ready`, matching CLI/daemon database identity and all five operations; MCP reported 9 read-only tools.
-- [x] Current contract gates pass. Evidence: `verify:no-citations`, `check:product-contract`, `check:surface-contract`, `check:endpoint-matrix`, and `typecheck` passed on 2026-07-10. Endpoint smoke probed schema 21 and exercised 36 allowed bridge reads, 3 allowed read-only posts, and 21 blocked mutations.
-- [x] Current hermetic Vitest suite passes. Evidence: `env -u CODEX_HOME npm test -- --run` passed 261 files / 1707 tests on 2026-07-10.
-- [x] Current production build passes. Evidence: `npm run build` completed Vite and daemon builds on 2026-07-10.
+- [x] Durable artifact fixture dogfood passes the machine gate. Evidence: on 2026-07-13, `npm run dogfood:durable-artifacts` reported the exact 3/2/2 candidate mix, all required fidelity/support/retrieval/reuse rates at `1.0`, zero integrity failures/leaks/duplicates/kind errors/raw-session reuse, and a 323.37 ms 100-session discovery page; `productionAccessed` was false. Human review remains deliberately incomplete in fixture output.
+- [x] Current authoring capabilities identify `workbench-authoring-v2`, candidate-scoped canonical evidence, and the six operations `candidates`, `open`, `status`, `evidence`, `submit`, `finish`; the transport protocol identifier remains `masthead.workbench.authoring/v1`.
+- [x] Current contract gates pass. Evidence: `verify:no-citations`, `check:product-contract`, `check:surface-contract`, `check:endpoint-matrix`, and `typecheck` passed on 2026-07-13. Endpoint smoke probed schema 23 and exercised 36 allowed bridge reads, 3 allowed read-only posts, and 21 blocked mutations.
+- [x] Current hermetic Vitest suite passes. Evidence: the final full gate passed 269 files / 1,897 tests on 2026-07-13.
+- [x] Current production build passes. Evidence: `npm run build` completed Vite and daemon builds on 2026-07-13.
 - [x] Current development and packaged Electron smokes pass. Evidence: `npm run smoke:electron` passed Electron 42.5.0; `npm run smoke:electron:packaged` built distributables and proved the bundled-Node installed CLI reached the packaged daemon on 2026-07-10.
 - [ ] GitHub Actions run passes for the final commit.

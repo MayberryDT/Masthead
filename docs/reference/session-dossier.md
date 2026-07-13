@@ -1,12 +1,17 @@
 # Session Dossier
 
-The session dossier is the shared detail surface for Board and Logbook sessions. It is backed by the canonical SQLite session graph and is exposed through:
+The original session dossier is Masthead's only dossier contract. It is backed by
+the canonical SQLite session graph and represented by `SessionDossierDto`. The live
+canonical read is exposed through:
 
 ```http
 GET /sessions/:sessionId/dossier
 ```
 
-`sessionId` is the canonical Masthead session id, not the runtime/source session id. Board cards carry `canonicalSessionId` so live cards can open the same dossier as Logbook rows.
+`sessionId` is the canonical Masthead session id, not the runtime/source session
+id. Board cards carry `canonicalSessionId` so live cards can open this dossier.
+Logbook does not treat the session as a row: it opens a published artifact whose
+body is an immutable snapshot of the same canonical dossier.
 
 ## Contents
 
@@ -22,6 +27,34 @@ The dossier response contains:
 - `timeline`: messages, tools, file effects, checkpoints, runtime signals, and attention events.
 - `reuse`: copyable context packet, MCP inclusion, source runtime/id, and canonical id.
 - `usage`: input, output, and total token counts from canonical usage rows.
+
+## Published canonical snapshot
+
+The daemon publishes `session_dossier` artifacts with schema and snapshot version
+`canonical-session-dossier-v1`. The body is a deep, immutable snapshot of the
+original dossier. It preserves identity, coverage, narrative, files, tools,
+verification, attention, excerpts, timeline, durable enrichment and state, reuse,
+and usage. Only the live DTO's recursive `artifacts` listing is excluded.
+
+Publication is daemon-owned:
+
+```http
+POST /workbench/dossiers/publish
+Content-Type: application/json
+
+{ "actorId": "workbench_ui", "sessionIds": ["session:..."] }
+```
+
+The request accepts 1–100 canonical session IDs. It builds each snapshot
+from current canonical data, publishes and indexes it atomically, records exactly
+one provenance session, and is idempotent for unchanged content. The request has
+no dossier-body field. Agents never author, summarize, enrich, or replace dossier
+prose; optional-artifact bundles cannot contain a dossier.
+
+Logbook recognizes the exact `canonical-session-dossier-v1` schema and renders it
+through `SessionDossierContent`, the body component used by the original dossier
+experience. A malformed canonical body and an unknown future schema are explicit
+errors, not silently relabeled legacy dossiers.
 
 ## Transcript-first behavior
 
@@ -50,6 +83,12 @@ Advanced dossier provenance shows enrichment provider, model, prompt version, pr
 
 ## UI Rules
 
-Board and Logbook use the same `SessionDossier` component inside their existing modal shells. Unsupported source-opening actions are intentionally hidden. The dossier can copy context or ids, but it does not open source apps, mutate Git, run commands, approve requests, or steer agents.
+Board uses the `SessionDossier` modal shell; Board and Logbook share
+`SessionDossierContent` for the original human-facing sections. Unsupported
+source-opening actions are intentionally hidden. The dossier can copy context or
+ids, but it does not open source apps, mutate Git, run commands, approve requests,
+or steer agents.
 
-If canonical dossier data is unavailable, Board can render a live-only fallback from the selected card. Logbook should treat missing dossier data as a fetch error because Logbook rows already use canonical ids.
+If canonical dossier data is unavailable, Board can render a live-only fallback
+from the selected card. Logbook artifact detail is self-contained and does not
+fetch a live dossier to reconstruct its body.

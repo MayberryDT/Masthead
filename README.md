@@ -22,9 +22,8 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 - Multi-adapter / multi-harness live connect (Sources V2) and conservative
   history adapters where coverage exists.
 - Workbench package path: transcript checks/import, quality, claims, Activity,
-  disposable agent handoffs, daemon-owned authoring runs, atomic publication,
-  and multi-kind resolution (runbook / ADR / incident timeline published, N/A,
-  or contributed).
+  positive-evidence artifact candidates, candidate-sized agent handoffs,
+  daemon-owned canonical dossier publication, V2 authoring runs, and atomic publication.
 - Logbook artifact book: `GET /logbook/artifacts` + body/provenance inspector;
   full-body search plus kind · project · date filters; no bulk enrich /
   checkboxes / summary strip.
@@ -40,9 +39,9 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 - Deeper schema coverage for additional source adapters beyond the initial
   bounded scanners.
 - Transcript import breadth and exclusion policy tuning.
-- Legacy/dev native remote enrichment hooks. Masthead V1 launch authoring uses
-  user-facing Workbench handoffs plus a thin installed CLI to the daemon-owned
-  authoring module; no native remote model key is required.
+- Legacy/dev native remote enrichment hooks. Optional-artifact authoring uses
+  user-facing Workbench candidate handoffs plus a thin installed CLI to the
+  daemon-owned V2 authoring module; no native remote model key is required.
 - Longer packaged desktop release-smoke automation.
 
 ## Install
@@ -77,26 +76,61 @@ MASTHEAD_BRIDGE_PORT=17374 npm run dev
 
 ## Artifact Authoring
 
-People select publish-path sessions in Workbench and copy a plain-language agent
-handoff. They do not see or paste a terminal recipe. A copied handoff asks the
-agent to complete unattended using the same quality policy as user-directed
-agent work.
+There is one session dossier contract. The daemon builds the original
+`SessionDossierDto`, stores an immutable `canonical-session-dossier-v1` snapshot,
+and Logbook renders it with the original dossier presentation. Agents never write
+dossier prose. Workbench’s **Publish canonical dossiers** action calls
+`POST /workbench/dossiers/publish` separately from optional-artifact authoring.
 
-The agent discovers the active daemon and database identity from authoring
-capabilities, then follows four domain operations:
+Runbooks, ADRs, and incident timelines start only from positive canonical
+evidence. Workbench shows the candidate kind, status, summary, and provenance
+count, then copies a plain-language handoff for one selected candidate. One
+`workbench-authoring-v2` run owns exactly one candidate and at most 12 provenance
+sessions. Every substantive claim supplies a typed `claimSupport` entry whose
+at-least-20-character excerpt must occur verbatim in canonical evidence.
+Unsupported authoring-process language, weak joins, and duplicate substantive
+content are rejected before publication.
 
-1. **Open** one durable run for the exact selected session set.
-2. **Read evidence** until every item in the complete canonical redacted
-   evidence manifest has been reviewed.
-3. **Submit** one grounded artifact bundle and revise any structured findings;
-   submit creates no output rows.
-4. **Finish** once to atomically publish all valid artifacts and resolve every
-   automatic kind. Retry returns the same completion report.
+The normal installed CLI is a thin daemon HTTP adapter:
 
-Run status is a read-only recovery operation. The installed `mastheadctl` is a
-thin daemon HTTP adapter and never opens the authoring database. See
-[ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md) and the
-[Workbench authoring reference](docs/reference/enrichment.md).
+```bash
+mastheadctl workbench capabilities --json
+mastheadctl workbench candidates --status pending --limit 100 --json
+mastheadctl workbench open --database-id <id> --candidate <candidate-id> --json
+mastheadctl workbench evidence --run <run-id> --session <session-id> --limit 100 --json
+mastheadctl workbench submit --run <run-id> --file <bundle.json> --json
+mastheadctl workbench finish --run <run-id> --json
+```
+
+`submit` stores validation findings without output rows. `finish` atomically
+publishes the optional artifact and canonical dossiers for its provenance,
+updates search and pipeline state, releases claims, and persists one retry-safe
+receipt. See [ADR 0013](docs/adr/0013-canonical-dossier-and-candidate-authoring.md),
+[ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md), and the
+[daemon API reference](docs/reference/daemon-api.md).
+
+### Failed V1 generation recovery
+
+These maintenance commands are the deliberate exception to the normal HTTP-only
+CLI boundary. They require an explicit database path and exclusive writer
+ownership. Audit and prepare do not mutate product rows; invalidate additionally
+requires the exact SHA-256 audit hash and `--confirm`:
+
+```bash
+mastheadctl workbench audit-v1-generation --db <path> --json
+mastheadctl workbench prepare-v1-recovery --db <path> --json
+mastheadctl workbench invalidate-v1-generation --db <path> --audit-hash <sha256> --confirm --json
+```
+
+The audit fails closed unless the exact known population is present: 1,283 V1
+dossiers, zero optional artifacts, and 66 completed V1 runs. Prepare acquires the
+daemon-equivalent writer locks, creates a SQLite-consistent backup, verifies its
+database identity and integrity, and retains exactly one backup. Invalidate removes
+only the hash-matched artifacts, search rows, and provenance, resets affected
+sessions for canonical dossier publication and V2 candidate discovery, releases
+matching claims, and preserves V1 runs and receipts as audit history. Never run
+production invalidation before the fixture gate, temporary-copy rehearsal, and
+separately authorized 25-session human-reviewed canary pass.
 
 ## Verify
 
@@ -106,6 +140,7 @@ Fast product checks:
 npm run check:product-contract
 npm run verify:no-citations
 npm run doctor
+npm run dogfood:durable-artifacts
 ```
 
 Full local gate:
@@ -123,6 +158,14 @@ and database identity, source/import readiness, Sources pipeline diagnostics,
 Logbook state, read-only MCP status/tools, and local data summary. `npm run
 verify` runs the product and surface contracts, typecheck, Vitest, build,
 endpoint matrix, and smoke suite.
+
+`npm run dogfood:durable-artifacts` is a fixture-only machine gate. It requires
+perfect dossier fidelity, claim support, labeled candidate precision/recall,
+Logbook/MCP recall@5, and artifact-only reuse; zero leaks, duplicate substantive
+fingerprints, or kind errors; at most 12 provenance sessions; and a 100-session
+discovery page within two seconds. It cannot satisfy the production human gate,
+which requires every canary artifact reviewed, median usefulness at least 4/5,
+and no artifact below 3/5.
 
 ## Data Path
 

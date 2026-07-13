@@ -30,12 +30,21 @@ Important contracts:
 - **`GET /logbook/search`** is an artifact-only compatibility alias. It returns `artifacts`, never session rows.
 - `GET /sessions` and session detail routes remain for evidence, Workbench, and compile — not the primary Logbook listing.
 - `GET /workbench/sessions` (and related Workbench reads) expose package-path pipeline state.
+- `GET /workbench/authoring/candidates` exposes keyset-paginated positive-evidence candidates and advances one bounded discovery page.
+- `POST /workbench/dossiers/publish` publishes 1–100 daemon-built canonical dossier snapshots without accepting prose.
+- `POST /workbench/authoring/runs` opens one candidate-owned V2 run from `{ actorId, databaseId, candidateId }`; arbitrary session arrays are rejected.
 - `GET /sources/connectors` and hook routes support Sources V2 live connect.
 - Write endpoints (`/ingest`, Workbench mutations, `/data/delete`, etc.) stay local to the daemon and are not exposed through MCP.
 
 `POST /ingest` uses the runtime query parameter or `x-masthead-runtime` header. Connector tests use a validation-only ingest variant so installer/test flows can verify the hook path without mutating the store when appropriate.
 
-Workbench enrichment and kind authoring go through Workbench/CLI paths with receipts. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
+Workbench enrichment and optional-artifact authoring go through Workbench/CLI paths with receipts. Normal `mastheadctl workbench` authoring commands are thin daemon HTTP calls. The candidate supplies the exact 1–12 provenance sessions, and submit accepts one `workbench-authoring-v2` optional artifact with typed, verbatim claim support. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
+
+The original dossier is different: the daemon snapshots `SessionDossierDto` as
+`canonical-session-dossier-v1`, and Logbook renders that immutable body through
+the original dossier presentation. An authoring agent has no dossier-body write
+path. Optional artifacts (`runbook`, `adr`, `incident_timeline`) exist only for
+positive-evidence candidates; no candidate means no optional work and no N/A prose.
 
 ## MCP
 
@@ -59,7 +68,23 @@ Session/transcript tools remain for compile-time evidence. Full list: `docs/refe
 
 `src/enrichment/enrichmentCoordinator.ts` turns session facts into durable derived records (capsules, live summaries, search projections). The pipeline is evidence-sensitive: it fingerprints facts and avoids rewriting a current result when the fingerprint and provider match.
 
-Published multi-kind artifacts (dossier / runbook / ADR / timeline) are authored and published on the Workbench path with per-artifact gates; enrichment alone does not put a row in Logbook.
+Published knowledge reaches Logbook on two explicit paths: the daemon publishes
+canonical dossier snapshots, while a candidate-sized V2 run validates and
+atomically publishes one supported runbook, ADR, or incident timeline. Enrichment
+alone does not put a row in Logbook.
+
+## Failed V1 recovery
+
+Recovery is intentionally CLI-only and offline; there are no recovery HTTP or MCP
+routes. `audit-v1-generation --db <path> --json` is read-only and recognizes only
+the exact failed population. `prepare-v1-recovery --db <path> --json` acquires
+exclusive writer ownership and retains one verified SQLite-consistent backup.
+`invalidate-v1-generation --db <path> --audit-hash <sha256> --confirm --json`
+re-audits and removes only the hash-matched artifact/search/provenance rows in one
+transaction, resets affected sessions for canonical dossier publication and V2
+candidate discovery, releases matching claims, and preserves V1 runs and receipts.
+Production recovery requires separate authorization after the fixture release gate
+and temporary-copy rehearsal.
 
 ## Identity and privacy notes
 

@@ -309,12 +309,17 @@ function compatibleHealth(dataDirectory: string, databasePath = `${dataDirectory
 
 function authoringCapabilities(command: string) {
   return {
-    bundleVersion: "workbench-authoring-v1",
+    bundleVersion: "workbench-authoring-v2",
     capability: "artifact_authoring",
     command,
     databaseId: "database:test",
-    evidencePolicy: "all_canonical_redacted_evidence",
-    operations: ["open", "status", "evidence", "submit", "finish"],
+    evidencePolicy: "candidate_scoped_canonical_evidence",
+    evidenceRequirements: {
+      adr: ["context", "decision", "alternatives"],
+      incident_timeline: ["symptom", "ordered_events", "remediation"],
+      runbook: ["problem", "change", "verification"]
+    },
+    operations: ["candidates", "open", "status", "evidence", "submit", "finish"],
     protocol: "masthead.workbench.authoring/v1",
     transport: "daemon_http"
   };

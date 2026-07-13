@@ -20,6 +20,19 @@ MASTHEAD_DB_PATH=/path/to/masthead.sqlite node dist/daemon/src/mcp/server.js
 | `search_artifacts` | optional `query`, `kind` (`session_dossier` \| `runbook` \| `adr` \| `incident_timeline`), `project`, `limit`, `offset` | Published artifact capsules matched across capsule fields and complete first-class body fields |
 | `get_artifact` | `artifactId` | One current published artifact with its complete body, provenance session ids, join rationale, evidence refs, lineage, and publication metadata |
 
+For `session_dossier`, `get_artifact` returns the immutable
+`canonical-session-dossier-v1` body built from the original `SessionDossierDto`;
+it does not return agent-authored replacement prose. Runbook, ADR, and
+incident-timeline bodies retain their exact typed `claimSupport` entries so a
+consumer can inspect the canonical evidence ref and verbatim supporting excerpt.
+
+Published artifacts are durable reuse units, not pointers that require a raw
+transcript for their core knowledge. The durable fixture gate proves five tasks by
+calling `search_artifacts` and then `get_artifact` only: executing a runbook repair,
+explaining a rejected ADR alternative, reconstructing an incident, locating a
+changed file in a dossier, and identifying a dossier verification failure. Session
+and transcript tools are explicitly forbidden during those reuse assertions.
+
 ### Evidence / compile
 
 | Tool | Arguments | Returns |

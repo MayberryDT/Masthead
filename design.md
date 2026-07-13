@@ -295,8 +295,9 @@ recur across views, but each surface may use the structure that fits its job:
 - Now: live cards.
 - Workbench: dense publish-path table + Activity console rail + metal ops toolbar.
   Human ops cover transcript check/import, quality review, claim/release, publish,
-  and Not Added inspection. Agent-authored enrichment/dossier/bug-fix work is
-  requested via Copy Agent Prompt, never via an in-app enrichment editor.
+  Not Added inspection, candidate selection, and daemon-owned canonical dossier publication.
+  Copy Agent Prompt hands one positive-evidence runbook, ADR, or incident-timeline candidate to an
+  agent. Agents never author dossier prose; no candidate exists merely to write an N/A result.
 - Logbook: dense table plus inspector.
 - Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
 - Settings: one centered compact steel card with direct controls for everyday preferences and one
@@ -375,6 +376,13 @@ provenance**. No bulk selection checkboxes, no bulk enrich chrome, no session-er
 Each capsule should answer: what kind of knowledge this is, what it claims, where/when it was
 published, confidence, and which sessions provenance it. Body detail and multi-session join rationale
 belong in the inspector, not free-floating table paragraphs.
+
+`session_dossier` has one visual and semantic contract: the original canonical dossier presentation.
+The daemon publishes an immutable `canonical-session-dossier-v1` snapshot and Logbook renders that
+snapshot with the shared dossier body component. Optional artifacts are separate, claim-supported
+candidate outputs. A candidate row shows kind, status, summary, and provenance count; one V2 run owns
+one selected candidate with no more than 12 provenance sessions. “Publish canonical dossiers” is a
+separate daemon action and never creates an agent handoff.
 
 ### Sources
 

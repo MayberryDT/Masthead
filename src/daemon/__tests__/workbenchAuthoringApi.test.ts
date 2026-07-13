@@ -221,13 +221,16 @@ describe("Workbench authoring HTTP API", () => {
     expect(arbitrary.body).toMatchObject({ error: { code: "candidate_id_required" }, ok: false });
 
     const proposed = await postJson(baseUrl, "/workbench/authoring/candidates", {
-      kind: "runbook",
-      provenanceSessionIds: ["session:oauth-fixed"],
-      seedSessionId: "session:oauth-fixed",
-      signalEvidenceRefs: ["tool_result:oauth:failure", "file:oauth:change", "checkpoint:oauth:verified"],
-      signalSummary: "OAuth callback failure recovery with an exact verified chain."
+      kind: "adr",
+      provenanceSessionIds: ["session:decision-local-first"],
+      seedSessionId: "session:decision-local-first",
+      signalEvidenceRefs: [
+        "message:decision-local-first:decision",
+        "message:decision-local-first:alternative"
+      ],
+      signalSummary: "SQLite was selected over hosted storage to preserve offline operation."
     }, 201);
-    expect(proposed.body.candidate).toMatchObject({ kind: "runbook", origin: "proposal", status: "pending" });
+    expect(proposed.body.candidate).toMatchObject({ kind: "adr", origin: "proposal", status: "pending" });
 
     const dismissed = await postJson(
       baseUrl,
