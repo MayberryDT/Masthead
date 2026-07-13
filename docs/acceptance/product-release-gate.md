@@ -112,7 +112,10 @@ ordinary, tool-heavy, failure/fix, decision-heavy), publish and visually compare
 all canonical dossiers, author every positive candidate one run at a time, and
 receive human scores for findability, grounding, reusability, specificity, and
 readability. Passing requires 100% review, median overall score at least 4.0, and
-no artifact below 3.0.
+no artifact below 3.0. Record authorization, identity, backup, rehearsal,
+invalidation, review, rollback, and rollout evidence in the
+[production canary worksheet](durable-artifact-production-canary.md); empty
+fields never imply a pass.
 
 Stop and restore the single backup if any dossier section differs materially from
 the original; unsupported authoring-protocol language appears; a claim excerpt
