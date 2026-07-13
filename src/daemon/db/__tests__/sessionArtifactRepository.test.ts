@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -7,14 +8,20 @@ import { getSessionDossier } from "../sessionDossierRepository.ts";
 import {
   applySessionArtifact,
   applySessionArtifactInTransaction,
+  auditFailedV1Generation,
+  FAILED_V1_DOSSIER_COUNT,
+  invalidateFailedV1Generation,
   listSessionArtifacts,
   publishSessionArtifact,
   publishSessionArtifactInTransaction,
   searchPublishedArtifactCapsules,
   wipePublishedArtifactState
 } from "../sessionArtifactRepository.ts";
-import { migrateDatabase } from "../schema.ts";
+import { getOrCreateDatabaseIdentity, migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
+import { createSingleConsistentBackup } from "../../databaseBackup.ts";
+import { acquireDatabaseWriterLock } from "../../../core/daemonOwnership.ts";
+import { fingerprintWorkbenchOutput } from "../../../workbench/applyArtifact.ts";
 import {
   buildPublishedDossierSnapshot,
   dossierSnapshotFingerprint
@@ -444,7 +451,318 @@ describe("session artifact repository", () => {
     expect(searchPublishedArtifactCapsules(db).total).toBe(0);
     expect(db.prepare("SELECT COUNT(*) AS count FROM session_artifact_search").get()).toEqual({ count: 0 });
   });
+
+  test("audits only the exact 1,283-dossier failed V1 generation without mutation", async () => {
+    const db = await testDb();
+    seedExactFailedV1Generation(db);
+    const changesBefore = totalChanges(db);
+
+    const audit = auditFailedV1Generation(db);
+
+    expect(audit).toMatchObject({
+      adrs: 0,
+      contractVersion: "workbench-authoring-v1",
+      dossiers: FAILED_V1_DOSSIER_COUNT,
+      incidentTimelines: 0,
+      runbooks: 0,
+      totalArtifacts: FAILED_V1_DOSSIER_COUNT,
+      totalSessions: FAILED_V1_DOSSIER_COUNT
+    });
+    expect(audit.counts.byKind).toEqual({ session_dossier: FAILED_V1_DOSSIER_COUNT });
+    expect(audit.counts.byStatus).toEqual({ "current/published": FAILED_V1_DOSSIER_COUNT });
+    expect(audit.auditHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(totalChanges(db)).toBe(changesBefore);
+  }, 60_000);
+
+  test("refuses mixed V1 populations and detects relevant state changes by audit hash", async () => {
+    const db = await testDb();
+    seedExactFailedV1Generation(db);
+    const audit = auditFailedV1Generation(db);
+    db.prepare(
+      "UPDATE workbench_session_state SET adr_status = 'required' WHERE session_id = 'session:failed-v1:0000'"
+    ).run();
+    expect(() => invalidateFailedV1Generation(db, audit.auditHash)).toThrow("audit_hash_mismatch");
+
+    db.prepare(
+      `INSERT INTO session_artifacts (
+         artifact_id, session_id, artifact_kind, status, content_fingerprint, created_at, updated_at,
+         created_by, schema_version, title, content_json, evidence_refs_json, validation_json,
+         publication_status, lineage_id, published_at
+       ) VALUES (?, ?, 'runbook', 'current', ?, ?, ?, ?, 'runbook-v2', ?, ?, '[]', ?, 'published', ?, ?)`
+    ).run(
+      "artifact:mixed-v1",
+      "session:failed-v1:0000",
+      "mixed-fingerprint",
+      FAILED_CREATED_AT,
+      FAILED_PUBLISHED_AT,
+      "workbench_authoring:failed-agent",
+      "Mixed artifact",
+      JSON.stringify({ title: "Mixed artifact" }),
+      JSON.stringify({ contract: "workbench-authoring-v1", ok: true, schemaVersion: "runbook-v2" }),
+      "artifact:mixed-v1",
+      FAILED_PUBLISHED_AT
+    );
+    expect(() => auditFailedV1Generation(db)).toThrow("ambiguous_population");
+  }, 60_000);
+
+  test("invalidates exact failed output, preserves V1 audit history, resets N/A, and rolls back every boundary", async () => {
+    const db = await testDb();
+    seedExactFailedV1Generation(db);
+    const audit = auditFailedV1Generation(db);
+    const before = recoveryCounts(db);
+    const boundaries = [
+      "search_deleted",
+      "provenance_deleted",
+      "artifacts_deleted",
+      "pipeline_reset",
+      "claims_released",
+      "activity_recorded"
+    ] as const;
+    for (const failedBoundary of boundaries) {
+      expect(() => invalidateFailedV1Generation(db, audit.auditHash, {
+        onMutationBoundary(boundary) {
+          if (boundary === failedBoundary) throw new Error(`injected:${boundary}`);
+        }
+      })).toThrow(`injected:${failedBoundary}`);
+      expect(recoveryCounts(db)).toEqual(before);
+      expect(auditFailedV1Generation(db).auditHash).toBe(audit.auditHash);
+    }
+
+    const receipt = invalidateFailedV1Generation(db, audit.auditHash);
+
+    expect(receipt).toMatchObject({
+      artifactsInvalidated: FAILED_V1_DOSSIER_COUNT,
+      auditHash: audit.auditHash,
+      provenanceDeleted: FAILED_V1_DOSSIER_COUNT,
+      searchRowsDeleted: FAILED_V1_DOSSIER_COUNT,
+      sessionsReset: FAILED_V1_DOSSIER_COUNT
+    });
+    expect(recoveryCounts(db)).toMatchObject({
+      activities: 1,
+      artifacts: 0,
+      provenance: 0,
+      runs: before.runs,
+      search: 0
+    });
+    expect(db.prepare(
+      `SELECT publication_status AS publicationStatus, next_action AS nextAction,
+              session_dossier_status AS sessionDossierStatus, session_package_status AS sessionPackageStatus,
+              resolution_status AS resolutionStatus, runbook_status AS runbookStatus,
+              adr_status AS adrStatus, incident_timeline_status AS incidentTimelineStatus
+       FROM workbench_session_state WHERE session_id = 'session:failed-v1:0000'`
+    ).get()).toEqual({
+      adrStatus: "unknown",
+      incidentTimelineStatus: "unknown",
+      nextAction: "create_dossier",
+      publicationStatus: "publish_path",
+      resolutionStatus: "in_progress",
+      runbookStatus: "unknown",
+      sessionDossierStatus: "missing",
+      sessionPackageStatus: "missing"
+    });
+    expect(db.prepare(
+      "SELECT released_at AS releasedAt, release_reason AS releaseReason FROM workbench_claims WHERE claim_id = 'claim:failed-v1:0000'"
+    ).get()).toMatchObject({ releaseReason: "failed_v1_generation_recovery", releasedAt: expect.any(String) });
+    expect(db.prepare(
+      "SELECT details_json AS detailsJson FROM workbench_activity WHERE event_type = 'failed_v1_generation_recovered'"
+    ).get()).toMatchObject({ detailsJson: expect.stringContaining(audit.auditHash) });
+    expect(db.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_authoring_runs WHERE status = 'completed' AND receipt_json IS NOT NULL"
+    ).get()).toEqual({ count: before.runs });
+  }, 60_000);
+
+  test("online backup includes committed WAL state, keeps one snapshot, validates identity, and refuses a writer lease", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-recovery-backup-"));
+    tempDirs.push(tempDir);
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const db = await openMastheadDatabase(databasePath);
+    migrateDatabase(db);
+    const databaseId = getOrCreateDatabaseIdentity(db);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:wal-backup",
+      title: "Committed WAL backup"
+    });
+
+    const first = await createSingleConsistentBackup(databasePath);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:wal-backup-two",
+      title: "Second committed WAL row"
+    });
+    const second = await createSingleConsistentBackup(databasePath);
+    expect(second).toMatchObject({ databaseId, integrityResult: "ok", sizeBytes: expect.any(Number) });
+    expect(second.backupPath).not.toBe(first.backupPath);
+    expect((await readdir(tempDir)).filter((name) => name.startsWith("masthead.sqlite.backup-"))).toEqual([
+      second.backupPath.split("/").at(-1)
+    ]);
+    const backupDb = new DatabaseSync(second.backupPath, { readOnly: true });
+    expect(backupDb.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 2 });
+    backupDb.close();
+
+    const lease = await acquireDatabaseWriterLock(databasePath);
+    try {
+      await expect(createSingleConsistentBackup(databasePath)).rejects.toThrow("already leased");
+    } finally {
+      await lease.release();
+      db.close();
+    }
+  });
 });
+
+const FAILED_CREATED_AT = "2026-07-11T08:00:00.000Z";
+const FAILED_PUBLISHED_AT = "2026-07-11T08:30:00.000Z";
+const FAILED_COMPLETED_AT = "2026-07-11T09:00:00.000Z";
+
+function seedExactFailedV1Generation(db: MastheadDatabase): void {
+  db.prepare("INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
+    "host:failed-v1", "fixture", FAILED_CREATED_AT, FAILED_COMPLETED_AT
+  );
+  db.prepare("INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(
+    "runtime:failed-v1", "codex", "fixture", FAILED_CREATED_AT, FAILED_COMPLETED_AT
+  );
+  const insertSession = db.prepare(
+    `INSERT INTO sessions (
+       session_id, host_id, runtime_id, source_session_id, title, lifecycle, last_activity_at,
+       source_confidence, created_at, updated_at
+     ) VALUES (?, 'host:failed-v1', 'runtime:failed-v1', ?, ?, 'ended', ?, 'authoritative', ?, ?)`
+  );
+  const insertState = db.prepare(
+    `INSERT INTO workbench_session_state (
+       session_id, publication_status, next_action, transcript_status, quality_status,
+       session_enrichment_status, session_dossier_status, bug_fix_trace_status,
+       runbook_status, adr_status, incident_timeline_status, session_package_status,
+       resolution_status, published_at, created_at, updated_at
+     ) VALUES (?, 'published', 'none', 'available', 'passed', 'satisfied', 'satisfied',
+       'not_applicable', 'not_applicable', 'not_applicable', 'not_applicable', 'published',
+       'automatic_resolved', ?, ?, ?)`
+  );
+  const insertClaim = db.prepare(
+    `INSERT INTO workbench_claims (
+       claim_id, session_id, claimed_by, claimed_at, heartbeat_at, expires_at, released_at, release_reason
+     ) VALUES (?, ?, 'failed-agent', ?, ?, ?, ?, ?)`
+  );
+  const insertArtifact = db.prepare(
+    `INSERT INTO session_artifacts (
+       artifact_id, session_id, artifact_kind, status, content_fingerprint, created_at, updated_at,
+       created_by, schema_version, title, content_json, evidence_refs_json, validation_json,
+       publication_status, lineage_id, published_at
+     ) VALUES (?, ?, 'session_dossier', 'current', ?, ?, ?, 'workbench_authoring:failed-agent',
+       'session_dossier-v2', ?, ?, '[]', ?, 'published', ?, ?)`
+  );
+  const insertProvenance = db.prepare(
+    "INSERT INTO session_artifact_provenance (artifact_id, session_id) VALUES (?, ?)"
+  );
+  const insertSearch = db.prepare(
+    "INSERT INTO session_artifact_search (artifact_id, title, summary, highlight, project, body) VALUES (?, ?, '', '', '', ?)"
+  );
+  const insertRun = db.prepare(
+    `INSERT INTO workbench_authoring_runs (
+       run_id, actor_id, database_id, status, evidence_revision, bundle_json, findings_json,
+       receipt_json, created_at, updated_at, completed_at, contract_version, candidate_id
+     ) VALUES (?, 'failed-agent', 'fixture-db', 'completed', ?, ?, '[]', ?, ?, ?, ?, 'workbench-authoring-v1', NULL)`
+  );
+  const insertRunSession = db.prepare(
+    "INSERT INTO workbench_authoring_run_sessions (run_id, session_id, claim_id, ordinal) VALUES (?, ?, ?, ?)"
+  );
+  for (let runIndex = 0, ordinal = 0; ordinal < FAILED_V1_DOSSIER_COUNT; runIndex += 1) {
+    const runId = `run:failed-v1:${String(runIndex).padStart(3, "0")}`;
+    const packages: Array<Record<string, unknown>> = [];
+    const publishedArtifactIds: string[] = [];
+    const resolvedSessionIds: string[] = [];
+    const notApplicable: Array<Record<string, unknown>> = [];
+    const members: Array<{ claimId: string; sessionId: string }> = [];
+    for (let runOrdinal = 0; runOrdinal < 20 && ordinal < FAILED_V1_DOSSIER_COUNT; runOrdinal += 1, ordinal += 1) {
+      const suffix = String(ordinal).padStart(4, "0");
+      const sessionId = `session:failed-v1:${suffix}`;
+      const claimId = `claim:failed-v1:${suffix}`;
+      const artifactId = `artifact:failed-v1:${suffix}`;
+      const dossier = {
+        approach: ["Read every canonical evidence item through cursor pagination."],
+        outcome: `Keep package ${suffix} single provenance and avoid weak multi-session joins.`,
+        title: `Failed dossier ${suffix}`
+      };
+      insertSession.run(sessionId, sessionId, `Failed dossier ${suffix}`, FAILED_PUBLISHED_AT, FAILED_CREATED_AT, FAILED_PUBLISHED_AT);
+      insertState.run(sessionId, FAILED_PUBLISHED_AT, FAILED_CREATED_AT, FAILED_PUBLISHED_AT);
+      insertClaim.run(
+        claimId,
+        sessionId,
+        FAILED_CREATED_AT,
+        FAILED_CREATED_AT,
+        FAILED_COMPLETED_AT,
+        ordinal === 0 ? null : FAILED_COMPLETED_AT,
+        ordinal === 0 ? null : "authoring_finished"
+      );
+      insertArtifact.run(
+        artifactId,
+        sessionId,
+        fingerprintWorkbenchOutput(dossier),
+        FAILED_CREATED_AT,
+        FAILED_PUBLISHED_AT,
+        dossier.title,
+        JSON.stringify(dossier),
+        JSON.stringify({ contract: "workbench-authoring-v1", ok: true, schemaVersion: "session_dossier-v2" }),
+        artifactId,
+        FAILED_PUBLISHED_AT
+      );
+      insertProvenance.run(artifactId, sessionId);
+      insertSearch.run(artifactId, dossier.title, JSON.stringify(dossier));
+      packages.push({ dossier, enrichment: { title: dossier.title }, sessionId });
+      publishedArtifactIds.push(artifactId);
+      resolvedSessionIds.push(sessionId);
+      members.push({ claimId, sessionId });
+      for (const kind of ["runbook", "adr", "incident_timeline"]) {
+        notApplicable.push({ evidenceRefs: [`message:${sessionId}:fixture`], kind, reason: "No reusable output", sessionId });
+      }
+    }
+    const bundle = {
+      artifacts: [],
+      bundleVersion: "workbench-authoring-v1",
+      contributions: [],
+      evidenceRevision: `revision:${runId}`,
+      notApplicable,
+      runId,
+      sessionPackages: packages
+    };
+    const receipt = {
+      completedAt: FAILED_COMPLETED_AT,
+      contributions: [],
+      notApplicable: notApplicable.map(({ kind, sessionId }) => ({ kind, sessionId })),
+      publishedArtifactIds,
+      resolvedSessionIds,
+      runId
+    };
+    insertRun.run(
+      runId,
+      bundle.evidenceRevision,
+      JSON.stringify(bundle),
+      JSON.stringify(receipt),
+      FAILED_CREATED_AT,
+      FAILED_COMPLETED_AT,
+      FAILED_COMPLETED_AT
+    );
+    members.forEach((member, index) => insertRunSession.run(runId, member.sessionId, member.claimId, index));
+  }
+}
+
+function recoveryCounts(db: MastheadDatabase) {
+  const count = (table: string) => Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count);
+  return {
+    activities: count("workbench_activity"),
+    artifacts: count("session_artifacts"),
+    provenance: count("session_artifact_provenance"),
+    runs: count("workbench_authoring_runs"),
+    search: count("session_artifact_search")
+  };
+}
+
+function totalChanges(db: MastheadDatabase): number {
+  return Number((db.prepare("SELECT total_changes() AS count").get() as { count: number }).count);
+}
 
 function artifactInput(contentFingerprint: string, title: string) {
   return {

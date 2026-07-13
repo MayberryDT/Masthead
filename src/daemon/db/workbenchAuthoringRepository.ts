@@ -34,6 +34,56 @@ type WorkbenchAuthoringRunSessionRow = {
   conflicting: number;
 };
 
+export type CompletedV1AuthoringRunRecoveryRow = {
+  actorId: string;
+  bundleJson: string;
+  completedAt: string;
+  createdAt: string;
+  receiptJson: string;
+  runId: string;
+  sessionIds: string[];
+  claimIds: string[];
+};
+
+/**
+ * Raw, completed V1 history used by the deliberately narrow recovery audit.
+ * This is read-only and intentionally does not reinterpret or repair legacy JSON.
+ */
+export function listCompletedV1AuthoringRunsForRecovery(
+  db: MastheadDatabase
+): CompletedV1AuthoringRunRecoveryRow[] {
+  const rows = db.prepare(
+    `SELECT
+       runs.run_id AS runId,
+       runs.actor_id AS actorId,
+       runs.bundle_json AS bundleJson,
+       runs.receipt_json AS receiptJson,
+       runs.created_at AS createdAt,
+       runs.completed_at AS completedAt
+     FROM workbench_authoring_runs AS runs
+     WHERE runs.contract_version = 'workbench-authoring-v1'
+       AND runs.status = 'completed'
+       AND runs.bundle_json IS NOT NULL
+       AND runs.receipt_json IS NOT NULL
+       AND runs.completed_at IS NOT NULL
+     ORDER BY runs.run_id`
+  ).all() as Array<Omit<CompletedV1AuthoringRunRecoveryRow, "claimIds" | "sessionIds">>;
+  const memberships = db.prepare(
+    `SELECT session_id AS sessionId, claim_id AS claimId
+     FROM workbench_authoring_run_sessions
+     WHERE run_id = ?
+     ORDER BY ordinal, session_id`
+  );
+  return rows.map((row) => {
+    const members = memberships.all(row.runId) as Array<{ claimId: string; sessionId: string }>;
+    return {
+      ...row,
+      claimIds: members.map(({ claimId }) => claimId),
+      sessionIds: members.map(({ sessionId }) => sessionId)
+    };
+  });
+}
+
 export function createWorkbenchAuthoringRun(
   db: MastheadDatabase,
   input: {
