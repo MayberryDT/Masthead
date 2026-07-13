@@ -409,6 +409,175 @@ describe("production lifecycle launcher", () => {
     })).rejects.toThrow("effective UID could not be established");
   });
 
+  test("skips an identity-stable same-UID zombie before protected cmdline, exe, or environment reads", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    let metadataReads = 0;
+    let statReads = 0;
+    let statusReads = 0;
+    await expect(readOwnedProcessStrict(1488, {
+      currentUid,
+      readCommandLine: async () => { metadataReads += 1; throw Object.assign(new Error("protected cmdline"), { code: "EACCES" }); },
+      readEnvironment: async () => { metadataReads += 1; throw Object.assign(new Error("protected environ"), { code: "EACCES" }); },
+      readExecutable: async () => { metadataReads += 1; throw Object.assign(new Error("protected exe"), { code: "EACCES" }); },
+      readStatLine: async () => {
+        statReads += 1;
+        return `1488 (zypak-sandbox) Z ${Array(18).fill("0").join(" ")} zombie-start`;
+      },
+      readStatus: async () => {
+        statusReads += 1;
+        return `Name:\tzypak-sandbox\nState:\tZ (zombie)\nUid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\nThreads:\t1\n`;
+      }
+    })).resolves.toBeUndefined();
+    expect(metadataReads).toBe(0);
+    expect(statReads).toBe(2);
+    expect(statusReads).toBe(2);
+  });
+
+  test("fails closed if a zombie PID identity changes while its exclusion is verified", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    let statusReads = 0;
+    await expect(readOwnedProcessStrict(1489, {
+      currentUid,
+      readCommandLine: async () => Buffer.alloc(0),
+      readExecutable: async () => { throw Object.assign(new Error("protected exe"), { code: "EACCES" }); },
+      readStatLine: async () => `1489 (process) Z ${Array(18).fill("0").join(" ")} stable-start`,
+      readStatus: async () => {
+        statusReads += 1;
+        const state = statusReads === 1 ? "Z (zombie)" : "S (sleeping)";
+        return `Name:\tprocess\nState:\t${state}\nUid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\nThreads:\t1\n`;
+      }
+    })).rejects.toThrow("zombie identity changed during scan");
+
+    let statReads = 0;
+    await expect(readOwnedProcessStrict(1489, {
+      currentUid,
+      readCommandLine: async () => Buffer.alloc(0),
+      readExecutable: async () => { throw Object.assign(new Error("protected exe"), { code: "EACCES" }); },
+      readStatLine: async () => {
+        statReads += 1;
+        return `1489 (process) Z ${Array(18).fill("0").join(" ")} zombie-start-${statReads}`;
+      },
+      readStatus: async () => `Name:\tprocess\nState:\tZ (zombie)\nUid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\nThreads:\t1\n`
+    })).rejects.toThrow("zombie identity changed during scan");
+  });
+
+  test.each([
+    ["missing", ""],
+    ["malformed", "Threads:\tmany\n"],
+    ["multiple", "Threads:\t2\n"]
+  ])("does not exclude a zombie thread-group leader when its thread count is %s", async (_label, threadsLine) => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    let metadataReads = 0;
+    const vanishedExecutable = Object.assign(new Error("zombie leader has no executable"), { code: "ENOENT" });
+    await expect(readOwnedProcessStrict(1487, {
+      currentUid,
+      readCommandLine: async () => { metadataReads += 1; return Buffer.alloc(0); },
+      readExecutable: async () => { metadataReads += 1; throw vanishedExecutable; },
+      readStatLine: async () => `1487 (leader) Z ${Array(18).fill("0").join(" ")} group-start`,
+      readStatus: async () => `Name:\tleader\nState:\tZ (zombie)\nUid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\n${threadsLine}`
+    })).rejects.toThrow("thread-group cardinality is unproven");
+    expect(metadataReads).toBe(0);
+  });
+
+  test("fails closed for every inconsistent or malformed zombie identity field", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    const otherUid = currentUid === 0 ? 1 : 0;
+    const status = ({ state = "Z (zombie)", uid = currentUid, threads = "1" } = {}) =>
+      `Name:\tprocess\nState:\t${state}\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\nThreads:\t${threads}\n`;
+    const statLine = ({ pid = 1486, state = "Z", starttime = "stable-start" } = {}) =>
+      `${pid} (process) ${state} ${Array(18).fill("0").join(" ")} ${starttime}`;
+    const cases = [
+      { label: "initial stat state", stats: [statLine({ state: "S" }), statLine()] },
+      { label: "verified stat state", stats: [statLine(), statLine({ state: "S" })] },
+      { label: "verified status state", statuses: [status(), status({ state: "S (sleeping)" })] },
+      { label: "verified effective UID", statuses: [status(), status({ uid: otherUid })] },
+      { label: "verified thread count", statuses: [status(), status({ threads: "2" })] },
+      { label: "initial stat PID", stats: [statLine({ pid: 9999 }), statLine()] },
+      { label: "verified stat PID", stats: [statLine(), statLine({ pid: 9999 })] },
+      { label: "verified status State", statuses: [status(), `Name:\tprocess\nUid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\nThreads:\t1\n`] },
+      { label: "verified status Uid", statuses: [status(), "Name:\tprocess\nState:\tZ (zombie)\nThreads:\t1\n"] }
+    ];
+    for (const scenario of cases) {
+      let metadataReads = 0;
+      let statReads = 0;
+      let statusReads = 0;
+      const statuses = scenario.statuses || [status(), status()];
+      const stats = scenario.stats || [statLine(), statLine()];
+      await expect(readOwnedProcessStrict(1486, {
+        currentUid,
+        readCommandLine: async () => { metadataReads += 1; return Buffer.alloc(0); },
+        readExecutable: async () => { metadataReads += 1; throw Object.assign(new Error("protected exe"), { code: "EACCES" }); },
+        readStatLine: async () => stats[Math.min(statReads++, stats.length - 1)],
+        readStatus: async () => statuses[Math.min(statusReads++, statuses.length - 1)]
+      }), scenario.label).rejects.toThrow("zombie identity changed during scan");
+      expect(metadataReads, scenario.label).toBe(0);
+    }
+
+    await expect(readOwnedProcessStrict(1486, {
+      currentUid,
+      readStatLine: async () => "malformed stat",
+      readStatus: async () => status()
+    })).rejects.toThrow("stat identity is malformed");
+  });
+
+  test.each([
+    ["first stat", "first_stat"],
+    ["second status", "second_status"],
+    ["second stat", "second_stat"]
+  ])("fails closed when zombie verification %s is permission denied", async (_label, failurePoint) => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    const denied = Object.assign(new Error("zombie verification permission denied"), { code: "EACCES" });
+    let metadataReads = 0;
+    let statReads = 0;
+    let statusReads = 0;
+    await expect(readOwnedProcessStrict(1485, {
+      currentUid,
+      readCommandLine: async () => { metadataReads += 1; return Buffer.alloc(0); },
+      readExecutable: async () => { metadataReads += 1; throw denied; },
+      readStatLine: async () => {
+        statReads += 1;
+        if (failurePoint === "first_stat" && statReads === 1) throw denied;
+        if (failurePoint === "second_stat" && statReads === 2) throw denied;
+        return `1485 (zombie) Z ${Array(18).fill("0").join(" ")} stable-start`;
+      },
+      readStatus: async () => {
+        statusReads += 1;
+        if (failurePoint === "second_status" && statusReads === 2) throw denied;
+        return `Name:\tzombie\nState:\tZ (zombie)\nUid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\nThreads:\t1\n`;
+      }
+    })).rejects.toMatchObject({ code: "EACCES" });
+    expect(metadataReads).toBe(0);
+  });
+
+  test.each([
+    ["first stat", "first_stat", "ENOENT"],
+    ["second status", "second_status", "ESRCH"],
+    ["second stat", "second_stat", "ENOENT"]
+  ])("treats zombie disappearance during %s verification as a race", async (_label, failurePoint, code) => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    const disappeared = Object.assign(new Error("zombie disappeared"), { code });
+    let metadataReads = 0;
+    let statReads = 0;
+    let statusReads = 0;
+    await expect(readOwnedProcessStrict(1484, {
+      currentUid,
+      readCommandLine: async () => { metadataReads += 1; return Buffer.alloc(0); },
+      readExecutable: async () => { metadataReads += 1; throw disappeared; },
+      readStatLine: async () => {
+        statReads += 1;
+        if (failurePoint === "first_stat" && statReads === 1) throw disappeared;
+        if (failurePoint === "second_stat" && statReads === 2) throw disappeared;
+        return `1484 (zombie) Z ${Array(18).fill("0").join(" ")} stable-start`;
+      },
+      readStatus: async () => {
+        statusReads += 1;
+        if (failurePoint === "second_status" && statusReads === 2) throw disappeared;
+        return `Name:\tzombie\nState:\tZ (zombie)\nUid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\nThreads:\t1\n`;
+      }
+    })).resolves.toBeUndefined();
+    expect(metadataReads).toBe(0);
+  });
+
   test("recovers unrelated same-UID systemd user process discovery after unreadable exe inspection", async () => {
     const procRoot = await mkdtemp(join(tmpdir(), "masthead-proc-systemd-user-"));
     cleanup.push(procRoot);

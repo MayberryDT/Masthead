@@ -1148,8 +1148,8 @@ export async function readOwnedProcessStrict(pid, adapters = {}) {
     if (Number.isSafeInteger(ownership.uid) && ownership.uid !== currentUid) return undefined;
     throw error;
   }
-  const uidMatch = String(status).match(/^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/mu);
-  const effectiveUid = uidMatch ? Number(uidMatch[2]) : undefined;
+  const processStatus = parseProcStatus(status);
+  const effectiveUid = processStatus.effectiveUid;
   if (!Number.isSafeInteger(effectiveUid) || effectiveUid < 0) {
     const ownership = await statProcess().catch((error) => {
       if (error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code)) return undefined;
@@ -1160,6 +1160,29 @@ export async function readOwnedProcessStrict(pid, adapters = {}) {
     throw new Error(`Production process ${pid} effective UID could not be established.`);
   }
   if (effectiveUid !== currentUid) return undefined;
+  if (processStatus.state === "Z") {
+    if (processStatus.threads !== 1) {
+      throw new Error(`Production process ${pid} zombie thread-group cardinality is unproven.`);
+    }
+    const initialZombieStatLine = await readProcValueOrRace(readStatLine);
+    if (initialZombieStatLine === undefined) return undefined;
+    const initialZombieStat = procStatSnapshot(initialZombieStatLine, pid);
+    const verifiedZombieStatusText = await readProcValueOrRace(readStatus);
+    if (verifiedZombieStatusText === undefined) return undefined;
+    const verifiedZombieStatus = parseProcStatus(verifiedZombieStatusText);
+    const verifiedZombieStatLine = await readProcValueOrRace(readStatLine);
+    if (verifiedZombieStatLine === undefined) return undefined;
+    const verifiedZombieStat = procStatSnapshot(verifiedZombieStatLine, pid);
+    if (
+      initialZombieStat.state !== "Z" || verifiedZombieStatus.state !== "Z" ||
+      verifiedZombieStatus.effectiveUid !== currentUid || verifiedZombieStatus.threads !== 1 ||
+      initialZombieStat.pid !== pid || verifiedZombieStat.pid !== pid || verifiedZombieStat.state !== "Z" ||
+      initialZombieStat.starttime !== verifiedZombieStat.starttime
+    ) {
+      throw new Error(`Production process ${pid} zombie identity changed during scan.`);
+    }
+    return undefined;
+  }
   const readCommandLine = adapters.readCommandLine || (() => readFile(join(processRoot, "cmdline")));
   let commandLine;
   try {
@@ -1252,6 +1275,18 @@ function parseProcCommandLine(commandLine) {
   return { argv, valid: true };
 }
 
+function parseProcStatus(status) {
+  const text = String(status);
+  const uidMatch = text.match(/^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/mu);
+  const stateMatch = text.match(/^State:\s+([A-Z])(?:\s|$)/mu);
+  const threadsMatch = text.match(/^Threads:\s+(\d+)\s*$/mu);
+  return {
+    effectiveUid: uidMatch ? Number(uidMatch[2]) : undefined,
+    state: stateMatch?.[1],
+    threads: threadsMatch ? Number(threadsMatch[1]) : undefined
+  };
+}
+
 function commandCouldBelongToProduction(argv, scanContext) {
   if (!scanContext) return true;
   const identifiers = [
@@ -1268,14 +1303,24 @@ function commandCouldBelongToProduction(argv, scanContext) {
 }
 
 function procStatStarttime(statLine, pid) {
+  const snapshot = procStatSnapshot(statLine, pid);
+  if (snapshot.pid !== pid) throw new Error(`Production process ${pid} stat PID is mismatched.`);
+  return snapshot.starttime;
+}
+
+function procStatSnapshot(statLine, pid) {
   const text = String(statLine);
   const closingParenthesis = text.lastIndexOf(")");
+  const parsedPid = closingParenthesis >= 0 ? Number(text.slice(0, text.indexOf(" "))) : undefined;
   const values = closingParenthesis >= 0
     ? text.slice(closingParenthesis + 2).trim().split(/\s+/u)
     : [];
+  const state = values[0];
   const starttime = values[19];
-  if (!starttime) throw new Error(`Production process ${pid} stat starttime is malformed.`);
-  return starttime;
+  if (!Number.isSafeInteger(parsedPid) || parsedPid <= 0 || !state || !starttime) {
+    throw new Error(`Production process ${pid} stat identity is malformed.`);
+  }
+  return { pid: parsedPid, state, starttime };
 }
 
 async function readProcValueOrRace(reader) {
