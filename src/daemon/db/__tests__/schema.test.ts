@@ -127,6 +127,8 @@ describe("daemon database schema", () => {
         "idx_workbench_candidates_current_session",
         "idx_workbench_candidates_status_updated",
         "idx_workbench_candidates_lineage",
+        "idx_workbench_candidates_signature_history",
+        "idx_workbench_candidates_session_history",
         "idx_workbench_candidate_provenance_session",
         "idx_workbench_signature_members_session",
         "idx_workbench_candidate_scans_session_time"

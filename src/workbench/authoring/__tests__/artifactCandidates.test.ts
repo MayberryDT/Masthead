@@ -65,15 +65,16 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
-  test("keeps targeted current and predecessor queries bounded with unrelated history", async () => {
+  test("keeps targeted current and predecessor queries bounded with unrelated active history", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
     discoverArtifactCandidates(db, ["session:oauth-fixed"]);
     const insertHistorical = db.prepare(
       `INSERT INTO workbench_artifact_candidates (
         candidate_id, kind, seed_session_id, provenance_session_ids_json,
-        signal_evidence_refs_json, signal_summary, evidence_revision, origin, status, created_at, updated_at
-      ) VALUES (?, 'runbook', ?, ?, ?, 'Unrelated historical candidate.', ?, 'automatic', 'superseded', ?, ?)`
+        signal_evidence_refs_json, signal_summary, signature_key, evidence_revision,
+        origin, status, created_at, updated_at
+      ) VALUES (?, 'runbook', ?, ?, ?, 'Unrelated active candidate.', ?, ?, 'automatic', 'pending', ?, ?)`
     );
     withImmediateTransaction(db, () => {
       for (let index = 0; index < 500; index += 1) {
@@ -83,6 +84,7 @@ describe("artifact candidate discovery", () => {
           dossierOnlyQuestion.id,
           JSON.stringify([dossierOnlyQuestion.id]),
           JSON.stringify([dossierOnlyQuestion.evidence[0]!.id]),
+          `error:unrelated:${index}`,
           `revision:unrelated:${index}`,
           `2026-07-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
           `2026-07-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`
@@ -103,6 +105,28 @@ describe("artifact candidate discovery", () => {
         seedSessionId: "session:oauth-fixed"
       })?.candidateId
     ).toBe(relevant[0]!.candidateId);
+    const planDetails = [
+      ...(db.prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT candidates.candidate_id
+         FROM workbench_artifact_candidate_provenance provenance
+         JOIN workbench_artifact_candidates candidates ON candidates.candidate_id = provenance.candidate_id
+         WHERE provenance.session_id = ?
+           AND candidates.status IN ('pending', 'claimed', 'published')`
+      ).all("session:oauth-fixed") as Array<{ detail: string }>),
+      ...(db.prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT candidate_id
+         FROM workbench_artifact_candidates
+         WHERE kind = 'runbook' AND signature_key = 'error:unrelated:499'
+         ORDER BY CASE WHEN status IN ('pending', 'claimed', 'published') THEN 0 ELSE 1 END,
+           updated_at DESC, candidate_id
+         LIMIT 1`
+      ).all() as Array<{ detail: string }>)
+    ].map((row) => row.detail).join("\n");
+    expect(planDetails).toContain("idx_workbench_candidate_provenance_session");
+    expect(planDetails).toContain("idx_workbench_candidates_signature_history");
+    expect(planDetails).not.toMatch(/SCAN workbench_artifact_candidates/);
     db.close();
   });
 
@@ -397,22 +421,38 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
-  test("preserves and revises split-session proposals until their selected support becomes invalid", async () => {
+  test("rejects unsigned joins and preserves signed proposals until selected support becomes invalid", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
+    expect(() =>
+      proposeArtifactCandidate(db, {
+        kind: "adr",
+        provenanceSessionIds: [explicitArchitectureDecision.id, decisionWithRejectedAlternatives.id],
+        seedSessionId: explicitArchitectureDecision.id,
+        signalEvidenceRefs: [
+          "message:decision-local-first:decision",
+          "message:decision-artifact-logbook:alternatives"
+        ],
+        signalSummary: "A weak topic-only join must not become a directed ADR."
+      })
+    ).toThrow("candidate_proposal_multi_session_signature_required");
+
     const proposal = proposeArtifactCandidate(db, {
-      kind: "adr",
-      provenanceSessionIds: [explicitArchitectureDecision.id, decisionWithRejectedAlternatives.id],
-      seedSessionId: explicitArchitectureDecision.id,
+      kind: "runbook",
+      provenanceSessionIds: [repeatedErrorPartOne.id, repeatedErrorPartTwo.id],
+      seedSessionId: repeatedErrorPartOne.id,
       signalEvidenceRefs: [
-        "message:decision-local-first:decision",
-        "message:decision-artifact-logbook:alternatives"
+        "tool_result:repeated-error:1:failure",
+        "file:repeated-error:1:change",
+        "checkpoint:repeated-error:1:verified",
+        "tool_result:repeated-error:2:failure"
       ],
-      signalSummary: "The directed ADR joins an explicit decision to its rejected alternatives."
+      signalSummary: "The directed runbook is joined by exact matching failure signatures.",
+      signatureKey: "error:ssh:codex-command-not-found"
     });
     expect(proposal.origin).toBe("proposal");
 
-    discoverArtifactCandidates(db, [explicitArchitectureDecision.id]);
+    discoverArtifactCandidates(db, [repeatedErrorPartOne.id]);
     expect(getWorkbenchArtifactCandidate(db, proposal.candidateId)?.status).toBe("pending");
 
     db.prepare(
@@ -420,8 +460,8 @@ describe("artifact candidate discovery", () => {
         message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
       ) VALUES ('proposal:unrelated', ?, 'assistant', 'Unrelated follow-up.', 'proposal:unrelated:hash',
         '2026-07-01T14:00:00.000Z', '{}', 'authoritative')`
-    ).run(explicitArchitectureDecision.id);
-    discoverArtifactCandidates(db, [explicitArchitectureDecision.id]);
+    ).run(repeatedErrorPartOne.id);
+    discoverArtifactCandidates(db, [repeatedErrorPartOne.id]);
     const revised = listWorkbenchArtifactCandidates(db).find(
       (candidate) => candidate.origin === "proposal" && candidate.status === "pending"
     )!;
@@ -431,16 +471,16 @@ describe("artifact candidate discovery", () => {
     db.prepare("UPDATE messages SET text_redacted = text_redacted || ' More context.' WHERE message_id = ?").run(
       "proposal:unrelated"
     );
-    expect(discoverArtifactCandidates(db, [explicitArchitectureDecision.id])).toEqual([]);
+    expect(discoverArtifactCandidates(db, [repeatedErrorPartOne.id])).toEqual([]);
     expect(getWorkbenchArtifactCandidate(db, revised.candidateId)?.status).toBe("claimed");
 
     setWorkbenchArtifactCandidateStatus(db, { candidateId: revised.candidateId, status: "pending" });
-    discoverArtifactCandidates(db, [explicitArchitectureDecision.id]);
+    discoverArtifactCandidates(db, [repeatedErrorPartOne.id]);
     const latest = listWorkbenchArtifactCandidates(db).find(
       (candidate) => candidate.origin === "proposal" && candidate.status === "pending"
     )!;
-    db.prepare("DELETE FROM messages WHERE message_id = 'decision-local-first:decision'").run();
-    discoverArtifactCandidates(db, [explicitArchitectureDecision.id]);
+    db.prepare("DELETE FROM checkpoints WHERE checkpoint_id = 'repeated-error:1:verified'").run();
+    discoverArtifactCandidates(db, [repeatedErrorPartOne.id]);
     expect(getWorkbenchArtifactCandidate(db, latest.candidateId)?.status).toBe("superseded");
     expect(
       listWorkbenchArtifactCandidates(db).some(
@@ -851,7 +891,7 @@ describe("artifact candidate discovery", () => {
         ],
         signalSummary: "These refs have all categories but no coherent chronological chain."
       })
-    ).toThrow("candidate_proposal_kind_signals_missing");
+    ).toThrow("candidate_proposal_multi_session_signature_required");
     expect(() =>
       proposeArtifactCandidate(db, {
         kind: "adr",
@@ -877,11 +917,11 @@ describe("artifact candidate discovery", () => {
         ],
         signalSummary: "Unrelated dossier evidence cannot pad valid runbook provenance."
       })
-    ).toThrow("candidate_proposal_signal_evidence_extra:message:dossier-question:1");
+    ).toThrow("candidate_proposal_multi_session_signature_required");
     db.close();
   });
 
-  test("allows a directed proposal to recover positive signals split across named sessions", async () => {
+  test("rejects unsigned directed proposals with positive signals split across sessions", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
     db.prepare("UPDATE messages SET text_redacted = ? WHERE message_id = ?").run(
@@ -897,19 +937,15 @@ describe("artifact candidate discovery", () => {
       discoverArtifactCandidates(db, [dossierOnlyQuestion.id, "session:dossier-sparse"])
     ).toEqual([]);
 
-    const proposed = proposeArtifactCandidate(db, {
-      kind: "adr",
-      provenanceSessionIds: [dossierOnlyQuestion.id, "session:dossier-sparse"],
-      seedSessionId: dossierOnlyQuestion.id,
-      signalEvidenceRefs: ["message:dossier-question:1", "message:dossier-sparse:1"],
-      signalSummary: "Directed review connected an explicit decision to its rejected alternative."
-    });
-
-    expect(proposed).toMatchObject({
-      kind: "adr",
-      provenanceSessionIds: ["session:dossier-question", "session:dossier-sparse"],
-      status: "pending"
-    });
+    expect(() =>
+      proposeArtifactCandidate(db, {
+        kind: "adr",
+        provenanceSessionIds: [dossierOnlyQuestion.id, "session:dossier-sparse"],
+        seedSessionId: dossierOnlyQuestion.id,
+        signalEvidenceRefs: ["message:dossier-question:1", "message:dossier-sparse:1"],
+        signalSummary: "Directed review cannot join sessions without a strong evidence key."
+      })
+    ).toThrow("candidate_proposal_multi_session_signature_required");
     db.close();
   });
 
@@ -939,6 +975,55 @@ describe("artifact candidate discovery", () => {
     expect(
       db.prepare("SELECT COUNT(*) AS count FROM workbench_artifact_candidates WHERE status = 'dismissed'").get()
     ).toEqual({ count: 1 });
+    const unchanged = discoverArtifactCandidates(db, corpusSessionIds()).find(
+      (entry) => entry.candidateId === candidate.candidateId
+    );
+    expect(unchanged?.status).toBe("dismissed");
+    expect(
+      db.prepare("SELECT COUNT(*) AS count FROM workbench_artifact_candidates").get()
+    ).toEqual({ count: 7 });
+    db.prepare(
+      `INSERT INTO workbench_artifact_candidates (
+        candidate_id, kind, seed_session_id, provenance_session_ids_json,
+        signal_evidence_refs_json, signal_summary, signature_key, evidence_revision,
+        origin, status, created_at, updated_at
+      ) VALUES ('candidate:active-overlap', ?, ?, ?, ?, 'Different active identity on the same provenance.',
+        'error:synthetic:overlap', 'revision:active-overlap', 'proposal', 'pending', ?, ?)`
+    ).run(
+      candidate.kind,
+      candidate.seedSessionId,
+      JSON.stringify(candidate.provenanceSessionIds),
+      JSON.stringify(candidate.signalEvidenceRefs),
+      "2026-07-13T00:00:00.000Z",
+      "2026-07-13T00:00:00.000Z"
+    );
+    const withActiveOverlap = discoverArtifactCandidates(db, candidate.provenanceSessionIds).find(
+      (entry) => entry.candidateId === candidate.candidateId
+    );
+    expect(withActiveOverlap?.status).toBe("dismissed");
+    db.close();
+  });
+
+  test("keeps an exactly unchanged directed proposal dismissed until its evidence changes", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const original = proposeOauthRunbook(db);
+    dismissWorkbenchArtifactCandidate(db, {
+      candidateId: original.candidateId,
+      reason: "This exact directed procedure is not reusable in the current environment.",
+      signalEvidenceRefs: original.signalEvidenceRefs
+    });
+
+    const unchanged = proposeOauthRunbook(db);
+    expect(unchanged.candidateId).toBe(original.candidateId);
+    expect(unchanged.status).toBe("dismissed");
+
+    db.prepare("UPDATE checkpoints SET summary = summary || ' New environment.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    const changed = proposeOauthRunbook(db);
+    expect(changed.candidateId).not.toBe(original.candidateId);
+    expect(changed).toMatchObject({ status: "pending", supersedesCandidateId: original.candidateId });
     db.close();
   });
 
@@ -1073,7 +1158,7 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
-  test("refills a capped signature group from more than one hundred stored members without rereading them", async () => {
+  test("does not refill a capped signature group from dirty unrescanned stored members", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
     seedAdditionalStrongSignatureSessions(db, 99);
@@ -1106,15 +1191,13 @@ describe("artifact candidate discovery", () => {
     ).toHaveLength(12);
 
     const invalidatedSessionId = original.provenanceSessionIds[0]!;
-    const priorOverflowSessionId = memberRows[12]!.sessionId;
     db.prepare("DELETE FROM checkpoints WHERE session_id = ?").run(invalidatedSessionId);
     db.prepare("DELETE FROM tool_results WHERE session_id = ? AND status = 'succeeded'").run(
       invalidatedSessionId
     );
 
-    // These sessions are deliberately outside the one-row scan below. Their persisted
-    // eligibility snapshot must be sufficient; reconciliation must not inspect their
-    // canonical transcript rows while processing the requested session.
+    // These sessions are deliberately outside the one-row scan below. Deleting their
+    // evidence makes their stored membership stale, so it must not rebuild a candidate.
     const unrequested = memberRows
       .map((row) => row.sessionId)
       .filter((sessionId) => sessionId !== invalidatedSessionId);
@@ -1131,13 +1214,11 @@ describe("artifact candidate discovery", () => {
     const refilled = listWorkbenchArtifactCandidates(db).find(
       (candidate) =>
         candidate.signatureKey === "error:ssh:codex-command-not-found" && candidate.status === "pending"
-    )!;
+    );
 
     expect(refillPage.scannedSessionIds).toEqual([invalidatedSessionId]);
     expect(getWorkbenchArtifactCandidate(db, original.candidateId)?.status).toBe("superseded");
-    expect(refilled.provenanceSessionIds).toHaveLength(12);
-    expect(refilled.provenanceSessionIds).toContain(priorOverflowSessionId);
-    expect(refilled.provenanceSessionIds).not.toContain(invalidatedSessionId);
+    expect(refilled).toBeUndefined();
     db.close();
   });
 
@@ -1153,6 +1234,8 @@ describe("artifact candidate discovery", () => {
     db.prepare("DELETE FROM sessions WHERE session_id = ?").run(repeatedErrorPartTwo.id);
     const superseded = getWorkbenchArtifactCandidate(db, joined.candidateId)!;
     expect(superseded.status).toBe("superseded");
+    expect(superseded.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
+    expect(Date.parse(superseded.updatedAt)).toBeGreaterThanOrEqual(Date.parse(joined.updatedAt));
     expect(superseded.provenanceSessionIds).toEqual([repeatedErrorPartOne.id]);
     expect(
       (

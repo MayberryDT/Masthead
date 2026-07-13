@@ -4,6 +4,7 @@ import {
   getWorkbenchArtifactCandidate,
   getWorkbenchArtifactCandidateSourceRevision,
   findBestWorkbenchArtifactCandidatePredecessor,
+  findExactWorkbenchArtifactCandidate,
   listCurrentWorkbenchArtifactCandidatesForReconciliation,
   listCurrentWorkbenchArtifactCandidatesForSeed,
   listWorkbenchArtifactSignatureMembersForIdentities,
@@ -152,6 +153,9 @@ function proposeArtifactCandidateInTransaction(
       throw new Error(`candidate_proposal_session_not_found:${sessionId}`);
     }
   }
+  if (provenanceSessionIds.length > 1 && !proposal.signatureKey) {
+    throw new Error("candidate_proposal_multi_session_signature_required");
+  }
 
   const signals = provenanceSessionIds.map((sessionId) => extractSessionSignals(db, sessionId));
   const allEvidenceRefs = new Set(signals.flatMap((session) => [...session.evidenceRefs]));
@@ -258,7 +262,7 @@ function reconcileArtifactCandidates(
   const requested = normalizedStrings(requestedSessionIds);
   const previousSignatureMembers = listWorkbenchArtifactSignatureMembersForSessions(db, requested);
   const preliminaryIndividual = individualCandidateSeedsForSessions(db, requested);
-  const preliminarySignatureMembers = signatureMembersFromSeeds(preliminaryIndividual);
+  const preliminarySignatureMembers = signatureMembersFromSeeds(db, preliminaryIndividual);
   const preliminarySeeds = groupCandidateSeeds(preliminaryIndividual);
   const preliminaryIdentities = uniqueSignatureIdentities([
     ...previousSignatureMembers,
@@ -316,11 +320,11 @@ function reconcileArtifactCandidates(
   const activePreliminary = groupCandidateSeeds(activeIndividual);
   const affectedSignatureIdentities = uniqueSignatureIdentities([
     ...previousSignatureMembers.filter((member) => acknowledgedSessionIds.includes(member.sessionId)),
-    ...signatureMembersFromSeeds(activeIndividual)
+    ...signatureMembersFromSeeds(db, activeIndividual)
   ]);
   replaceWorkbenchArtifactSignatureMembersForSessions(db, {
     sessionIds: acknowledgedSessionIds,
-    members: signatureMembersFromSeeds(activeIndividual)
+    members: signatureMembersFromSeeds(db, activeIndividual)
   });
   const storedSignatureMembers = listWorkbenchArtifactSignatureMembersForIdentities(
     db,
@@ -524,7 +528,10 @@ function uniqueSignatureIdentities(
   );
 }
 
-function signatureMembersFromSeeds(seeds: CandidateSeed[]): WorkbenchArtifactSignatureMember[] {
+function signatureMembersFromSeeds(
+  db: MastheadDatabase,
+  seeds: CandidateSeed[]
+): WorkbenchArtifactSignatureMember[] {
   return seeds.flatMap((seed) =>
     seed.signatureKey
       ? [{
@@ -532,6 +539,7 @@ function signatureMembersFromSeeds(seeds: CandidateSeed[]): WorkbenchArtifactSig
           kind: seed.kind,
           sessionId: seed.seedSessionId,
           signalEvidenceRefs: seed.signalEvidenceRefs,
+          sourceRevision: getWorkbenchArtifactCandidateSourceRevision(db, seed.seedSessionId),
           signatureKey: seed.signatureKey
         }]
       : []
@@ -872,6 +880,8 @@ function persistSeeds(
       const current = listCurrentWorkbenchArtifactCandidatesForSeed(db, seed)[0];
       const unchanged = current && candidateMatchesSeedRevision(current, seed) ? current : undefined;
       if (unchanged) return getStoredCandidate(db, unchanged.candidateId);
+      const exact = findExactWorkbenchArtifactCandidate(db, seed);
+      if (exact?.status === "dismissed" && candidateMatchesSeedRevision(exact, seed)) return exact;
       const predecessor = findBestWorkbenchArtifactCandidatePredecessor(db, seed);
       return saveWorkbenchArtifactCandidate(db, {
         candidateId: candidateId(

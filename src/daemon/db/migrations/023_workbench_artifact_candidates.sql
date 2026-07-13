@@ -44,6 +44,14 @@ CREATE INDEX idx_workbench_candidates_status_updated
 CREATE INDEX idx_workbench_candidates_lineage
   ON workbench_artifact_candidates(supersedes_candidate_id);
 
+CREATE INDEX idx_workbench_candidates_signature_history
+  ON workbench_artifact_candidates(kind, signature_key, updated_at DESC)
+  WHERE signature_key IS NOT NULL;
+
+CREATE INDEX idx_workbench_candidates_session_history
+  ON workbench_artifact_candidates(kind, seed_session_id, updated_at DESC)
+  WHERE signature_key IS NULL;
+
 CREATE TABLE workbench_artifact_candidate_provenance (
   candidate_id TEXT NOT NULL REFERENCES workbench_artifact_candidates(candidate_id) ON DELETE CASCADE,
   session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -69,6 +77,7 @@ CREATE TABLE workbench_artifact_candidate_signature_members (
   signature_key TEXT NOT NULL,
   session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
   evidence_revision TEXT NOT NULL,
+  source_revision INTEGER NOT NULL DEFAULT 0,
   signal_evidence_refs_json TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (kind, signature_key, session_id),
@@ -294,7 +303,7 @@ BEGIN
     );
 
   UPDATE workbench_artifact_candidates
-  SET status = 'superseded', updated_at = CURRENT_TIMESTAMP
+  SET status = 'superseded', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
   WHERE status IN ('pending', 'claimed', 'published')
     AND candidate_id IN (
       SELECT candidate_id
@@ -317,7 +326,7 @@ BEGIN
   ON CONFLICT(session_id) DO UPDATE SET source_revision = source_revision + 1;
 
   UPDATE workbench_artifact_candidates
-  SET status = 'superseded', updated_at = CURRENT_TIMESTAMP
+  SET status = 'superseded', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
   WHERE status IN ('pending', 'claimed', 'published')
     AND candidate_id IN (
       SELECT candidate_id

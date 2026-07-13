@@ -31,6 +31,7 @@ export type WorkbenchArtifactSignatureMember = {
   signatureKey: string;
   sessionId: string;
   evidenceRevision: string;
+  sourceRevision: number;
   signalEvidenceRefs: string[];
 };
 
@@ -57,6 +58,7 @@ type SignatureMemberRow = {
   signatureKey: string;
   sessionId: string;
   evidenceRevision: string;
+  sourceRevision: number;
   signalEvidenceRefsJson: string;
 };
 
@@ -166,26 +168,31 @@ export function listCurrentWorkbenchArtifactCandidatesForReconciliation(
   }
 ): StoredWorkbenchArtifactCandidate[] {
   const sessionIds = normalizedStrings(input.sessionIds);
-  const identityClauses = input.identities.map(() => "(c.kind = ? AND c.signature_key = ?)");
-  const relevance = [
-    ...(sessionIds.length > 0 ? [`p.session_id IN (${sessionIds.map(() => "?").join(", ")})`] : []),
-    ...identityClauses
-  ];
-  if (relevance.length === 0) return [];
+  const branches: string[] = [];
+  const params: string[] = [];
+  if (sessionIds.length > 0) {
+    branches.push(
+      `SELECT provenance.candidate_id
+       FROM workbench_artifact_candidate_provenance provenance
+       JOIN workbench_artifact_candidates candidates ON candidates.candidate_id = provenance.candidate_id
+       WHERE provenance.session_id IN (${sessionIds.map(() => "?").join(", ")})
+         AND candidates.status IN ('pending', 'claimed', 'published')`
+    );
+    params.push(...sessionIds);
+  }
+  for (const identity of input.identities) {
+    branches.push(
+      `SELECT candidate_id FROM workbench_artifact_candidates
+       WHERE kind = ? AND signature_key = ? AND status IN ('pending', 'claimed', 'published')`
+    );
+    params.push(identity.kind, identity.signatureKey);
+  }
+  if (branches.length === 0) return [];
   const rows = db.prepare(
     `${CANDIDATE_SELECT}
-     WHERE candidate_id IN (
-       SELECT DISTINCT c.candidate_id
-       FROM workbench_artifact_candidates c
-       LEFT JOIN workbench_artifact_candidate_provenance p ON p.candidate_id = c.candidate_id
-       WHERE c.status IN ('pending', 'claimed', 'published')
-         AND (${relevance.join(" OR ")})
-     )
+     WHERE candidate_id IN (${branches.join(" UNION ")})
      ORDER BY updated_at DESC, candidate_id`
-  ).all(
-    ...sessionIds,
-    ...input.identities.flatMap((identity) => [identity.kind, identity.signatureKey])
-  ) as CandidateRow[];
+  ).all(...params) as CandidateRow[];
   return rows.map(rowToCandidate);
 }
 
@@ -214,27 +221,44 @@ export function findBestWorkbenchArtifactCandidatePredecessor(
   db: MastheadDatabase,
   input: { kind: WorkbenchAutomaticKind; provenanceSessionIds: string[]; seedSessionId: string; signatureKey?: string }
 ): StoredWorkbenchArtifactCandidate | undefined {
+  const exact = findExactWorkbenchArtifactCandidate(db, input);
   const sessionIds = normalizedStrings(input.provenanceSessionIds);
+  if (sessionIds.length === 0) return exact;
+  const row = db.prepare(
+    `${CANDIDATE_SELECT}
+     WHERE kind = ? AND candidate_id IN (
+       SELECT candidate_id FROM workbench_artifact_candidate_provenance
+       WHERE session_id IN (${sessionIds.map(() => "?").join(", ")})
+     )
+     ORDER BY CASE WHEN status IN ('pending', 'claimed', 'published') THEN 0 ELSE 1 END,
+       updated_at DESC, candidate_id
+     LIMIT 1`
+  ).get(input.kind, ...sessionIds) as CandidateRow | undefined;
+  const overlap = row ? rowToCandidate(row) : undefined;
+  if (!exact) return overlap;
+  if (!overlap) return exact;
+  const lifecycleRank = (candidate: StoredWorkbenchArtifactCandidate): number =>
+    candidate.status === "pending" || candidate.status === "claimed" || candidate.status === "published" ? 0 : 1;
+  return lifecycleRank(exact) < lifecycleRank(overlap) ||
+    (lifecycleRank(exact) === lifecycleRank(overlap) && exact.updatedAt >= overlap.updatedAt)
+    ? exact
+    : overlap;
+}
+
+export function findExactWorkbenchArtifactCandidate(
+  db: MastheadDatabase,
+  input: { kind: WorkbenchAutomaticKind; seedSessionId: string; signatureKey?: string }
+): StoredWorkbenchArtifactCandidate | undefined {
   const identityClause = input.signatureKey
     ? "signature_key = ?"
     : "seed_session_id = ? AND signature_key IS NULL";
   const row = db.prepare(
     `${CANDIDATE_SELECT}
-     WHERE kind = ? AND (
-       ${identityClause}
-       OR candidate_id IN (
-         SELECT candidate_id FROM workbench_artifact_candidate_provenance
-         WHERE session_id IN (${sessionIds.map(() => "?").join(", ")})
-       )
-     )
+     WHERE kind = ? AND ${identityClause}
      ORDER BY CASE WHEN status IN ('pending', 'claimed', 'published') THEN 0 ELSE 1 END,
        updated_at DESC, candidate_id
      LIMIT 1`
-  ).get(
-    input.kind,
-    input.signatureKey ?? input.seedSessionId,
-    ...sessionIds
-  ) as CandidateRow | undefined;
+  ).get(input.kind, input.signatureKey ?? input.seedSessionId) as CandidateRow | undefined;
   return row ? rowToCandidate(row) : undefined;
 }
 
@@ -341,6 +365,7 @@ export function listWorkbenchArtifactSignatureMembersForSessions(
           signature_key AS signatureKey,
           session_id AS sessionId,
           evidence_revision AS evidenceRevision,
+          source_revision AS sourceRevision,
           signal_evidence_refs_json AS signalEvidenceRefsJson
          FROM workbench_artifact_candidate_signature_members
          WHERE session_id IN (${placeholders})
@@ -366,14 +391,18 @@ export function listWorkbenchArtifactSignatureMembersForIdentities(
     (
       db
         .prepare(
-          `SELECT kind,
-            signature_key AS signatureKey,
-            session_id AS sessionId,
-            evidence_revision AS evidenceRevision,
-            signal_evidence_refs_json AS signalEvidenceRefsJson
-           FROM workbench_artifact_candidate_signature_members
-           WHERE kind = ? AND signature_key = ?
-           ORDER BY session_id
+          `SELECT members.kind,
+            members.signature_key AS signatureKey,
+            members.session_id AS sessionId,
+            members.evidence_revision AS evidenceRevision,
+            members.source_revision AS sourceRevision,
+            members.signal_evidence_refs_json AS signalEvidenceRefsJson
+           FROM workbench_artifact_candidate_signature_members members
+           LEFT JOIN workbench_artifact_candidate_source_revisions revisions
+             ON revisions.session_id = members.session_id
+           WHERE members.kind = ? AND members.signature_key = ?
+             AND members.source_revision = COALESCE(revisions.source_revision, 0)
+           ORDER BY members.session_id
            LIMIT 12`
         )
         .all(identity.kind, identity.signatureKey) as SignatureMemberRow[]
@@ -393,7 +422,8 @@ export function replaceWorkbenchArtifactSignatureMembersForSessions(
   const insert = db.prepare(
     `INSERT INTO workbench_artifact_candidate_signature_members (
       kind, signature_key, session_id, evidence_revision, signal_evidence_refs_json, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?)`
+      , source_revision
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
   const updatedAt = new Date().toISOString();
   for (const member of input.members) {
@@ -404,7 +434,8 @@ export function replaceWorkbenchArtifactSignatureMembersForSessions(
       member.sessionId,
       member.evidenceRevision,
       JSON.stringify(normalizedStrings(member.signalEvidenceRefs)),
-      updatedAt
+      updatedAt,
+      member.sourceRevision
     );
   }
 }
@@ -458,6 +489,7 @@ function rowToSignatureMember(row: SignatureMemberRow): WorkbenchArtifactSignatu
     signatureKey: row.signatureKey,
     sessionId: row.sessionId,
     evidenceRevision: row.evidenceRevision,
+    sourceRevision: row.sourceRevision,
     signalEvidenceRefs: JSON.parse(row.signalEvidenceRefsJson) as string[]
   };
 }
