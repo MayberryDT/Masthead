@@ -103,6 +103,19 @@ describe("production lifecycle launcher", () => {
     expect(Math.max(...sleeps)).toBe(250);
   });
 
+  test("rejects a successful health response that arrives after the monotonic deadline", async () => {
+    let now = 0;
+    await expect(waitForProductionHealth({ port: 17383 }, {
+      delay: async (milliseconds: number) => { now += milliseconds; },
+      fetchHealth: async () => {
+        now += 300_001;
+        return { ok: true };
+      },
+      now: () => now
+    })).rejects.toThrow("within 5 minutes");
+    expect(now).toBe(300_001);
+  });
+
   test("reads proc executable symlink text so deleted kernel identities remain observable", async () => {
     const source = await readFile("scripts/masthead-production.js", "utf8");
     expect(source).toContain('readlink(join(processRoot, "exe"))');

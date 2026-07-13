@@ -680,6 +680,7 @@ export async function waitForProductionHealth(config, adapters = {}) {
     const requestBudget = Math.min(750, deadline - now());
     if (requestBudget <= 0) break;
     const health = await fetchAdapter(config.port, requestBudget);
+    if (now() >= deadline) break;
     if (health) return health;
     const sleepBudget = Math.min(policy.intervalMs, deadline - now());
     if (sleepBudget <= 0) break;
