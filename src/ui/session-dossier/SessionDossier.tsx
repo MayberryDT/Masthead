@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import type { SessionTranscriptKindFilter, SessionTranscriptResult } from "../../app/daemonClient";
 import type { SafeAction, SessionDetailView } from "../../core/types";
-import type { SessionDossierDto, SessionDossierTimelineEvent } from "../../shared/sessionDossier";
+import type {
+  ReadableSessionDossier,
+  SessionDossierArtifact,
+  SessionDossierDto,
+  SessionDossierTimelineEvent
+} from "../../shared/sessionDossier";
 import type { SessionTranscriptItem } from "../../shared/sessionTranscript";
 import { AppButton } from "../primitives/AppButton";
 import { readableTranscriptText } from "./transcriptPresentation";
@@ -11,7 +16,7 @@ type TimelineFilter = "all" | "user" | "assistant" | "tools" | "checkpoints" | "
 
 type Props = {
   live?: SessionDetailView;
-  dossier?: SessionDossierDto;
+  dossier?: ReadableSessionDossier;
   loading?: boolean;
   error?: string;
   dossierEnrichmentBusy?: boolean;
@@ -31,6 +36,7 @@ type Props = {
   actionStatus?: string;
   onClose?: () => void;
   titleId?: string;
+  showClose?: boolean;
 };
 
 const formatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
@@ -42,7 +48,20 @@ const transcriptFilters: Array<{ label: string; value: SessionTranscriptKindFilt
   { label: "Tools", value: "tools" }
 ];
 
-export function SessionDossier({
+export function SessionDossier(props: Props) {
+  return (
+    <section className="session-dossier stage" aria-label="Session dossier">
+      <div className="backdrop">
+        <article className="dossier" aria-label="Session dossier modal">
+          <SessionDossierContentImpl {...props} showClose />
+        </article>
+      </div>
+    </section>
+  );
+}
+
+/** Shared original dossier presentation. Use SessionDossierContent outside the live modal. */
+export function SessionDossierContentImpl({
   dossier,
   dossierEnrichmentBusy = false,
   dossierEnrichmentError,
@@ -52,6 +71,7 @@ export function SessionDossier({
   onClose,
   onTranscriptFilterChange,
   onTranscriptLoadMore,
+  showClose = true,
   titleId,
   transcript,
   transcriptError,
@@ -99,9 +119,7 @@ export function SessionDossier({
   }, [onTranscriptLoadMore, transcript?.nextCursor, transcriptLoading]);
 
   return (
-    <section className="session-dossier stage" aria-label="Session dossier">
-      <div className="backdrop">
-        <article className="dossier" aria-label="Session dossier modal">
+    <>
           <header className="dossier-header">
             <div className="meta-rail" aria-label="Session identity metadata">
               <MetaCell label="Project" value={identity?.project ?? live?.project ?? "Not captured"} />
@@ -116,9 +134,11 @@ export function SessionDossier({
                 <h2 id={titleId}>{title}</h2>
                 <p>{description}</p>
               </div>
-              <AppButton className="close" variant="icon" type="button" aria-label="Close session dossier" onClick={onClose}>
-                &times;
-              </AppButton>
+              {showClose ? (
+                <AppButton className="close" variant="icon" type="button" aria-label="Close session dossier" onClick={onClose}>
+                  &times;
+                </AppButton>
+              ) : null}
             </div>
           </header>
 
@@ -313,9 +333,7 @@ export function SessionDossier({
               </div>
             </section>
           </div>
-        </article>
-      </div>
-    </section>
+    </>
   );
 }
 
@@ -345,7 +363,7 @@ function DossierEnrichmentPanel({
   loading,
   summary
 }: {
-  dossier?: SessionDossierDto;
+  dossier?: ReadableSessionDossier;
   enrichmentBusy?: boolean;
   enrichmentError?: string;
   error?: string;
@@ -387,7 +405,7 @@ function DossierEnrichmentPanel({
   );
 }
 
-function DossierDurableMemory({ dossier }: { dossier?: SessionDossierDto }) {
+function DossierDurableMemory({ dossier }: { dossier?: ReadableSessionDossier }) {
   const durable = currentDurableEnrichment(dossier);
   if (!durable) return null;
   const memory = durable.sessionDossier;
@@ -436,7 +454,7 @@ function DurableList({ label, values }: { label: string; values: string[] }) {
   );
 }
 
-function WorkbenchArtifactsSection({ dossier }: { dossier?: SessionDossierDto }) {
+function WorkbenchArtifactsSection({ dossier }: { dossier?: ReadableSessionDossier }) {
   const artifacts = dossier?.artifacts ?? [];
   if (artifacts.length === 0) return null;
   return (
@@ -460,7 +478,7 @@ function WorkbenchArtifactsSection({ dossier }: { dossier?: SessionDossierDto })
   );
 }
 
-function artifactKindLabel(kind: SessionDossierDto["artifacts"][number]["artifactKind"]): string {
+function artifactKindLabel(kind: SessionDossierArtifact["artifactKind"]): string {
   return kind === "runbook" ? "Runbook" : "Session Dossier";
 }
 
@@ -508,7 +526,7 @@ function SummaryFact({ label, value }: { label: string; value?: string | number 
   );
 }
 
-function DossierEvidenceBlocks({ dossier, hasCurrentEnrichment }: { dossier?: SessionDossierDto; hasCurrentEnrichment: boolean }) {
+function DossierEvidenceBlocks({ dossier, hasCurrentEnrichment }: { dossier?: ReadableSessionDossier; hasCurrentEnrichment: boolean }) {
   const values = [
     ...(hasCurrentEnrichment ? (dossier?.narrative.topics ?? []).map((value) => ({ className: "is-blue", value })) : []),
     ...(dossier?.reuse.mcpIncluded ? [{ className: "is-green", value: "Agent retrieval ready (MCP included)" }] : []),
@@ -598,7 +616,7 @@ function compactTranscriptRows(items?: SessionTranscriptItem[]): CompactTranscri
     .filter((item) => item.displayText.length > 0);
 }
 
-function dossierTitle(dossier?: SessionDossierDto, live?: SessionDetailView): string {
+function dossierTitle(dossier?: ReadableSessionDossier, live?: SessionDetailView): string {
   const candidates = [
     currentDurableEnrichment(dossier)?.sessionTitle.text,
     dossier?.identity.title,
@@ -613,7 +631,7 @@ function dossierDescription(summary: string | undefined, live?: SessionDetailVie
   return candidates.map(readableTranscriptText).find(isPlainDossierCopy) ?? "Canonical identifiers and reusable session context.";
 }
 
-function dossierEnrichmentStatus(dossier: SessionDossierDto | undefined, loading?: boolean, enrichmentBusy?: boolean): string {
+function dossierEnrichmentStatus(dossier: ReadableSessionDossier | undefined, loading?: boolean, enrichmentBusy?: boolean): string {
   if (enrichmentBusy || dossier?.enrichment.status === "enriching") return "Enriching";
   if (!dossier) return loading ? "Loading" : "Live";
   if (dossier.enrichment.status === "current") return "Current";
@@ -621,16 +639,16 @@ function dossierEnrichmentStatus(dossier: SessionDossierDto | undefined, loading
   return "Not enriched";
 }
 
-function hasCurrentDossierEnrichment(dossier?: SessionDossierDto): boolean {
+function hasCurrentDossierEnrichment(dossier?: ReadableSessionDossier): boolean {
   return Boolean(currentDurableEnrichment(dossier) || currentNarrativeDebug(dossier));
 }
 
-function currentDurableEnrichment(dossier?: SessionDossierDto) {
+function currentDurableEnrichment(dossier?: ReadableSessionDossier) {
   const durable = dossier?.durableEnrichment;
   return durable?.promptVersion === CURRENT_SESSION_CAPSULE_VERSION || durable?.version === CURRENT_SESSION_CAPSULE_VERSION ? durable : undefined;
 }
 
-function currentNarrativeDebug(dossier?: SessionDossierDto): SessionDossierDto["narrative"]["narrativeDebug"] | undefined {
+function currentNarrativeDebug(dossier?: ReadableSessionDossier): ReadableSessionDossier["narrative"]["narrativeDebug"] | undefined {
   const debug = dossier?.narrative.narrativeDebug;
   if (debug?.promptVersion !== CURRENT_SESSION_CAPSULE_VERSION) return undefined;
   if (debug.failureCode) return undefined;
@@ -638,7 +656,7 @@ function currentNarrativeDebug(dossier?: SessionDossierDto): SessionDossierDto["
   return debug;
 }
 
-function dossierSummary(dossier?: SessionDossierDto, live?: SessionDetailView): string | undefined {
+function dossierSummary(dossier?: ReadableSessionDossier, live?: SessionDetailView): string | undefined {
   const narrative = dossier?.narrative;
   const hasCurrentEnrichment = hasCurrentDossierEnrichment(dossier);
   const candidates = [
@@ -659,12 +677,12 @@ function dossierSummary(dossier?: SessionDossierDto, live?: SessionDetailView): 
   return summary ? sentence(summary) : undefined;
 }
 
-function dossierSummaryExtras(dossier?: SessionDossierDto): string[] {
+function dossierSummaryExtras(dossier?: ReadableSessionDossier): string[] {
   if (!hasCurrentDossierEnrichment(dossier)) return [];
   return [dossier?.narrative.outcome].map(readableTranscriptText).filter(isPlainDossierCopy);
 }
 
-function dossierRetrievalNotes(dossier?: SessionDossierDto): string[] | undefined {
+function dossierRetrievalNotes(dossier?: ReadableSessionDossier): string[] | undefined {
   const memory = currentDurableEnrichment(dossier)?.sessionDossier;
   const hasCurrentEnrichment = Boolean(memory || hasCurrentDossierEnrichment(dossier));
   const durableValues = [

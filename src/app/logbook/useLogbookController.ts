@@ -1,21 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LogbookFilterState, LogbookLoadState } from "../../ui/HistoryPanel";
 import type { AppSurface } from "../../ui/ObservabilitySidebar";
-import {
-  getLogbookArtifact,
-  listProjects,
-  searchLogbook,
-  type AdapterStatus,
-  type LogbookSearchResult,
-  type LogbookSort
-} from "../daemonClient";
-import {
-  logbookPageSearchFilters,
-  readCachedLogbookPage,
-  writeCachedLogbookPage,
-  type LogbookPageCacheRequest
-} from "../logbookPageCache";
-import { toLogbookInspectorArtifact, type LogbookInspectorArtifact } from "./logbookInspectorModel";
+import { getLogbookArtifact, getSessionTranscript, listProjects, searchLogbook, type AdapterStatus, type LogbookSearchResult, type LogbookSort } from "../daemonClient";
+import { logbookPageSearchFilters, readCachedLogbookPage, writeCachedLogbookPage, type LogbookPageCacheRequest } from "../logbookPageCache";
+import { isPublishedSessionDossierV1, toLogbookInspectorArtifact, type LogbookInspectorArtifact } from "./logbookInspectorModel";
 
 const LOGBOOK_PAGE_SIZE = 50;
 
@@ -27,13 +15,7 @@ type UseLogbookControllerInput = {
   isLive: boolean;
 };
 
-export function useLogbookController({
-  activeProjectionUrl,
-  activeSurface,
-  adapters: _adapters,
-  externalRefreshKey,
-  isLive
-}: UseLogbookControllerInput) {
+export function useLogbookController({ activeProjectionUrl, activeSurface, adapters: _adapters, externalRefreshKey, isLive }: UseLogbookControllerInput) {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<LogbookSearchResult>();
   const [loading, setLoading] = useState(false);
@@ -144,11 +126,30 @@ export function useLogbookController({
     setSelectedArtifact(undefined);
     setDetailError(undefined);
     setDetailLoading(true);
-    void getLogbookArtifact(selectedSessionId, activeProjectionUrl, { signal: controller.signal })
-      .then((detail) => {
+    void getLogbookArtifact(selectedSessionId, activeProjectionUrl, {
+      signal: controller.signal
+    })
+      .then(async (detail) => {
         if (controller.signal.aborted) return;
-        setSelectedArtifact(toLogbookInspectorArtifact(detail));
+        const artifact = toLogbookInspectorArtifact(detail);
+        setSelectedArtifact(artifact);
         setDetailError(undefined);
+        if (artifact.kind !== "session_dossier" || !isPublishedSessionDossierV1(artifact.body) || artifact.provenanceSessionIds.length !== 1) {
+          return;
+        }
+
+        try {
+          const provenanceTranscript = await loadProvenanceTranscript(artifact.provenanceSessionIds[0], activeProjectionUrl, controller.signal);
+          if (controller.signal.aborted) return;
+          setSelectedArtifact({ ...artifact, provenanceTranscript });
+        } catch (transcriptError: unknown) {
+          if (controller.signal.aborted) return;
+          console.error("[masthead] Logbook provenance transcript failed", transcriptError);
+          setSelectedArtifact({
+            ...artifact,
+            provenanceTranscriptError: "Could not load transcript evidence"
+          });
+        }
       })
       .catch((loadError: unknown) => {
         if (!controller.signal.aborted) {
@@ -225,4 +226,26 @@ export function useLogbookController({
     selectedSessionId,
     sort
   };
+}
+
+async function loadProvenanceTranscript(sessionId: string, baseUrl: string, signal: AbortSignal) {
+  let cursor: string | undefined;
+  let result: Awaited<ReturnType<typeof getSessionTranscript>> | undefined;
+  const items: Awaited<ReturnType<typeof getSessionTranscript>>["items"] = [];
+  const seenCursors = new Set<string>();
+
+  do {
+    const page = await getSessionTranscript(sessionId, { cursor, limit: 200 }, baseUrl, { signal });
+    if (!result) result = page;
+    items.push(...page.items);
+    if (!page.nextCursor || seenCursors.has(page.nextCursor)) {
+      cursor = undefined;
+    } else {
+      seenCursors.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+  } while (cursor && !signal.aborted);
+
+  if (!result) throw new Error("Transcript pagination returned no result");
+  return { ...result, items };
 }

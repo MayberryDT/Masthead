@@ -932,6 +932,48 @@
   color: var(--mute);
 }
 
+/* The canonical Logbook artifact reuses the dossier body inside a narrow inspector. */
+.session-dossier.is-compact-shell .dossier {
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  border-width: 1px;
+}
+
+.session-dossier.is-compact-shell .meta-rail,
+.session-dossier.is-compact-shell .metrics,
+.session-dossier.is-compact-shell .summary-grid,
+.session-dossier.is-compact-shell .advanced,
+.session-dossier.is-compact-shell .evidence-blocks,
+.session-dossier.is-compact-shell .advanced-details-panel {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.session-dossier.is-compact-shell .meta-cell:nth-child(even) {
+  border-right: 0;
+}
+
+.session-dossier.is-compact-shell .content-grid {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "summary"
+    "metrics"
+    "transcript"
+    "advanced";
+}
+
+.session-dossier.is-compact-shell .metrics {
+  grid-template-rows: none;
+}
+
+.session-dossier.is-compact-shell .summary {
+  height: 520px;
+}
+
+.session-dossier.is-compact-shell .transcript li {
+  grid-template-columns: 64px 96px minmax(0, 1fr);
+}
+
 @media (max-width: 920px) {
   .session-detail-modal.session-dossier-modal {
     width: min(100%, calc(100vw - 24px));

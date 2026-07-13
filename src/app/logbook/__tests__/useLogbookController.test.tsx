@@ -5,16 +5,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { HistoryPanel } from "../../../ui/HistoryPanel";
 import { useLogbookController } from "../useLogbookController";
-import {
-  getLogbookArtifact,
-  listProjects,
-  searchLogbook,
-  type LogbookArtifactDetail,
-  type LogbookSession
-} from "../../daemonClient";
+import { getLogbookArtifact, getSessionTranscript, listProjects, searchLogbook, type LogbookArtifactDetail, type LogbookSession } from "../../daemonClient";
 
 const daemonClientMocks = vi.hoisted(() => ({
   getLogbookArtifact: vi.fn(),
+  getSessionTranscript: vi.fn(),
   listProjects: vi.fn(),
   searchLogbook: vi.fn()
 }));
@@ -39,6 +34,42 @@ afterEach(async () => {
 });
 
 describe("useLogbookController artifact detail", () => {
+  test("loads canonical dossier transcript evidence from its single provenance session through pagination", async () => {
+    mockLogbookSearch([session("artifact-canonical", "Canonical dossier")], 1);
+    vi.mocked(getLogbookArtifact).mockResolvedValueOnce(canonicalArtifactDetail("artifact-canonical", "canonical-session-1"));
+    vi.mocked(getSessionTranscript).mockResolvedValueOnce(transcriptPage("first", "cursor-2")).mockResolvedValueOnce(transcriptPage("second"));
+    await renderHarness();
+
+    await act(async () => {
+      latestController?.selectSession("artifact-canonical");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    await flushAsync();
+
+    expect(getSessionTranscript).toHaveBeenNthCalledWith(1, "canonical-session-1", expect.objectContaining({ cursor: undefined }), baseUrl, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(getSessionTranscript).toHaveBeenNthCalledWith(2, "canonical-session-1", expect.objectContaining({ cursor: "cursor-2" }), baseUrl, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(latestController?.selectedArtifact?.provenanceTranscript?.items.map((item) => item.text)).toEqual(["first", "second"]);
+  });
+
+  test("keeps the canonical dossier readable when provenance transcript loading fails", async () => {
+    mockLogbookSearch([session("artifact-canonical", "Canonical dossier")], 1);
+    vi.mocked(getLogbookArtifact).mockResolvedValueOnce(canonicalArtifactDetail("artifact-canonical", "canonical-session-1"));
+    vi.mocked(getSessionTranscript).mockRejectedValueOnce(new Error("transcript unavailable"));
+    await renderHarness();
+
+    await act(async () => {
+      latestController?.selectSession("artifact-canonical");
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(latestController?.selectedArtifact?.title).toBe("Artifact");
+    expect(latestController?.detailError).toBeUndefined();
+    expect(latestController?.selectedArtifact?.provenanceTranscriptError).toBe("Could not load transcript evidence");
+    expect(container?.textContent).toContain("Transcript error: Could not load transcript evidence");
+  });
+
   test("selecting a row id loads artifact detail via getLogbookArtifact", async () => {
     mockLogbookSearch([session("session-a", "First artifact")], 1);
     vi.mocked(getLogbookArtifact).mockResolvedValueOnce(artifactDetail("session-a", "Problem body"));
@@ -132,7 +163,7 @@ describe("useLogbookController artifact detail", () => {
     await flushAsync();
 
     expect(getLogbookArtifact).toHaveBeenCalledTimes(1);
-    expect(Object.keys(daemonClientMocks)).toEqual(["getLogbookArtifact", "listProjects", "searchLogbook"]);
+    expect(getSessionTranscript).not.toHaveBeenCalled();
     expect(latestController).not.toHaveProperty("dossier");
     expect(latestController).not.toHaveProperty("transcript");
     expect(latestController).not.toHaveProperty("bulkEnrichFull");
@@ -153,6 +184,97 @@ async function renderHarness(): Promise<void> {
   await flushAsync();
 }
 
+function canonicalArtifactDetail(artifactId: string, provenanceSessionId: string): LogbookArtifactDetail {
+  return {
+    ...artifactDetail(artifactId, "ignored legacy problem"),
+    body: canonicalDossierBody(provenanceSessionId),
+    provenanceSessionIds: [provenanceSessionId],
+    schemaVersion: "canonical-session-dossier-v1"
+  };
+}
+
+function canonicalDossierBody(sessionId: string) {
+  return {
+    snapshotVersion: "canonical-session-dossier-v1",
+    capturedAt: "2026-07-12T18:00:00.000Z",
+    attention: [],
+    coverage: {
+      level: "complete",
+      transcript: transcriptCoverage(),
+      warnings: []
+    },
+    enrichment: { status: "current" },
+    excerpts: [],
+    files: [],
+    identity: {
+      hostId: "host:test",
+      lastActivityAt: "2026-07-12T18:00:00.000Z",
+      lifecycle: "ended",
+      models: ["gpt-5"],
+      project: "Masthead",
+      runtime: "codex",
+      sessionId,
+      sourceConfidence: "authoritative",
+      sourceSessionId: `source:${sessionId}`,
+      startedAt: "2026-07-12T17:00:00.000Z",
+      title: "Canonical dossier"
+    },
+    narrative: {
+      objective: "Restore the original dossier.",
+      technologies: [],
+      topics: [],
+      unresolved: []
+    },
+    reuse: {
+      canonicalSessionId: sessionId,
+      copyableContext: "Canonical dossier",
+      mcpIncluded: true,
+      sourceConfidence: "authoritative",
+      sourceRuntime: "codex",
+      sourceSessionId: `source:${sessionId}`
+    },
+    timeline: [],
+    tools: [],
+    usage: { usageRows: 0 },
+    verification: { commands: [], status: "not_run", summary: "Not run." }
+  };
+}
+
+function transcriptCoverage() {
+  return {
+    assistantMessages: 1,
+    checkpoints: 0,
+    fileEffects: 0,
+    hasUsableTranscript: true,
+    lowValueItems: 0,
+    messages: 2,
+    runtimeSignals: 0,
+    toolCalls: 0,
+    toolResults: 0,
+    userMessages: 1
+  };
+}
+
+function transcriptPage(text: string, nextCursor?: string) {
+  return {
+    coverage: transcriptCoverage(),
+    items: [
+      {
+        itemId: `message:${text}`,
+        kind: "message" as const,
+        label: "assistant",
+        observedAt: "2026-07-12T18:00:00.000Z",
+        role: "assistant" as const,
+        sessionId: "canonical-session-1",
+        sourceRef: {},
+        text
+      }
+    ],
+    nextCursor,
+    total: 2
+  };
+}
+
 function LogbookHarness() {
   const logbook = useLogbookController({
     activeProjectionUrl: baseUrl,
@@ -164,34 +286,15 @@ function LogbookHarness() {
   useEffect(() => {
     latestController = logbook;
   });
-  return (
-    <HistoryPanel
-      density="compact"
-      detailError={logbook.detailError}
-      detailLoading={logbook.detailLoading}
-      filterOptions={logbook.filterOptions}
-      filters={logbook.filters}
-      loadState={logbook.loadState}
-      pageIndex={logbook.pageIndex}
-      pageSize={logbook.pageSize}
-      query={logbook.query}
-      refreshError={logbook.refreshError}
-      selectedArtifact={logbook.selectedArtifact}
-      selectedSessionId={logbook.selectedSessionId}
-      sort={logbook.sort}
-      onCloseDetail={logbook.closeSession}
-      onFilterChange={logbook.changeFilters}
-      onPageChange={logbook.changePage}
-      onQueryChange={logbook.changeQuery}
-      onRetry={logbook.retry}
-      onSessionSelect={logbook.selectSession}
-      onSortChange={logbook.changeSort}
-    />
-  );
+  return <HistoryPanel density="compact" detailError={logbook.detailError} detailLoading={logbook.detailLoading} filterOptions={logbook.filterOptions} filters={logbook.filters} loadState={logbook.loadState} pageIndex={logbook.pageIndex} pageSize={logbook.pageSize} query={logbook.query} refreshError={logbook.refreshError} selectedArtifact={logbook.selectedArtifact} selectedSessionId={logbook.selectedSessionId} sort={logbook.sort} onCloseDetail={logbook.closeSession} onFilterChange={logbook.changeFilters} onPageChange={logbook.changePage} onQueryChange={logbook.changeQuery} onRetry={logbook.retry} onSessionSelect={logbook.selectSession} onSortChange={logbook.changeSort} />;
 }
 
 function mockLogbookSearch(sessions: LogbookSession[], total: number): void {
-  vi.mocked(searchLogbook).mockResolvedValue({ nextCursor: undefined, sessions, total });
+  vi.mocked(searchLogbook).mockResolvedValue({
+    nextCursor: undefined,
+    sessions,
+    total
+  });
 }
 
 function mockMetadata(): void {

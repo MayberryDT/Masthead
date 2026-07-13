@@ -8,10 +8,32 @@ import type { SessionDetailView } from "../../../core/types";
 import type { SessionDossierDto } from "../../../shared/sessionDossier";
 import { DossierTranscript } from "../DossierTranscript";
 import { SessionDossier } from "../SessionDossier";
+import { SessionDossierContent } from "../SessionDossierContent";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("SessionDossier", () => {
+  test("shares the original dossier evidence presentation without the modal shell", () => {
+    const html = renderToStaticMarkup(
+      <SessionDossierContent
+        compactShell
+        dossier={dossier()}
+        transcript={{
+          coverage: dossier().coverage.transcript,
+          items: [],
+          total: 0
+        }}
+      />
+    );
+
+    expect(html).toContain("Transcript evidence");
+    expect(html).toContain("Needs attention");
+    expect(html).toContain("Tools");
+    expect(html).toContain("Timeline");
+    expect(html).not.toContain("session-dossier stage");
+    expect(html).not.toContain("Close session dossier");
+  });
+
   test("uses the selected prototype grid and scroll-window classes", () => {
     const css = readFileSync("src/styles/session-dossier.css", "utf8");
     const backdropRule = css.match(/\.session-dossier\s+\.backdrop\s*\{[^}]+\}/)?.[0] ?? "";
@@ -27,7 +49,7 @@ describe("SessionDossier", () => {
     expect(dossierRule).toContain("max-height: calc(100vh - 48px);");
     expect(dossierRule).toContain("overflow-y: auto;");
     expect(gridRule).toContain("grid-template-areas:");
-    expect(gridRule).toContain("\"summary metrics\"");
+    expect(gridRule).toContain('"summary metrics"');
     expect(summaryRule).toContain("height: 626px;");
     expect(summaryScrollRule).toContain("overflow-y: auto;");
     expect(advancedPanelRule).toContain("grid-template-columns: repeat(4, minmax(0, 1fr));");
@@ -125,8 +147,8 @@ describe("SessionDossier", () => {
     };
 
     const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
-    const memoryIndex = html.indexOf("data-dossier-section=\"durable-memory\"");
-    const diagnosticIndex = html.indexOf("data-dossier-section=\"diagnostic-coverage\"");
+    const memoryIndex = html.indexOf('data-dossier-section="durable-memory"');
+    const diagnosticIndex = html.indexOf('data-dossier-section="diagnostic-coverage"');
 
     expect(memoryIndex).toBeGreaterThan(-1);
     expect(diagnosticIndex).toBeGreaterThan(memoryIndex);
@@ -143,7 +165,10 @@ describe("SessionDossier", () => {
         artifactId: "artifact-1",
         artifactKind: "session_dossier",
         confidence: "medium",
-        content: { outcome: "Workbench artifacts persist locally.", title: "Persist Workbench dossier" },
+        content: {
+          outcome: "Workbench artifacts persist locally.",
+          title: "Persist Workbench dossier"
+        },
         createdAt: "2026-06-25T23:15:00.000Z",
         evidenceRefs: ["message:canonical-session-1:message"],
         status: "current",
@@ -214,16 +239,8 @@ describe("SessionDossier", () => {
 
   test("uses neutral durable summary and plain-language retrieval notes in default dossier", () => {
     const currentDossier = dossier();
-    currentDossier.narrative.finalAssistantMessage =
-      "I found a precise root cause and fix: the app does not support hash routes, but it leaves #settings in the address bar.";
-    currentDossier.reuse.copyableContext = [
-      "# Masthead Session Context",
-      "Canonical session: session:06850bab04dbc2101a3a380fd866b66d7",
-      "Files:",
-      "- src/app/App.tsx",
-      "Tools:",
-      "- shell: succeeded"
-    ].join("\n");
+    currentDossier.narrative.finalAssistantMessage = "I found a precise root cause and fix: the app does not support hash routes, but it leaves #settings in the address bar.";
+    currentDossier.reuse.copyableContext = ["# Masthead Session Context", "Canonical session: session:06850bab04dbc2101a3a380fd866b66d7", "Files:", "- src/app/App.tsx", "Tools:", "- shell: succeeded"].join("\n");
     currentDossier.durableEnrichment = {
       sessionDossier: {
         blockers: [],
@@ -279,7 +296,17 @@ describe("SessionDossier", () => {
     const root = createRoot(host);
 
     await act(async () => {
-      root.render(<SessionDossier dossier={dossier()} transcript={{ coverage: dossier().coverage.transcript, items: [], total: 0 }} transcriptLoading />);
+      root.render(
+        <SessionDossier
+          dossier={dossier()}
+          transcript={{
+            coverage: dossier().coverage.transcript,
+            items: [],
+            total: 0
+          }}
+          transcriptLoading
+        />
+      );
     });
 
     const summary = host.querySelector(".panel.summary");
@@ -573,7 +600,7 @@ describe("SessionDossier", () => {
     expect(html).toContain("title-block");
     expect(html).toContain("app-button");
     expect(html).toContain("advanced-details-panel");
-    expect(html).toContain("hidden=\"\"");
+    expect(html).toContain('hidden=""');
     expect(html).not.toContain("dossier-hero-actions");
     expect(html).not.toContain("<h4>Context packet</h4>");
     expect(html).not.toContain("<h4>Files</h4>");
@@ -606,17 +633,7 @@ describe("SessionDossier", () => {
   });
 
   test("hides raw system and bracket metadata from the default transcript but keeps raw access in advanced details", async () => {
-    const rawPrompt = [
-      "# AGENTS.md instructions for /tmp/Masthead",
-      "<INSTRUCTIONS>",
-      "# Codex Behavioral Guidelines",
-      "Do not show this repository instruction block by default.",
-      "</INSTRUCTIONS>",
-      "<environment_context>",
-      "<cwd>/tmp/Masthead</cwd>",
-      "</environment_context>",
-      "Please repair [system: hidden metadata] the OAuth callback and keep array[index] readable."
-    ].join("\n");
+    const rawPrompt = ["# AGENTS.md instructions for /tmp/Masthead", "<INSTRUCTIONS>", "# Codex Behavioral Guidelines", "Do not show this repository instruction block by default.", "</INSTRUCTIONS>", "<environment_context>", "<cwd>/tmp/Masthead</cwd>", "</environment_context>", "Please repair [system: hidden metadata] the OAuth callback and keep array[index] readable."].join("\n");
     const rawPermissions = "Filesystem sandboxing defines which files can be read or written. Network access is restricted.";
     const currentDossier = dossier();
     currentDossier.narrative.firstUserPrompt = rawPrompt;
@@ -1134,7 +1151,14 @@ function dossier(): SessionDossierDto {
         model: "gpt-5-nano",
         promptVersion: "session-capsule-v4",
         provider: "openai",
-        sourceRefs: [{ id: "source-ref-1", kind: "event", observedAt: "2026-06-25T23:00:00.000Z", source: "codex" }],
+        sourceRefs: [
+          {
+            id: "source-ref-1",
+            kind: "event",
+            observedAt: "2026-06-25T23:00:00.000Z",
+            source: "codex"
+          }
+        ],
         subjectConfidence: "high",
         subjectSource: "message",
         titleSource: "objective",
