@@ -27,7 +27,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(21);
+    expect(CURRENT_SCHEMA_VERSION).toBe(22);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -105,7 +105,8 @@ describe("daemon database schema", () => {
       { version: 18, name: "018_artifact_first_logbook" },
       { version: 19, name: "019_workbench_authoring_runs" },
       { version: 20, name: "020_normalize_workbench_optional_statuses" },
-      { version: 21, name: "021_artifact_body_search" }
+      { version: 21, name: "021_artifact_body_search" },
+      { version: 22, name: "022_workbench_authoring_v2" }
     ]);
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
     expect(indexes.map((row) => row.name)).toEqual(
@@ -114,7 +115,23 @@ describe("daemon database schema", () => {
         "tool_results_session_status_idx",
         "runtime_signals_session_observed_idx",
         "checkpoints_session_observed_idx",
-        "idx_live_state_reports_session"
+        "idx_live_state_reports_session",
+        "idx_workbench_authoring_run_contract_candidate"
+      ])
+    );
+    const authoringRunColumns = db.prepare("PRAGMA table_info(workbench_authoring_runs)").all() as Array<{
+      dflt_value: string | null;
+      name: string;
+      notnull: number;
+    }>;
+    expect(authoringRunColumns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          dflt_value: "'workbench-authoring-v1'",
+          name: "contract_version",
+          notnull: 1
+        }),
+        expect.objectContaining({ dflt_value: null, name: "candidate_id" })
       ])
     );
     const frameColumns = db.prepare("PRAGMA table_info(board_headline_frames)").all() as Array<{ name: string }>;
@@ -179,8 +196,10 @@ describe("daemon database schema", () => {
     tempDirs.push(tempDir);
     const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
     migrateDatabase(db);
-    db.prepare("DELETE FROM schema_migrations WHERE version >= 20").run();
-    expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 19 });
+    db.prepare("DELETE FROM schema_migrations WHERE version IN (20, 21)").run();
+    expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations WHERE version <= 21").get()).toEqual({
+      version: 19
+    });
 
     const publishedKinds = ["runbook", "adr", "incident_timeline"] as const;
     for (const kind of publishedKinds) {

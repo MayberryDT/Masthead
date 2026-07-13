@@ -9,6 +9,25 @@ export type WorkbenchClaimEvidence = {
   evidenceRefs: string[];
 };
 
+export type WorkbenchClaimSupport = {
+  path: string;
+  evidenceRef: string;
+  excerpt: string;
+  supportKind:
+    | "problem"
+    | "decision"
+    | "alternative"
+    | "change"
+    | "verification"
+    | "timeline"
+    | "remediation"
+    | "root_cause";
+};
+
+export type WorkbenchAuthoringContractVersion =
+  | "workbench-authoring-v1"
+  | "workbench-authoring-v2";
+
 export type WorkbenchAuthoringCapabilitiesDto = {
   capability: "artifact_authoring";
   protocol: "masthead.workbench.authoring/v1";
@@ -124,6 +143,16 @@ export type WorkbenchAuthoringBundle = {
   contributions: WorkbenchContributionDecision[];
 };
 
+export type WorkbenchAuthoringBundleV2 = {
+  bundleVersion: "workbench-authoring-v2";
+  runId: string;
+  candidateId: string;
+  evidenceRevision: string;
+  artifact: WorkbenchArtifactDraft;
+};
+
+export type WorkbenchStoredAuthoringBundle = WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2;
+
 export type WorkbenchAuthoringFinding = {
   code: string;
   message: string;
@@ -147,13 +176,15 @@ export type WorkbenchAuthoringRunDto = {
   actorId: string;
   databaseId: string;
   status: WorkbenchAuthoringRunStatus;
+  contractVersion: WorkbenchAuthoringContractVersion;
+  candidateId?: string;
   evidenceRevision: string;
   sessionIds: string[];
   claimIds: string[];
   claimsExpireAt: string;
   claimStatus: "active" | "expired" | "conflicted" | "released";
   findings: WorkbenchAuthoringFinding[];
-  bundle?: WorkbenchAuthoringBundle;
+  bundle?: WorkbenchStoredAuthoringBundle;
   receipt?: WorkbenchAuthoringReceipt;
   createdAt: string;
   updatedAt: string;

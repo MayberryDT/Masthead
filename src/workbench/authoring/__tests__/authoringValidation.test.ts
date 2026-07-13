@@ -1,12 +1,57 @@
 import { describe, expect, test } from "vitest";
 import type { SessionArtifactRecord } from "../../../daemon/db/sessionArtifactRepository.ts";
-import type { WorkbenchAuthoringBundle } from "../../../shared/workbenchAuthoring.ts";
+import type {
+  WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV2
+} from "../../../shared/workbenchAuthoring.ts";
 import { getWorkbenchSchema } from "../../schemas.ts";
 import type { WorkbenchAuthoringValidationInput, WorkbenchValidationEvidence } from "../../types.ts";
-import { getAuthoringBundleSchema, getWorkbenchAuthoringOutputSchema } from "../authoringSchemas.ts";
+import {
+  getAuthoringBundleSchema,
+  getAuthoringBundleV2Schema,
+  getWorkbenchAuthoringOutputSchema,
+  parseAuthoringBundleV2
+} from "../authoringSchemas.ts";
 import { validateAuthoringBundle } from "../authoringValidation.ts";
 
 describe("Workbench authoring V2 schemas", () => {
+  test("accepts exactly one candidate-scoped optional artifact", () => {
+    expect(parseAuthoringBundleV2(validV2Bundle())).toEqual(validV2Bundle());
+    expect(getAuthoringBundleV2Schema()).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        artifact: { oneOf: expect.any(Array) },
+        bundleVersion: { const: "workbench-authoring-v2" },
+        candidateId: { type: "string" },
+        evidenceRevision: { type: "string" },
+        runId: { type: "string" }
+      },
+      required: ["bundleVersion", "runId", "candidateId", "evidenceRevision", "artifact"],
+      title: "WorkbenchAuthoringBundleV2",
+      type: "object"
+    });
+  });
+
+  test("V2 bundles cannot contain an agent-authored dossier or V1 resolution fields", () => {
+    for (const field of [
+      "sessionPackages",
+      "dossier",
+      "enrichments",
+      "notApplicable",
+      "contributions",
+      "artifacts"
+    ] as const) {
+      const bundle = { ...validV2Bundle(), [field]: [] };
+      expect(() => parseAuthoringBundleV2(bundle)).toThrow(`unexpected_authoring_bundle_property:${field}`);
+    }
+  });
+
+  test("V1 bundles are not accepted by the V2 parser", () => {
+    expect(() => parseAuthoringBundleV2(validAuthoringBundle())).toThrow(
+      "unsupported_authoring_bundle_version"
+    );
+  });
+
   test("adds claim evidence without mutating the V1 registry", () => {
     const v1 = getWorkbenchSchema("session_enrichment");
     const v2 = getWorkbenchAuthoringOutputSchema("session_enrichment");
@@ -60,6 +105,16 @@ describe("Workbench authoring V2 schemas", () => {
     });
   });
 });
+
+function validV2Bundle(): WorkbenchAuthoringBundleV2 {
+  return {
+    artifact: validRunbookDraft(),
+    bundleVersion: "workbench-authoring-v2",
+    candidateId: "candidate:runbook:oauth",
+    evidenceRevision: "sha256:evidence",
+    runId: "authoring:run"
+  };
+}
 
 describe("validateAuthoringBundle", () => {
   test("accepts a grounded bundle that resolves every automatic kind", () => {

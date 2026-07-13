@@ -1,9 +1,12 @@
 import type {
   WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV2,
+  WorkbenchAuthoringContractVersion,
   WorkbenchAuthoringFinding,
   WorkbenchAuthoringReceipt,
   WorkbenchAuthoringRunDto,
-  WorkbenchAuthoringRunStatus
+  WorkbenchAuthoringRunStatus,
+  WorkbenchStoredAuthoringBundle
 } from "../../shared/workbenchAuthoring.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
@@ -13,6 +16,8 @@ type WorkbenchAuthoringRunRow = {
   databaseId: string;
   status: WorkbenchAuthoringRunStatus;
   evidenceRevision: string;
+  contractVersion: WorkbenchAuthoringContractVersion;
+  candidateId: string | null;
   bundleJson: string | null;
   findingsJson: string;
   receiptJson: string | null;
@@ -35,6 +40,8 @@ export function createWorkbenchAuthoringRun(
     actorId: string;
     databaseId: string;
     evidenceRevision: string;
+    contractVersion?: WorkbenchAuthoringContractVersion;
+    candidateId?: string;
     runId: string;
     sessions: Array<{ claimId: string; ordinal: number; sessionId: string }>;
   }
@@ -56,17 +63,37 @@ export function createWorkbenchAuthoringRunInTransaction(
     actorId: string;
     databaseId: string;
     evidenceRevision: string;
+    contractVersion?: WorkbenchAuthoringContractVersion;
+    candidateId?: string;
     runId: string;
     sessions: Array<{ claimId: string; ordinal: number; sessionId: string }>;
   }
 ): WorkbenchAuthoringRunDto {
   if (input.sessions.length === 0) throw new Error("authoring_run_requires_sessions");
+  const contractVersion = input.contractVersion ?? "workbench-authoring-v1";
+  const candidateId = input.candidateId?.trim() || undefined;
+  if (contractVersion === "workbench-authoring-v2" && !candidateId) {
+    throw new Error("authoring_v2_candidate_required");
+  }
+  if (contractVersion === "workbench-authoring-v1" && candidateId) {
+    throw new Error("authoring_v1_candidate_not_supported");
+  }
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO workbench_authoring_runs (
-      run_id, actor_id, database_id, status, evidence_revision, created_at, updated_at
-    ) VALUES (?, ?, ?, 'open', ?, ?, ?)`
-  ).run(input.runId, input.actorId, input.databaseId, input.evidenceRevision, now, now);
+      run_id, actor_id, database_id, status, evidence_revision,
+      contract_version, candidate_id, created_at, updated_at
+    ) VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?)`
+  ).run(
+    input.runId,
+    input.actorId,
+    input.databaseId,
+    input.evidenceRevision,
+    contractVersion,
+    candidateId ?? null,
+    now,
+    now
+  );
   const insertSession = db.prepare(
     `INSERT INTO workbench_authoring_run_sessions (run_id, session_id, claim_id, ordinal)
      VALUES (?, ?, ?, ?)`
@@ -86,6 +113,8 @@ export function getWorkbenchAuthoringRun(db: MastheadDatabase, runId: string): W
         database_id AS databaseId,
         status,
         evidence_revision AS evidenceRevision,
+        contract_version AS contractVersion,
+        candidate_id AS candidateId,
         bundle_json AS bundleJson,
         findings_json AS findingsJson,
         receipt_json AS receiptJson,
@@ -128,6 +157,7 @@ export function getWorkbenchAuthoringRun(db: MastheadDatabase, runId: string): W
     claimStatus: claimStatus(sessions, now),
     createdAt: row.createdAt,
     databaseId: row.databaseId,
+    contractVersion: row.contractVersion,
     evidenceRevision: row.evidenceRevision,
     findings: parseJson<WorkbenchAuthoringFinding[]>(row.findingsJson),
     runId: row.runId,
@@ -135,7 +165,8 @@ export function getWorkbenchAuthoringRun(db: MastheadDatabase, runId: string): W
     status: row.status,
     updatedAt: row.updatedAt
   };
-  if (row.bundleJson) dto.bundle = parseJson<WorkbenchAuthoringBundle>(row.bundleJson);
+  if (row.candidateId) dto.candidateId = row.candidateId;
+  if (row.bundleJson) dto.bundle = parseJson<WorkbenchStoredAuthoringBundle>(row.bundleJson);
   if (row.receiptJson) dto.receipt = parseJson<WorkbenchAuthoringReceipt>(row.receiptJson);
   if (row.completedAt) dto.completedAt = row.completedAt;
   return dto;
@@ -143,18 +174,28 @@ export function getWorkbenchAuthoringRun(db: MastheadDatabase, runId: string): W
 
 export function findReusableWorkbenchAuthoringRun(
   db: MastheadDatabase,
-  input: { actorId: string; databaseId: string; sessionIds: string[] }
+  input: {
+    actorId: string;
+    candidateId?: string;
+    contractVersion?: WorkbenchAuthoringContractVersion;
+    databaseId: string;
+    sessionIds: string[];
+  }
 ): WorkbenchAuthoringRunDto | undefined {
   const expectedSessionSet = normalizeSessionSet(input.sessionIds);
+  const contractVersion = input.contractVersion ?? "workbench-authoring-v1";
+  const candidateId = input.candidateId?.trim() || null;
   const candidates = db
     .prepare(
       `SELECT run_id AS runId
        FROM workbench_authoring_runs
        WHERE actor_id = ?
          AND database_id = ?
+         AND contract_version = ?
+         AND candidate_id IS ?
        ORDER BY updated_at DESC, run_id DESC`
     )
-    .all(input.actorId, input.databaseId) as Array<{ runId: string }>;
+    .all(input.actorId, input.databaseId, contractVersion, candidateId) as Array<{ runId: string }>;
   for (const candidate of candidates) {
     const run = getWorkbenchAuthoringRun(db, candidate.runId)!;
     if (sessionSetsEqual(normalizeSessionSet(run.sessionIds), expectedSessionSet)) return run;
@@ -184,7 +225,7 @@ export function resetWorkbenchAuthoringRunEvidence(
 export function saveWorkbenchAuthoringSubmission(
   db: MastheadDatabase,
   input: {
-    bundle: WorkbenchAuthoringBundle;
+    bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2;
     evidenceRevision: string;
     findings: WorkbenchAuthoringFinding[];
     runId: string;
@@ -194,6 +235,15 @@ export function saveWorkbenchAuthoringSubmission(
   const existing = getWorkbenchAuthoringRun(db, input.runId);
   if (!existing) throw new Error(`authoring_run_not_found:${input.runId}`);
   if (existing.status === "completed") return existing;
+  if (input.bundle.bundleVersion !== existing.contractVersion) {
+    throw new Error("unsupported_authoring_bundle_version");
+  }
+  if (
+    input.bundle.bundleVersion === "workbench-authoring-v2" &&
+    input.bundle.candidateId !== existing.candidateId
+  ) {
+    throw new Error("authoring_candidate_mismatch");
+  }
   const updatedAt = new Date().toISOString();
   db.prepare(
     `UPDATE workbench_authoring_runs

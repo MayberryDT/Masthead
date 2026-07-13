@@ -258,9 +258,9 @@ export function finishAuthoringRun(
     if (existing.status !== "ready_to_finish") {
       throw new Error(`authoring_run_not_ready:${existing.status}`);
     }
-    if (!existing.bundle) throw new Error(`authoring_run_bundle_missing:${existing.runId}`);
+    const existingBundle = requireLegacyAuthoringBundle(existing);
 
-    const signatureCollisions = findArtifactSignatureFindings(existing.bundle.artifacts).filter(
+    const signatureCollisions = findArtifactSignatureFindings(existingBundle.artifacts).filter(
       (finding) => finding.code === "duplicate_artifact_signature"
     );
     if (signatureCollisions.length > 0) {
@@ -275,12 +275,20 @@ export function finishAuthoringRun(
     if (authoringEvidenceRevision(db, run.sessionIds) !== run.evidenceRevision) {
       throw new Error("evidence_revision_changed");
     }
-    if (!run.bundle) throw new Error(`authoring_run_bundle_missing:${run.runId}`);
+    const runBundle = requireLegacyAuthoringBundle(run);
 
-    const receipt = finishInsideTransaction(db, { ...run, bundle: run.bundle }, input.verifyPublished);
+    const receipt = finishInsideTransaction(db, { ...run, bundle: runBundle }, input.verifyPublished);
     completeWorkbenchAuthoringRun(db, { receipt, runId: run.runId });
     return receipt;
   });
+}
+
+function requireLegacyAuthoringBundle(run: WorkbenchAuthoringRunDto): WorkbenchAuthoringBundle {
+  if (!run.bundle) throw new Error(`authoring_run_bundle_missing:${run.runId}`);
+  if (run.contractVersion !== "workbench-authoring-v1" || run.bundle.bundleVersion !== "workbench-authoring-v1") {
+    throw new Error("unsupported_authoring_service_contract:workbench-authoring-v2");
+  }
+  return run.bundle;
 }
 
 function finishInsideTransaction(
