@@ -201,6 +201,8 @@ function proposeArtifactCandidateInTransaction(
 }
 
 function reconcileProposedCandidate(db: MastheadDatabase, seed: CandidateSeed): WorkbenchArtifactCandidate {
+  const exact = findExactWorkbenchArtifactCandidate(db, seed);
+  if (exact?.status === "dismissed" && candidateMatchesSeedRevision(exact, seed)) return exact;
   const predecessors = listCurrentWorkbenchArtifactCandidatesForSeed(db, seed);
   if (predecessors.length > 1) {
     throw new Error(
@@ -218,7 +220,7 @@ function reconcileProposedCandidate(db: MastheadDatabase, seed: CandidateSeed): 
   if (current) {
     setWorkbenchArtifactCandidateStatus(db, { candidateId: current.candidateId, status: "superseded" });
   }
-  return persistSeeds(db, [seed])[0]!;
+  return persistSeeds(db, [seed], current ? [current] : [])[0]!;
 }
 
 function proposalAllowedEvidenceRefs(
@@ -367,7 +369,7 @@ function reconcileArtifactCandidates(
   }
   return {
     acknowledgedSessionIds,
-    candidates: persistSeeds(db, finalSeeds)
+    candidates: persistSeeds(db, finalSeeds, relevantMutable)
   };
 }
 
@@ -873,7 +875,8 @@ function normalizeProposedSignature(
 
 function persistSeeds(
   db: MastheadDatabase,
-  seeds: CandidateSeed[]
+  seeds: CandidateSeed[],
+  knownCurrentCandidates: WorkbenchArtifactCandidate[] = []
 ): WorkbenchArtifactCandidate[] {
   return seeds
     .map((seed) => {
@@ -882,7 +885,20 @@ function persistSeeds(
       if (unchanged) return getStoredCandidate(db, unchanged.candidateId);
       const exact = findExactWorkbenchArtifactCandidate(db, seed);
       if (exact?.status === "dismissed" && candidateMatchesSeedRevision(exact, seed)) return exact;
-      const predecessor = findBestWorkbenchArtifactCandidatePredecessor(db, seed);
+      const knownPredecessor = knownCurrentCandidates
+        .filter(
+          (candidate) =>
+            candidate.kind === seed.kind &&
+            (candidateIdentityMatches(candidate, seed) ||
+              candidate.provenanceSessionIds.some((sessionId) => seed.provenanceSessionIds.includes(sessionId)))
+        )
+        .sort(
+          (left, right) =>
+            Number(candidateIdentityMatches(right, seed)) - Number(candidateIdentityMatches(left, seed)) ||
+            right.updatedAt.localeCompare(left.updatedAt) ||
+            left.candidateId.localeCompare(right.candidateId)
+        )[0];
+      const predecessor = knownPredecessor ?? findBestWorkbenchArtifactCandidatePredecessor(db, seed);
       return saveWorkbenchArtifactCandidate(db, {
         candidateId: candidateId(
           seed.kind,

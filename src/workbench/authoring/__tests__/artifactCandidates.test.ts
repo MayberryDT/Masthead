@@ -609,6 +609,29 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("links proposal lineage to the known current predecessor when timestamps are equal", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const revisionA = proposeOauthRunbook(db);
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Revision B.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    const revisionB = proposeOauthRunbook(db);
+    db.prepare(
+      `UPDATE workbench_artifact_candidates
+       SET updated_at = '2026-07-13T00:00:00.000Z'
+       WHERE candidate_id IN (?, ?)`
+    ).run(revisionA.candidateId, revisionB.candidateId);
+
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Revision C.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    const revisionC = proposeOauthRunbook(db);
+    expect(revisionC.supersedesCandidateId).toBe(revisionB.candidateId);
+    expect(getWorkbenchArtifactCandidate(db, revisionB.candidateId)?.status).toBe("superseded");
+    db.close();
+  });
+
   test("freezes a claimed proposal when its evidence revision changes", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
@@ -1018,12 +1041,33 @@ describe("artifact candidate discovery", () => {
     expect(unchanged.candidateId).toBe(original.candidateId);
     expect(unchanged.status).toBe("dismissed");
 
+    db.prepare(
+      `INSERT INTO workbench_artifact_candidates (
+        candidate_id, kind, seed_session_id, provenance_session_ids_json,
+        signal_evidence_refs_json, signal_summary, signature_key, evidence_revision,
+        origin, status, created_at, updated_at
+      ) VALUES ('candidate:proposal-active-overlap', 'runbook', 'session:oauth-fixed',
+        '["session:oauth-fixed"]', '["tool_result:oauth:failure"]',
+        'Independent signed work on the same provenance.', 'error:independent:overlap',
+        'revision:independent-overlap', 'proposal', 'pending', ?, ?)`
+    ).run("2026-07-13T00:00:00.000Z", "2026-07-13T00:00:00.000Z");
+    const unchangedWithOverlap = proposeOauthRunbook(db);
+    expect(unchangedWithOverlap.candidateId).toBe(original.candidateId);
+    expect(getWorkbenchArtifactCandidate(db, "candidate:proposal-active-overlap")?.status).toBe("pending");
+    setWorkbenchArtifactCandidateStatus(db, {
+      candidateId: "candidate:proposal-active-overlap",
+      status: "superseded"
+    });
+
     db.prepare("UPDATE checkpoints SET summary = summary || ' New environment.' WHERE session_id = ?").run(
       "session:oauth-fixed"
     );
     const changed = proposeOauthRunbook(db);
     expect(changed.candidateId).not.toBe(original.candidateId);
-    expect(changed).toMatchObject({ status: "pending", supersedesCandidateId: original.candidateId });
+    expect(changed).toMatchObject({
+      status: "pending",
+      supersedesCandidateId: "candidate:proposal-active-overlap"
+    });
     db.close();
   });
 
