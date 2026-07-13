@@ -234,7 +234,6 @@ export function saveWorkbenchAuthoringSubmission(
 ): WorkbenchAuthoringRunDto {
   const existing = getWorkbenchAuthoringRun(db, input.runId);
   if (!existing) throw new Error(`authoring_run_not_found:${input.runId}`);
-  if (existing.status === "completed") return existing;
   if (input.bundle.bundleVersion !== existing.contractVersion) {
     throw new Error("unsupported_authoring_bundle_version");
   }
@@ -244,6 +243,7 @@ export function saveWorkbenchAuthoringSubmission(
   ) {
     throw new Error("authoring_candidate_mismatch");
   }
+  if (existing.status === "completed") return existing;
   const updatedAt = new Date().toISOString();
   db.prepare(
     `UPDATE workbench_authoring_runs

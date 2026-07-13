@@ -194,6 +194,15 @@ describe("workbench authoring repository", () => {
     expect(v1).toMatchObject({ contractVersion: "workbench-authoring-v1" });
     expect(v1.candidateId).toBeUndefined();
     completeWorkbenchAuthoringRun(db, { receipt: receiptFor("authoring:v1"), runId: "authoring:v1" });
+    expect(() =>
+      saveWorkbenchAuthoringSubmission(db, {
+        bundle: validV2Bundle("authoring:v1", "candidate:runbook:oauth"),
+        evidenceRevision: "evidence:v1",
+        findings: [],
+        runId: "authoring:v1",
+        status: "ready_to_finish"
+      })
+    ).toThrow("unsupported_authoring_bundle_version");
 
     const v2 = createWorkbenchAuthoringRun(db, {
       actorId: "codex",
