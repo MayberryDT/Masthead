@@ -482,6 +482,9 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     verified.close();
 
     const backupPath = join(tempDir, "masthead.sqlite.backup-current");
+    for (const suffix of ["-wal", "-shm", "-journal"]) {
+      await expect(access(`${backupPath}${suffix}`)).rejects.toMatchObject({ code: "ENOENT" });
+    }
     for (const omitted of ["backup", "auditHash", "confirmation"] as const) {
       const restoreArgs = ["workbench", "restore-v1-recovery", "--db", dbPath];
       if (omitted !== "backup") restoreArgs.push("--backup", backupPath);
@@ -492,6 +495,28 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       expect(JSON.parse(refused.stderr)).toMatchObject({ error: { code: "missing_argument" }, ok: false });
       expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 0, runs: 66 });
     }
+
+    const backupBytesBeforeSidecarRefusal = await readFile(backupPath);
+    const activeBytesBeforeSidecarRefusal = await readFile(dbPath);
+    const backupSidecars = ["-wal", "-shm", "-journal"].map((suffix) => `${backupPath}${suffix}`);
+    for (const sidecarPath of backupSidecars) await writeFile(sidecarPath, "");
+    const sidecarRefused = await runMastheadCli(
+      [
+        "workbench", "restore-v1-recovery", "--db", dbPath, "--backup", backupPath,
+        "--audit-hash", audit.auditHash, "--confirm", "--json"
+      ],
+      { env: {} }
+    );
+    expect(sidecarRefused.exitCode).toBe(1);
+    expect(JSON.parse(sidecarRefused.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_restore_backup_sidecar_present") },
+      ok: false
+    });
+    expect(await readFile(dbPath)).toEqual(activeBytesBeforeSidecarRefusal);
+    expect(await readFile(backupPath)).toEqual(backupBytesBeforeSidecarRefusal);
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 0, runs: 66 });
+    for (const sidecarPath of backupSidecars) expect(await readFile(sidecarPath)).toEqual(Buffer.alloc(0));
+    await Promise.all(backupSidecars.map((sidecarPath) => rm(sidecarPath)));
 
     const outside = await runMastheadCli(
       [
@@ -672,7 +697,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     for (const suffix of ["-wal", "-shm", "-journal"]) {
       await expect(access(`${dbPath}${suffix}`)).rejects.toMatchObject({ code: "ENOENT" });
     }
-  }, 60_000);
+  }, 120_000);
 });
 
 async function startTestDaemon(): Promise<{ baseUrl: string; daemon: MastheadDaemon }> {

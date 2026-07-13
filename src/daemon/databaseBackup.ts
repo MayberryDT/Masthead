@@ -119,7 +119,7 @@ export async function createSingleConsistentBackupInsideExclusiveMaintenance(
     options.onBoundary?.("finalize");
     await rename(stagePath, finalPath);
     promoted = true;
-    await retainNewestFinalSnapshots(directory, finalPrefix, 1);
+    await retainExactFinalSnapshot(directory, finalPrefix, finalPath);
     return {
       backupPath: finalPath,
       databaseId: verified.databaseId,
@@ -131,11 +131,8 @@ export async function createSingleConsistentBackupInsideExclusiveMaintenance(
     source?.close();
     await removeDatabaseAndSidecars(stagePath);
     if (promoted) {
-      await Promise.all([
-        rm(`${finalPath}-journal`, { force: true }),
-        rm(`${finalPath}-shm`, { force: true }),
-        rm(`${finalPath}-wal`, { force: true })
-      ]);
+      await removeSidecars(finalPath);
+      await assertNoDatabaseSidecars(finalPath, "database_backup_final_sidecar_present");
     }
   }
 }
@@ -168,12 +165,15 @@ export async function createVerifiedMigrationBackupInsideDaemonStartup(
     options.onBoundary?.("finalize");
     await rename(stagePath, finalPath);
     promoted = true;
-    await retainNewestFinalSnapshots(directory, finalPrefix, 1);
+    await retainExactFinalSnapshot(directory, finalPrefix, finalPath);
     return { backupPath: finalPath, integrityResult: "ok", pagesCopied, sizeBytes };
   } finally {
     source?.close();
     await removeDatabaseAndSidecars(stagePath);
-    if (promoted) await removeSidecars(finalPath);
+    if (promoted) {
+      await removeSidecars(finalPath);
+      await assertNoDatabaseSidecars(finalPath, "database_backup_final_sidecar_present");
+    }
   }
 }
 
@@ -193,6 +193,7 @@ export async function restoreFailedV1RecoveryBackupInsideExclusiveMaintenance(
   await assertRegularNonSymlinkPath(activePath, activePath, "database_restore_active_path_invalid");
   const expectedBackupPath = join(dirname(activePath), `${basename(activePath)}.backup-current`);
   await assertRegularNonSymlinkPath(backupPath, expectedBackupPath, "database_restore_backup_path_invalid");
+  await assertNoDatabaseSidecars(expectedBackupPath, "database_restore_backup_sidecar_present");
 
   const active = verifyRecoveryDatabase(activePath, false);
   const backupVerification = verifyRecoveryDatabase(expectedBackupPath, true);
@@ -312,21 +313,20 @@ function verifyOpenDatabaseIntegrity(database: DatabaseSync): void {
   }
 }
 
-async function retainNewestFinalSnapshots(
+async function retainExactFinalSnapshot(
   directory: string,
   prefix: string,
-  retainedCount: number
+  retainedPath: string
 ): Promise<void> {
-  const snapshots = await Promise.all(
-    (await readdir(directory, { withFileTypes: true }))
-      .filter((entry) => entry.isFile() && entry.name.startsWith(prefix))
-      .map(async (entry) => ({
-        path: join(directory, entry.name),
-        mtimeMs: (await stat(join(directory, entry.name))).mtimeMs
-      }))
-  );
-  const stale = snapshots.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(retainedCount).map((entry) => entry.path);
+  const retainedName = basename(retainedPath);
+  const stale = (await readdir(directory, { withFileTypes: true }))
+    .filter((entry) => entry.name.startsWith(prefix) && entry.name !== retainedName)
+    .map((entry) => join(directory, entry.name));
   await Promise.all(stale.map((path) => rm(path, { force: true })));
+  const retained = await lstat(retainedPath);
+  if (!retained.isFile() || retained.isSymbolicLink()) {
+    throw new Error("database_backup_promoted_snapshot_missing");
+  }
 }
 
 async function removeDatabaseAndSidecars(path: string): Promise<void> {
@@ -335,6 +335,22 @@ async function removeDatabaseAndSidecars(path: string): Promise<void> {
 
 async function removeSidecars(path: string): Promise<void> {
   await Promise.all([rm(`${path}-journal`, { force: true }), rm(`${path}-shm`, { force: true }), rm(`${path}-wal`, { force: true })]);
+}
+
+async function assertNoDatabaseSidecars(path: string, errorCode: string): Promise<void> {
+  for (const suffix of ["-wal", "-shm", "-journal"]) {
+    try {
+      await lstat(`${path}${suffix}`);
+      throw new Error(`${errorCode}:${suffix.slice(1)}`);
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) continue;
+      throw error;
+    }
+  }
+}
+
+function isErrno(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
 function parseDatabaseId(value: string | undefined): string {

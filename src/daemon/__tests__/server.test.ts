@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("Masthead daemon startup", () => {
-  test("migration backup includes committed rows that exist only in the WAL", async () => {
+  test("migration backup retains the promoted WAL-complete snapshot over future-dated equal-mtime stale snapshots", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-daemon-migration-backup-"));
     tempDirs.push(tempDir);
     const databasePath = join(tempDir, "masthead.sqlite");
@@ -37,7 +37,11 @@ describe("Masthead daemon startup", () => {
       ).run("migration_backup_wal_marker", JSON.stringify({ durable: true }), "2026-07-13T12:00:00.000Z");
       source.exec("COMMIT;");
       expect((await stat(`${databasePath}-wal`)).size).toBeGreaterThan(0);
-      await writeFile(`${databasePath}.backup-old`, "stale migration snapshot", "utf8");
+      const staleBackups = [`${databasePath}.backup-future-a`, `${databasePath}.backup-future-b`];
+      for (const stalePath of staleBackups) {
+        await writeFile(stalePath, "stale migration snapshot", "utf8");
+        await utimes(stalePath, new Date("2040-01-01T00:00:00.000Z"), new Date("2040-01-01T00:00:00.000Z"));
+      }
 
       const daemon = await createMastheadDaemon({
         allowedOrigins: ["http://127.0.0.1:5173"],
@@ -56,6 +60,7 @@ describe("Masthead daemon startup", () => {
 
       const backups = (await readdir(tempDir)).filter((name) => name.startsWith("masthead.sqlite.backup-"));
       expect(backups).toHaveLength(1);
+      expect(backups[0]).not.toMatch(/future-[ab]$/u);
       const backupPath = join(tempDir, backups[0]!);
       const backup = new DatabaseSync(backupPath, { readOnly: true });
       try {
