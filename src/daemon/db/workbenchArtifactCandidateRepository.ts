@@ -221,28 +221,32 @@ export function findBestWorkbenchArtifactCandidatePredecessor(
   db: MastheadDatabase,
   input: { kind: WorkbenchAutomaticKind; provenanceSessionIds: string[]; seedSessionId: string; signatureKey?: string }
 ): StoredWorkbenchArtifactCandidate | undefined {
-  const exact = findExactWorkbenchArtifactCandidate(db, input);
   const sessionIds = normalizedStrings(input.provenanceSessionIds);
-  if (sessionIds.length === 0) return exact;
+  const identityClause = input.signatureKey
+    ? "kind = ? AND signature_key = ?"
+    : "kind = ? AND seed_session_id = ? AND signature_key IS NULL";
+  const overlapBranch = sessionIds.length > 0
+    ? `UNION
+       SELECT candidate_id FROM workbench_artifact_candidate_provenance
+       WHERE session_id IN (${sessionIds.map(() => "?").join(", ")})`
+    : "";
   const row = db.prepare(
     `${CANDIDATE_SELECT}
      WHERE kind = ? AND candidate_id IN (
-       SELECT candidate_id FROM workbench_artifact_candidate_provenance
-       WHERE session_id IN (${sessionIds.map(() => "?").join(", ")})
+       SELECT candidate_id FROM workbench_artifact_candidates
+       WHERE ${identityClause}
+       ${overlapBranch}
      )
      ORDER BY CASE WHEN status IN ('pending', 'claimed', 'published') THEN 0 ELSE 1 END,
-       updated_at DESC, candidate_id
+       workbench_artifact_candidates.rowid DESC
      LIMIT 1`
-  ).get(input.kind, ...sessionIds) as CandidateRow | undefined;
-  const overlap = row ? rowToCandidate(row) : undefined;
-  if (!exact) return overlap;
-  if (!overlap) return exact;
-  const lifecycleRank = (candidate: StoredWorkbenchArtifactCandidate): number =>
-    candidate.status === "pending" || candidate.status === "claimed" || candidate.status === "published" ? 0 : 1;
-  return lifecycleRank(exact) < lifecycleRank(overlap) ||
-    (lifecycleRank(exact) === lifecycleRank(overlap) && exact.updatedAt >= overlap.updatedAt)
-    ? exact
-    : overlap;
+  ).get(
+    input.kind,
+    input.kind,
+    input.signatureKey ?? input.seedSessionId,
+    ...sessionIds
+  ) as CandidateRow | undefined;
+  return row ? rowToCandidate(row) : undefined;
 }
 
 export function findExactWorkbenchArtifactCandidate(
@@ -256,7 +260,7 @@ export function findExactWorkbenchArtifactCandidate(
     `${CANDIDATE_SELECT}
      WHERE kind = ? AND ${identityClause}
      ORDER BY CASE WHEN status IN ('pending', 'claimed', 'published') THEN 0 ELSE 1 END,
-       updated_at DESC, candidate_id
+       workbench_artifact_candidates.rowid DESC
      LIMIT 1`
   ).get(input.kind, input.signatureKey ?? input.seedSessionId) as CandidateRow | undefined;
   return row ? rowToCandidate(row) : undefined;

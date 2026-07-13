@@ -632,6 +632,33 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("links changed evidence to the latest dismissed revision when timestamps are equal", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const revisionA = proposeOauthRunbook(db);
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Revision B.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    const revisionB = proposeOauthRunbook(db);
+    dismissWorkbenchArtifactCandidate(db, {
+      candidateId: revisionB.candidateId,
+      reason: "This exact revision is not reusable.",
+      signalEvidenceRefs: revisionB.signalEvidenceRefs
+    });
+    db.prepare(
+      `UPDATE workbench_artifact_candidates
+       SET updated_at = '2026-07-13T00:00:00.000Z'
+       WHERE candidate_id IN (?, ?)`
+    ).run(revisionA.candidateId, revisionB.candidateId);
+
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Revision C.' WHERE session_id = ?").run(
+      "session:oauth-fixed"
+    );
+    const revisionC = proposeOauthRunbook(db);
+    expect(revisionC.supersedesCandidateId).toBe(revisionB.candidateId);
+    db.close();
+  });
+
   test("freezes a claimed proposal when its evidence revision changes", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
