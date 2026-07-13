@@ -78,8 +78,8 @@ _Avoid_: Checklist, status label, session-as-Logbook-gate alone
 
 **Publication memory requirement**:
 Per-artifact readiness rules that must be satisfied before publish, such as schema-valid body,
-valid evidence refs, confidence, and kind-specific applicability. Session readiness is upstream of
-authoring, not a substitute for artifact publish.
+valid evidence refs, confidence, and candidate-kind evidence requirements. Session readiness is
+upstream of authoring, not a substitute for artifact publish.
 _Avoid_: Optional enrichment, blanket artifact requirement, publish whole session
 
 **Workbench session states (artifact-first)**:
