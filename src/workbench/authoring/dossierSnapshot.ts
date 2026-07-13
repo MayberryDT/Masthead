@@ -29,18 +29,17 @@ export function dossierEvidenceRefs(snapshot: PublishedSessionDossierV1): string
     ...snapshot.files.map((item) => item.sourceRef),
     ...snapshot.tools.map((item) => item.sourceRef),
     ...snapshot.timeline.map((item) => item.sourceRef)
-  ]
-    .map(evidenceRefId)
-    .filter((ref): ref is string => ref !== undefined);
+  ].flatMap(evidenceRefIds);
 
   return [...new Set(refs)].toSorted();
 }
 
-function evidenceRefId(value: unknown): string | undefined {
-  if (typeof value === "string") return value.trim() || undefined;
-  if (!value || typeof value !== "object" || !("id" in value)) return undefined;
+function evidenceRefIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(evidenceRefIds);
+  if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+  if (!value || typeof value !== "object" || !("id" in value)) return [];
   const id = value.id;
-  return typeof id === "string" ? id.trim() || undefined : undefined;
+  return typeof id === "string" && id.trim() ? [id.trim()] : [];
 }
 
 function stableStringify(value: unknown): string {

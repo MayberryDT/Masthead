@@ -89,6 +89,25 @@ describe("published session dossier snapshot", () => {
       "tool:1"
     ]);
   });
+
+  test("collects explicit canonical refs from nested sourceRef arrays", () => {
+    const snapshot = buildPublishedDossierSnapshot(fixtureSessionDossier());
+    snapshot.excerpts[0]!.sourceRef = [
+      " array:string ",
+      [{ id: "array:object" }, ["array:string", { id: "  " }]],
+      { source: "not-an-evidence-ref" }
+    ];
+
+    expect(dossierEvidenceRefs(snapshot)).toEqual([
+      "array:object",
+      "array:string",
+      "attention:1",
+      "file:1",
+      "narrative:1",
+      "timeline:1",
+      "tool:1"
+    ]);
+  });
 });
 
 function fixtureSessionDossier(): SessionDossierDto {
