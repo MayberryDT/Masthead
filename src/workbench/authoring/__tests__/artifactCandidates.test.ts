@@ -31,7 +31,8 @@ import {
   decisionWithRejectedAlternatives,
   repeatedErrorPartOne,
   repeatedErrorPartTwo,
-  seedDurableArtifactCorpus
+  seedDurableArtifactCorpus,
+  seedToolHeavyPerformanceSessions
 } from "../__fixtures__/durableArtifactCorpus.ts";
 
 const tempDirs: string[] = [];
@@ -1437,7 +1438,7 @@ describe("artifact candidate discovery", () => {
 
   test("caps a discovery page at 100 tool-heavy publish-path sessions and completes within two seconds", async () => {
     const db = await testDb();
-    seedToolHeavySessions(db, 101, 60);
+    seedToolHeavyPerformanceSessions(db, 101, 60);
 
     const started = performance.now();
     const page = discoverArtifactCandidatePage(db, { limit: 500 });
@@ -1463,43 +1464,6 @@ function countKinds(candidates: ReturnType<typeof discoverArtifactCandidates>): 
     counts[candidate.kind] = (counts[candidate.kind] ?? 0) + 1;
     return counts;
   }, {});
-}
-
-function seedToolHeavySessions(db: MastheadDatabase, sessionCount: number, toolsPerSession: number): void {
-  db.prepare(
-    "INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES ('host:perf', 'perf', ?, ?)"
-  ).run("2026-07-12T00:00:00.000Z", "2026-07-12T00:00:00.000Z");
-  db.prepare(
-    "INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at) VALUES ('runtime:perf', 'codex', 'test', ?, ?)"
-  ).run("2026-07-12T00:00:00.000Z", "2026-07-12T00:00:00.000Z");
-  const insertSession = db.prepare(
-    `INSERT INTO sessions (
-      session_id, host_id, runtime_id, source_session_id, project_label, title, lifecycle,
-      started_at, last_activity_at, ended_at, source_confidence, created_at, updated_at
-    ) VALUES (?, 'host:perf', 'runtime:perf', ?, 'Performance', ?, 'ended', ?, ?, ?, 'authoritative', ?, ?)`
-  );
-  const insertState = db.prepare(
-    "INSERT INTO workbench_session_state (session_id, publication_status) VALUES (?, 'publish_path')"
-  );
-  const insertCall = db.prepare(
-    "INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, 'read_file', ?, '{}')"
-  );
-  const insertResult = db.prepare(
-    "INSERT INTO tool_results (tool_result_id, tool_call_id, session_id, status, completed_at, source_ref_json) VALUES (?, ?, ?, 'succeeded', ?, '{}')"
-  );
-  withImmediateTransaction(db, () => {
-    for (let sessionIndex = 0; sessionIndex < sessionCount; sessionIndex += 1) {
-      const sessionId = `session:perf:${String(sessionIndex).padStart(3, "0")}`;
-      const observedAt = `2026-07-12T00:${String(sessionIndex % 60).padStart(2, "0")}:00.000Z`;
-      insertSession.run(sessionId, sessionId, sessionId, observedAt, observedAt, observedAt, observedAt, observedAt);
-      insertState.run(sessionId);
-      for (let toolIndex = 0; toolIndex < toolsPerSession; toolIndex += 1) {
-        const callId = `${sessionId}:tool:${toolIndex}`;
-        insertCall.run(callId, sessionId, observedAt);
-        insertResult.run(`${callId}:result`, callId, sessionId, observedAt);
-      }
-    }
-  });
 }
 
 function seedAdditionalStrongSignatureSessions(db: MastheadDatabase, count: number): string[] {

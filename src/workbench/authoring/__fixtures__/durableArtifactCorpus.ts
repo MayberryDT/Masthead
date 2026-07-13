@@ -1,4 +1,9 @@
-import type { MastheadDatabase } from "../../../daemon/db/sqlite.ts";
+import { withImmediateTransaction, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
+import type {
+  WorkbenchAuthoringBundleV2,
+  WorkbenchClaimSupport
+} from "../../../shared/workbenchAuthoring.ts";
+import type { WorkbenchArtifactCandidate } from "../artifactCandidates.ts";
 
 type CorpusEvidence = {
   id: string;
@@ -348,6 +353,55 @@ export function seedDurableArtifactCorpus(db: MastheadDatabase): void {
   }
 }
 
+export function seedToolHeavyPerformanceSessions(
+  db: MastheadDatabase,
+  sessionCount: number,
+  toolsPerSession: number
+): { evidenceItemsPerSession: number; sessionCount: number; toolsPerSession: number; totalEvidenceItems: number } {
+  const at = "2026-07-12T00:00:00.000Z";
+  db.prepare(
+    "INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES ('host:perf', 'perf', ?, ?)"
+  ).run(at, at);
+  db.prepare(
+    "INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at) VALUES ('runtime:perf', 'codex', 'test', ?, ?)"
+  ).run(at, at);
+  const insertSession = db.prepare(
+    `INSERT INTO sessions (
+      session_id, host_id, runtime_id, source_session_id, project_label, title, lifecycle,
+      started_at, last_activity_at, ended_at, source_confidence, created_at, updated_at
+    ) VALUES (?, 'host:perf', 'runtime:perf', ?, 'Performance', ?, 'ended', ?, ?, ?, 'authoritative', ?, ?)`
+  );
+  const insertState = db.prepare(
+    "INSERT INTO workbench_session_state (session_id, publication_status) VALUES (?, 'publish_path')"
+  );
+  const insertCall = db.prepare(
+    "INSERT INTO tool_calls (tool_call_id, session_id, tool_name, started_at, source_ref_json) VALUES (?, ?, 'read_file', ?, '{}')"
+  );
+  const insertResult = db.prepare(
+    "INSERT INTO tool_results (tool_result_id, tool_call_id, session_id, status, completed_at, source_ref_json) VALUES (?, ?, ?, 'succeeded', ?, '{}')"
+  );
+  withImmediateTransaction(db, () => {
+    for (let sessionIndex = 0; sessionIndex < sessionCount; sessionIndex += 1) {
+      const sessionId = `session:perf:${String(sessionIndex).padStart(3, "0")}`;
+      const observedAt = `2026-07-12T00:${String(sessionIndex % 60).padStart(2, "0")}:00.000Z`;
+      insertSession.run(sessionId, sessionId, sessionId, observedAt, observedAt, observedAt, observedAt, observedAt);
+      insertState.run(sessionId);
+      for (let toolIndex = 0; toolIndex < toolsPerSession; toolIndex += 1) {
+        const callId = `${sessionId}:tool:${toolIndex}`;
+        insertCall.run(callId, sessionId, observedAt);
+        insertResult.run(`${callId}:result`, callId, sessionId, observedAt);
+      }
+    }
+  });
+  const evidenceItemsPerSession = toolsPerSession * 2;
+  return {
+    evidenceItemsPerSession,
+    sessionCount,
+    toolsPerSession,
+    totalEvidenceItems: sessionCount * evidenceItemsPerSession
+  };
+}
+
 function insertEvidence(db: MastheadDatabase, sessionId: string, evidence: CorpusEvidence): void {
   const sourceRef = JSON.stringify({ fixture: "durable-artifact-corpus", id: evidence.id });
   const storageId = evidence.id.replace(new RegExp(`^${canonicalPrefix(evidence.kind)}:`), "");
@@ -417,4 +471,136 @@ function canonicalPrefix(kind: CorpusEvidence["kind"]): string {
   if (kind === "runtime_signal") return "signal";
   if (kind === "file_effect") return "file";
   return kind;
+}
+
+export function buildDurableArtifactFixtureBundle(
+  run: { runId: string; evidenceRevision: string },
+  candidate: WorkbenchArtifactCandidate
+): WorkbenchAuthoringBundleV2 {
+  const output = candidate.kind === "runbook"
+    ? durableRunbookOutput(candidate)
+    : candidate.kind === "adr"
+      ? durableAdrOutput(candidate)
+      : durableIncidentOutput(candidate);
+  return {
+    artifact: {
+      kind: candidate.kind,
+      output,
+      provenanceSessionIds: candidate.provenanceSessionIds,
+      seedSessionId: candidate.seedSessionId
+    },
+    bundleVersion: "workbench-authoring-v2",
+    candidateId: candidate.candidateId,
+    evidenceRevision: run.evidenceRevision,
+    runId: run.runId
+  };
+}
+
+function durableRunbookOutput(candidate: WorkbenchArtifactCandidate): Record<string, unknown> {
+  const problemRef = "tool_result:oauth:failure";
+  const problem = "OAuth callback test failed with an invalid state nonce.";
+  const changeRef = "file:oauth:change";
+  const change = "modified auth/callback.ts";
+  const verificationRef = "checkpoint:oauth:verified";
+  const verification = "Callback regression test passed after the nonce repair.";
+  return {
+    changedFiles: ["auth/callback.ts"],
+    claimSupport: [
+      durableSupport("problemSignature.symptoms[0]", problemRef, problem, "problem"),
+      durableSupport("fixSteps[0]", changeRef, change, "change"),
+      durableSupport("validationChecks[0]", verificationRef, verification, "verification")
+    ],
+    commands: ["Run the OAuth callback regression test."],
+    confidence: "low",
+    deadEnds: [],
+    environmentRequirements: ["OAuth callback test environment"],
+    evidenceRefs: [problemRef, changeRef, verificationRef],
+    fixSteps: [`Apply the recorded callback change: ${change}.`],
+    missingEvidence: [],
+    preconditions: ["The callback regression reproduces an invalid state nonce."],
+    preventionNotes: ["Keep the callback regression in the verification suite."],
+    problemSignature: {
+      affectedScope: "OAuth callback state validation",
+      errorStrings: ["invalid state nonce"],
+      symptoms: [problem]
+    },
+    provenanceSessionIds: candidate.provenanceSessionIds,
+    reproSteps: ["Run the OAuth callback regression test and observe the invalid state nonce."],
+    risksOrGaps: [],
+    rootCause: "The root cause remains unknown from the available evidence.",
+    title: "Repair OAuth callback state nonce validation",
+    validationChecks: [verification]
+  };
+}
+
+function durableAdrOutput(candidate: WorkbenchArtifactCandidate): Record<string, unknown> {
+  const decisionRef = "message:decision-local-first:decision";
+  const decision = "Decision: adopt SQLite as the canonical local-first session store.";
+  const alternativeRef = "message:decision-local-first:alternative";
+  const alternative = "Rejected alternative: a hosted database would break offline operation.";
+  return {
+    alternatives: [alternative],
+    claimSupport: [
+      durableSupport("decision", decisionRef, decision, "decision"),
+      durableSupport("alternatives[0]", alternativeRef, alternative, "alternative")
+    ],
+    confidence: "low",
+    consequences: ["The session store remains local and supports offline operation."],
+    context: "The storage choice must preserve local operation without a hosted dependency.",
+    decision,
+    evidenceRefs: [decisionRef, alternativeRef],
+    missingEvidence: [],
+    provenanceSessionIds: candidate.provenanceSessionIds,
+    status: "accepted",
+    title: "Keep the canonical session store local-first"
+  };
+}
+
+function durableIncidentOutput(candidate: WorkbenchArtifactCandidate): Record<string, unknown> {
+  const detectedRef = "signal:incident-root-cause:detected";
+  const detected = "Ingestion requests failed across production.";
+  const triageRef = "signal:incident-root-cause:triage";
+  const triage = "Triage isolated exhausted SQLite writer leases.";
+  const mitigatedRef = "signal:incident-root-cause:mitigated";
+  const mitigated = "The stuck writer was recycled and backlog processing resumed.";
+  const restoredRef = "checkpoint:incident-root-cause:restored";
+  const restored = "Service health and backlog drain were verified.";
+  return {
+    claimSupport: [
+      durableSupport("symptom", detectedRef, detected, "problem"),
+      durableSupport("timeline[0].summary", detectedRef, detected, "timeline"),
+      durableSupport("timeline[1].summary", triageRef, triage, "timeline"),
+      durableSupport("timeline[2].summary", mitigatedRef, mitigated, "timeline"),
+      durableSupport("timeline[3].summary", restoredRef, restored, "timeline"),
+      durableSupport("rootCause", triageRef, triage, "root_cause"),
+      durableSupport("remediation[0]", mitigatedRef, mitigated, "remediation")
+    ],
+    confidence: "low",
+    contributingFactors: [triage],
+    evidenceRefs: [detectedRef, triageRef, mitigatedRef, restoredRef],
+    impact: detected,
+    missingEvidence: [],
+    prevention: ["Monitor writer lease exhaustion and backlog health."],
+    provenanceSessionIds: candidate.provenanceSessionIds,
+    remediation: [mitigated],
+    rootCause: triage,
+    status: "resolved",
+    symptom: detected,
+    timeline: [
+      { at: "2026-07-01T12:00:00.000Z", evidenceRefs: [detectedRef], summary: detected },
+      { at: "2026-07-01T12:01:00.000Z", evidenceRefs: [triageRef], summary: triage },
+      { at: "2026-07-01T12:02:00.000Z", evidenceRefs: [mitigatedRef], summary: mitigated },
+      { at: "2026-07-01T12:03:00.000Z", evidenceRefs: [restoredRef], summary: restored }
+    ],
+    title: "Restore ingestion after SQLite writer lease exhaustion"
+  };
+}
+
+function durableSupport(
+  path: string,
+  evidenceRef: string,
+  excerpt: string,
+  supportKind: WorkbenchClaimSupport["supportKind"]
+): WorkbenchClaimSupport {
+  return { path, evidenceRef, excerpt, supportKind };
 }

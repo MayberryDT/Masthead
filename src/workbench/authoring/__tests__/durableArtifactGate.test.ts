@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type {
-  WorkbenchAuthoringBundleV2,
   WorkbenchAuthoringReceipt,
   WorkbenchAuthoringReceiptV2
 } from "../../../shared/workbenchAuthoring.ts";
@@ -22,6 +21,7 @@ import {
 } from "../authoringService.ts";
 import { discoverArtifactCandidates } from "../artifactCandidates.ts";
 import {
+  buildDurableArtifactFixtureBundle,
   corpusSessionIds,
   seedDurableArtifactCorpus
 } from "../__fixtures__/durableArtifactCorpus.ts";
@@ -60,7 +60,7 @@ describe("Gate B durable optional artifact slice", () => {
         sessionIds: candidate.provenanceSessionIds
       });
 
-      const bundle = buildGateBundle(opened.run, candidate);
+      const bundle = buildDurableArtifactFixtureBundle(opened.run, candidate);
       expect(JSON.stringify(bundle.artifact.output).toLowerCase()).not.toMatch(
         /cursor pagination|canonical evidence|evidence manifest|authoring run|single provenance|weak multi-session join|published artifact/
       );
@@ -154,136 +154,6 @@ describe("Gate B durable optional artifact slice", () => {
 });
 
 type Candidate = ReturnType<typeof discoverArtifactCandidates>[number];
-type OpenedRun = ReturnType<typeof openCandidateAuthoringRun>["run"];
-
-function buildGateBundle(run: OpenedRun, candidate: Candidate): WorkbenchAuthoringBundleV2 {
-  const output = candidate.kind === "runbook"
-    ? runbookOutput(candidate)
-    : candidate.kind === "adr"
-      ? adrOutput(candidate)
-      : incidentOutput(candidate);
-  return {
-    artifact: {
-      kind: candidate.kind,
-      output,
-      provenanceSessionIds: candidate.provenanceSessionIds,
-      seedSessionId: candidate.seedSessionId
-    },
-    bundleVersion: "workbench-authoring-v2",
-    candidateId: candidate.candidateId,
-    evidenceRevision: run.evidenceRevision,
-    runId: run.runId
-  };
-}
-
-function runbookOutput(candidate: Candidate): Record<string, unknown> {
-  const problemRef = "tool_result:oauth:failure";
-  const problem = "OAuth callback test failed with an invalid state nonce.";
-  const changeRef = "file:oauth:change";
-  const change = "modified auth/callback.ts";
-  const verificationRef = "checkpoint:oauth:verified";
-  const verification = "Callback regression test passed after the nonce repair.";
-  return {
-    changedFiles: ["auth/callback.ts"],
-    claimSupport: [
-      support("problemSignature.symptoms[0]", problemRef, problem, "problem"),
-      support("fixSteps[0]", changeRef, change, "change"),
-      support("validationChecks[0]", verificationRef, verification, "verification")
-    ],
-    commands: ["Run the OAuth callback regression test."],
-    confidence: "low",
-    deadEnds: [],
-    environmentRequirements: ["OAuth callback test environment"],
-    evidenceRefs: [problemRef, changeRef, verificationRef],
-    fixSteps: [`Apply the recorded callback change: ${change}.`],
-    missingEvidence: [],
-    preconditions: ["The callback regression reproduces an invalid state nonce."],
-    preventionNotes: ["Keep the callback regression in the verification suite."],
-    problemSignature: {
-      affectedScope: "OAuth callback state validation",
-      errorStrings: ["invalid state nonce"],
-      symptoms: [problem]
-    },
-    provenanceSessionIds: candidate.provenanceSessionIds,
-    reproSteps: ["Run the OAuth callback regression test and observe the invalid state nonce."],
-    risksOrGaps: [],
-    rootCause: "The root cause remains unknown from the available evidence.",
-    title: "Repair OAuth callback state nonce validation",
-    validationChecks: [verification]
-  };
-}
-
-function adrOutput(candidate: Candidate): Record<string, unknown> {
-  const decisionRef = "message:decision-local-first:decision";
-  const decision = "Decision: adopt SQLite as the canonical local-first session store.";
-  const alternativeRef = "message:decision-local-first:alternative";
-  const alternative = "Rejected alternative: a hosted database would break offline operation.";
-  return {
-    alternatives: [alternative],
-    claimSupport: [
-      support("decision", decisionRef, decision, "decision"),
-      support("alternatives[0]", alternativeRef, alternative, "alternative")
-    ],
-    confidence: "low",
-    consequences: ["The session store remains local and supports offline operation."],
-    context: "The storage choice must preserve local operation without a hosted dependency.",
-    decision,
-    evidenceRefs: [decisionRef, alternativeRef],
-    missingEvidence: [],
-    provenanceSessionIds: candidate.provenanceSessionIds,
-    status: "accepted",
-    title: "Keep the canonical session store local-first"
-  };
-}
-
-function incidentOutput(candidate: Candidate): Record<string, unknown> {
-  const detectedRef = "signal:incident-root-cause:detected";
-  const detected = "Ingestion requests failed across production.";
-  const triageRef = "signal:incident-root-cause:triage";
-  const triage = "Triage isolated exhausted SQLite writer leases.";
-  const mitigatedRef = "signal:incident-root-cause:mitigated";
-  const mitigated = "The stuck writer was recycled and backlog processing resumed.";
-  const restoredRef = "checkpoint:incident-root-cause:restored";
-  const restored = "Service health and backlog drain were verified.";
-  return {
-    claimSupport: [
-      support("symptom", detectedRef, detected, "problem"),
-      support("timeline[0].summary", detectedRef, detected, "timeline"),
-      support("timeline[1].summary", triageRef, triage, "timeline"),
-      support("timeline[2].summary", mitigatedRef, mitigated, "timeline"),
-      support("timeline[3].summary", restoredRef, restored, "timeline"),
-      support("rootCause", triageRef, triage, "root_cause"),
-      support("remediation[0]", mitigatedRef, mitigated, "remediation")
-    ],
-    confidence: "low",
-    contributingFactors: [triage],
-    evidenceRefs: [detectedRef, triageRef, mitigatedRef, restoredRef],
-    impact: detected,
-    missingEvidence: [],
-    prevention: ["Monitor writer lease exhaustion and backlog health."],
-    provenanceSessionIds: candidate.provenanceSessionIds,
-    remediation: [mitigated],
-    rootCause: triage,
-    status: "resolved",
-    symptom: detected,
-    timeline: [
-      { at: "2026-07-01T12:00:00.000Z", evidenceRefs: [detectedRef], summary: detected },
-      { at: "2026-07-01T12:01:00.000Z", evidenceRefs: [triageRef], summary: triage },
-      { at: "2026-07-01T12:02:00.000Z", evidenceRefs: [mitigatedRef], summary: mitigated },
-      { at: "2026-07-01T12:03:00.000Z", evidenceRefs: [restoredRef], summary: restored }
-    ],
-    title: "Restore ingestion after SQLite writer lease exhaustion"
-  };
-}
-
-function support(
-  path: string,
-  evidenceRef: string,
-  excerpt: string,
-  supportKind: "problem" | "decision" | "alternative" | "change" | "verification" | "timeline" | "remediation" | "root_cause"
-): { path: string; evidenceRef: string; excerpt: string; supportKind: typeof supportKind } {
-  return { path, evidenceRef, excerpt, supportKind };
-}
 
 function requireCandidate(candidates: Candidate[], kind: Candidate["kind"], seedSessionId: string): Candidate {
   const candidate = candidates.find((entry) => entry.kind === kind && entry.seedSessionId === seedSessionId);
