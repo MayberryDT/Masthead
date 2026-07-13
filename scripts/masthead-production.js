@@ -180,11 +180,22 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
     cleanupCandidate: (candidate) => stopProduction(candidate, { acquireLease: noLifecycleLease }),
     completeMaintenance: (request) => runMaintenanceChild(config, "complete", request),
     currentTarget: () => realpath(join(productionRoot, "current")).catch(() => undefined),
+    readMaintenanceJournal: () => readTransitionJournal(config.databasePath),
     prepareMaintenance: (request) => runMaintenanceChild(config, "prepare", request),
+    recoverLaunchers: (oldBundle) => installProductionLauncher({
+      bundleDigest: oldBundle.bundleDigest,
+      bundlePath: oldBundle.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }),
     restoreCurrent: (_oldTarget) => swapCurrentTarget(productionRoot, _oldTarget),
     restoreLaunchers: (staged) => restoreStagedLaunchers(staged),
     restoreMaintenance: (request) => runMaintenanceChild(config, "restore", request),
     cleanupBundles: () => cleanupOldProductionBundles(productionRoot, target),
+    cleanupRecoveredBundles: (oldTarget) => cleanupOldProductionBundles(productionRoot, oldTarget),
     stageLaunchers: () => stageProductionLaunchers({ ...input, bundlePath: target, homeDir, productionRoot }),
     start: (candidate = config) => startProduction(candidate, { acquireLease: noLifecycleLease }),
     stop: () => stopProduction(config, { acquireLease: noLifecycleLease }),
@@ -195,6 +206,32 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   let staged;
   let oldTarget;
   try {
+    const pending = await dependencies.readMaintenanceJournal();
+    if (pending && !isRecoverableTransitionState(pending.state)) {
+      throw new Error(`Production transition journal has unsupported state: ${String(pending.state)}.`);
+    }
+    if (pending) {
+      const recoveryRequest = await validatePendingRecovery(config, pending);
+      assertRecoveryCurrentTarget(await dependencies.currentTarget(), recoveryRequest);
+      const stopReceipt = await dependencies.stop(config);
+      const restored = await dependencies.restoreMaintenance(recoveryRequest);
+      assertRestoredMaintenanceReceipt(restored, recoveryRequest);
+      await dependencies.restoreCurrent(recoveryRequest.oldBundle.target);
+      await dependencies.recoverLaunchers(recoveryRequest.oldBundle);
+      const started = await dependencies.start({
+        ...config,
+        bundleDigest: recoveryRequest.oldBundle.bundleDigest,
+        expectedDatabaseId: recoveryRequest.databaseId,
+        expectedSchemaVersion: recoveryRequest.sourceSchemaVersion,
+        gitSha: recoveryRequest.oldBundle.gitSha,
+        target: recoveryRequest.oldBundle.target,
+        transitionNonce: recoveryRequest.nonce,
+        version: recoveryRequest.oldBundle.version
+      });
+      await dependencies.completeMaintenance(recoveryRequest);
+      await dependencies.cleanupRecoveredBundles(recoveryRequest.oldBundle.target);
+      return { activated: false, recovered: true, started, stopped: stopReceipt, target: recoveryRequest.oldBundle.target };
+    }
     oldTarget = await dependencies.currentTarget();
     if (!oldTarget) throw new Error("Production transition requires an existing current target.");
     staged = await dependencies.stageLaunchers(config);
@@ -339,6 +376,21 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
   const lease = await dependencies.acquireLease();
   try {
+    let interruptedStart;
+    const pending = await dependencies.readMaintenanceJournal();
+    if (pending && isRecoverableTransitionState(pending.state) && !config.transitionNonce) {
+      interruptedStart = await validatePendingRecovery(config, pending, "start");
+      const current = await dependencies.currentTarget();
+      assertRecoveryCurrentTarget(current, interruptedStart);
+      await dependencies.stopInterruptedStart(interruptedStart, dependencies);
+      const restored = await dependencies.restoreInterruptedStart(interruptedStart);
+      assertRestoredMaintenanceReceipt(restored, interruptedStart);
+      await dependencies.recoverStartSurface(interruptedStart);
+      Object.assign(config, interruptedStart.oldBundle);
+      config.expectedDatabaseId = interruptedStart.databaseId;
+      config.expectedSchemaVersion = interruptedStart.sourceSchemaVersion;
+      config.transitionNonce = interruptedStart.nonce;
+    }
     await dependencies.transitionGuard();
     const current = await dependencies.currentTarget();
     if (current !== config.target) throw new Error(`Production current target changed: expected ${config.target}, found ${current || "missing"}.`);
@@ -352,6 +404,10 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
     if (pinnedProcesses.length > 0) {
       assertPinnedTopology(pinnedProcesses, config.target);
       assertMatchingHealth(health, config);
+      if (interruptedStart) {
+        await dependencies.completeInterruptedStart(interruptedStart);
+        await dependencies.cleanupInterruptedStart(interruptedStart);
+      }
       return { alreadyRunning: true, started: false, pids: pinnedProcesses.map((record) => record.pid).sort((a, b) => a - b) };
     }
     if (health) throw new Error(`Refusing to start because port ${config.port} serves a process that is not the pinned production target.`);
@@ -378,6 +434,10 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
       const startedHealth = await dependencies.waitForHealth();
       assertMatchingHealth(startedHealth, config);
       assertPinnedTopology(await classifiedProcesses(config, dependencies), config.target);
+      if (interruptedStart) {
+        await dependencies.completeInterruptedStart(interruptedStart);
+        await dependencies.cleanupInterruptedStart(interruptedStart);
+      }
       return { health: startedHealth, pid, started: true };
     } catch (error) {
       const cleanup = dependencies.cleanupSpawned
@@ -544,10 +604,35 @@ function defaultDependencies(config) {
     captureSpawned: (pid) => captureSpawnedProcess(pid, config),
     currentTarget: () => realpath(join(config.productionRoot, "current")).catch(() => undefined),
     fetchHealth: () => fetchHealth(config.port),
+    completeInterruptedStart: (request) => runMaintenanceChild(
+      { ...config, ...request.newBundle },
+      "complete",
+      request
+    ),
+    cleanupInterruptedStart: (request) => cleanupOldProductionBundles(config.productionRoot, request.oldBundle.target),
     ownershipProbe: () => probeExclusiveOwnership(config),
     portBindable: () => portBindable(config.port),
     readProcess,
     readProcesses,
+    readMaintenanceJournal: () => readTransitionJournal(config.databasePath),
+    recoverStartSurface: async (request) => {
+      await swapCurrentTarget(config.productionRoot, request.oldBundle.target);
+      await installProductionLauncher({
+        bundleDigest: request.oldBundle.bundleDigest,
+        bundlePath: request.oldBundle.target,
+        dataDirectory: config.dataDirectory,
+        databasePath: config.databasePath,
+        homeDir: homedir(),
+        port: config.port,
+        productionRoot: config.productionRoot
+      });
+    },
+    restoreInterruptedStart: (request) => runMaintenanceChild(
+      { ...config, ...request.newBundle },
+      "restore",
+      request
+    ),
+    stopInterruptedStart: (_request, activeDependencies) => stopInsideLifecycleLease(config, activeDependencies),
     signal: (pid, signal) => process.kill(pid, signal),
     spawnElectron: (launch) => {
       const child = spawn(launch.executable, launch.args, {
@@ -706,14 +791,69 @@ async function classifiedProcesses(config, dependencies) {
 }
 
 async function readProcesses() {
-  const entries = await readdir("/proc", { withFileTypes: true });
-  const records = await Promise.all(entries
-    .filter((entry) => entry.isDirectory() && /^\d+$/u.test(entry.name))
-    .map((entry) => readProcess(Number(entry.name))));
-  return records.filter(Boolean);
+  return readProductionProcesses();
 }
 
-async function readProcess(pid) {
+export async function readProductionProcesses(adapters = {}) {
+  const entries = await (adapters.entries || (async () =>
+    (await readdir("/proc", { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && /^\d+$/u.test(entry.name))
+      .map((entry) => entry.name)))();
+  const numericEntries = entries.filter((entry) => /^\d+$/u.test(String(entry)));
+  const maxEntries = adapters.maxEntries ?? 100_000;
+  const concurrency = adapters.concurrency ?? 32;
+  const now = adapters.now || monotonicMilliseconds;
+  const deadline = now() + (adapters.timeoutMs ?? 30_000);
+  const readAdapter = adapters.readProcess || readOwnedProcessStrict;
+  if (numericEntries.length > maxEntries) {
+    throw new Error(`Production process scan exceeded its ${maxEntries} entry budget.`);
+  }
+  let cursor = 0;
+  const records = [];
+  const workers = Array.from({ length: Math.min(concurrency, numericEntries.length) }, async () => {
+    while (cursor < numericEntries.length) {
+      if (now() >= deadline) throw new Error("Production process scan exceeded its bounded deadline.");
+      const entry = numericEntries[cursor];
+      cursor += 1;
+      const remaining = deadline - now();
+      if (remaining <= 0) throw new Error("Production process scan exceeded its bounded deadline.");
+      const record = await promiseWithTimeout(
+        readAdapter(Number(entry)),
+        remaining,
+        "Production process scan exceeded its bounded deadline."
+      );
+      if (record) records.push(record);
+      if (now() >= deadline) throw new Error("Production process scan exceeded its bounded deadline.");
+    }
+  });
+  await Promise.all(workers);
+  return records;
+}
+
+function promiseWithTimeout(promise, timeoutMs, message) {
+  return new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), Math.max(1, timeoutMs));
+    Promise.resolve(promise).then(
+      (value) => { clearTimeout(timer); resolvePromise(value); },
+      (error) => { clearTimeout(timer); reject(error); }
+    );
+  });
+}
+
+async function readOwnedProcessStrict(pid) {
+  const processRoot = `/proc/${pid}`;
+  let info;
+  try {
+    info = await stat(processRoot);
+  } catch (error) {
+    if (error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code)) return undefined;
+    throw error;
+  }
+  if (typeof process.getuid === "function" && info.uid !== process.getuid()) return undefined;
+  return readProcess(pid, true);
+}
+
+async function readProcess(pid, strict = false) {
   const processRoot = `/proc/${pid}`;
   try {
     const [exe, commandLine, environment, statLine] = await Promise.all([
@@ -733,7 +873,8 @@ async function readProcess(pid) {
       pid,
       starttime: values[19]
     };
-  } catch {
+  } catch (error) {
+    if (strict && !(error && typeof error === "object" && ["ENOENT", "ESRCH"].includes(error.code))) throw error;
     return undefined;
   }
 }
@@ -834,6 +975,78 @@ function bundleIdentity(config) {
   };
 }
 
+function isRecoverableTransitionState(state) {
+  return ["snapshot_ready", "ready_to_activate", "restoring", "restore_failed", "restored"].includes(state);
+}
+
+async function readTransitionJournal(databasePath) {
+  const journalPath = `${databasePath}.production-transition.json`;
+  try {
+    const info = await lstat(journalPath);
+    if (!info.isFile() || info.isSymbolicLink() || await realpath(journalPath) !== journalPath) {
+      throw new Error("transition_journal_path_invalid");
+    }
+    return JSON.parse(await readFile(journalPath, "utf8"));
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+    throw new Error(`Production transition journal is invalid for ${databasePath}.`, { cause: error });
+  }
+}
+
+async function validatePendingRecovery(config, receipt, mode = "install") {
+  const request = {
+    databaseId: receipt?.databaseId,
+    databasePath: receipt?.databasePath,
+    newBundle: receipt?.newBundle,
+    nonce: receipt?.nonce,
+    oldBundle: receipt?.oldBundle,
+    sourceSchemaVersion: receipt?.sourceSchemaVersion
+  };
+  if (
+    receipt?.schemaVersion !== 1 || !isRecoverableTransitionState(receipt?.state) ||
+    typeof request.databaseId !== "string" || !request.databaseId ||
+    !Number.isSafeInteger(request.sourceSchemaVersion) || request.sourceSchemaVersion < 0 ||
+    request.databasePath !== config.databasePath ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(request.nonce || "") ||
+    !request.oldBundle || !request.newBundle ||
+    ![request.oldBundle, request.newBundle].every((bundle) =>
+      dirname(resolve(bundle.target || "")) === config.productionRoot && VERSIONED_TARGET.test(basename(bundle.target || ""))
+    ) ||
+    (mode === "install" && !sameBundleIdentity(request.newBundle, bundleIdentity(config))) ||
+    (mode === "start" && ![request.oldBundle, request.newBundle].some((bundle) => sameBundleIdentity(bundle, bundleIdentity(config))))
+  ) {
+    throw new Error("Production transition recovery receipt does not match the requested old/new bundle identity.");
+  }
+  for (const bundle of [request.oldBundle, request.newBundle]) {
+    const targetInfo = await lstat(bundle.target);
+    if (targetInfo.isSymbolicLink() || await realpath(bundle.target) !== bundle.target) {
+      throw new Error("Production transition recovery target is not an immutable direct bundle.");
+    }
+    const release = await readRelease(bundle.target);
+    if (release.gitSha !== bundle.gitSha || release.version !== bundle.version) {
+      throw new Error("Production transition recovery release identity does not match its receipt.");
+    }
+    await verifyPinnedBundle(bundle.target, bundle.bundleDigest);
+  }
+  return request;
+}
+
+function assertRecoveryCurrentTarget(current, request) {
+  if (current !== request.oldBundle.target && current !== request.newBundle.target) {
+    throw new Error("Production transition recovery current target is neither the receipt old nor new bundle.");
+  }
+}
+
+function assertRestoredMaintenanceReceipt(receipt, request) {
+  if (
+    receipt?.state !== "restored" || receipt.databasePath !== request.databasePath || receipt.nonce !== request.nonce ||
+    !sameBundleIdentity(receipt.oldBundle, request.oldBundle) || !sameBundleIdentity(receipt.newBundle, request.newBundle) ||
+    receipt.databaseId !== request.databaseId || receipt.sourceSchemaVersion !== request.sourceSchemaVersion
+  ) {
+    throw new Error("Production maintenance restore receipt does not exactly match the authoritative transition journal.");
+  }
+}
+
 async function assertTransitionJournalAllowsStart(config) {
   const journalPath = `${config.databasePath}.production-transition.json`;
   let receipt;
@@ -873,13 +1086,36 @@ async function runMaintenanceChild(config, action, request) {
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
-  return waitForMaintenanceChild(child, action, PRODUCTION_MAINTENANCE_TIMEOUT_MS, PRODUCTION_MAINTENANCE_EXIT_GRACE_MS);
+  const identity = captureMaintenanceChildIdentity(child);
+  return waitForMaintenanceChild(
+    child,
+    action,
+    PRODUCTION_MAINTENANCE_TIMEOUT_MS,
+    PRODUCTION_MAINTENANCE_EXIT_GRACE_MS,
+    identity
+  );
 }
 
-export function waitForMaintenanceChild(child, action, timeoutMs, exitGraceMs = PRODUCTION_MAINTENANCE_EXIT_GRACE_MS) {
+export function waitForMaintenanceChild(
+  child,
+  action,
+  timeoutMs,
+  exitGraceMs = PRODUCTION_MAINTENANCE_EXIT_GRACE_MS,
+  identityPromise = captureMaintenanceChildIdentity(child),
+  identityReader = async (pid) => {
+    const record = await readProcess(pid);
+    return record ? { pid, starttime: record.starttime } : undefined;
+  }
+) {
+  const observedIdentityPromise = Promise.resolve(identityPromise).then(
+    (value) => ({ value }),
+    (error) => ({ error })
+  );
   return new Promise((resolvePromise, reject) => {
     let settled = false;
     let timedOut = false;
+    let childError;
+    let exitObserved = false;
     let exitGraceTimer;
     let stdout = "";
     let stderr = "";
@@ -887,41 +1123,100 @@ export function waitForMaintenanceChild(child, action, timeoutMs, exitGraceMs = 
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk) => { stdout += chunk; });
     child.stderr?.on("data", (chunk) => { stderr += chunk; });
-    const timer = setTimeout(() => {
-      if (settled) return;
-      timedOut = true;
-      child.kill("SIGTERM");
+    const scheduleExitGrace = (message) => {
+      if (exitGraceTimer) return;
       exitGraceTimer = setTimeout(() => {
         if (settled) return;
         settled = true;
         child.stdout?.destroy();
         child.stderr?.destroy();
         child.unref();
-        const error = new Error(
-          `Production maintenance child exceeded ${timeoutMs}ms and exact exit was not proven within ${exitGraceMs}ms after SIGTERM; no SIGKILL was sent.`
-        );
-        error.code = "maintenance_child_exit_unproven";
-        reject(error);
+        reject(maintenanceChildExitUnproven(message));
       }, exitGraceMs);
+    };
+    const timer = setTimeout(async () => {
+      if (settled) return;
+      const graceMessage = `Production maintenance child exceeded ${timeoutMs}ms and exact exit was not proven within ${exitGraceMs}ms; no SIGKILL was sent.`;
+      if (exitObserved) {
+        scheduleExitGrace(graceMessage);
+        return;
+      }
+      timedOut = true;
+      let captured;
+      let current;
+      try {
+        const identityDeadline = monotonicMilliseconds() + exitGraceMs;
+        const observed = await promiseWithTimeout(
+          observedIdentityPromise,
+          exitGraceMs,
+          "maintenance child identity acquisition exceeded its bounded deadline"
+        );
+        if (observed.error) throw observed.error;
+        captured = observed.value;
+        if (!captured || captured.pid !== child.pid || typeof captured.starttime !== "string" || !captured.starttime) {
+          throw new Error("maintenance child PID/start identity was unavailable");
+        }
+        const remaining = identityDeadline - monotonicMilliseconds();
+        if (remaining <= 0) throw new Error("maintenance child identity revalidation exceeded its bounded deadline");
+        current = await promiseWithTimeout(
+          identityReader(child.pid),
+          remaining,
+          "maintenance child identity revalidation exceeded its bounded deadline"
+        );
+      } catch (error) {
+        if (!settled) {
+          settled = true;
+          reject(maintenanceChildExitUnproven(`Production maintenance child identity revalidation failed: ${error instanceof Error ? error.message : String(error)}.`));
+        }
+        return;
+      }
+      if (settled) return;
+      if (exitObserved || !current) {
+        scheduleExitGrace(graceMessage);
+        return;
+      }
+      if (current.pid !== captured.pid || current.starttime !== captured.starttime) {
+        settled = true;
+        reject(maintenanceChildExitUnproven("Production maintenance child PID/start identity changed before SIGTERM; no signal was sent."));
+        return;
+      }
+      child.kill("SIGTERM");
+      scheduleExitGrace(`${graceMessage} SIGTERM was sent to the exact child identity.`);
     }, timeoutMs);
+    child.once("exit", () => { exitObserved = true; });
     child.once("error", (error) => {
+      if (settled) return;
+      childError = error;
+      scheduleExitGrace(`Production maintenance child emitted an error but exact exit was not proven within ${exitGraceMs}ms.`);
+    });
+    child.once("close", async (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(exitGraceTimer);
+      let identity;
+      try {
+        const observed = await promiseWithTimeout(
+          observedIdentityPromise,
+          exitGraceMs,
+          "maintenance child identity acquisition exceeded its bounded deadline"
+        );
+        if (observed.error) throw observed.error;
+        identity = observed.value;
+      } catch (error) {
+        reject(maintenanceChildExitUnproven(`Production maintenance child identity was not proven: ${error instanceof Error ? error.message : String(error)}.`));
+        return;
+      }
+      if (!identity || identity.pid !== child.pid || typeof identity.starttime !== "string" || !identity.starttime) {
+        reject(maintenanceChildExitUnproven("Production maintenance child PID/start identity did not match the observed child exit."));
+        return;
+      }
       if (timedOut) {
         reject(new Error(`Production maintenance child exceeded ${timeoutMs}ms and exited after SIGTERM; no SIGKILL was sent.`));
         return;
       }
-      reject(error);
-    });
-    child.once("close", (code, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearTimeout(exitGraceTimer);
-      if (timedOut) {
-        reject(new Error(`Production maintenance child exceeded ${timeoutMs}ms and exited after SIGTERM; no SIGKILL was sent.`));
+      if (childError) {
+        reject(childError);
         return;
       }
       if (code !== 0) {
@@ -935,6 +1230,22 @@ export function waitForMaintenanceChild(child, action, timeoutMs, exitGraceMs = 
       }
     });
   });
+}
+
+async function captureMaintenanceChildIdentity(child) {
+  if (!Number.isSafeInteger(child.pid) || child.pid <= 0) throw new Error("maintenance_child_pid_missing");
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const record = await readProcess(child.pid);
+    if (record?.starttime) return { pid: child.pid, starttime: record.starttime };
+    await delay(5);
+  }
+  throw new Error("maintenance_child_start_identity_unavailable");
+}
+
+function maintenanceChildExitUnproven(message) {
+  const error = new Error(message);
+  error.code = "maintenance_child_exit_unproven";
+  return error;
 }
 
 async function probeExclusiveOwnership(config) {

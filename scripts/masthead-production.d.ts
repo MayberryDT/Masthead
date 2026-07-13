@@ -23,6 +23,14 @@ export type ProductionProcessRecord = {
 
 export function acquireLifecycleLease(path: string): Promise<{ release(): Promise<void> }>;
 export function productionHealthPollPolicy(): { intervalMs: 250; maxAttempts: 1200; timeoutMs: 300000 };
+export function readProductionProcesses(adapters?: {
+  concurrency?: number;
+  entries?: () => Promise<string[]>;
+  maxEntries?: number;
+  now?: () => number;
+  readProcess?: (pid: number) => Promise<ProductionProcessRecord | undefined>;
+  timeoutMs?: number;
+}): Promise<ProductionProcessRecord[]>;
 export function waitForProductionHealth(
   config: { port: number },
   adapters?: {
@@ -35,7 +43,9 @@ export function waitForMaintenanceChild(
   child: import("node:child_process").ChildProcess,
   action: string,
   timeoutMs: number,
-  exitGraceMs?: number
+  exitGraceMs?: number,
+  identity?: Promise<{ pid: number; starttime: string }>,
+  identityReader?: (pid: number) => Promise<{ pid: number; starttime: string } | undefined>
 ): Promise<unknown>;
 export function classifyProductionProcess(
   record: ProductionProcessRecord,

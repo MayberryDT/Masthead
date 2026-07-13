@@ -53,10 +53,12 @@ export type ProductionTransitionBoundary =
   | "snapshot_ready"
   | "after_migrate"
   | "before_restore_promotion"
+  | "after_restore_promotion"
   | "restored";
 
 export type ProductionTransitionOptions = {
   onBoundary?: (boundary: ProductionTransitionBoundary, database?: DatabaseSync) => void;
+  onFullIntegrityCheck?: (databasePath: string) => void;
 };
 
 export function productionTransitionJournalPath(databasePath: string): string {
@@ -71,7 +73,8 @@ export async function prepareProductionTransition(
   return withExclusiveDatabaseMaintenance(input.databasePath, async (ownership) => {
     await cleanupAbandonedMigrationStagesInsideOwnership(input.databasePath);
     await assertCleanTransitionBoundary(input.databasePath);
-    const activeBefore = verifyDatabase(input.databasePath);
+    const activeBefore = verifyDatabase(input.databasePath, { foreignKeys: true });
+    options.onFullIntegrityCheck?.(join(dirname(input.databasePath), `${basename(input.databasePath)}.backup-current`));
     const backupReceipt = await createSingleConsistentBackupInsideExclusiveMaintenance(
       input.databasePath,
       ownership
@@ -109,7 +112,7 @@ export async function prepareProductionTransition(
       } finally {
         database.close();
       }
-      const migrated = verifyDatabase(input.databasePath);
+      const migrated = verifyDatabase(input.databasePath, { foreignKeys: true });
       if (migrated.databaseId !== receipt.databaseId) throw new Error("transition_migrated_identity_mismatch");
       if (migrated.schemaVersion !== CURRENT_SCHEMA_VERSION) throw new Error("transition_target_schema_mismatch");
       receipt.state = "ready_to_activate";
@@ -118,7 +121,7 @@ export async function prepareProductionTransition(
       return receipt;
     } catch (error) {
       try {
-        await restoreSnapshotInsideOwnership(receipt, ownership, options);
+        await restoreSnapshotInsideOwnership(receipt, ownership, options, false);
         await rm(productionTransitionJournalPath(input.databasePath), { force: true });
       } catch (restoreError) {
         receipt.state = "restore_failed";
@@ -161,10 +164,11 @@ export async function completeProductionTransition(inputValue: ProductionTransit
 async function restoreSnapshotInsideOwnership(
   receipt: ProductionTransitionReceipt,
   ownership: ExclusiveDatabaseMaintenance,
-  options: ProductionTransitionOptions
+  options: ProductionTransitionOptions,
+  requireFullSnapshotIntegrity = true
 ): Promise<void> {
   if (ownership.databasePath !== receipt.databasePath) throw new Error("transition_restore_ownership_mismatch");
-  await verifySnapshot(receipt);
+  await verifySnapshot(receipt, options, requireFullSnapshotIntegrity);
   receipt.state = "restoring";
   receipt.updatedAt = new Date().toISOString();
   await writeJournal(receipt);
@@ -181,14 +185,22 @@ async function restoreSnapshotInsideOwnership(
       snapshot.close();
     }
     normalizeJournal(stagePath);
-    const staged = verifyDatabase(stagePath);
+    const staged = verifyDatabase(stagePath, { foreignKeys: true });
     if (!matchesSourceDatabase(staged, receipt)) {
       throw new Error("transition_restore_stage_mismatch");
     }
     options.onBoundary?.("before_restore_promotion");
     await removeSidecars(receipt.databasePath);
     await rename(stagePath, receipt.databasePath);
-    const restored = verifyDatabase(receipt.databasePath);
+    if (options.onBoundary) {
+      const promoted = new DatabaseSync(receipt.databasePath);
+      try {
+        options.onBoundary("after_restore_promotion", promoted);
+      } finally {
+        promoted.close();
+      }
+    }
+    const restored = verifyDatabase(receipt.databasePath, { foreignKeys: true });
     if (!matchesSourceDatabase(restored, receipt)) {
       throw new Error("transition_restored_database_mismatch");
     }
@@ -262,7 +274,11 @@ async function readAndValidateJournal(input: ProductionTransitionInput): Promise
   return receipt;
 }
 
-async function verifySnapshot(receipt: ProductionTransitionReceipt): Promise<void> {
+async function verifySnapshot(
+  receipt: ProductionTransitionReceipt,
+  options: ProductionTransitionOptions,
+  requireFullIntegrity: boolean
+): Promise<void> {
   const info = await lstat(receipt.snapshot.path);
   if (!info.isFile() || info.isSymbolicLink() || await realpath(receipt.snapshot.path) !== receipt.snapshot.path) {
     throw new Error("transition_snapshot_path_invalid");
@@ -270,7 +286,8 @@ async function verifySnapshot(receipt: ProductionTransitionReceipt): Promise<voi
   if (info.size !== receipt.snapshot.sizeBytes || await hashFile(receipt.snapshot.path) !== receipt.snapshot.sha256) {
     throw new Error("transition_snapshot_receipt_mismatch");
   }
-  const verified = verifyDatabase(receipt.snapshot.path);
+  if (requireFullIntegrity) options.onFullIntegrityCheck?.(receipt.snapshot.path);
+  const verified = verifyDatabase(receipt.snapshot.path, { foreignKeys: true, fullIntegrity: requireFullIntegrity });
   if (!matchesSourceDatabase(verified, receipt)) {
     throw new Error("transition_snapshot_database_mismatch");
   }
@@ -283,13 +300,24 @@ type VerifiedDatabase = {
   schemaVersion: number;
 };
 
-function verifyDatabase(path: string): VerifiedDatabase {
+function verifyDatabase(
+  path: string,
+  options: { foreignKeys?: boolean; fullIntegrity?: boolean } = {}
+): VerifiedDatabase {
   const database = new DatabaseSync(path, { readOnly: true });
   try {
-    const integrity = database.prepare("PRAGMA integrity_check").all() as Array<Record<string, unknown>>;
-    const results = integrity.flatMap((row) => Object.values(row));
-    if (results.length !== 1 || results[0] !== "ok") throw new Error("transition_database_integrity_failed");
+    if (options.fullIntegrity) {
+      const integrity = database.prepare("PRAGMA integrity_check").all() as Array<Record<string, unknown>>;
+      const results = integrity.flatMap((row) => Object.values(row));
+      if (results.length !== 1 || results[0] !== "ok") throw new Error("transition_database_integrity_failed");
+    }
     quickCheckMastheadDatabase(database);
+    if (options.foreignKeys) {
+      const foreignKeyFailures = database.prepare("PRAGMA foreign_key_check").all();
+      if (foreignKeyFailures.length > 0) {
+        throw new Error(`transition_foreign_key_check_failed:${JSON.stringify(foreignKeyFailures.slice(0, 10))}`);
+      }
+    }
     const identity = database.prepare(
       "SELECT setting_json AS value FROM app_settings WHERE setting_key = 'database_identity'"
     ).get() as { value: string } | undefined;

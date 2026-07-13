@@ -58,8 +58,11 @@ describe("offline production transition maintenance", () => {
     const abandonedRecoveryStage = join(root, ".masthead.sqlite.recovery-stage-abandoned");
     await writeFile(abandonedStage, "abandoned stage from an interrupted maintenance run");
     await writeFile(abandonedRecoveryStage, "abandoned snapshot stage from an interrupted maintenance child");
+    const fullIntegrityChecks: string[] = [];
     const receipt = await prepareProductionTransition({
       databasePath, newBundle, nonce: "11111111-1111-4111-8111-111111111111", oldBundle
+    }, {
+      onFullIntegrityCheck: (path) => fullIntegrityChecks.push(path)
     });
 
     expect(receipt).toMatchObject({
@@ -78,6 +81,7 @@ describe("offline production transition maintenance", () => {
     expect((await readdir(root)).filter((name) => name.includes("transition-stage"))).toEqual([]);
     await expect(readFile(abandonedStage)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(abandonedRecoveryStage)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(fullIntegrityChecks).toEqual([receipt.snapshot.path]);
   });
 
   test("restores the exact receipt-bound snapshot and source identity before old activation", async () => {
@@ -89,11 +93,36 @@ describe("offline production transition maintenance", () => {
       .run(JSON.stringify({ value: "after" }), "transition_marker");
     changed.close();
 
-    const receipt = await restoreProductionTransition({ databasePath, newBundle, nonce, oldBundle });
+    const fullIntegrityChecks: string[] = [];
+    const receipt = await restoreProductionTransition({ databasePath, newBundle, nonce, oldBundle }, {
+      onFullIntegrityCheck: (path) => fullIntegrityChecks.push(path)
+    });
     expect(receipt).toMatchObject({ databaseId, nonce, state: "restored" });
     const restored = new DatabaseSync(databasePath, { readOnly: true });
     expect(restored.prepare("SELECT setting_json FROM app_settings WHERE setting_key = ?").get("transition_marker"))
       .toEqual({ setting_json: JSON.stringify({ value: "before" }) });
+    restored.close();
+    expect(fullIntegrityChecks).toEqual([receipt.snapshot.path]);
+  });
+
+  test("rejects foreign-key orphans before activation and restores the clean snapshot", async () => {
+    const { databasePath, newBundle, oldBundle } = await fixture();
+    await expect(prepareProductionTransition({
+      databasePath,
+      newBundle,
+      nonce: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      oldBundle
+    }, {
+      onBoundary: (boundary, database) => {
+        if (boundary !== "after_migrate") return;
+        database?.exec("PRAGMA foreign_keys = OFF;");
+        database?.prepare(
+          "INSERT INTO session_sources(session_id, source_id, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)"
+        ).run("missing-session", "missing-source", "2026-07-13T12:00:00.000Z", "2026-07-13T12:00:00.000Z");
+      }
+    })).rejects.toThrow("foreign_key_check");
+    const restored = new DatabaseSync(databasePath, { readOnly: true });
+    expect(restored.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     restored.close();
   });
 
@@ -123,7 +152,9 @@ describe("offline production transition maintenance", () => {
   test("rolls back a partial migration failure before returning and records no trusted journal", async () => {
     const { databasePath, newBundle, oldBundle } = await fixture(21);
     const nonce = "33333333-3333-4333-8333-333333333333";
+    const fullIntegrityChecks: string[] = [];
     await expect(prepareProductionTransition({ databasePath, newBundle, nonce, oldBundle }, {
+      onFullIntegrityCheck: (path) => fullIntegrityChecks.push(path),
       onBoundary: (boundary, database) => {
         if (boundary !== "after_migrate") return;
         database?.prepare("UPDATE app_settings SET setting_json = ? WHERE setting_key = ?")
@@ -136,6 +167,7 @@ describe("offline production transition maintenance", () => {
       .toEqual({ setting_json: JSON.stringify({ value: "before" }) });
     expect(active.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 21 });
     active.close();
+    expect(fullIntegrityChecks).toHaveLength(1);
     await expect(readFile(productionTransitionJournalPath(databasePath), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -180,6 +212,25 @@ describe("offline production transition maintenance", () => {
         if (boundary === "before_restore_promotion") throw new Error("injected restore failure");
       }
     })).rejects.toThrow("injected restore failure");
+    expect(JSON.parse(await readFile(productionTransitionJournalPath(databasePath), "utf8"))).toMatchObject({
+      nonce,
+      state: "restore_failed"
+    });
+  });
+
+  test("rejects a foreign-key orphan introduced after restore promotion", async () => {
+    const { databasePath, newBundle, oldBundle } = await fixture();
+    const nonce = "abababab-abab-4bab-8bab-abababababab";
+    await prepareProductionTransition({ databasePath, newBundle, nonce, oldBundle });
+    await expect(restoreProductionTransition({ databasePath, newBundle, nonce, oldBundle }, {
+      onBoundary: (boundary, database) => {
+        if (boundary !== "after_restore_promotion") return;
+        database?.exec("PRAGMA foreign_keys = OFF;");
+        database?.prepare(
+          "INSERT INTO session_sources(session_id, source_id, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)"
+        ).run("missing-session", "missing-source", "2026-07-13T12:00:00.000Z", "2026-07-13T12:00:00.000Z");
+      }
+    })).rejects.toThrow("foreign_key_check");
     expect(JSON.parse(await readFile(productionTransitionJournalPath(databasePath), "utf8"))).toMatchObject({
       nonce,
       state: "restore_failed"

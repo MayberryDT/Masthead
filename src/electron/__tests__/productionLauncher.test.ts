@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +12,7 @@ import {
   classifyProductionProcess,
   installProductionLauncher,
   productionHealthPollPolicy,
+  readProductionProcesses,
   waitForProductionHealth,
   startProduction,
   stopProduction,
@@ -68,6 +71,30 @@ async function fixture() {
     productionRoot,
     root,
     target
+  };
+}
+
+async function secondBundle(productionRoot: string, sourceTarget: string) {
+  const { cp, rm } = await import("node:fs/promises");
+  const target = join(productionRoot, "Masthead-linux-x64-0.2.0-candidate");
+  await cp(sourceTarget, target, { recursive: true });
+  await writeFile(join(target, "masthead"), "candidate-binary", { mode: 0o755 });
+  await writeFile(join(target, "resources", "app.asar"), "candidate-app");
+  await writeFile(join(target, "resources", "daemon", "release.json"), JSON.stringify({
+    gitSha: "b".repeat(40),
+    version: "0.2.0"
+  }));
+  await rm(join(target, "resources", "release-manifest.json"), { force: true });
+  const manifest = await writePackagedBundleManifest({
+    bundleRoot: target,
+    executablePath: join(target, "masthead"),
+    resourcesPath: join(target, "resources")
+  });
+  return {
+    bundleDigest: manifest.bundleDigest,
+    gitSha: "b".repeat(40),
+    target,
+    version: "0.2.0"
   };
 }
 
@@ -161,12 +188,148 @@ describe("production lifecycle launcher", () => {
       .rejects.toMatchObject({ code: "maintenance_child_exit_unproven" });
     expect(unproven.exitCode).toBeNull();
     await once(unproven, "close");
+
+    const errorOnly = Object.assign(new EventEmitter(), {
+      kill: () => true,
+      pid: 4242,
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
+      unref: () => undefined
+    });
+    const errorOnlyWait = waitForMaintenanceChild(
+      errorOnly as any,
+      "test",
+      10,
+      20,
+      Promise.resolve({ pid: 4242, starttime: "observed-start" })
+    );
+    errorOnly.emit("error", new Error("pipe error is not process exit"));
+    await expect(errorOnlyWait).rejects.toMatchObject({ code: "maintenance_child_exit_unproven" });
+
+    const rejectedIdentityChild = Object.assign(new EventEmitter(), {
+      kill: () => true,
+      pid: 4243,
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
+      unref: () => undefined
+    });
+    const rejectedIdentityWait = waitForMaintenanceChild(
+      rejectedIdentityChild as any,
+      "test",
+      100,
+      20,
+      Promise.reject(new Error("identity capture failed early"))
+    );
+    rejectedIdentityChild.emit("close", 1, null);
+    await expect(rejectedIdentityWait).rejects.toMatchObject({ code: "maintenance_child_exit_unproven" });
+
+    const neverSettlingIdentity = new Promise<{ pid: number; starttime: string }>(() => undefined);
+    const neverIdentifiedChild = Object.assign(new EventEmitter(), {
+      kill: () => true,
+      pid: 4244,
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
+      unref: () => undefined
+    });
+    const neverIdentifiedWait = waitForMaintenanceChild(
+      neverIdentifiedChild as any,
+      "test",
+      10,
+      20,
+      neverSettlingIdentity
+    );
+    await expect(Promise.race([
+      neverIdentifiedWait,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("identity wait remained unbounded")), 100))
+    ])).rejects.toMatchObject({ code: "maintenance_child_exit_unproven" });
+
+    const closedBeforeIdentity = Object.assign(new EventEmitter(), {
+      kill: () => true,
+      pid: 4245,
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
+      unref: () => undefined
+    });
+    const closedBeforeIdentityWait = waitForMaintenanceChild(
+      closedBeforeIdentity as any,
+      "test",
+      100,
+      20,
+      new Promise(() => undefined)
+    );
+    closedBeforeIdentity.emit("close", 0, null);
+    await expect(Promise.race([
+      closedBeforeIdentityWait,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("closed identity wait remained unbounded")), 100))
+    ])).rejects.toMatchObject({ code: "maintenance_child_exit_unproven" });
+
+    let exitedKillCount = 0;
+    const exitedBeforeClose = Object.assign(new EventEmitter(), {
+      kill: () => { exitedKillCount += 1; return true; },
+      pid: 4343,
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
+      unref: () => undefined
+    });
+    const exitedWait = waitForMaintenanceChild(
+      exitedBeforeClose as any,
+      "test",
+      10,
+      100,
+      Promise.resolve({ pid: 4343, starttime: "original" }),
+      async () => ({ pid: 4343, starttime: "reused" })
+    );
+    exitedBeforeClose.emit("exit", 0, null);
+    setTimeout(() => {
+      exitedBeforeClose.stdout.end('{"completed":true}');
+      exitedBeforeClose.stderr.end();
+      exitedBeforeClose.emit("close", 0, null);
+    }, 30);
+    await expect(exitedWait).resolves.toEqual({ completed: true });
+    expect(exitedKillCount).toBe(0);
+
+    let reusedKillCount = 0;
+    const reused = Object.assign(new EventEmitter(), {
+      kill: () => { reusedKillCount += 1; return true; },
+      pid: 4444,
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
+      unref: () => undefined
+    });
+    await expect(waitForMaintenanceChild(
+      reused as any,
+      "test",
+      10,
+      20,
+      Promise.resolve({ pid: 4444, starttime: "original" }),
+      async () => ({ pid: 4444, starttime: "replacement" })
+    )).rejects.toMatchObject({ code: "maintenance_child_exit_unproven" });
+    expect(reusedKillCount).toBe(0);
   });
 
   test("reads proc executable symlink text so deleted kernel identities remain observable", async () => {
     const source = await readFile("scripts/masthead-production.js", "utf8");
     expect(source).toContain('readlink(join(processRoot, "exe"))');
     expect(source).not.toContain('realpath(join(processRoot, "exe"))');
+  });
+
+  test("fails closed when the bounded process scan exceeds its entry budget or hits a non-race read error", async () => {
+    await expect(readProductionProcesses({
+      entries: async () => ["1", "2", "3"],
+      maxEntries: 2,
+      readProcess: async () => undefined
+    })).rejects.toThrow("entry budget");
+    await expect(readProductionProcesses({
+      entries: async () => ["1"],
+      readProcess: async () => { throw Object.assign(new Error("too many open files"), { code: "EMFILE" }); }
+    })).rejects.toThrow("too many open files");
+    const startedAt = Date.now();
+    await expect(readProductionProcesses({
+      entries: async () => ["1"],
+      readProcess: async () => new Promise(() => undefined),
+      timeoutMs: 10
+    })).rejects.toThrow("bounded deadline");
+    expect(Date.now() - startedAt).toBeLessThan(100);
   });
 
   test("installs an atomic wrapper and desktop entry pinned to the immutable target and release identity", async () => {
@@ -268,6 +431,202 @@ describe("production lifecycle launcher", () => {
     expect(calls).toEqual(["stage", "stop", "maintenance", "swap", "activate-launchers", "start", "complete-maintenance", "release"]);
     const { access } = await import("node:fs/promises");
     await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test.each(["snapshot_ready", "ready_to_activate", "restoring", "restore_failed", "restored"])(
+    "public install rerun recovers the authoritative %s journal without generating a fresh transition",
+    async (state) => {
+      const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+      const candidate = await secondBundle(productionRoot, oldTarget);
+      if (state !== "snapshot_ready") {
+        const { rm } = await import("node:fs/promises");
+        await rm(join(productionRoot, "current"));
+        await symlink(candidate.target, join(productionRoot, "current"));
+      }
+      const nonce = "12121212-1212-4212-8212-121212121212";
+      await mkdir(config.dataDirectory, { recursive: true });
+      await writeFile(`${config.databasePath}.production-transition.json`, JSON.stringify({
+        databaseId: "db-recovered",
+        databasePath: config.databasePath,
+        newBundle: candidate,
+        nonce,
+        oldBundle: { bundleDigest: config.bundleDigest, gitSha: "a".repeat(40), target: oldTarget, version: "0.1.0" },
+        schemaVersion: 1,
+        sourceSchemaVersion: 21,
+        state
+      }));
+      const calls: string[] = [];
+      const result = await transitionProduction({
+        bundleDigest: candidate.bundleDigest, bundlePath: candidate.target, dataDirectory: config.dataDirectory, homeDir, productionRoot
+      }, {
+        acquireLease: async () => ({ release: async () => calls.push("release") }),
+        cleanupRecoveredBundles: async () => calls.push("cleanup-bundles"),
+        completeMaintenance: async (request: any) => calls.push(`complete:${request.nonce}`),
+        prepareMaintenance: async () => { calls.push("prepare-new"); throw new Error("must not prepare"); },
+        recoverLaunchers: async () => calls.push("recover-launchers"),
+        restoreCurrent: async () => calls.push("restore-current"),
+        restoreMaintenance: async (request: any) => {
+          calls.push(`restore:${request.nonce}`);
+          return {
+            ...request,
+            databaseId: "db-recovered",
+            sourceSchemaVersion: 21,
+            state: "restored"
+          };
+        },
+        stageLaunchers: async () => { calls.push("stage-new"); throw new Error("must not stage"); },
+        start: async (candidate: any) => {
+          calls.push(`start:${candidate.transitionNonce}:${candidate.expectedSchemaVersion}`);
+          return { started: true };
+        },
+        stop: async () => { calls.push("stop"); return { stopped: true }; }
+      });
+      expect(result).toMatchObject({ activated: false, recovered: true });
+      expect(calls).toEqual([
+        "stop",
+        `restore:${nonce}`,
+        "restore-current",
+        "recover-launchers",
+        `start:${nonce}:21`,
+        `complete:${nonce}`,
+        "cleanup-bundles",
+        "release"
+      ]);
+    }
+  );
+
+  test("public install recovery rejects a third current target before stop or restore", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await mkdir(config.dataDirectory, { recursive: true });
+    await writeFile(`${config.databasePath}.production-transition.json`, JSON.stringify({
+      databaseId: "db-recovered",
+      databasePath: config.databasePath,
+      newBundle: candidate,
+      nonce: "15151515-1515-4515-8515-151515151515",
+      oldBundle: { bundleDigest: config.bundleDigest, gitSha: "a".repeat(40), target: oldTarget, version: "0.1.0" },
+      schemaVersion: 1,
+      sourceSchemaVersion: 23,
+      state: "snapshot_ready"
+    }));
+    let stopped = false;
+    let restored = false;
+    await expect(transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      currentTarget: async () => join(productionRoot, "Masthead-linux-x64-third"),
+      restoreMaintenance: async () => { restored = true; },
+      stop: async () => { stopped = true; }
+    })).rejects.toThrow("neither the receipt old nor new bundle");
+    expect(stopped).toBe(false);
+    expect(restored).toBe(false);
+  });
+
+  test("public install recovery rejects a symlink journal before stop", async () => {
+    const { config, homeDir, productionRoot, root, target } = await fixture();
+    await mkdir(config.dataDirectory, { recursive: true });
+    const outsideJournal = join(root, "outside-transition.json");
+    await writeFile(outsideJournal, JSON.stringify({ state: "snapshot_ready" }));
+    await symlink(outsideJournal, `${config.databasePath}.production-transition.json`);
+    let stopped = false;
+    await expect(transitionProduction({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      stop: async () => { stopped = true; }
+    })).rejects.toThrow("transition journal is invalid");
+    expect(stopped).toBe(false);
+  });
+
+  test("public install rejects an unknown journal state before staging or stopping", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+    await mkdir(config.dataDirectory, { recursive: true });
+    await writeFile(`${config.databasePath}.production-transition.json`, JSON.stringify({ state: "future_state" }));
+    let staged = false;
+    let stopped = false;
+    await expect(transitionProduction({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      stageLaunchers: async () => { staged = true; },
+      stop: async () => { stopped = true; }
+    })).rejects.toThrow("unsupported state");
+    expect(staged).toBe(false);
+    expect(stopped).toBe(false);
+  });
+
+  test("public start recovery keeps the restored journal when old health validation fails", async () => {
+    const { config, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const { rm } = await import("node:fs/promises");
+    await rm(join(productionRoot, "current"));
+    await symlink(candidate.target, join(productionRoot, "current"));
+    const nonce = "14141414-1414-4414-8414-141414141414";
+    const journalPath = `${config.databasePath}.production-transition.json`;
+    const journal = {
+      databaseId: "db-recovered",
+      databasePath: config.databasePath,
+      newBundle: candidate,
+      nonce,
+      oldBundle: { bundleDigest: config.bundleDigest, gitSha: "a".repeat(40), target: oldTarget, version: "0.1.0" },
+      schemaVersion: 1,
+      sourceSchemaVersion: 23,
+      state: "restore_failed"
+    };
+    await mkdir(config.dataDirectory, { recursive: true });
+    await writeFile(journalPath, JSON.stringify(journal));
+    const electron = processRecord({
+      argv: [join(oldTarget, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(oldTarget, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [join(oldTarget, "resources", "daemon", "node"), join(oldTarget, "resources", "daemon", "dist", "src", "daemon", "main.js")],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(oldTarget, "resources", "daemon", "node"), pid: 43, starttime: "daemon"
+    });
+    let completed = false;
+    let cleaned = false;
+    await expect(startProduction({
+      ...config,
+      bundleDigest: candidate.bundleDigest,
+      gitSha: candidate.gitSha,
+      target: candidate.target,
+      version: candidate.version
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      cleanupInterruptedStart: async () => { cleaned = true; },
+      completeInterruptedStart: async () => { completed = true; },
+      currentTarget: async () => oldTarget,
+      fetchHealth: async () => ({
+        buildSha: "a".repeat(40), buildVersion: "0.1.0",
+        data: { dataDirectory: config.dataDirectory, databaseId: "wrong-db", databasePath: config.databasePath },
+        ok: true, product: "masthead", runtime: { port: config.port, writable: true }, schemaVersion: 23
+      }),
+      readProcesses: async () => [electron, daemon],
+      recoverStartSurface: async () => undefined,
+      restoreInterruptedStart: async (request: any) => {
+        await writeFile(journalPath, JSON.stringify({ ...journal, state: "restored" }));
+        return { ...request, state: "restored" };
+      },
+      stopInterruptedStart: async () => undefined
+    })).rejects.toThrow("database identity/schema");
+    expect(completed).toBe(false);
+    expect(cleaned).toBe(false);
+    expect(JSON.parse(await readFile(journalPath, "utf8"))).toMatchObject({ nonce, state: "restored" });
   });
 
   test("refuses a version-named transition symlink that escapes the production root before stopping", async () => {
@@ -377,7 +736,7 @@ describe("production lifecycle launcher", () => {
   });
 
   test.each(["snapshot_ready", "ready_to_activate", "restoring", "restore_failed", "restored"])(
-    "start refuses the %s crash journal before inspecting or spawning processes",
+    "start refuses the malformed %s crash journal before inspecting or spawning processes",
     async (state) => {
       const { config } = await fixture();
       await mkdir(config.dataDirectory, { recursive: true });
@@ -391,8 +750,83 @@ describe("production lifecycle launcher", () => {
       await expect(startProduction(config, {
         acquireLease: async () => ({ release: async () => undefined }),
         currentTarget: async () => { inspected = true; return config.target; }
-      })).rejects.toThrow("incomplete transition journal");
+      })).rejects.toThrow("recovery receipt does not match");
       expect(inspected).toBe(false);
+    }
+  );
+
+  test.each(["snapshot_ready", "ready_to_activate", "restoring", "restore_failed", "restored"])(
+    "public start rerun recovers %s with the journal nonce before accepting old health",
+    async (state) => {
+      const { config, productionRoot, target: oldTarget } = await fixture();
+      const candidate = await secondBundle(productionRoot, oldTarget);
+      const startsFromCandidate = state !== "snapshot_ready";
+      if (startsFromCandidate) {
+        const { rm } = await import("node:fs/promises");
+        await rm(join(productionRoot, "current"));
+        await symlink(candidate.target, join(productionRoot, "current"));
+      }
+      const wrapperConfig = startsFromCandidate ? {
+        ...config,
+        bundleDigest: candidate.bundleDigest,
+        gitSha: candidate.gitSha,
+        target: candidate.target,
+        version: candidate.version
+      } : config;
+      const nonce = "13131313-1313-4313-8313-131313131313";
+      const journalPath = `${config.databasePath}.production-transition.json`;
+      const journal = {
+        databaseId: "db-recovered",
+        databasePath: config.databasePath,
+        newBundle: candidate,
+        nonce,
+        oldBundle: { bundleDigest: config.bundleDigest, gitSha: "a".repeat(40), target: oldTarget, version: "0.1.0" },
+        schemaVersion: 1,
+        sourceSchemaVersion: 23,
+        state
+      };
+      await mkdir(config.dataDirectory, { recursive: true });
+      await writeFile(journalPath, JSON.stringify(journal));
+      const electron = processRecord({
+        argv: [join(oldTarget, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+        environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+        exe: join(oldTarget, "masthead")
+      });
+      const daemon = processRecord({
+        argv: [join(oldTarget, "resources", "daemon", "node"), join(oldTarget, "resources", "daemon", "dist", "src", "daemon", "main.js")],
+        environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+        exe: join(oldTarget, "resources", "daemon", "node"), pid: 43, starttime: "daemon"
+      });
+      const calls: string[] = [];
+      let surfaceRecovered = false;
+      const result = await startProduction(wrapperConfig, {
+        acquireLease: async () => ({ release: async () => calls.push("release") }),
+        completeInterruptedStart: async (request: any) => {
+          calls.push(`complete:${request.nonce}`);
+          const { rm } = await import("node:fs/promises");
+          await rm(journalPath);
+        },
+        cleanupInterruptedStart: async () => calls.push("cleanup-bundles"),
+        currentTarget: async () => surfaceRecovered ? oldTarget : (startsFromCandidate ? candidate.target : oldTarget),
+        fetchHealth: async () => ({
+          buildSha: "a".repeat(40), buildVersion: "0.1.0",
+          data: { dataDirectory: config.dataDirectory, databaseId: "db-recovered", databasePath: config.databasePath },
+          ok: true, product: "masthead", runtime: { port: config.port, writable: true }, schemaVersion: 23
+        }),
+        readProcesses: async () => [electron, daemon],
+        recoverStartSurface: async () => { calls.push("recover-surface"); surfaceRecovered = true; },
+        restoreInterruptedStart: async (request: any) => {
+          calls.push(`restore:${request.nonce}`);
+          await writeFile(journalPath, JSON.stringify({ ...journal, state: "restored" }));
+          return { ...request, databaseId: "db-recovered", sourceSchemaVersion: 23, state: "restored" };
+        },
+        stopInterruptedStart: async () => calls.push("stop")
+      });
+      expect(result).toMatchObject({ alreadyRunning: true, started: false });
+      expect(calls).toEqual([
+        "stop", `restore:${nonce}`, "recover-surface", `complete:${nonce}`, "cleanup-bundles", "release"
+      ]);
+      await expect(readFile(journalPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     }
   );
 
