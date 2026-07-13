@@ -21,8 +21,8 @@ _Avoid_: Instructional page, onboarding page, command guide
 
 **Published session**:
 Legacy term for a session that passed older Logbook-oriented publication gates. In the artifact-first
-model, prefer **compile-ready session** and **automatic work resolved**; a session is not a
-Logbook search hit.
+model, prefer **compile-ready session** and **dossier-published session**; a session is not a Logbook
+search hit.
 _Avoid_: Logbook row, primary searchable unit
 
 **Compile-ready session**:
@@ -31,12 +31,11 @@ checked as needed, quality accepted, and required permissions in place. It may b
 disposable handoff. It is not a Logbook hit and does not require artifacts yet.
 _Avoid_: Published session, automatic work resolved, Logbook-ready session
 
-**Automatic work resolved**:
-Session-level state meaning the default automatic kind set is settled for that seed session: the
-session package is published, and runbook, ADR, and incident timeline are each either published or
-explicitly not applicable or satisfied by contribution. This is the disposable-handoff exit
-criterion for that session. An applied-but-unpublished optional artifact does not qualify.
-_Avoid_: Compile-ready only, partial apply without N/A, Logbook session row
+**Legacy automatic work resolved**:
+Audit-only V1 state that required a session package plus explicit resolution of every optional kind.
+Authoring contract V2 does not target or compute this state. It publishes the canonical dossier
+independently and tracks each positive-evidence candidate group directly.
+_Avoid_: V2 completion criterion, per-session optional-kind checklist, Logbook session row
 
 **Publication transition**:
 The explicit Workbench state change that admits one artifact into Logbook after that artifact is
@@ -84,10 +83,10 @@ authoring, not a substitute for artifact publish.
 _Avoid_: Optional enrichment, blanket artifact requirement, publish whole session
 
 **Workbench session states (artifact-first)**:
-Two user-visible session states on the Workbench path: **compile-ready** (handoff may start) and
-**automatic work resolved** (default automatic kind set settled: published session package plus
-runbook/ADR/timeline each published or N/A). Finer pipeline chips may exist under the hood.
-_Avoid_: Published session as Logbook eligibility, single binary published flag as the only state
+The session path exposes readiness and canonical dossier publication. Optional knowledge work is
+shown as discovered, claimed, completed, or rejected artifact candidate groups; a session does not
+acquire three empty optional-kind obligations merely by existing.
+_Avoid_: Published session as Logbook eligibility, blanket optional-kind resolution state
 
 **Workbench pipeline state**:
 The canonical per-session Workbench state that says where a captured session sits between capture
@@ -271,8 +270,8 @@ _Avoid_: Transcript excerpt, first page, raw harness file, privacy approval prom
 
 **Automatic completion report**:
 The immutable receipt stored when atomic finish succeeds. It records the run, completion time,
-published artifact ids, resolved sessions, N/A decisions, and contributions. A finish retry returns
-the same report and creates no duplicate outputs.
+candidate group, published artifact id, provenance sessions, and validation result. A finish retry
+returns the same report and creates no duplicate output.
 _Avoid_: Draft summary, Activity-only event, best-effort publish list
 
 **Workbench action parity**:
@@ -441,10 +440,10 @@ together, citing the strong join key(s) used. Required for multi-session apply/p
 _Avoid_: Implicit relatedness, undocumented cluster, search ranking as proof
 
 **Automatic handoff completion**:
-On the disposable-handoff path, the coding agent is expected to finish the full loop for in-scope
-work: claim, evidence, provenance selection, apply capsule and body, validate, and publish
-artifacts that pass kind rules. The human is not asked to cluster sessions or click publish.
-Directed-agent work may stop earlier or change scope when the human instructs it to.
+On the disposable-handoff path, the coding agent is expected to finish the full loop for one
+candidate group: claim, evidence review, apply one capsule and body, validate, and publish the
+supported artifact. The human is not asked to cluster sessions or click publish. Directed-agent
+work may stop earlier or change scope when the human instructs it to.
 _Avoid_: Human publish click as default, partial handoff that only drafts, silent backend publish without agent tools
 
 **Default automatic kind set**:
@@ -497,22 +496,21 @@ artifact body must be supportable from that set.
 _Avoid_: Implicit attachment, hidden parent session, evidence from outside the provenance set
 
 **Artifact applicability**:
-The Workbench decision that an artifact kind is required, optional, or not applicable for a given
-seed session based on available evidence. Not applicable is a session-relative pipeline fact and
-does not create a Logbook row.
-_Avoid_: Empty artifact, failed artifact, missing artifact, N/A stub in Logbook
+Legacy V1 audit data recording whether an optional kind was treated as applicable for a seed
+session. V2 replaces this obligation model with positive-evidence candidate discovery; no candidate
+is simply no work and creates no Logbook row or resolution record.
+_Avoid_: V2 candidate state, empty artifact, missing artifact treated as error
 
 **Not applicable (N/A)**:
-Session-relative pipeline state meaning the default automatic path will not produce a given kind
-from this seed session. It is intentional, auditable in Workbench Activity, and never a published
-Logbook artifact.
-_Avoid_: Published stub, failed artifact, missing artifact treated as error
+Legacy V1 audit state retained to explain historical authoring runs. V2 never asks an agent to
+generate N/A prose or complete an N/A obligation when positive evidence produced no candidate.
+_Avoid_: V2 output, published stub, candidate-discovery result
 
 **Satisfied via contribution**:
-Session-relative pipeline state meaning the seed session is in the provenance set of a published
-multi-session artifact of that kind, so the kind is resolved for automatic work without a second
-session-local copy.
-_Avoid_: Duplicate per-session publish, N/A when a real shared artifact exists
+Legacy V1 audit state meaning a seed session contributed to a published multi-session artifact.
+In V2, provenance membership lives on the completed candidate group and artifact itself rather than
+resolving a per-session optional-kind obligation.
+_Avoid_: V2 candidate status, duplicate per-session publish
 
 **Workbench queue item**:
 A session selected for enrichment or artifact work because it is missing, stale, low-confidence, or
@@ -543,10 +541,11 @@ turning sessions into assigned tasks or adding noisy context to default agent pr
 _Avoid_: Assignment, task ownership, project management
 
 **Applied enrichment**:
-Intermediate Workbench state after the daemon has written agent-authored memory. For the session kind this updates the
-session capsule (listing) and/or session dossier (body) according to the output kind; it does not
-by itself publish into Logbook.
-_Avoid_: Draft, pending proposal, Logbook hit, publish
+Intermediate Workbench state after the daemon has written dedicated session enrichment. That
+enrichment may improve canonical source data reflected in a later daemon-built dossier snapshot,
+but the agent does not author the dossier artifact body. Applied enrichment does not by itself
+publish into Logbook.
+_Avoid_: Agent-authored dossier, pending proposal, Logbook hit, publish
 
 **Current artifact**:
 The latest active version of an artifact for its identity and kind.
