@@ -1,7 +1,18 @@
-import type { WorkbenchAutomaticArtifactKind, WorkbenchAuthoringBundleV2, WorkbenchClaimEvidence } from "../../shared/workbenchAuthoring.ts";
+import type {
+  WorkbenchAutomaticArtifactKind,
+  WorkbenchAuthoringBundleV2,
+  WorkbenchClaimEvidence,
+  WorkbenchClaimSupport
+} from "../../shared/workbenchAuthoring.ts";
 import { redactText } from "../../core/redaction.ts";
 import { normalizeSessionArtifactSignatureKey } from "../../daemon/db/sessionArtifactRepository.ts";
-import { getAuthoringBundleSchema, getAuthoringBundleV2Schema, getWorkbenchAuthoringOutputSchema } from "./authoringSchemas.ts";
+import {
+  getAuthoringBundleSchema,
+  getAuthoringBundleV2Schema,
+  getWorkbenchAuthoringOutputSchema,
+  getWorkbenchAuthoringOutputV2Schema
+} from "./authoringSchemas.ts";
+import { findDuplicateHumanContent, validateArtifactQuality } from "./artifactQuality.ts";
 import type {
   WorkbenchAuthoringFindingCode,
   WorkbenchAuthoringFindingV2,
@@ -89,8 +100,29 @@ export function validateAuthoringBundleV2(input: {
       0,
       selectedSessions,
       input,
-      findings
+      findings,
+      { basePath: "artifact", contractVersion: "workbench-authoring-v2" }
     );
+    const artifact = input.bundle.artifact;
+    if (automaticKind(artifact.kind) && isRecord(artifact.output)) {
+      for (const finding of findDuplicateHumanContent(
+        [{
+          candidateId: input.bundle.candidateId,
+          kind: artifact.kind,
+          output: artifact.output,
+          provenanceSessionIds: artifact.provenanceSessionIds
+        }],
+        input.publishedArtifacts
+      )) {
+        addFinding(findings, {
+          artifactKind: artifact.kind,
+          code: finding.code,
+          message: finding.message,
+          path: "artifact.output",
+          sessionId: artifact.seedSessionId
+        });
+      }
+    }
   }
   return result(findings);
 }
@@ -177,12 +209,16 @@ function validateArtifact(
   index: number,
   selectedSessions: Set<string>,
   input: WorkbenchAuthoringValidationContext,
-  findings: WorkbenchAuthoringFindingV2[]
+  findings: WorkbenchAuthoringFindingV2[],
+  options: {
+    basePath?: string;
+    contractVersion?: "workbench-authoring-v1" | "workbench-authoring-v2";
+  } = {}
 ): void {
   const kind = automaticKind(artifact.kind);
   const seedSessionId = stringValue(artifact.seedSessionId);
   const provenanceSessionIds = stringArray(artifact.provenanceSessionIds) ?? [];
-  const basePath = `artifacts[${index}]`;
+  const basePath = options.basePath ?? `artifacts[${index}]`;
   if (!kind || !seedSessionId) return;
 
   validateUniqueProvenanceIds(
@@ -260,7 +296,8 @@ function validateArtifact(
     input,
     findings,
     false,
-    seedSessionId
+    seedSessionId,
+    options.contractVersion ?? "workbench-authoring-v1"
   );
 }
 
@@ -272,11 +309,14 @@ function validateGroundedOutput(
   input: WorkbenchAuthoringValidationContext,
   findings: WorkbenchAuthoringFindingV2[],
   requireSparseEvidenceNote: boolean,
-  explicitSessionId?: string
+  explicitSessionId?: string,
+  contractVersion: "workbench-authoring-v1" | "workbench-authoring-v2" = "workbench-authoring-v1"
 ): void {
   const artifactKind = kind;
   const sessionId = explicitSessionId ?? [...provenance][0];
-  const schema = getWorkbenchAuthoringOutputSchema(kind);
+  const schema = contractVersion === "workbench-authoring-v2"
+    ? getWorkbenchAuthoringOutputV2Schema(kind)
+    : getWorkbenchAuthoringOutputSchema(kind);
   validateRequiredStrings(output, schema, basePath, findings, artifactKind, sessionId);
 
   const title = stringValue(output.title);
@@ -366,7 +406,45 @@ function validateGroundedOutput(
   }
 
   const claimEntries = claimEvidenceEntries(output.claimEvidence);
-  if (claimEntries.length === 0) {
+  const v2ArtifactKind = contractVersion === "workbench-authoring-v2" ? automaticKind(kind) : undefined;
+  if (v2ArtifactKind) {
+    const supports = claimSupportEntries(output.claimSupport);
+    for (const support of supports) {
+      if (!evidenceRefs.includes(support.evidenceRef)) {
+        addFinding(findings, {
+          artifactKind,
+          code: "claim_evidence_outside_declared_evidence",
+          message: `Claim support evidence ref is not declared by the output: ${support.evidenceRef}`,
+          path: `${basePath}.claimSupport`,
+          sessionId
+        });
+      }
+      validateEvidenceRefs(
+        [support.evidenceRef],
+        `${basePath}.claimSupport`,
+        provenance,
+        input,
+        findings,
+        artifactKind,
+        sessionId
+      );
+    }
+    for (const finding of validateArtifactQuality({
+      evidenceByRef: input.evidenceByRef,
+      kind: v2ArtifactKind,
+      output,
+      provenanceSessionIds: [...provenance],
+      supports
+    })) {
+      addFinding(findings, {
+        artifactKind,
+        code: finding.code,
+        message: finding.message,
+        path: finding.path ? `${basePath}.${finding.path}` : `${basePath}.claimSupport`,
+        sessionId
+      });
+    }
+  } else if (claimEntries.length === 0) {
     addFinding(findings, {
       artifactKind,
       code: "missing_claim_evidence",
@@ -425,7 +503,7 @@ function validateGroundedOutput(
     });
   }
 
-  if (kind === "runbook" && output.confidence === "high") {
+  if (kind === "runbook" && output.confidence === "high" && contractVersion === "workbench-authoring-v1") {
     const verificationRefs = claimEntries
       .filter((entry) => entry.path.startsWith("validationChecks["))
       .flatMap((entry) => entry.evidenceRefs);
@@ -939,6 +1017,27 @@ function claimEvidenceEntries(value: unknown): IndexedClaimEvidence[] {
     if (!isRecord(entry) || typeof entry.path !== "string") return [];
     const evidenceRefs = stringArray(entry.evidenceRefs);
     return evidenceRefs ? [{ evidenceRefs, index, path: entry.path }] : [];
+  });
+}
+
+function claimSupportEntries(value: unknown): WorkbenchClaimSupport[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (
+      !isRecord(entry) ||
+      typeof entry.path !== "string" ||
+      typeof entry.evidenceRef !== "string" ||
+      typeof entry.excerpt !== "string" ||
+      ![
+        "problem", "decision", "alternative", "change", "verification", "timeline", "remediation", "root_cause"
+      ].includes(String(entry.supportKind))
+    ) return [];
+    return [{
+      evidenceRef: entry.evidenceRef,
+      excerpt: entry.excerpt,
+      path: entry.path,
+      supportKind: entry.supportKind as WorkbenchClaimSupport["supportKind"]
+    }];
   });
 }
 

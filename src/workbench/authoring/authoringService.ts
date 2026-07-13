@@ -20,6 +20,7 @@ import {
 } from "../../daemon/db/workbenchArtifactCandidateRepository.ts";
 import {
   applySessionArtifactInTransaction,
+  getSessionArtifact,
   indexSessionArtifactSearch,
   listSessionArtifacts,
   normalizeSessionArtifactSignatureKey,
@@ -348,7 +349,9 @@ export function submitAuthoringBundle(
     const validationInput = {
       coverageWarningsBySession: coverageWarningsBySession(db, renewed.sessionIds),
       evidenceByRef: evidenceByRef(db, renewed.sessionIds),
-      publishedArtifacts: currentArtifacts(db, renewed.sessionIds),
+      publishedArtifacts: input.bundle.bundleVersion === "workbench-authoring-v2"
+        ? recentCurrentOptionalArtifacts(db)
+        : currentArtifacts(db, renewed.sessionIds),
       selectedSessionIds: renewed.sessionIds
     };
     const validation = input.bundle.bundleVersion === "workbench-authoring-v2"
@@ -833,8 +836,14 @@ function evidenceByRef(db: MastheadDatabase, sessionIds: string[]): Map<string, 
       evidence.set(item.itemId, {
         exitCode: item.exitCode,
         kind: item.kind,
+        label: item.label,
+        lowValue: item.lowValue ?? false,
+        observedAt: item.observedAt,
+        role: item.role,
         sessionId,
-        status: item.status
+        status: item.status,
+        text: item.kind === "file_effect" ? `${item.label} ${item.text}` : item.text,
+        toolName: item.toolName
       });
     }
   }
@@ -849,6 +858,22 @@ function currentArtifacts(db: MastheadDatabase, sessionIds: string[]): SessionAr
     }
   }
   return [...artifacts.values()].sort((left, right) => left.artifactId.localeCompare(right.artifactId));
+}
+
+function recentCurrentOptionalArtifacts(db: MastheadDatabase, limit = 100): SessionArtifactRecord[] {
+  const rows = db.prepare(
+    `SELECT artifact_id AS artifactId
+     FROM session_artifacts
+     WHERE status = 'current'
+       AND publication_status = 'published'
+       AND artifact_kind IN ('runbook', 'adr', 'incident_timeline')
+     ORDER BY COALESCE(published_at, updated_at) DESC, artifact_id DESC
+     LIMIT ?`
+  ).all(limit) as Array<{ artifactId: string }>;
+  return rows.flatMap(({ artifactId }) => {
+    const artifact = getSessionArtifact(db, artifactId);
+    return artifact ? [artifact] : [];
+  });
 }
 
 function currentPublishedSignatureProvenanceSessionIds(

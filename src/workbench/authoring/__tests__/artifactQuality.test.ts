@@ -1,0 +1,395 @@
+import { describe, expect, test } from "vitest";
+import type { SessionArtifactRecord } from "../../../daemon/db/sessionArtifactRepository.ts";
+import type { WorkbenchClaimSupport } from "../../../shared/workbenchAuthoring.ts";
+import type { WorkbenchValidationEvidence } from "../../types.ts";
+import {
+  findDuplicateHumanContent,
+  findUnsupportedProtocolLanguage,
+  validateArtifactQuality,
+  validateClaimSupport
+} from "../artifactQuality.ts";
+
+const MESSAGE = "message:session:a:problem";
+const CHANGE = "file_effect:session:a:change";
+const PASSED = "tool_result:session:a:passed";
+
+describe("artifact claim support", () => {
+  test("rejects the 1,283-dossier authoring-protocol template pattern", () => {
+    const output = {
+      approach: ["Read every canonical evidence item through cursor pagination."],
+      outcome: "The canonical redacted record was fully reviewed."
+    };
+
+    expect(findUnsupportedProtocolLanguage(output, [], fixtureEvidence())).toContainEqual(
+      expect.objectContaining({ code: "unsupported_authoring_protocol_language", path: "approach[0]" })
+    );
+  });
+
+  test("rejects a normalized excerpt shorter than 20 characters or absent from cited evidence", () => {
+    const output = { rootCause: "The callback state check rejected the request." };
+    const findings = validateClaimSupport(
+      output,
+      [
+        support("rootCause", MESSAGE, "too short", "root_cause"),
+        support("rootCause", MESSAGE, "A sentence that never appeared in the evidence.", "root_cause")
+      ],
+      fixtureEvidence()
+    );
+
+    expect(findings.filter((finding) => finding.code === "unsupported_claim_excerpt")).toHaveLength(2);
+  });
+
+  test("accepts a 20+ character excerpt after whitespace normalization", () => {
+    const output = { rootCause: "The callback state check rejected the request." };
+    const findings = validateClaimSupport(
+      output,
+      [support("rootCause", MESSAGE, "OAuth callback state\n  validation rejected the request", "root_cause")],
+      fixtureEvidence()
+    );
+
+    expect(findings).toEqual([]);
+  });
+
+  test("requires support for every populated claim-bearing path", () => {
+    const quality = validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports: validRunbookSupports().filter((entry) => entry.path !== "fixSteps[0]")
+    });
+
+    expect(quality).toContainEqual(
+      expect.objectContaining({ code: "missing_claim_support", path: "fixSteps[0]" })
+    );
+  });
+
+  test("rejects a runbook verification supported only by a failed command", () => {
+    const evidence = fixtureEvidence();
+    evidence.set("tool_result:session:a:failed", {
+      ...evidence.get(PASSED)!,
+      exitCode: 1,
+      status: "failed",
+      text: "Focused authoring validation tests failed with exit code one."
+    });
+    const supports = validRunbookSupports().map((entry) =>
+      entry.supportKind === "verification"
+        ? support(
+            "validationChecks[0]",
+            "tool_result:session:a:failed",
+            "Focused authoring validation tests failed with exit code one.",
+            "verification"
+          )
+        : entry
+    );
+
+    expect(validateArtifactQuality({
+      evidenceByRef: evidence,
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports
+    })).toContainEqual(expect.objectContaining({
+      code: "invalid_support_kind_evidence",
+      path: "validationChecks[0]"
+    }));
+  });
+
+  test("rejects a successful command whose verification text records a negative outcome", () => {
+    const evidence = fixtureEvidence();
+    evidence.set("tool_result:session:a:false-positive", {
+      ...evidence.get(PASSED)!,
+      text: "Verification tests failed; failure reproduced successfully."
+    });
+    const supports = validRunbookSupports().map((entry) => entry.supportKind === "verification"
+      ? support(
+          "validationChecks[0]",
+          "tool_result:session:a:false-positive",
+          "Verification tests failed; failure reproduced successfully.",
+          "verification"
+        )
+      : entry);
+
+    expect(validateArtifactQuality({
+      evidenceByRef: evidence,
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports
+    })).toContainEqual(expect.objectContaining({ code: "invalid_support_kind_evidence", path: "validationChecks[0]" }));
+  });
+
+  test("accepts an explicit positive verification checkpoint", () => {
+    const supports = validRunbookSupports().map((entry) => entry.supportKind === "verification"
+      ? support(
+          "validationChecks[0]",
+          "checkpoint:session:a:passed",
+          "Focused callback regression checkpoint verified the repaired behavior.",
+          "verification"
+        )
+      : entry);
+
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports
+    })).not.toContainEqual(expect.objectContaining({ code: "invalid_support_kind_evidence", path: "validationChecks[0]" }));
+  });
+
+  test("requires change support to be a file effect, command, or explicit assistant change statement", () => {
+    const supports = validRunbookSupports().map((entry) =>
+      entry.supportKind === "change"
+        ? support("fixSteps[0]", MESSAGE, "OAuth callback state validation rejected the request.", "change")
+        : entry
+    );
+
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports
+    })).toContainEqual(expect.objectContaining({ code: "invalid_support_kind_evidence", path: "fixSteps[0]" }));
+  });
+
+  test("requires incident timeline support to be timestamped and chronologically ordered", () => {
+    const output = validIncident();
+    output.timeline = [...output.timeline].reverse();
+
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "incident_timeline",
+      output,
+      provenanceSessionIds: ["session:a"],
+      supports: validIncidentSupports()
+    })).toContainEqual(expect.objectContaining({ code: "invalid_timeline_order", path: "timeline[1].at" }));
+  });
+
+  test("rejects ordered authored timestamps backed by reverse-chronological evidence", () => {
+    const supports = validIncidentSupports().map((entry) => {
+      if (entry.path === "timeline[0].summary") return { ...entry, evidenceRef: "message:session:a:remediation", excerpt: "Remediation added deterministic callback state validation before token exchange." };
+      if (entry.path === "timeline[1].summary") return { ...entry, evidenceRef: MESSAGE, excerpt: "OAuth callback state validation rejected the request." };
+      return entry;
+    });
+
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "incident_timeline",
+      output: validIncident(),
+      provenanceSessionIds: ["session:a"],
+      supports
+    })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "invalid_timeline_order", path: "timeline[0].at" }),
+      expect.objectContaining({ code: "invalid_timeline_order", path: "timeline[1].at" })
+    ]));
+  });
+
+  test("allows an explicit unknown root cause but requires root_cause support for a causal assertion", () => {
+    const unknown = validRunbook();
+    unknown.rootCause = "Unknown from the available canonical evidence.";
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "runbook",
+      output: unknown,
+      provenanceSessionIds: ["session:a"],
+      supports: validRunbookSupports().filter((entry) => entry.supportKind !== "root_cause")
+    })).not.toContainEqual(expect.objectContaining({ code: "missing_root_cause_support" }));
+
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports: validRunbookSupports().filter((entry) => entry.supportKind !== "root_cause")
+    })).toContainEqual(expect.objectContaining({ code: "missing_root_cause_support", path: "rootCause" }));
+  });
+
+  test("permits real Masthead authoring language when that exact field is directly supported", () => {
+    const evidence = fixtureEvidence();
+    evidence.set("message:session:a:manifest", {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T13:00:00.000Z",
+      role: "user",
+      sessionId: "session:a",
+      text: "Masthead must keep the evidence manifest visible during an authoring run."
+    });
+    const output = { context: "Keep the evidence manifest visible during an authoring run." };
+    const supports = [support(
+      "context",
+      "message:session:a:manifest",
+      "keep the evidence manifest visible during an authoring run",
+      "problem"
+    )];
+
+    expect(findUnsupportedProtocolLanguage(output, supports, evidence)).toEqual([]);
+  });
+});
+
+describe("duplicate substantive human content", () => {
+  test("rejects identical candidate outputs and disjoint recent current artifacts", () => {
+    const output = validRunbook();
+    const recent = recentArtifact(output, ["session:z"]);
+    const findings = findDuplicateHumanContent(
+      [
+        { candidateId: "candidate:a", kind: "runbook", output, provenanceSessionIds: ["session:a"] },
+        { candidateId: "candidate:b", kind: "runbook", output: structuredClone(output), provenanceSessionIds: ["session:b"] }
+      ],
+      [recent]
+    );
+
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "duplicate_human_content", candidateId: "candidate:b" }),
+      expect.objectContaining({ code: "duplicate_human_content", artifactId: recent.artifactId })
+    ]));
+  });
+
+  test("excludes canonical dossiers and permits matching current content with overlapping provenance", () => {
+    const output = validRunbook();
+    const sameProvenance = recentArtifact(output, ["session:a"]);
+    const dossier = { ...recentArtifact(output, ["session:z"]), artifactKind: "session_dossier" as const };
+
+    expect(findDuplicateHumanContent(
+      [{ candidateId: "candidate:a", kind: "runbook", output, provenanceSessionIds: ["session:a"] }],
+      [sameProvenance, dossier]
+    )).toEqual([]);
+  });
+});
+
+function support(
+  path: string,
+  evidenceRef: string,
+  excerpt: string,
+  supportKind: WorkbenchClaimSupport["supportKind"]
+): WorkbenchClaimSupport {
+  return { evidenceRef, excerpt, path, supportKind };
+}
+
+function fixtureEvidence(): Map<string, WorkbenchValidationEvidence> {
+  return new Map([
+    [MESSAGE, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T12:00:00.000Z",
+      role: "user",
+      sessionId: "session:a",
+      text: "OAuth callback state validation rejected the request. The prior validator accepted unsupported root cause claims."
+    }],
+    [CHANGE, {
+      kind: "file_effect",
+      lowValue: false,
+      observedAt: "2026-07-12T12:05:00.000Z",
+      role: "tool",
+      sessionId: "session:a",
+      text: "Changed src/auth/callback.ts to validate callback state before token exchange."
+    }],
+    [PASSED, {
+      exitCode: 0,
+      kind: "tool_result",
+      lowValue: false,
+      observedAt: "2026-07-12T12:10:00.000Z",
+      role: "tool",
+      sessionId: "session:a",
+      status: "passed",
+      text: "Focused authoring validation tests passed with 24 assertions."
+    }],
+    ["checkpoint:session:a:passed", {
+      kind: "checkpoint",
+      label: "verification_passed",
+      lowValue: false,
+      observedAt: "2026-07-12T12:11:00.000Z",
+      role: "system",
+      sessionId: "session:a",
+      text: "Focused callback regression checkpoint verified the repaired behavior."
+    }],
+    ["message:session:a:remediation", {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T12:15:00.000Z",
+      role: "assistant",
+      sessionId: "session:a",
+      text: "Remediation added deterministic callback state validation before token exchange."
+    }]
+  ]);
+}
+
+function validRunbook(): Record<string, unknown> & { rootCause: string } {
+  return {
+    changedFiles: ["src/auth/callback.ts"],
+    commands: ["npm test -- auth-callback"],
+    fixSteps: ["Validate callback state before exchanging the authorization code."],
+    problemSignature: {
+      affectedScope: "OAuth callback handling",
+      errorStrings: ["invalid callback state"],
+      symptoms: ["OAuth callback state validation rejected the request."]
+    },
+    rootCause: "The prior validator accepted unsupported root cause claims.",
+    title: "Repair OAuth callback validation",
+    validationChecks: ["Focused authoring validation tests passed with 24 assertions."]
+  };
+}
+
+function validRunbookSupports(): WorkbenchClaimSupport[] {
+  return [
+    support("problemSignature.symptoms[0]", MESSAGE, "OAuth callback state validation rejected the request.", "problem"),
+    support("fixSteps[0]", CHANGE, "Changed src/auth/callback.ts to validate callback state before token exchange.", "change"),
+    support("rootCause", MESSAGE, "The prior validator accepted unsupported root cause claims.", "root_cause"),
+    support("validationChecks[0]", PASSED, "Focused authoring validation tests passed with 24 assertions.", "verification")
+  ];
+}
+
+function validIncident(): Record<string, unknown> & { timeline: Array<{ at: string; summary: string }> } {
+  return {
+    remediation: ["Remediation added deterministic callback state validation before token exchange."],
+    symptom: "OAuth callback state validation rejected the request.",
+    timeline: [
+      { at: "2026-07-12T12:00:00.000Z", summary: "OAuth callback state validation rejected the request." },
+      { at: "2026-07-12T12:15:00.000Z", summary: "Remediation added deterministic callback state validation before token exchange." }
+    ],
+    title: "OAuth callback validation incident"
+  };
+}
+
+function validIncidentSupports(): WorkbenchClaimSupport[] {
+  return [
+    support("symptom", MESSAGE, "OAuth callback state validation rejected the request.", "problem"),
+    support("timeline[0].summary", MESSAGE, "OAuth callback state validation rejected the request.", "timeline"),
+    support(
+      "timeline[1].summary",
+      "message:session:a:remediation",
+      "Remediation added deterministic callback state validation before token exchange.",
+      "timeline"
+    ),
+    support(
+      "remediation[0]",
+      "message:session:a:remediation",
+      "Remediation added deterministic callback state validation before token exchange.",
+      "remediation"
+    )
+  ];
+}
+
+function recentArtifact(output: Record<string, unknown>, provenanceSessionIds: string[]): SessionArtifactRecord {
+  return {
+    artifactId: "artifact:recent",
+    artifactKind: "runbook",
+    confidence: "high",
+    content: output,
+    contentFingerprint: "stored-fingerprint",
+    createdAt: "2026-07-12T12:00:00.000Z",
+    createdBy: "workbench_authoring:test",
+    evidenceRefs: [],
+    lineageId: "lineage:recent",
+    provenanceSessionIds,
+    publicationStatus: "published",
+    publishedAt: "2026-07-12T12:00:00.000Z",
+    schemaVersion: "runbook-v2",
+    sessionId: provenanceSessionIds[0]!,
+    status: "current",
+    title: String(output.title),
+    updatedAt: "2026-07-12T12:00:00.000Z",
+    validation: { ok: true }
+  };
+}

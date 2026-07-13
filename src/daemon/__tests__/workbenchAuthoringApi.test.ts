@@ -155,10 +155,36 @@ describe("Workbench authoring HTTP API", () => {
       error: { code: "unsupported_authoring_bundle_version" },
       ok: false
     });
+    const candidateBundle = validCandidateBundle(opened.body.run, candidate);
+    seedAuthoringSession(daemon, "session:disjoint-duplicate");
+    const duplicate = applySessionArtifact(daemon.database, {
+      artifactKind: "runbook",
+      content: candidateBundle.artifact.output,
+      contentFingerprint: "duplicate:substantive-human-content",
+      createdBy: "workbench_authoring:test",
+      evidenceRefs: [],
+      provenanceSessionIds: ["session:disjoint-duplicate"],
+      schemaVersion: "runbook-v2",
+      sessionId: "session:disjoint-duplicate",
+      title: candidateBundle.artifact.output.title,
+      validation: { ok: true }
+    });
+    publishSessionArtifact(daemon.database, duplicate.artifactId);
+    const rejectedDuplicate = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}/submit`,
+      candidateBundle
+    );
+    expect(rejectedDuplicate.body).toMatchObject({ accepted: false, run: { status: "needs_revision" } });
+    expect(rejectedDuplicate.body.findings).toContainEqual(
+      expect.objectContaining({ code: "duplicate_human_content", path: "artifact.output" })
+    );
+    daemon.database.prepare("UPDATE session_artifacts SET status = 'invalid' WHERE artifact_id = ?").run(duplicate.artifactId);
+
     const submittedV2 = await postJson(
       baseUrl,
       `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}/submit`,
-      validCandidateBundle(opened.body.run, candidate)
+      candidateBundle
     );
     expect(submittedV2.body).toMatchObject({
       accepted: true,
@@ -623,10 +649,31 @@ function validCandidateBundle(run: any, candidate: any) {
       kind: candidate.kind,
       output: {
         changedFiles: ["src/workbench/authoring/authoringService.ts"],
-        claimEvidence: [
-          { evidenceRefs: [changeRef], path: "fixSteps[0]" },
-          { evidenceRefs: [failureRef], path: "rootCause" },
-          { evidenceRefs: [verificationRef], path: "validationChecks[0]" }
+        claimSupport: [
+          {
+            evidenceRef: failureRef,
+            excerpt: candidateExcerpt(failureRef),
+            path: "problemSignature.symptoms[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: changeRef,
+            excerpt: candidateExcerpt(changeRef),
+            path: "fixSteps[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: failureRef,
+            excerpt: candidateExcerpt(failureRef),
+            path: "rootCause",
+            supportKind: "root_cause"
+          },
+          {
+            evidenceRef: verificationRef,
+            excerpt: candidateExcerpt(verificationRef),
+            path: "validationChecks[0]",
+            supportKind: "verification"
+          }
         ],
         commands: ["npm test"],
         confidence: "low",
@@ -657,6 +704,18 @@ function validCandidateBundle(run: any, candidate: any) {
     evidenceRevision: run.evidenceRevision,
     runId: run.runId
   };
+}
+
+function candidateExcerpt(ref: string): string {
+  const excerpts: Record<string, string> = {
+    "file:migration:change": "modified migrations/041_retry.sql",
+    "file:oauth:change": "modified auth/callback.ts",
+    "checkpoint:oauth:verified": "Callback regression test passed after the nonce repair.",
+    "tool_result:migration:failure": "Migration 41 failed because the index already existed.",
+    "tool_result:migration:verified": "Migration smoke test passed on a restored snapshot.",
+    "tool_result:oauth:failure": "OAuth callback test failed with an invalid state nonce."
+  };
+  return excerpts[ref] ?? `Canonical evidence excerpt for ${ref}`;
 }
 
 async function getJson(baseUrl: string, path: string, expectedStatus = 200) {

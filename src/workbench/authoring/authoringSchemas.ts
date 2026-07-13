@@ -19,6 +19,23 @@ const claimEvidence = {
   type: "array"
 };
 
+const claimSupport = {
+  items: {
+    additionalProperties: false,
+    properties: {
+      evidenceRef: stringField,
+      excerpt: stringField,
+      path: stringField,
+      supportKind: {
+        enum: ["problem", "decision", "alternative", "change", "verification", "timeline", "remediation", "root_cause"]
+      }
+    },
+    required: ["path", "evidenceRef", "excerpt", "supportKind"],
+    type: "object"
+  },
+  type: "array"
+};
+
 export function getWorkbenchAuthoringOutputSchema(kind: WorkbenchOutputKind): WorkbenchJsonSchema {
   const v1 = getWorkbenchSchema(kind);
   return {
@@ -28,6 +45,19 @@ export function getWorkbenchAuthoringOutputSchema(kind: WorkbenchOutputKind): Wo
       claimEvidence
     },
     required: [...v1.required, "claimEvidence"],
+    title: `${v1.title}V2`
+  };
+}
+
+export function getWorkbenchAuthoringOutputV2Schema(kind: WorkbenchOutputKind): WorkbenchJsonSchema {
+  const v1 = getWorkbenchSchema(kind);
+  return {
+    ...v1,
+    properties: {
+      ...v1.properties,
+      claimSupport
+    },
+    required: [...v1.required, "claimSupport"],
     title: `${v1.title}V2`
   };
 }
@@ -121,7 +151,7 @@ export function getAuthoringBundleV2Schema(): WorkbenchJsonSchema {
           additionalProperties: false,
           properties: {
             kind: { const: kind },
-            output: getWorkbenchAuthoringOutputSchema(kind),
+            output: getWorkbenchAuthoringOutputV2Schema(kind),
             provenanceSessionIds: stringArray,
             seedSessionId: stringField
           },
