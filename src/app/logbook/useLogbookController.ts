@@ -3,7 +3,7 @@ import type { LogbookFilterState, LogbookLoadState } from "../../ui/HistoryPanel
 import type { AppSurface } from "../../ui/ObservabilitySidebar";
 import { getLogbookArtifact, getSessionTranscript, listProjects, searchLogbook, type AdapterStatus, type LogbookSearchResult, type LogbookSort } from "../daemonClient";
 import { logbookPageSearchFilters, readCachedLogbookPage, writeCachedLogbookPage, type LogbookPageCacheRequest } from "../logbookPageCache";
-import { isPublishedSessionDossierV1, toLogbookInspectorArtifact, type LogbookInspectorArtifact } from "./logbookInspectorModel";
+import { CANONICAL_SESSION_DOSSIER_SCHEMA, isPublishedSessionDossierV1, toLogbookInspectorArtifact, type LogbookInspectorArtifact } from "./logbookInspectorModel";
 
 const LOGBOOK_PAGE_SIZE = 50;
 
@@ -132,21 +132,27 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
       .then(async (detail) => {
         if (controller.signal.aborted) return;
         const artifact = toLogbookInspectorArtifact(detail);
-        setSelectedArtifact(artifact);
+        const shouldLoadTranscript =
+          artifact.kind === "session_dossier" &&
+          artifact.schemaVersion === CANONICAL_SESSION_DOSSIER_SCHEMA &&
+          isPublishedSessionDossierV1(artifact.body) &&
+          artifact.provenanceSessionIds.length === 1;
+        setSelectedArtifact(shouldLoadTranscript ? { ...artifact, provenanceTranscriptLoading: true } : artifact);
         setDetailError(undefined);
-        if (artifact.kind !== "session_dossier" || !isPublishedSessionDossierV1(artifact.body) || artifact.provenanceSessionIds.length !== 1) {
+        if (!shouldLoadTranscript) {
           return;
         }
 
         try {
           const provenanceTranscript = await loadProvenanceTranscript(artifact.provenanceSessionIds[0], activeProjectionUrl, controller.signal);
           if (controller.signal.aborted) return;
-          setSelectedArtifact({ ...artifact, provenanceTranscript });
+          setSelectedArtifact({ ...artifact, provenanceTranscript, provenanceTranscriptLoading: false });
         } catch (transcriptError: unknown) {
           if (controller.signal.aborted) return;
           console.error("[masthead] Logbook provenance transcript failed", transcriptError);
           setSelectedArtifact({
             ...artifact,
+            provenanceTranscriptLoading: false,
             provenanceTranscriptError: "Could not load transcript evidence"
           });
         }
@@ -247,5 +253,5 @@ async function loadProvenanceTranscript(sessionId: string, baseUrl: string, sign
   } while (cursor && !signal.aborted);
 
   if (!result) throw new Error("Transcript pagination returned no result");
-  return { ...result, items };
+  return { ...result, items, nextCursor: undefined };
 }

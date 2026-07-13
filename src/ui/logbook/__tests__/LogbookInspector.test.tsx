@@ -9,6 +9,7 @@ describe("LogbookInspector", () => {
         onClose={() => {}}
         artifact={{
           kind: "session_dossier",
+          schemaVersion: "canonical-session-dossier-v1",
           title: "Repair OAuth callback",
           body: canonicalDossierBody(),
           provenanceSessionIds: ["canonical-session-1"],
@@ -74,6 +75,7 @@ describe("LogbookInspector", () => {
         onClose={() => {}}
         artifact={{
           kind: "session_dossier",
+          schemaVersion: "session_dossier-v1",
           title: "Repair OAuth callback",
           confidence: "high",
           project: "Masthead",
@@ -125,6 +127,48 @@ describe("LogbookInspector", () => {
     expect(html).toContain("session:1");
     expect(html).toContain("Legacy providers remain untested");
     expect(html).toContain("1 session");
+  });
+
+  test("does not mislabel malformed canonical dossier bodies as legacy", () => {
+    const malformedBody = {
+      ...canonicalDossierBody(),
+      coverage: { ...canonicalDossierBody().coverage, warnings: "not-an-array" }
+    };
+    const html = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => {}}
+        artifact={{
+          kind: "session_dossier",
+          schemaVersion: "canonical-session-dossier-v1",
+          title: "Malformed canonical dossier",
+          body: malformedBody,
+          provenanceSessionIds: ["canonical-session-1"]
+        }}
+      />
+    );
+
+    expect(html).toContain("Invalid canonical session dossier");
+    expect(html).not.toContain("Legacy session dossier");
+  });
+
+  test("does not render future dossier schemas as legacy", () => {
+    const html = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => {}}
+        artifact={{
+          kind: "session_dossier",
+          schemaVersion: "canonical-session-dossier-v2",
+          title: "Future dossier",
+          body: canonicalDossierBody(),
+          provenanceSessionIds: ["canonical-session-1"]
+        }}
+      />
+    );
+
+    expect(html).toContain("Unsupported session dossier schema");
+    expect(html).toContain("canonical-session-dossier-v2");
+    expect(html).not.toContain("Legacy session dossier");
+    expect(html).not.toContain("Transcript evidence");
   });
 
   test("renders every runbook field while tolerating absent historical fields", () => {

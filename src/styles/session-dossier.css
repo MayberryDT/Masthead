@@ -974,6 +974,10 @@
     "advanced";
 }
 
+.session-dossier.is-compact-shell .title-block {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .session-dossier.is-compact-shell .metrics {
   grid-template-rows: none;
 }

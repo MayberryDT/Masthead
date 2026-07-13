@@ -1,26 +1,850 @@
-import type { SessionTranscriptResult } from "../../app/daemonClient";
-import type { ReadableSessionDossier } from "../../shared/sessionDossier";
-import { SessionDossierContentImpl } from "./SessionDossier";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type React from "react";
+import type { SessionTranscriptKindFilter, SessionTranscriptResult } from "../../app/daemonClient";
+import type { SafeAction, SessionDetailView } from "../../core/types";
+import type {
+  ReadableSessionDossier,
+  SessionDossierArtifact,
+  SessionDossierDto,
+  SessionDossierTimelineEvent
+} from "../../shared/sessionDossier";
+import type { SessionTranscriptItem } from "../../shared/sessionTranscript";
+import { AppButton } from "../primitives/AppButton";
+import { readableTranscriptText } from "./transcriptPresentation";
 
-type Props = {
-  dossier: ReadableSessionDossier;
+type TimelineFilter = "all" | "user" | "assistant" | "tools" | "checkpoints" | "attention";
+
+export type SessionDossierContentProps = {
+  live?: SessionDetailView;
+  dossier?: ReadableSessionDossier;
+  loading?: boolean;
+  error?: string;
+  dossierEnrichmentBusy?: boolean;
+  dossierEnrichmentError?: string;
+  onRetry?: () => void;
   transcript?: SessionTranscriptResult;
+  transcriptLoading?: boolean;
   transcriptError?: string;
+  transcriptFilter?: SessionTranscriptKindFilter;
+  transcriptQuery?: string;
+  onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
+  onTranscriptQueryChange?: (query: string) => void;
+  onTranscriptLoadMore?: () => void;
+  onTranscriptRetry?: () => void;
+  onOpenSources?: () => void;
+  onAction?: (action: SafeAction, session: SessionDetailView) => void;
+  actionStatus?: string;
+  onClose?: () => void;
+  titleId?: string;
+  showClose?: boolean;
   compactShell?: boolean;
 };
 
-/**
- * The original human-readable dossier presentation without live modal ownership.
- * Published snapshots omit `artifacts`, so related artifacts remain absent instead
- * of being recursively copied into the canonical artifact body.
- */
-export function SessionDossierContent({ compactShell = false, dossier, transcript, transcriptError }: Props) {
-  const content = <SessionDossierContentImpl dossier={dossier} showClose={false} transcript={transcript} transcriptError={transcriptError} />;
-  if (!compactShell) return content;
+const formatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const CURRENT_SESSION_CAPSULE_VERSION = "session-capsule-v4";
+const transcriptFilters: Array<{ label: string; value: SessionTranscriptKindFilter }> = [
+  { label: "Evidence", value: "all" },
+  { label: "User", value: "user" },
+  { label: "Assistant", value: "assistant" },
+  { label: "Tools", value: "tools" }
+];
 
+/** The original human-readable dossier presentation and transcript observer. */
+export function SessionDossierContent({
+  compactShell = false,
+  dossier,
+  dossierEnrichmentBusy = false,
+  dossierEnrichmentError,
+  error,
+  live,
+  loading = false,
+  onClose,
+  onTranscriptFilterChange,
+  onTranscriptLoadMore,
+  showClose = false,
+  titleId,
+  transcript,
+  transcriptError,
+  transcriptFilter = "all",
+  transcriptLoading = false,
+  transcriptQuery = ""
+}: SessionDossierContentProps) {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+  const transcriptLoadMoreRef = useRef<HTMLDivElement | null>(null);
+  const requestedTranscriptCursorRef = useRef<string | undefined>(undefined);
+  const identity = dossier?.identity;
+  const summary = dossierSummary(dossier, live);
+  const attentionItems = dossier?.attention ?? liveAttention(live);
+  const timelineEvents = useMemo(() => (dossier?.timeline ?? liveTimeline(live)).filter((event) => event.kind !== "file"), [dossier?.timeline, live]);
+  const transcriptRows = useMemo(() => compactTranscriptRows(transcript?.items), [transcript?.items]);
+  const title = dossierTitle(dossier, live);
+  const description = dossierDescription(summary, live);
+  const enrichmentStatus = dossierEnrichmentStatus(dossier, loading, dossierEnrichmentBusy);
+  const narrativeDebug = currentNarrativeDebug(dossier);
+  const endedAt = identity?.endedAt ?? identity?.lastActivityAt ?? live?.lastActivity;
+  const advancedPanelId = `${identity?.sessionId ?? live?.canonicalSessionId ?? live?.sessionId ?? "session"}-advanced-details-panel`;
+  const sourceId = identity?.sourceSessionId ?? live?.sourceSessionId ?? live?.sessionId ?? "-";
+
+  useEffect(() => {
+    requestedTranscriptCursorRef.current = undefined;
+  }, [transcriptFilter, transcriptQuery]);
+
+  useEffect(() => {
+    const nextCursor = transcript?.nextCursor;
+    const sentinel = transcriptLoadMoreRef.current;
+    if (!nextCursor || !sentinel || transcriptLoading || !onTranscriptLoadMore || typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        if (requestedTranscriptCursorRef.current === nextCursor) return;
+        requestedTranscriptCursorRef.current = nextCursor;
+        onTranscriptLoadMore();
+      },
+      { root: transcriptScrollRef.current, rootMargin: "80px 0px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [onTranscriptLoadMore, transcript?.nextCursor, transcriptLoading]);
+
+  const content = (
+    <>
+          <header className="dossier-header">
+            <div className="meta-rail" aria-label="Session identity metadata">
+              <MetaCell label="Project" value={identity?.project ?? live?.project ?? "Not captured"} />
+              <MetaCell label="Runtime" value={identity?.runtime ?? live?.runtime ?? "Not captured"} />
+              <MetaCell label="Lifecycle" value={identity?.lifecycle ?? live?.lifecycle ?? "Unknown"} />
+              <MetaCell label="Ended" value={endedAt ? formatDateTime(endedAt) : live?.durationLabel ?? "-"} />
+              <MetaCell label="Model" value={identity?.model ?? live?.model ?? identity?.models?.join(", ") ?? "Not captured"} />
+            </div>
+            <div className="title-block">
+              <div>
+                <span className="mono label">Session identity</span>
+                <h2 id={titleId}>{title}</h2>
+                <p>{description}</p>
+              </div>
+              {showClose ? (
+                <AppButton className="close" variant="icon" type="button" aria-label="Close session dossier" onClick={onClose}>
+                  &times;
+                </AppButton>
+              ) : null}
+            </div>
+          </header>
+
+          <div className="content-grid">
+            <DossierEnrichmentPanel
+              dossier={dossier}
+              enrichmentBusy={dossierEnrichmentBusy}
+              enrichmentError={dossierEnrichmentError}
+              error={error}
+              loading={loading}
+              summary={summary}
+            />
+
+            <section className="metrics" aria-label="Key stats">
+              <Metric className="is-good" label="Source confidence" value={identity?.sourceConfidence ?? live?.identityConfidence ?? "Unknown"} />
+              <Metric label="Coverage" value={coverageLabel(dossier?.coverage.level)} />
+              <Metric className="is-primary" label="Total tokens" value={formatCompactNumber(dossier?.usage.totalTokens ?? live?.totalTokens)} />
+              <Metric label="Input tokens" value={formatCompactNumber(dossier?.usage.inputTokens)} />
+              <Metric label="Output tokens" value={formatCompactNumber(dossier?.usage.outputTokens)} />
+              <Metric label="Usage rows" value={formatNumber(dossier?.usage.usageRows)} />
+              <Metric label="Messages" value={formatNumber(dossier?.coverage.transcript.messages)} />
+              <Metric label="Tool calls" value={formatNumber(dossier?.coverage.transcript.toolCalls)} />
+              <Metric className={attentionItems.length > 0 ? "is-warning" : undefined} label="Attention rows" value={formatNumber(attentionItems.length)} />
+            </section>
+
+            <section className="panel transcript" aria-label="Transcript excerpt">
+              <div className="transcript-toolbar">
+                <div>
+                  <h3>Transcript evidence</h3>
+                  <span className="rail-label">Relevant transcript evidence</span>
+                </div>
+                <div className="filter-row" aria-label="Transcript filters">
+                  {transcriptFilters.map((filter) => (
+                    <AppButton
+                      key={filter.value}
+                      className={filter.value === transcriptFilter ? "filter is-active" : "filter"}
+                      variant={filter.value === transcriptFilter ? "primary" : "default"}
+                      type="button"
+                      aria-pressed={filter.value === transcriptFilter}
+                      onClick={() => onTranscriptFilterChange?.(filter.value)}
+                    >
+                      {filter.label}
+                    </AppButton>
+                  ))}
+                </div>
+              </div>
+              <div className="transcript-scroll" ref={transcriptScrollRef}>
+                <ol>
+                  {transcriptRows.length > 0 ? (
+                    transcriptRows.map((item, index) => (
+                      <li key={`${item.itemId}:${index}`} className={rowTone(item.kind === "message" ? item.role : item.kind)}>
+                        <time dateTime={item.observedAt}>{formatTime(item.observedAt)}</time>
+                        <b>{itemLabel(item)}</b>
+                        <p>{item.displayText}</p>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="is-system">
+                      <time>-</time>
+                      <b>Empty</b>
+                      <p>{transcriptError ? `Transcript error: ${transcriptError}` : transcriptLoading ? "Loading transcript..." : "No transcript evidence captured."}</p>
+                    </li>
+                  )}
+                </ol>
+                {transcript?.nextCursor ? (
+                  <div ref={transcriptLoadMoreRef} className="transcript-sentinel" aria-hidden="true">
+                    {transcriptLoading ? "Loading more evidence..." : ""}
+                  </div>
+                ) : null}
+              </div>
+            </section>
+
+            <section className="advanced" aria-label="Advanced session details">
+              <div className="advanced-cell is-wide">
+                <span>Canonical ID</span>
+                <strong>{identity?.sessionId ?? live?.canonicalSessionId ?? "-"}</strong>
+              </div>
+              <div className="advanced-cell">
+                <span>Source session</span>
+                <strong>{sourceId}</strong>
+              </div>
+              <div className="advanced-cell">
+                <span>Agent retrieval</span>
+                <strong>{dossier ? (dossier.reuse.mcpIncluded ? "Included" : "Excluded") : "-"}</strong>
+              </div>
+              <div className="advanced-cell">
+                <span>Verification</span>
+                <strong>{dossier?.verification.summary ?? verificationFallback(live)}</strong>
+              </div>
+              <div className="advanced-cell">
+                <span>Enrichment</span>
+                <strong>{dossier || loading ? enrichmentStatus : "-"}</strong>
+              </div>
+              <div className="advanced-cell is-wide">
+                <span>Worktree</span>
+                <strong>{identity?.worktreePath ?? identity?.repoRoot ?? live?.workspace?.worktreePath ?? "-"}</strong>
+                <div className="path-row">Host: {identity?.hostId ?? live?.workspace?.repoRoot ?? "Not captured"}</div>
+              </div>
+              <AppButton
+                className="advanced-toggle"
+                type="button"
+                aria-expanded={advancedOpen}
+                aria-controls={advancedPanelId}
+                onClick={() => setAdvancedOpen((current) => !current)}
+              >
+                {advancedOpen ? "Hide advanced details" : "Advanced details"}
+              </AppButton>
+              <div className="advanced-details-panel" id={advancedPanelId} hidden={!advancedOpen}>
+                <section className="advanced-detail-card is-compact">
+                  <h4>Verification</h4>
+                  <p>{dossier?.verification.summary ?? verificationFallback(live)}</p>
+                </section>
+
+                <section className="advanced-detail-card is-compact">
+                  <h4>Needs attention</h4>
+                  <AdvancedList empty="No attention items captured.">
+                    {attentionItems.slice(0, 6).map((item, index) => (
+                      <li key={`${item.kind}:${item.title}:${index}`}>
+                        <strong>{item.title}</strong>
+                        <span>{item.detail ?? item.severity}</span>
+                      </li>
+                    ))}
+                  </AdvancedList>
+                </section>
+
+                <section className="advanced-detail-card is-wide is-compact">
+                  <h4>Tools</h4>
+                  <AdvancedList empty="No tool calls captured.">
+                    {dossier?.tools.slice(0, 12).map((tool, index) => (
+                      <li key={`${tool.toolCallId}:${index}`}>
+                        <strong>{tool.toolName}</strong>
+                        <span>{tool.status ?? tool.category ?? "captured"}{tool.exitCode !== undefined ? ` / exit ${tool.exitCode}` : ""}</span>
+                      </li>
+                    ))}
+                  </AdvancedList>
+                </section>
+
+                <section className="advanced-detail-card is-wide">
+                  <h4>Provenance</h4>
+                  <ul className="advanced-list">
+                    <li><strong>Canonical ID</strong><span>{identity?.sessionId ?? live?.canonicalSessionId ?? "-"}</span></li>
+                    <li><strong>Source session</strong><span>{sourceId}</span></li>
+                    <li><strong>Source confidence</strong><span>{identity?.sourceConfidence ?? live?.identityConfidence ?? "Unknown"}</span></li>
+                    <li><strong>Agent retrieval</strong><span>{dossier ? (dossier.reuse.mcpIncluded ? "included in MCP search" : "excluded from MCP search") : "-"}</span></li>
+                  </ul>
+                </section>
+
+                <section className="advanced-detail-card is-wide">
+                  <h4>Narrative evidence</h4>
+                  {narrativeDebug ? (
+                    <ul className="advanced-list">
+                      <li><strong>Title source</strong><span>{narrativeDebug.titleSource ?? "-"}</span></li>
+                      <li><strong>Subject source</strong><span>{narrativeDebug.subjectSource ?? "-"}</span></li>
+                      <li><strong>Provider</strong><span>{narrativeDebug.provider ?? "local rules"}</span></li>
+                      <li><strong>Evidence refs</strong><span>{formatNumber(narrativeDebug.sourceRefs.length)}</span></li>
+                    </ul>
+                  ) : (
+                    <p className="advanced-detail-muted">Narrative not generated yet.</p>
+                  )}
+                </section>
+
+                <section className="advanced-detail-card is-full is-scroll-window is-timeline">
+                  <div className="advanced-scroll-head">
+                    <h4>Timeline</h4>
+                    <span className="rail-label">{formatNumber(timelineEvents.length)} events / all</span>
+                  </div>
+                  <div className="advanced-scroll-body">
+                    <ol className="advanced-list timeline-list">
+                      {timelineEvents.length > 0 ? (
+                        timelineEvents.map((event, index) => (
+                          <li key={`${event.eventId}:${index}`} className={rowTone(event.kind)}>
+                            <strong>{formatDateTime(event.observedAt)}</strong>
+                            <span>{event.summary}</span>
+                          </li>
+                        ))
+                      ) : (
+                        <li className="is-system"><strong>-</strong><span>No timeline events captured.</span></li>
+                      )}
+                    </ol>
+                  </div>
+                </section>
+
+                <section className="advanced-detail-card is-full is-scroll-window is-raw">
+                  <div className="advanced-scroll-head">
+                    <h4>Raw transcript</h4>
+                    <span className="rail-label">{formatNumber(transcript?.items.length)} rows / transcript</span>
+                  </div>
+                  <div className="advanced-scroll-body">
+                    <DossierRawTranscript items={transcript?.items} />
+                  </div>
+                </section>
+              </div>
+            </section>
+          </div>
+    </>
+  );
+
+  if (!compactShell) return content;
   return (
     <section className="session-dossier is-compact-shell" aria-label="Canonical dossier content">
       <article className="dossier">{content}</article>
     </section>
   );
+}
+
+function MetaCell({ label, value }: { label: string; value?: string | number }) {
+  return (
+    <div className="meta-cell">
+      <span>{label}</span>
+      <strong>{value ?? "-"}</strong>
+    </div>
+  );
+}
+
+function Metric({ className, label, value }: { className?: string; label: string; value?: string | number }) {
+  return (
+    <div className={["metric", className].filter(Boolean).join(" ")}>
+      <span>{label}</span>
+      <strong>{value ?? "-"}</strong>
+    </div>
+  );
+}
+
+function DossierEnrichmentPanel({
+  dossier,
+  enrichmentBusy,
+  enrichmentError,
+  error,
+  loading,
+  summary
+}: {
+  dossier?: ReadableSessionDossier;
+  enrichmentBusy?: boolean;
+  enrichmentError?: string;
+  error?: string;
+  loading?: boolean;
+  summary?: string;
+}) {
+  const coverage = dossier?.coverage.transcript;
+  const status = dossierEnrichmentStatus(dossier, loading, enrichmentBusy);
+  const hasCurrentEnrichment = hasCurrentDossierEnrichment(dossier);
+  return (
+    <section className="panel summary" aria-label="Enrichment summary">
+      <div className="panel-head">
+        <h3>Enrichment summary</h3>
+        <div className="dossier-enrichment-actions">
+          <span className={["dossier-enrichment-status", `is-${status.toLowerCase().replace(/\s+/g, "-")}`].join(" ")}>{status}</span>
+        </div>
+      </div>
+      <div className="summary-scroll">
+        <DossierDurableMemory dossier={dossier} />
+        <SummarySection label="Transcript summary" section="summary" value={summary} extraParagraphs={dossierSummaryExtras(dossier)} />
+        <SummarySection label="Latest prompt" section="latest-prompt" value={dossier?.narrative.latestUserPrompt} />
+        <SummarySection label="Retrieval notes" section="retrieval" values={dossierRetrievalNotes(dossier)} />
+        <SummarySection label="Continuation notes" section="continuation" values={dossier?.attention.map((item) => item.title)} />
+        <SummarySection label="Unresolved" section="unresolved" values={hasCurrentEnrichment ? dossier?.narrative.unresolved : undefined} />
+        {enrichmentError ? <SummarySection label="Enrichment error" section="error" value={enrichmentError} /> : null}
+        {error ? <SummarySection label="Dossier error" section="error" value={error} /> : null}
+        <DossierEvidenceBlocks dossier={dossier} hasCurrentEnrichment={hasCurrentEnrichment} />
+        <SummarySection
+          label="Workbench"
+          section="workbench-handoff"
+          value={dossier ? "Use Workbench to prepare an agent handoff for this session." : undefined}
+        />
+        <WorkbenchArtifactsSection dossier={dossier} />
+        <SummarySection label="First prompt" section="first-prompt" value={dossier?.narrative.firstUserPrompt} />
+        <SummarySection label="Technologies" section="technologies" values={hasCurrentEnrichment ? dossier?.narrative.technologies : undefined} />
+        <DiagnosticCoverage coverage={coverage} />
+      </div>
+    </section>
+  );
+}
+
+function DossierDurableMemory({ dossier }: { dossier?: ReadableSessionDossier }) {
+  const durable = currentDurableEnrichment(dossier);
+  if (!durable) return null;
+  const memory = durable.sessionDossier;
+  const verification = memory.verification;
+  return (
+    <div className="dossier-durable-memory" data-dossier-section="durable-memory">
+      <header>
+        <div>
+          <h4>{durable.sessionTitle.text}</h4>
+          <p>{durable.sessionSummary.text}</p>
+        </div>
+      </header>
+      <DurableParagraph label="Purpose" value={memory.purpose} />
+      <DurableParagraph label="Outcome" value={memory.outcome} />
+      <DurableParagraph label="Verification" value={`${statusLabel(verification.status)} - ${verification.summary}`} />
+      <DurableParagraph label="Next step" value={memory.continuation.nextStep} />
+      <DurableList label="Key work" values={memory.keyWork} />
+      <DurableList label="Decisions" values={memory.decisions} />
+      <DurableList label="Blockers" values={memory.blockers} />
+      <DurableList label="Constraints" values={memory.continuation.constraints} />
+    </div>
+  );
+}
+
+function DurableParagraph({ label, value }: { label: string; value?: string }) {
+  if (!value) return null;
+  return (
+    <div className="durable-paragraph">
+      <span>{label}</span>
+      <p>{value}</p>
+    </div>
+  );
+}
+
+function DurableList({ label, values }: { label: string; values: string[] }) {
+  if (values.length === 0) return null;
+  return (
+    <div className="durable-list">
+      <span>{label}</span>
+      <ul>
+        {values.slice(0, 5).map((value) => (
+          <li key={value}>{value}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function WorkbenchArtifactsSection({ dossier }: { dossier?: ReadableSessionDossier }) {
+  const artifacts = dossier?.artifacts ?? [];
+  if (artifacts.length === 0) return null;
+  return (
+    <div className="summary-section workbench-artifacts" data-dossier-section="workbench-artifacts">
+      <h4>Workbench artifacts</h4>
+      <ul className="workbench-artifact-list">
+        {artifacts.map((artifact) => (
+          <li key={artifact.artifactId}>
+            <details>
+              <summary>
+                <span>{artifactKindLabel(artifact.artifactKind)}</span>
+                <strong>{artifact.title ?? "Untitled artifact"}</strong>
+                <em>{[artifact.confidence, `${artifact.evidenceRefs.length} refs`, formatDateTime(artifact.createdAt)].filter(Boolean).join(" / ")}</em>
+              </summary>
+              <pre>{artifactContentPreview(artifact.content)}</pre>
+            </details>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function artifactKindLabel(kind: SessionDossierArtifact["artifactKind"]): string {
+  return kind === "runbook" ? "Runbook" : "Session Dossier";
+}
+
+function artifactContentPreview(content: unknown): string {
+  try {
+    return sanitizeWorkbenchArtifactPreview(JSON.stringify(content, null, 2));
+  } catch {
+    return "Artifact content could not be rendered.";
+  }
+}
+
+function sanitizeWorkbenchArtifactPreview(preview: string): string {
+  const redactions: Array<[RegExp, string]> = [
+    [/masthead(?:ctl)/gi, "Workbench CLI"],
+    [/npm\s+run/gi, "project script"],
+    [/output[.]json/gi, "artifact output file"],
+    [/schema[.]json/gi, "artifact schema file"],
+    [/apply[.]sh/gi, "artifact patch script"]
+  ];
+  return redactions.reduce((result, [pattern, replacement]) => result.replace(pattern, replacement), preview);
+}
+
+function DiagnosticCoverage({ coverage }: { coverage?: SessionDossierDto["coverage"]["transcript"] }) {
+  return (
+    <div className="summary-section diagnostic-coverage" data-dossier-section="diagnostic-coverage">
+      <h4>Diagnostic coverage</h4>
+      <div className="summary-grid" aria-label="Diagnostic coverage">
+        <SummaryFact label="User messages" value={formatNumber(coverage?.userMessages)} />
+        <SummaryFact label="Assistant messages" value={formatNumber(coverage?.assistantMessages)} />
+        <SummaryFact label="Tool results" value={formatNumber(coverage?.toolResults)} />
+        <SummaryFact label="Checkpoints" value={formatNumber(coverage?.checkpoints)} />
+        <SummaryFact label="System events" value={formatNumber(coverage?.runtimeSignals)} />
+        <SummaryFact label="Filtered rows" value={formatNumber(coverage?.lowValueItems)} />
+      </div>
+    </div>
+  );
+}
+
+function SummaryFact({ label, value }: { label: string; value?: string | number }) {
+  return (
+    <div className="summary-fact">
+      <span>{label}</span>
+      <strong>{value ?? "-"}</strong>
+    </div>
+  );
+}
+
+function DossierEvidenceBlocks({ dossier, hasCurrentEnrichment }: { dossier?: ReadableSessionDossier; hasCurrentEnrichment: boolean }) {
+  const values = [
+    ...(hasCurrentEnrichment ? (dossier?.narrative.topics ?? []).map((value) => ({ className: "is-blue", value })) : []),
+    ...(dossier?.reuse.mcpIncluded ? [{ className: "is-green", value: "Agent retrieval ready (MCP included)" }] : []),
+    ...(hasCurrentEnrichment ? (dossier?.narrative.unresolved ?? []).map((value) => ({ className: "is-yellow", value })) : []),
+    ...(dossier?.coverage.warnings.slice(0, 3).map((warning) => ({ className: "is-yellow", value: warning.code.replaceAll("_", " ") })) ?? [])
+  ];
+  const uniqueValues = values.filter((item, index) => {
+    const key = item.value.trim().toLowerCase();
+    return values.findIndex((candidate) => candidate.value.trim().toLowerCase() === key) === index;
+  });
+  if (uniqueValues.length === 0) return null;
+  return (
+    <div className="evidence-blocks" aria-label="Session topics and warnings" data-dossier-section="signals">
+      {uniqueValues.slice(0, 10).map((item) => (
+        <div key={`${item.className}:${item.value}`} className={`evidence-block ${item.className}`}>
+          <span>{item.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SummarySection({
+  extraParagraphs,
+  label,
+  section,
+  value,
+  values
+}: {
+  extraParagraphs?: string[];
+  label: string;
+  section: string;
+  value?: string;
+  values?: string[];
+}) {
+  const text = readableTranscriptText(value);
+  const paragraphs = [text, ...(extraParagraphs?.map(readableTranscriptText) ?? [])]
+    .filter((item): item is string => Boolean(item))
+    .filter((item, index, items) => items.findIndex((candidate) => sameReadableText(candidate, item)) === index)
+    .slice(0, 8);
+  const visibleValues = values?.map(readableTranscriptText).filter(Boolean).slice(0, 8) ?? [];
+  if (paragraphs.length === 0 && visibleValues.length === 0) return null;
+  return (
+    <div className="summary-section" data-dossier-section={section}>
+      <h4>{label}</h4>
+      {paragraphs.map((paragraph) => (
+        <p key={paragraph}>{paragraph}</p>
+      ))}
+      {visibleValues.length > 0 ? <p>{visibleValues.join(", ")}</p> : null}
+    </div>
+  );
+}
+
+function AdvancedList({ children, empty }: { children?: React.ReactNode; empty: string }) {
+  const items = Array.isArray(children) ? children.filter(Boolean) : children ? [children] : [];
+  if (items.length === 0) return <p className="advanced-detail-muted">{empty}</p>;
+  return <ul className="advanced-list">{items}</ul>;
+}
+
+function DossierRawTranscript({ items }: { items?: SessionTranscriptItem[] }) {
+  const visibleItems = items?.slice(0, 120) ?? [];
+  if (visibleItems.length === 0) {
+    return (
+      <ul className="advanced-list raw-transcript-list">
+        <li className="is-system"><strong>-</strong><span>No raw transcript items loaded.</span></li>
+      </ul>
+    );
+  }
+  return (
+    <ul className="advanced-list raw-transcript-list">
+      {visibleItems.map((item, index) => (
+        <li key={`${item.itemId}:${index}`} className={rowTone(item.kind === "message" ? item.role : item.kind)}>
+          <strong>{formatTime(item.observedAt)} {itemLabel(item).toLowerCase()}</strong>
+          <span>{item.text}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+type CompactTranscriptRow = SessionTranscriptItem & { displayText: string };
+
+function compactTranscriptRows(items?: SessionTranscriptItem[]): CompactTranscriptRow[] {
+  return (items ?? [])
+    .filter((item) => item.kind !== "file_effect")
+    .map((item) => ({ ...item, displayText: readableTranscriptText(item.text) }))
+    .filter((item) => item.displayText.length > 0);
+}
+
+function dossierTitle(dossier?: ReadableSessionDossier, live?: SessionDetailView): string {
+  const candidates = [
+    currentDurableEnrichment(dossier)?.sessionTitle.text,
+    dossier?.identity.title,
+    live?.headline.headline,
+    live?.title
+  ];
+  return candidates.map(readableTranscriptText).find(isUsefulDossierLabel) ?? "Session dossier";
+}
+
+function dossierDescription(summary: string | undefined, live?: SessionDetailView): string {
+  const candidates = [summary, live?.headline.frame?.disposition, live?.currentActivity];
+  return candidates.map(readableTranscriptText).find(isPlainDossierCopy) ?? "Canonical identifiers and reusable session context.";
+}
+
+function dossierEnrichmentStatus(dossier: ReadableSessionDossier | undefined, loading?: boolean, enrichmentBusy?: boolean): string {
+  if (enrichmentBusy || dossier?.enrichment.status === "enriching") return "Enriching";
+  if (!dossier) return loading ? "Loading" : "Live";
+  if (dossier.enrichment.status === "current") return "Current";
+  if (dossier.enrichment.status === "failed") return "Failed";
+  return "Not enriched";
+}
+
+function hasCurrentDossierEnrichment(dossier?: ReadableSessionDossier): boolean {
+  return Boolean(currentDurableEnrichment(dossier) || currentNarrativeDebug(dossier));
+}
+
+function currentDurableEnrichment(dossier?: ReadableSessionDossier) {
+  const durable = dossier?.durableEnrichment;
+  return durable?.promptVersion === CURRENT_SESSION_CAPSULE_VERSION || durable?.version === CURRENT_SESSION_CAPSULE_VERSION ? durable : undefined;
+}
+
+function currentNarrativeDebug(dossier?: ReadableSessionDossier): ReadableSessionDossier["narrative"]["narrativeDebug"] | undefined {
+  const debug = dossier?.narrative.narrativeDebug;
+  if (debug?.promptVersion !== CURRENT_SESSION_CAPSULE_VERSION) return undefined;
+  if (debug.failureCode) return undefined;
+  if (debug.providerStatus && !["current", "success"].includes(debug.providerStatus)) return undefined;
+  return debug;
+}
+
+function dossierSummary(dossier?: ReadableSessionDossier, live?: SessionDetailView): string | undefined {
+  const narrative = dossier?.narrative;
+  const hasCurrentEnrichment = hasCurrentDossierEnrichment(dossier);
+  const candidates = [
+    currentDurableEnrichment(dossier)?.sessionSummary.text,
+    hasCurrentEnrichment ? narrative?.liveSummary : undefined,
+    hasCurrentEnrichment ? narrative?.outcome : undefined,
+    live?.headline.headline,
+    live?.currentActivity,
+    hasCurrentEnrichment ? narrative?.objective : undefined,
+    live?.headline.frame?.disposition,
+    ...(live?.headline.frame?.evidence ?? []),
+    live?.headline.status
+  ]
+    .map(readableTranscriptText)
+    .filter(isPlainDossierCopy)
+    .filter((value): value is string => Boolean(value));
+  const summary = candidates.find((candidate, index) => !candidates.slice(0, index).some((earlier) => sameReadableText(candidate, earlier)));
+  return summary ? sentence(summary) : undefined;
+}
+
+function dossierSummaryExtras(dossier?: ReadableSessionDossier): string[] {
+  if (!hasCurrentDossierEnrichment(dossier)) return [];
+  return [dossier?.narrative.outcome].map(readableTranscriptText).filter(isPlainDossierCopy);
+}
+
+function dossierRetrievalNotes(dossier?: ReadableSessionDossier): string[] | undefined {
+  const memory = currentDurableEnrichment(dossier)?.sessionDossier;
+  const hasCurrentEnrichment = Boolean(memory || hasCurrentDossierEnrichment(dossier));
+  const durableValues = [
+    memory?.purpose,
+    memory?.outcome,
+    ...(memory?.keyWork ?? []),
+    ...(memory?.decisions ?? []),
+    ...(memory?.blockers ?? []),
+    memory?.verification.summary,
+    memory?.continuation.nextStep,
+    ...(memory?.continuation.openQuestions ?? []),
+    ...(memory?.continuation.constraints ?? [])
+  ];
+  const fallbackValues = [
+    hasCurrentEnrichment ? dossier?.narrative.objective : undefined,
+    hasCurrentEnrichment ? dossier?.narrative.liveSummary : undefined,
+    hasCurrentEnrichment ? dossier?.narrative.outcome : undefined,
+    dossier?.verification.summary,
+    ...(dossier?.attention.map((item) => item.title) ?? []),
+    ...(dossier?.coverage.warnings.map((warning) => warning.message) ?? [])
+  ];
+  const values = (memory ? durableValues : fallbackValues)
+    .map(readableTranscriptText)
+    .filter(isPlainDossierCopy)
+    .filter((value, index, items) => items.findIndex((candidate) => sameReadableText(candidate, value)) === index)
+    .slice(0, 8);
+  return values.length > 0 ? values : undefined;
+}
+
+function isUsefulDossierLabel(value: string | undefined): value is string {
+  if (!value) return false;
+  const text = value.trim();
+  return Boolean(text) && !isWeakDossierCopy(text);
+}
+
+function isPlainDossierCopy(value: string | undefined): value is string {
+  if (!value) return false;
+  const text = value.trim();
+  if (!text) return false;
+  if (isWeakDossierCopy(text)) return false;
+  if (/\b(?:i|me|my|mine|we|us|our|ours|you|your|yours)\b/i.test(text)) return false;
+  if (/#\s*Masthead Session Context/i.test(text)) return false;
+  if (/\bsession:[0-9a-f-]{12,}\b/i.test(text)) return false;
+  if (/(?:^|\s)(?:src|dist|node_modules|\.codex|\/home)\/[^\s]+/i.test(text)) return false;
+  if (/\bshell:\s*(?:succeeded|failed|unknown)\b/i.test(text)) return false;
+  return true;
+}
+
+function isWeakDossierCopy(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replace(/[.!?]+$/g, "");
+  return (
+    normalized === "codex hook event" ||
+    normalized === "runtime signal" ||
+    normalized === "completed" ||
+    normalized === "complete" ||
+    normalized === "done" ||
+    normalized === "running" ||
+    normalized === "active" ||
+    normalized === "idle" ||
+    normalized === "ended" ||
+    normalized === "blocked" ||
+    normalized === "failed" ||
+    normalized === "unknown"
+  );
+}
+
+function sentence(value: string): string {
+  const trimmed = value.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function sameReadableText(left?: string, right?: string): boolean {
+  if (!left || !right) return false;
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+function itemLabel(item: SessionTranscriptItem): string {
+  if (item.kind === "tool_call") return `Tool · ${item.toolName ?? item.label}`;
+  if (item.kind === "tool_result") return `Tool result · ${item.status ?? item.label}`;
+  if (item.kind === "file_effect") return `File · ${item.label}`;
+  if (item.kind === "runtime_signal") return `Signal · ${item.label}`;
+  if (item.kind === "checkpoint") return `Checkpoint · ${item.label}`;
+  return item.role[0].toUpperCase() + item.role.slice(1);
+}
+
+function liveTimeline(live?: SessionDetailView): SessionDossierTimelineEvent[] {
+  return (
+    live?.timeline.map((event) => ({
+      eventId: event.eventId,
+      kind: "session" as const,
+      label: event.type,
+      observedAt: event.occurredAt,
+      summary: event.summary
+    })) ?? []
+  );
+}
+
+function liveAttention(live?: SessionDetailView) {
+  const attention =
+    live?.attentionItems.map((item) => ({
+      detail: item.suggestedNextAction,
+      kind: item.type === "command_failed" ? ("command_failure" as const) : ("stalled" as const),
+      observedAt: item.createdAt,
+      severity: item.severity,
+      sourceRefs: item.evidence,
+      title: item.title
+    })) ?? [];
+  const conflicts =
+    live?.conflicts.map((conflict) => ({
+      detail: conflict.sharedPaths.slice(0, 3).join(", "),
+      kind: "conflict" as const,
+      severity: conflict.severity === "high" ? ("P1" as const) : ("P2" as const),
+      sourceRefs: conflict.evidence,
+      title: conflict.title
+    })) ?? [];
+  return [...attention, ...conflicts];
+}
+
+function verificationFallback(live?: SessionDetailView): string {
+  if (!live) return "No verification signal captured.";
+  if (live.indicators.includes("verification")) return "Verification signal was captured in the live projection.";
+  return "No canonical verification signal captured.";
+}
+
+function rowTone(kind?: string): string {
+  if (kind === "user") return "is-user";
+  if (kind === "assistant") return "is-assistant";
+  if (kind === "tool" || kind === "tool_call" || kind === "tool_result") return "is-tool";
+  if (kind === "checkpoint") return "is-tool";
+  return "is-system";
+}
+
+function coverageLabel(value?: SessionDossierDto["coverage"]["level"]): string {
+  if (!value) return "Live";
+  return value.replaceAll("_", " ");
+}
+
+function statusLabel(value: string): string {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatCompactNumber(value?: number): string {
+  if (typeof value !== "number") return "-";
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return formatter.format(value);
+}
+
+function formatNumber(value?: number): string {
+  if (typeof value !== "number") return "-";
+  return formatter.format(value);
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "-";
+  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
 }

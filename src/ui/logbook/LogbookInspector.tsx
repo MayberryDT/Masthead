@@ -1,5 +1,10 @@
 import type { ReactNode } from "react";
-import { isPublishedSessionDossierV1, type LogbookInspectorArtifact } from "../../app/logbook/logbookInspectorModel";
+import {
+  CANONICAL_SESSION_DOSSIER_SCHEMA,
+  isKnownLegacySessionDossierSchema,
+  isPublishedSessionDossierV1,
+  type LogbookInspectorArtifact
+} from "../../app/logbook/logbookInspectorModel";
 import { Icon } from "../icons/Icon";
 import { iconWeights } from "../icons/icon-tokens";
 import { StatusBadge } from "../primitives/StatusBadge";
@@ -104,9 +109,24 @@ function ProvenanceSection({ joinRationale, provenanceLabel, provenanceSessionId
 }
 
 function renderArtifactBody(artifact: LogbookInspectorArtifact): ReactNode {
-  const { body, kind } = artifact;
-  if (kind === "session_dossier" && isPublishedSessionDossierV1(body)) {
-    return <SessionDossierContent compactShell dossier={body} transcript={artifact.provenanceTranscript} transcriptError={artifact.provenanceTranscriptError} />;
+  const { body, kind, schemaVersion } = artifact;
+  if (kind === "session_dossier" && schemaVersion === CANONICAL_SESSION_DOSSIER_SCHEMA) {
+    if (!isPublishedSessionDossierV1(body)) {
+      return <DossierSchemaStatus title="Invalid canonical session dossier" detail="The published body does not match the canonical dossier contract." />;
+    }
+    return (
+      <SessionDossierContent
+        compactShell
+        dossier={body}
+        transcript={artifact.provenanceTranscript}
+        transcriptError={artifact.provenanceTranscriptError}
+        transcriptLoading={artifact.provenanceTranscriptLoading}
+      />
+    );
+  }
+
+  if (kind === "session_dossier" && !isKnownLegacySessionDossierSchema(schemaVersion)) {
+    return <DossierSchemaStatus title="Unsupported session dossier schema" detail={schemaVersion ? `Schema ${schemaVersion} is not supported by this version of Masthead.` : "The artifact does not declare a supported dossier schema."} />;
   }
 
   const record = asRecord(body);
@@ -197,6 +217,15 @@ function renderArtifactBody(artifact: LogbookInspectorArtifact): ReactNode {
   }
 
   return <pre className="logbook-inspector-json">{prettyUnknown(body)}</pre>;
+}
+
+function DossierSchemaStatus({ detail, title }: { detail: string; title: string }) {
+  return (
+    <section className="logbook-inspector-section" role="status">
+      <p className="mono-label">{title}</p>
+      <p>{detail}</p>
+    </section>
+  );
 }
 
 function isKnownArtifactKind(kind: string): boolean {

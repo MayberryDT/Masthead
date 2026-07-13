@@ -50,6 +50,39 @@ describe("useLogbookController artifact detail", () => {
     expect(getSessionTranscript).toHaveBeenNthCalledWith(1, "canonical-session-1", expect.objectContaining({ cursor: undefined }), baseUrl, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(getSessionTranscript).toHaveBeenNthCalledWith(2, "canonical-session-1", expect.objectContaining({ cursor: "cursor-2" }), baseUrl, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(latestController?.selectedArtifact?.provenanceTranscript?.items.map((item) => item.text)).toEqual(["first", "second"]);
+    expect(latestController?.selectedArtifact?.provenanceTranscript?.nextCursor).toBeUndefined();
+  });
+
+  test("shows transcript loading without claiming evidence is absent", async () => {
+    mockLogbookSearch([session("artifact-canonical", "Canonical dossier")], 1);
+    vi.mocked(getLogbookArtifact).mockResolvedValueOnce(canonicalArtifactDetail("artifact-canonical", "canonical-session-1"));
+    let resolveTranscript: ((value: ReturnType<typeof transcriptPage>) => void) | undefined;
+    vi.mocked(getSessionTranscript).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveTranscript = resolve;
+        })
+    );
+    await renderHarness();
+
+    await act(async () => {
+      latestController?.selectSession("artifact-canonical");
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(latestController?.selectedArtifact?.provenanceTranscriptLoading).toBe(true);
+    expect(container?.textContent).toContain("Loading transcript...");
+    expect(container?.textContent).not.toContain("No transcript evidence captured.");
+
+    await act(async () => {
+      resolveTranscript?.(transcriptPage("loaded"));
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(latestController?.selectedArtifact?.provenanceTranscriptLoading).toBe(false);
+    expect(container?.textContent).toContain("loaded");
   });
 
   test("keeps the canonical dossier readable when provenance transcript loading fails", async () => {
@@ -235,7 +268,7 @@ function canonicalDossierBody(sessionId: string) {
     },
     timeline: [],
     tools: [],
-    usage: { usageRows: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, usageRows: 0 },
     verification: { commands: [], status: "not_run", summary: "Not run." }
   };
 }
