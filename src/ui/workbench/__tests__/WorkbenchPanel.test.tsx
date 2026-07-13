@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import type { WorkbenchActionKind } from "../../../app/workbench/useWorkbenchController";
@@ -57,7 +58,24 @@ function allow(...kinds: WorkbenchActionKind[]) {
   return (kind: WorkbenchActionKind) => allowed.has(kind);
 }
 
+function mediaRule(css: string, query: string): string {
+  const start = css.indexOf(`@media ${query}`);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const next = css.indexOf("\n@media ", start + 1);
+  return css.slice(start, next === -1 ? css.length : next);
+}
+
 describe("WorkbenchPanel", () => {
+  test("keeps the responsive action row from collapsing behind queue facts", () => {
+    const css = readFileSync("src/styles/masthead.css", "utf8");
+    expect(mediaRule(css, "(max-width: 1120px)")).toMatch(
+      /\.workbench-toolbar\.observability-toolbar \.workbench-toolbar-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*min-height:\s*40px;/s
+    );
+    expect(mediaRule(css, "(max-width: 640px)")).toMatch(
+      /\.workbench-toolbar\.observability-toolbar \.workbench-toolbar-actions\s*\{[^}]*width:\s*100%;[^}]*flex-wrap:\s*wrap;/s
+    );
+  });
+
   test("shows a retryable candidate error instead of claiming the actionable queue is empty", () => {
     const html = renderToStaticMarkup(
       <WorkbenchPanel

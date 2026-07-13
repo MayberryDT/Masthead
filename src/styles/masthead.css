@@ -3324,6 +3324,11 @@ main {
     width: 100%;
   }
 
+  .workbench-toolbar.observability-toolbar .workbench-toolbar-actions {
+    flex: 0 0 auto;
+    min-height: 40px;
+  }
+
   .workbench-layout {
     grid-template-columns: 1fr;
   }
@@ -3345,7 +3350,7 @@ main {
 }
 
 @media (max-width: 640px) {
-  .workbench-toolbar-actions {
+  .workbench-toolbar.observability-toolbar .workbench-toolbar-actions {
     width: 100%;
     flex-wrap: wrap;
     overflow-x: visible;
