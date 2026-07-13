@@ -1,4 +1,5 @@
 export type ProductionConfig = {
+  bundleDigest: string;
   dataDirectory: string;
   databasePath: string;
   gitSha?: string;
@@ -23,6 +24,7 @@ export function classifyProductionProcess(
   config: ProductionConfig
 ): (ProductionProcessRecord & { role: "daemon" | "electron"; target: string }) | undefined;
 export function installProductionLauncher(input: {
+  bundleDigest: string;
   bundlePath: string;
   dataDirectory?: string;
   databasePath?: string;
@@ -37,6 +39,7 @@ export function stopProduction(config: ProductionConfig, dependencies?: Record<s
 }>;
 export function statusProduction(config: ProductionConfig, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export function transitionProduction(input: {
+  bundleDigest: string;
   bundlePath: string;
   dataDirectory?: string;
   databasePath?: string;

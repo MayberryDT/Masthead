@@ -4,12 +4,15 @@ import { constants } from "node:fs";
 import {
   access,
   chmod,
+  lstat,
   mkdir,
   readFile,
+  readlink,
   readdir,
   realpath,
   rename,
   rm,
+  stat,
   symlink,
   writeFile
 } from "node:fs/promises";
@@ -18,6 +21,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
 
 const DEFAULT_PORT = 17383;
 const VERSIONED_TARGET = /^Masthead-linux-x64-[A-Za-z0-9][A-Za-z0-9._+-]*$/u;
@@ -56,10 +60,14 @@ export async function installProductionLauncher(input) {
   if (!input.bundlePath || dirname(requestedTarget) !== productionRoot || !VERSIONED_TARGET.test(basename(requestedTarget))) {
     throw new Error(`Production bundle must be a versioned direct child of ${productionRoot}.`);
   }
+  if ((await lstat(requestedTarget)).isSymbolicLink()) {
+    throw new Error(`Production bundle must not be a symbolic link: ${requestedTarget}.`);
+  }
   const target = await realpath(requestedTarget).catch(() => {
     throw new Error(`Production bundle does not exist: ${requestedTarget}`);
   });
-  if (dirname(target) !== await realpath(productionRoot)) {
+  const bundleManifest = await verifyPinnedBundle(target, input.bundleDigest);
+  if (dirname(target) !== await realpath(productionRoot) || !VERSIONED_TARGET.test(basename(target))) {
     throw new Error(`Production bundle must resolve to a direct child of ${productionRoot}.`);
   }
   const currentPath = join(productionRoot, "current");
@@ -91,6 +99,7 @@ export async function installProductionLauncher(input) {
     dataDirectory,
     databasePath,
     gitSha: release.gitSha,
+    bundleDigest: bundleManifest.bundleDigest,
     lifecycleLeasePath: join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"),
     port,
     productionRoot,
@@ -119,11 +128,15 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   if (!input.bundlePath || dirname(requestedTarget) !== productionRoot || !VERSIONED_TARGET.test(basename(requestedTarget))) {
     throw new Error(`Production bundle must be a versioned direct child of ${productionRoot}.`);
   }
+  if ((await lstat(requestedTarget)).isSymbolicLink()) {
+    throw new Error(`Production bundle must not be a symbolic link: ${requestedTarget}.`);
+  }
   const target = await realpath(requestedTarget);
   const canonicalProductionRoot = await realpath(productionRoot);
-  if (dirname(target) !== canonicalProductionRoot) {
+  if (dirname(target) !== canonicalProductionRoot || !VERSIONED_TARGET.test(basename(target))) {
     throw new Error(`Production bundle must resolve to a direct child of ${canonicalProductionRoot}.`);
   }
+  await verifyPinnedBundle(target, input.bundleDigest);
   const release = await readRelease(target);
   const runtime = productionRuntimePaths(target);
   await Promise.all([
@@ -134,6 +147,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   ]);
   const dataDirectory = resolve(input.dataDirectory || join(homeDir, ".config", "masthead-production"));
   const config = await completeConfig({
+    bundleDigest: input.bundleDigest,
     dataDirectory,
     databasePath: input.databasePath || join(dataDirectory, "masthead.sqlite"),
     gitSha: release.gitSha,
@@ -146,20 +160,50 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   const noLifecycleLease = async () => ({ release: async () => undefined });
   const dependencies = {
     acquireLease: () => acquireLifecycleLease(config.lifecycleLeasePath),
-    install: () => installProductionLauncher({ ...input, bundlePath: target, homeDir, productionRoot }),
-    start: () => startProduction(config, { acquireLease: noLifecycleLease }),
+    activateLaunchers: (staged) => activateStagedLaunchers(staged),
+    currentTarget: () => realpath(join(productionRoot, "current")).catch(() => undefined),
+    restoreCurrent: (_oldTarget) => swapCurrentTarget(productionRoot, _oldTarget),
+    restoreLaunchers: (staged) => restoreStagedLaunchers(staged),
+    cleanupBundles: () => cleanupOldProductionBundles(productionRoot, target),
+    stageLaunchers: () => stageProductionLaunchers({ ...input, bundlePath: target, homeDir, productionRoot }),
+    start: (candidate = config) => startProduction(candidate, { acquireLease: noLifecycleLease }),
     stop: () => stopProduction(config, { acquireLease: noLifecycleLease }),
     swapCurrent: () => swapCurrentTarget(productionRoot, target),
     ...dependencyOverrides
   };
   const lease = await dependencies.acquireLease();
+  let staged;
+  let oldTarget;
   try {
-    const stopped = await dependencies.stop(config);
-    await dependencies.swapCurrent(productionRoot, target);
-    const installed = await dependencies.install({ ...input, bundlePath: target, homeDir, productionRoot });
-    const started = await dependencies.start(config);
-    return { installed, started, stopped, target };
+    oldTarget = await dependencies.currentTarget();
+    staged = await dependencies.stageLaunchers(config);
+    const stopReceipt = await dependencies.stop(config);
+    let started;
+    try {
+      await dependencies.swapCurrent(productionRoot, target);
+      await dependencies.activateLaunchers(staged);
+      started = await dependencies.start(config);
+    } catch (error) {
+      let restarted = false;
+      try {
+        if (oldTarget) await dependencies.restoreCurrent(oldTarget);
+        await dependencies.restoreLaunchers(staged);
+        if (oldTarget) {
+          const oldRelease = await readRelease(oldTarget);
+          const oldDigest = pinnedDigestFromLauncherSnapshot(staged.previousLauncher);
+          const oldConfig = { ...config, bundleDigest: oldDigest, gitSha: oldRelease.gitSha, target: oldTarget, version: oldRelease.version };
+          await dependencies.start(oldConfig);
+          restarted = true;
+        }
+      } catch {
+        restarted = false;
+      }
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; rollback restarted=${restarted}`, { cause: error });
+    }
+    await dependencies.cleanupBundles(productionRoot, target);
+    return { activated: true, started, stopped: stopReceipt, target };
   } finally {
+    if (staged) await discardStagedLaunchers(staged);
     await lease.release();
   }
 }
@@ -167,21 +211,24 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
 export function classifyProductionProcess(record, config) {
   if (!record || !Number.isSafeInteger(record.pid) || record.pid <= 0 || !record.starttime) return undefined;
   const productionRoot = resolve(config.productionRoot);
-  const target = productionTargetForPath(record.exe, productionRoot);
+  const executableIdentity = normalizeProcExecutable(record.exe);
+  const target = productionTargetForPath(executableIdentity, productionRoot);
   if (!target) return undefined;
   const runtime = productionRuntimePaths(target);
   const args = Array.isArray(record.argv) ? record.argv : [];
+  const environment = record.environ || {};
   if (
-    resolve(record.exe) === runtime.executable &&
+    resolve(executableIdentity) === runtime.executable &&
     resolve(args[0] || "") === runtime.executable &&
     args.includes(`--user-data-dir=${resolve(config.dataDirectory)}`) &&
+    resolve(environment.MASTHEAD_DATA_DIR || "") === resolve(config.dataDirectory) &&
+    resolve(environment.MASTHEAD_DB_PATH || "") === resolve(config.databasePath) &&
     !args.some((argument) => argument.startsWith("--type="))
   ) {
     return { ...record, role: "electron", target };
   }
-  const environment = record.environ || {};
   if (
-    resolve(record.exe) === runtime.node &&
+    resolve(executableIdentity) === runtime.node &&
     resolve(args[0] || "") === runtime.node &&
     resolve(args[1] || "") === runtime.daemonEntry &&
     resolve(environment.MASTHEAD_DATA_DIR || "") === resolve(config.dataDirectory) &&
@@ -192,8 +239,17 @@ export function classifyProductionProcess(record, config) {
   return undefined;
 }
 
+function normalizeProcExecutable(path) {
+  if (typeof path !== "string") return path;
+  const deletedSuffix = " (deleted)";
+  if (!path.endsWith(deletedSuffix)) return path;
+  const normalized = path.slice(0, -deletedSuffix.length);
+  return normalized.endsWith(deletedSuffix) ? path : normalized;
+}
+
 export async function startProduction(configInput, dependencyOverrides = {}) {
   const config = await completeConfig(configInput);
+  await verifyPinnedBundle(config.target, config.bundleDigest);
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
   const lease = await dependencies.acquireLease();
   try {
@@ -207,6 +263,11 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
     const pinnedProcesses = processes.filter((processRecord) => processRecord.target === config.target);
     const health = await dependencies.fetchHealth();
     if (pinnedProcesses.length > 0) {
+      const electronCount = pinnedProcesses.filter((record) => record.role === "electron").length;
+      const daemonCount = pinnedProcesses.filter((record) => record.role === "daemon").length;
+      if (electronCount !== 1 || daemonCount !== 1 || pinnedProcesses.length !== 2) {
+        throw new Error("Pinned production topology must contain exactly one Electron main and one daemon.");
+      }
       assertMatchingHealth(health, config);
       return { alreadyRunning: true, started: false, pids: pinnedProcesses.map((record) => record.pid).sort((a, b) => a - b) };
     }
@@ -219,6 +280,7 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
         ...process.env,
         MASTHEAD_BUILD_SHA: config.gitSha,
         MASTHEAD_BUILD_VERSION: config.version,
+        MASTHEAD_BUNDLE_DIGEST: config.bundleDigest,
         MASTHEAD_DATA_DIR: config.dataDirectory,
         MASTHEAD_DB_PATH: config.databasePath,
         MASTHEAD_PORT: String(config.port),
@@ -228,9 +290,20 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
       executable: productionRuntimePaths(config.target).executable
     };
     const pid = await dependencies.spawnElectron(launch);
-    const startedHealth = await dependencies.waitForHealth();
-    assertMatchingHealth(startedHealth, config);
-    return { health: startedHealth, pid, started: true };
+    const captured = await dependencies.captureSpawned(pid);
+    try {
+      const startedHealth = await dependencies.waitForHealth();
+      assertMatchingHealth(startedHealth, config);
+      return { health: startedHealth, pid, started: true };
+    } catch (error) {
+      const cleanup = dependencies.cleanupSpawned
+        ? await dependencies.cleanupSpawned(captured, dependencies)
+        : await cleanupFailedStart(captured, config, dependencies);
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; cleanup stopped=${cleanup.stopped}`,
+        { cause: error }
+      );
+    }
   } finally {
     await lease.release();
   }
@@ -241,34 +314,7 @@ export async function stopProduction(configInput, dependencyOverrides = {}) {
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
   const lease = await dependencies.acquireLease();
   try {
-    const captured = await classifiedProcesses(config, dependencies);
-    const signalled = [];
-    for (const processRecord of captured) {
-      const current = await dependencies.readProcess(processRecord.pid);
-      if (!current) continue;
-      const currentClassification = current ? classifyProductionProcess(current, config) : undefined;
-      if (
-        !currentClassification ||
-        currentClassification.starttime !== processRecord.starttime ||
-        currentClassification.exe !== processRecord.exe ||
-        currentClassification.role !== processRecord.role
-      ) {
-        throw new Error(`PID identity changed before shutdown for ${processRecord.pid}; refusing to signal it.`);
-      }
-      dependencies.signal(processRecord.pid, "SIGTERM");
-      signalled.push(processRecord);
-    }
-    for (const processRecord of signalled) {
-      if (!(await dependencies.waitForExit(processRecord.pid, processRecord.starttime, 30_000))) {
-        throw new Error(`Production PID ${processRecord.pid} did not stop after SIGTERM within 30 seconds; no SIGKILL was sent.`);
-      }
-    }
-    const remaining = await classifiedProcesses(config, dependencies);
-    if (remaining.length > 0) throw new Error(`Production process set is not empty after shutdown: ${formatProcesses(remaining)}.`);
-    if (await dependencies.fetchHealth()) throw new Error("Production health endpoint remains available after shutdown.");
-    if (!(await dependencies.portBindable())) throw new Error(`Production port remains occupied after shutdown: ${config.port}.`);
-    await dependencies.ownershipProbe();
-    return { stopped: true, stoppedPids: captured.map((record) => record.pid).sort((a, b) => a - b) };
+    return await stopInsideLifecycleLease(config, dependencies);
   } finally {
     await lease.release();
   }
@@ -296,6 +342,7 @@ export async function runCli(argv = process.argv.slice(2), environment = process
     if (!bundlePath) throw new Error("install requires --bundle <versioned-production-path>.");
     return transitionProduction({
       bundlePath,
+      bundleDigest: option(argv, "--bundle-digest"),
       dataDirectory: option(argv, "--data-dir"),
       homeDir: environment.HOME,
       port: numberOption(argv, "--port"),
@@ -320,9 +367,97 @@ async function swapCurrentTarget(productionRoot, target) {
   }
 }
 
+async function stageProductionLaunchers(input) {
+  const homeDir = resolve(input.homeDir || homedir());
+  const target = await realpath(input.bundlePath);
+  const productionRoot = resolve(input.productionRoot);
+  const release = await readRelease(target);
+  const bundleManifest = await verifyPinnedBundle(target, input.bundleDigest);
+  const dataDirectory = resolve(input.dataDirectory || join(homeDir, ".config", "masthead-production"));
+  const databasePath = resolve(input.databasePath || join(dataDirectory, "masthead.sqlite"));
+  const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+  const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+  await Promise.all([mkdir(dirname(launcherPath), { recursive: true }), mkdir(dirname(desktopPath), { recursive: true })]);
+  const wrapper = productionWrapper({
+    bundleDigest: bundleManifest.bundleDigest, dataDirectory, databasePath, gitSha: release.gitSha,
+    lifecycleLeasePath: join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"),
+    port: validPort(input.port ?? DEFAULT_PORT), productionRoot, target, version: release.version
+  });
+  const desktop = [
+    "[Desktop Entry]", "Type=Application", "Name=Masthead", `Exec=${launcherPath}`,
+    `Icon=${join(target, "resources", "masthead-logo-sail.png")}`, "Terminal=false", "Categories=Development;", ""
+  ].join("\n");
+  const token = `${process.pid}.${Date.now()}`;
+  const launcherStage = `${launcherPath}.${token}.staged`;
+  const desktopStage = `${desktopPath}.${token}.staged`;
+  const [previousLauncher, previousDesktop] = await Promise.all([snapshotFile(launcherPath), snapshotFile(desktopPath)]);
+  await writeFile(launcherStage, wrapper, { encoding: "utf8", mode: 0o755 });
+  await chmod(launcherStage, 0o755);
+  await writeFile(desktopStage, desktop, { encoding: "utf8", mode: 0o644 });
+  return { desktopPath, desktopStage, launcherPath, launcherStage, previousDesktop, previousLauncher };
+}
+
+function pinnedDigestFromLauncherSnapshot(snapshot) {
+  if (!snapshot?.exists) throw new Error("Previous production launcher is unavailable for rollback.");
+  const source = Buffer.from(snapshot.body).toString("utf8");
+  const match = source.match(/^MASTHEAD_BUNDLE_DIGEST='([a-f0-9]{64})'$/mu);
+  if (!match) throw new Error("Previous production launcher has no pinned bundle digest for rollback.");
+  return match[1];
+}
+
+async function activateStagedLaunchers(staged) {
+  await rename(staged.launcherStage, staged.launcherPath);
+  await rename(staged.desktopStage, staged.desktopPath);
+}
+
+async function restoreStagedLaunchers(staged) {
+  await restoreSnapshot(staged.launcherPath, staged.previousLauncher);
+  await restoreSnapshot(staged.desktopPath, staged.previousDesktop);
+}
+
+async function discardStagedLaunchers(staged) {
+  const paths = [staged.launcherStage, staged.desktopStage].filter((path) => typeof path === "string");
+  await Promise.all(paths.map((path) => rm(path, { force: true })));
+}
+
+async function snapshotFile(path) {
+  try {
+    const [body, info] = await Promise.all([readFile(path), stat(path)]);
+    return { body, exists: true, mode: info.mode & 0o777 };
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return { exists: false };
+    throw error;
+  }
+}
+
+async function restoreSnapshot(path, snapshot) {
+  if (!snapshot.exists) {
+    await rm(path, { force: true });
+    return;
+  }
+  const temporary = `${path}.${process.pid}.${Date.now()}.restore`;
+  try {
+    await writeFile(temporary, snapshot.body, { mode: snapshot.mode });
+    await chmod(temporary, snapshot.mode);
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+async function cleanupOldProductionBundles(productionRoot, target) {
+  const retainedName = basename(target);
+  const entries = await readdir(productionRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!VERSIONED_TARGET.test(entry.name) || entry.name === retainedName) continue;
+    await rm(join(productionRoot, entry.name), { force: true, recursive: true });
+  }
+}
+
 function defaultDependencies(config) {
   return {
     acquireLease: () => acquireLifecycleLease(config.lifecycleLeasePath),
+    captureSpawned: (pid) => captureSpawnedProcess(pid, config),
     currentTarget: () => realpath(join(config.productionRoot, "current")).catch(() => undefined),
     fetchHealth: () => fetchHealth(config.port),
     ownershipProbe: () => probeExclusiveOwnership(config),
@@ -345,11 +480,68 @@ function defaultDependencies(config) {
   };
 }
 
+async function captureSpawnedProcess(pid, config) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const record = await readProcess(pid);
+    const classified = record ? classifyProductionProcess(record, config) : undefined;
+    if (classified?.role === "electron" && classified.target === config.target) return classified;
+    await delay(25);
+  }
+  return undefined;
+}
+
+async function cleanupFailedStart(captured, config, dependencies) {
+  if (captured) {
+    const current = await dependencies.readProcess(captured.pid);
+    if (current) {
+      const classified = classifyProductionProcess(current, config);
+      if (
+        classified?.role !== "electron" || classified.target !== config.target ||
+        classified.starttime !== captured.starttime || classified.exe !== captured.exe
+      ) return { stopped: false };
+    }
+  }
+  try {
+    await stopInsideLifecycleLease(config, dependencies);
+    return { stopped: true };
+  } catch {
+    return { stopped: false };
+  }
+}
+
+async function stopInsideLifecycleLease(config, dependencies) {
+  const captured = await classifiedProcesses(config, dependencies);
+  const signalled = [];
+  for (const processRecord of captured) {
+    const current = await dependencies.readProcess(processRecord.pid);
+    if (!current) continue;
+    const currentClassification = classifyProductionProcess(current, config);
+    if (
+      !currentClassification || currentClassification.starttime !== processRecord.starttime ||
+      currentClassification.exe !== processRecord.exe || currentClassification.role !== processRecord.role
+    ) throw new Error(`PID identity changed before shutdown for ${processRecord.pid}; refusing to signal it.`);
+    dependencies.signal(processRecord.pid, "SIGTERM");
+    signalled.push(processRecord);
+  }
+  for (const processRecord of signalled) {
+    if (!(await dependencies.waitForExit(processRecord.pid, processRecord.starttime, 30_000))) {
+      throw new Error(`Production PID ${processRecord.pid} did not stop after SIGTERM within 30 seconds; no SIGKILL was sent.`);
+    }
+  }
+  const remaining = await classifiedProcesses(config, dependencies);
+  if (remaining.length > 0) throw new Error(`Production process set is not empty after shutdown: ${formatProcesses(remaining)}.`);
+  if (await dependencies.fetchHealth()) throw new Error("Production health endpoint remains available after shutdown.");
+  if (!(await dependencies.portBindable())) throw new Error(`Production port remains occupied after shutdown: ${config.port}.`);
+  await dependencies.ownershipProbe();
+  return { stopped: true, stoppedPids: captured.map((record) => record.pid).sort((a, b) => a - b) };
+}
+
 async function configFromEnvironment(environment) {
   const targetValue = environment.MASTHEAD_PRODUCTION_TARGET;
   if (!targetValue) throw new Error("MASTHEAD_PRODUCTION_TARGET is required; use the installed immutable launcher.");
   return completeConfig({
     dataDirectory: environment.MASTHEAD_DATA_DIR,
+    bundleDigest: environment.MASTHEAD_BUNDLE_DIGEST,
     databasePath: environment.MASTHEAD_DB_PATH,
     gitSha: environment.MASTHEAD_BUILD_SHA,
     lifecycleLeasePath: environment.MASTHEAD_LIFECYCLE_LEASE,
@@ -366,6 +558,7 @@ async function completeConfig(input) {
   const release = input.gitSha && input.version ? { gitSha: input.gitSha, version: input.version } : await readRelease(target);
   const dataDirectory = resolve(required(input.dataDirectory, "production data directory"));
   return {
+    bundleDigest: validateDigest(input.bundleDigest),
     dataDirectory,
     databasePath: resolve(input.databasePath || join(dataDirectory, "masthead.sqlite")),
     gitSha: validateSha(release.gitSha),
@@ -424,7 +617,7 @@ async function readProcess(pid) {
   const processRoot = `/proc/${pid}`;
   try {
     const [exe, commandLine, environment, statLine] = await Promise.all([
-      realpath(join(processRoot, "exe")),
+      readlink(join(processRoot, "exe")),
       readFile(join(processRoot, "cmdline")),
       readFile(join(processRoot, "environ")),
       readFile(join(processRoot, "stat"), "utf8")
@@ -527,11 +720,12 @@ function productionWrapper(config) {
     `MASTHEAD_PRODUCTION_ROOT=${shellQuote(config.productionRoot)}`,
     `MASTHEAD_BUILD_VERSION=${shellQuote(config.version)}`,
     `MASTHEAD_BUILD_SHA=${shellQuote(config.gitSha)}`,
+    `MASTHEAD_BUNDLE_DIGEST=${shellQuote(config.bundleDigest)}`,
     `MASTHEAD_DATA_DIR=${shellQuote(config.dataDirectory)}`,
     `MASTHEAD_DB_PATH=${shellQuote(config.databasePath)}`,
     `MASTHEAD_PORT=${shellQuote(String(config.port))}`,
     `MASTHEAD_LIFECYCLE_LEASE=${shellQuote(config.lifecycleLeasePath)}`,
-    "export MASTHEAD_PRODUCTION_TARGET MASTHEAD_PRODUCTION_ROOT MASTHEAD_BUILD_VERSION MASTHEAD_BUILD_SHA",
+    "export MASTHEAD_PRODUCTION_TARGET MASTHEAD_PRODUCTION_ROOT MASTHEAD_BUILD_VERSION MASTHEAD_BUILD_SHA MASTHEAD_BUNDLE_DIGEST",
     "export MASTHEAD_DATA_DIR MASTHEAD_DB_PATH MASTHEAD_PORT MASTHEAD_LIFECYCLE_LEASE",
     `exec ${shellQuote(runtime.node)} ${shellQuote(runtime.lifecycle)} "$@"`,
     ""
@@ -556,6 +750,25 @@ function shellQuote(value) {
 function validateSha(value) {
   if (typeof value !== "string" || !/^[a-f0-9]{40}$/u.test(value)) throw new Error("Release git SHA must be full lowercase 40-hex.");
   return value;
+}
+
+function validateDigest(value) {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) throw new Error("Pinned bundle digest must be lowercase 64-hex.");
+  return value;
+}
+
+async function verifyPinnedBundle(target, expectedDigest) {
+  const runtime = productionRuntimePaths(target);
+  const manifest = await verifyPackagedBundleManifest({
+    bundleRoot: target,
+    executablePath: runtime.executable,
+    nodePath: runtime.node,
+    resourcesPath: join(target, "resources")
+  });
+  if (manifest.bundleDigest !== validateDigest(expectedDigest)) {
+    throw new Error("Packaged content manifest does not match the pinned bundle digest.");
+  }
+  return manifest;
 }
 
 function required(value, label) {
