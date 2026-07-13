@@ -29,6 +29,8 @@ async function packagedFixture() {
   await writeFile(join(daemonPath, "dist", "src", "cli", "mastheadctl.js"), "cli main");
   await writeFile(join(daemonPath, "scripts", "packaged-bundle-manifest.js"), "manifest verifier");
   await writeFile(join(daemonPath, "scripts", "masthead-production.js"), "lifecycle");
+  await writeFile(join(daemonPath, "scripts", "masthead-hook.js"), "evidence hook");
+  await writeFile(join(daemonPath, "scripts", "resolve-hook-runtime.js"), "hook resolver");
   await writeFile(join(daemonPath, "release.json"), `${JSON.stringify({
     gitSha: "a".repeat(40),
     version: "0.1.0"
@@ -75,8 +77,10 @@ describe("packaged bundle manifest", () => {
       "resources/daemon/dist/src/daemon/main.js",
       "resources/daemon/node",
       "resources/daemon/release.json",
+      "resources/daemon/scripts/masthead-hook.js",
       "resources/daemon/scripts/masthead-production.js",
-      "resources/daemon/scripts/packaged-bundle-manifest.js"
+      "resources/daemon/scripts/packaged-bundle-manifest.js",
+      "resources/daemon/scripts/resolve-hook-runtime.js"
     ]);
     expect(first.files.map((entry: { path: string }) => entry.path)).not.toContain(
       "resources/release-manifest.json"
@@ -86,6 +90,21 @@ describe("packaged bundle manifest", () => {
       executablePath: join(fixture.bundleRoot, "masthead"),
       resourcesPath: fixture.resourcesPath
     })).resolves.toEqual(first);
+  });
+
+  test.each(["masthead-hook.js", "resolve-hook-runtime.js"])("rejects tampered executable hook helper %s", async (script) => {
+    const fixture = await packagedFixture();
+    await writePackagedBundleManifest({
+      bundleRoot: fixture.bundleRoot,
+      executablePath: join(fixture.bundleRoot, "masthead"),
+      resourcesPath: fixture.resourcesPath
+    });
+    await writeFile(join(fixture.daemonPath, "scripts", script), "tampered");
+    await expect(verifyPackagedBundleManifest({
+      bundleRoot: fixture.bundleRoot,
+      executablePath: join(fixture.bundleRoot, "masthead"),
+      resourcesPath: fixture.resourcesPath
+    })).rejects.toThrow("does not match its content manifest");
   });
 
   test("rejects a changed required file and an unlisted daemon dist file", async () => {

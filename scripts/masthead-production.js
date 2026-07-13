@@ -263,11 +263,7 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
     const pinnedProcesses = processes.filter((processRecord) => processRecord.target === config.target);
     const health = await dependencies.fetchHealth();
     if (pinnedProcesses.length > 0) {
-      const electronCount = pinnedProcesses.filter((record) => record.role === "electron").length;
-      const daemonCount = pinnedProcesses.filter((record) => record.role === "daemon").length;
-      if (electronCount !== 1 || daemonCount !== 1 || pinnedProcesses.length !== 2) {
-        throw new Error("Pinned production topology must contain exactly one Electron main and one daemon.");
-      }
+      assertPinnedTopology(pinnedProcesses, config.target);
       assertMatchingHealth(health, config);
       return { alreadyRunning: true, started: false, pids: pinnedProcesses.map((record) => record.pid).sort((a, b) => a - b) };
     }
@@ -294,6 +290,7 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
     try {
       const startedHealth = await dependencies.waitForHealth();
       assertMatchingHealth(startedHealth, config);
+      assertPinnedTopology(await classifiedProcesses(config, dependencies), config.target);
       return { health: startedHealth, pid, started: true };
     } catch (error) {
       const cleanup = dependencies.cleanupSpawned
@@ -491,6 +488,7 @@ async function captureSpawnedProcess(pid, config) {
 }
 
 async function cleanupFailedStart(captured, config, dependencies) {
+  const excludedPids = new Set();
   if (captured) {
     const current = await dependencies.readProcess(captured.pid);
     if (current) {
@@ -498,19 +496,19 @@ async function cleanupFailedStart(captured, config, dependencies) {
       if (
         classified?.role !== "electron" || classified.target !== config.target ||
         classified.starttime !== captured.starttime || classified.exe !== captured.exe
-      ) return { stopped: false };
+      ) excludedPids.add(captured.pid);
     }
   }
   try {
-    await stopInsideLifecycleLease(config, dependencies);
+    await stopInsideLifecycleLease(config, dependencies, excludedPids);
     return { stopped: true };
   } catch {
     return { stopped: false };
   }
 }
 
-async function stopInsideLifecycleLease(config, dependencies) {
-  const captured = await classifiedProcesses(config, dependencies);
+async function stopInsideLifecycleLease(config, dependencies, excludedPids = new Set()) {
+  const captured = (await classifiedProcesses(config, dependencies)).filter((record) => !excludedPids.has(record.pid));
   const signalled = [];
   for (const processRecord of captured) {
     const current = await dependencies.readProcess(processRecord.pid);
@@ -528,12 +526,21 @@ async function stopInsideLifecycleLease(config, dependencies) {
       throw new Error(`Production PID ${processRecord.pid} did not stop after SIGTERM within 30 seconds; no SIGKILL was sent.`);
     }
   }
-  const remaining = await classifiedProcesses(config, dependencies);
+  const remaining = (await classifiedProcesses(config, dependencies)).filter((record) => !excludedPids.has(record.pid));
   if (remaining.length > 0) throw new Error(`Production process set is not empty after shutdown: ${formatProcesses(remaining)}.`);
   if (await dependencies.fetchHealth()) throw new Error("Production health endpoint remains available after shutdown.");
   if (!(await dependencies.portBindable())) throw new Error(`Production port remains occupied after shutdown: ${config.port}.`);
   await dependencies.ownershipProbe();
   return { stopped: true, stoppedPids: captured.map((record) => record.pid).sort((a, b) => a - b) };
+}
+
+function assertPinnedTopology(processes, target) {
+  const pinned = processes.filter((record) => record.target === target);
+  const electronCount = pinned.filter((record) => record.role === "electron").length;
+  const daemonCount = pinned.filter((record) => record.role === "daemon").length;
+  if (electronCount !== 1 || daemonCount !== 1 || pinned.length !== 2 || processes.length !== 2) {
+    throw new Error("Pinned production topology must contain exactly one Electron main and one daemon on the same target.");
+  }
 }
 
 async function configFromEnvironment(environment) {

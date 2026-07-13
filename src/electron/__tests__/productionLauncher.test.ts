@@ -35,6 +35,8 @@ async function fixture() {
   await writeFile(join(daemonRoot, "node"), "node", { mode: 0o755 });
   await writeFile(join(daemonRoot, "scripts", "masthead-production.js"), "script");
   await writeFile(join(daemonRoot, "scripts", "packaged-bundle-manifest.js"), "verifier");
+  await writeFile(join(daemonRoot, "scripts", "masthead-hook.js"), "hook");
+  await writeFile(join(daemonRoot, "scripts", "resolve-hook-runtime.js"), "resolver");
   await writeFile(join(daemonRoot, "dist", "src", "daemon", "main.js"), "daemon");
   await writeFile(join(target, "resources", "app.asar"), "app");
   await writeFile(join(daemonRoot, "release.json"), JSON.stringify({
@@ -297,6 +299,17 @@ describe("production lifecycle launcher", () => {
       runtime: { port: config.port, writable: true }
     };
     let launch: unknown;
+    const electron = processRecord({
+      argv: [join(target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [join(target, "resources", "daemon", "node"), join(target, "resources", "daemon", "dist", "src", "daemon", "main.js")],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "resources", "daemon", "node"), pid: 43, starttime: "daemon"
+    });
+    let scans = 0;
     const receipt = await startProduction({ ...config, gitSha: "a".repeat(40), version: "0.1.0" }, {
       acquireLease: async () => ({ release: async () => undefined }),
       captureSpawned: async () => undefined,
@@ -304,7 +317,7 @@ describe("production lifecycle launcher", () => {
       fetchHealth: async () => undefined,
       ownershipProbe: async () => undefined,
       portBindable: async () => true,
-      readProcesses: async () => [],
+      readProcesses: async () => (++scans === 1 ? [] : [electron, daemon]),
       spawnElectron: async (input: unknown) => { launch = input; return 90; },
       waitForHealth: async () => health
     });
@@ -320,6 +333,43 @@ describe("production lifecycle launcher", () => {
       }),
       executable: join(target, "masthead")
     });
+  });
+
+  test.each([
+    ["incomplete", 1],
+    ["duplicate", 3]
+  ])("cleans up when post-health topology is %s", async (_label, count) => {
+    const { config, target } = await fixture();
+    const electron = processRecord({
+      argv: [join(target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [join(target, "resources", "daemon", "node"), join(target, "resources", "daemon", "dist", "src", "daemon", "main.js")],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "resources", "daemon", "node"), pid: 43, starttime: "daemon"
+    });
+    const topology = count === 1 ? [electron] : [electron, daemon, { ...daemon, pid: 44, starttime: "duplicate" }];
+    let scans = 0;
+    let cleaned = false;
+    await expect(startProduction(config, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      captureSpawned: async () => electron,
+      cleanupSpawned: async () => { cleaned = true; return { stopped: true }; },
+      currentTarget: async () => target,
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => (++scans === 1 ? [] : topology),
+      spawnElectron: async () => 42,
+      waitForHealth: async () => ({
+        buildSha: "a".repeat(40), buildVersion: "0.1.0",
+        data: { dataDirectory: config.dataDirectory, databasePath: config.databasePath },
+        ok: true, product: "masthead", runtime: { port: config.port, writable: true }
+      })
+    })).rejects.toThrow("exactly one Electron main and one daemon");
+    expect(cleaned).toBe(true);
   });
 
   test("start returns already running only for an exact pinned process with matching health", async () => {
@@ -420,6 +470,38 @@ describe("production lifecycle launcher", () => {
       waitForHealth: async () => ({ ok: false })
     })).rejects.toThrow("cleanup stopped=true");
     expect(calls).toEqual(["SIGTERM:91"]);
+  });
+
+  test("PID reuse quarantines the replacement while orphan daemon cleanup still completes", async () => {
+    const { config, target } = await fixture();
+    const captured = processRecord({
+      argv: [join(target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "masthead"), pid: 90, starttime: "original"
+    });
+    const replacement = { ...captured, starttime: "replacement" };
+    const daemon = processRecord({
+      argv: [join(target, "resources", "daemon", "node"), join(target, "resources", "daemon", "dist", "src", "daemon", "main.js")],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "resources", "daemon", "node"), pid: 91, starttime: "daemon"
+    });
+    const signals: number[] = [];
+    let scans = 0;
+    await expect(startProduction(config, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      captureSpawned: async () => captured,
+      currentTarget: async () => target,
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcess: async (pid: number) => pid === 90 ? replacement : daemon,
+      readProcesses: async () => (++scans === 1 ? [] : scans === 2 ? [replacement, daemon] : [replacement]),
+      signal: (pid: number) => signals.push(pid),
+      spawnElectron: async () => 90,
+      waitForExit: async () => true,
+      waitForHealth: async () => ({ ok: false })
+    })).rejects.toThrow("cleanup stopped=true");
+    expect(signals).toEqual([91]);
   });
 
   test("transition restores old target and launchers and restarts old identity when new start fails", async () => {
