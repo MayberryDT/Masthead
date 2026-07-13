@@ -1383,6 +1383,30 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("never records a still-current overlapping candidate as lineage", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    addOauthSignature(db);
+    db.prepare(
+      `INSERT INTO messages (
+        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+      ) VALUES ('oauth:second-signature', 'session:oauth-fixed', 'assistant',
+        'ERROR_SIGNATURE: oauth nonce invalid', 'oauth:second-signature:hash',
+        '2026-07-01T12:00:31.000Z', '{}', 'authoritative')`
+    ).run();
+    const signedProposal = proposeSignedOauthRunbook(db);
+
+    const candidates = discoverArtifactCandidates(db, ["session:oauth-fixed"]);
+    const unsignedAutomatic = candidates.find(
+      (candidate) => candidate.kind === "runbook" && !candidate.signatureKey
+    )!;
+
+    expect(getWorkbenchArtifactCandidate(db, signedProposal.candidateId)?.status).toBe("pending");
+    expect(unsignedAutomatic.status).toBe("pending");
+    expect(unsignedAutomatic.supersedesCandidateId).toBeUndefined();
+    db.close();
+  });
+
   test("caps a discovery page at 100 tool-heavy publish-path sessions and completes within two seconds", async () => {
     const db = await testDb();
     seedToolHeavySessions(db, 101, 60);

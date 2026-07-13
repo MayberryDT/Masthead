@@ -354,6 +354,7 @@ function reconcileArtifactCandidates(
     (seed) => !proposalSeeds.some((proposalSeed) => candidateIdentityMatches(seed, proposalSeed))
   );
   const finalSeeds = [...automaticSeeds, ...proposalSeeds].sort(compareSeeds);
+  const supersededCandidates: WorkbenchArtifactCandidate[] = [];
   for (const candidate of relevantMutable) {
     if (
       finalSeeds.some(
@@ -366,10 +367,11 @@ function reconcileArtifactCandidates(
       candidateId: candidate.candidateId,
       status: "superseded"
     });
+    supersededCandidates.push(candidate);
   }
   return {
     acknowledgedSessionIds,
-    candidates: persistSeeds(db, finalSeeds, relevantMutable)
+    candidates: persistSeeds(db, finalSeeds, supersededCandidates)
   };
 }
 
@@ -898,7 +900,12 @@ function persistSeeds(
             right.updatedAt.localeCompare(left.updatedAt) ||
             left.candidateId.localeCompare(right.candidateId)
         )[0];
-      const predecessor = knownPredecessor ?? findBestWorkbenchArtifactCandidatePredecessor(db, seed);
+      const storedPredecessor = findBestWorkbenchArtifactCandidatePredecessor(db, seed);
+      const predecessor = knownPredecessor ?? (
+        storedPredecessor?.status === "dismissed" || storedPredecessor?.status === "superseded"
+          ? storedPredecessor
+          : undefined
+      );
       return saveWorkbenchArtifactCandidate(db, {
         candidateId: candidateId(
           seed.kind,
