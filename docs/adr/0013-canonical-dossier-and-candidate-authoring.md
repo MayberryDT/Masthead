@@ -30,7 +30,12 @@ the recursive artifact listing. The daemon builds the snapshot. Agents never aut
 enrich, or replace a session dossier body. The existing dedicated session-enrichment path remains
 separate and may continue to improve the canonical source data before a snapshot is published.
 
-Optional artifact authoring uses `masthead.workbench.authoring/v2`:
+The daemon HTTP transport keeps the stable protocol identifier
+`masthead.workbench.authoring/v1`. The candidate-sized bundle and authoring
+contract are `workbench-authoring-v2`; the stable transport identifier does not
+mean that V1 bundles remain current or reusable.
+
+Optional artifact authoring follows that V2 bundle contract:
 
 1. The daemon discovers positive-evidence candidates for `runbook`, `adr`, and
    `incident_timeline` from canonical session evidence.
@@ -38,8 +43,10 @@ Optional artifact authoring uses `masthead.workbench.authoring/v2`:
    exactly one candidate group and no more than 12 provenance sessions.
 3. The bundle contains only the candidate's optional artifact output. It cannot contain a dossier
    body or per-session not-applicable obligations.
-4. Every substantive claim carries claim support: a verbatim excerpt plus its canonical evidence
-   reference and session id. The daemon verifies that support before publication.
+4. Every substantive claim carries a `claimSupport` entry with exactly `path`, `evidenceRef`,
+   `excerpt`, and `supportKind`. The session is resolved through candidate provenance and the
+   evidence reference; `sessionId` is not repeated in each support entry. The daemon verifies the
+   verbatim excerpt against canonical evidence before publication.
 5. Submission rejects authoring-protocol leakage, unsupported claims, weak provenance joins, and
    materially duplicated template content. Finish applies and publishes the accepted artifact and
    completes its candidate group atomically and idempotently.

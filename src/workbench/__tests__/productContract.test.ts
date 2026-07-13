@@ -37,7 +37,10 @@ describe("artifact authoring product contract", () => {
       "docs/reference/session-dossier.md",
       "docs/reference/daemon-api.md",
       "docs/reference/mcp-tools.md",
+      "docs/adr/0013-canonical-dossier-and-candidate-authoring.md",
       "docs/acceptance/product-release-gate.md",
+      "docs/acceptance/workbench-v1-evidence.md",
+      "docs/acceptance/workbench-enroll-evidence.md",
       "openwiki/quickstart.md",
       "openwiki/data-and-integrations.md",
     ];
@@ -47,7 +50,9 @@ describe("artifact authoring product contract", () => {
     const activeDocs = documents.map(({ body }) => body).join("\n");
     const normalized = activeDocs.replace(/\s+/g, " ");
 
-    for (const { body, path } of documents) {
+    for (const { body, path } of documents.filter(
+      ({ path }) => path !== "docs/acceptance/workbench-v1-evidence.md",
+    )) {
       expect(body, path).not.toMatch(/agent-authored session dossier/i);
       expect(body, path).not.toMatch(/agent-authored enrichment\/dossier/i);
       expect(body, path).not.toMatch(/read every item named by every session evidence manifest/i);
@@ -70,5 +75,31 @@ describe("artifact authoring product contract", () => {
     expect(activeDocs).toContain("audit-v1-generation");
     expect(activeDocs).toContain("--db <path> --audit-hash <sha256> --confirm");
     expect(activeDocs).toContain("dossierFidelity");
+
+    const byPath = Object.fromEntries(documents.map(({ body, path }) => [path, body]));
+    const design = byPath["design.md"]!;
+    const readme = byPath["README.md"]!;
+    const adr = byPath["docs/adr/0013-canonical-dossier-and-candidate-authoring.md"]!;
+    const daemonApi = byPath["docs/reference/daemon-api.md"]!;
+    const v1Evidence = byPath["docs/acceptance/workbench-v1-evidence.md"]!;
+    const enrollmentEvidence = byPath["docs/acceptance/workbench-enroll-evidence.md"]!;
+
+    expect(design).toContain("Author candidate");
+    expect(design).not.toContain("Copy Agent Prompt");
+    expect(readme).toMatch(/schema 23\b/);
+    expect(adr).toContain("`masthead.workbench.authoring/v1`");
+    expect(adr).toContain("`workbench-authoring-v2`");
+    expect(adr).toMatch(/`path`,\s*`evidenceRef`,\s*`excerpt`,\s*and `supportKind`/);
+    expect(adr).toMatch(
+      /The session is resolved through candidate provenance and the\s+evidence reference/,
+    );
+    expect(adr).not.toMatch(/claim support:[^.]*session id/i);
+    expect(daemonApi).toContain("with 1–100 canonical session IDs");
+    expect(daemonApi).not.toContain("1–100 unique canonical");
+    expect(v1Evidence).toMatch(/^# Historical:/);
+    expect(v1Evidence.slice(0, 600)).toMatch(/superseded/i);
+    expect(v1Evidence.slice(0, 600)).toContain("ADR 0013");
+    expect(enrollmentEvidence).toMatch(/historical Workbench V1 evidence/i);
+    expect(enrollmentEvidence).not.toMatch(/current end-to-end Workbench authoring contract[^\n]*workbench-v1-evidence/i);
   });
 });

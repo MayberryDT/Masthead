@@ -2,7 +2,7 @@
 
 ## Status
 
-This page records the 2026-07-09 enrollment and toolbar-density rollout. Its former direct-SQLite enrollment recipe is retired. The primary CLI now supports only daemon-owned artifact authoring plus explicit `wipe-published` maintenance.
+This page records the 2026-07-09 enrollment and toolbar-density rollout. Its former direct-SQLite enrollment recipe is retired. This page is not the current artifact-authoring contract; use ADR 0013 and the current release gates below for that contract.
 
 The current enrollment contract is:
 
@@ -68,4 +68,9 @@ The recorded dogfood enrolled 78 pre-existing sessions and a second pass enrolle
 | Sources | same 56px / 40px density |
 | Workbench control | **Enroll missing** remains a human UI action backed by the daemon endpoint |
 
-For the current end-to-end Workbench authoring contract and release evidence, use `docs/acceptance/product-release-gate.md`, `docs/acceptance/workbench-v1-evidence.md`, and ADR 0012.
+For the current end-to-end Workbench authoring contract and release evidence, use
+`docs/adr/0013-canonical-dossier-and-candidate-authoring.md`,
+`docs/acceptance/product-release-gate.md`, and
+`docs/acceptance/durable-artifact-gate.md`. The
+[historical Workbench V1 evidence](workbench-v1-evidence.md) and ADR 0012 preserve
+superseded implementation history; they are not current authoring instructions.

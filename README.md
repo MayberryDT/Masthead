@@ -18,7 +18,7 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 
 - Canonical local SQLite ownership for Masthead-owned sessions, published
   artifacts + provenance, source/connector state, import jobs, settings, and MCP
-  audit rows (schema 21 for full-body artifact search).
+  audit rows (schema 23; full-body artifact search arrived in schema 21).
 - Multi-adapter / multi-harness live connect (Sources V2) and conservative
   history adapters where coverage exists.
 - Workbench package path: transcript checks/import, quality, claims, Activity,

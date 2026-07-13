@@ -296,7 +296,7 @@ recur across views, but each surface may use the structure that fits its job:
 - Workbench: dense publish-path table + Activity console rail + metal ops toolbar.
   Human ops cover transcript check/import, quality review, claim/release, publish,
   Not Added inspection, candidate selection, and daemon-owned canonical dossier publication.
-  Copy Agent Prompt hands one positive-evidence runbook, ADR, or incident-timeline candidate to an
+  **Author candidate** hands one positive-evidence runbook, ADR, or incident-timeline candidate to an
   agent. Agents never author dossier prose; no candidate exists merely to write an N/A result.
 - Logbook: dense table plus inspector.
 - Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
