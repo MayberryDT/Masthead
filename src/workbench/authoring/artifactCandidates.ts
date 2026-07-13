@@ -3,9 +3,11 @@ import {
   hasWorkbenchArtifactCandidateScan,
   getWorkbenchArtifactCandidate,
   getWorkbenchArtifactCandidateSourceRevision,
+  findBestWorkbenchArtifactCandidatePredecessor,
+  listCurrentWorkbenchArtifactCandidatesForReconciliation,
+  listCurrentWorkbenchArtifactCandidatesForSeed,
   listWorkbenchArtifactSignatureMembersForIdentities,
   listWorkbenchArtifactSignatureMembersForSessions,
-  listWorkbenchArtifactCandidates,
   recordWorkbenchArtifactCandidateScan,
   replaceWorkbenchArtifactSignatureMembersForSessions,
   saveWorkbenchArtifactCandidate,
@@ -188,24 +190,14 @@ function proposeArtifactCandidateInTransaction(
     provenanceSessionIds,
     seedSessionId: proposal.seedSessionId,
     signalEvidenceRefs,
-    signalSummary: proposal.signalSummary,
+    signalSummary: proposal.signalSummary.trim(),
     evidenceRevision,
     ...(signatureKey ? { signatureKey } : {})
   });
 }
 
 function reconcileProposedCandidate(db: MastheadDatabase, seed: CandidateSeed): WorkbenchArtifactCandidate {
-  const allCandidates = listWorkbenchArtifactCandidates(db);
-  const activeSameKind = allCandidates.filter(
-    (candidate) =>
-      (candidate.status === "pending" || candidate.status === "claimed" || candidate.status === "published") &&
-      candidate.kind === seed.kind
-  );
-  const identityMatches = activeSameKind.filter((candidate) => candidateIdentityMatches(candidate, seed));
-  const overlapping = activeSameKind.filter((candidate) =>
-    candidate.provenanceSessionIds.some((sessionId) => seed.provenanceSessionIds.includes(sessionId))
-  );
-  const predecessors = identityMatches.length > 0 ? identityMatches : overlapping;
+  const predecessors = listCurrentWorkbenchArtifactCandidatesForSeed(db, seed);
   if (predecessors.length > 1) {
     throw new Error(
       `candidate_proposal_lineage_ambiguous:${predecessors
@@ -222,7 +214,7 @@ function reconcileProposedCandidate(db: MastheadDatabase, seed: CandidateSeed): 
   if (current) {
     setWorkbenchArtifactCandidateStatus(db, { candidateId: current.candidateId, status: "superseded" });
   }
-  return persistSeeds(db, [seed], allCandidates)[0]!;
+  return persistSeeds(db, [seed])[0]!;
 }
 
 function proposalAllowedEvidenceRefs(
@@ -268,10 +260,14 @@ function reconcileArtifactCandidates(
   const preliminaryIndividual = individualCandidateSeedsForSessions(db, requested);
   const preliminarySignatureMembers = signatureMembersFromSeeds(preliminaryIndividual);
   const preliminarySeeds = groupCandidateSeeds(preliminaryIndividual);
-  const allCandidates = listWorkbenchArtifactCandidates(db);
-  const current = allCandidates.filter((candidate) =>
-    candidate.status === "pending" || candidate.status === "claimed" || candidate.status === "published"
-  );
+  const preliminaryIdentities = uniqueSignatureIdentities([
+    ...previousSignatureMembers,
+    ...preliminarySignatureMembers
+  ]);
+  const current = listCurrentWorkbenchArtifactCandidatesForReconciliation(db, {
+    sessionIds: requested,
+    identities: preliminaryIdentities
+  });
   const relevantClaimed = current.filter(
     (candidate) =>
       candidate.status === "claimed" &&
@@ -367,7 +363,7 @@ function reconcileArtifactCandidates(
   }
   return {
     acknowledgedSessionIds,
-    candidates: persistSeeds(db, finalSeeds, allCandidates)
+    candidates: persistSeeds(db, finalSeeds)
   };
 }
 
@@ -438,6 +434,8 @@ function candidateIdentityMatches(
 function candidateMatchesSeedRevision(candidate: WorkbenchArtifactCandidate, seed: CandidateSeed): boolean {
   return (
     candidate.origin === (seed.origin ?? "automatic") &&
+    candidate.seedSessionId === seed.seedSessionId &&
+    candidate.signalSummary === seed.signalSummary &&
     candidate.evidenceRevision === seed.evidenceRevision &&
     arraysEqual(candidate.provenanceSessionIds, seed.provenanceSessionIds) &&
     arraysEqual(candidate.signalEvidenceRefs, seed.signalEvidenceRefs)
@@ -867,26 +865,14 @@ function normalizeProposedSignature(
 
 function persistSeeds(
   db: MastheadDatabase,
-  seeds: CandidateSeed[],
-  lineageCandidates: WorkbenchArtifactCandidate[] = []
+  seeds: CandidateSeed[]
 ): WorkbenchArtifactCandidate[] {
   return seeds
     .map((seed) => {
-      const unchanged = lineageCandidates.find(
-        (candidate) =>
-          candidate.status !== "superseded" &&
-          candidateIdentityMatches(candidate, seed) &&
-          candidateMatchesSeedRevision(candidate, seed)
-      );
+      const current = listCurrentWorkbenchArtifactCandidatesForSeed(db, seed)[0];
+      const unchanged = current && candidateMatchesSeedRevision(current, seed) ? current : undefined;
       if (unchanged) return getStoredCandidate(db, unchanged.candidateId);
-      const predecessor = lineageCandidates
-        .filter(
-          (candidate) =>
-            candidate.kind === seed.kind &&
-            (candidateIdentityMatches(candidate, seed) ||
-              candidate.provenanceSessionIds.some((sessionId) => seed.provenanceSessionIds.includes(sessionId)))
-        )
-        .sort(compareLineageCandidates)[0];
+      const predecessor = findBestWorkbenchArtifactCandidatePredecessor(db, seed);
       return saveWorkbenchArtifactCandidate(db, {
         candidateId: candidateId(
           seed.kind,
@@ -907,19 +893,6 @@ function persistSeeds(
       });
     })
     .sort(compareCandidates);
-}
-
-function compareLineageCandidates(
-  left: WorkbenchArtifactCandidate,
-  right: WorkbenchArtifactCandidate
-): number {
-  const rank = (candidate: WorkbenchArtifactCandidate): number =>
-    candidate.status === "pending" || candidate.status === "claimed" || candidate.status === "published" ? 0 : 1;
-  return (
-    rank(left) - rank(right) ||
-    right.updatedAt.localeCompare(left.updatedAt) ||
-    left.candidateId.localeCompare(right.candidateId)
-  );
 }
 
 function getStoredCandidate(db: MastheadDatabase, candidateIdValue: string): WorkbenchArtifactCandidate {

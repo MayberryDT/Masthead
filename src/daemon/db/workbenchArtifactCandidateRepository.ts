@@ -158,6 +158,86 @@ export function listWorkbenchArtifactCandidates(
   return rows.map(rowToCandidate);
 }
 
+export function listCurrentWorkbenchArtifactCandidatesForReconciliation(
+  db: MastheadDatabase,
+  input: {
+    sessionIds: string[];
+    identities: Array<{ kind: WorkbenchAutomaticKind; signatureKey: string }>;
+  }
+): StoredWorkbenchArtifactCandidate[] {
+  const sessionIds = normalizedStrings(input.sessionIds);
+  const identityClauses = input.identities.map(() => "(c.kind = ? AND c.signature_key = ?)");
+  const relevance = [
+    ...(sessionIds.length > 0 ? [`p.session_id IN (${sessionIds.map(() => "?").join(", ")})`] : []),
+    ...identityClauses
+  ];
+  if (relevance.length === 0) return [];
+  const rows = db.prepare(
+    `${CANDIDATE_SELECT}
+     WHERE candidate_id IN (
+       SELECT DISTINCT c.candidate_id
+       FROM workbench_artifact_candidates c
+       LEFT JOIN workbench_artifact_candidate_provenance p ON p.candidate_id = c.candidate_id
+       WHERE c.status IN ('pending', 'claimed', 'published')
+         AND (${relevance.join(" OR ")})
+     )
+     ORDER BY updated_at DESC, candidate_id`
+  ).all(
+    ...sessionIds,
+    ...input.identities.flatMap((identity) => [identity.kind, identity.signatureKey])
+  ) as CandidateRow[];
+  return rows.map(rowToCandidate);
+}
+
+export function listCurrentWorkbenchArtifactCandidatesForSeed(
+  db: MastheadDatabase,
+  input: { kind: WorkbenchAutomaticKind; provenanceSessionIds: string[]; seedSessionId: string; signatureKey?: string }
+): StoredWorkbenchArtifactCandidate[] {
+  const exact = findCurrentCandidate(db, input);
+  if (exact) return [exact];
+  const sessionIds = normalizedStrings(input.provenanceSessionIds);
+  if (sessionIds.length === 0) return [];
+  const rows = db.prepare(
+    `${CANDIDATE_SELECT}
+     WHERE kind = ? AND status IN ('pending', 'claimed', 'published')
+       AND candidate_id IN (
+         SELECT candidate_id FROM workbench_artifact_candidate_provenance
+         WHERE session_id IN (${sessionIds.map(() => "?").join(", ")})
+       )
+     ORDER BY candidate_id
+     LIMIT 2`
+  ).all(input.kind, ...sessionIds) as CandidateRow[];
+  return rows.map(rowToCandidate);
+}
+
+export function findBestWorkbenchArtifactCandidatePredecessor(
+  db: MastheadDatabase,
+  input: { kind: WorkbenchAutomaticKind; provenanceSessionIds: string[]; seedSessionId: string; signatureKey?: string }
+): StoredWorkbenchArtifactCandidate | undefined {
+  const sessionIds = normalizedStrings(input.provenanceSessionIds);
+  const identityClause = input.signatureKey
+    ? "signature_key = ?"
+    : "seed_session_id = ? AND signature_key IS NULL";
+  const row = db.prepare(
+    `${CANDIDATE_SELECT}
+     WHERE kind = ? AND (
+       ${identityClause}
+       OR candidate_id IN (
+         SELECT candidate_id FROM workbench_artifact_candidate_provenance
+         WHERE session_id IN (${sessionIds.map(() => "?").join(", ")})
+       )
+     )
+     ORDER BY CASE WHEN status IN ('pending', 'claimed', 'published') THEN 0 ELSE 1 END,
+       updated_at DESC, candidate_id
+     LIMIT 1`
+  ).get(
+    input.kind,
+    input.signatureKey ?? input.seedSessionId,
+    ...sessionIds
+  ) as CandidateRow | undefined;
+  return row ? rowToCandidate(row) : undefined;
+}
+
 export function setWorkbenchArtifactCandidateStatus(
   db: MastheadDatabase,
   input: { candidateId: string; status: Exclude<WorkbenchArtifactCandidateStatus, "dismissed"> }

@@ -10,7 +10,9 @@ import {
 } from "../../../daemon/db/sqlite.ts";
 import {
   dismissWorkbenchArtifactCandidate,
+  findBestWorkbenchArtifactCandidatePredecessor,
   getWorkbenchArtifactCandidate,
+  listCurrentWorkbenchArtifactCandidatesForReconciliation,
   listWorkbenchArtifactSignatureMembersForIdentities,
   listWorkbenchArtifactCandidates,
   setWorkbenchArtifactCandidateStatus
@@ -60,6 +62,47 @@ describe("artifact candidate discovery", () => {
         .all(candidate.candidateId) as Array<{ sessionId: string }>;
       expect(normalizedProvenance.map((row) => row.sessionId)).toEqual(candidate.provenanceSessionIds);
     }
+    db.close();
+  });
+
+  test("keeps targeted current and predecessor queries bounded with unrelated history", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    discoverArtifactCandidates(db, ["session:oauth-fixed"]);
+    const insertHistorical = db.prepare(
+      `INSERT INTO workbench_artifact_candidates (
+        candidate_id, kind, seed_session_id, provenance_session_ids_json,
+        signal_evidence_refs_json, signal_summary, evidence_revision, origin, status, created_at, updated_at
+      ) VALUES (?, 'runbook', ?, ?, ?, 'Unrelated historical candidate.', ?, 'automatic', 'superseded', ?, ?)`
+    );
+    withImmediateTransaction(db, () => {
+      for (let index = 0; index < 500; index += 1) {
+        const candidateId = `candidate:unrelated-history:${index}`;
+        insertHistorical.run(
+          candidateId,
+          dossierOnlyQuestion.id,
+          JSON.stringify([dossierOnlyQuestion.id]),
+          JSON.stringify([dossierOnlyQuestion.evidence[0]!.id]),
+          `revision:unrelated:${index}`,
+          `2026-07-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+          `2026-07-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`
+        );
+      }
+    });
+
+    const relevant = listCurrentWorkbenchArtifactCandidatesForReconciliation(db, {
+      identities: [],
+      sessionIds: ["session:oauth-fixed"]
+    });
+    expect(relevant).toHaveLength(1);
+    expect(relevant[0]!.seedSessionId).toBe("session:oauth-fixed");
+    expect(
+      findBestWorkbenchArtifactCandidatePredecessor(db, {
+        kind: "runbook",
+        provenanceSessionIds: ["session:oauth-fixed"],
+        seedSessionId: "session:oauth-fixed"
+      })?.candidateId
+    ).toBe(relevant[0]!.candidateId);
     db.close();
   });
 
@@ -466,6 +509,30 @@ describe("artifact candidate discovery", () => {
       "tool_result:repeated-error:1:failure",
       "tool_result:repeated-error:2:failure"
     ]);
+
+    const seedChanged = proposeArtifactCandidate(db, {
+      kind: "runbook",
+      provenanceSessionIds: [repeatedErrorPartOne.id, repeatedErrorPartTwo.id],
+      seedSessionId: repeatedErrorPartTwo.id,
+      signalEvidenceRefs: joined.signalEvidenceRefs,
+      signalSummary: joined.signalSummary,
+      signatureKey: joined.signatureKey
+    });
+    expect(getWorkbenchArtifactCandidate(db, joined.candidateId)?.status).toBe("superseded");
+    expect(seedChanged.supersedesCandidateId).toBe(joined.candidateId);
+    expect(seedChanged.seedSessionId).toBe(repeatedErrorPartTwo.id);
+
+    const summaryChanged = proposeArtifactCandidate(db, {
+      kind: "runbook",
+      provenanceSessionIds: [repeatedErrorPartOne.id, repeatedErrorPartTwo.id],
+      seedSessionId: repeatedErrorPartTwo.id,
+      signalEvidenceRefs: joined.signalEvidenceRefs,
+      signalSummary: "The same signed evidence now has a deliberately revised durable summary.",
+      signatureKey: joined.signatureKey
+    });
+    expect(getWorkbenchArtifactCandidate(db, seedChanged.candidateId)?.status).toBe("superseded");
+    expect(summaryChanged.supersedesCandidateId).toBe(seedChanged.candidateId);
+    expect(summaryChanged.signalSummary).not.toBe(joined.signalSummary);
 
     db.close();
   });
@@ -1084,7 +1151,19 @@ describe("artifact candidate discovery", () => {
     expect(joined.seedSessionId).toBe(repeatedErrorPartOne.id);
 
     db.prepare("DELETE FROM sessions WHERE session_id = ?").run(repeatedErrorPartTwo.id);
-    expect(getWorkbenchArtifactCandidate(db, joined.candidateId)?.status).toBe("superseded");
+    const superseded = getWorkbenchArtifactCandidate(db, joined.candidateId)!;
+    expect(superseded.status).toBe("superseded");
+    expect(superseded.provenanceSessionIds).toEqual([repeatedErrorPartOne.id]);
+    expect(
+      (
+        db.prepare(
+          `SELECT session_id AS sessionId
+           FROM workbench_artifact_candidate_provenance
+           WHERE candidate_id = ?
+           ORDER BY position`
+        ).all(joined.candidateId) as Array<{ sessionId: string }>
+      ).map((row) => row.sessionId)
+    ).toEqual(superseded.provenanceSessionIds);
     expect(
       listWorkbenchArtifactCandidates(db).some(
         (candidate) =>

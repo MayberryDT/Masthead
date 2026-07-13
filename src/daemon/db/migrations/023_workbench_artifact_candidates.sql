@@ -276,6 +276,24 @@ BEGIN
   ON CONFLICT(session_id) DO UPDATE SET source_revision = source_revision + 1;
 
   UPDATE workbench_artifact_candidates
+  SET provenance_session_ids_json = (
+    SELECT json_group_array(session_id)
+    FROM (
+      SELECT session_id
+      FROM workbench_artifact_candidate_provenance
+      WHERE candidate_id = workbench_artifact_candidates.candidate_id
+        AND session_id <> OLD.session_id
+      ORDER BY position
+    )
+  )
+  WHERE seed_session_id <> OLD.session_id
+    AND candidate_id IN (
+      SELECT candidate_id
+      FROM workbench_artifact_candidate_provenance
+      WHERE session_id = OLD.session_id
+    );
+
+  UPDATE workbench_artifact_candidates
   SET status = 'superseded', updated_at = CURRENT_TIMESTAMP
   WHERE status IN ('pending', 'claimed', 'published')
     AND candidate_id IN (
