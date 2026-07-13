@@ -101,6 +101,7 @@ async function buildPayload(layout) {
     layout.nodePath,
     join(daemonPath, "release.json"),
     join(daemonPath, "scripts", "packaged-bundle-manifest.js"),
+    join(daemonPath, "scripts", "masthead-production-cold-activation.js"),
     join(daemonPath, "scripts", "masthead-production.js"),
     join(daemonPath, "scripts", "masthead-hook.js"),
     join(daemonPath, "scripts", "resolve-hook-runtime.js")

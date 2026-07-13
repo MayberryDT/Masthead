@@ -22,6 +22,10 @@ export type ProductionProcessRecord = {
 };
 
 export function acquireLifecycleLease(path: string): Promise<{ release(): Promise<void> }>;
+export function assertColdProductionOffline(
+  config: ProductionConfig,
+  dependencies?: Record<string, unknown>
+): Promise<void>;
 export function productionHealthPollPolicy(): { intervalMs: 250; maxAttempts: 1200; timeoutMs: 300000 };
 export function readProductionProcesses(adapters?: {
   concurrency?: number;
@@ -47,6 +51,11 @@ export function waitForMaintenanceChild(
   identity?: Promise<{ pid: number; starttime: string }>,
   identityReader?: (pid: number) => Promise<{ pid: number; starttime: string } | undefined>
 ): Promise<unknown>;
+export function stopColdMaintenanceChildren(
+  config: ProductionConfig,
+  request: Record<string, unknown>,
+  dependencies?: Record<string, unknown>
+): Promise<void>;
 export function classifyProductionProcess(
   record: ProductionProcessRecord,
   config: ProductionConfig
@@ -60,6 +69,24 @@ export function installProductionLauncher(input: {
   port?: number;
   productionRoot?: string;
 }): Promise<{ desktopPath: string; gitSha: string; launcherPath: string; target: string; version: string }>;
+export function installDisabledProductionSurface(input: {
+  databasePath: string;
+  homeDir?: string;
+}): Promise<{ desktopPath: string; launcherPath: string }>;
+export function captureLegacyTargetIdentity(
+  target: string,
+  productionRoot: string,
+  adapters?: Record<string, unknown>
+): Promise<{ device: string; inode: string; path: string }>;
+export function coldActivateProduction(input: {
+  bundleDigest: string;
+  bundlePath: string;
+  dataDirectory?: string;
+  databasePath: string;
+  homeDir?: string;
+  port?: number;
+  productionRoot?: string;
+}, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export function startProduction(config: ProductionConfig, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
 export function stopProduction(config: ProductionConfig, dependencies?: Record<string, unknown>): Promise<{
   stopped: boolean;

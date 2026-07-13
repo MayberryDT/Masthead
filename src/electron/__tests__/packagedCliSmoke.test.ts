@@ -9,6 +9,7 @@ describe("packaged authoring CLI smoke coverage", () => {
     expect(source).toContain("await access(cliTarget, constants.R_OK)");
     expect(source).toContain("await access(maintenanceTarget, constants.R_OK)");
     expect(source).toContain("masthead-production.js");
+    expect(source).toContain("masthead-production-cold-activation.js");
     expect(source).toContain("packaged-bundle-manifest.js");
     expect(source).toContain("release.json");
     expect(source).toContain('execFileSync("git", ["rev-parse", "HEAD"]');

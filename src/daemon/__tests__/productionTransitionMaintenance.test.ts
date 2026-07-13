@@ -105,6 +105,44 @@ describe("offline production transition maintenance", () => {
     expect(fullIntegrityChecks).toEqual([receipt.snapshot.path]);
   });
 
+  test("records and restores an offline-only legacy boundary without fabricating a legacy release identity", async () => {
+    const { databaseId, databasePath, newBundle, oldBundle } = await fixture(21);
+    const nonce = "20202020-2020-4020-8020-202020202020";
+    const receipt = await prepareProductionTransition({
+      databasePath,
+      legacyTarget: { device: "42", inode: "84", path: oldBundle.target },
+      newBundle,
+      nonce,
+      rollbackMode: "offline_only"
+    });
+
+    expect(receipt).toMatchObject({
+      databaseId,
+      databasePath,
+      legacyTarget: { device: "42", inode: "84", path: oldBundle.target },
+      newBundle,
+      nonce,
+      rollbackMode: "offline_only",
+      sourceSchemaVersion: 21,
+      state: "ready_to_activate"
+    });
+    expect(receipt).not.toHaveProperty("oldBundle");
+
+    await expect(restoreProductionTransition({
+      databasePath,
+      legacyTarget: { device: "42", inode: "84", path: oldBundle.target },
+      newBundle,
+      nonce,
+      rollbackMode: "offline_only"
+    })).resolves.toMatchObject({
+      databaseId,
+      legacyTarget: { device: "42", inode: "84", path: oldBundle.target },
+      rollbackMode: "offline_only",
+      sourceSchemaVersion: 21,
+      state: "restored"
+    });
+  });
+
   test("rejects foreign-key orphans before activation and restores the clean snapshot", async () => {
     const { databasePath, newBundle, oldBundle } = await fixture();
     await expect(prepareProductionTransition({

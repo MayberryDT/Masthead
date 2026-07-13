@@ -57,6 +57,7 @@ These are the main existing docs this wiki synthesizes:
 - `docs/reference/mcp-tools.md` — MCP tools (prefer `search_artifacts` / `get_artifact`).
 - `docs/reference/sources-v2.md` — Sources V2 live-connect contract (current).
 - `docs/reference/artifact-first-logbook-cutover.md` — wipe/rebuild published artifact state.
+- `docs/reference/production-cold-activation.md` — explicit offline-only boundary for pre-manifest legacy production installs.
 - `docs/superpowers/plans/` — **implementation history only**, not current visual/product SoT.
 
 ## Run and verify

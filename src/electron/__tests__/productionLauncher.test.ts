@@ -9,12 +9,18 @@ import { afterEach, describe, expect, test } from "vitest";
 import { writePackagedBundleManifest } from "../../../scripts/packaged-bundle-manifest.js";
 import {
   acquireLifecycleLease,
+  assertColdProductionOffline,
+  captureLegacyTargetIdentity,
   classifyProductionProcess,
+  coldActivateProduction,
+  installDisabledProductionSurface,
   installProductionLauncher,
   productionHealthPollPolicy,
   readProductionProcesses,
   waitForProductionHealth,
   startProduction,
+  statusProduction,
+  stopColdMaintenanceChildren,
   stopProduction,
   transitionProduction,
   waitForMaintenanceChild
@@ -42,6 +48,7 @@ async function fixture() {
   await writeFile(join(target, "masthead"), "binary", { mode: 0o755 });
   await writeFile(join(daemonRoot, "node"), "node", { mode: 0o755 });
   await writeFile(join(daemonRoot, "scripts", "masthead-production.js"), "script");
+  await writeFile(join(daemonRoot, "scripts", "masthead-production-cold-activation.js"), "cold activation");
   await writeFile(join(daemonRoot, "scripts", "packaged-bundle-manifest.js"), "verifier");
   await writeFile(join(daemonRoot, "scripts", "masthead-hook.js"), "hook");
   await writeFile(join(daemonRoot, "scripts", "resolve-hook-runtime.js"), "resolver");
@@ -98,6 +105,20 @@ async function secondBundle(productionRoot: string, sourceTarget: string) {
   };
 }
 
+async function legacyBoundaryFixture() {
+  const value = await fixture();
+  const candidate = await secondBundle(value.productionRoot, value.target);
+  const { rm } = await import("node:fs/promises");
+  await rm(join(value.target, "resources", "daemon", "release.json"));
+  await rm(join(value.target, "resources", "release-manifest.json"));
+  await writeFile(join(value.homeDir, ".local", "bin", "masthead-production"), [
+    "#!/usr/bin/env bash",
+    `exec '${join(value.target, "masthead")}' \"$@\"`,
+    ""
+  ].join("\n"), { mode: 0o755 });
+  return { ...value, candidate, legacyTarget: value.target };
+}
+
 function processRecord(overrides: Record<string, unknown> = {}) {
   return {
     argv: [],
@@ -107,6 +128,10 @@ function processRecord(overrides: Record<string, unknown> = {}) {
     starttime: "100",
     ...overrides
   };
+}
+
+function legacyIdentity(path: string) {
+  return { device: "42", inode: "84", path };
 }
 
 describe("production lifecycle launcher", () => {
@@ -431,6 +456,625 @@ describe("production lifecycle launcher", () => {
     expect(calls).toEqual(["stage", "stop", "maintenance", "swap", "activate-launchers", "start", "complete-maintenance", "release"]);
     const { access } = await import("node:fs/promises");
     await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("requires explicit cold activation for a legacy current target with no attestable release identity", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    let prepared = false;
+    await expect(transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      prepareMaintenance: async () => { prepared = true; }
+    })).rejects.toThrow();
+    expect(prepared).toBe(false);
+    expect(await realpath(join(productionRoot, "current"))).toBe(legacyTarget);
+  });
+
+  test("cold-activates a fully attested candidate without reading or executing the legacy bundle", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    const nonce = "21212121-2121-4121-8121-212121212121";
+    const oldIdentity = legacyIdentity(legacyTarget);
+    const calls: string[] = [];
+    let current = legacyTarget;
+    const result = await coldActivateProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertLegacyIdentity: async () => calls.push("assert-legacy"),
+      assertOffline: async () => calls.push("offline"),
+      attestCandidate: async () => calls.push("attest-candidate"),
+      captureLegacyIdentity: async () => oldIdentity,
+      cleanupBundles: async () => calls.push("cleanup-bundles"),
+      completeMaintenance: async (request: any) => calls.push(`complete:${request.nonce}`),
+      currentTarget: async () => current,
+      createNonce: () => nonce,
+      installCandidateSurface: async () => calls.push("candidate-surface"),
+      installDisabledSurface: async () => calls.push("disabled"),
+      prepareMaintenance: async (request: any) => {
+        calls.push("prepare");
+        expect(request).toMatchObject({
+          databasePath: config.databasePath,
+          legacyTarget: oldIdentity,
+          newBundle: candidate,
+          rollbackMode: "offline_only"
+        });
+        expect(request).not.toHaveProperty("oldBundle");
+        return {
+          ...request,
+          databaseId: "legacy-db",
+          schemaVersion: 2,
+          sourceSchemaVersion: 21,
+          state: "ready_to_activate",
+          targetSchemaVersion: 23
+        };
+      },
+      readMaintenanceJournal: async () => undefined,
+      start: async (startConfig: any) => {
+        calls.push("start-candidate");
+        expect(startConfig).toMatchObject({
+          expectedDatabaseId: "legacy-db",
+          expectedSchemaVersion: 23,
+          target: candidate.target
+        });
+        return { started: true };
+      },
+      swapCurrent: async () => { calls.push("swap-candidate"); current = candidate.target; }
+    });
+    expect(result).toMatchObject({ activated: true, coldActivated: true, target: candidate.target });
+    expect(calls).toEqual([
+      "attest-candidate", "offline", "disabled", "prepare", "assert-legacy", "attest-candidate",
+      "swap-candidate", "candidate-surface", "attest-candidate", "start-candidate", "attest-candidate", "assert-legacy",
+      `complete:${nonce}`, "cleanup-bundles", "release"
+    ]);
+  });
+
+  test("does not roll back a committed healthy candidate when success-only bundle cleanup fails", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    const nonce = "28282828-2828-4828-8828-282828282828";
+    const oldIdentity = legacyIdentity(legacyTarget);
+    const calls: string[] = [];
+    await expect(coldActivateProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertLegacyIdentity: async () => undefined,
+      assertOffline: async () => undefined,
+      attestCandidate: async () => undefined,
+      captureLegacyIdentity: async () => oldIdentity,
+      cleanupBundles: async () => { calls.push("cleanup-bundles"); throw new Error("bundle cleanup failed"); },
+      completeMaintenance: async () => calls.push("commit"),
+      createNonce: () => nonce,
+      currentTarget: async () => legacyTarget,
+      installCandidateSurface: async () => calls.push("candidate-surface"),
+      installDisabledSurface: async () => calls.push("disabled"),
+      prepareMaintenance: async (request: any) => ({
+        ...request,
+        databaseId: "legacy-db",
+        schemaVersion: 2,
+        sourceSchemaVersion: 21,
+        state: "ready_to_activate",
+        targetSchemaVersion: 23
+      }),
+      readMaintenanceJournal: async () => undefined,
+      restoreMaintenance: async () => { calls.push("restore"); },
+      start: async () => ({ started: true }),
+      stopCandidate: async () => calls.push("stop-candidate"),
+      stopMaintenance: async () => calls.push("stop-maintenance"),
+      swapCurrent: async () => undefined
+    })).rejects.toThrow("bundle cleanup failed");
+    expect(calls).toEqual(["disabled", "candidate-surface", "commit", "cleanup-bundles", "release"]);
+  });
+
+  test("re-attests identities after startup verification and before durable completion", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    const nonce = "29292929-2929-4929-8929-292929292929";
+    const oldIdentity = legacyIdentity(legacyTarget);
+    const calls: string[] = [];
+    let attestations = 0;
+    let journalReads = 0;
+    let receipt: any;
+    await expect(coldActivateProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertLegacyIdentity: async () => undefined,
+      assertOffline: async () => undefined,
+      attestCandidate: async () => {
+        attestations += 1;
+        calls.push(`attest:${attestations}`);
+        if (attestations === 4) throw new Error("candidate replaced during startup verification");
+      },
+      captureLegacyIdentity: async () => oldIdentity,
+      cleanupBundles: async () => calls.push("cleanup-bundles"),
+      completeMaintenance: async () => calls.push("complete-rollback"),
+      createNonce: () => nonce,
+      currentTarget: async () => legacyTarget,
+      installCandidateSurface: async () => calls.push("candidate-surface"),
+      installDisabledSurface: async () => calls.push("disabled"),
+      prepareMaintenance: async (request: any) => {
+        receipt = {
+          ...request,
+          databaseId: "legacy-db",
+          schemaVersion: 2,
+          sourceSchemaVersion: 21,
+          state: "ready_to_activate",
+          targetSchemaVersion: 23
+        };
+        return receipt;
+      },
+      readMaintenanceJournal: async () => (++journalReads === 1 ? undefined : receipt),
+      restoreCurrent: async () => calls.push("restore-current"),
+      restoreMaintenance: async (request: any) => ({ ...request, state: "restored" }),
+      start: async () => { calls.push("start-candidate"); return { started: true }; },
+      stopCandidate: async () => calls.push("stop-candidate"),
+      stopMaintenance: async () => calls.push("stop-maintenance"),
+      swapCurrent: async () => undefined
+    })).rejects.toThrow("candidate replaced during startup verification; cold rollback offline=true");
+    expect(calls).toContain("attest:4");
+    expect(calls).toContain("complete-rollback");
+    expect(calls).not.toContain("cleanup-bundles");
+  });
+
+  test("requires an explicit database path before cold activation acquires the lifecycle lease", async () => {
+    const { candidate, config, homeDir, productionRoot } = await legacyBoundaryFixture();
+    let leased = false;
+    await expect((coldActivateProduction as any)({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => { leased = true; return { release: async () => undefined }; }
+    })).rejects.toThrow("explicit --db-path");
+    expect(leased).toBe(false);
+  });
+
+  test("cold activation refuses failed offline preconditions before maintenance or mutation", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    const calls: string[] = [];
+    const oldIdentity = legacyIdentity(legacyTarget);
+    await expect(coldActivateProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertLegacyIdentity: async () => undefined,
+      assertOffline: async () => { calls.push("offline"); throw new Error("production health is present"); },
+      captureLegacyIdentity: async () => oldIdentity,
+      currentTarget: async () => legacyTarget,
+      installDisabledSurface: async () => calls.push("disabled"),
+      prepareMaintenance: async () => calls.push("prepare"),
+      readMaintenanceJournal: async () => undefined,
+      swapCurrent: async () => calls.push("swap")
+    })).rejects.toThrow("production health is present");
+    expect(calls).toEqual(["offline", "release"]);
+  });
+
+  test("cold offline proof rejects any production-root executable, health, port, or ownership conflict", async () => {
+    const { candidate, config } = await legacyBoundaryFixture();
+    const coldConfig = {
+      ...config,
+      bundleDigest: candidate.bundleDigest,
+      gitSha: candidate.gitSha,
+      target: candidate.target,
+      version: candidate.version
+    };
+    const unknownProductionChild = processRecord({
+      argv: [join(candidate.target, "masthead"), "--type=utility"],
+      environ: {},
+      exe: join(candidate.target, "masthead")
+    });
+    await expect(assertColdProductionOffline(coldConfig, {
+      readProcesses: async () => [unknownProductionChild]
+    })).rejects.toThrow("empty production process set");
+
+    const base = {
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => []
+    };
+    await expect(assertColdProductionOffline(coldConfig, {
+      ...base,
+      fetchHealth: async () => ({ ok: true })
+    })).rejects.toThrow("health to be absent");
+    await expect(assertColdProductionOffline(coldConfig, {
+      ...base,
+      portBindable: async () => false
+    })).rejects.toThrow("bindable");
+    await expect(assertColdProductionOffline(coldConfig, {
+      ...base,
+      ownershipProbe: async () => { throw new Error("database ownership unavailable"); }
+    })).rejects.toThrow("database ownership unavailable");
+  });
+
+  test("cold activation leaves a deterministic disabled surface after a receipt-clean prepare failure", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    const calls: string[] = [];
+    const oldIdentity = legacyIdentity(legacyTarget);
+    await expect(coldActivateProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertLegacyIdentity: async () => undefined,
+      assertOffline: async () => calls.push("offline"),
+      captureLegacyIdentity: async () => oldIdentity,
+      currentTarget: async () => legacyTarget,
+      installDisabledSurface: async () => calls.push("disabled"),
+      prepareMaintenance: async () => { calls.push("prepare"); throw new Error("migration rejected and internally restored"); },
+      readMaintenanceJournal: async () => undefined,
+      restoreCurrent: async () => calls.push("restore-current"),
+      stopCandidate: async () => calls.push("stop-candidate"),
+      stopMaintenance: async () => calls.push("stop-maintenance")
+    })).rejects.toThrow("cold rollback offline=true");
+    expect(calls).toEqual([
+      "offline", "disabled", "prepare", "disabled", "stop-maintenance", "stop-candidate",
+      "restore-current", "offline", "release"
+    ]);
+  });
+
+  test("cold activation restores the receipt-bound database and never restarts legacy after candidate failure", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    const nonce = "22222222-3333-4333-8333-222222222222";
+    const oldIdentity = legacyIdentity(legacyTarget);
+    const request = {
+      databaseId: "legacy-db",
+      databasePath: config.databasePath,
+      legacyTarget: oldIdentity,
+      newBundle: candidate,
+      nonce,
+      rollbackMode: "offline_only",
+      schemaVersion: 2,
+      sourceSchemaVersion: 21,
+      state: "ready_to_activate",
+      targetSchemaVersion: 23
+    };
+    const calls: string[] = [];
+    let journalReads = 0;
+    await expect(coldActivateProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertLegacyIdentity: async () => undefined,
+      assertOffline: async () => calls.push("offline"),
+      captureLegacyIdentity: async () => oldIdentity,
+      createNonce: () => nonce,
+      completeMaintenance: async () => calls.push("complete"),
+      currentTarget: async () => legacyTarget,
+      installCandidateSurface: async () => calls.push("candidate-surface"),
+      installDisabledSurface: async () => calls.push("disabled"),
+      prepareMaintenance: async () => request,
+      readMaintenanceJournal: async () => (++journalReads === 1 ? undefined : request),
+      restoreCurrent: async () => calls.push("restore-current"),
+      restoreMaintenance: async (value: any) => {
+        calls.push("restore-database");
+        return { ...value, databaseId: "legacy-db", sourceSchemaVersion: 21, state: "restored" };
+      },
+      start: async () => { calls.push("start-candidate"); throw new Error("candidate health failed"); },
+      stopCandidate: async () => calls.push("stop-candidate"),
+      stopMaintenance: async () => calls.push("stop-maintenance"),
+      swapCurrent: async () => calls.push("swap-candidate")
+    })).rejects.toThrow("cold rollback offline=true");
+    expect(calls).toEqual([
+      "offline", "disabled", "swap-candidate", "candidate-surface", "start-candidate", "disabled",
+      "stop-maintenance", "stop-candidate", "restore-database", "restore-current", "offline", "complete", "release"
+    ]);
+    expect(calls).not.toContain("start-legacy");
+  });
+
+  test.each(["snapshot_ready", "ready_to_activate", "restoring", "restore_failed", "restored"])(
+    "cold activation rerun recovers offline-only %s journals from either current position",
+    async (state) => {
+      for (const currentPosition of ["legacy", "candidate"] as const) {
+        const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+        const nonce = "23232323-2323-4323-8323-232323232323";
+        const oldIdentity = legacyIdentity(legacyTarget);
+        const journal = {
+          databaseId: "legacy-db",
+          databasePath: config.databasePath,
+          legacyTarget: oldIdentity,
+          newBundle: candidate,
+          nonce,
+          rollbackMode: "offline_only",
+          schemaVersion: 2,
+          sourceSchemaVersion: 21,
+          state,
+          targetSchemaVersion: 23
+        };
+        const calls: string[] = [];
+        const result = await coldActivateProduction({
+          bundleDigest: candidate.bundleDigest,
+          bundlePath: candidate.target,
+          dataDirectory: config.dataDirectory,
+          databasePath: config.databasePath,
+          homeDir,
+          productionRoot
+        }, {
+          acquireLease: async () => ({ release: async () => calls.push("release") }),
+          assertLegacyIdentity: async () => undefined,
+          assertOffline: async () => calls.push("offline"),
+          completeMaintenance: async () => calls.push("complete"),
+          currentTarget: async () => currentPosition === "legacy" ? legacyTarget : candidate.target,
+          installDisabledSurface: async () => calls.push("disabled"),
+          prepareMaintenance: async () => { calls.push("prepare"); throw new Error("must not prepare"); },
+          readMaintenanceJournal: async () => journal,
+          restoreCurrent: async () => calls.push("restore-current"),
+          restoreMaintenance: async (value: any) => {
+            calls.push("restore-database");
+            return { ...value, databaseId: "legacy-db", sourceSchemaVersion: 21, state: "restored" };
+          },
+          start: async () => { calls.push("start"); throw new Error("must not start"); },
+          stopCandidate: async () => calls.push("stop-candidate"),
+          stopMaintenance: async () => calls.push("stop-maintenance")
+        });
+        expect(result).toMatchObject({ activated: false, coldActivated: true, recovered: true, target: legacyTarget });
+        expect(calls).toEqual([
+          "disabled", "stop-maintenance", "stop-candidate", "restore-database", "restore-current", "offline", "complete", "release"
+        ]);
+      }
+    }
+  );
+
+  test("installs a deterministic disabled cold-rollback launcher that executes neither legacy nor candidate", async () => {
+    const { candidate, homeDir, legacyTarget } = await legacyBoundaryFixture();
+    const databasePath = join(homeDir, "data", "masthead.sqlite");
+    const receipt = await installDisabledProductionSurface({ databasePath, homeDir });
+    const wrapper = await readFile(receipt.launcherPath, "utf8");
+    const desktop = await readFile(receipt.desktopPath, "utf8");
+    expect(wrapper).toContain("Masthead production is offline after legacy cold activation");
+    expect(wrapper).toContain("exit 78");
+    expect(wrapper).not.toContain(candidate.target);
+    expect(wrapper).not.toContain(legacyTarget);
+    expect(desktop).toContain(`Exec=${receipt.launcherPath}`);
+    expect(desktop).toContain("Name=Masthead (Offline)");
+    expect(desktop).not.toContain(candidate.target);
+    expect(desktop).not.toContain(legacyTarget);
+
+    const child = spawn(receipt.launcherPath, [], { stdio: ["ignore", "pipe", "pipe"] });
+    const stderr: Buffer[] = [];
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    const [code] = await once(child, "close");
+    expect(code).toBe(78);
+    expect(Buffer.concat(stderr).toString("utf8")).toContain("--cold-activate");
+
+    await mkdir(join(homeDir, "data"), { recursive: true });
+    await writeFile(`${databasePath}.production-transition.json`, JSON.stringify({
+      rollbackMode: "offline_only",
+      schemaVersion: 2,
+      state: "restore_failed"
+    }));
+    const status = spawn(receipt.launcherPath, ["status"], { stdio: ["ignore", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    status.stdout.on("data", (chunk) => stdout.push(chunk));
+    const [statusCode] = await once(status, "close");
+    expect(statusCode).toBe(0);
+    expect(JSON.parse(Buffer.concat(stdout).toString("utf8"))).toEqual({ coldActivation: { pending: true } });
+  });
+
+  test("captures exact legacy device and inode identities above Number.MAX_SAFE_INTEGER", async () => {
+    const productionRoot = "/production";
+    const target = "/production/Masthead-linux-x64-legacy";
+    await expect(captureLegacyTargetIdentity(target, productionRoot, {
+      lstat: async () => ({
+        dev: 90071992547409931234n,
+        ino: 90071992547409939876n,
+        isDirectory: () => true,
+        isSymbolicLink: () => false
+      }),
+      realpath: async (path: string) => path
+    })).resolves.toEqual({
+      device: "90071992547409931234",
+      inode: "90071992547409939876",
+      path: target
+    });
+  });
+
+  test("ordinary install and start reject an offline-only journal before process or surface mutation", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    const pending = {
+      databaseId: "legacy-db",
+      databasePath: config.databasePath,
+      legacyTarget: legacyIdentity(legacyTarget),
+      newBundle: candidate,
+      nonce: "24242424-2424-4424-8424-242424242424",
+      rollbackMode: "offline_only",
+      schemaVersion: 2,
+      sourceSchemaVersion: 21,
+      state: "ready_to_activate",
+      targetSchemaVersion: 23
+    };
+    const installCalls: string[] = [];
+    await expect(transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => installCalls.push("release") }),
+      readMaintenanceJournal: async () => pending,
+      stageLaunchers: async () => installCalls.push("stage"),
+      stop: async () => installCalls.push("stop")
+    })).rejects.toThrow("--cold-activate");
+    expect(installCalls).toEqual(["release"]);
+
+    const startCalls: string[] = [];
+    await expect(startProduction({
+      ...config,
+      bundleDigest: candidate.bundleDigest,
+      gitSha: candidate.gitSha,
+      target: candidate.target,
+      version: candidate.version
+    }, {
+      acquireLease: async () => ({ release: async () => startCalls.push("release") }),
+      currentTarget: async () => { startCalls.push("current"); return candidate.target; },
+      readMaintenanceJournal: async () => pending,
+      readProcesses: async () => { startCalls.push("processes"); return []; }
+    })).rejects.toThrow("ordinary start is disabled");
+    expect(startCalls).toEqual(["release"]);
+  });
+
+  test("cold activation refuses a replaced legacy directory before swap or database restore", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    const { rename, rm } = await import("node:fs/promises");
+    const displaced = `${legacyTarget}-displaced`;
+    let receipt: any;
+    const calls: string[] = [];
+    await expect(coldActivateProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertOffline: async () => undefined,
+      currentTarget: async () => legacyTarget,
+      installDisabledSurface: async () => calls.push("disabled"),
+      prepareMaintenance: async (request: any) => {
+        await rename(legacyTarget, displaced);
+        await mkdir(legacyTarget);
+        receipt = {
+          ...request,
+          databaseId: "legacy-db",
+          schemaVersion: 2,
+          sourceSchemaVersion: 21,
+          state: "ready_to_activate",
+          targetSchemaVersion: 23
+        };
+        return receipt;
+      },
+      readMaintenanceJournal: async () => receipt,
+      restoreMaintenance: async () => { calls.push("restore-database"); },
+      stopCandidate: async () => calls.push("stop-candidate"),
+      stopMaintenance: async () => calls.push("stop-maintenance"),
+      swapCurrent: async () => calls.push("swap")
+    })).rejects.toThrow("filesystem identity changed");
+    expect(calls).not.toContain("swap");
+    expect(calls).not.toContain("restore-database");
+    await rm(legacyTarget, { recursive: true });
+    await rename(displaced, legacyTarget);
+  });
+
+  test("stops only an exact receipt-bound orphan maintenance child with SIGTERM", async () => {
+    const { candidate, config, productionRoot } = await legacyBoundaryFixture();
+    const coldConfig = {
+      ...config,
+      bundleDigest: candidate.bundleDigest,
+      gitSha: candidate.gitSha,
+      target: candidate.target,
+      version: candidate.version
+    };
+    const request = {
+      databasePath: config.databasePath,
+      legacyTarget: legacyIdentity(join(productionRoot, "Masthead-linux-x64-legacy")),
+      newBundle: candidate,
+      nonce: "25252525-2525-4525-8525-252525252525",
+      rollbackMode: "offline_only"
+    };
+    const runtime = {
+      node: join(candidate.target, "resources", "daemon", "node"),
+      maintenance: join(candidate.target, "resources", "daemon", "dist", "src", "daemon", "productionTransitionMaintenance.js")
+    };
+    const record = processRecord({
+      argv: [runtime.node, runtime.maintenance, "restore", "--request", JSON.stringify(request)],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: runtime.node,
+      pid: 77,
+      starttime: "exact-start"
+    });
+    const signals: Array<[number, string]> = [];
+    let scans = 0;
+    await stopColdMaintenanceChildren(coldConfig, request, {
+      readProcess: async () => record,
+      readProcesses: async () => (++scans === 1 ? [record] : []),
+      signal: (pid: number, signal: string) => signals.push([pid, signal]),
+      waitForExit: async () => true
+    });
+    expect(signals).toEqual([[77, "SIGTERM"]]);
+
+    await expect(stopColdMaintenanceChildren(coldConfig, { ...request, nonce: "26262626-2626-4626-8626-262626262626" }, {
+      readProcesses: async () => [record],
+      signal: (pid: number, signal: string) => signals.push([pid, signal])
+    })).rejects.toThrow("unrecognized maintenance child");
+    expect(signals).toEqual([[77, "SIGTERM"]]);
+  });
+
+  test("status reports an offline-only cold journal without mutating it", async () => {
+    const { candidate, config, legacyTarget } = await legacyBoundaryFixture();
+    const pending = {
+      databaseId: "legacy-db",
+      legacyTarget: legacyIdentity(legacyTarget),
+      newBundle: candidate,
+      nonce: "27272727-2727-4727-8727-272727272727",
+      rollbackMode: "offline_only",
+      schemaVersion: 2,
+      state: "restore_failed"
+    };
+    const result = await statusProduction({
+      ...config,
+      bundleDigest: candidate.bundleDigest,
+      gitSha: candidate.gitSha,
+      target: candidate.target,
+      version: candidate.version
+    }, {
+      currentTarget: async () => candidate.target,
+      fetchHealth: async () => undefined,
+      readMaintenanceJournal: async () => pending,
+      readProcesses: async () => []
+    });
+    expect(result).toMatchObject({
+      coldActivation: {
+        databaseId: "legacy-db",
+        legacyTarget,
+        nonce: pending.nonce,
+        pending: true,
+        state: "restore_failed",
+        target: candidate.target
+      }
+    });
+  });
+
+  test("the public cold CLI forwards an explicit database path", async () => {
+    const source = await readFile("scripts/masthead-production.js", "utf8");
+    expect(source).toContain('argv.includes("--cold-activate") ? coldActivateProduction : transitionProduction');
+    expect(source).toContain('databasePath: option(argv, "--db-path")');
   });
 
   test.each(["snapshot_ready", "ready_to_activate", "restoring", "restore_failed", "restored"])(

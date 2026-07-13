@@ -29,6 +29,7 @@ async function packagedFixture() {
   await writeFile(join(daemonPath, "dist", "src", "cli", "mastheadctl.js"), "cli main");
   await writeFile(join(daemonPath, "scripts", "packaged-bundle-manifest.js"), "manifest verifier");
   await writeFile(join(daemonPath, "scripts", "masthead-production.js"), "lifecycle");
+  await writeFile(join(daemonPath, "scripts", "masthead-production-cold-activation.js"), "cold activation");
   await writeFile(join(daemonPath, "scripts", "masthead-hook.js"), "evidence hook");
   await writeFile(join(daemonPath, "scripts", "resolve-hook-runtime.js"), "hook resolver");
   await writeFile(join(daemonPath, "release.json"), `${JSON.stringify({
@@ -78,6 +79,7 @@ describe("packaged bundle manifest", () => {
       "resources/daemon/node",
       "resources/daemon/release.json",
       "resources/daemon/scripts/masthead-hook.js",
+      "resources/daemon/scripts/masthead-production-cold-activation.js",
       "resources/daemon/scripts/masthead-production.js",
       "resources/daemon/scripts/packaged-bundle-manifest.js",
       "resources/daemon/scripts/resolve-hook-runtime.js"

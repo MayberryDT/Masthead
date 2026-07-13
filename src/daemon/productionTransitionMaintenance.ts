@@ -26,13 +26,11 @@ export type ProductionTransitionState =
   | "restore_failed"
   | "restored";
 
-export type ProductionTransitionReceipt = {
+type ProductionTransitionReceiptBase = {
   databaseId: string;
   databasePath: string;
   newBundle: ProductionBundleIdentity;
   nonce: string;
-  oldBundle: ProductionBundleIdentity;
-  schemaVersion: 1;
   snapshot: { path: string; sha256: string; sizeBytes: number };
   sourceMigrationLedger: Array<{ name: string; version: number }>;
   sourceSchemaFingerprint: string;
@@ -42,12 +40,32 @@ export type ProductionTransitionReceipt = {
   updatedAt: string;
 };
 
+export type LegacyProductionTargetIdentity = {
+  device: string;
+  inode: string;
+  path: string;
+};
+
+export type ProductionTransitionReceipt = ProductionTransitionReceiptBase & ({
+  oldBundle: ProductionBundleIdentity;
+  schemaVersion: 1;
+} | {
+  legacyTarget: LegacyProductionTargetIdentity;
+  rollbackMode: "offline_only";
+  schemaVersion: 2;
+});
+
 export type ProductionTransitionInput = {
   databasePath: string;
   newBundle: ProductionBundleIdentity;
   nonce: string;
+} & ({
   oldBundle: ProductionBundleIdentity;
-};
+  rollbackMode?: undefined;
+} | {
+  legacyTarget: LegacyProductionTargetIdentity;
+  rollbackMode: "offline_only";
+});
 
 export type ProductionTransitionBoundary =
   | "snapshot_ready"
@@ -80,13 +98,17 @@ export async function prepareProductionTransition(
       ownership
     );
     if (backupReceipt.databaseId !== activeBefore.databaseId) throw new Error("transition_snapshot_identity_mismatch");
-    const receipt: ProductionTransitionReceipt = {
+    const receipt = {
       databaseId: activeBefore.databaseId,
       databasePath: input.databasePath,
       newBundle: input.newBundle,
       nonce: input.nonce,
-      oldBundle: input.oldBundle,
-      schemaVersion: 1,
+      ...(input.rollbackMode === "offline_only"
+        ? { legacyTarget: input.legacyTarget }
+        : { oldBundle: input.oldBundle }),
+      ...(input.rollbackMode === "offline_only"
+        ? { rollbackMode: "offline_only" as const, schemaVersion: 2 as const }
+        : { schemaVersion: 1 as const }),
       snapshot: {
         path: backupReceipt.backupPath,
         sha256: await hashFile(backupReceipt.backupPath),
@@ -98,7 +120,7 @@ export async function prepareProductionTransition(
       state: "snapshot_ready",
       targetSchemaVersion: CURRENT_SCHEMA_VERSION,
       updatedAt: new Date().toISOString()
-    };
+    } as ProductionTransitionReceipt;
     await writeJournal(receipt);
     options.onBoundary?.("snapshot_ready");
     try {
@@ -159,6 +181,12 @@ export async function completeProductionTransition(inputValue: ProductionTransit
     throw new Error(`transition_complete_state_invalid:${receipt.state}`);
   }
   await rm(productionTransitionJournalPath(input.databasePath));
+  const directory = await open(dirname(input.databasePath), "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
 }
 
 async function restoreSnapshotInsideOwnership(
@@ -262,10 +290,13 @@ async function readAndValidateJournal(input: ProductionTransitionInput): Promise
     throw new Error("transition_journal_invalid");
   }
   if (
-    receipt.schemaVersion !== 1 ||
     receipt.databasePath !== input.databasePath ||
     receipt.nonce !== input.nonce ||
-    !sameBundle(receipt.oldBundle, input.oldBundle) ||
+    (input.rollbackMode === "offline_only"
+      ? receipt.schemaVersion !== 2 || receipt.rollbackMode !== "offline_only" ||
+        !sameLegacyTarget(receipt.legacyTarget, input.legacyTarget) || "oldBundle" in receipt
+      : receipt.schemaVersion !== 1 || !sameBundle(receipt.oldBundle, input.oldBundle) ||
+        "legacyTarget" in receipt || "rollbackMode" in receipt) ||
     !sameBundle(receipt.newBundle, input.newBundle) ||
     receipt.snapshot?.path !== join(dirname(input.databasePath), `${basename(input.databasePath)}.backup-current`)
   ) {
@@ -350,24 +381,39 @@ function validateInput(input: ProductionTransitionInput): ProductionTransitionIn
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(input?.nonce || "")) {
     throw new Error("transition_nonce_invalid");
   }
-  return {
-    databasePath,
-    nonce: input.nonce,
-    oldBundle: validateBundle(input.oldBundle),
-    newBundle: validateBundle(input.newBundle)
-  };
+  const common = { databasePath, nonce: input.nonce, newBundle: validateBundle(input.newBundle) };
+  if (input.rollbackMode === "offline_only") {
+    return {
+      ...common,
+      legacyTarget: validateLegacyTarget(input.legacyTarget),
+      rollbackMode: "offline_only"
+    };
+  }
+  return { ...common, oldBundle: validateBundle(input.oldBundle) };
 }
 
-function validateBundle(bundle: ProductionBundleIdentity): ProductionBundleIdentity {
+function validateBundle(bundle: ProductionBundleIdentity | undefined): ProductionBundleIdentity {
   if (!bundle || !/^[a-f0-9]{64}$/u.test(bundle.bundleDigest) || !/^[a-f0-9]{40}$/u.test(bundle.gitSha)) {
     throw new Error("transition_bundle_identity_invalid");
   }
   return { ...bundle, target: resolve(required(bundle.target, "transition_bundle_target_required")), version: required(bundle.version, "transition_bundle_version_required") };
 }
 
-function sameBundle(left: ProductionBundleIdentity, right: ProductionBundleIdentity): boolean {
+function sameBundle(left: ProductionBundleIdentity | undefined, right: ProductionBundleIdentity | undefined): boolean {
+  if (!left || !right) return false;
   return left?.bundleDigest === right.bundleDigest && left?.gitSha === right.gitSha &&
     left?.target === right.target && left?.version === right.version;
+}
+
+function validateLegacyTarget(identity: LegacyProductionTargetIdentity): LegacyProductionTargetIdentity {
+  if (!identity || !/^\d+$/u.test(identity.device) || !/^\d+$/u.test(identity.inode)) {
+    throw new Error("transition_legacy_target_identity_invalid");
+  }
+  return { ...identity, path: resolve(required(identity.path, "transition_legacy_target_required")) };
+}
+
+function sameLegacyTarget(left: LegacyProductionTargetIdentity, right: LegacyProductionTargetIdentity): boolean {
+  return Boolean(left && right && left.path === right.path && left.device === right.device && left.inode === right.inode);
 }
 
 function parseDatabaseId(value: string | undefined): string {

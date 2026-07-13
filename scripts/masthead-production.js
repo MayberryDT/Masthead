@@ -23,6 +23,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
+import { runColdProductionActivation } from "./masthead-production-cold-activation.js";
 
 const DEFAULT_PORT = 17383;
 const PRODUCTION_HEALTH_INTERVAL_MS = 250;
@@ -136,6 +137,109 @@ export async function installProductionLauncher(input) {
   return { desktopPath, gitSha: release.gitSha, launcherPath, target, version: release.version };
 }
 
+export async function installDisabledProductionSurface(input = {}) {
+  const homeDir = resolve(input.homeDir || homedir());
+  const databasePath = resolve(required(input.databasePath, "disabled production status database path"));
+  const journalPath = `${databasePath}.production-transition.json`;
+  const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+  const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+  await Promise.all([mkdir(dirname(launcherPath), { recursive: true }), mkdir(dirname(desktopPath), { recursive: true })]);
+  const wrapper = [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    `COLD_TRANSITION_JOURNAL=${shellQuote(journalPath)}`,
+    "if [[ ${1:-} == status ]]; then",
+    "  if [[ -f \"$COLD_TRANSITION_JOURNAL\" && ! -L \"$COLD_TRANSITION_JOURNAL\" ]]; then",
+    "    printf '%s\\n' '{\"coldActivation\":{\"pending\":true}}'",
+    "  else",
+    "    printf '%s\\n' '{\"coldActivation\":{\"pending\":false}}'",
+    "  fi",
+    "  exit 0",
+    "fi",
+    "echo 'Masthead production is offline after legacy cold activation. Retry the fully attested install with --cold-activate.' >&2",
+    "exit 78",
+    ""
+  ].join("\n");
+  const desktop = [
+    "[Desktop Entry]",
+    "Type=Application",
+    "Name=Masthead (Offline)",
+    `Exec=${launcherPath}`,
+    "Terminal=true",
+    "Categories=Development;",
+    ""
+  ].join("\n");
+  await atomicWrite(launcherPath, wrapper, 0o755);
+  await atomicWrite(desktopPath, desktop, 0o644);
+  return { desktopPath, launcherPath };
+}
+
+export async function coldActivateProduction(input, dependencyOverrides = {}) {
+  if (typeof input.databasePath !== "string" || !input.databasePath.trim()) {
+    throw new Error("Cold activation requires an explicit --db-path; no database path is inferred.");
+  }
+  const homeDir = resolve(input.homeDir || homedir());
+  const productionRoot = resolve(input.productionRoot || join(homeDir, ".local", "share", "masthead-production"));
+  const requestedTarget = resolve(input.bundlePath || "");
+  if (!input.bundlePath || dirname(requestedTarget) !== productionRoot || !VERSIONED_TARGET.test(basename(requestedTarget))) {
+    throw new Error(`Production bundle must be a versioned direct child of ${productionRoot}.`);
+  }
+  if ((await lstat(requestedTarget)).isSymbolicLink()) {
+    throw new Error(`Production bundle must not be a symbolic link: ${requestedTarget}.`);
+  }
+  const target = await realpath(requestedTarget);
+  const canonicalProductionRoot = await realpath(productionRoot);
+  if (dirname(target) !== canonicalProductionRoot || !VERSIONED_TARGET.test(basename(target))) {
+    throw new Error(`Production bundle must resolve to a direct child of ${canonicalProductionRoot}.`);
+  }
+  await verifyPinnedBundle(target, input.bundleDigest);
+  const release = await readRelease(target);
+  const dataDirectory = resolve(input.dataDirectory || join(homeDir, ".config", "masthead-production"));
+  const config = await completeConfig({
+    bundleDigest: input.bundleDigest,
+    dataDirectory,
+    databasePath: input.databasePath,
+    gitSha: release.gitSha,
+    lifecycleLeasePath: join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"),
+    port: input.port ?? DEFAULT_PORT,
+    productionRoot,
+    target,
+    version: release.version
+  });
+  await attestCandidate(config);
+  const noLifecycleLease = async () => ({ release: async () => undefined });
+  const dependencies = {
+    acquireLease: () => acquireLifecycleLease(config.lifecycleLeasePath),
+    assertLegacyIdentity: (identity) => assertLegacyTargetIdentity(identity, productionRoot),
+    assertOffline: () => assertColdProductionOffline(config),
+    attestCandidate: () => attestCandidate(config),
+    captureLegacyIdentity: (legacyTarget) => captureLegacyTargetIdentity(legacyTarget, productionRoot),
+    cleanupBundles: () => cleanupOldProductionBundles(productionRoot, target),
+    completeMaintenance: (request) => runMaintenanceChild(config, "complete", request),
+    currentTarget: () => realpath(join(productionRoot, "current")).catch(() => undefined),
+    installCandidateSurface: () => installProductionLauncher({
+      bundleDigest: config.bundleDigest,
+      bundlePath: config.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }),
+    installDisabledSurface: () => installDisabledProductionSurface({ databasePath: config.databasePath, homeDir }),
+    prepareMaintenance: (request) => runMaintenanceChild(config, "prepare", request),
+    readMaintenanceJournal: () => readTransitionJournal(config.databasePath),
+    restoreCurrent: (legacyTarget) => swapCurrentTarget(productionRoot, legacyTarget),
+    restoreMaintenance: (request) => runMaintenanceChild(config, "restore", request),
+    start: (candidate) => startProduction(candidate, { acquireLease: noLifecycleLease }),
+    stopCandidate: () => stopColdCandidate(config),
+    stopMaintenance: (request) => stopColdMaintenanceChildren(config, request),
+    swapCurrent: () => swapCurrentTarget(productionRoot, target),
+    ...dependencyOverrides
+  };
+  return runColdProductionActivation({ config }, dependencies);
+}
+
 export async function transitionProduction(input, dependencyOverrides = {}) {
   const homeDir = resolve(input.homeDir || homedir());
   const productionRoot = resolve(input.productionRoot || join(homeDir, ".local", "share", "masthead-production"));
@@ -207,6 +311,9 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   let oldTarget;
   try {
     const pending = await dependencies.readMaintenanceJournal();
+    if (pending?.schemaVersion === 2 || pending?.rollbackMode === "offline_only") {
+      throw new Error("Production has a pending offline-only cold activation; rerun install with --cold-activate.");
+    }
     if (pending && !isRecoverableTransitionState(pending.state)) {
       throw new Error(`Production transition journal has unsupported state: ${String(pending.state)}.`);
     }
@@ -362,6 +469,30 @@ export function classifyProductionProcess(record, config) {
   return undefined;
 }
 
+function classifyColdMaintenanceProcess(record, config) {
+  if (!record || !Number.isSafeInteger(record.pid) || record.pid <= 0 || !record.starttime) return undefined;
+  const target = productionTargetForPath(normalizeProcExecutable(record.exe), config.productionRoot);
+  if (!target) return undefined;
+  const runtime = productionRuntimePaths(target);
+  const args = Array.isArray(record.argv) ? record.argv : [];
+  const environment = record.environ || {};
+  if (
+    resolve(normalizeProcExecutable(record.exe) || "") !== runtime.node ||
+    args.length !== 5 || resolve(args[0] || "") !== runtime.node ||
+    resolve(args[1] || "") !== runtime.maintenanceEntry ||
+    !["prepare", "restore", "complete"].includes(args[2]) || args[3] !== "--request" ||
+    resolve(environment.MASTHEAD_DATA_DIR || "") !== config.dataDirectory ||
+    resolve(environment.MASTHEAD_DB_PATH || "") !== config.databasePath
+  ) return undefined;
+  let request;
+  try {
+    request = JSON.parse(args[4]);
+  } catch {
+    return { ...record, action: args[2], request: undefined, role: "maintenance", target };
+  }
+  return { ...record, action: args[2], request, role: "maintenance", target };
+}
+
 function normalizeProcExecutable(path) {
   if (typeof path !== "string") return path;
   const deletedSuffix = " (deleted)";
@@ -378,6 +509,9 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
   try {
     let interruptedStart;
     const pending = await dependencies.readMaintenanceJournal();
+    if ((pending?.schemaVersion === 2 || pending?.rollbackMode === "offline_only") && !config.transitionNonce) {
+      throw new Error("Production has a pending offline-only cold activation; ordinary start is disabled; rerun install with --cold-activate.");
+    }
     if (pending && isRecoverableTransitionState(pending.state) && !config.transitionNonce) {
       interruptedStart = await validatePendingRecovery(config, pending, "start");
       const current = await dependencies.currentTarget();
@@ -469,8 +603,19 @@ export async function statusProduction(configInput, dependencyOverrides = {}) {
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
   const processes = await classifiedProcesses(config, dependencies);
   const health = await dependencies.fetchHealth();
+  const pending = await dependencies.readMaintenanceJournal();
   const matching = Boolean(health && healthMatches(health, config));
   return {
+    coldActivation: pending?.schemaVersion === 2 && pending?.rollbackMode === "offline_only"
+      ? {
+          databaseId: pending.databaseId,
+          legacyTarget: pending.legacyTarget?.path,
+          nonce: pending.nonce,
+          pending: true,
+          state: pending.state,
+          target: pending.newBundle?.target
+        }
+      : undefined,
     currentTarget: await dependencies.currentTarget(),
     healthMatches: matching,
     processes: processes.map(({ pid, role, starttime, target }) => ({ pid, role, starttime, target })),
@@ -484,10 +629,12 @@ export async function runCli(argv = process.argv.slice(2), environment = process
   if (command === "install") {
     const bundlePath = option(argv, "--bundle");
     if (!bundlePath) throw new Error("install requires --bundle <versioned-production-path>.");
-    return transitionProduction({
+    const install = argv.includes("--cold-activate") ? coldActivateProduction : transitionProduction;
+    return install({
       bundlePath,
       bundleDigest: option(argv, "--bundle-digest"),
       dataDirectory: option(argv, "--data-dir"),
+      databasePath: option(argv, "--db-path"),
       homeDir: environment.HOME,
       port: numberOption(argv, "--port"),
       productionRoot: option(argv, "--production-root")
@@ -680,8 +827,11 @@ async function cleanupFailedStart(captured, config, dependencies) {
   }
 }
 
-async function stopInsideLifecycleLease(config, dependencies, excludedPids = new Set()) {
+async function stopInsideLifecycleLease(config, dependencies, excludedPids = new Set(), allowedTargets) {
   const captured = (await classifiedProcesses(config, dependencies)).filter((record) => !excludedPids.has(record.pid));
+  if (allowedTargets && captured.some((record) => !allowedTargets.has(record.target))) {
+    throw new Error(`Refusing to signal a production target outside the allowed shutdown set: ${formatProcesses(captured)}.`);
+  }
   const signalled = [];
   for (const processRecord of captured) {
     const current = await dependencies.readProcess(processRecord.pid);
@@ -706,6 +856,125 @@ async function stopInsideLifecycleLease(config, dependencies, excludedPids = new
   if (!(await dependencies.portBindable())) throw new Error(`Production port remains occupied after shutdown: ${config.port}.`);
   await dependencies.ownershipProbe();
   return { stopped: true, stoppedPids: captured.map((record) => record.pid).sort((a, b) => a - b) };
+}
+
+async function attestCandidate(config) {
+  const info = await lstat(config.target);
+  if (info.isSymbolicLink() || await realpath(config.target) !== config.target || dirname(config.target) !== await realpath(config.productionRoot)) {
+    throw new Error("Cold activation candidate is no longer the immutable direct production bundle.");
+  }
+  const manifest = await verifyPinnedBundle(config.target, config.bundleDigest);
+  const release = await readRelease(config.target);
+  if (manifest.bundleDigest !== config.bundleDigest || release.gitSha !== config.gitSha || release.version !== config.version) {
+    throw new Error("Cold activation candidate release identity changed after attestation.");
+  }
+  const runtime = productionRuntimePaths(config.target);
+  await Promise.all([
+    access(runtime.executable, constants.X_OK),
+    access(runtime.node, constants.X_OK),
+    access(runtime.lifecycle, constants.R_OK),
+    access(runtime.daemonEntry, constants.R_OK),
+    access(runtime.maintenanceEntry, constants.R_OK)
+  ]);
+}
+
+export async function captureLegacyTargetIdentity(targetValue, productionRoot, adapters = {}) {
+  const lstatAdapter = adapters.lstat || ((path) => lstat(path, { bigint: true }));
+  const realpathAdapter = adapters.realpath || realpath;
+  const target = resolve(targetValue || "");
+  if (dirname(target) !== await realpathAdapter(productionRoot) || !VERSIONED_TARGET.test(basename(target))) {
+    throw new Error("Cold activation legacy target must be a versioned direct child of the production root.");
+  }
+  const linkInfo = await lstatAdapter(target);
+  if (linkInfo.isSymbolicLink() || await realpathAdapter(target) !== target || !linkInfo.isDirectory()) {
+    throw new Error("Cold activation legacy target must be an immutable non-symlink directory.");
+  }
+  return { device: String(linkInfo.dev), inode: String(linkInfo.ino), path: target };
+}
+
+async function assertLegacyTargetIdentity(expected, productionRoot) {
+  const current = await captureLegacyTargetIdentity(expected?.path, productionRoot);
+  if (current.path !== expected.path || current.device !== expected.device || current.inode !== expected.inode) {
+    throw new Error("Cold activation legacy target filesystem identity changed; refusing replacement.");
+  }
+}
+
+export async function assertColdProductionOffline(config, dependencyOverrides = {}) {
+  const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
+  const processes = await productionRootProcesses(config, dependencies);
+  if (processes.length > 0) {
+    throw new Error(`Cold activation requires an empty production process set: ${formatProcesses(processes)}.`);
+  }
+  if (await dependencies.fetchHealth()) throw new Error("Cold activation requires production health to be absent.");
+  if (!(await dependencies.portBindable())) throw new Error(`Cold activation requires port ${config.port} to be bindable.`);
+  await dependencies.ownershipProbe();
+}
+
+async function stopColdCandidate(config) {
+  const dependencies = defaultDependencies(config);
+  const before = await productionRootProcesses(config, dependencies);
+  const nonCandidate = before.filter((record) => record.target !== config.target || record.role === "maintenance");
+  if (nonCandidate.length > 0) {
+    throw new Error(`Cold activation found a non-candidate production process and refused to signal it: ${formatProcesses(nonCandidate)}.`);
+  }
+  const receipt = await stopInsideLifecycleLease(config, dependencies, new Set(), new Set([config.target]));
+  const remaining = await productionRootProcesses(config, dependencies);
+  if (remaining.length > 0) {
+    throw new Error(`Cold activation candidate process set is not empty after exact shutdown: ${formatProcesses(remaining)}.`);
+  }
+  return receipt;
+}
+
+async function productionRootProcesses(config, dependencies) {
+  return (await dependencies.readProcesses()).flatMap((record) => {
+    const target = productionTargetForPath(normalizeProcExecutable(record.exe), config.productionRoot);
+    if (!target) return [];
+    const classified = classifyProductionProcess(record, config) || classifyColdMaintenanceProcess(record, config);
+    return [{ ...record, role: classified?.role || "unknown", target }];
+  }).sort((left, right) => left.pid - right.pid);
+}
+
+async function coldMaintenanceProcesses(config, dependencies) {
+  return (await dependencies.readProcesses())
+    .map((record) => classifyColdMaintenanceProcess(record, config))
+    .filter(Boolean)
+    .sort((left, right) => left.pid - right.pid);
+}
+
+export async function stopColdMaintenanceChildren(config, request, dependencyOverrides = {}) {
+  const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
+  const captured = await coldMaintenanceProcesses(config, dependencies);
+  for (const child of captured) {
+    if (child.target !== config.target || !sameColdMaintenanceRequest(child.request, request)) {
+      throw new Error(`Cold activation found an unrecognized maintenance child and refused to signal it: ${child.pid}.`);
+    }
+    const current = await dependencies.readProcess(child.pid);
+    const classified = classifyColdMaintenanceProcess(current, config);
+    if (
+      !classified || classified.pid !== child.pid || classified.starttime !== child.starttime ||
+      normalizeProcExecutable(classified.exe) !== normalizeProcExecutable(child.exe) ||
+      classified.target !== config.target || !sameColdMaintenanceRequest(classified.request, request)
+    ) {
+      throw new Error(`Cold activation maintenance PID identity changed before SIGTERM: ${child.pid}.`);
+    }
+    dependencies.signal(child.pid, "SIGTERM");
+    if (!(await dependencies.waitForExit(child.pid, child.starttime, PRODUCTION_SHUTDOWN_TIMEOUT_MS))) {
+      throw new Error(`Cold activation maintenance PID ${child.pid} did not stop after SIGTERM; no SIGKILL was sent.`);
+    }
+  }
+  const remaining = await coldMaintenanceProcesses(config, dependencies);
+  if (remaining.length > 0) throw new Error(`Cold activation maintenance child set is not empty: ${formatProcesses(remaining)}.`);
+}
+
+function sameColdMaintenanceRequest(left, right) {
+  return Boolean(
+    left && right && left.rollbackMode === "offline_only" && right.rollbackMode === "offline_only" &&
+    resolve(left.databasePath || "") === resolve(right.databasePath || "") && left.nonce === right.nonce &&
+    sameBundleIdentity(left.newBundle, right.newBundle) &&
+    left.legacyTarget?.path === right.legacyTarget?.path &&
+    left.legacyTarget?.device === right.legacyTarget?.device &&
+    left.legacyTarget?.inode === right.legacyTarget?.inode
+  );
 }
 
 function assertPinnedTopology(processes, target) {
