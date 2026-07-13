@@ -528,12 +528,14 @@ describe("production lifecycle launcher", () => {
         });
         return { started: true };
       },
-      swapCurrent: async () => { calls.push("swap-candidate"); current = candidate.target; }
+      swapCurrent: async () => { calls.push("swap-candidate"); current = candidate.target; },
+      verifyCandidate: async () => calls.push("verify-candidate")
     });
     expect(result).toMatchObject({ activated: true, coldActivated: true, target: candidate.target });
     expect(calls).toEqual([
-      "attest-candidate", "offline", "disabled", "prepare", "assert-legacy", "attest-candidate",
+      "attest-candidate", "offline", "disabled", "offline", "prepare", "assert-legacy", "attest-candidate",
       "swap-candidate", "candidate-surface", "attest-candidate", "start-candidate", "attest-candidate", "assert-legacy",
+      "verify-candidate",
       `complete:${nonce}`, "cleanup-bundles", "release"
     ]);
   });
@@ -575,9 +577,12 @@ describe("production lifecycle launcher", () => {
       start: async () => ({ started: true }),
       stopCandidate: async () => calls.push("stop-candidate"),
       stopMaintenance: async () => calls.push("stop-maintenance"),
-      swapCurrent: async () => undefined
+      swapCurrent: async () => undefined,
+      verifyCandidate: async () => calls.push("verify-candidate")
     })).rejects.toThrow("bundle cleanup failed");
-    expect(calls).toEqual(["disabled", "candidate-surface", "commit", "cleanup-bundles", "release"]);
+    expect(calls).toEqual([
+      "disabled", "candidate-surface", "verify-candidate", "commit", "cleanup-bundles", "release"
+    ]);
   });
 
   test("re-attests identities after startup verification and before durable completion", async () => {
@@ -635,6 +640,65 @@ describe("production lifecycle launcher", () => {
     expect(calls).not.toContain("cleanup-bundles");
   });
 
+  test("rolls back when the candidate dies during final identity attestation before commit", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    const nonce = "30303030-3030-4030-8030-303030303030";
+    const oldIdentity = legacyIdentity(legacyTarget);
+    const calls: string[] = [];
+    let attestations = 0;
+    let candidateAlive = true;
+    let journalReads = 0;
+    let receipt: any;
+    await expect(coldActivateProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertLegacyIdentity: async () => undefined,
+      assertOffline: async () => calls.push("offline"),
+      attestCandidate: async () => {
+        attestations += 1;
+        if (attestations === 4) candidateAlive = false;
+      },
+      captureLegacyIdentity: async () => oldIdentity,
+      cleanupBundles: async () => calls.push("cleanup-bundles"),
+      completeMaintenance: async (request: any) => calls.push(request.state === "restored" ? "complete-rollback" : "complete-success"),
+      createNonce: () => nonce,
+      currentTarget: async () => legacyTarget,
+      installCandidateSurface: async () => undefined,
+      installDisabledSurface: async () => undefined,
+      prepareMaintenance: async (request: any) => {
+        receipt = {
+          ...request,
+          databaseId: "legacy-db",
+          schemaVersion: 2,
+          sourceSchemaVersion: 21,
+          state: "ready_to_activate",
+          targetSchemaVersion: 23
+        };
+        return receipt;
+      },
+      readMaintenanceJournal: async () => (++journalReads === 1 ? undefined : receipt),
+      restoreCurrent: async () => calls.push("restore-current"),
+      restoreMaintenance: async (request: any) => ({ ...request, state: "restored" }),
+      start: async () => ({ started: true }),
+      stopCandidate: async () => calls.push("stop-candidate"),
+      stopMaintenance: async () => calls.push("stop-maintenance"),
+      swapCurrent: async () => undefined,
+      verifyCandidate: async () => {
+        calls.push("verify-candidate");
+        if (!candidateAlive) throw new Error("candidate topology disappeared after attestation");
+      }
+    })).rejects.toThrow("candidate topology disappeared after attestation; cold rollback offline=true");
+    expect(calls).toContain("complete-rollback");
+    expect(calls).not.toContain("complete-success");
+    expect(calls).not.toContain("cleanup-bundles");
+  });
+
   test("requires an explicit database path before cold activation acquires the lifecycle lease", async () => {
     const { candidate, config, homeDir, productionRoot } = await legacyBoundaryFixture();
     let leased = false;
@@ -673,6 +737,33 @@ describe("production lifecycle launcher", () => {
       swapCurrent: async () => calls.push("swap")
     })).rejects.toThrow("production health is present");
     expect(calls).toEqual(["offline", "release"]);
+  });
+
+  test("re-proves offline after disabling and refuses a legacy-start race before maintenance", async () => {
+    const { candidate, config, homeDir, legacyTarget, productionRoot } = await legacyBoundaryFixture();
+    const calls: string[] = [];
+    let offlineProofs = 0;
+    await expect(coldActivateProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertOffline: async () => {
+        offlineProofs += 1;
+        calls.push(`offline:${offlineProofs}`);
+        if (offlineProofs === 2) throw new Error("legacy process started during disable boundary");
+      },
+      captureLegacyIdentity: async () => legacyIdentity(legacyTarget),
+      currentTarget: async () => legacyTarget,
+      installDisabledSurface: async () => calls.push("disabled"),
+      prepareMaintenance: async () => calls.push("prepare"),
+      readMaintenanceJournal: async () => undefined
+    })).rejects.toThrow("legacy process started during disable boundary");
+    expect(calls).toEqual(["offline:1", "disabled", "offline:2", "release"]);
   });
 
   test("cold offline proof rejects any production-root executable, health, port, or ownership conflict", async () => {
@@ -738,7 +829,7 @@ describe("production lifecycle launcher", () => {
       stopMaintenance: async () => calls.push("stop-maintenance")
     })).rejects.toThrow("cold rollback offline=true");
     expect(calls).toEqual([
-      "offline", "disabled", "prepare", "disabled", "stop-maintenance", "stop-candidate",
+      "offline", "disabled", "offline", "prepare", "disabled", "stop-maintenance", "stop-candidate",
       "restore-current", "offline", "release"
     ]);
   });
@@ -791,7 +882,7 @@ describe("production lifecycle launcher", () => {
       swapCurrent: async () => calls.push("swap-candidate")
     })).rejects.toThrow("cold rollback offline=true");
     expect(calls).toEqual([
-      "offline", "disabled", "swap-candidate", "candidate-surface", "start-candidate", "disabled",
+      "offline", "disabled", "offline", "swap-candidate", "candidate-surface", "start-candidate", "disabled",
       "stop-maintenance", "stop-candidate", "restore-database", "restore-current", "offline", "complete", "release"
     ]);
     expect(calls).not.toContain("start-legacy");

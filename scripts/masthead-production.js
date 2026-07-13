@@ -235,6 +235,7 @@ export async function coldActivateProduction(input, dependencyOverrides = {}) {
     stopCandidate: () => stopColdCandidate(config),
     stopMaintenance: (request) => stopColdMaintenanceChildren(config, request),
     swapCurrent: () => swapCurrentTarget(productionRoot, target),
+    verifyCandidate: (candidate) => verifyColdCandidateCommit(candidate),
     ...dependencyOverrides
   };
   return runColdProductionActivation({ config }, dependencies);
@@ -876,6 +877,12 @@ async function attestCandidate(config) {
     access(runtime.daemonEntry, constants.R_OK),
     access(runtime.maintenanceEntry, constants.R_OK)
   ]);
+}
+
+async function verifyColdCandidateCommit(config) {
+  const dependencies = defaultDependencies(config);
+  assertMatchingHealth(await dependencies.fetchHealth(), config);
+  assertPinnedTopology(await classifiedProcesses(config, dependencies), config.target);
 }
 
 export async function captureLegacyTargetIdentity(targetValue, productionRoot, adapters = {}) {

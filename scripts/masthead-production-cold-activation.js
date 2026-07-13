@@ -39,6 +39,7 @@ export async function runColdProductionActivation(context, dependencies) {
     // This fail-closed surface is durable before maintenance can take minutes or
     // leave a journal. Neither the legacy nor candidate executable is reachable.
     await dependencies.installDisabledSurface();
+    await dependencies.assertOffline();
     const request = {
       databasePath: config.databasePath,
       legacyTarget,
@@ -64,6 +65,12 @@ export async function runColdProductionActivation(context, dependencies) {
       });
       await dependencies.attestCandidate();
       await dependencies.assertLegacyIdentity(legacyTarget);
+      await dependencies.verifyCandidate({
+        ...config,
+        expectedDatabaseId: prepared.databaseId,
+        expectedSchemaVersion: prepared.targetSchemaVersion,
+        transitionNonce: prepared.nonce
+      });
       await dependencies.completeMaintenance(request);
     } catch (error) {
       try {
