@@ -34,14 +34,47 @@ canary decision.
 
 | Item | Required evidence | Result |
 |---|---|---|
-| Release candidate | Branch `codex/durable-artifact-recovery`; Gate C closeout `d3c61e2c` or a descendant with identical recovery contracts | `d3c61e2c` |
+| Release candidate | Branch `codex/durable-artifact-recovery`; Gate C closeout `d3c61e2c` or a descendant with identical recovery contracts | `a2ea13d4` |
 | Gate A | Original canonical dossier contract, snapshot, renderer, and responsive inspection | PASS |
 | Gate B | Real V2 runbook, ADR, and incident timeline validated, atomically published, and retrieved | PASS |
 | Recovery fixture | Recovery, CLI, and ownership tests | PASS — 91/91 |
 | Workbench fixture | Candidate UI/controller/client tests | PASS — 88/88 |
 | Durable artifact machine gate | `machineGatePassed: true`; `productionAccessed: false` | PASS |
-| Repository verification | Tests, build, schema-23 endpoint matrix, and smokes | PASS — 269 files / 1,898 tests |
+| Repository verification | Tests, build, schema-23 endpoint matrix, and smokes | PASS — 272 files / 1,969 tests; Vitest concurrency bounded to four workers after two unrelated load-sensitive tests passed immediately in isolation |
 | In-app Browser | Candidate and dossier controls at desktop, tablet, 480px, and narrow widths | PASS |
+
+### Failed activation attempt — retained as release-blocking evidence
+
+The first authorized activation attempt used candidate `0c2cabe3c15924a003577fd145a5bada99edefe0`
+with pinned bundle digest
+`b5433874dc449473f3c340932351732241eff8815e8556369b61c5233ce0b2cf`.
+The packaged smoke and 455-file manifest verification passed before activation.
+
+- Attempt started: `2026-07-13T09:37:11-06:00`
+- Result: **FAIL CLOSED** — V2 health was not accepted within the strict
+  five-minute startup deadline.
+- Active database result: unchanged; its modification time remained at the
+  pre-attempt value while the candidate was stopped inside backup verification.
+- Snapshot copy result: a WAL-complete 6,633,172,992-byte hidden stage was
+  created in about 20 seconds, but it was not promoted and the active database
+  was not migrated.
+- Independent isolated verification: full `PRAGMA integrity_check` returned
+  `ok` in `1,065,801 ms` (17 minutes 45.8 seconds).
+- Cleanup defect found: rollback restored the V1 `current` target and launcher
+  before proving the exact V2 process tree was gone. The remaining V2 Electron
+  main was positively identified by immutable executable path, PID, start time,
+  command line, and production user-data directory, then stopped with `SIGTERM`.
+  No `SIGKILL` was used.
+- Post-attempt state: no Masthead process, no listener on port `17383`, V1
+  `current` target and launcher restored, and no invalidation or canary
+  authoring started.
+
+This attempt prohibits retry until production migration is moved into a
+lifecycle-owned offline maintenance phase with a receipt-bound database
+rollback. The maintenance deadline is separate from the five-minute health
+deadline; the measured full-integrity runtime supports an initial strict
+30-minute maintenance ceiling. Candidate `a2ea13d4` implements those conditions
+and passed independent review before the next package was built.
 
 ## Step 1 — Installed V2 identity and current counts
 
