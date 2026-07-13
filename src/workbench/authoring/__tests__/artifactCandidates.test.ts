@@ -464,6 +464,69 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("atomically reconciles unsigned and signed proposal identity transitions", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const unsigned = proposeOauthRunbook(db);
+    addOauthSignature(db);
+    const signed = proposeSignedOauthRunbook(db);
+
+    expect(getWorkbenchArtifactCandidate(db, unsigned.candidateId)?.status).toBe("superseded");
+    expect(signed).toMatchObject({
+      signatureKey: "error:oauth:state-mismatch",
+      status: "pending",
+      supersedesCandidateId: unsigned.candidateId
+    });
+    expect(currentRunbookCandidates(db, "session:oauth-fixed")).toEqual([signed.candidateId]);
+
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: signed.candidateId, status: "published" });
+    db.prepare("DELETE FROM messages WHERE message_id = 'oauth:signature'").run();
+    const unsignedAgain = proposeOauthRunbook(db);
+    expect(getWorkbenchArtifactCandidate(db, signed.candidateId)?.status).toBe("superseded");
+    expect(unsignedAgain).toMatchObject({
+      status: "pending",
+      supersedesCandidateId: signed.candidateId
+    });
+    expect(unsignedAgain).not.toHaveProperty("signatureKey");
+    expect(currentRunbookCandidates(db, "session:oauth-fixed")).toEqual([unsignedAgain.candidateId]);
+    db.close();
+  });
+
+  test("defers an identity transition while its overlapping predecessor is claimed", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const claimed = proposeOauthRunbook(db);
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: claimed.candidateId, status: "claimed" });
+    addOauthSignature(db);
+
+    expect(() => proposeSignedOauthRunbook(db)).toThrow(
+      `candidate_proposal_reconciliation_deferred:${claimed.candidateId}`
+    );
+    expect(getWorkbenchArtifactCandidate(db, claimed.candidateId)?.status).toBe("claimed");
+    expect(currentRunbookCandidates(db, "session:oauth-fixed")).toEqual([claimed.candidateId]);
+    db.close();
+  });
+
+  test("rolls back identity-transition supersession when proposed replacement insertion fails", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const unsigned = proposeOauthRunbook(db);
+    addOauthSignature(db);
+    db.exec(
+      `CREATE TRIGGER fail_identity_transition
+       BEFORE INSERT ON workbench_artifact_candidates
+       WHEN NEW.kind = 'runbook'
+       BEGIN
+         SELECT RAISE(ABORT, 'injected identity transition failure');
+       END;`
+    );
+
+    expect(() => proposeSignedOauthRunbook(db)).toThrow("injected identity transition failure");
+    expect(getWorkbenchArtifactCandidate(db, unsigned.candidateId)?.status).toBe("pending");
+    expect(currentRunbookCandidates(db, "session:oauth-fixed")).toEqual([unsigned.candidateId]);
+    db.close();
+  });
+
   test("requires real passed-verification semantics and retains only the earning chain", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
@@ -509,6 +572,38 @@ describe("artifact candidate discovery", () => {
       "session:oauth-fixed"
     );
     expect(discoverArtifactCandidates(db, ["session:oauth-fixed"])).toEqual([]);
+    db.close();
+  });
+
+  test("does not turn succeeded, negated, or hypothetical error discussion into a failure signal", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    db.prepare(
+      `UPDATE tool_results
+       SET status = 'succeeded', exit_code = 0, output_redacted = 'No error was observed.'
+       WHERE session_id = 'session:migration-fixed' AND status = 'failed'`
+    ).run();
+    db.prepare(
+      `INSERT INTO messages (
+        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+      ) VALUES ('migration:hypothetical', 'session:migration-fixed', 'assistant',
+        'We discussed error handling if the migration fails.', 'migration:hypothetical:hash',
+        '2026-07-01T12:00:30.000Z', '{}', 'authoritative')`
+    ).run();
+
+    expect(discoverArtifactCandidates(db, ["session:migration-fixed"])).toEqual([]);
+
+    db.prepare(
+      `INSERT INTO messages (
+        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+      ) VALUES ('migration:observed-failure', 'session:migration-fixed', 'assistant',
+        'The migration failed during deployment.', 'migration:observed-failure:hash',
+        '2026-07-01T12:00:45.000Z', '{}', 'authoritative')`
+    ).run();
+    const observed = discoverArtifactCandidates(db, ["session:migration-fixed"]);
+    expect(observed).toHaveLength(1);
+    expect(observed[0]!.signalEvidenceRefs).toContain("message:migration:observed-failure");
+    expect(observed[0]!.signalEvidenceRefs).not.toContain("tool_result:migration:failure");
     db.close();
   });
 
@@ -723,6 +818,33 @@ describe("artifact candidate discovery", () => {
     expect(repeated.provenanceSessionIds).toEqual(allRepeatedIds.slice(0, 12));
     expect(repeated.provenanceSessionIds).toHaveLength(12);
     expect(page.scannedSessionIds).toEqual(expect.arrayContaining(allRepeatedIds));
+    expect(
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM workbench_artifact_candidate_signature_members
+           WHERE kind = 'runbook' AND signature_key = 'error:ssh:codex-command-not-found'`
+        )
+        .get()
+    ).toEqual({ count: 13 });
+
+    const invalidatedSessionId = repeated.provenanceSessionIds[0]!;
+    const priorOverflowSessionId = allRepeatedIds[12]!;
+    db.prepare("DELETE FROM checkpoints WHERE session_id = ?").run(invalidatedSessionId);
+    db.prepare("DELETE FROM tool_results WHERE session_id = ? AND status = 'succeeded'").run(
+      invalidatedSessionId
+    );
+    const refillPage = discoverArtifactCandidatePage(db, { limit: 100 });
+    const refilled = listWorkbenchArtifactCandidates(db).find(
+      (candidate) =>
+        candidate.signatureKey === "error:ssh:codex-command-not-found" && candidate.status === "pending"
+    )!;
+
+    expect(refillPage.scannedSessionIds).toEqual([invalidatedSessionId]);
+    expect(getWorkbenchArtifactCandidate(db, repeated.candidateId)?.status).toBe("superseded");
+    expect(refilled.provenanceSessionIds).toHaveLength(12);
+    expect(refilled.provenanceSessionIds).toContain(priorOverflowSessionId);
+    expect(refilled.provenanceSessionIds).not.toContain(invalidatedSessionId);
     db.close();
   });
 
@@ -912,6 +1034,44 @@ function proposeOauthRunbook(
     signalEvidenceRefs: ["tool_result:oauth:failure", "file:oauth:change", verificationRef],
     signalSummary: "OAuth callback failure recovery with an exact verified chain."
   });
+}
+
+function addOauthSignature(db: MastheadDatabase): void {
+  db.prepare(
+    `INSERT INTO messages (
+      message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+    ) VALUES ('oauth:signature', 'session:oauth-fixed', 'assistant',
+      'ERROR_SIGNATURE: oauth state mismatch', 'oauth:signature:hash',
+      '2026-07-01T12:00:30.000Z', '{}', 'authoritative')`
+  ).run();
+}
+
+function proposeSignedOauthRunbook(db: MastheadDatabase): ReturnType<typeof proposeArtifactCandidate> {
+  return proposeArtifactCandidate(db, {
+    kind: "runbook",
+    provenanceSessionIds: ["session:oauth-fixed"],
+    seedSessionId: "session:oauth-fixed",
+    signalEvidenceRefs: [
+      "tool_result:oauth:failure",
+      "file:oauth:change",
+      "checkpoint:oauth:verified",
+      "message:oauth:signature"
+    ],
+    signalSummary: "OAuth callback recovery joined to its exact normalized failure signature.",
+    signatureKey: "error:oauth:state-mismatch"
+  });
+}
+
+function currentRunbookCandidates(db: MastheadDatabase, sessionId: string): string[] {
+  return listWorkbenchArtifactCandidates(db)
+    .filter(
+      (candidate) =>
+        candidate.kind === "runbook" &&
+        (candidate.status === "pending" || candidate.status === "claimed" || candidate.status === "published") &&
+        candidate.provenanceSessionIds.includes(sessionId)
+    )
+    .map((candidate) => candidate.candidateId)
+    .sort();
 }
 
 function seedRunbookSignals(db: MastheadDatabase, sessionId: string): void {

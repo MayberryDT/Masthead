@@ -25,6 +25,14 @@ export type StoredWorkbenchArtifactCandidate = {
   updatedAt: string;
 };
 
+export type WorkbenchArtifactSignatureMember = {
+  kind: WorkbenchAutomaticKind;
+  signatureKey: string;
+  sessionId: string;
+  evidenceRevision: string;
+  signalEvidenceRefs: string[];
+};
+
 type CandidateRow = {
   candidateId: string;
   kind: WorkbenchAutomaticKind;
@@ -210,6 +218,87 @@ export function recordWorkbenchArtifactCandidateScan(
     `INSERT OR IGNORE INTO workbench_artifact_candidate_scans (session_id, evidence_revision, scanned_at)
      VALUES (?, ?, ?)`
   ).run(input.sessionId, input.evidenceRevision, new Date().toISOString());
+}
+
+export function listWorkbenchArtifactSignatureMembersForSessions(
+  db: MastheadDatabase,
+  sessionIds: string[]
+): WorkbenchArtifactSignatureMember[] {
+  const normalized = normalizedStrings(sessionIds);
+  if (normalized.length === 0) return [];
+  const placeholders = normalized.map(() => "?").join(", ");
+  return (
+    db
+      .prepare(
+        `SELECT kind,
+          signature_key AS signatureKey,
+          session_id AS sessionId,
+          evidence_revision AS evidenceRevision,
+          signal_evidence_refs_json AS signalEvidenceRefsJson
+         FROM workbench_artifact_candidate_signature_members
+         WHERE session_id IN (${placeholders})
+         ORDER BY kind, signature_key, session_id`
+      )
+      .all(...normalized) as Array<{
+        kind: WorkbenchAutomaticKind;
+        signatureKey: string;
+        sessionId: string;
+        evidenceRevision: string;
+        signalEvidenceRefsJson: string;
+      }>
+  ).map((row) => ({
+    kind: row.kind,
+    signatureKey: row.signatureKey,
+    sessionId: row.sessionId,
+    evidenceRevision: row.evidenceRevision,
+    signalEvidenceRefs: JSON.parse(row.signalEvidenceRefsJson) as string[]
+  }));
+}
+
+export function listWorkbenchArtifactSignatureMemberSessionIds(
+  db: MastheadDatabase,
+  identities: Array<{ kind: WorkbenchAutomaticKind; signatureKey: string }>
+): string[] {
+  const sessionIds = identities.flatMap((identity) =>
+    (
+      db
+        .prepare(
+          `SELECT session_id AS sessionId
+           FROM workbench_artifact_candidate_signature_members
+           WHERE kind = ? AND signature_key = ?`
+        )
+        .all(identity.kind, identity.signatureKey) as Array<{ sessionId: string }>
+    ).map((row) => row.sessionId)
+  );
+  return normalizedStrings(sessionIds);
+}
+
+export function replaceWorkbenchArtifactSignatureMembersForSessions(
+  db: MastheadDatabase,
+  input: { sessionIds: string[]; members: WorkbenchArtifactSignatureMember[] }
+): void {
+  const sessionIds = normalizedStrings(input.sessionIds);
+  const remove = db.prepare(
+    "DELETE FROM workbench_artifact_candidate_signature_members WHERE session_id = ?"
+  );
+  for (const sessionId of sessionIds) remove.run(sessionId);
+  const insert = db.prepare(
+    `INSERT INTO workbench_artifact_candidate_signature_members (
+      kind, signature_key, session_id, evidence_revision, signal_evidence_refs_json, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  const updatedAt = new Date().toISOString();
+  for (const member of input.members) {
+    if (!sessionIds.includes(member.sessionId)) throw new Error("signature_member_session_not_replaced");
+    insert.run(
+      member.kind,
+      member.signatureKey,
+      member.sessionId,
+      member.evidenceRevision,
+      JSON.stringify(normalizedStrings(member.signalEvidenceRefs)),
+      updatedAt
+    );
+  }
 }
 
 function findCurrentCandidate(

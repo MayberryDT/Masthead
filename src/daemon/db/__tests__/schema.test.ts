@@ -82,6 +82,7 @@ describe("daemon database schema", () => {
         "workbench_authoring_runs",
         "workbench_authoring_run_sessions",
         "workbench_artifact_candidates",
+        "workbench_artifact_candidate_signature_members",
         "workbench_artifact_candidate_scans"
       ])
     );
@@ -124,6 +125,7 @@ describe("daemon database schema", () => {
         "idx_workbench_candidates_current_session",
         "idx_workbench_candidates_status_updated",
         "idx_workbench_candidates_lineage",
+        "idx_workbench_signature_members_session",
         "idx_workbench_candidate_scans_session_time"
       ])
     );
