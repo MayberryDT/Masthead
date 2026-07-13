@@ -15,6 +15,7 @@ import { hasSemanticRedactedText } from "../../core/redaction.ts";
 import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepository.ts";
 import {
   getWorkbenchArtifactCandidate,
+  publishClaimedWorkbenchArtifactCandidateInTransaction,
   setWorkbenchArtifactCandidateStatus,
   type StoredWorkbenchArtifactCandidate,
 } from "../../daemon/db/workbenchArtifactCandidateRepository.ts";
@@ -48,6 +49,7 @@ import {
   markWorkbenchArtifactAppliedInTransaction,
   markWorkbenchArtifactPublishedInTransaction,
   markWorkbenchTranscriptAvailableInTransaction,
+  publishWorkbenchCandidateSessionInTransaction,
   publishWorkbenchSessionInTransaction,
   readWorkbenchSessionState,
   reconcileWorkbenchArtifactSatisfactionInTransaction,
@@ -133,6 +135,17 @@ export type SubmitAuthoringBundleResult = {
   findings: WorkbenchAuthoringFinding[];
   run: WorkbenchAuthoringRunDto;
 };
+
+export type CandidateFinishMutationBoundary =
+  | "canonical_dossiers_published"
+  | "optional_artifact_applied"
+  | "optional_artifact_published"
+  | "pipeline_updated"
+  | "search_indexed"
+  | "candidate_published"
+  | "claims_released"
+  | "activities_recorded"
+  | "receipt_persisted";
 
 export function openAuthoringRun(
   db: MastheadDatabase,
@@ -254,7 +267,7 @@ export function openCandidateAuthoringRun(
       return openCandidateResult(db, candidate, run, evidence);
     }
     if (candidate.status !== "pending") throw new Error("artifact_candidate_claim_conflict");
-    assertSessionsOnPublishPath(db, sessionIds);
+    assertSessionsCandidateAuthorable(db, sessionIds);
     assertCanonicalEvidence(db, evidence);
     assertSessionsUnclaimed(db, sessionIds);
     const actor = { id: input.actorId, kind: "agent" } as const;
@@ -403,11 +416,20 @@ function assertCandidateArtifactMatches(
   ) {
     throw new Error("authoring_candidate_artifact_mismatch");
   }
+  const authoredSignatureKey = normalizeSessionArtifactSignatureKey(bundle.artifact.output.signatureKey);
+  const candidateSignatureKey = normalizeSessionArtifactSignatureKey(candidate.signatureKey);
+  if (authoredSignatureKey !== candidateSignatureKey) {
+    throw new Error("authoring_candidate_signature_mismatch");
+  }
 }
 
 export function finishAuthoringRun(
   db: MastheadDatabase,
-  input: { runId: string; verifyPublished?: (artifactId: string) => boolean }
+  input: {
+    runId: string;
+    verifyPublished?: (artifactId: string) => boolean;
+    onMutationBoundary?: (boundary: CandidateFinishMutationBoundary) => void;
+  }
 ): WorkbenchAuthoringReceipt {
   return withImmediateTransaction(db, () => {
     const existing = requireAuthoringRun(db, input.runId);
@@ -415,6 +437,37 @@ export function finishAuthoringRun(
     if (existing.status !== "ready_to_finish") {
       throw new Error(`authoring_run_not_ready:${existing.status}`);
     }
+
+    if (existing.contractVersion === "workbench-authoring-v2") {
+      const existingBundle = requireCandidateAuthoringBundle(existing);
+      const candidate = requireClaimedAuthoringCandidate(db, existing);
+      assertCandidateArtifactMatches(candidate, existingBundle);
+      const run = renewOrReacquireAuthoringClaimsInTransaction(db, {
+        actorId: existing.actorId,
+        expiresAt: authoringLeaseExpiry(),
+        runId: existing.runId
+      });
+      if (authoringEvidenceRevision(db, run.sessionIds) !== run.evidenceRevision) {
+        throw new Error("evidence_revision_changed");
+      }
+      const currentCandidate = requireClaimedAuthoringCandidate(db, run);
+      if (!isArtifactCandidateEvidenceCurrent(db, currentCandidate)) {
+        throw new Error("candidate_evidence_revision_changed");
+      }
+      const runBundle = requireCandidateAuthoringBundle(run);
+      assertCandidateArtifactMatches(currentCandidate, runBundle);
+      const receipt = finishCandidateInsideTransaction(
+        db,
+        { ...run, bundle: runBundle },
+        currentCandidate,
+        input.verifyPublished,
+        input.onMutationBoundary
+      );
+      completeWorkbenchAuthoringRun(db, { receipt, runId: run.runId });
+      input.onMutationBoundary?.("receipt_persisted");
+      return receipt;
+    }
+
     const existingBundle = requireLegacyAuthoringBundle(existing);
 
     const signatureCollisions = findArtifactSignatureFindings(existingBundle.artifacts).filter(
@@ -529,6 +582,145 @@ function requireLegacyAuthoringBundle(run: WorkbenchAuthoringRunDto): WorkbenchA
     throw new Error("unsupported_authoring_service_contract:workbench-authoring-v2");
   }
   return run.bundle;
+}
+
+function requireCandidateAuthoringBundle(run: WorkbenchAuthoringRunDto): WorkbenchAuthoringBundleV2 {
+  if (!run.bundle) throw new Error(`authoring_run_bundle_missing:${run.runId}`);
+  if (run.contractVersion !== "workbench-authoring-v2" || run.bundle.bundleVersion !== "workbench-authoring-v2") {
+    throw new Error("unsupported_authoring_service_contract:workbench-authoring-v1");
+  }
+  const artifact = "artifact" in run.bundle ? run.bundle.artifact : undefined;
+  if (
+    !artifact ||
+    typeof artifact !== "object" ||
+    typeof artifact.kind !== "string" ||
+    typeof artifact.seedSessionId !== "string" ||
+    !Array.isArray(artifact.provenanceSessionIds) ||
+    !artifact.output ||
+    typeof artifact.output !== "object" ||
+    Array.isArray(artifact.output)
+  ) {
+    throw new Error("candidate_artifact_required");
+  }
+  return run.bundle;
+}
+
+function finishCandidateInsideTransaction(
+  db: MastheadDatabase,
+  run: WorkbenchAuthoringRunDto & { bundle: WorkbenchAuthoringBundleV2 },
+  candidate: StoredWorkbenchArtifactCandidate,
+  verifyPublished: ((artifactId: string) => boolean) | undefined,
+  onMutationBoundary: ((boundary: CandidateFinishMutationBoundary) => void) | undefined
+): WorkbenchAuthoringReceipt {
+  const actor = { id: run.actorId, kind: "agent" } as const;
+  const dossierArtifacts = candidate.provenanceSessionIds.map((sessionId) =>
+    publishCanonicalDossierInTransaction(db, sessionId, run.actorId)
+  );
+  onMutationBoundary?.("canonical_dossiers_published");
+
+  const signatureKey = normalizeSessionArtifactSignatureKey(candidate.signatureKey);
+  const supersededProvenanceSessionIds = currentPublishedSignatureProvenanceSessionIds(
+    db,
+    candidate.kind,
+    signatureKey
+  );
+  const optionalArtifact = applyCandidateAuthoringArtifactInTransaction(db, {
+    actorId: run.actorId,
+    candidate,
+    output: run.bundle.artifact.output,
+    signatureKey
+  });
+  onMutationBoundary?.("optional_artifact_applied");
+
+  const publishedOptionalArtifact = publishSessionArtifactInTransaction(db, optionalArtifact.artifactId);
+  if (!publishedOptionalArtifact) {
+    throw new Error(`authoring_finish_artifact_missing:${optionalArtifact.artifactId}`);
+  }
+  onMutationBoundary?.("optional_artifact_published");
+
+  markWorkbenchArtifactAppliedInTransaction(db, {
+    actor,
+    artifactKind: candidate.kind,
+    sessionId: candidate.seedSessionId
+  });
+  markWorkbenchArtifactPublishedInTransaction(db, {
+    actor,
+    artifactId: publishedOptionalArtifact.artifactId,
+    artifactKind: candidate.kind,
+    sessionId: candidate.seedSessionId
+  });
+  markContributionSatisfactionForProvenanceInTransaction(db, {
+    actor,
+    artifactKind: candidate.kind,
+    provenanceSessionIds: candidate.provenanceSessionIds,
+    publishedArtifactId: publishedOptionalArtifact.artifactId,
+    seedSessionId: candidate.seedSessionId
+  });
+  if (supersededProvenanceSessionIds.length > 0) {
+    reconcileWorkbenchArtifactSatisfactionInTransaction(db, {
+      artifactKind: candidate.kind,
+      sessionIds: supersededProvenanceSessionIds
+    });
+  }
+  for (const sessionId of candidate.provenanceSessionIds) {
+    publishWorkbenchCandidateSessionInTransaction(db, { actor, sessionId });
+  }
+  onMutationBoundary?.("pipeline_updated");
+
+  const expectedArtifacts = [...dossierArtifacts, publishedOptionalArtifact];
+  for (const artifact of expectedArtifacts) {
+    indexSessionArtifactSearch(db, artifact.artifactId);
+    assertPublishedArtifactVisible(db, artifact.artifactId, artifact.provenanceSessionIds);
+    if (verifyPublished && !verifyPublished(artifact.artifactId)) {
+      throw new Error(`authoring_finish_visibility_failed:${artifact.artifactId}`);
+    }
+  }
+  onMutationBoundary?.("search_indexed");
+
+  publishClaimedWorkbenchArtifactCandidateInTransaction(db, candidate.candidateId);
+  onMutationBoundary?.("candidate_published");
+
+  for (const claimId of run.claimIds) {
+    releaseWorkbenchClaimInTransaction(db, { claimId, reason: "authoring_finished" });
+  }
+  onMutationBoundary?.("claims_released");
+
+  const contributions = candidate.provenanceSessionIds
+    .filter((sessionId) => sessionId !== candidate.seedSessionId)
+    .map((sessionId) => ({ artifactId: publishedOptionalArtifact.artifactId, kind: candidate.kind, sessionId }))
+    .sort(compareReceiptResolution);
+  const receipt: WorkbenchAuthoringReceipt = {
+    candidateId: candidate.candidateId,
+    completedAt: new Date().toISOString(),
+    contributions,
+    dossierArtifactIds: dossierArtifacts.map(({ artifactId }) => artifactId),
+    notApplicable: [],
+    optionalArtifact: { artifactId: publishedOptionalArtifact.artifactId, kind: candidate.kind },
+    provenanceSessionIds: [...candidate.provenanceSessionIds],
+    publishedArtifactIds: [
+      ...dossierArtifacts.map(({ artifactId }) => artifactId),
+      publishedOptionalArtifact.artifactId
+    ],
+    resolvedSessionIds: [...candidate.provenanceSessionIds],
+    runId: run.runId
+  };
+  run.sessionIds.forEach((sessionId, index) => {
+    recordWorkbenchActivity(db, {
+      actor,
+      details: {
+        candidateId: candidate.candidateId,
+        dossierArtifactIds: receipt.dossierArtifactIds,
+        optionalArtifact: receipt.optionalArtifact
+      },
+      eventType: "authoring_finished",
+      relatedClaimId: run.claimIds[index],
+      relatedRunId: run.runId,
+      sessionId,
+      summary: `Workbench ${candidate.kind} candidate authoring finished`
+    });
+  });
+  onMutationBoundary?.("activities_recorded");
+  return receipt;
 }
 
 function finishInsideTransaction(
@@ -785,6 +977,15 @@ function assertSessionsOnPublishPath(db: MastheadDatabase, sessionIds: string[])
   }
 }
 
+function assertSessionsCandidateAuthorable(db: MastheadDatabase, sessionIds: string[]): void {
+  for (const sessionId of sessionIds) {
+    const state = readWorkbenchSessionState(db, sessionId);
+    if (state?.publicationStatus === "not_added_to_logbook") {
+      throw new Error(`authoring_session_not_on_publish_path:${sessionId}`);
+    }
+  }
+}
+
 function assertSessionsUnclaimed(db: MastheadDatabase, sessionIds: string[]): void {
   const now = new Date().toISOString();
   for (const sessionId of sessionIds) {
@@ -967,6 +1168,39 @@ function applyAuthoringArtifactInTransaction(
     signatureKey: normalizeSessionArtifactSignatureKey(input.output.signatureKey),
     title: stringFromOutput(input.output.title),
     validation: { contract: "workbench-authoring-v1", ok: true, schemaVersion: `${input.kind}-v2` }
+  });
+}
+
+function applyCandidateAuthoringArtifactInTransaction(
+  db: MastheadDatabase,
+  input: {
+    actorId: string;
+    candidate: StoredWorkbenchArtifactCandidate;
+    output: Record<string, unknown>;
+    signatureKey?: string;
+  }
+): SessionArtifactRecord {
+  return applySessionArtifactInTransaction(db, {
+    artifactKind: input.candidate.kind,
+    confidence: confidenceFromOutput(input.output),
+    content: input.output,
+    contentFingerprint: fingerprintWorkbenchOutput(input.output),
+    createdBy: `workbench_authoring_v2:${input.actorId}`,
+    evidenceRefs: stringArrayFromOutput(input.output.evidenceRefs),
+    joinRationale: stringFromOutput(input.output.joinRationale),
+    projectLabel: projectLabelForSession(db, input.candidate.seedSessionId),
+    provenanceSessionIds: input.candidate.provenanceSessionIds,
+    schemaVersion: `${input.candidate.kind}-v2`,
+    sessionId: input.candidate.seedSessionId,
+    signatureKey: input.signatureKey,
+    title: stringFromOutput(input.output.title),
+    validation: {
+      candidateId: input.candidate.candidateId,
+      contract: "workbench-authoring-v2",
+      evidenceRevision: input.candidate.evidenceRevision,
+      ok: true,
+      schemaVersion: `${input.candidate.kind}-v2`
+    }
   });
 }
 

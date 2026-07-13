@@ -2,15 +2,23 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { WorkbenchAuthoringBundle } from "../../../shared/workbenchAuthoring.ts";
+import type {
+  WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV2
+} from "../../../shared/workbenchAuthoring.ts";
 import { seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
 import { getSessionDossier } from "../../../daemon/db/sessionDossierRepository.ts";
 import {
   applySessionArtifact,
   listSessionArtifacts,
-  publishSessionArtifact
+  publishSessionArtifact,
+  searchPublishedArtifactCapsules
 } from "../../../daemon/db/sessionArtifactRepository.ts";
+import {
+  getWorkbenchArtifactCandidate,
+  type StoredWorkbenchArtifactCandidate
+} from "../../../daemon/db/workbenchArtifactCandidateRepository.ts";
 import {
   claimWorkbenchSessions,
   markContributionSatisfactionForProvenance,
@@ -25,11 +33,14 @@ import {
   finishAuthoringRun,
   getAuthoringRunEvidence,
   getAuthoringRunStatus,
+  openCandidateAuthoringRun,
   openAuthoringRun,
   publishCanonicalDossiers,
   submitAuthoringBundle
 } from "../authoringService.ts";
+import { discoverArtifactCandidates } from "../artifactCandidates.ts";
 import { buildPublishedDossierSnapshot } from "../dossierSnapshot.ts";
+import { seedDurableArtifactCorpus } from "../__fixtures__/durableArtifactCorpus.ts";
 
 const tempDirs: string[] = [];
 
@@ -656,6 +667,209 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
+  test("finishes one accepted candidate with one optional artifact and canonical dossiers", async () => {
+    const { candidate, db, runId } = await submittedCandidateAuthoringDb();
+
+    const first = finishAuthoringRun(db, { runId });
+    const second = finishAuthoringRun(db, { runId });
+
+    expect(second).toEqual(first);
+    expect(first).toMatchObject({
+      candidateId: candidate.candidateId,
+      contributions: [],
+      dossierArtifactIds: expect.any(Array),
+      notApplicable: [],
+      optionalArtifact: { kind: candidate.kind },
+      provenanceSessionIds: candidate.provenanceSessionIds,
+      resolvedSessionIds: candidate.provenanceSessionIds,
+      runId
+    });
+    expect(first.dossierArtifactIds).toHaveLength(candidate.provenanceSessionIds.length);
+    expect(first.publishedArtifactIds).toEqual([
+      ...first.dossierArtifactIds!,
+      first.optionalArtifact!.artifactId
+    ]);
+    expect(getWorkbenchArtifactCandidate(db, candidate.candidateId)?.status).toBe("published");
+    expect(getLogbookArtifactDetail(db, first.optionalArtifact!.artifactId)).toMatchObject({
+      capsule: { kind: candidate.kind },
+      provenanceSessionIds: candidate.provenanceSessionIds,
+      publicationStatus: "published",
+      status: "current"
+    });
+    for (const sessionId of candidate.provenanceSessionIds) {
+      expect(listSessionArtifacts(db, { artifactKind: "session_dossier", sessionId })).toEqual([
+        expect.objectContaining({ publicationStatus: "published", status: "current" })
+      ]);
+      expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
+        adrStatus: "unknown",
+        incidentTimelineStatus: "unknown",
+        publicationStatus: "published",
+        runbookStatus: sessionId === candidate.seedSessionId ? "published" : "contributed",
+        sessionDossierStatus: "satisfied",
+        sessionPackageStatus: "published"
+      });
+    }
+    expect(
+      db.prepare(
+        `SELECT COUNT(*) AS count
+         FROM workbench_activity
+         WHERE event_type LIKE '%_not_applicable'`
+      ).get()
+    ).toEqual({ count: 0 });
+    db.close();
+  });
+
+  test("refuses to finish a positive candidate without its accepted artifact", async () => {
+    const { db, runId } = await submittedCandidateAuthoringDb();
+    const stored = getAuthoringRunStatus(db, runId).run.bundle as WorkbenchAuthoringBundleV2;
+    const { artifact: _artifact, ...withoutArtifact } = stored;
+    db.prepare("UPDATE workbench_authoring_runs SET bundle_json = ? WHERE run_id = ?").run(
+      JSON.stringify(withoutArtifact),
+      runId
+    );
+
+    expect(() => finishAuthoringRun(db, { runId })).toThrow("candidate_artifact_required");
+    expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
+    expect(listSessionArtifacts(db)).toEqual([]);
+    db.close();
+  });
+
+  test("does not let an unsigned candidate invent lineage or supersede a signed artifact", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const unrelated = applySessionArtifact(db, {
+      artifactKind: "runbook",
+      content: { title: "Unrelated signed runbook" },
+      contentFingerprint: "unrelated-signed-runbook",
+      createdBy: "test",
+      evidenceRefs: ["message:dossier-question:1"],
+      provenanceSessionIds: ["session:dossier-question"],
+      schemaVersion: "runbook-v2",
+      sessionId: "session:dossier-question",
+      signatureKey: "signature:unrelated",
+      title: "Unrelated signed runbook",
+      validation: { ok: true }
+    });
+    publishSessionArtifact(db, unrelated.artifactId);
+    const candidate = discoverArtifactCandidates(db, ["session:oauth-fixed"]).find(
+      (entry) => entry.kind === "runbook"
+    )!;
+    expect(candidate.signatureKey).toBeUndefined();
+    const opened = openCandidateAuthoringRun(db, {
+      actorId: "codex",
+      candidateId: candidate.candidateId,
+      databaseId: testDatabaseId(db)
+    });
+    const bundle = validCandidateBundle(opened.run, candidate);
+    bundle.artifact.output.signatureKey = "signature:unrelated";
+
+    expect(() => submitAuthoringBundle(db, { bundle, runId: opened.run.runId })).toThrow(
+      "authoring_candidate_signature_mismatch"
+    );
+    expect(getWorkbenchArtifactCandidate(db, candidate.candidateId)?.status).toBe("claimed");
+    expect(listSessionArtifacts(db).find(({ artifactId }) => artifactId === unrelated.artifactId)).toMatchObject({
+      publicationStatus: "published",
+      status: "current"
+    });
+    db.close();
+  });
+
+  test("reauthoring a changed candidate revision supersedes the old signature and search hit", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const candidate = discoverArtifactCandidates(db, ["session:repeated-error:1", "session:repeated-error:2"]).find(
+      (entry) => entry.kind === "runbook" && entry.provenanceSessionIds.length === 2
+    )!;
+    expect(candidate.signatureKey).toBeTruthy();
+    const opened = openCandidateAuthoringRun(db, {
+      actorId: "codex",
+      candidateId: candidate.candidateId,
+      databaseId: testDatabaseId(db)
+    });
+    const firstSubmitted = submitAuthoringBundle(db, {
+      bundle: validCandidateBundle(opened.run, candidate),
+      runId: opened.run.runId
+    });
+    expect(firstSubmitted.accepted, JSON.stringify(firstSubmitted.findings, null, 2)).toBe(true);
+    const first = finishAuthoringRun(db, { runId: opened.run.runId });
+    const firstOptionalId = first.optionalArtifact!.artifactId;
+
+    db.prepare(
+      `INSERT INTO file_effects (
+        file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json
+      ) VALUES (?, ?, ?, 'modified', ?, '{}')`
+    ).run(
+      "repeated-error:revision-change",
+      candidate.seedSessionId,
+      "remote shell bootstrap retry guard",
+      "2026-07-01T12:04:00.000Z"
+    );
+    const revisedCandidate = discoverArtifactCandidates(db, candidate.provenanceSessionIds).find(
+      (entry) => entry.kind === candidate.kind && entry.status === "pending"
+    )!;
+    expect(revisedCandidate).toBeDefined();
+    expect(revisedCandidate.candidateId).not.toBe(candidate.candidateId);
+    const revised = openCandidateAuthoringRun(db, {
+      actorId: "codex",
+      candidateId: revisedCandidate.candidateId,
+      databaseId: testDatabaseId(db)
+    });
+    const revisedBundle = validCandidateBundle(revised.run, revisedCandidate, {
+      changeRef: "file:repeated-error:revision-change",
+      title: "Repair remote Codex launch with the retry guard"
+    });
+    const revisedSubmitted = submitAuthoringBundle(db, { bundle: revisedBundle, runId: revised.run.runId });
+    expect(revisedSubmitted.accepted, JSON.stringify(revisedSubmitted.findings, null, 2)).toBe(true);
+
+    const second = finishAuthoringRun(db, { runId: revised.run.runId });
+
+    expect(listSessionArtifacts(db).find(({ artifactId }) => artifactId === firstOptionalId)?.status).toBe(
+      "superseded"
+    );
+    expect(second.optionalArtifact!.artifactId).not.toBe(firstOptionalId);
+    expect(
+      searchPublishedArtifactCapsules(db, { q: "retry guard", kind: "runbook" }).artifacts.map(
+        ({ artifactId }) => artifactId
+      )
+    ).toEqual([second.optionalArtifact!.artifactId]);
+    expect(
+      db.prepare("SELECT artifact_id AS artifactId FROM session_artifact_search WHERE artifact_id = ?").all(firstOptionalId)
+    ).toEqual([]);
+    db.close();
+  });
+
+  test("rolls back candidate finish after every mutation boundary", async () => {
+    const boundaries = [
+      "canonical_dossiers_published",
+      "optional_artifact_applied",
+      "optional_artifact_published",
+      "pipeline_updated",
+      "search_indexed",
+      "candidate_published",
+      "claims_released",
+      "activities_recorded",
+      "receipt_persisted"
+    ];
+
+    for (const target of boundaries) {
+      const { db, runId } = await submittedCandidateAuthoringDb();
+      const before = candidateFinishRows(db);
+
+      expect(() =>
+        finishAuthoringRun(db, {
+          onMutationBoundary: (boundary: string) => {
+            if (boundary === target) throw new Error(`injected_finish_failure:${target}`);
+          },
+          runId
+        })
+      ).toThrow(`injected_finish_failure:${target}`);
+
+      expect(candidateFinishRows(db)).toEqual(before);
+      expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
+      db.close();
+    }
+  });
+
   test("publishes canonical dossiers in one bounded atomic idempotent batch", async () => {
     const db = await testDb();
     seedSessionWithRedactedEvidence(db, "session:a");
@@ -1155,6 +1369,27 @@ async function submittedMultiSessionAuthoringDb(): Promise<{ db: MastheadDatabas
   return { db, runId: opened.run.runId };
 }
 
+async function submittedCandidateAuthoringDb(): Promise<{
+  candidate: StoredWorkbenchArtifactCandidate;
+  db: MastheadDatabase;
+  runId: string;
+}> {
+  const db = await testDb();
+  seedDurableArtifactCorpus(db);
+  const candidate = discoverArtifactCandidates(db, ["session:oauth-fixed"]).find(
+    (entry) => entry.kind === "runbook"
+  )!;
+  const opened = openCandidateAuthoringRun(db, {
+    actorId: "codex",
+    candidateId: candidate.candidateId,
+    databaseId: testDatabaseId(db)
+  });
+  const bundle = validCandidateBundle(opened.run, candidate);
+  const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
+  expect(submitted.accepted, JSON.stringify(submitted.findings, null, 2)).toBe(true);
+  return { candidate, db, runId: opened.run.runId };
+}
+
 function seedSessionWithRedactedEvidence(db: MastheadDatabase, sessionId: string): void {
   seedSession(db, {
     lifecycle: "ended",
@@ -1285,6 +1520,101 @@ function validRunbookDraft(
   };
 }
 
+function validCandidateBundle(
+  run: { evidenceRevision: string; runId: string },
+  candidate: StoredWorkbenchArtifactCandidate,
+  overrides: { changeRef?: string; title?: string } = {}
+): WorkbenchAuthoringBundleV2 {
+  const failureRef = candidate.signalEvidenceRefs.find((ref) => ref.startsWith("tool_result:"))!;
+  const changeRef = overrides.changeRef ?? candidate.signalEvidenceRefs.find((ref) => ref.startsWith("file:"))!;
+  const verificationRef = candidate.signalEvidenceRefs.find(
+    (ref) => ref.startsWith("checkpoint:") || ref.includes(":verified")
+  )!;
+  const failureExcerpt = canonicalCandidateExcerpt(failureRef);
+  const changeExcerpt = canonicalCandidateExcerpt(changeRef);
+  const verificationExcerpt = canonicalCandidateExcerpt(verificationRef);
+  return {
+    artifact: {
+      kind: candidate.kind,
+      output: {
+        changedFiles: ["auth/callback.ts"],
+        claimSupport: [
+          {
+            evidenceRef: failureRef,
+            excerpt: failureExcerpt,
+            path: "problemSignature.symptoms[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: changeRef,
+            excerpt: changeExcerpt,
+            path: "fixSteps[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: failureRef,
+            excerpt: failureExcerpt,
+            path: "rootCause",
+            supportKind: "root_cause"
+          },
+          {
+            evidenceRef: verificationRef,
+            excerpt: verificationExcerpt,
+            path: "validationChecks[0]",
+            supportKind: "verification"
+          }
+        ],
+        commands: ["npm test"],
+        confidence: "low",
+        deadEnds: [],
+        environmentRequirements: ["Node.js"],
+        evidenceRefs: [...new Set([...candidate.signalEvidenceRefs, changeRef])],
+        fixSteps: [`Apply the recorded change: ${changeExcerpt}.`],
+        ...(candidate.provenanceSessionIds.length > 1
+          ? { joinRationale: "The candidate groups the same normalized failure signature across both sessions." }
+          : {}),
+        missingEvidence: [],
+        preconditions: [`The recorded failure is present: ${failureExcerpt}`],
+        preventionNotes: [`Retain the recorded verification: ${verificationExcerpt}`],
+        problemSignature: {
+          affectedScope: "The candidate's recorded failure scope",
+          errorStrings: [failureExcerpt],
+          symptoms: [failureExcerpt]
+        },
+        provenanceSessionIds: candidate.provenanceSessionIds,
+        reproSteps: ["Run the OAuth callback regression test."],
+        risksOrGaps: [],
+        rootCause: failureExcerpt,
+        ...(candidate.signatureKey ? { signatureKey: candidate.signatureKey } : {}),
+        title: overrides.title ?? "Repair the verified candidate failure",
+        validationChecks: [verificationExcerpt]
+      },
+      provenanceSessionIds: candidate.provenanceSessionIds,
+      seedSessionId: candidate.seedSessionId
+    },
+    bundleVersion: "workbench-authoring-v2",
+    candidateId: candidate.candidateId,
+    evidenceRevision: run.evidenceRevision,
+    runId: run.runId
+  };
+}
+
+function canonicalCandidateExcerpt(ref: string): string {
+  const excerpts: Record<string, string> = {
+    "checkpoint:oauth:verified": "Callback regression test passed after the nonce repair.",
+    "checkpoint:repeated-error:1:verified": "Remote codex --version check passed.",
+    "checkpoint:repeated-error:2:verified": "Remote launcher smoke test passed.",
+    "file:oauth:change": "modified auth/callback.ts",
+    "file:repeated-error:1:change": "modified shell environment launcher",
+    "file:repeated-error:2:change": "modified the remote PATH bootstrap",
+    "file:repeated-error:revision-change": "modified remote shell bootstrap retry guard",
+    "tool_result:oauth:failure": "OAuth callback test failed with an invalid state nonce.",
+    "tool_result:repeated-error:1:failure": "ssh: codex: command not found. ERROR_SIGNATURE: ssh codex command not found",
+    "tool_result:repeated-error:2:failure": "ssh: codex: command not found. ERROR_SIGNATURE: SSH / Codex command not found"
+  };
+  return excerpts[ref] ?? `Canonical evidence excerpt for ${ref}`;
+}
+
 function expireAuthoringClaims(db: MastheadDatabase, runId: string): void {
   db.prepare(
     `UPDATE workbench_claims
@@ -1325,6 +1655,20 @@ function authoringOutputCounts(db: MastheadDatabase): Record<string, number> {
       (db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count
     ])
   );
+}
+
+function candidateFinishRows(db: MastheadDatabase): Record<string, unknown[]> {
+  const tables = [
+    "session_artifacts",
+    "session_artifact_provenance",
+    "session_artifact_search",
+    "workbench_artifact_candidates",
+    "workbench_session_state",
+    "workbench_claims",
+    "workbench_activity",
+    "workbench_authoring_runs"
+  ];
+  return Object.fromEntries(tables.map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
 }
 
 function runClaimRows(db: MastheadDatabase, runId: string): Array<{ claimId: string; expiresAt: string; releasedAt: string | null }> {

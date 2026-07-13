@@ -22,6 +22,7 @@ import {
   markWorkbenchQuality,
   markWorkbenchQualityPassedInTransaction,
   markWorkbenchSessionEnrichmentSatisfied,
+  publishWorkbenchCandidateSessionInTransaction,
   publishWorkbenchSession,
   readWorkbenchSessionState,
   releaseWorkbenchClaim,
@@ -380,6 +381,39 @@ describe("workbench pipeline repository", () => {
 
     expect(readWorkbenchSessionState(db, "session:seed")?.runbookStatus).toBe("unknown");
     expect(readWorkbenchSessionState(db, "session:provenance")?.runbookStatus).toBe("contributed");
+  });
+
+  test("publishes a candidate dossier without fabricating optional-kind resolutions", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:candidate",
+      title: "Candidate provenance"
+    });
+    ensureWorkbenchSessionState(db, "session:candidate");
+    db.exec("BEGIN IMMEDIATE;");
+    markWorkbenchArtifactAppliedInTransaction(db, {
+      actor: { kind: "agent", id: "codex" },
+      artifactKind: "session_dossier",
+      sessionId: "session:candidate"
+    });
+    publishWorkbenchCandidateSessionInTransaction(db, {
+      actor: { kind: "agent", id: "codex" },
+      sessionId: "session:candidate"
+    });
+    db.exec("COMMIT;");
+
+    expect(readWorkbenchSessionState(db, "session:candidate")).toMatchObject({
+      adrStatus: "unknown",
+      incidentTimelineStatus: "unknown",
+      publicationStatus: "published",
+      runbookStatus: "unknown",
+      sessionDossierStatus: "satisfied",
+      sessionPackageStatus: "published"
+    });
+    db.close();
   });
 
   test("quality pass advances next action toward enrichment", async () => {

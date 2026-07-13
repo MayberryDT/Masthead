@@ -263,6 +263,7 @@ const authoringConflictCodes = new Set([
   "candidate_dismissal_evidence_changed",
   "candidate_evidence_revision_changed",
   "authoring_candidate_artifact_mismatch",
+  "authoring_candidate_signature_mismatch",
   "authoring_candidate_mismatch",
   "database_identity_mismatch",
   "evidence_revision_changed",

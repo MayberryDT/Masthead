@@ -221,6 +221,10 @@ export type WorkbenchAuthoringReceipt = {
   resolvedSessionIds: string[];
   notApplicable: Array<{ sessionId: string; kind: WorkbenchAutomaticArtifactKind }>;
   contributions: Array<{ sessionId: string; kind: WorkbenchAutomaticArtifactKind; artifactId: string }>;
+  candidateId?: string;
+  dossierArtifactIds?: string[];
+  optionalArtifact?: { artifactId: string; kind: WorkbenchAutomaticArtifactKind };
+  provenanceSessionIds?: string[];
 };
 
 export type WorkbenchAuthoringRunDto = {

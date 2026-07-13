@@ -324,6 +324,18 @@ export function setWorkbenchArtifactCandidateStatus(
   return getWorkbenchArtifactCandidate(db, input.candidateId)!;
 }
 
+export function publishClaimedWorkbenchArtifactCandidateInTransaction(
+  db: MastheadDatabase,
+  candidateId: string
+): StoredWorkbenchArtifactCandidate {
+  const candidate = getWorkbenchArtifactCandidate(db, candidateId);
+  if (!candidate) throw new Error(`artifact_candidate_not_found:${candidateId}`);
+  if (candidate.status !== "claimed") {
+    throw new Error(`artifact_candidate_transition_invalid:${candidate.status}:published`);
+  }
+  return setWorkbenchArtifactCandidateStatus(db, { candidateId, status: "published" });
+}
+
 export function dismissWorkbenchArtifactCandidate(
   db: MastheadDatabase,
   input: { candidateId: string; reason: string; signalEvidenceRefs: string[] }

@@ -373,6 +373,25 @@ export function publishWorkbenchSessionInTransaction(
   return { activity: result.activity, ok: true, state: result.state };
 }
 
+/**
+ * Candidate authoring publishes the canonical dossier independently of whether
+ * the session has candidates for either of the other optional artifact kinds.
+ */
+export function publishWorkbenchCandidateSessionInTransaction(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; sessionId: string }
+): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  const state = ensureWorkbenchSessionState(db, input.sessionId);
+  if (state.sessionDossierStatus !== "satisfied") {
+    throw new Error(`candidate_finish_dossier_required:${input.sessionId}`);
+  }
+  return markWorkbenchPublishedInTransaction(db, {
+    actor: input.actor,
+    publishedVia: "workbench_candidate_finish",
+    sessionId: input.sessionId
+  });
+}
+
 export function markWorkbenchNotAdded(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; reason: string; sessionId: string }
