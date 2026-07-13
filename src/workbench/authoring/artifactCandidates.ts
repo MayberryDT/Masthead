@@ -47,6 +47,7 @@ type SessionSignals = {
 
 type CandidateSeed = {
   kind: WorkbenchAutomaticKind;
+  origin?: "automatic" | "proposal";
   seedSessionId: string;
   provenanceSessionIds: string[];
   signalEvidenceRefs: string[];
@@ -183,6 +184,7 @@ function proposeArtifactCandidateInTransaction(
   const evidenceRevision = authoringEvidenceRevision(db, provenanceSessionIds);
   return reconcileProposedCandidate(db, {
     kind: proposal.kind,
+    origin: "proposal",
     provenanceSessionIds,
     seedSessionId: proposal.seedSessionId,
     signalEvidenceRefs,
@@ -340,10 +342,16 @@ function reconcileArtifactCandidates(
             )
         ))
   );
-  const finalSeeds = [
+  const proposalSeeds = relevantMutable
+    .filter((candidate) => candidate.origin === "proposal")
+    .flatMap((candidate) => validatedProposalSeedFromCandidate(db, candidate) ?? []);
+  const automaticSeeds = [
     ...activeIndividual.filter((seed) => !seed.signatureKey),
     ...signatureCandidateSeeds(storedSignatureMembers)
-  ].sort(compareSeeds);
+  ].filter(
+    (seed) => !proposalSeeds.some((proposalSeed) => candidateIdentityMatches(seed, proposalSeed))
+  );
+  const finalSeeds = [...automaticSeeds, ...proposalSeeds].sort(compareSeeds);
   for (const candidate of relevantMutable) {
     if (
       finalSeeds.some(
@@ -363,6 +371,61 @@ function reconcileArtifactCandidates(
   };
 }
 
+function validatedProposalSeedFromCandidate(
+  db: MastheadDatabase,
+  candidate: WorkbenchArtifactCandidate
+): CandidateSeed | undefined {
+  if (
+    candidate.provenanceSessionIds.some(
+      (sessionId) => !db.prepare("SELECT 1 FROM sessions WHERE session_id = ? AND deleted_at IS NULL").get(sessionId)
+    )
+  ) {
+    return undefined;
+  }
+  const signals = candidate.provenanceSessionIds.map((sessionId) => extractSessionSignals(db, sessionId));
+  const selected = new Set(candidate.signalEvidenceRefs);
+  const allEvidenceRefs = new Set(signals.flatMap((session) => [...session.evidenceRefs]));
+  if (candidate.signalEvidenceRefs.some((ref) => !allEvidenceRefs.has(ref))) return undefined;
+  if (!proposalHasKindSignals(candidate.kind, signals, selected)) return undefined;
+  if (
+    candidate.signatureKey &&
+    signals.some(
+      (signal) =>
+        !signal.signatureRefs.some(
+          (entry) => entry.signatureKey === candidate.signatureKey && selected.has(entry.ref)
+        )
+    )
+  ) {
+    return undefined;
+  }
+  const allowed = proposalAllowedEvidenceRefs(candidate.kind, signals, selected, candidate.signatureKey);
+  if (candidate.signalEvidenceRefs.some((ref) => !allowed.has(ref))) return undefined;
+  if (
+    signals.some(
+      (signal) =>
+        !sessionContributesKindSignal(candidate.kind, signal, selected) &&
+        !(
+          candidate.signatureKey &&
+          signal.signatureRefs.some(
+            (entry) => entry.signatureKey === candidate.signatureKey && selected.has(entry.ref)
+          )
+        )
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    kind: candidate.kind,
+    origin: "proposal",
+    provenanceSessionIds: candidate.provenanceSessionIds,
+    seedSessionId: candidate.seedSessionId,
+    signalEvidenceRefs: candidate.signalEvidenceRefs,
+    signalSummary: candidate.signalSummary,
+    evidenceRevision: authoringEvidenceRevision(db, candidate.provenanceSessionIds),
+    ...(candidate.signatureKey ? { signatureKey: candidate.signatureKey } : {})
+  };
+}
+
 function candidateIdentityMatches(
   candidate: Pick<WorkbenchArtifactCandidate, "kind" | "seedSessionId" | "signatureKey">,
   seed: Pick<CandidateSeed, "kind" | "seedSessionId" | "signatureKey">
@@ -374,6 +437,7 @@ function candidateIdentityMatches(
 
 function candidateMatchesSeedRevision(candidate: WorkbenchArtifactCandidate, seed: CandidateSeed): boolean {
   return (
+    candidate.origin === (seed.origin ?? "automatic") &&
     candidate.evidenceRevision === seed.evidenceRevision &&
     arraysEqual(candidate.provenanceSessionIds, seed.provenanceSessionIds) &&
     arraysEqual(candidate.signalEvidenceRefs, seed.signalEvidenceRefs)
@@ -832,6 +896,7 @@ function persistSeeds(
           predecessor?.candidateId
         ),
         kind: seed.kind,
+        origin: seed.origin ?? "automatic",
         provenanceSessionIds: seed.provenanceSessionIds,
         seedSessionId: seed.seedSessionId,
         signalEvidenceRefs: seed.signalEvidenceRefs,

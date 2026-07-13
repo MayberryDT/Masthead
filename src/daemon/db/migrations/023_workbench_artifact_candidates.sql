@@ -8,12 +8,14 @@ CREATE TABLE workbench_artifact_candidates (
   signature_key TEXT,
   evidence_revision TEXT NOT NULL,
   supersedes_candidate_id TEXT REFERENCES workbench_artifact_candidates(candidate_id) ON DELETE SET NULL,
+  origin TEXT NOT NULL DEFAULT 'automatic',
   status TEXT NOT NULL DEFAULT 'pending',
   dismissal_reason TEXT,
   dismissal_evidence_refs_json TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (kind IN ('runbook', 'adr', 'incident_timeline')),
+  CHECK (origin IN ('automatic', 'proposal')),
   CHECK (status IN ('pending', 'claimed', 'published', 'dismissed', 'superseded')),
   CHECK (json_valid(provenance_session_ids_json)),
   CHECK (json_array_length(provenance_session_ids_json) BETWEEN 1 AND 12),
@@ -41,6 +43,26 @@ CREATE INDEX idx_workbench_candidates_status_updated
 
 CREATE INDEX idx_workbench_candidates_lineage
   ON workbench_artifact_candidates(supersedes_candidate_id);
+
+CREATE TABLE workbench_artifact_candidate_provenance (
+  candidate_id TEXT NOT NULL REFERENCES workbench_artifact_candidates(candidate_id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (candidate_id, session_id),
+  UNIQUE (candidate_id, position),
+  CHECK (position >= 0)
+);
+
+CREATE INDEX idx_workbench_candidate_provenance_session
+  ON workbench_artifact_candidate_provenance(session_id, candidate_id);
+
+CREATE TRIGGER workbench_candidate_provenance_insert
+AFTER INSERT ON workbench_artifact_candidates
+BEGIN
+  INSERT INTO workbench_artifact_candidate_provenance (candidate_id, session_id, position)
+  SELECT NEW.candidate_id, value, CAST(key AS INTEGER)
+  FROM json_each(NEW.provenance_session_ids_json);
+END;
 
 CREATE TABLE workbench_artifact_candidate_signature_members (
   kind TEXT NOT NULL,
@@ -238,5 +260,62 @@ AFTER DELETE ON file_effects
 BEGIN
   INSERT INTO workbench_artifact_candidate_source_revisions (session_id, source_revision)
   SELECT OLD.session_id, 1 WHERE EXISTS (SELECT 1 FROM sessions WHERE session_id = OLD.session_id)
+  ON CONFLICT(session_id) DO UPDATE SET source_revision = source_revision + 1;
+END;
+
+CREATE TRIGGER workbench_candidate_session_hard_delete
+BEFORE DELETE ON sessions
+BEGIN
+  INSERT INTO workbench_artifact_candidate_source_revisions (session_id, source_revision)
+  SELECT DISTINCT remaining.session_id, 1
+  FROM workbench_artifact_candidate_provenance deleted
+  JOIN workbench_artifact_candidate_provenance remaining
+    ON remaining.candidate_id = deleted.candidate_id
+  WHERE deleted.session_id = OLD.session_id
+    AND remaining.session_id <> OLD.session_id
+  ON CONFLICT(session_id) DO UPDATE SET source_revision = source_revision + 1;
+
+  UPDATE workbench_artifact_candidates
+  SET status = 'superseded', updated_at = CURRENT_TIMESTAMP
+  WHERE status IN ('pending', 'claimed', 'published')
+    AND candidate_id IN (
+      SELECT candidate_id
+      FROM workbench_artifact_candidate_provenance
+      WHERE session_id = OLD.session_id
+    );
+END;
+
+CREATE TRIGGER workbench_candidate_session_soft_delete
+AFTER UPDATE OF deleted_at ON sessions
+WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
+BEGIN
+  INSERT INTO workbench_artifact_candidate_source_revisions (session_id, source_revision)
+  SELECT DISTINCT remaining.session_id, 1
+  FROM workbench_artifact_candidate_provenance deleted
+  JOIN workbench_artifact_candidate_provenance remaining
+    ON remaining.candidate_id = deleted.candidate_id
+  WHERE deleted.session_id = NEW.session_id
+    AND remaining.session_id <> NEW.session_id
+  ON CONFLICT(session_id) DO UPDATE SET source_revision = source_revision + 1;
+
+  UPDATE workbench_artifact_candidates
+  SET status = 'superseded', updated_at = CURRENT_TIMESTAMP
+  WHERE status IN ('pending', 'claimed', 'published')
+    AND candidate_id IN (
+      SELECT candidate_id
+      FROM workbench_artifact_candidate_provenance
+      WHERE session_id = NEW.session_id
+    );
+
+  DELETE FROM workbench_artifact_candidate_signature_members
+  WHERE session_id = NEW.session_id;
+END;
+
+CREATE TRIGGER workbench_candidate_session_undelete
+AFTER UPDATE OF deleted_at ON sessions
+WHEN OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL
+BEGIN
+  INSERT INTO workbench_artifact_candidate_source_revisions (session_id, source_revision)
+  VALUES (NEW.session_id, 1)
   ON CONFLICT(session_id) DO UPDATE SET source_revision = source_revision + 1;
 END;

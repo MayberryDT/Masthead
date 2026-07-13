@@ -11,6 +11,7 @@ export type WorkbenchArtifactCandidateStatus =
 export type StoredWorkbenchArtifactCandidate = {
   candidateId: string;
   kind: WorkbenchAutomaticKind;
+  origin: "automatic" | "proposal";
   seedSessionId: string;
   provenanceSessionIds: string[];
   signalEvidenceRefs: string[];
@@ -43,6 +44,7 @@ type CandidateRow = {
   signatureKey: string | null;
   evidenceRevision: string;
   supersedesCandidateId: string | null;
+  origin: "automatic" | "proposal";
   status: WorkbenchArtifactCandidateStatus;
   dismissalReason: string | null;
   dismissalEvidenceRefsJson: string | null;
@@ -68,6 +70,7 @@ const CANDIDATE_SELECT = `SELECT
   signature_key AS signatureKey,
   evidence_revision AS evidenceRevision,
   supersedes_candidate_id AS supersedesCandidateId,
+  origin,
   status,
   dismissal_reason AS dismissalReason,
   dismissal_evidence_refs_json AS dismissalEvidenceRefsJson,
@@ -115,8 +118,8 @@ export function saveWorkbenchArtifactCandidate(
     `INSERT INTO workbench_artifact_candidates (
       candidate_id, kind, seed_session_id, provenance_session_ids_json,
       signal_evidence_refs_json, signal_summary, signature_key, evidence_revision,
-      supersedes_candidate_id, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      supersedes_candidate_id, origin, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.candidateId,
     input.kind,
@@ -127,6 +130,7 @@ export function saveWorkbenchArtifactCandidate(
     input.signatureKey ?? null,
     input.evidenceRevision,
     input.supersedesCandidateId ?? null,
+    input.origin,
     input.status ?? "pending",
     now,
     now
@@ -357,6 +361,7 @@ function rowToCandidate(row: CandidateRow): StoredWorkbenchArtifactCandidate {
     ...(row.signatureKey ? { signatureKey: row.signatureKey } : {}),
     evidenceRevision: row.evidenceRevision,
     ...(row.supersedesCandidateId ? { supersedesCandidateId: row.supersedesCandidateId } : {}),
+    origin: row.origin,
     status: row.status,
     ...(row.dismissalReason ? { dismissalReason: row.dismissalReason } : {}),
     ...(row.dismissalEvidenceRefsJson

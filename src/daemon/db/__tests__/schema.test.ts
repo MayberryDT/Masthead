@@ -82,6 +82,7 @@ describe("daemon database schema", () => {
         "workbench_authoring_runs",
         "workbench_authoring_run_sessions",
         "workbench_artifact_candidates",
+        "workbench_artifact_candidate_provenance",
         "workbench_artifact_candidate_signature_members",
         "workbench_artifact_candidate_source_revisions",
         "workbench_artifact_candidate_scans"
@@ -126,6 +127,7 @@ describe("daemon database schema", () => {
         "idx_workbench_candidates_current_session",
         "idx_workbench_candidates_status_updated",
         "idx_workbench_candidates_lineage",
+        "idx_workbench_candidate_provenance_session",
         "idx_workbench_signature_members_session",
         "idx_workbench_candidate_scans_session_time"
       ])
@@ -278,6 +280,19 @@ describe("daemon database schema", () => {
       now,
       now
     );
+    expect(
+      db.prepare(
+        `SELECT session_id AS sessionId, position
+         FROM workbench_artifact_candidate_provenance
+         WHERE candidate_id = 'candidate:replacement'
+         ORDER BY position`
+      ).all()
+    ).toEqual([{ position: 0, sessionId: "session:candidate-schema" }]);
+    expect(
+      db.prepare(
+        "SELECT origin FROM workbench_artifact_candidates WHERE candidate_id = 'candidate:replacement'"
+      ).get()
+    ).toEqual({ origin: "automatic" });
     db.prepare(
       `INSERT INTO workbench_artifact_candidate_scans (
         session_id, evidence_revision, source_revision, scanned_at
@@ -310,6 +325,7 @@ describe("daemon database schema", () => {
     expect(() => db.prepare("DELETE FROM sessions WHERE session_id = 'session:candidate-schema'").run()).not.toThrow();
     for (const table of [
       "workbench_artifact_candidate_source_revisions",
+      "workbench_artifact_candidate_provenance",
       "workbench_artifact_candidate_signature_members",
       "workbench_artifact_candidate_scans"
     ]) {

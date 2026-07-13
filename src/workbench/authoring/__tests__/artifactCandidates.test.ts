@@ -25,6 +25,8 @@ import {
   corpusSessionIds,
   dossierOnlyQuestion,
   durableArtifactCorpus,
+  explicitArchitectureDecision,
+  decisionWithRejectedAlternatives,
   repeatedErrorPartOne,
   repeatedErrorPartTwo,
   seedDurableArtifactCorpus
@@ -47,6 +49,17 @@ describe("artifact candidate discovery", () => {
     expect(countKinds(candidates)).toEqual({ runbook: 3, adr: 2, incident_timeline: 2 });
     expect(candidates.some((candidate) => candidate.seedSessionId === dossierOnlyQuestion.id)).toBe(false);
     expect(candidates.every((candidate) => candidate.signalEvidenceRefs.length > 0)).toBe(true);
+    for (const candidate of candidates) {
+      const normalizedProvenance = db
+        .prepare(
+          `SELECT session_id AS sessionId
+           FROM workbench_artifact_candidate_provenance
+           WHERE candidate_id = ?
+           ORDER BY position`
+        )
+        .all(candidate.candidateId) as Array<{ sessionId: string }>;
+      expect(normalizedProvenance.map((row) => row.sessionId)).toEqual(candidate.provenanceSessionIds);
+    }
     db.close();
   });
 
@@ -338,6 +351,59 @@ describe("artifact candidate discovery", () => {
         signalSummary: "A reason cannot replace positive signals."
       })
     ).toThrow("candidate_proposal_kind_signals_missing");
+    db.close();
+  });
+
+  test("preserves and revises split-session proposals until their selected support becomes invalid", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const proposal = proposeArtifactCandidate(db, {
+      kind: "adr",
+      provenanceSessionIds: [explicitArchitectureDecision.id, decisionWithRejectedAlternatives.id],
+      seedSessionId: explicitArchitectureDecision.id,
+      signalEvidenceRefs: [
+        "message:decision-local-first:decision",
+        "message:decision-artifact-logbook:alternatives"
+      ],
+      signalSummary: "The directed ADR joins an explicit decision to its rejected alternatives."
+    });
+    expect(proposal.origin).toBe("proposal");
+
+    discoverArtifactCandidates(db, [explicitArchitectureDecision.id]);
+    expect(getWorkbenchArtifactCandidate(db, proposal.candidateId)?.status).toBe("pending");
+
+    db.prepare(
+      `INSERT INTO messages (
+        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+      ) VALUES ('proposal:unrelated', ?, 'assistant', 'Unrelated follow-up.', 'proposal:unrelated:hash',
+        '2026-07-01T14:00:00.000Z', '{}', 'authoritative')`
+    ).run(explicitArchitectureDecision.id);
+    discoverArtifactCandidates(db, [explicitArchitectureDecision.id]);
+    const revised = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.origin === "proposal" && candidate.status === "pending"
+    )!;
+    expect(revised.supersedesCandidateId).toBe(proposal.candidateId);
+
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: revised.candidateId, status: "claimed" });
+    db.prepare("UPDATE messages SET text_redacted = text_redacted || ' More context.' WHERE message_id = ?").run(
+      "proposal:unrelated"
+    );
+    expect(discoverArtifactCandidates(db, [explicitArchitectureDecision.id])).toEqual([]);
+    expect(getWorkbenchArtifactCandidate(db, revised.candidateId)?.status).toBe("claimed");
+
+    setWorkbenchArtifactCandidateStatus(db, { candidateId: revised.candidateId, status: "pending" });
+    discoverArtifactCandidates(db, [explicitArchitectureDecision.id]);
+    const latest = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.origin === "proposal" && candidate.status === "pending"
+    )!;
+    db.prepare("DELETE FROM messages WHERE message_id = 'decision-local-first:decision'").run();
+    discoverArtifactCandidates(db, [explicitArchitectureDecision.id]);
+    expect(getWorkbenchArtifactCandidate(db, latest.candidateId)?.status).toBe("superseded");
+    expect(
+      listWorkbenchArtifactCandidates(db).some(
+        (candidate) => candidate.origin === "proposal" && candidate.status === "pending"
+      )
+    ).toBe(false);
     db.close();
   });
 
@@ -1005,6 +1071,64 @@ describe("artifact candidate discovery", () => {
     expect(refilled.provenanceSessionIds).toHaveLength(12);
     expect(refilled.provenanceSessionIds).toContain(priorOverflowSessionId);
     expect(refilled.provenanceSessionIds).not.toContain(invalidatedSessionId);
+    db.close();
+  });
+
+  test("supersedes and rebuilds joined candidates immediately after non-seed hard deletion", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    discoverArtifactCandidatePage(db, { limit: 100 });
+    const joined = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.signatureKey === "error:ssh:codex-command-not-found" && candidate.status === "pending"
+    )!;
+    expect(joined.seedSessionId).toBe(repeatedErrorPartOne.id);
+
+    db.prepare("DELETE FROM sessions WHERE session_id = ?").run(repeatedErrorPartTwo.id);
+    expect(getWorkbenchArtifactCandidate(db, joined.candidateId)?.status).toBe("superseded");
+    expect(
+      listWorkbenchArtifactCandidates(db).some(
+        (candidate) =>
+          ["pending", "claimed", "published"].includes(candidate.status) &&
+          candidate.provenanceSessionIds.includes(repeatedErrorPartTwo.id)
+      )
+    ).toBe(false);
+
+    const page = discoverArtifactCandidatePage(db, { limit: 100 });
+    const rebuilt = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.signatureKey === "error:ssh:codex-command-not-found" && candidate.status === "pending"
+    )!;
+    expect(page.scannedSessionIds).toContain(repeatedErrorPartOne.id);
+    expect(rebuilt.provenanceSessionIds).toEqual([repeatedErrorPartOne.id]);
+    db.close();
+  });
+
+  test("invalidates joined candidates on soft delete and rescans an undeleted member", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    discoverArtifactCandidatePage(db, { limit: 100 });
+    const joined = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.signatureKey === "error:ssh:codex-command-not-found" && candidate.status === "pending"
+    )!;
+
+    db.prepare("UPDATE sessions SET deleted_at = ? WHERE session_id = ?").run(
+      "2026-07-13T00:00:00.000Z",
+      repeatedErrorPartTwo.id
+    );
+    expect(getWorkbenchArtifactCandidate(db, joined.candidateId)?.status).toBe("superseded");
+    expect(
+      db.prepare(
+        "SELECT COUNT(*) AS count FROM workbench_artifact_candidate_signature_members WHERE session_id = ?"
+      ).get(repeatedErrorPartTwo.id)
+    ).toEqual({ count: 0 });
+    discoverArtifactCandidatePage(db, { limit: 100 });
+
+    db.prepare("UPDATE sessions SET deleted_at = NULL WHERE session_id = ?").run(repeatedErrorPartTwo.id);
+    const undeleted = discoverArtifactCandidatePage(db, { limit: 100 });
+    const rebuilt = listWorkbenchArtifactCandidates(db).find(
+      (candidate) => candidate.signatureKey === "error:ssh:codex-command-not-found" && candidate.status === "pending"
+    )!;
+    expect(undeleted.scannedSessionIds).toEqual([repeatedErrorPartTwo.id]);
+    expect(rebuilt.provenanceSessionIds).toEqual([repeatedErrorPartOne.id, repeatedErrorPartTwo.id]);
     db.close();
   });
 
