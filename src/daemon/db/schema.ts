@@ -162,6 +162,7 @@ const criticalTables = [
   "workbench_authoring_run_sessions",
   "workbench_artifact_candidates",
   "workbench_artifact_candidate_signature_members",
+  "workbench_artifact_candidate_source_revisions",
   "workbench_artifact_candidate_scans"
 ];
 

@@ -11,6 +11,7 @@ import {
 import {
   dismissWorkbenchArtifactCandidate,
   getWorkbenchArtifactCandidate,
+  listWorkbenchArtifactSignatureMembersForIdentities,
   listWorkbenchArtifactCandidates,
   setWorkbenchArtifactCandidateStatus
 } from "../../../daemon/db/workbenchArtifactCandidateRepository.ts";
@@ -92,6 +93,13 @@ describe("artifact candidate discovery", () => {
     expect(discoverArtifactCandidatePage(db, { limit: 100 }).scannedSessionIds).toEqual([
       dossierOnlyQuestion.id
     ]);
+
+    db.prepare("UPDATE tool_calls SET tool_name = tool_name || '_changed' WHERE session_id = ?").run(
+      repeatedErrorPartTwo.id
+    );
+    expect(discoverArtifactCandidatePage(db, { limit: 100 }).scannedSessionIds).toEqual([
+      repeatedErrorPartTwo.id
+    ]);
     db.close();
   });
 
@@ -117,6 +125,37 @@ describe("artifact candidate discovery", () => {
     const retry = discoverArtifactCandidatePage(db, { limit: 100 });
     expect(retry.scannedSessionIds).toHaveLength(durableArtifactCorpus.length);
     expect(retry.candidates).toHaveLength(7);
+    db.close();
+  });
+
+  test("uses a source revision to skip unchanged transcript hashing and notices later evidence changes", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    discoverArtifactCandidatePage(db, { limit: 100 });
+    const sourceRevision = db
+      .prepare(
+        `SELECT source_revision AS sourceRevision
+         FROM workbench_artifact_candidate_source_revisions
+         WHERE session_id = ?`
+      )
+      .get(dossierOnlyQuestion.id) as { sourceRevision: number };
+
+    db.prepare("UPDATE messages SET text_redacted = text_redacted || ' unreadable sentinel' WHERE session_id = ?").run(
+      dossierOnlyQuestion.id
+    );
+    db.prepare(
+      `UPDATE workbench_artifact_candidate_source_revisions
+       SET source_revision = ?
+       WHERE session_id = ?`
+    ).run(sourceRevision.sourceRevision, dossierOnlyQuestion.id);
+    expect(discoverArtifactCandidatePage(db, { limit: 100 }).scannedSessionIds).toEqual([]);
+
+    db.prepare("UPDATE messages SET text_redacted = text_redacted || ' changed again' WHERE session_id = ?").run(
+      dossierOnlyQuestion.id
+    );
+    expect(discoverArtifactCandidatePage(db, { limit: 100 }).scannedSessionIds).toEqual([
+      dossierOnlyQuestion.id
+    ]);
     db.close();
   });
 
@@ -607,6 +646,59 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("rejects negated and hypothetical change, decision, and alternative language", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const sessionId = dossierOnlyQuestion.id;
+    db.prepare(
+      `INSERT INTO tool_calls (
+        tool_call_id, session_id, tool_name, started_at, source_ref_json
+      ) VALUES ('adversarial:failure:call', ?, 'exec_command', '2026-07-01T13:00:00.000Z', '{}')`
+    ).run(sessionId);
+    db.prepare(
+      `INSERT INTO tool_results (
+        tool_result_id, tool_call_id, session_id, status, exit_code, output_redacted, completed_at, source_ref_json
+      ) VALUES ('adversarial:failure', 'adversarial:failure:call', ?, 'failed', 1,
+        'The configuration test failed.', '2026-07-01T13:00:00.000Z', '{}')`
+    ).run(sessionId);
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+      ) VALUES (?, ?, 'assistant', ?, ?, ?, '{}', 'authoritative')`
+    );
+    insertMessage.run(
+      'adversarial:not-changed', sessionId, 'The configuration was not changed.',
+      'adversarial:not-changed:hash', '2026-07-01T13:01:00.000Z'
+    );
+    insertMessage.run(
+      'adversarial:no-update', sessionId, 'No update was applied.',
+      'adversarial:no-update:hash', '2026-07-01T13:02:00.000Z'
+    );
+    insertMessage.run(
+      'adversarial:hypothetical-change', sessionId, 'If the callback changed, it could be fixed later.',
+      'adversarial:hypothetical-change:hash', '2026-07-01T13:03:00.000Z'
+    );
+    insertMessage.run(
+      'adversarial:hypothetical-decision', sessionId,
+      'If we decided to use SQLite instead of Postgres, we would discuss the tradeoff.',
+      'adversarial:hypothetical-decision:hash', '2026-07-01T13:04:00.000Z'
+    );
+    insertMessage.run(
+      'adversarial:rejected-decision', sessionId,
+      'The proposed decision was rejected; no alternative was actually considered.',
+      'adversarial:rejected-decision:hash', '2026-07-01T13:05:00.000Z'
+    );
+    db.prepare(
+      `INSERT INTO checkpoints (
+        checkpoint_id, session_id, checkpoint_kind, summary, observed_at, source_ref_json
+      ) VALUES ('adversarial:verified', ?, 'verification_passed',
+        'Configuration verification test passed.', '2026-07-01T13:06:00.000Z', '{}')`
+    ).run(sessionId);
+
+    expect(discoverArtifactCandidates(db, [sessionId])).toEqual([]);
+    db.close();
+  });
+
   test("rejects incoherent runbook chronology, nonexistent sessions, and unrelated provenance padding", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
@@ -874,6 +966,11 @@ describe("artifact candidate discovery", () => {
       )
       .all() as Array<{ sessionId: string }>;
     expect(memberRows).toHaveLength(101);
+    expect(
+      listWorkbenchArtifactSignatureMembersForIdentities(db, [
+        { kind: "runbook", signatureKey: "error:ssh:codex-command-not-found" }
+      ])
+    ).toHaveLength(12);
 
     const invalidatedSessionId = original.provenanceSessionIds[0]!;
     const priorOverflowSessionId = memberRows[12]!.sessionId;

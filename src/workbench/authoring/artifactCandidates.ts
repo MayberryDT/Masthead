@@ -2,6 +2,7 @@ import { stableRecordId } from "../../daemon/identity.ts";
 import {
   hasWorkbenchArtifactCandidateScan,
   getWorkbenchArtifactCandidate,
+  getWorkbenchArtifactCandidateSourceRevision,
   listWorkbenchArtifactSignatureMembersForIdentities,
   listWorkbenchArtifactSignatureMembersForSessions,
   listWorkbenchArtifactCandidates,
@@ -85,10 +86,10 @@ export function discoverArtifactCandidatePage(
 
   const reconciled = withImmediateTransaction(db, () => {
     const changed = rows.flatMap((row) => {
-      const evidenceRevision = authoringEvidenceRevision(db, [row.sessionId]);
-      return hasWorkbenchArtifactCandidateScan(db, { evidenceRevision, sessionId: row.sessionId })
+      const sourceRevision = getWorkbenchArtifactCandidateSourceRevision(db, row.sessionId);
+      return hasWorkbenchArtifactCandidateScan(db, { sessionId: row.sessionId, sourceRevision })
         ? []
-        : [{ evidenceRevision, sessionId: row.sessionId }];
+        : [{ sessionId: row.sessionId, sourceRevision }];
     });
     const reconciliation = reconcileArtifactCandidates(
       db,
@@ -96,7 +97,12 @@ export function discoverArtifactCandidatePage(
     );
     const acknowledged = new Set(reconciliation.acknowledgedSessionIds);
     for (const entry of changed) {
-      if (acknowledged.has(entry.sessionId)) recordWorkbenchArtifactCandidateScan(db, entry);
+      if (acknowledged.has(entry.sessionId)) {
+        recordWorkbenchArtifactCandidateScan(db, {
+          ...entry,
+          evidenceRevision: authoringEvidenceRevision(db, [entry.sessionId])
+        });
+      }
     }
     return reconciliation;
   });
@@ -413,9 +419,7 @@ function signatureCandidateSeeds(members: WorkbenchArtifactSignatureMember[]): C
   }
   return [...groups.values()]
     .map((group) => {
-      const selected = [...group]
-        .sort((left, right) => left.sessionId.localeCompare(right.sessionId))
-        .slice(0, 12);
+      const selected = [...group].sort((left, right) => left.sessionId.localeCompare(right.sessionId));
       const first = selected[0]!;
       const provenanceSessionIds = selected.map((member) => member.sessionId);
       return {
@@ -678,6 +682,15 @@ function isFailure(item: SessionTranscriptItem, normalized: string): boolean {
 
 function isChange(item: SessionTranscriptItem, normalized: string): boolean {
   if (item.kind === "file_effect") return true;
+  const changeTerm = "(?:change(?:d)?|fix(?:ed)?|patch(?:ed)?|repair(?:ed)?|update(?:d)?|migrat(?:ed)?|mitigat(?:ed)?)";
+  if (
+    new RegExp(`\\b(?:no|not|never|without)\\b[^.\\n]{0,40}\\b${changeTerm}\\b`).test(normalized) ||
+    new RegExp(
+      `\\b(?:if|could|might|may|would|should)\\b[^.\\n]{0,80}\\b${changeTerm}\\b`
+    ).test(normalized)
+  ) {
+    return false;
+  }
   return /\b(?:changed|fixed|patched|repaired|updated|migrated|mitigated)\b/.test(normalized);
 }
 
@@ -712,15 +725,42 @@ function isPassedVerification(item: SessionTranscriptItem, normalized: string): 
 
 function isExplicitDecision(item: SessionTranscriptItem, normalized: string): boolean {
   if (item.kind === "checkpoint" && /decision_(?:recorded|approved)/.test(item.label.toLowerCase())) return true;
-  return /\bdecision(?:\s+(?:approved|recorded))?\s*:|\bdecided\s+to\b|\badopted\s+as\b/.test(normalized);
+  if (
+    /\b(?:if|could|might|may|would|should)\b[^.\n]{0,80}\b(?:decision|decided|adopted)\b/.test(
+      normalized
+    ) ||
+    /\b(?:no|not|never)\b[^.\n]{0,40}\b(?:decision|decided|adopted|approved|recorded)\b/.test(
+      normalized
+    ) ||
+    /\b(?:proposed|hypothetical|possible)\s+decision\b/.test(normalized) ||
+    /\b(?:rejected|declined)\b[^.\n]{0,30}\bdecision\b|\bdecision\b[^.\n]{0,30}\b(?:rejected|declined)\b/.test(
+      normalized
+    )
+  ) {
+    return false;
+  }
+  return (
+    /\bdecision\s*:/.test(normalized) ||
+    /\bdecided\s+to\b/.test(normalized) ||
+    /\bdecision\s+(?:was\s+)?(?:approved|recorded)\b/.test(normalized)
+  );
 }
 
 function isRejectedAlternative(normalized: string): boolean {
+  if (
+    /\b(?:if|could|might|may|would|should)\b[^.\n]{0,100}\b(?:alternatives?|considered|rejected|instead\s+of)\b/.test(
+      normalized
+    ) ||
+    /\b(?:no|not|never)\b[^.\n]{0,60}\b(?:alternatives?|considered|rejected)\b/.test(normalized) ||
+    /\balternatives?\b[^.\n]{0,40}\b(?:not|never)\s+(?:considered|rejected)\b/.test(normalized)
+  ) {
+    return false;
+  }
   return (
     /\brejected\s+alternatives?\b/.test(normalized) ||
     /\balternatives?\b.*\brejected\b/.test(normalized) ||
     /\bconsidered\b.*\balternatives?\b/.test(normalized) ||
-    /\binstead\s+of\b/.test(normalized)
+    /\bconsidered\b.*\binstead\s+of\b/.test(normalized)
   );
 }
 

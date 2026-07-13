@@ -205,27 +205,42 @@ export function dismissWorkbenchArtifactCandidate(
 
 export function hasWorkbenchArtifactCandidateScan(
   db: MastheadDatabase,
-  input: { evidenceRevision: string; sessionId: string }
+  input: { sessionId: string; sourceRevision: number }
 ): boolean {
   return Boolean(
     db
       .prepare(
         `SELECT 1
          FROM workbench_artifact_candidate_scans
-         WHERE session_id = ? AND evidence_revision = ?`
+         WHERE session_id = ? AND source_revision = ?`
       )
-      .get(input.sessionId, input.evidenceRevision)
+      .get(input.sessionId, input.sourceRevision)
   );
+}
+
+export function getWorkbenchArtifactCandidateSourceRevision(
+  db: MastheadDatabase,
+  sessionId: string
+): number {
+  const row = db
+    .prepare(
+      `SELECT source_revision AS sourceRevision
+       FROM workbench_artifact_candidate_source_revisions
+       WHERE session_id = ?`
+    )
+    .get(sessionId) as { sourceRevision: number } | undefined;
+  return row?.sourceRevision ?? 0;
 }
 
 export function recordWorkbenchArtifactCandidateScan(
   db: MastheadDatabase,
-  input: { evidenceRevision: string; sessionId: string }
+  input: { evidenceRevision: string; sessionId: string; sourceRevision: number }
 ): void {
   db.prepare(
-    `INSERT OR IGNORE INTO workbench_artifact_candidate_scans (session_id, evidence_revision, scanned_at)
-     VALUES (?, ?, ?)`
-  ).run(input.sessionId, input.evidenceRevision, new Date().toISOString());
+    `INSERT OR IGNORE INTO workbench_artifact_candidate_scans (
+      session_id, evidence_revision, source_revision, scanned_at
+    ) VALUES (?, ?, ?, ?)`
+  ).run(input.sessionId, input.evidenceRevision, input.sourceRevision, new Date().toISOString());
 }
 
 export function listWorkbenchArtifactSignatureMembersForSessions(
@@ -274,7 +289,8 @@ export function listWorkbenchArtifactSignatureMembersForIdentities(
             signal_evidence_refs_json AS signalEvidenceRefsJson
            FROM workbench_artifact_candidate_signature_members
            WHERE kind = ? AND signature_key = ?
-           ORDER BY session_id`
+           ORDER BY session_id
+           LIMIT 12`
         )
         .all(identity.kind, identity.signatureKey) as SignatureMemberRow[]
     ).map(rowToSignatureMember)

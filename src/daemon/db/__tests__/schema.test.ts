@@ -83,6 +83,7 @@ describe("daemon database schema", () => {
         "workbench_authoring_run_sessions",
         "workbench_artifact_candidates",
         "workbench_artifact_candidate_signature_members",
+        "workbench_artifact_candidate_source_revisions",
         "workbench_artifact_candidate_scans"
       ])
     );
@@ -128,6 +129,31 @@ describe("daemon database schema", () => {
         "idx_workbench_signature_members_session",
         "idx_workbench_candidate_scans_session_time"
       ])
+    );
+    const sourceRevisionTriggers = db
+      .prepare(
+        `SELECT name
+         FROM sqlite_master
+         WHERE type = 'trigger' AND name LIKE 'workbench_candidate_%_revision'
+         ORDER BY name`
+      )
+      .all() as Array<{ name: string }>;
+    const transcriptTables = [
+      "messages",
+      "tool_calls",
+      "tool_results",
+      "checkpoints",
+      "runtime_signals",
+      "file_effects"
+    ];
+    expect(sourceRevisionTriggers.map((row) => row.name)).toEqual(
+      transcriptTables
+        .flatMap((table) =>
+          ["insert", "update", "delete"].map(
+            (operation) => `workbench_candidate_${table}_${operation}_revision`
+          )
+        )
+        .sort()
     );
     const authoringRunColumns = db.prepare("PRAGMA table_info(workbench_authoring_runs)").all() as Array<{
       dflt_value: string | null;
@@ -253,23 +279,42 @@ describe("daemon database schema", () => {
       now
     );
     db.prepare(
-      `INSERT INTO workbench_artifact_candidate_scans (session_id, evidence_revision, scanned_at)
-       VALUES ('session:candidate-schema', 'sha256:first', ?)`
+      `INSERT INTO workbench_artifact_candidate_scans (
+        session_id, evidence_revision, source_revision, scanned_at
+      ) VALUES ('session:candidate-schema', 'sha256:first', 0, ?)`
     ).run(now);
     db.prepare(
-      `INSERT INTO workbench_artifact_candidate_scans (session_id, evidence_revision, scanned_at)
-       VALUES ('session:candidate-schema', 'sha256:second', ?)`
+      `INSERT INTO workbench_artifact_candidate_scans (
+        session_id, evidence_revision, source_revision, scanned_at
+      ) VALUES ('session:candidate-schema', 'sha256:second', 1, ?)`
     ).run(now);
     expect(
       db
         .prepare(
-          `SELECT evidence_revision AS evidenceRevision
+          `SELECT evidence_revision AS evidenceRevision, source_revision AS sourceRevision
            FROM workbench_artifact_candidate_scans
            WHERE session_id = 'session:candidate-schema'
            ORDER BY evidence_revision`
         )
         .all()
-    ).toEqual([{ evidenceRevision: "sha256:first" }, { evidenceRevision: "sha256:second" }]);
+    ).toEqual([
+      { evidenceRevision: "sha256:first", sourceRevision: 0 },
+      { evidenceRevision: "sha256:second", sourceRevision: 1 }
+    ]);
+    db.prepare(
+      `INSERT INTO workbench_artifact_candidate_signature_members (
+        kind, signature_key, session_id, evidence_revision, signal_evidence_refs_json, updated_at
+      ) VALUES ('runbook', 'error:ssh:missing-command', 'session:candidate-schema',
+        'sha256:member', '["message:session:candidate-schema:message"]', ?)`
+    ).run(now);
+    expect(() => db.prepare("DELETE FROM sessions WHERE session_id = 'session:candidate-schema'").run()).not.toThrow();
+    for (const table of [
+      "workbench_artifact_candidate_source_revisions",
+      "workbench_artifact_candidate_signature_members",
+      "workbench_artifact_candidate_scans"
+    ]) {
+      expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({ count: 0 });
+    }
     db.close();
   });
 
