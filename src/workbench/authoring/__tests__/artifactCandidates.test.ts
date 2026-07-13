@@ -636,10 +636,11 @@ describe("artifact candidate discovery", () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
     const revisionA = proposeOauthRunbook(db);
-    db.prepare("UPDATE checkpoints SET summary = summary || ' Revision B.' WHERE session_id = ?").run(
+    db.prepare("UPDATE checkpoints SET summary = summary || ' Revision B5.' WHERE session_id = ?").run(
       "session:oauth-fixed"
     );
     const revisionB = proposeOauthRunbook(db);
+    expect(revisionA.candidateId.localeCompare(revisionB.candidateId)).toBeLessThan(0);
     dismissWorkbenchArtifactCandidate(db, {
       candidateId: revisionB.candidateId,
       reason: "This exact revision is not reusable.",
