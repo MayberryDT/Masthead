@@ -28,6 +28,7 @@
     "version:bump:major": "npm version major --no-git-tag-version && npm run version:sync",
     "setup:dev-hooks": "node scripts/setup-dev-hooks.js",
     "install:electron-dev-launcher": "node scripts/install-electron-dev-launcher.js",
+    "install:production-launcher": "node scripts/masthead-production.js install",
     "audit:runtime": "npm audit --omit=dev --audit-level=high",
     "verify:no-citations": "node scripts/verify-no-dev-citations.js",
     "prepare": "node scripts/setup-dev-hooks.js || echo 'dev-hook setup skipped (no .git or permissions)'",

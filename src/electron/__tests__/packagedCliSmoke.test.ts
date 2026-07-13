@@ -7,6 +7,9 @@ describe("packaged authoring CLI smoke coverage", () => {
 
     expect(source).toContain("await access(nodeTarget, constants.X_OK)");
     expect(source).toContain("await access(cliTarget, constants.R_OK)");
+    expect(source).toContain("masthead-production.js");
+    expect(source).toContain("release.json");
+    expect(source).toContain('execFileSync("git", ["rev-parse", "HEAD"]');
   });
 
   test("packaged smoke invokes the capability-reported launcher from an isolated home", async () => {
@@ -37,5 +40,8 @@ describe("packaged authoring CLI smoke coverage", () => {
     expect(source).toContain("let settled = false");
     expect(source).toContain("await rm(dataDir");
     expect(source).toContain("await rm(homeDir");
+    expect(source).toContain('join(resources, "release.json")');
+    expect(source).toContain("health?.buildVersion");
+    expect(source).toContain("health?.buildSha");
   });
 });
