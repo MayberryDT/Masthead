@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { seedSession } from "./sessionTestHelpers.ts";
+import { getSessionDossier } from "../sessionDossierRepository.ts";
 import {
   applySessionArtifact,
   applySessionArtifactInTransaction,
@@ -14,6 +15,10 @@ import {
 } from "../sessionArtifactRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
+import {
+  buildPublishedDossierSnapshot,
+  dossierSnapshotFingerprint
+} from "../../../workbench/authoring/dossierSnapshot.ts";
 
 const tempDirs: string[] = [];
 
@@ -202,6 +207,65 @@ describe("session artifact repository", () => {
         (entry) => entry.artifactId
       )
     ).toEqual([artifact.artifactId]);
+  });
+
+  test.each([
+    ["title", "Canonical OAuth repair"],
+    ["narrative", "callback state mismatch"],
+    ["topic", "redirect-security"],
+    ["technology", "TypeScript"],
+    ["file", "callback-router"],
+    ["tool", "oauth_probe"],
+    ["verification", "callback smoke test"],
+    ["attention", "stale client secret"]
+  ])("indexes canonical dossier %s text explicitly", async (_label, query) => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:canonical-search",
+      title: "Canonical OAuth repair"
+    });
+    const canonical = getSessionDossier(db, "session:canonical-search")!;
+    const snapshot = buildPublishedDossierSnapshot(canonical, "2026-07-12T18:00:00.000Z");
+    snapshot.narrative.objective = "Repair the callback state mismatch in the OAuth return path.";
+    snapshot.narrative.topics = ["redirect-security"];
+    snapshot.narrative.technologies = ["TypeScript"];
+    snapshot.files[0]!.displayPath = "src/auth/callback-router.ts";
+    snapshot.files[0]!.basename = "callback-router.ts";
+    snapshot.tools[0]!.toolName = "oauth_probe";
+    snapshot.verification = {
+      commands: [],
+      status: "passed",
+      summary: "Verification passed with the callback smoke test."
+    };
+    snapshot.attention = [
+      {
+        detail: "The OAuth client secret must be replaced before deployment.",
+        kind: "high_risk_change",
+        severity: "P1",
+        sourceRefs: [],
+        title: "Rotate the stale client secret"
+      }
+    ];
+    const artifact = applySessionArtifact(db, {
+      artifactKind: "session_dossier",
+      content: snapshot,
+      contentFingerprint: dossierSnapshotFingerprint(snapshot),
+      createdBy: "workbench_authoring_v2:test",
+      evidenceRefs: [],
+      schemaVersion: snapshot.snapshotVersion,
+      sessionId: snapshot.identity.sessionId,
+      title: snapshot.identity.title,
+      validation: { canonicalSnapshot: true }
+    });
+    publishSessionArtifact(db, artifact.artifactId);
+
+    expect(searchPublishedArtifactCapsules(db, { q: query }).artifacts).toEqual([
+      expect.objectContaining({ artifactId: artifact.artifactId })
+    ]);
+    db.close();
   });
 
   test("sanitizes FTS syntax and treats punctuation-only queries as unfiltered", async () => {

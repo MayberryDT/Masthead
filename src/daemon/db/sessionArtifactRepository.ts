@@ -1,4 +1,5 @@
 import { stableRecordId } from "../identity.ts";
+import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "./sqlite.ts";
 
 export type SessionArtifactKind = "session_dossier" | "runbook" | "adr" | "incident_timeline";
@@ -233,17 +234,50 @@ export function publishSessionArtifactInTransaction(
 
 export function indexSessionArtifactSearch(db: MastheadDatabase, artifactId: string): void {
   db.prepare("DELETE FROM session_artifact_search WHERE artifact_id = ?").run(artifactId);
+  const artifact = readArtifactById(db, artifactId);
+  if (!artifact || artifact.status !== "current" || artifact.publicationStatus !== "published") return;
+  const body =
+    artifact.schemaVersion === "canonical-session-dossier-v1"
+      ? canonicalDossierSearchText(artifact.content as PublishedSessionDossierV1)
+      : JSON.stringify(artifact.content);
   db.prepare(
     `INSERT INTO session_artifact_search (artifact_id, title, summary, highlight, project, body)
-     SELECT artifact_id,
-            COALESCE(title, ''),
-            COALESCE(summary, ''),
-            COALESCE(highlight, ''),
-            COALESCE(project_label, ''),
-            content_json
-     FROM session_artifacts
-     WHERE artifact_id = ? AND status = 'current' AND publication_status = 'published'`
-  ).run(artifactId);
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    artifact.artifactId,
+    artifact.title ?? "",
+    artifact.summary ?? "",
+    artifact.highlight ?? "",
+    artifact.projectLabel ?? "",
+    body
+  );
+}
+
+export function canonicalDossierSearchText(snapshot: PublishedSessionDossierV1): string {
+  return [
+    snapshot.identity.title,
+    snapshot.identity.project,
+    snapshot.identity.branch,
+    snapshot.narrative.objective,
+    snapshot.narrative.firstUserPrompt,
+    snapshot.narrative.latestUserPrompt,
+    snapshot.narrative.finalAssistantMessage,
+    snapshot.narrative.liveSummary,
+    snapshot.narrative.outcome,
+    snapshot.durableEnrichment?.sessionSummary.text,
+    ...snapshot.narrative.topics,
+    ...snapshot.narrative.technologies,
+    ...snapshot.narrative.unresolved,
+    ...snapshot.files.flatMap((file) => [file.path, file.displayPath, file.basename, file.effectKind]),
+    ...snapshot.tools.flatMap((tool) => [tool.toolName, tool.category, tool.status, tool.outputPreview]),
+    snapshot.verification.summary,
+    ...snapshot.verification.commands.flatMap((tool) => [tool.toolName, tool.status, tool.outputPreview]),
+    ...snapshot.attention.flatMap((item) => [item.title, item.detail]),
+    ...snapshot.excerpts.map((excerpt) => excerpt.text)
+  ]
+    .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+    .join("\n")
+    .slice(0, 256_000);
 }
 
 export function getSessionArtifact(db: MastheadDatabase, artifactId: string): SessionArtifactRecord | undefined {
@@ -507,7 +541,9 @@ function makeCurrentInTransaction(db: MastheadDatabase, artifact: SessionArtifac
        WHERE session_id = ? AND artifact_kind = ? AND status = 'current' AND artifact_id <> ?`
     ).run(now, artifact.sessionId, artifact.artifactKind, artifact.artifactId);
   }
-  db.prepare("UPDATE session_artifacts SET status = 'current', updated_at = ? WHERE artifact_id = ?").run(now, artifact.artifactId);
+  db.prepare(
+    "UPDATE session_artifacts SET status = 'current', updated_at = ? WHERE artifact_id = ? AND status <> 'current'"
+  ).run(now, artifact.artifactId);
 }
 
 function provenanceFor(db: MastheadDatabase, artifactId: string): string[] {

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchAuthoringBundle } from "../../../shared/workbenchAuthoring.ts";
 import { seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
+import { getSessionDossier } from "../../../daemon/db/sessionDossierRepository.ts";
 import {
   applySessionArtifact,
   listSessionArtifacts,
@@ -25,8 +26,10 @@ import {
   getAuthoringRunEvidence,
   getAuthoringRunStatus,
   openAuthoringRun,
+  publishCanonicalDossiers,
   submitAuthoringBundle
 } from "../authoringService.ts";
+import { buildPublishedDossierSnapshot } from "../dossierSnapshot.ts";
 
 const tempDirs: string[] = [];
 
@@ -594,6 +597,7 @@ describe("Workbench authoring service", () => {
 
   test("finishes once and publishes the complete bundle atomically", async () => {
     const { db, runId } = await submittedAuthoringDb();
+    const canonicalBeforeFinish = getSessionDossier(db, "session:a")!;
 
     const first = finishAuthoringRun(db, { runId });
     const second = finishAuthoringRun(db, { runId });
@@ -613,9 +617,17 @@ describe("Workbench authoring service", () => {
       ).get()
     ).toEqual({ count: 2 });
     expect(listSessionArtifacts(db).map((artifact) => artifact.schemaVersion).sort()).toEqual([
+      "canonical-session-dossier-v1",
       "runbook-v2",
-      "session_dossier-v2"
     ]);
+    const dossier = listSessionArtifacts(db, {
+      artifactKind: "session_dossier",
+      sessionId: "session:a"
+    })[0]!;
+    expect(omitCapturedAt(dossier.content)).toEqual(
+      omitCapturedAt(buildPublishedDossierSnapshot(canonicalBeforeFinish))
+    );
+    expect(dossier.createdBy).toBe("workbench_authoring_v2:codex");
     expect(first.publishedArtifactIds.every((artifactId) => getLogbookArtifactDetail(db, artifactId))).toBe(true);
     expect(
       db
@@ -641,6 +653,67 @@ describe("Workbench authoring service", () => {
       ).all()
     ).toEqual([{ eventType: "runbook_published" }, { eventType: "published" }]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
+    db.close();
+  });
+
+  test("publishes canonical dossiers in one bounded atomic idempotent batch", async () => {
+    const db = await testDb();
+    seedSessionWithRedactedEvidence(db, "session:a");
+    seedSessionWithRedactedEvidence(db, "session:b");
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-07-12T18:00:00.000Z");
+
+    const first = publishCanonicalDossiers(db, {
+      actorId: "recovery",
+      sessionIds: ["session:a", "session:b"]
+    });
+    const artifactsAfterFirst = listSessionArtifacts(db);
+    const activitiesAfterFirst = db
+      .prepare("SELECT * FROM workbench_activity ORDER BY activity_id")
+      .all();
+    vi.setSystemTime("2026-07-12T19:00:00.000Z");
+    const second = publishCanonicalDossiers(db, {
+      actorId: "recovery",
+      sessionIds: ["session:a", "session:b"]
+    });
+
+    expect(second).toEqual(first);
+    expect(first.sessionIds).toEqual(["session:a", "session:b"]);
+    expect(first.artifactIds).toHaveLength(2);
+    expect(listSessionArtifacts(db, { publicationStatus: "published" })).toHaveLength(2);
+    expect(listSessionArtifacts(db)).toEqual(artifactsAfterFirst);
+    expect(db.prepare("SELECT * FROM workbench_activity ORDER BY activity_id").all()).toEqual(
+      activitiesAfterFirst
+    );
+
+    const beforeFailure = listSessionArtifacts(db);
+    const stateBeforeFailure = [
+      readWorkbenchSessionState(db, "session:a"),
+      readWorkbenchSessionState(db, "session:b")
+    ];
+    const activityBeforeFailure = db
+      .prepare("SELECT * FROM workbench_activity ORDER BY activity_id")
+      .all();
+    expect(() =>
+      publishCanonicalDossiers(db, {
+        actorId: "recovery",
+        sessionIds: ["session:a", "session:missing"]
+      })
+    ).toThrow("canonical_dossier_missing:session:missing");
+    expect(listSessionArtifacts(db)).toEqual(beforeFailure);
+    expect([
+      readWorkbenchSessionState(db, "session:a"),
+      readWorkbenchSessionState(db, "session:b")
+    ]).toEqual(stateBeforeFailure);
+    expect(db.prepare("SELECT * FROM workbench_activity ORDER BY activity_id").all()).toEqual(
+      activityBeforeFailure
+    );
+    expect(() =>
+      publishCanonicalDossiers(db, {
+        actorId: "recovery",
+        sessionIds: Array.from({ length: 101 }, (_, index) => `session:${index}`)
+      })
+    ).toThrow("canonical_dossier_batch_too_large");
     db.close();
   });
 
@@ -1094,6 +1167,11 @@ function seedSessionWithRedactedEvidence(db: MastheadDatabase, sessionId: string
 
 function testDatabaseId(db: MastheadDatabase): string {
   return getOrCreateDatabaseIdentity(db);
+}
+
+function omitCapturedAt(value: unknown): unknown {
+  const { capturedAt: _capturedAt, ...rest } = value as Record<string, unknown>;
+  return rest;
 }
 
 function invalidBundle(runId: string, evidenceRevision: string): WorkbenchAuthoringBundle {

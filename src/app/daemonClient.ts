@@ -21,6 +21,7 @@ import type {
   WorkbenchMissingSessionsResponse,
   WorkbenchNotAddedResponse,
   WorkbenchNotAddedSummaryDto,
+  WorkbenchCanonicalDossierPublicationResponse,
   WorkbenchSessionsResponse
 } from "../shared/workbench";
 import {
@@ -1390,6 +1391,17 @@ export async function postWorkbenchPublish(
   return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/publish`, {
     label: "workbench publish",
     signal: options.signal
+  });
+}
+
+export async function postWorkbenchPublishCanonicalDossiers(
+  baseUrl: string,
+  input: { actorId: string; sessionIds: string[]; signal?: AbortSignal }
+): Promise<WorkbenchCanonicalDossierPublicationResponse> {
+  return postJson(baseUrl, "/workbench/dossiers/publish", {
+    body: { actorId: input.actorId, sessionIds: input.sessionIds },
+    label: "workbench publish canonical dossiers",
+    signal: input.signal
   });
 }
 

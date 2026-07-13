@@ -8,6 +8,8 @@ import type {
   WorkbenchAuthoringReceipt,
   WorkbenchAuthoringRunDto
 } from "../../shared/workbenchAuthoring.ts";
+import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
+import type { CanonicalDossierPublicationReceipt } from "../../shared/workbench.ts";
 import { hasSemanticRedactedText } from "../../core/redaction.ts";
 import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepository.ts";
 import {
@@ -18,6 +20,7 @@ import {
   publishSessionArtifactInTransaction
 } from "../../daemon/db/sessionArtifactRepository.ts";
 import { getLogbookArtifactDetail } from "../../daemon/db/logbookArtifactRepository.ts";
+import { getSessionDossier } from "../../daemon/db/sessionDossierRepository.ts";
 import { iterateSessionTranscriptItems, type SessionTranscriptKindFilter } from "../../daemon/db/sessionTranscriptRepository.ts";
 import { getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "../../daemon/db/sqlite.ts";
@@ -33,6 +36,7 @@ import {
   claimWorkbenchSessionsInTransaction,
   ensureWorkbenchSessionState,
   markWorkbenchQualityPassedInTransaction,
+  markWorkbenchSessionEnrichmentSatisfiedInTransaction,
   markContributionSatisfactionForProvenanceInTransaction,
   markWorkbenchArtifactAppliedInTransaction,
   markWorkbenchArtifactPublishedInTransaction,
@@ -47,8 +51,7 @@ import {
 } from "../../daemon/db/workbenchPipelineRepository.ts";
 import { runCaptureQualityPrecheck } from "../qualityPrecheck.ts";
 import { fingerprintWorkbenchOutput } from "../applyArtifact.ts";
-import { applySessionEnrichmentInTransaction } from "../applySessionEnrichment.ts";
-import type { SessionEnrichmentOutput, WorkbenchValidationEvidence } from "../types.ts";
+import type { WorkbenchValidationEvidence } from "../types.ts";
 import { getAuthoringBundleSchema } from "./authoringSchemas.ts";
 import {
   authoringEvidenceRevision,
@@ -56,6 +59,11 @@ import {
   getAuthoringEvidencePage
 } from "./evidenceCatalog.ts";
 import { findArtifactSignatureFindings, validateAuthoringBundle } from "./authoringValidation.ts";
+import {
+  buildPublishedDossierSnapshot,
+  dossierEvidenceRefs,
+  dossierSnapshotFingerprint
+} from "./dossierSnapshot.ts";
 
 const AUTHORING_LEASE_MS = 60 * 60_000;
 
@@ -283,6 +291,89 @@ export function finishAuthoringRun(
   });
 }
 
+export function canonicalDossierCapsule(snapshot: PublishedSessionDossierV1): {
+  confidence: "high" | "medium" | "low";
+  highlight: string;
+  project?: string;
+  summary: string;
+  title: string;
+} {
+  return {
+    confidence:
+      snapshot.durableEnrichment?.sessionSummary.confidence ??
+      ({ authoritative: "high", inferred: "medium", heuristic: "low" } as const)[
+        snapshot.identity.sourceConfidence
+      ],
+    highlight: snapshot.attention[0]?.title ?? snapshot.verification.summary,
+    project: snapshot.identity.project,
+    summary:
+      snapshot.durableEnrichment?.sessionSummary.text ??
+      snapshot.narrative.finalAssistantMessage ??
+      snapshot.narrative.outcome ??
+      snapshot.narrative.objective ??
+      snapshot.identity.title,
+    title: snapshot.identity.title
+  };
+}
+
+export function publishCanonicalDossierInTransaction(
+  db: MastheadDatabase,
+  sessionId: string,
+  actorId: string
+): SessionArtifactRecord {
+  const canonical = getSessionDossier(db, sessionId);
+  if (!canonical) throw new Error(`canonical_dossier_missing:${sessionId}`);
+  const snapshot = buildPublishedDossierSnapshot(canonical);
+  const capsule = canonicalDossierCapsule(snapshot);
+  const applied = applySessionArtifactInTransaction(db, {
+    artifactKind: "session_dossier",
+    confidence: capsule.confidence,
+    content: snapshot,
+    contentFingerprint: dossierSnapshotFingerprint(snapshot),
+    createdBy: `workbench_authoring_v2:${actorId}`,
+    evidenceRefs: dossierEvidenceRefs(snapshot),
+    highlight: capsule.highlight,
+    projectLabel: capsule.project,
+    provenanceSessionIds: [sessionId],
+    schemaVersion: snapshot.snapshotVersion,
+    sessionId,
+    summary: capsule.summary,
+    title: capsule.title,
+    validation: {
+      canonicalSnapshot: true,
+      contract: "canonical-session-dossier-v1",
+      ok: true
+    }
+  });
+  const actor = { id: actorId, kind: "agent" } as const;
+  let state = readWorkbenchSessionState(db, sessionId);
+  if (snapshot.enrichment.status === "current" && state?.sessionEnrichmentStatus !== "satisfied") {
+    markWorkbenchSessionEnrichmentSatisfiedInTransaction(db, { actor, sessionId });
+    state = readWorkbenchSessionState(db, sessionId);
+  }
+  if (state?.sessionDossierStatus !== "satisfied") {
+    markWorkbenchArtifactAppliedInTransaction(db, {
+      actor,
+      artifactKind: "session_dossier",
+      sessionId
+    });
+  }
+  return publishSessionArtifactInTransaction(db, applied.artifactId)!;
+}
+
+export function publishCanonicalDossiers(
+  db: MastheadDatabase,
+  input: { actorId: string; sessionIds: string[] }
+): CanonicalDossierPublicationReceipt {
+  if (input.sessionIds.length > 100) throw new Error("canonical_dossier_batch_too_large");
+  return withImmediateTransaction(db, () => ({
+    artifactIds: input.sessionIds.map(
+      (sessionId) => publishCanonicalDossierInTransaction(db, sessionId, input.actorId).artifactId
+    ),
+    sessionIds: [...input.sessionIds]
+  }));
+}
+
 function requireLegacyAuthoringBundle(run: WorkbenchAuthoringRunDto): WorkbenchAuthoringBundle {
   if (!run.bundle) throw new Error(`authoring_run_bundle_missing:${run.runId}`);
   if (run.contractVersion !== "workbench-authoring-v1" || run.bundle.bundleVersion !== "workbench-authoring-v1") {
@@ -308,22 +399,7 @@ function finishInsideTransaction(
   }> = [];
 
   for (const sessionPackage of run.bundle.sessionPackages) {
-    applySessionEnrichmentInTransaction(db, {
-      output: sessionPackage.enrichment as SessionEnrichmentOutput,
-      sessionId: sessionPackage.sessionId
-    });
-    const dossier = applyAuthoringArtifactInTransaction(db, {
-      actorId: run.actorId,
-      kind: "session_dossier",
-      output: sessionPackage.dossier,
-      provenanceSessionIds: [sessionPackage.sessionId],
-      seedSessionId: sessionPackage.sessionId
-    });
-    markWorkbenchArtifactAppliedInTransaction(db, {
-      actor,
-      artifactKind: "session_dossier",
-      sessionId: sessionPackage.sessionId
-    });
+    const dossier = publishCanonicalDossierInTransaction(db, sessionPackage.sessionId, run.actorId);
     appliedArtifacts.push({
       artifact: dossier,
       kind: "session_dossier",
