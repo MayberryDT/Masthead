@@ -2,6 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
+import { isDeepStrictEqual } from "node:util";
+import { upsertSessionEnrichment } from "../../daemon/db/enrichmentRepository.ts";
 import { getLogbookArtifactDetail, searchLogbookArtifacts } from "../../daemon/db/logbookArtifactRepository.ts";
 import { getSessionDossier } from "../../daemon/db/sessionDossierRepository.ts";
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../../daemon/db/schema.ts";
@@ -14,7 +16,7 @@ import type {
   WorkbenchAutomaticArtifactKind,
   WorkbenchClaimSupport
 } from "../../shared/workbenchAuthoring.ts";
-import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
+import type { SessionDossierDto } from "../../shared/sessionDossier.ts";
 import { substantiveFingerprint } from "./artifactQuality.ts";
 import {
   discoverArtifactCandidatePage,
@@ -32,9 +34,36 @@ import {
   seedDurableArtifactCorpus,
   seedToolHeavyPerformanceSessions
 } from "./__fixtures__/durableArtifactCorpus.ts";
-import { buildPublishedDossierSnapshot, dossierSnapshotFingerprint } from "./dossierSnapshot.ts";
 
 type KindMix = Record<WorkbenchAutomaticArtifactKind, number>;
+
+export const CANONICAL_DOSSIER_REQUIRED_SECTIONS = [
+  "identity",
+  "coverage",
+  "narrative",
+  "files",
+  "tools",
+  "verification",
+  "attention",
+  "timeline",
+  "excerpts",
+  "durableEnrichment",
+  "enrichment",
+  "reuse",
+  "usage"
+] as const;
+
+type ClaimSupportCheck = {
+  artifactId?: string;
+  path: string;
+  requiredSupportKind: WorkbenchClaimSupport["supportKind"];
+  evidenceRef?: string;
+  supportCount: number;
+  excerptLength: number;
+  exactExcerpt: boolean;
+  pathResolved: boolean;
+  passed: boolean;
+};
 
 export type DurableArtifactReuseTaskResult = {
   task: "oauth_repair" | "rejected_architecture_alternative" | "incident_sequence" | "dossier_changed_file" | "dossier_verification_failure";
@@ -54,9 +83,18 @@ export type DurableArtifactCorpusReport = {
   machineGatePassed: boolean;
   failures: string[];
   dossierFidelity: number;
-  dossierFidelityChecks: Array<{ artifactId: string; sessionId: string; matched: boolean }>;
+  dossierFidelityChecks: Array<{
+    artifactId: string;
+    sessionId: string;
+    matched: boolean;
+    missingRequiredSections: string[];
+  }>;
   claimSupportCoverage: number;
-  claimSupportChecks: Array<{ artifactId: string; path: string; evidenceRef: string; exactExcerpt: boolean }>;
+  claimSupportChecks: ClaimSupportCheck[];
+  claimSupportIntegrityFailureCount: number;
+  claimSupportIntegrityFailures: Array<{ artifactId: string; failure: string }>;
+  persistedArtifactEquality: number;
+  persistedArtifactEqualityChecks: Array<{ artifactId: string; matched: boolean }>;
   candidateRecall: number;
   candidatePrecision: number;
   expectedCandidateLabels: string[];
@@ -120,6 +158,29 @@ const EXPECTED_CANDIDATE_LABELS = [
 
 const EXPECTED_KINDS: KindMix = { adr: 2, incident_timeline: 2, runbook: 3 };
 const EXPECTED_PUBLISHED_KINDS: KindMix = { adr: 1, incident_timeline: 1, runbook: 1 };
+const REQUIRED_CLAIM_SUPPORT: Record<
+  WorkbenchAutomaticArtifactKind,
+  Array<{ path: string; supportKind: WorkbenchClaimSupport["supportKind"] }>
+> = {
+  runbook: [
+    { path: "problemSignature.symptoms[0]", supportKind: "problem" },
+    { path: "fixSteps[0]", supportKind: "change" },
+    { path: "validationChecks[0]", supportKind: "verification" }
+  ],
+  adr: [
+    { path: "decision", supportKind: "decision" },
+    { path: "alternatives[0]", supportKind: "alternative" }
+  ],
+  incident_timeline: [
+    { path: "symptom", supportKind: "problem" },
+    { path: "timeline[0].summary", supportKind: "timeline" },
+    { path: "timeline[1].summary", supportKind: "timeline" },
+    { path: "timeline[2].summary", supportKind: "timeline" },
+    { path: "timeline[3].summary", supportKind: "timeline" },
+    { path: "rootCause", supportKind: "root_cause" },
+    { path: "remediation[0]", supportKind: "remediation" }
+  ]
+};
 const PROTOCOL_PHRASES = [
   "cursor pagination",
   "canonical evidence",
@@ -146,21 +207,22 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
   try {
     db = await openFixtureDatabase(join(fixtureDir, "masthead.sqlite"));
     seedDurableArtifactCorpus(db);
+    seedAcceptanceEnrichments(db);
     const candidates = discoverArtifactCandidates(db, corpusSessionIds());
-    const expectedSnapshots = new Map<string, PublishedSessionDossierV1>();
+    const canonicalDossiers = new Map<string, SessionDossierDto>();
     const selected = [
       requireCandidate(candidates, "runbook", "session:oauth-fixed"),
       requireCandidate(candidates, "adr", "session:decision-local-first"),
       requireCandidate(candidates, "incident_timeline", "session:incident-root-cause")
     ];
     const receipts: WorkbenchAuthoringReceiptV2[] = [];
-    const outputByArtifactId = new Map<string, Record<string, unknown>>();
+    const submittedOutputByArtifactId = new Map<string, Record<string, unknown>>();
 
     for (const candidate of selected) {
       for (const sessionId of candidate.provenanceSessionIds) {
         const canonical = getSessionDossier(db, sessionId);
         if (!canonical) throw new Error(`fixture_dossier_missing:${sessionId}`);
-        expectedSnapshots.set(sessionId, buildPublishedDossierSnapshot(canonical, "fixture-captured-at"));
+        canonicalDossiers.set(sessionId, structuredClone(canonical));
       }
       const opened = openCandidateAuthoringRun(db, {
         actorId: "durable-artifact-gate",
@@ -172,7 +234,7 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
       if (!submitted.accepted) throw new Error(`fixture_bundle_rejected:${JSON.stringify(submitted.findings)}`);
       const receipt = requireV2Receipt(finishAuthoringRun(db, { runId: opened.run.runId }));
       receipts.push(receipt);
-      outputByArtifactId.set(receipt.optionalArtifact.artifactId, bundle.artifact.output);
+      submittedOutputByArtifactId.set(receipt.optionalArtifact.artifactId, structuredClone(bundle.artifact.output));
     }
 
     const expectedLabels = EXPECTED_CANDIDATE_LABELS;
@@ -188,31 +250,41 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
     const dossierFidelityChecks = receipts.flatMap((receipt) => receipt.dossierArtifactIds.map((artifactId, index) => {
       const sessionId = receipt.provenanceSessionIds[index]!;
       const detail = requireArtifact(db!, artifactId);
-      const actual = detail.body as PublishedSessionDossierV1;
-      const expected = expectedSnapshots.get(sessionId)!;
+      const comparison = comparePublishedDossierToCanonical(detail.body, canonicalDossiers.get(sessionId)!);
       return {
         artifactId,
-        matched: actual.snapshotVersion === "canonical-session-dossier-v1" &&
-          dossierSnapshotFingerprint(actual) === dossierSnapshotFingerprint(expected),
+        matched: comparison.matched,
+        missingRequiredSections: comparison.missingRequiredSections,
         sessionId
       };
     }));
 
-    const claimSupportChecks = receipts.flatMap((receipt) => {
-      const artifactId = receipt.optionalArtifact.artifactId;
-      const output = outputByArtifactId.get(artifactId)!;
-      const supports = claimSupports(output);
-      const evidence = evidenceTextByRef(db!, receipt.provenanceSessionIds);
-      return supports.map((support) => ({
-        artifactId,
-        evidenceRef: support.evidenceRef,
-        exactExcerpt: normalize(evidence.get(support.evidenceRef) ?? "").includes(normalize(support.excerpt)) &&
-          resolvePath(output, support.path),
-        path: support.path
-      }));
-    });
-
     const optionalArtifacts = receipts.map((receipt) => requireArtifact(db!, receipt.optionalArtifact.artifactId));
+    const persistedArtifactEqualityChecks = optionalArtifacts.map((artifact) => ({
+      artifactId: artifact.capsule.artifactId,
+      matched: persistedArtifactEqualsSubmission(
+        artifact.body,
+        submittedOutputByArtifactId.get(artifact.capsule.artifactId)
+      )
+    }));
+    const claimSupportEvaluations = receipts.map((receipt) => {
+      const artifactId = receipt.optionalArtifact.artifactId;
+      const persisted = requireArtifact(db!, artifactId);
+      return {
+        artifactId,
+        evaluation: evaluatePersistedClaimSupport(
+          receipt.optionalArtifact.kind,
+          persisted.body,
+          evidenceTextByRef(db!, receipt.provenanceSessionIds)
+        )
+      };
+    });
+    const claimSupportChecks = claimSupportEvaluations.flatMap(({ artifactId, evaluation }) =>
+      evaluation.checks.map((check) => ({ ...check, artifactId }))
+    );
+    const claimSupportIntegrityFailures = claimSupportEvaluations.flatMap(({ artifactId, evaluation }) =>
+      evaluation.integrityFailures.map((failure) => ({ artifactId, failure }))
+    );
     const protocolLeaks = optionalArtifacts.flatMap((artifact) => {
       const body = JSON.stringify(artifact.body).toLowerCase();
       return PROTOCOL_PHRASES.flatMap((phrase) => body.includes(phrase) ? [{ artifactId: artifact.capsule.artifactId, phrase }] : []);
@@ -268,8 +340,15 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
       productionAccessed: false as const,
       dossierFidelity: ratio(dossierFidelityChecks.filter((check) => check.matched).length, dossierFidelityChecks.length),
       dossierFidelityChecks,
-      claimSupportCoverage: ratio(claimSupportChecks.filter((check) => check.exactExcerpt).length, claimSupportChecks.length),
+      claimSupportCoverage: ratio(claimSupportChecks.filter((check) => check.passed).length, claimSupportChecks.length),
       claimSupportChecks,
+      claimSupportIntegrityFailureCount: claimSupportIntegrityFailures.length,
+      claimSupportIntegrityFailures,
+      persistedArtifactEquality: ratio(
+        persistedArtifactEqualityChecks.filter((check) => check.matched).length,
+        persistedArtifactEqualityChecks.length
+      ),
+      persistedArtifactEqualityChecks,
       candidateRecall: ratio(matchingCandidateCount, expectedLabels.length),
       candidatePrecision: ratio(matchingCandidateCount, actualLabels.length),
       expectedCandidateLabels: expectedLabels,
@@ -331,6 +410,8 @@ export function durableArtifactMachineFailures(report: Omit<DurableArtifactCorpu
   const failures: string[] = [];
   if (report.dossierFidelity < 1) failures.push("dossier_fidelity_below_1");
   if (report.claimSupportCoverage < 1) failures.push("claim_support_coverage_below_1");
+  if (report.claimSupportIntegrityFailureCount > 0) failures.push("claim_support_integrity_failed");
+  if (report.persistedArtifactEquality < 1) failures.push("persisted_artifact_differs_from_submission");
   if (report.candidateRecall < 1) failures.push("candidate_recall_below_1");
   if (report.candidatePrecision < 1) failures.push("candidate_precision_below_1");
   if (report.logbookRetrievalRecallAt5 < 1) failures.push("logbook_recall_at_5_below_1");
@@ -352,6 +433,82 @@ export function durableArtifactMachineFailures(report: Omit<DurableArtifactCorpu
   ) failures.push("candidate_discovery_fixture_not_tool_heavy");
   if (report.candidateDiscoveryPageDurationMs > 2_000) failures.push("candidate_discovery_page_exceeds_2000ms");
   return failures;
+}
+
+export function comparePublishedDossierToCanonical(
+  published: unknown,
+  canonical: SessionDossierDto
+): { matched: boolean; missingRequiredSections: string[] } {
+  const canonicalClone = jsonClone(canonical) as Record<string, unknown>;
+  delete canonicalClone.artifacts;
+  const expected = {
+    ...canonicalClone,
+    capturedAt: "normalized-captured-at",
+    snapshotVersion: "canonical-session-dossier-v1"
+  };
+  const actual = isRecord(published) ? jsonClone(published) : {};
+  const capturedAtPresent = typeof actual.capturedAt === "string" && actual.capturedAt.length > 0;
+  if (capturedAtPresent) actual.capturedAt = "normalized-captured-at";
+  const missingRequiredSections = CANONICAL_DOSSIER_REQUIRED_SECTIONS.filter(
+    (section) => !Object.prototype.hasOwnProperty.call(actual, section)
+  );
+  return {
+    matched: capturedAtPresent && missingRequiredSections.length === 0 && isDeepStrictEqual(actual, expected),
+    missingRequiredSections: [...missingRequiredSections]
+  };
+}
+
+export function evaluatePersistedClaimSupport(
+  kind: WorkbenchAutomaticArtifactKind,
+  persisted: unknown,
+  evidenceByRef: Map<string, string>
+): { checks: ClaimSupportCheck[]; expectedCount: number; passedCount: number; integrityFailures: string[] } {
+  const body = isRecord(persisted) ? persisted : {};
+  const rawSupports = Array.isArray(body.claimSupport) ? body.claimSupport : [];
+  const supports = claimSupports(body);
+  const required = REQUIRED_CLAIM_SUPPORT[kind];
+  const checks = required.map(({ path, supportKind }) => {
+    const pathSupports = supports.filter((support) => support.path === path);
+    const support = pathSupports.length === 1 && pathSupports[0]!.supportKind === supportKind
+      ? pathSupports[0]
+      : undefined;
+    const excerpt = normalize(support?.excerpt ?? "");
+    const exactExcerpt = Boolean(
+      support &&
+      excerpt.length >= 20 &&
+      normalize(evidenceByRef.get(support.evidenceRef) ?? "").includes(excerpt)
+    );
+    const pathResolved = resolvePath(body, path);
+    return {
+      evidenceRef: support?.evidenceRef,
+      exactExcerpt,
+      excerptLength: excerpt.length,
+      passed: pathSupports.length === 1 && Boolean(support) && pathResolved && exactExcerpt,
+      path,
+      pathResolved,
+      requiredSupportKind: supportKind,
+      supportCount: pathSupports.length
+    };
+  });
+  const expectedPairs = new Set(required.map(({ path, supportKind }) => `${path}|${supportKind}`));
+  const integrityFailures = [
+    ...(Array.isArray(body.claimSupport) ? [] : ["claim_support_not_array"]),
+    ...Array.from({ length: Math.max(0, rawSupports.length - supports.length) }, (_, index) => `malformed_claim_support:${index}`),
+    ...checks.flatMap((check) => check.passed ? [] : [`required_claim_support_failed:${check.path}:${check.requiredSupportKind}`]),
+    ...supports.flatMap((support) => expectedPairs.has(`${support.path}|${support.supportKind}`)
+      ? []
+      : [`unexpected_claim_support:${support.path}:${support.supportKind}`])
+  ];
+  return {
+    checks,
+    expectedCount: required.length,
+    integrityFailures,
+    passedCount: checks.filter((check) => check.passed).length
+  };
+}
+
+export function persistedArtifactEqualsSubmission(persisted: unknown, submitted: unknown): boolean {
+  return submitted !== undefined && isDeepStrictEqual(persisted, submitted);
 }
 
 function runReuseTasks(db: MastheadDatabase): DurableArtifactReuseTaskResult[] {
@@ -468,6 +625,67 @@ async function openFixtureDatabase(path: string): Promise<MastheadDatabase> {
   return db;
 }
 
+function seedAcceptanceEnrichments(db: MastheadDatabase): void {
+  const sessions = [
+    ["session:oauth-fixed", "Repair OAuth callback failure"],
+    ["session:decision-local-first", "Choose local-first storage"],
+    ["session:incident-root-cause", "Production ingestion outage"]
+  ] as const;
+  for (const [sessionId, title] of sessions) {
+    const durableEnrichment = {
+      generatedAt: "2026-07-01T12:10:00.000Z",
+      sessionDossier: {
+        blockers: [],
+        continuation: { constraints: [], openQuestions: [] },
+        decisions: [],
+        evidenceRefs: [],
+        keyWork: [`Captured ${title}.`],
+        verification: {
+          commands: [],
+          evidenceRefs: [],
+          failures: [],
+          status: "unknown" as const,
+          summary: "Canonical fixture evidence determines verification state."
+        },
+        warnings: []
+      },
+      sessionSummary: {
+        confidence: "high" as const,
+        evidenceRefs: [],
+        state: "completed" as const,
+        text: title
+      },
+      sessionTitle: {
+        basis: "dominant_work" as const,
+        confidence: "high" as const,
+        evidenceRefs: [],
+        text: title
+      },
+      source: "deterministic" as const,
+      version: "session-capsule-v4" as const
+    };
+    upsertSessionEnrichment(db, {
+      content: {
+        candidateDecisions: [],
+        durableEnrichment,
+        searchPhrases: [title],
+        technologies: [],
+        title,
+        topics: ["durable-artifact-acceptance"],
+        unresolved: []
+      },
+      contentFingerprint: `durable-artifact-acceptance:${sessionId}`,
+      enrichmentKind: "session_capsule",
+      generatedAt: "2026-07-01T12:10:00.000Z",
+      promptVersion: "session-capsule-v4",
+      provider: "deterministic",
+      sessionId,
+      sourceRefs: [],
+      status: "current"
+    });
+  }
+}
+
 function requireCandidate(
   candidates: WorkbenchArtifactCandidate[],
   kind: WorkbenchAutomaticArtifactKind,
@@ -570,4 +788,8 @@ function stringArray(value: unknown): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function jsonClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
+import type { SessionDossierDto } from "../../../shared/sessionDossier.ts";
 import {
+  CANONICAL_DOSSIER_REQUIRED_SECTIONS,
+  comparePublishedDossierToCanonical,
   durableArtifactMachineFailures,
+  evaluatePersistedClaimSupport,
+  persistedArtifactEqualsSubmission,
   runDurableArtifactCorpus
 } from "../durableArtifactCorpusAcceptance.ts";
 
@@ -10,6 +15,8 @@ describe("durable artifact acceptance corpus", () => {
 
     expect(report.dossierFidelity).toBe(1);
     expect(report.claimSupportCoverage).toBe(1);
+    expect(report.claimSupportIntegrityFailureCount).toBe(0);
+    expect(report.persistedArtifactEquality).toBe(1);
     expect(report.candidateRecall).toBe(1);
     expect(report.candidatePrecision).toBe(1);
     expect(report.logbookRetrievalRecallAt5).toBe(1);
@@ -37,6 +44,8 @@ describe("durable artifact acceptance corpus", () => {
     const mandatoryFailures: Array<[Partial<typeof metrics>, string]> = [
       [{ dossierFidelity: 0.99 }, "dossier_fidelity_below_1"],
       [{ claimSupportCoverage: 0.99 }, "claim_support_coverage_below_1"],
+      [{ claimSupportIntegrityFailureCount: 1 }, "claim_support_integrity_failed"],
+      [{ persistedArtifactEquality: 0.99 }, "persisted_artifact_differs_from_submission"],
       [{ candidateRecall: 0.99 }, "candidate_recall_below_1"],
       [{ candidatePrecision: 0.99 }, "candidate_precision_below_1"],
       [{ logbookRetrievalRecallAt5: 0.99 }, "logbook_recall_at_5_below_1"],
@@ -56,4 +65,131 @@ describe("durable artifact acceptance corpus", () => {
       expect(durableArtifactMachineFailures({ ...metrics, ...override })).toContain(expectedFailure);
     }
   });
+
+  test("independently rejects a published dossier that drops an original section", () => {
+    const canonical = canonicalDossierShape();
+    const { artifacts: _artifacts, ...originalSections } = structuredClone(canonical);
+    const published = {
+      ...originalSections,
+      capturedAt: "2026-07-13T00:00:00.000Z",
+      snapshotVersion: "canonical-session-dossier-v1"
+    } as Record<string, unknown>;
+
+    expect(comparePublishedDossierToCanonical(published, canonical)).toMatchObject({
+      matched: true,
+      missingRequiredSections: []
+    });
+    delete published.narrative;
+    expect(comparePublishedDossierToCanonical(published, canonical)).toMatchObject({
+      matched: false,
+      missingRequiredSections: ["narrative"]
+    });
+    expect(CANONICAL_DOSSIER_REQUIRED_SECTIONS).toEqual([
+      "identity",
+      "coverage",
+      "narrative",
+      "files",
+      "tools",
+      "verification",
+      "attention",
+      "timeline",
+      "excerpts",
+      "durableEnrichment",
+      "enrichment",
+      "reuse",
+      "usage"
+    ]);
+  });
+
+  test("rejects stripped persisted claim support and an unresolved required path", () => {
+    const body = validPersistedRunbook();
+    const evidence = new Map([
+      ["problem", "OAuth callback test failed with an invalid state nonce."],
+      ["change", "modified auth/callback.ts"],
+      ["verification", "Callback regression test passed after the nonce repair."]
+    ]);
+    expect(evaluatePersistedClaimSupport("runbook", body, evidence)).toMatchObject({
+      expectedCount: 3,
+      passedCount: 3,
+      integrityFailures: []
+    });
+
+    const stripped = structuredClone(body);
+    stripped.claimSupport = [];
+    const strippedResult = evaluatePersistedClaimSupport("runbook", stripped, evidence);
+    expect(strippedResult.passedCount / strippedResult.expectedCount).toBeLessThan(1);
+    expect(strippedResult.integrityFailures).not.toEqual([]);
+
+    const missingPath = structuredClone(body);
+    delete missingPath.fixSteps;
+    const missingPathResult = evaluatePersistedClaimSupport("runbook", missingPath, evidence);
+    expect(missingPathResult.passedCount / missingPathResult.expectedCount).toBeLessThan(1);
+    expect(missingPathResult.checks.find((check) => check.path === "fixSteps[0]")?.pathResolved).toBe(false);
+
+    expect(persistedArtifactEqualsSubmission(body, structuredClone(body))).toBe(true);
+    expect(persistedArtifactEqualsSubmission({ ...body, title: "corrupted" }, body)).toBe(false);
+  });
 });
+
+function canonicalDossierShape(): SessionDossierDto {
+  return {
+    artifacts: [{ artifactId: "old", artifactKind: "runbook", content: {}, createdAt: "now", evidenceRefs: [], status: "current", updatedAt: "now" }],
+    attention: [],
+    coverage: { level: "metadata_only", transcript: { assistantMessages: 0, checkpoints: 0, fileEffects: 0, hasUsableTranscript: false, lowValueItems: 0, messages: 0, runtimeSignals: 0, toolCalls: 0, toolResults: 0, userMessages: 0 }, warnings: [] },
+    durableEnrichment: {
+      sessionDossier: {
+        blockers: [],
+        continuation: { constraints: [], openQuestions: [] },
+        decisions: [],
+        evidenceRefs: [],
+        keyWork: [],
+        verification: { commands: [], evidenceRefs: [], failures: [], status: "unknown", summary: "Unknown." },
+        warnings: []
+      },
+      sessionSummary: { confidence: "high", evidenceRefs: [], state: "completed", text: "Test dossier" },
+      sessionTitle: { basis: "dominant_work", confidence: "high", evidenceRefs: [], text: "Test dossier" },
+      version: "session-capsule-v4"
+    },
+    enrichment: { status: "not_enriched" },
+    excerpts: [],
+    files: [],
+    identity: {
+      hostId: "host:test",
+      lastActivityAt: "2026-07-13T00:00:00.000Z",
+      lifecycle: "ended",
+      models: [],
+      runtime: "codex",
+      sessionId: "session:test",
+      sourceConfidence: "authoritative",
+      sourceSessionId: "source:test",
+      title: "Test dossier"
+    },
+    narrative: { objective: "Test the independent contract.", technologies: [], topics: [], unresolved: [] },
+    reuse: {
+      canonicalSessionId: "session:test",
+      copyableContext: "Test",
+      mcpIncluded: true,
+      sourceConfidence: "authoritative",
+      sourceRuntime: "codex",
+      sourceSessionId: "source:test"
+    },
+    timeline: [],
+    tools: [],
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, usageRows: 0 },
+    verification: { commands: [], status: "unknown", summary: "No verification signal captured." }
+  };
+}
+
+function validPersistedRunbook(): Record<string, unknown> {
+  return {
+    title: "Repair OAuth callback state nonce validation",
+    problemSignature: { symptoms: ["OAuth callback test failed with an invalid state nonce."] },
+    fixSteps: ["Apply the recorded callback change: modified auth/callback.ts."],
+    validationChecks: ["Callback regression test passed after the nonce repair."],
+    claimSupport: [
+      { path: "problemSignature.symptoms[0]", evidenceRef: "problem", excerpt: "OAuth callback test failed with an invalid state nonce.", supportKind: "problem" },
+      { path: "fixSteps[0]", evidenceRef: "change", excerpt: "modified auth/callback.ts", supportKind: "change" },
+      { path: "validationChecks[0]", evidenceRef: "verification", excerpt: "Callback regression test passed after the nonce repair.", supportKind: "verification" }
+    ]
+  };
+}

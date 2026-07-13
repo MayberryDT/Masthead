@@ -33,9 +33,9 @@ The expected labeled candidate mix is three runbooks, two ADRs, and two incident
 
 The performance database reuses the candidate-discovery fixture shared with the Task 6 regression test: 100 sessions, 60 tool calls and 60 tool results per session, or 12,000 canonical evidence items total. The report includes those counts and fails if the fixture becomes trivial; database setup time is excluded from the two-second measurement.
 
-`dossierFidelity` compares each published dossier with the original `canonical-session-dossier-v1` snapshot generated from the same canonical session dossier. Only `capturedAt`, which is deliberately excluded by the product fingerprint contract, may differ.
+`dossierFidelity` is independent of the product snapshot builder and fingerprint. Before publication, the harness deep-clones the live canonical `SessionDossierDto`, removes only its recursive `artifacts` field, adds the expected `canonical-session-dossier-v1` marker, normalizes `capturedAt`, and then deep-compares every persisted Logbook body field. A golden list also requires identity, coverage, narrative, files, tools, verification, attention, timeline, excerpts, durable enrichment, enrichment state, reuse, and usage.
 
-`claimSupportCoverage` checks every declared support path against the published body and requires its normalized excerpt to occur verbatim in the referenced canonical evidence item. Candidate submission still goes through the production semantic quality validator before publication.
+`claimSupportCoverage` reads `claimSupport` back from each persisted Logbook optional-artifact body. It independently requires the exact canary path/support-kind matrix, requires every path exactly once, resolves the path in the persisted body, and requires a normalized excerpt of at least 20 characters to occur verbatim in canonical evidence. The gate also deep-compares persisted optional bodies with their accepted submissions. Candidate submission still goes through the production semantic quality validator before publication.
 
 ## Artifact-only reuse tasks
 
