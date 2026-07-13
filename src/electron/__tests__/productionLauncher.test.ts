@@ -8,6 +8,7 @@ import {
   classifyProductionProcess,
   installProductionLauncher,
   productionHealthPollPolicy,
+  productionShutdownTimeout,
   waitForProductionHealth,
   startProduction,
   stopProduction,
@@ -114,6 +115,23 @@ describe("production lifecycle launcher", () => {
       now: () => now
     })).rejects.toThrow("within 5 minutes");
     expect(now).toBe(300_001);
+  });
+
+  test("extends startup only for an active migration and accepts health after the normal deadline", async () => {
+    let now = 0;
+    const health = { ok: true };
+    await expect(waitForProductionHealth({ port: 17383 }, {
+      delay: async (milliseconds: number) => { now += milliseconds; },
+      fetchHealth: async (_port: number, timeoutMs: number) => {
+        now += timeoutMs;
+        return now >= 360_000 ? health : undefined;
+      },
+      migrationActive: async () => true,
+      now: () => now
+    })).resolves.toBe(health);
+    expect(now).toBeGreaterThanOrEqual(360_000);
+    expect(productionShutdownTimeout(false)).toBe(30_000);
+    expect(productionShutdownTimeout(true)).toBe(1_800_000);
   });
 
   test("reads proc executable symlink text so deleted kernel identities remain observable", async () => {
@@ -554,6 +572,7 @@ describe("production lifecycle launcher", () => {
       acquireLease: async () => ({ release: async () => calls.push("release") }),
       activateLaunchers: async () => calls.push("activate-launchers"),
       currentTarget: async () => oldTarget,
+      cleanupCandidate: async () => calls.push("cleanup-candidate"),
       restoreCurrent: async () => calls.push("restore-current"),
       restoreLaunchers: async () => calls.push("restore-launchers"),
       stageLaunchers: async () => { calls.push("stage"); return {
@@ -566,8 +585,44 @@ describe("production lifecycle launcher", () => {
     })).rejects.toThrow("rollback restarted=true");
     expect(calls).toEqual([
       "stage", "stop", "swap", "activate-launchers", "start-new",
-      "restore-current", "restore-launchers", "restart-old", "release"
+      "cleanup-candidate", "restore-current", "restore-launchers", "restart-old", "release"
     ]);
+  });
+
+  test("transition never rolls current back while immutable candidate cleanup is unresolved", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+    const calls: string[] = [];
+    await expect(transitionProduction({
+      bundleDigest: config.bundleDigest, bundlePath: target, dataDirectory: config.dataDirectory, homeDir, productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      activateLaunchers: async () => calls.push("activate-launchers"),
+      cleanupCandidate: async () => { calls.push("cleanup-candidate"); throw new Error("daemon still verifying backup"); },
+      currentTarget: async () => target,
+      restoreCurrent: async () => calls.push("restore-current"),
+      restoreLaunchers: async () => calls.push("restore-launchers"),
+      stageLaunchers: async () => ({ staged: true }),
+      start: async () => { throw new Error("health timeout; cleanup stopped=false; cleanup error=daemon blocked"); },
+      stop: async () => undefined,
+      swapCurrent: async () => calls.push("swap")
+    })).rejects.toThrow("rollback skipped; candidate cleanup error=daemon still verifying backup");
+    expect(calls).toEqual(["swap", "activate-launchers", "cleanup-candidate", "release"]);
+  });
+
+  test("failed start reports the exact cleanup error detail", async () => {
+    const { config, target } = await fixture();
+    await expect(startProduction(config, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      captureSpawned: async () => undefined,
+      cleanupSpawned: async () => ({ error: "daemon PID 91 did not stop after migration-aware SIGTERM wait", stopped: false }),
+      currentTarget: async () => target,
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => [],
+      spawnElectron: async () => 90,
+      waitForHealth: async () => { throw new Error("health timeout"); }
+    })).rejects.toThrow("cleanup error=daemon PID 91 did not stop");
   });
 
   test("stop revalidates PID identity, sends SIGTERM only, and passes every offline gate", async () => {

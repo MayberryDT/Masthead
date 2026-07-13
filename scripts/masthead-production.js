@@ -26,6 +26,8 @@ import { verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
 const DEFAULT_PORT = 17383;
 const PRODUCTION_HEALTH_INTERVAL_MS = 250;
 const PRODUCTION_HEALTH_TIMEOUT_MS = 300_000;
+const PRODUCTION_MIGRATION_TIMEOUT_MS = 1_800_000;
+const PRODUCTION_SHUTDOWN_TIMEOUT_MS = 30_000;
 const VERSIONED_TARGET = /^Masthead-linux-x64-[A-Za-z0-9][A-Za-z0-9._+-]*$/u;
 
 export function productionHealthPollPolicy() {
@@ -34,6 +36,10 @@ export function productionHealthPollPolicy() {
     maxAttempts: PRODUCTION_HEALTH_TIMEOUT_MS / PRODUCTION_HEALTH_INTERVAL_MS,
     timeoutMs: PRODUCTION_HEALTH_TIMEOUT_MS
   };
+}
+
+export function productionShutdownTimeout(migrationActive) {
+  return migrationActive ? PRODUCTION_MIGRATION_TIMEOUT_MS : PRODUCTION_SHUTDOWN_TIMEOUT_MS;
 }
 
 export async function acquireLifecycleLease(leasePath) {
@@ -171,6 +177,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   const dependencies = {
     acquireLease: () => acquireLifecycleLease(config.lifecycleLeasePath),
     activateLaunchers: (staged) => activateStagedLaunchers(staged),
+    cleanupCandidate: (candidate) => stopProduction(candidate, { acquireLease: noLifecycleLease }),
     currentTarget: () => realpath(join(productionRoot, "current")).catch(() => undefined),
     restoreCurrent: (_oldTarget) => swapCurrentTarget(productionRoot, _oldTarget),
     restoreLaunchers: (staged) => restoreStagedLaunchers(staged),
@@ -194,6 +201,14 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
       await dependencies.activateLaunchers(staged);
       started = await dependencies.start(config);
     } catch (error) {
+      try {
+        await dependencies.cleanupCandidate(config);
+      } catch (cleanupError) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}; rollback skipped; candidate cleanup error=${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+          { cause: error }
+        );
+      }
       let restarted = false;
       try {
         if (oldTarget) await dependencies.restoreCurrent(oldTarget);
@@ -307,7 +322,7 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
         ? await dependencies.cleanupSpawned(captured, dependencies)
         : await cleanupFailedStart(captured, config, dependencies);
       throw new Error(
-        `${error instanceof Error ? error.message : String(error)}; cleanup stopped=${cleanup.stopped}`,
+        `${error instanceof Error ? error.message : String(error)}; cleanup stopped=${cleanup.stopped}${cleanup.error ? `; cleanup error=${cleanup.error}` : ""}`,
         { cause: error }
       );
     }
@@ -467,6 +482,7 @@ function defaultDependencies(config) {
     captureSpawned: (pid) => captureSpawnedProcess(pid, config),
     currentTarget: () => realpath(join(config.productionRoot, "current")).catch(() => undefined),
     fetchHealth: () => fetchHealth(config.port),
+    migrationActive: () => migrationStageActive(config),
     ownershipProbe: () => probeExclusiveOwnership(config),
     portBindable: () => portBindable(config.port),
     readProcess,
@@ -512,8 +528,8 @@ async function cleanupFailedStart(captured, config, dependencies) {
   try {
     await stopInsideLifecycleLease(config, dependencies, excludedPids);
     return { stopped: true };
-  } catch {
-    return { stopped: false };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error), stopped: false };
   }
 }
 
@@ -531,9 +547,10 @@ async function stopInsideLifecycleLease(config, dependencies, excludedPids = new
     dependencies.signal(processRecord.pid, "SIGTERM");
     signalled.push(processRecord);
   }
+  const exitTimeout = productionShutdownTimeout(await dependencies.migrationActive());
   for (const processRecord of signalled) {
-    if (!(await dependencies.waitForExit(processRecord.pid, processRecord.starttime, 30_000))) {
-      throw new Error(`Production PID ${processRecord.pid} did not stop after SIGTERM within 30 seconds; no SIGKILL was sent.`);
+    if (!(await dependencies.waitForExit(processRecord.pid, processRecord.starttime, exitTimeout))) {
+      throw new Error(`Production PID ${processRecord.pid} did not stop after SIGTERM within ${exitTimeout}ms; no SIGKILL was sent.`);
     }
   }
   const remaining = (await classifiedProcesses(config, dependencies)).filter((record) => !excludedPids.has(record.pid));
@@ -667,7 +684,7 @@ async function fetchHealth(port, timeoutMs = 750) {
 }
 
 async function waitForHealth(config) {
-  return waitForProductionHealth(config);
+  return waitForProductionHealth(config, { migrationActive: () => migrationStageActive(config) });
 }
 
 export async function waitForProductionHealth(config, adapters = {}) {
@@ -675,18 +692,45 @@ export async function waitForProductionHealth(config, adapters = {}) {
   const now = adapters.now || monotonicMilliseconds;
   const fetchAdapter = adapters.fetchHealth || fetchHealth;
   const delayAdapter = adapters.delay || delay;
-  const deadline = now() + policy.timeoutMs;
-  while (now() < deadline) {
+  const migrationActive = adapters.migrationActive || (async () => false);
+  const startedAt = now();
+  let deadline = startedAt + policy.timeoutMs;
+  let migrationExtended = false;
+  while (true) {
+    if (now() >= deadline) {
+      if (!migrationExtended && await migrationActive()) {
+        migrationExtended = true;
+        deadline = startedAt + PRODUCTION_MIGRATION_TIMEOUT_MS;
+      }
+      if (now() >= deadline) break;
+    }
     const requestBudget = Math.min(750, deadline - now());
     if (requestBudget <= 0) break;
     const health = await fetchAdapter(config.port, requestBudget);
-    if (now() >= deadline) break;
+    if (now() >= deadline) {
+      if (!migrationExtended && await migrationActive()) {
+        migrationExtended = true;
+        deadline = startedAt + PRODUCTION_MIGRATION_TIMEOUT_MS;
+      }
+      if (now() >= deadline) break;
+    }
     if (health) return health;
     const sleepBudget = Math.min(policy.intervalMs, deadline - now());
     if (sleepBudget <= 0) break;
     await delayAdapter(sleepBudget);
   }
-  throw new Error("Pinned Masthead production health did not become available within 5 minutes.");
+  throw new Error(
+    migrationExtended
+      ? "Pinned Masthead production health did not become available within the migration-aware 30 minute deadline."
+      : "Pinned Masthead production health did not become available within 5 minutes."
+  );
+}
+
+async function migrationStageActive(config) {
+  const databaseName = basename(config.databasePath);
+  const prefix = `.${databaseName}.migration-backup-stage-`;
+  const entries = await readdir(dirname(config.databasePath), { withFileTypes: true }).catch(() => []);
+  return entries.some((entry) => entry.isFile() && entry.name.startsWith(prefix));
 }
 
 function monotonicMilliseconds() {
