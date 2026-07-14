@@ -1,0 +1,438 @@
+{
+  "receiptVersion": 1,
+  "sourceDatabaseId": "a203fcdd-e720-4230-8146-967df054a2c4",
+  "selectionSource": "canonical session/evidence tables only on disposable verified copy",
+  "exclusions": [
+    "generated dossier and other artifact prose",
+    "raw transcripts and raw event payloads",
+    "session artifact membership, provenance, and search data",
+    "workbench authoring runs and run membership",
+    "artifact candidates, candidate provenance, revisions, signatures, and discovery results",
+    "review labels and candidate evaluation results"
+  ],
+  "deterministicPolicySummary": {
+    "eligibility": "Non-deleted sessions with at least one substantive user message, one narrative assistant message, and 500 combined evidence characters.",
+    "protocolEnvelopeExclusions": [
+      "AGENTS instructions",
+      "environment and permission envelopes",
+      "recommended-plugin envelopes",
+      "automation SYSTEM envelopes",
+      "approval-transcript envelopes",
+      "skill bodies",
+      "JSON-only approval replies"
+    ],
+    "deduplication": "Deduplicate exact replay or fork copies by minimum substantive-user text hash; break ties by ascending session ID.",
+    "assignmentPrecedence": [
+      "sparse",
+      "tool_heavy",
+      "failure_fix",
+      "decision_heavy",
+      "ordinary_conversation"
+    ],
+    "bandPolicies": {
+      "sparse": "Exactly one substantive user message and one narrative assistant message, at most two tool calls; order by exchange count, evidence characters, then session ID.",
+      "tool_heavy": "Between 400 and 2000 tool calls, excluding hook-event sessions; retain the highest-ranked session per project and order by descending tool calls.",
+      "failure_fix": "At least two substantive user and two narrative assistant messages, 1-250 tool calls, at least one user failure-bearing message and one assistant fix-or-verification-bearing message; retain one per project and rank by 3*failure messages + fix messages, then tool calls and session ID.",
+      "decision_heavy": "At least three substantive user and three narrative assistant messages, fewer than 400 tool calls, at least two user and two assistant decision-bearing messages; retain one per project and rank by 2*user decision messages + assistant decision messages, then tool calls and session ID.",
+      "ordinary_conversation": "From the unassigned remainder: 3-12 substantive user messages, 3-20 narrative assistant messages, at most three tool calls, no failed results or user failure-bearing messages, and at most one user decision-bearing message; rank by distance from ten exchanges, tool calls, evidence characters, then session ID."
+    }
+  },
+  "rows": [
+    {
+      "key": "S1",
+      "band": "sparse",
+      "slot": 1,
+      "sessionId": "session:c6fe4163237638c31c7281de8c751d8c",
+      "canonicalCounts": {
+        "userMessages": 1,
+        "assistantMessages": 1,
+        "evidenceChars": 1919,
+        "toolCalls": 0,
+        "toolKinds": 0,
+        "toolResults": 0
+      },
+      "selectionReason": "Sticky Hermes completion notifications with a bounded transient-notification repair and verification summary."
+    },
+    {
+      "key": "S2",
+      "band": "sparse",
+      "slot": 2,
+      "sessionId": "session:75070ddba5f638e51f93ebf69f38c70b",
+      "canonicalCounts": {
+        "userMessages": 1,
+        "assistantMessages": 1,
+        "evidenceChars": 4380,
+        "toolCalls": 0,
+        "toolKinds": 0,
+        "toolResults": 0
+      },
+      "selectionReason": "Linux Mint captive-portal, suspend, and network UI problems answered with bounded NetworkManager alternatives."
+    },
+    {
+      "key": "S3",
+      "band": "sparse",
+      "slot": 3,
+      "sessionId": "session:e9dfe470a25feca41360192db0ca39f2",
+      "canonicalCounts": {
+        "userMessages": 1,
+        "assistantMessages": 1,
+        "evidenceChars": 7085,
+        "toolCalls": 0,
+        "toolKinds": 0,
+        "toolResults": 0
+      },
+      "selectionReason": "Jarvis 1Password runtime auth failure traced to a malformed upstream secret and summarized after repair."
+    },
+    {
+      "key": "S4",
+      "band": "sparse",
+      "slot": 4,
+      "sessionId": "session:24049722ea8903c18ad66d4d64f7504f",
+      "canonicalCounts": {
+        "userMessages": 1,
+        "assistantMessages": 1,
+        "evidenceChars": 10133,
+        "toolCalls": 0,
+        "toolKinds": 0,
+        "toolResults": 0
+      },
+      "selectionReason": "Fitbit and OpenClaw cron handoff resolved by repairing local device authorization scope."
+    },
+    {
+      "key": "S5",
+      "band": "sparse",
+      "slot": 5,
+      "sessionId": "session:8a2437e1e402c203fa941b815f44db64",
+      "canonicalCounts": {
+        "userMessages": 1,
+        "assistantMessages": 1,
+        "evidenceChars": 14259,
+        "toolCalls": 0,
+        "toolKinds": 0,
+        "toolResults": 0
+      },
+      "selectionReason": "One-shot migration away from a Git mirror toward direct workspace and SSH configuration editing."
+    },
+    {
+      "key": "O1",
+      "band": "ordinary_conversation",
+      "slot": 1,
+      "sessionId": "session:04065938f10a644f4ed91bb9224bb613",
+      "canonicalCounts": {
+        "userMessages": 5,
+        "assistantMessages": 5,
+        "evidenceChars": 15674,
+        "toolCalls": 0,
+        "toolKinds": 0,
+        "toolResults": 0
+      },
+      "selectionReason": "Multi-turn Jarvis context recovery, audit discussion, approval-mode choice, restart, and verification."
+    },
+    {
+      "key": "O2",
+      "band": "ordinary_conversation",
+      "slot": 2,
+      "sessionId": "session:353310a00116949c8beb79747f379c0e",
+      "canonicalCounts": {
+        "userMessages": 6,
+        "assistantMessages": 3,
+        "evidenceChars": 16643,
+        "toolCalls": 0,
+        "toolKinds": 0,
+        "toolResults": 0
+      },
+      "selectionReason": "Read-only 200-file review request followed by a challenge, correction, and evidence-focused follow-up."
+    },
+    {
+      "key": "O3",
+      "band": "ordinary_conversation",
+      "slot": 3,
+      "sessionId": "session:d112ad5a0d600e7127cad67d9d04e501",
+      "canonicalCounts": {
+        "userMessages": 3,
+        "assistantMessages": 6,
+        "evidenceChars": 2880,
+        "toolCalls": 3,
+        "toolKinds": 1,
+        "toolResults": 3
+      },
+      "selectionReason": "Iterative funny-story request and revisions with a small, bounded set of skill reads."
+    },
+    {
+      "key": "O4",
+      "band": "ordinary_conversation",
+      "slot": 4,
+      "sessionId": "session:b5ba406a4a442465ebf67b1f37449ccb",
+      "canonicalCounts": {
+        "userMessages": 4,
+        "assistantMessages": 8,
+        "evidenceChars": 3404,
+        "toolCalls": 0,
+        "toolKinds": 0,
+        "toolResults": 0
+      },
+      "selectionReason": "Career-history study collaboration covering format choice and interview-preparation refinement."
+    },
+    {
+      "key": "O5",
+      "band": "ordinary_conversation",
+      "slot": 5,
+      "sessionId": "session:91bc4e6dc57de8583a4d129c7026ac26",
+      "canonicalCounts": {
+        "userMessages": 4,
+        "assistantMessages": 4,
+        "evidenceChars": 11177,
+        "toolCalls": 0,
+        "toolKinds": 0,
+        "toolResults": 0
+      },
+      "selectionReason": "Jarvis path-permission diagnosis, numbered choices, and UID/GID remediation validation."
+    },
+    {
+      "key": "T1",
+      "band": "tool_heavy",
+      "slot": 1,
+      "sessionId": "session:45aa864c1f7ea43aa933c51a9b44410f",
+      "canonicalCounts": {
+        "userMessages": 79,
+        "assistantMessages": 1037,
+        "evidenceChars": 301995,
+        "toolCalls": 1867,
+        "toolKinds": 14,
+        "toolResults": 1867
+      },
+      "selectionReason": "Masthead production menu replacement spanning release tests, installation, and merge closeout."
+    },
+    {
+      "key": "T2",
+      "band": "tool_heavy",
+      "slot": 2,
+      "sessionId": "session:46e33cad9a5397933cccfce31addb850",
+      "canonicalCounts": {
+        "userMessages": 57,
+        "assistantMessages": 967,
+        "evidenceChars": 332337,
+        "toolCalls": 1647,
+        "toolKinds": 18,
+        "toolResults": 1646
+      },
+      "selectionReason": "Halla product build and removal plan carried through authorization and sustained execution."
+    },
+    {
+      "key": "T3",
+      "band": "tool_heavy",
+      "slot": 3,
+      "sessionId": "session:a8802265cd0ea83ac48fb2fb6c727fb5",
+      "canonicalCounts": {
+        "userMessages": 31,
+        "assistantMessages": 843,
+        "evidenceChars": 224333,
+        "toolCalls": 1619,
+        "toolKinds": 41,
+        "toolResults": 1618
+      },
+      "selectionReason": "Executioner application, funnel, and pricing recovery followed by an implementation handoff."
+    },
+    {
+      "key": "T4",
+      "band": "tool_heavy",
+      "slot": 4,
+      "sessionId": "session:540476847ffcc4e6d22460471bf0c696",
+      "canonicalCounts": {
+        "userMessages": 30,
+        "assistantMessages": 611,
+        "evidenceChars": 181514,
+        "toolCalls": 1452,
+        "toolKinds": 14,
+        "toolResults": 1452
+      },
+      "selectionReason": "VibeTyper-to-OpenTypeless migration investigation with extensive integration testing."
+    },
+    {
+      "key": "T5",
+      "band": "tool_heavy",
+      "slot": 5,
+      "sessionId": "session:5662177018e13506528c4794c33fb027",
+      "canonicalCounts": {
+        "userMessages": 14,
+        "assistantMessages": 724,
+        "evidenceChars": 223361,
+        "toolCalls": 1411,
+        "toolKinds": 8,
+        "toolResults": 1411
+      },
+      "selectionReason": "Client transcript analysis followed by a sustained Command Centre implementation goal."
+    },
+    {
+      "key": "F1",
+      "band": "failure_fix",
+      "slot": 1,
+      "sessionId": "session:8d3ada7fa7adbbec1f9383ef2b12e832",
+      "canonicalCounts": {
+        "userMessages": 2,
+        "assistantMessages": 70,
+        "evidenceChars": 21520,
+        "toolCalls": 106,
+        "toolKinds": 2,
+        "toolResults": 106,
+        "failureUserMessages": 1,
+        "fixAssistantMessages": 35
+      },
+      "selectionReason": "A required fixed-demo browser verifier failed, then focused script and documentation changes made it pass."
+    },
+    {
+      "key": "F2",
+      "band": "failure_fix",
+      "slot": 2,
+      "sessionId": "session:3be28d785e021fc1235362519f616603",
+      "canonicalCounts": {
+        "userMessages": 12,
+        "assistantMessages": 81,
+        "evidenceChars": 33989,
+        "toolCalls": 151,
+        "toolKinds": 11,
+        "toolResults": 151,
+        "failureUserMessages": 7,
+        "fixAssistantMessages": 10
+      },
+      "selectionReason": "Impossible red-and-active Masthead cards led to a conflict/status root-cause fix and focused tests."
+    },
+    {
+      "key": "F3",
+      "band": "failure_fix",
+      "slot": 3,
+      "sessionId": "session:7a0f90fb2ae887ee7e28fd9c7eddc301",
+      "canonicalCounts": {
+        "userMessages": 4,
+        "assistantMessages": 95,
+        "evidenceChars": 21311,
+        "toolCalls": 162,
+        "toolKinds": 3,
+        "toolResults": 162,
+        "failureUserMessages": 2,
+        "fixAssistantMessages": 9
+      },
+      "selectionReason": "Unreadable remote-control UI was traced through sidebar clipping and stylesheet caching to a verified repair."
+    },
+    {
+      "key": "F4",
+      "band": "failure_fix",
+      "slot": 4,
+      "sessionId": "session:00a3355a298a08635b90ffcd7ded3a74",
+      "canonicalCounts": {
+        "userMessages": 11,
+        "assistantMessages": 57,
+        "evidenceChars": 53171,
+        "toolCalls": 194,
+        "toolKinds": 3,
+        "toolResults": 194,
+        "failureUserMessages": 3,
+        "fixAssistantMessages": 4
+      },
+      "selectionReason": "A brittle and regressed Wargus path prompted a web-native pivot that passed browser smoke verification."
+    },
+    {
+      "key": "F5",
+      "band": "failure_fix",
+      "slot": 5,
+      "sessionId": "session:b2d4e11e83ed11ac375b370bfeb5d9a9",
+      "canonicalCounts": {
+        "userMessages": 4,
+        "assistantMessages": 90,
+        "evidenceChars": 21562,
+        "toolCalls": 132,
+        "toolKinds": 7,
+        "toolResults": 132,
+        "failureUserMessages": 2,
+        "fixAssistantMessages": 6
+      },
+      "selectionReason": "An absent or stale Masthead site was replaced and its production custom domains were verified."
+    },
+    {
+      "key": "D1",
+      "band": "decision_heavy",
+      "slot": 1,
+      "sessionId": "session:5f1db8586f2425e57fef8212e46d9d2d",
+      "canonicalCounts": {
+        "userMessages": 10,
+        "assistantMessages": 91,
+        "evidenceChars": 72318,
+        "toolCalls": 345,
+        "toolKinds": 5,
+        "toolResults": 345,
+        "decisionUserMessages": 10,
+        "decisionAssistantMessages": 38
+      },
+      "selectionReason": "Workbench direction resolves audit versus proposal, UI versus CLI, and queue-first scope decisions."
+    },
+    {
+      "key": "D2",
+      "band": "decision_heavy",
+      "slot": 2,
+      "sessionId": "session:56128985d68f2e5bcce3ab07af7f2a7f",
+      "canonicalCounts": {
+        "userMessages": 54,
+        "assistantMessages": 92,
+        "evidenceChars": 35093,
+        "toolCalls": 54,
+        "toolKinds": 8,
+        "toolResults": 36,
+        "fileEffects": 38,
+        "decisionUserMessages": 4,
+        "decisionAssistantMessages": 38
+      },
+      "selectionReason": "Sextant grounded-agent and generated-view contract moved through approval and durable decision closeout."
+    },
+    {
+      "key": "D3",
+      "band": "decision_heavy",
+      "slot": 3,
+      "sessionId": "session:8504d543a399cc79929c8f1def3ded68",
+      "canonicalCounts": {
+        "userMessages": 11,
+        "assistantMessages": 70,
+        "evidenceChars": 26240,
+        "toolCalls": 103,
+        "toolKinds": 6,
+        "toolResults": 103,
+        "decisionUserMessages": 5,
+        "decisionAssistantMessages": 23
+      },
+      "selectionReason": "UI Design Directions was reshaped around element variations and a revised prototype workflow."
+    },
+    {
+      "key": "D4",
+      "band": "decision_heavy",
+      "slot": 4,
+      "sessionId": "session:631440164376bc8384b1637e80373b60",
+      "canonicalCounts": {
+        "userMessages": 18,
+        "assistantMessages": 47,
+        "evidenceChars": 33622,
+        "toolCalls": 123,
+        "toolKinds": 3,
+        "toolResults": 123,
+        "decisionUserMessages": 5,
+        "decisionAssistantMessages": 18
+      },
+      "selectionReason": "Decree of War resolves engine-native, fresh-application, command, and gameplay architecture choices."
+    },
+    {
+      "key": "D5",
+      "band": "decision_heavy",
+      "slot": 5,
+      "sessionId": "session:241bb3d2390e71919f7917fb17e6dab0",
+      "canonicalCounts": {
+        "userMessages": 18,
+        "assistantMessages": 221,
+        "evidenceChars": 64001,
+        "toolCalls": 339,
+        "toolKinds": 20,
+        "toolResults": 338,
+        "decisionUserMessages": 2,
+        "decisionAssistantMessages": 21
+      },
+      "selectionReason": "Daily Codex automation resolved report format, scheduling, local publication, and presentation choices."
+    }
+  ]
+}
