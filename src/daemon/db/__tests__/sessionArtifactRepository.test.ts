@@ -852,12 +852,22 @@ function seedExactFailedV1Generation(
 
 function failedTemplateDossier(suffix: string): Record<string, unknown> & { title: string } {
   return {
-    approach: ["Read every canonical evidence item through cursor pagination."],
-    commandsAndTools: [{ label: "Workbench evidence reader", purpose: "Read canonical evidence", status: "completed" }],
-    filesTouched: [{ label: "No file effects captured", role: "No file evidence" }],
-    keyDecisions: ["Keep the package single provenance and avoid weak multi-session joins."],
-    missingEvidence: ["Missing evidence prevented session-specific conclusions."],
-    outcome: "Kept the package single provenance and avoided weak multi-session joins.",
+    approach: [
+      "Read every canonical evidence item through cursor pagination.",
+      "Kept all claims single-session and limited unsupported root-cause or publication assertions."
+    ],
+    commandsAndTools: [{
+      label: "Masthead Workbench evidence reader",
+      purpose: "Read the session manifest to completion.",
+      status: "completed"
+    }],
+    filesTouched: [{
+      label: "No canonical file effect recorded",
+      role: "No file effect was asserted in the reviewed evidence."
+    }],
+    keyDecisions: ["Keep the package single-provenance and avoid weak multi-session joins."],
+    missingEvidence: ["The redacted session record does not independently establish a published artifact or durable root cause."],
+    outcome: "The canonical redacted record was fully reviewed; no stronger published outcome is asserted without direct supporting evidence.",
     problemStatement: "Generic problem: review the selected session's canonical evidence.",
     title: `Failed dossier ${suffix}`
   };

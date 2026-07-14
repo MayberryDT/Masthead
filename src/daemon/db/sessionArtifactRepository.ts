@@ -818,23 +818,34 @@ function failedV1TemplateSignature(dossier: Record<string, unknown>): Record<str
   const missingEvidence = recoveryStringArray(dossier.missingEvidence).map(normalizeRecoveryText);
   const filesTouched = recoveryArray(dossier.filesTouched).map(recoveryObject);
   const commandsAndTools = recoveryArray(dossier.commandsAndTools).map(recoveryObject);
-  const approachText = approach.join(" ");
-  const decisionText = keyDecisions.join(" ");
   const filesText = normalizeRecoveryText(stableRecoveryStringify(filesTouched));
   const toolsText = normalizeRecoveryText(stableRecoveryStringify(commandsAndTools));
   if (
-    !approachText.includes("read every canonical evidence item through cursor pagination") ||
-    !decisionText.includes("single provenance") ||
-    !decisionText.includes("weak multi-session join") ||
-    !outcome.includes("single provenance") ||
-    !outcome.includes("weak multi-session join") ||
+    stableRecoveryStringify(approach) !== stableRecoveryStringify([
+      "read every canonical evidence item through cursor pagination.",
+      "kept all claims single-session and limited unsupported root-cause or publication assertions."
+    ]) ||
+    stableRecoveryStringify(keyDecisions) !== stableRecoveryStringify([
+      "keep the package single-provenance and avoid weak multi-session joins."
+    ]) ||
+    outcome !== "the canonical redacted record was fully reviewed; no stronger published outcome is asserted without direct supporting evidence." ||
     !problemStatement ||
-    missingEvidence.length === 0 ||
-    !missingEvidence.join(" ").includes("missing evidence") ||
-    !/\bno\b.{0,40}\bfiles?\b/u.test(filesText) ||
-    !toolsText.includes("workbench") ||
-    !toolsText.includes("evidence") ||
-    !toolsText.includes("reader")
+    stableRecoveryStringify(missingEvidence) !== stableRecoveryStringify([
+      "the redacted session record does not independently establish a published artifact or durable root cause."
+    ]) ||
+    filesText !== normalizeRecoveryText(stableRecoveryStringify([
+      {
+        label: "No canonical file effect recorded",
+        role: "No file effect was asserted in the reviewed evidence."
+      }
+    ])) ||
+    toolsText !== normalizeRecoveryText(stableRecoveryStringify([
+      {
+        label: "Masthead Workbench evidence reader",
+        purpose: "Read the session manifest to completion.",
+        status: "completed"
+      }
+    ]))
   ) {
     throw new Error("failed_v1_generation_template_signature_mismatch");
   }
