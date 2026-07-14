@@ -17,13 +17,22 @@ export function buildPublishedDossierSnapshot(
 }
 
 export function dossierSnapshotFingerprint(snapshot: PublishedSessionDossierV1): string {
-  const { capturedAt: _capturedAt, ...fingerprinted } = snapshot;
+  const { capturedAt: _capturedAt, reuse, ...canonical } = snapshot;
+  // These two reuse fields are presentation derived from the session's current
+  // publication policy. They can change immediately after this immutable
+  // snapshot is published, while the underlying canonical dossier does not.
+  const { copyableContext: _copyableContext, mcpIncluded: _mcpIncluded, ...stableReuse } = reuse;
+  const fingerprinted = { ...canonical, reuse: stableReuse };
   return createHash("sha256").update(stableStringify(fingerprinted)).digest("hex");
 }
 
 export function dossierEvidenceRefs(snapshot: PublishedSessionDossierV1): string[] {
   const refs = [
     ...(snapshot.narrative.narrativeDebug?.sourceRefs ?? []),
+    ...(snapshot.durableEnrichment?.sessionTitle.evidenceRefs ?? []),
+    ...(snapshot.durableEnrichment?.sessionSummary.evidenceRefs ?? []),
+    ...(snapshot.durableEnrichment?.sessionDossier.evidenceRefs ?? []),
+    ...(snapshot.durableEnrichment?.sessionDossier.verification.evidenceRefs ?? []),
     ...snapshot.attention.flatMap((item) => item.sourceRefs),
     ...snapshot.excerpts.map((item) => item.sourceRef),
     ...snapshot.files.map((item) => item.sourceRef),

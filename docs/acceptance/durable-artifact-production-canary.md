@@ -1,10 +1,12 @@
 # Durable artifact production recovery and canary evidence
 
-Status: **authorized; final V2 cold activation in progress**
+Status: **historical failed activation recovered; corrected schema-24 temporary-copy rehearsal pending; production invalidation not authorized**
 
 This is the signed evidence record for Task 14 of the durable artifact recovery
-plan. It is deliberately incomplete until the production recovery is explicitly
-authorized and run. Empty fields are stop signs, not permission to infer a pass.
+plan. It is deliberately incomplete until the corrected temporary-copy
+rehearsal and real human review are complete. Empty fields are stop signs, not
+permission to infer a pass. Production invalidation is forbidden until both of
+those gates are signed.
 
 Do not paste transcripts, credentials, environment values, or raw session
 content into this file. Record database IDs, hashes, counts, artifact IDs,
@@ -12,9 +14,11 @@ session IDs, bounded claim excerpts, review scores, and receipt paths only.
 
 ## Authorization boundary
 
-- Explicit production authorization received: [x]
+- Explicit production recovery/canary-preparation authorization received: [x]
 - Authorizing message/task: `"i approve"` in the current Codex task, in direct
-  response to the exact production recovery/canary scope
+  response to the production recovery/canary-preparation scope; this does not
+  override the temporary-rehearsal, human-review, invalidation, or bounded-wave
+  gates below
 - Authorized operator: `Tyler`
 - Authorized at: `2026-07-13T08:19:26-06:00`
 - Production database path confirmed under authorization:
@@ -34,18 +38,27 @@ canary decision.
 
 | Item | Required evidence | Result |
 |---|---|---|
-| Release candidate | Branch `codex/durable-artifact-recovery`; Gate C closeout `d3c61e2c` or a descendant with identical recovery contracts | `8f648523b24c7d70e01efdc85dc73b6fde35c501` |
-| Immutable production bundle | Exact staged path and SHA-256 digest | `/home/tyler/.local/share/masthead-production/Masthead-linux-x64-0.1.0-8f648523`; `e58eceadd5d538dee640aaf7acaebfa57948ca042b5dfec54f8407786fc1a0d6` |
-| Packaged verification | Manifest and packaged smoke | PASS — 458 files; packaged smoke PASS |
+| Release candidate | Branch `codex/durable-artifact-recovery`; corrected Gate C descendant | `7587cee0085cdb58d7e0bf1462918c365d87c446` |
+| Immutable production bundle | Exact staged path and SHA-256 digest for the corrected release candidate | `pending rebuild`; digest `pending` |
+| Packaged verification | Corrected manifest, release SHA, bundle digest, and packaged smoke | `pending` |
 | Gate A | Original canonical dossier contract, snapshot, renderer, and responsive inspection | PASS |
 | Gate B | Real V2 runbook, ADR, and incident timeline validated, atomically published, and retrieved | PASS |
 | Recovery fixture | Recovery, CLI, and ownership tests | PASS — 91/91 |
 | Workbench fixture | Candidate UI/controller/client tests | PASS — 88/88 |
 | Durable artifact machine gate | `machineGatePassed: true`; `productionAccessed: false` | PASS |
-| Repository verification | Tests, build, schema-23 endpoint matrix, and smokes | PASS — 272 files / 1,969 tests; Vitest concurrency bounded to four workers after two unrelated load-sensitive tests passed immediately in isolation |
+| Repository verification | Tests, build, schema-24 endpoint matrix, and smokes | Partitioned repository verification PASS; exact monolithic `npm run verify` pending |
 | In-app Browser | Candidate and dossier controls at desktop, tablet, 480px, and narrow widths | PASS |
 
-### Failed activation attempt — retained as release-blocking evidence
+### Historical failed activation and recovery — not the release candidate
+
+The superseded candidate `8f648523b24c7d70e01efdc85dc73b6fde35c501`,
+bundle
+`/home/tyler/.local/share/masthead-production/Masthead-linux-x64-0.1.0-8f648523`,
+and digest
+`e58eceadd5d538dee640aaf7acaebfa57948ca042b5dfec54f8407786fc1a0d6`
+are retained only as historical failed-activation and rollback-recovery evidence.
+They are not the corrected release candidate and must not be reused for the
+schema-24 rehearsal, production activation, or production invalidation.
 
 The first authorized activation attempt used candidate `0c2cabe3c15924a003577fd145a5bada99edefe0`
 with pinned bundle digest
@@ -295,63 +308,116 @@ broadens the V1 selector or weakens the receipt hash.
 Abort on any count, membership, actor, creator, schema, template, window, or
 hash ambiguity. Do not broaden the selector to make production match.
 
-## Step 4 — Temporary-copy rehearsal
+## Step 4 — Corrected schema-24 temporary-copy rehearsal
 
-Copy only the verified, self-contained backup into a new temporary directory.
-Never copy the live database or its WAL/SHM files. Keep the isolated daemon
-stopped while auditing and invalidating the copy. Start it only after
-invalidation, with its database path, data directory, port, and daemon URL all
-explicitly pointed at the temporary directory. Stop it again before cleanup.
+Production invalidation is forbidden until this entire temporary-copy rehearsal
+and its real human review are complete and signed. Every command in this section
+must resolve to a fresh temporary root and isolated port `17483`; resolving the
+production database, production data directory, or production port `17383` is
+an immediate stop.
 
-Before rehearsal begins, record exact deployment-specific commands for stopping
-and starting the installed production daemon and for restoring a database while
-holding daemon-equivalent exclusive ownership. Exercise those same restore
-steps against the temporary copy, including sidecar removal and post-restore
-identity/integrity checks. Empty or unproved commands prohibit production
-invalidation.
+Run the rehearsal in this exact order:
 
-### Schema-21 to schema-23 migration rehearsal (precondition only)
+1. Rebuild the immutable packaged bundle from exact corrected HEAD
+   `7587cee0085cdb58d7e0bf1462918c365d87c446`. Verify its `release.json` SHA,
+   content manifest, bundle digest, and packaged smoke against that same bundle.
+2. Create a fresh temporary root. Copy only the verified, self-contained
+   `masthead.sqlite.backup-current` into it. Never copy the live database or any
+   live WAL, SHM, or journal sidecar.
+3. With no isolated daemon running, audit both the source backup and active
+   temporary copy. Require the Step 1 database ID, the Step 3 audit hash, exactly
+   1,283 dossiers, zero optional artifacts, 66 V1 runs, 1,283 sessions, and no
+   sidecars on either copy.
+4. Before the corrected daemon first starts, preserve the audited schema-21 copy
+   beneath `$ROOT/frozen-v1/masthead.sqlite`: use a same-filesystem rename of the
+   temporary active copy into that nested directory, then copy the frozen file
+   back to `$ROOT/masthead.sqlite`. The nested location is mandatory because
+   migration backup retention removes other top-level
+   `masthead.sqlite.backup-*` files. Re-audit the frozen and active copies.
+5. Start the corrected packaged daemon with database path, data directory,
+   build identity, CLI command, and port `17483` explicitly bound to the
+   temporary root. Disable background hydration, live copy, remote enrichment,
+   hook transcript catch-up, and Git refresh. Wait for health to prove corrected
+   HEAD, schema `24`, the temporary database path, the Step 1 database ID, and a
+   primary writable runtime. Stop it gracefully with `SIGTERM` before offline
+   maintenance.
+6. Run `prepare-v1-recovery` against the migrated temporary database. Require a
+   new sibling schema-24 `masthead.sqlite.backup-current`, database identity
+   match, `integrityResult: ok`, positive size/pages, and exactly one retained
+   top-level recovery snapshot.
+7. Re-audit the migrated active database and schema-24 recovery snapshot. Both
+   must retain the exact Step 3 audit hash and V1 population; the migration
+   ledger must exactly contain versions 1 through 24.
+8. With the isolated daemon still stopped, run `invalidate-v1-generation` only
+   against the temporary active database using the exact audit hash. Require
+   exactly 1,283 artifacts, search rows, provenance rows, and sessions in the
+   receipt; retain all 66 V1 runs and their receipts.
+9. Restart the corrected isolated daemon. Require health and authoring
+   capabilities to agree on corrected HEAD, schema `24`, temporary path,
+   database ID, `workbench-authoring-v2`, and
+   `candidate_scoped_canonical_evidence`.
+10. Publish the frozen 25 canonical dossiers. Compare every persisted body with
+    the original canonical dossier, excluding only recursive artifact listings
+    and the expected snapshot timestamp, and verify Logbook retrieval.
+11. Advance candidate discovery through all 1,283 reset sessions using 13
+    bounded 100-session passes, then paginate every resulting candidate. Map all
+    75 frozen label units and require recall at least 90%, precision at least
+    80%, and complete TP/FP/FN/TN accounting.
+12. Author every candidate whose provenance intersects a frozen session,
+    including any additional strongly joined provenance. Use exactly one
+    candidate per V2 run and no more than 12 provenance sessions. Validate exact
+    claim support, Logbook and MCP retrieval, artifact-only reuse, duplicate
+    fingerprints, protocol leakage, provenance, and immutable run receipts.
+13. A real human reviews 100% of the 25 dossiers and 100% of optional canary
+    artifacts. Do not synthesize reviewer scores. Require every human and machine
+    threshold in Steps 6 through 8 and no stop condition.
+14. Stop the isolated daemon gracefully. Restore the temporary active database
+    only with `restore-v1-recovery` and its schema-24 recovery snapshot. Require
+    the exact restore receipt, then independently re-audit 1,283 artifacts, 66
+    runs, 1,283 sessions, the Step 3 hash, database identity, schema-24 ledger,
+    integrity, and absence of active WAL/SHM/journal sidecars. Delete the
+    temporary root only after all evidence is captured.
 
-A disposable 6.63 GB copy of the frozen schema-21 backup completed the
-schema-23 migration rehearsal. Migration itself took `758 ms`; both quick
-checks passed, the foreign-key check completed in `57556 ms`, and the final
-schema ledger exactly matched versions 1 through 23. Result: **PASS for schema
-migration compatibility only**. This did not exercise V1 invalidation,
-candidate authoring, human review, or rollback-after-invalidation, so none of
-the Step 4 gates below are satisfied by it.
-
-- [ ] Temporary copy database ID equals the production/backup database ID.
-- [ ] Rehearsal audit hash equals the Step 3 audit hash.
-- [ ] Isolated daemon was stopped during copy audit and invalidation.
-- [ ] Invalidation on the copy reports exactly 1,283 artifacts and sessions.
-- [ ] All 66 V1 runs and receipts remain queryable on the copy.
-- [ ] Isolated daemon started only after invalidation and reported the expected
-      build and database identity.
+- [ ] Corrected bundle identity, manifest, digest, and packaged smoke pass.
+- [ ] Temporary source, frozen, active, and schema-24 recovery copies have the
+      expected database ID, hashes, audit, and sidecar state.
+- [ ] Schema-21 to schema-24 migration and exact ledger pass.
+- [ ] Temporary invalidation reports the exact 1,283-artifact/session population
+      and preserves all 66 V1 runs and receipts.
 - [ ] The stratified 25-session dossier canary passes on the copy.
-- [ ] Every positive candidate is authored one candidate per V2 run.
-- [ ] Claim-support, retrieval, duplicate, provenance, and protocol checks pass.
-- [ ] Human review is complete and passes every threshold.
+- [ ] Every canary-intersecting candidate is authored one candidate per V2 run.
+- [ ] Claim-support, retrieval, reuse, duplicate, provenance, and protocol checks pass.
+- [ ] Real human review is complete and passes every threshold.
 - [ ] No stop condition fired.
-- [ ] Rollback sequence was rehearsed against the temporary copy and restored
-      the original artifact counts and audit hash.
+- [ ] CLI-owned rollback restored the original artifact counts and audit hash.
 - [ ] Temporary daemon stopped and temporary directory deleted after evidence capture.
 
 | Field | Recorded value |
 |---|---|
-| Temporary directory | `pending` |
-| Rehearsal started at | `pending` |
-| Rehearsal completed at | `pending` |
+| Corrected release SHA / schema | `7587cee0085cdb58d7e0bf1462918c365d87c446` / `24` |
+| Corrected bundle path / digest | `pending` / `pending` |
+| Temporary directory / isolated daemon URL | `pending` / `http://127.0.0.1:17483` |
+| Nested frozen schema-21 copy / SHA-256 | `pending` / `pending` |
+| Source, frozen, and active schema-21 audit receipts | `pending` |
+| Schema-24 migration health / ledger receipt | `pending` |
+| Schema-24 prepare receipt / recovery snapshot | `pending` |
+| Temporary invalidation receipt | `pending` |
+| Dossier, candidate, publication, MCP, and machine reports | `pending` |
+| Human review decision / reviewer | `pending` / `pending` |
+| Restore rehearsal receipt / post-restore audit | `pending` / `pending` |
+| Rehearsal started / completed at | `pending` / `pending` |
 | Rehearsal decision | `pending` |
-| Rehearsal reviewer | `pending` |
-| Production daemon stop command | `pending` |
-| Production daemon start command | `pending` |
-| Exclusive-ownership restore command | `<installed-mastheadctl> workbench restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current> --audit-hash <sha256> --confirm --json` |
-| Restore rehearsal receipt | `pending` |
 | Frozen sample hash / label hash | `574e6edc2a03d0966f4de2f100acc5dc3bb19506b06c0d469596e51c782b933d` / `96cc853bb712d6e28f844b853fdd708d4961eedd7b1a31d6ffd01c21b87119c0` |
 
-Production invalidation is forbidden unless this section is completely signed.
+Production invalidation is forbidden unless this section is completely signed
+and the real human review is complete.
 
 ## Step 5 — Production invalidation receipt
+
+Do not run this step based on the historical approval or failed-activation
+record alone. Production invalidation is forbidden until Step 4 is completely
+signed, the corrected temporary-copy rehearsal has restored successfully, and a
+real human has completed and passed the full rehearsal review.
 
 Confirm the production writable daemon is still stopped. Copy the audit hash
 from Step 3 exactly; do not retype or transform it:
@@ -373,10 +439,13 @@ from Step 3 exactly; do not retype or transform it:
 | Sessions reset | 1,283 | `pending` |
 | Claims released | exact non-negative receipt value | `pending` |
 | Activity ID | one durable recovery event | `pending` |
+| Recovery backup | exact sibling path, database ID, audit hash, integrity `ok`, 1,283 artifacts, 66 runs, 1,283 sessions, stable device/inode/size, `backupPreserved: true` | `pending` |
 
-These are the only `FailedGenerationReceipt` fields. `claimsReleased` counts
-still-live matched claims actually changed; it may be zero and must never be
-substituted with the artifact or session population.
+The seven scalar mutation fields and the frozen `recoveryBackup` object are the
+complete `FailedGenerationReceipt`. `claimsReleased` counts still-live matched
+claims actually changed; it may be zero and must never be substituted with the
+artifact or session population. Invalidation must refuse before mutation when
+the recovery-backup evidence is missing or differs from the active V1 audit.
 
 Verify these postconditions separately after a successful receipt:
 
@@ -490,17 +559,18 @@ Any unchecked item means the canary has not passed.
 
 Rollback restores the single verified backup and stops publication. Do not
 partially repair the invalidated database in place. There is no permission to
-improvise a restore command during an incident: the exact stop, start, and
-exclusive-ownership restore commands must already be recorded and proven in
-Step 4.
+improvise a restore command during an incident: the exact stop and start
+commands and the single `restore-v1-recovery` invocation must already be
+recorded and proven in Step 4.
 
 Run rollback in this order:
 
 1. Stop all authoring, stop the production writable daemon with the recorded
    command, and verify its health URL is unavailable.
-2. Run the executable restore command below. It must refuse if daemon-equivalent
-   writer ownership cannot be acquired and must hold that ownership through
-   replacement and verification.
+2. Run the executable restore command below exactly once. It must refuse if
+   daemon-equivalent writer ownership cannot be acquired. The command itself
+   holds ownership through backup verification, staging, sidecar removal,
+   atomic replacement, and restored-active verification.
 
    ```bash
    <installed-mastheadctl> workbench restore-v1-recovery \
@@ -510,17 +580,16 @@ Run rollback in this order:
      --confirm \
      --json
    ```
-3. While ownership is held, verify the backup is the Step 2 self-contained
-   `masthead.sqlite.backup-current`, its database ID matches Step 1, and its
-   `PRAGMA integrity_check` result is exactly `ok`.
-4. Remove the invalidated database's `-wal`, `-shm`, and `-journal` sidecars;
-   stage the verified backup as a sibling of the active database; atomically
-   rename the stage over the active database; and verify no stale active
-   sidecars remain. Never copy the backup into a live database file.
-5. Open the restored active database read-only while ownership is still held;
-   require the Step 1 database ID, `PRAGMA integrity_check = ok`, the Step 3
-   audit hash, and the Step 1 artifact counts. Release ownership only after all
-   checks pass.
+3. Do not manually delete sidecars, copy the backup over the active file, stage
+   another replacement, edit the database, or manipulate ownership files. Those
+   operations belong exclusively to `restore-v1-recovery`.
+4. Require the successful command object and exact receipt below. A refusal or
+   mismatched receipt leaves the daemon stopped and requires escalation.
+5. After the command returns, independently run `audit-v1-generation` against
+   the restored active database. Require the Step 1 database ID,
+   `PRAGMA integrity_check = ok`, the Step 3 audit hash, 1,283 artifacts, 66
+   runs, 1,283 sessions, and no active `-wal`, `-shm`, or `-journal` sidecars.
+   Verify the sibling recovery backup still exists unchanged.
 6. Restart the installed daemon with the recorded command. Re-run the Step 1
    health, capabilities, and four kind-filtered artifact receipts and require
    the same build and database identities plus restored counts. Keep authoring
@@ -547,7 +616,7 @@ is an immediate operator stop and escalation; do not start the daemon.
 - Rollback required: `pending`
 - Stop condition: `pending`
 - Backup restored from: `pending`
-- Stop / exclusive-ownership restore / start command receipts: `pending`
+- Stop / `restore-v1-recovery` / start command receipts: `pending`
 - Restored database ID: `pending`
 - Integrity check after restore: `pending`
 - Restored audit hash: `pending`

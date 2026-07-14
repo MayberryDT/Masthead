@@ -164,21 +164,36 @@ const REQUIRED_CLAIM_SUPPORT: Record<
 > = {
   runbook: [
     { path: "problemSignature.symptoms[0]", supportKind: "problem" },
+    { path: "problemSignature.errorStrings[0]", supportKind: "problem" },
+    { path: "problemSignature.affectedScope", supportKind: "problem" },
+    { path: "preconditions[0]", supportKind: "problem" },
+    { path: "reproSteps[0]", supportKind: "problem" },
     { path: "fixSteps[0]", supportKind: "change" },
-    { path: "validationChecks[0]", supportKind: "verification" }
+    { path: "commands[0]", supportKind: "change" },
+    { path: "changedFiles[0]", supportKind: "change" },
+    { path: "validationChecks[0]", supportKind: "verification" },
+    { path: "environmentRequirements[0]", supportKind: "problem" },
+    { path: "preventionNotes[0]", supportKind: "remediation" }
   ],
   adr: [
+    { path: "context", supportKind: "problem" },
     { path: "decision", supportKind: "decision" },
-    { path: "alternatives[0]", supportKind: "alternative" }
+    { path: "status", supportKind: "decision" },
+    { path: "alternatives[0]", supportKind: "alternative" },
+    { path: "consequences[0]", supportKind: "decision" }
   ],
   incident_timeline: [
     { path: "symptom", supportKind: "problem" },
+    { path: "impact", supportKind: "problem" },
     { path: "timeline[0].summary", supportKind: "timeline" },
     { path: "timeline[1].summary", supportKind: "timeline" },
     { path: "timeline[2].summary", supportKind: "timeline" },
     { path: "timeline[3].summary", supportKind: "timeline" },
     { path: "rootCause", supportKind: "root_cause" },
-    { path: "remediation[0]", supportKind: "remediation" }
+    { path: "contributingFactors[0]", supportKind: "problem" },
+    { path: "remediation[0]", supportKind: "remediation" },
+    { path: "prevention[0]", supportKind: "remediation" },
+    { path: "status", supportKind: "verification" }
   ]
 };
 const PROTOCOL_PHRASES = [

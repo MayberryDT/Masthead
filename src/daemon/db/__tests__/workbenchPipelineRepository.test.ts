@@ -68,8 +68,8 @@ describe("workbench pipeline repository", () => {
     });
 
     expect(result.state.publicationStatus).toBe("published");
-    // Package published; automatic kinds still open → continue compile (enrich), not terminal none.
-    expect(result.state.nextAction).toBe("enrich");
+    // The session package is complete once published; optional kinds live in the candidate queue.
+    expect(result.state.nextAction).toBe("none");
     expect(result.state.publishedAt).toEqual(expect.any(String));
     expect(result.activity.eventType).toBe("published");
     expect(listWorkbenchActivity(db, { sessionId: "session:1", limit: 10 })[0]).toMatchObject({
@@ -164,7 +164,7 @@ describe("workbench pipeline repository", () => {
     expect(second.state.updatedAt).toBe(first.state.updatedAt);
   });
 
-  test("lists publish-path and unresolved published sessions in the default queue", async () => {
+  test("keeps published sessions out of the session queue because optional work is candidate-driven", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:publish", title: "Publish path" });
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:published", title: "Published but unresolved" });
@@ -192,11 +192,10 @@ describe("workbench pipeline repository", () => {
       sessionId: "session:not-added"
     });
 
-    expect(listWorkbenchQueue(db, { limit: 10 }).map((state) => state.sessionId).sort()).toEqual([
-      "session:publish",
-      "session:published"
+    expect(listWorkbenchQueue(db, { limit: 10 }).map((state) => state.sessionId)).toEqual([
+      "session:publish"
     ]);
-    expect(countWorkbenchQueue(db)).toBe(2);
+    expect(countWorkbenchQueue(db)).toBe(1);
   });
 
   test("claims are short-lived and do not change publication state", async () => {
@@ -291,7 +290,7 @@ describe("workbench pipeline repository", () => {
     });
   });
 
-  test("does not resolve an applied optional artifact", async () => {
+  test("keeps a published dossier session resolved while optional artifacts are candidate-driven", async () => {
     const db = await testDb();
     seedSession(db, {
       lifecycle: "ended",
@@ -329,7 +328,8 @@ describe("workbench pipeline repository", () => {
     });
 
     expect(readWorkbenchSessionState(db, "session:applied")).toMatchObject({
-      resolutionStatus: "compile_ready",
+      nextAction: "none",
+      resolutionStatus: "automatic_resolved",
       runbookStatus: "applied"
     });
   });

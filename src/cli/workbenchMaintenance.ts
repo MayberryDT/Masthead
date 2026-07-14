@@ -4,11 +4,11 @@ import { resolveWorkbenchDatabasePath } from "./dbPath.ts";
 import { errorResult, jsonResult, type CliResult } from "./output.ts";
 import {
   auditFailedV1Generation,
-  invalidateFailedV1Generation,
   wipePublishedArtifactState
 } from "../daemon/db/sessionArtifactRepository.ts";
 import {
   createSingleConsistentBackupInsideExclusiveMaintenance,
+  invalidateFailedV1GenerationInsideExclusiveMaintenance,
   restoreFailedV1RecoveryBackupInsideExclusiveMaintenance,
   withExclusiveDatabaseMaintenance
 } from "../daemon/databaseBackup.ts";
@@ -107,19 +107,15 @@ export async function runFailedV1RecoveryMaintenance(
         json
       );
     }
-    return await withExclusiveDatabaseMaintenance(databasePath, () => {
-      const db = new DatabaseSync(databasePath);
-      try {
-        db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;");
-        return jsonResult({
-          databasePath,
-          ok: true,
-          receipt: invalidateFailedV1Generation(db, expectedAuditHash)
-        });
-      } finally {
-        db.close();
-      }
-    });
+    return await withExclusiveDatabaseMaintenance(databasePath, async (ownership) => jsonResult({
+      databasePath,
+      ok: true,
+      receipt: await invalidateFailedV1GenerationInsideExclusiveMaintenance(
+        databasePath,
+        expectedAuditHash,
+        ownership
+      )
+    }));
   } catch (error) {
     return errorResult(
       "v1_recovery_refused",

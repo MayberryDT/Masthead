@@ -574,6 +574,7 @@ export function markWorkbenchSessionEnrichmentSatisfiedInTransaction(
     `UPDATE workbench_session_state
     SET session_enrichment_status = 'satisfied',
       session_package_status = CASE
+        WHEN publication_status = 'published' THEN 'published'
         WHEN session_dossier_status = 'satisfied' THEN 'applied'
         ELSE session_package_status
       END,
@@ -625,6 +626,7 @@ function applyWorkbenchArtifactAppliedInTransaction(
       `UPDATE workbench_session_state
        SET session_dossier_status = 'satisfied',
            session_package_status = CASE
+             WHEN publication_status = 'published' THEN 'published'
              WHEN session_enrichment_status = 'satisfied' THEN 'applied'
              ELSE session_package_status
            END,
@@ -910,9 +912,7 @@ export function countWorkbenchQueue(
 ): number {
   const publicationFilter = options.publicationStatus
     ? "workbench_session_state.publication_status = ?"
-    : `(workbench_session_state.publication_status = 'publish_path'
-       OR (workbench_session_state.publication_status = 'published'
-           AND workbench_session_state.resolution_status <> 'automatic_resolved'))`;
+    : "workbench_session_state.publication_status = 'publish_path'";
   const row = db
     .prepare(
       `SELECT COUNT(*) AS count
@@ -931,9 +931,7 @@ export function listWorkbenchQueue(
 ): WorkbenchSessionStateRecord[] {
   const publicationFilter = options.publicationStatus
     ? "workbench_session_state.publication_status = ?"
-    : `(workbench_session_state.publication_status = 'publish_path'
-       OR (workbench_session_state.publication_status = 'published'
-           AND workbench_session_state.resolution_status <> 'automatic_resolved'))`;
+    : "workbench_session_state.publication_status = 'publish_path'";
   const limit = Math.max(1, Math.min(Math.trunc(options.limit), 500));
   const offset = Math.max(0, Math.trunc(options.offset ?? 0));
   const rows = db
@@ -1141,30 +1139,17 @@ function resolutionStatusForState(state: WorkbenchSessionStateRecord): Workbench
     state.sessionDossierStatus === "satisfied";
   if (!packageReady) return "in_progress";
   const automaticResolved =
-    state.sessionPackageStatus === "published" &&
-    isOptionalKindResolved(state.runbookStatus) &&
-    isOptionalKindResolved(state.adrStatus) &&
-    isOptionalKindResolved(state.incidentTimelineStatus);
+    state.sessionPackageStatus === "published";
   if (automaticResolved) return "automatic_resolved";
   return "compile_ready";
 }
 
-function isOptionalKindResolved(status: WorkbenchOptionalKindStatus): boolean {
-  return status === "published" || status === "not_applicable" || status === "contributed";
-}
-
 function nextActionForState(state: WorkbenchSessionStateRecord): WorkbenchNextAction {
   if (state.publicationStatus === "not_added_to_logbook") return "none";
-  // Session package already published: remaining work is automatic kinds (or done).
+  // Optional artifacts are candidate-driven and have their own queue. Once the
+  // canonical dossier package is published, the session itself has no more work.
   if (state.publicationStatus === "published" || state.sessionPackageStatus === "published") {
-    if (
-      isOptionalKindResolved(state.runbookStatus) &&
-      isOptionalKindResolved(state.adrStatus) &&
-      isOptionalKindResolved(state.incidentTimelineStatus)
-    ) {
-      return "none";
-    }
-    return "enrich";
+    return "none";
   }
   if (state.transcriptStatus === "unchecked") return "check_transcript";
   if (state.transcriptStatus === "missing" || state.transcriptStatus === "permission_needed") return "import_transcript";

@@ -12,6 +12,49 @@ import {
 const MESSAGE = "message:session:a:problem";
 const CHANGE = "file_effect:session:a:change";
 const PASSED = "tool_result:session:a:passed";
+const ADR = "message:session:a:adr";
+const JOIN_A = "message:session:a:join";
+const JOIN_B = "message:session:b:join";
+
+const RUNBOOK_CLAIM_PATHS = [
+  "problemSignature.symptoms[0]",
+  "problemSignature.errorStrings[0]",
+  "problemSignature.affectedScope",
+  "preconditions[0]",
+  "reproSteps[0]",
+  "deadEnds[0]",
+  "fixSteps[0]",
+  "commands[0]",
+  "changedFiles[0]",
+  "validationChecks[0]",
+  "environmentRequirements[0]",
+  "rootCause",
+  "preventionNotes[0]",
+  "risksOrGaps[0]"
+] as const;
+
+const ADR_CLAIM_PATHS = [
+  "context",
+  "decision",
+  "status",
+  "alternatives[0]",
+  "consequences[0]",
+  "affectedPaths[0]",
+  "supersedes[0]",
+  "supersedes[1]"
+] as const;
+
+const INCIDENT_CLAIM_PATHS = [
+  "symptom",
+  "impact",
+  "timeline[0].summary",
+  "timeline[1].summary",
+  "rootCause",
+  "contributingFactors[0]",
+  "remediation[0]",
+  "prevention[0]",
+  "status"
+] as const;
 
 describe("artifact claim support", () => {
   test("rejects the 1,283-dossier authoring-protocol template pattern", () => {
@@ -69,19 +112,232 @@ describe("artifact claim support", () => {
     expect(findings).toEqual([]);
   });
 
-  test("requires support for every populated claim-bearing path", () => {
-    const quality = validateArtifactQuality({
+  test("requires exact support for every populated runbook claim field and element", () => {
+    for (const path of RUNBOOK_CLAIM_PATHS) {
+      const quality = validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind: "runbook",
+        output: validRunbook(),
+        provenanceSessionIds: ["session:a"],
+        supports: validRunbookSupports().filter((entry) => entry.path !== path)
+      });
+
+      expect(quality).toContainEqual(
+        expect.objectContaining({ code: "missing_claim_support", path })
+      );
+    }
+  });
+
+  test("accepts a fully supported runbook without treating structural metadata as claims", () => {
+    expect(validateArtifactQuality({
       evidenceByRef: fixtureEvidence(),
       kind: "runbook",
-      output: validRunbook(),
+      output: {
+        ...validRunbook(),
+        confidence: "high",
+        evidenceRefs: [MESSAGE, CHANGE, PASSED],
+        joinRationale: "The same callback failure signature joins these sessions.",
+        missingEvidence: [],
+        provenanceSessionIds: ["session:a"],
+        signatureKey: "oauth-callback-state"
+      },
       provenanceSessionIds: ["session:a"],
-      supports: validRunbookSupports().filter((entry) => entry.path !== "fixSteps[0]")
-    });
-
-    expect(quality).toContainEqual(
-      expect.objectContaining({ code: "missing_claim_support", path: "fixSteps[0]" })
-    );
+      supports: validRunbookSupports()
+    })).toEqual([]);
   });
+
+  test("requires exact support for every populated ADR claim field and element", () => {
+    for (const path of ADR_CLAIM_PATHS) {
+      const quality = validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind: "adr",
+        output: validAdr(),
+        provenanceSessionIds: ["session:a"],
+        supports: validAdrSupports().filter((entry) => entry.path !== path)
+      });
+
+      expect(quality).toContainEqual(
+        expect.objectContaining({ code: "missing_claim_support", path })
+      );
+    }
+  });
+
+  test("accepts a fully supported ADR while leaving only envelope metadata ungrounded", () => {
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "adr",
+      output: validAdr(),
+      provenanceSessionIds: ["session:a"],
+      supports: validAdrSupports()
+    })).toEqual([]);
+  });
+
+  test.each(["status", "supersedes[0]", "supersedes[1]"])(
+    "requires decision support for ADR status and lineage: %s",
+    (path) => {
+      const supports = validAdrSupports().map((entry) => entry.path === path
+        ? { ...entry, supportKind: "problem" as const }
+        : entry);
+
+      expect(validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind: "adr",
+        output: validAdr(),
+        provenanceSessionIds: ["session:a"],
+        supports
+      })).toContainEqual(expect.objectContaining({
+        code: "invalid_support_kind_evidence",
+        path
+      }));
+    }
+  );
+
+  test("requires exact support for every populated incident claim field and element", () => {
+    for (const path of INCIDENT_CLAIM_PATHS) {
+      const quality = validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind: "incident_timeline",
+        output: validIncident(),
+        provenanceSessionIds: ["session:a"],
+        supports: validIncidentSupports().filter((entry) => entry.path !== path)
+      });
+
+      expect(quality).toContainEqual(
+        expect.objectContaining({ code: "missing_claim_support", path })
+      );
+    }
+  });
+
+  test("accepts a fully supported incident without treating timeline metadata as claims", () => {
+    expect(validateArtifactQuality({
+      evidenceByRef: fixtureEvidence(),
+      kind: "incident_timeline",
+      output: validIncident(),
+      provenanceSessionIds: ["session:a"],
+      supports: validIncidentSupports()
+    })).toEqual([]);
+  });
+
+  test.each(["resolved", "recovered", "closed"])(
+    "requires verification support for terminal incident status: %s",
+    (status) => {
+      const output = { ...validIncident(), status };
+      const wrongSupports = validIncidentSupports().map((entry) => entry.path === "status"
+        ? support("status", MESSAGE, "OAuth callback state validation rejected the request.", "problem")
+        : entry);
+
+      expect(validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind: "incident_timeline",
+        output,
+        provenanceSessionIds: ["session:a"],
+        supports: wrongSupports
+      })).toContainEqual(expect.objectContaining({
+        code: "invalid_support_kind_evidence",
+        path: "status"
+      }));
+
+      expect(validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind: "incident_timeline",
+        output,
+        provenanceSessionIds: ["session:a"],
+        supports: validIncidentSupports()
+      })).toEqual([]);
+    }
+  );
+
+  test.each(["open", "ongoing", "active"])(
+    "requires problem support for active incident status: %s",
+    (status) => {
+      const output = { ...validIncident(), status };
+      const problemStatus = support(
+        "status",
+        MESSAGE,
+        "OAuth callback state validation rejected the request.",
+        "problem"
+      );
+      const correctSupports = validIncidentSupports().map((entry) => entry.path === "status" ? problemStatus : entry);
+
+      expect(validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind: "incident_timeline",
+        output,
+        provenanceSessionIds: ["session:a"],
+        supports: validIncidentSupports()
+      })).toContainEqual(expect.objectContaining({
+        code: "invalid_support_kind_evidence",
+        path: "status"
+      }));
+
+      expect(validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind: "incident_timeline",
+        output,
+        provenanceSessionIds: ["session:a"],
+        supports: correctSupports
+      })).toEqual([]);
+    }
+  );
+
+  test.each([
+    ["runbook", "problem"],
+    ["adr", "decision"],
+    ["incident_timeline", "problem"]
+  ] as const)(
+    "requires %s join-rationale support from every provenance session",
+    (kind, joinSupportKind) => {
+      const output = {
+        ...(kind === "runbook" ? validRunbook() : kind === "adr" ? validAdr() : validIncident()),
+        joinRationale: "Both sessions recorded the same OAuth callback state mismatch signature.",
+        provenanceSessionIds: ["session:a", "session:b"]
+      };
+      const baseSupports = kind === "runbook"
+        ? validRunbookSupports()
+        : kind === "adr"
+          ? validAdrSupports()
+          : validIncidentSupports();
+      const joinSupportA = support(
+        "joinRationale",
+        JOIN_A,
+        "Session A recorded the OAuth callback state mismatch signature.",
+        joinSupportKind
+      );
+      const joinSupportB = support(
+        "joinRationale",
+        JOIN_B,
+        "Session B recorded the OAuth callback state mismatch signature.",
+        joinSupportKind
+      );
+      const wrongJoinSupportB: WorkbenchClaimSupport = {
+        ...joinSupportB,
+        supportKind: joinSupportKind === "decision" ? "problem" : "decision"
+      };
+
+      expect(validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind,
+        output,
+        provenanceSessionIds: ["session:a", "session:b"],
+        supports: [...baseSupports, joinSupportA, wrongJoinSupportB]
+      })).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "invalid_support_kind_evidence", path: "joinRationale" }),
+        expect.objectContaining({
+          code: "missing_claim_support",
+          message: expect.stringContaining("session:b"),
+          path: "joinRationale"
+        })
+      ]));
+
+      expect(validateArtifactQuality({
+        evidenceByRef: fixtureEvidence(),
+        kind,
+        output,
+        provenanceSessionIds: ["session:a", "session:b"],
+        supports: [...baseSupports, joinSupportA, joinSupportB]
+      })).toEqual([]);
+    }
+  );
 
   test("rejects a runbook verification supported only by a failed command", () => {
     const evidence = fixtureEvidence();
@@ -518,7 +774,7 @@ describe("artifact claim support", () => {
       kind: "incident_timeline",
       output: incident,
       provenanceSessionIds: ["session:a"],
-      supports: validIncidentSupports()
+      supports: validIncidentSupports().filter((entry) => entry.supportKind !== "root_cause")
     })).toContainEqual(expect.objectContaining({ code: "missing_root_cause_support", path: "rootCause" }));
   });
 
@@ -611,7 +867,20 @@ function fixtureEvidence(): Map<string, WorkbenchValidationEvidence> {
       observedAt: "2026-07-12T12:00:00.000Z",
       role: "user",
       sessionId: "session:a",
-      text: "OAuth callback state validation rejected the request. The prior validator accepted unsupported root cause claims."
+      text: [
+        "OAuth callback state validation rejected the request.",
+        "The response contained invalid callback state in OAuth callback handling.",
+        "OAuth callback handling is enabled.",
+        "Submit a callback with stale state to reproduce the failure.",
+        "Retrying token exchange without validating state did not work.",
+        "Production callback configuration is required.",
+        "Validate state before token exchange for every callback.",
+        "Legacy clients can still send invalid callback state.",
+        "Users could not complete OAuth sign-in.",
+        "Callback retries amplified the sign-in failures.",
+        "Reject callbacks whose state does not match the initiating request.",
+        "The prior validator accepted unsupported root cause claims."
+      ].join(" ")
     }],
     [CHANGE, {
       kind: "file_effect",
@@ -619,7 +888,7 @@ function fixtureEvidence(): Map<string, WorkbenchValidationEvidence> {
       observedAt: "2026-07-12T12:05:00.000Z",
       role: "tool",
       sessionId: "session:a",
-      text: "Changed src/auth/callback.ts to validate callback state before token exchange."
+      text: "Changed src/auth/callback.ts to validate callback state before token exchange. Ran npm test -- auth-callback after the change."
     }],
     [PASSED, {
       exitCode: 0,
@@ -647,6 +916,39 @@ function fixtureEvidence(): Map<string, WorkbenchValidationEvidence> {
       role: "assistant",
       sessionId: "session:a",
       text: "Remediation added deterministic callback state validation before token exchange."
+    }],
+    [ADR, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T12:30:00.000Z",
+      role: "user",
+      sessionId: "session:a",
+      text: [
+        "The callback contract accepted invalid state because decisions were not evidence-bound.",
+        "Keep the legacy claim envelope unchanged was considered and rejected.",
+        "Require exact claim support on every V2 artifact.",
+        "Unsupported artifacts now fail validation before publication.",
+        "src/workbench/authoring/artifactQuality.ts is affected.",
+        "The evidence-backed decision status is accepted.",
+        "This decision supersedes adr:legacy-claim-envelope.",
+        "This decision also supersedes adr:implicit-support-contract."
+      ].join(" ")
+    }],
+    [JOIN_A, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T12:40:00.000Z",
+      role: "user",
+      sessionId: "session:a",
+      text: "Session A recorded the OAuth callback state mismatch signature."
+    }],
+    [JOIN_B, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T12:41:00.000Z",
+      role: "user",
+      sessionId: "session:b",
+      text: "Session B recorded the OAuth callback state mismatch signature."
     }]
   ]);
 }
@@ -655,12 +957,18 @@ function validRunbook(): Record<string, unknown> & { rootCause: string } {
   return {
     changedFiles: ["src/auth/callback.ts"],
     commands: ["npm test -- auth-callback"],
+    deadEnds: ["Retrying token exchange without validating state did not work."],
+    environmentRequirements: ["Production callback configuration is required."],
     fixSteps: ["Validate callback state before exchanging the authorization code."],
+    preconditions: ["OAuth callback handling is enabled."],
+    preventionNotes: ["Validate state before token exchange for every callback."],
     problemSignature: {
       affectedScope: "OAuth callback handling",
       errorStrings: ["invalid callback state"],
       symptoms: ["OAuth callback state validation rejected the request."]
     },
+    reproSteps: ["Submit a callback with stale state to reproduce the failure."],
+    risksOrGaps: ["Legacy clients can still send invalid callback state."],
     rootCause: "The prior validator accepted unsupported root cause claims.",
     title: "Repair OAuth callback validation",
     validationChecks: ["Focused authoring validation tests passed with 24 assertions."]
@@ -670,9 +978,49 @@ function validRunbook(): Record<string, unknown> & { rootCause: string } {
 function validRunbookSupports(): WorkbenchClaimSupport[] {
   return [
     support("problemSignature.symptoms[0]", MESSAGE, "OAuth callback state validation rejected the request.", "problem"),
+    support("problemSignature.errorStrings[0]", MESSAGE, "The response contained invalid callback state in OAuth callback handling.", "problem"),
+    support("problemSignature.affectedScope", MESSAGE, "The response contained invalid callback state in OAuth callback handling.", "problem"),
+    support("preconditions[0]", MESSAGE, "OAuth callback handling is enabled.", "problem"),
+    support("reproSteps[0]", MESSAGE, "Submit a callback with stale state to reproduce the failure.", "problem"),
+    support("deadEnds[0]", MESSAGE, "Retrying token exchange without validating state did not work.", "problem"),
     support("fixSteps[0]", CHANGE, "Changed src/auth/callback.ts to validate callback state before token exchange.", "change"),
+    support("commands[0]", CHANGE, "Ran npm test -- auth-callback after the change.", "change"),
+    support("changedFiles[0]", CHANGE, "Changed src/auth/callback.ts to validate callback state before token exchange.", "change"),
+    support("environmentRequirements[0]", MESSAGE, "Production callback configuration is required.", "problem"),
     support("rootCause", MESSAGE, "The prior validator accepted unsupported root cause claims.", "root_cause"),
+    support("preventionNotes[0]", MESSAGE, "Validate state before token exchange for every callback.", "remediation"),
+    support("risksOrGaps[0]", MESSAGE, "Legacy clients can still send invalid callback state.", "problem"),
     support("validationChecks[0]", PASSED, "Focused authoring validation tests passed with 24 assertions.", "verification")
+  ];
+}
+
+function validAdr(): Record<string, unknown> {
+  return {
+    affectedPaths: ["src/workbench/authoring/artifactQuality.ts"],
+    alternatives: ["Keep the legacy claim envelope unchanged."],
+    confidence: "high",
+    consequences: ["Unsupported artifacts now fail validation before publication."],
+    context: "The callback contract accepted invalid state because decisions were not evidence-bound.",
+    decision: "Require exact claim support on every V2 artifact.",
+    evidenceRefs: [ADR],
+    missingEvidence: [],
+    provenanceSessionIds: ["session:a"],
+    status: "accepted",
+    supersedes: ["adr:legacy-claim-envelope", "adr:implicit-support-contract"],
+    title: "Require exact V2 claim support"
+  };
+}
+
+function validAdrSupports(): WorkbenchClaimSupport[] {
+  return [
+    support("context", ADR, "The callback contract accepted invalid state because decisions were not evidence-bound.", "problem"),
+    support("decision", ADR, "Require exact claim support on every V2 artifact.", "decision"),
+    support("status", ADR, "The evidence-backed decision status is accepted.", "decision"),
+    support("alternatives[0]", ADR, "Keep the legacy claim envelope unchanged was considered and rejected.", "alternative"),
+    support("consequences[0]", ADR, "Unsupported artifacts now fail validation before publication.", "decision"),
+    support("affectedPaths[0]", ADR, "src/workbench/authoring/artifactQuality.ts is affected.", "decision"),
+    support("supersedes[0]", ADR, "This decision supersedes adr:legacy-claim-envelope.", "decision"),
+    support("supersedes[1]", ADR, "This decision also supersedes adr:implicit-support-contract.", "decision")
   ];
 }
 
@@ -680,7 +1028,12 @@ function validIncident(): Record<string, unknown> & {
   timeline: Array<{ at: string; evidenceRefs: string[]; summary: string }>;
 } {
   return {
+    contributingFactors: ["Callback retries amplified the sign-in failures."],
+    impact: "Users could not complete OAuth sign-in.",
+    prevention: ["Reject callbacks whose state does not match the initiating request."],
     remediation: ["Remediation added deterministic callback state validation before token exchange."],
+    rootCause: "The prior validator accepted unsupported root cause claims.",
+    status: "resolved",
     symptom: "OAuth callback state validation rejected the request.",
     timeline: [
       {
@@ -701,6 +1054,7 @@ function validIncident(): Record<string, unknown> & {
 function validIncidentSupports(): WorkbenchClaimSupport[] {
   return [
     support("symptom", MESSAGE, "OAuth callback state validation rejected the request.", "problem"),
+    support("impact", MESSAGE, "Users could not complete OAuth sign-in.", "problem"),
     support("timeline[0].summary", MESSAGE, "OAuth callback state validation rejected the request.", "timeline"),
     support(
       "timeline[1].summary",
@@ -713,7 +1067,11 @@ function validIncidentSupports(): WorkbenchClaimSupport[] {
       "message:session:a:remediation",
       "Remediation added deterministic callback state validation before token exchange.",
       "remediation"
-    )
+    ),
+    support("rootCause", MESSAGE, "The prior validator accepted unsupported root cause claims.", "root_cause"),
+    support("contributingFactors[0]", MESSAGE, "Callback retries amplified the sign-in failures.", "problem"),
+    support("prevention[0]", MESSAGE, "Reject callbacks whose state does not match the initiating request.", "remediation"),
+    support("status", PASSED, "Focused authoring validation tests passed with 24 assertions.", "verification")
   ];
 }
 

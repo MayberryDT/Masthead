@@ -398,7 +398,7 @@ describe("Workbench authoring HTTP API", () => {
       candidateId: "candidate:no-evidence",
       evidenceRevision: authoringEvidenceRevision(daemon.database, ["session:no-evidence"]),
       kind: "runbook",
-      origin: "automatic",
+      origin: "proposal",
       provenanceSessionIds: ["session:no-evidence"],
       seedSessionId: "session:no-evidence",
       signalEvidenceRefs: ["message:deleted"],
@@ -667,6 +667,19 @@ function validCandidateBundle(run: any, candidate: any) {
   const verificationRef = candidate.signalEvidenceRefs.find(
     (ref: string) => ref.startsWith("checkpoint:") || ref.includes(":verified")
   );
+  const joinSupports = candidate.provenanceSessionIds.length > 1
+    ? candidate.provenanceSessionIds.map((sessionId: string) => {
+        const sessionToken = sessionId.replace(/^session:/, "");
+        const evidenceRef = candidate.signalEvidenceRefs.find((ref: string) => ref.includes(sessionToken));
+        if (!evidenceRef) throw new Error(`candidate_join_fixture_evidence_missing:${sessionId}`);
+        return {
+          evidenceRef,
+          excerpt: candidateExcerpt(evidenceRef),
+          path: "joinRationale",
+          supportKind: "problem"
+        };
+      })
+    : [];
   return {
     artifact: {
       kind: candidate.kind,
@@ -680,10 +693,52 @@ function validCandidateBundle(run: any, candidate: any) {
             supportKind: "problem"
           },
           {
+            evidenceRef: failureRef,
+            excerpt: candidateExcerpt(failureRef),
+            path: "problemSignature.errorStrings[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: failureRef,
+            excerpt: candidateExcerpt(failureRef),
+            path: "problemSignature.affectedScope",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: failureRef,
+            excerpt: candidateExcerpt(failureRef),
+            path: "preconditions[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: failureRef,
+            excerpt: candidateExcerpt(failureRef),
+            path: "reproSteps[0]",
+            supportKind: "problem"
+          },
+          {
             evidenceRef: changeRef,
             excerpt: candidateExcerpt(changeRef),
             path: "fixSteps[0]",
             supportKind: "change"
+          },
+          {
+            evidenceRef: changeRef,
+            excerpt: candidateExcerpt(changeRef),
+            path: "commands[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: changeRef,
+            excerpt: candidateExcerpt(changeRef),
+            path: "changedFiles[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: failureRef,
+            excerpt: candidateExcerpt(failureRef),
+            path: "environmentRequirements[0]",
+            supportKind: "problem"
           },
           {
             evidenceRef: failureRef,
@@ -694,9 +749,16 @@ function validCandidateBundle(run: any, candidate: any) {
           {
             evidenceRef: verificationRef,
             excerpt: candidateExcerpt(verificationRef),
+            path: "preventionNotes[0]",
+            supportKind: "remediation"
+          },
+          {
+            evidenceRef: verificationRef,
+            excerpt: candidateExcerpt(verificationRef),
             path: "validationChecks[0]",
             supportKind: "verification"
-          }
+          },
+          ...joinSupports
         ],
         commands: ["npm test"],
         confidence: "low",

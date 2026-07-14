@@ -507,7 +507,15 @@ function durableRunbookOutput(candidate: WorkbenchArtifactCandidate): Record<str
     changedFiles: ["auth/callback.ts"],
     claimSupport: [
       durableSupport("problemSignature.symptoms[0]", problemRef, problem, "problem"),
+      durableSupport("problemSignature.errorStrings[0]", problemRef, problem, "problem"),
+      durableSupport("problemSignature.affectedScope", problemRef, problem, "problem"),
+      durableSupport("preconditions[0]", problemRef, problem, "problem"),
+      durableSupport("reproSteps[0]", problemRef, problem, "problem"),
       durableSupport("fixSteps[0]", changeRef, change, "change"),
+      durableSupport("commands[0]", changeRef, change, "change"),
+      durableSupport("changedFiles[0]", changeRef, change, "change"),
+      durableSupport("environmentRequirements[0]", problemRef, problem, "problem"),
+      durableSupport("preventionNotes[0]", verificationRef, verification, "remediation"),
       durableSupport("validationChecks[0]", verificationRef, verification, "verification")
     ],
     commands: ["Run the OAuth callback regression test."],
@@ -541,8 +549,11 @@ function durableAdrOutput(candidate: WorkbenchArtifactCandidate): Record<string,
   return {
     alternatives: [alternative],
     claimSupport: [
+      durableSupport("context", decisionRef, decision, "problem"),
       durableSupport("decision", decisionRef, decision, "decision"),
-      durableSupport("alternatives[0]", alternativeRef, alternative, "alternative")
+      durableSupport("status", decisionRef, decision, "decision"),
+      durableSupport("alternatives[0]", alternativeRef, alternative, "alternative"),
+      durableSupport("consequences[0]", decisionRef, decision, "decision")
     ],
     confidence: "low",
     consequences: ["The session store remains local and supports offline operation."],
@@ -568,12 +579,16 @@ function durableIncidentOutput(candidate: WorkbenchArtifactCandidate): Record<st
   return {
     claimSupport: [
       durableSupport("symptom", detectedRef, detected, "problem"),
+      durableSupport("impact", detectedRef, detected, "problem"),
       durableSupport("timeline[0].summary", detectedRef, detected, "timeline"),
       durableSupport("timeline[1].summary", triageRef, triage, "timeline"),
       durableSupport("timeline[2].summary", mitigatedRef, mitigated, "timeline"),
       durableSupport("timeline[3].summary", restoredRef, restored, "timeline"),
       durableSupport("rootCause", triageRef, triage, "root_cause"),
-      durableSupport("remediation[0]", mitigatedRef, mitigated, "remediation")
+      durableSupport("contributingFactors[0]", triageRef, triage, "problem"),
+      durableSupport("remediation[0]", mitigatedRef, mitigated, "remediation"),
+      durableSupport("prevention[0]", restoredRef, restored, "remediation"),
+      durableSupport("status", restoredRef, restored, "verification")
     ],
     confidence: "low",
     contributingFactors: [triage],

@@ -677,8 +677,8 @@ describe("daemon database schema", () => {
       ).all()
     ).toEqual([
       {
-        nextAction: "enrich",
-        resolutionStatus: "compile_ready",
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
         sessionId: "session:no-published-artifacts"
       },
       {
@@ -884,8 +884,8 @@ describe("daemon database schema", () => {
       ).all()
     ).toEqual([
       {
-        nextAction: "enrich",
-        resolutionStatus: "compile_ready",
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
         runbookStatus: "applied",
         sessionId: "session:already-applied"
       },
@@ -896,8 +896,8 @@ describe("daemon database schema", () => {
         sessionId: "session:collision-new"
       },
       {
-        nextAction: "enrich",
-        resolutionStatus: "compile_ready",
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
         runbookStatus: "applied",
         sessionId: "session:collision-old"
       },
@@ -908,8 +908,8 @@ describe("daemon database schema", () => {
         sessionId: "session:contribution-new"
       },
       {
-        nextAction: "enrich",
-        resolutionStatus: "compile_ready",
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
         runbookStatus: "applied",
         sessionId: "session:contribution-old"
       },

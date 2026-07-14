@@ -21,6 +21,8 @@ import {
   ARTIFACT_CANDIDATE_DETECTOR_REVISION,
   discoverArtifactCandidatePage,
   discoverArtifactCandidates,
+  discoverNextArtifactCandidatePage,
+  isArtifactCandidateEvidenceCurrent,
   proposeArtifactCandidate
 } from "../artifactCandidates.ts";
 import { getAuthoringEvidencePage } from "../evidenceCatalog.ts";
@@ -204,6 +206,40 @@ describe("artifact candidate discovery", () => {
          WHERE detector_revision = ?`
       ).get(ARTIFACT_CANDIDATE_DETECTOR_REVISION)
     ).toEqual({ count: durableArtifactCorpus.length });
+    db.close();
+  });
+
+  test("keeps automatic candidates closed until every provenance session has a current detector scan", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const discovered = discoverArtifactCandidatePage(db, { limit: 100 });
+    const candidate = discovered.candidates.find((entry) => entry.origin === "automatic")!;
+    expect(isArtifactCandidateEvidenceCurrent(db, candidate)).toBe(true);
+
+    db.prepare(
+      `UPDATE workbench_artifact_candidate_scans
+       SET detector_revision = ?
+       WHERE session_id = ?`
+    ).run(ARTIFACT_CANDIDATE_DETECTOR_REVISION - 1, candidate.provenanceSessionIds[0]);
+
+    expect(isArtifactCandidateEvidenceCurrent(db, candidate)).toBe(false);
+    discoverArtifactCandidatePage(db, { limit: 100 });
+    expect(isArtifactCandidateEvidenceCurrent(db, candidate)).toBe(true);
+    db.close();
+  });
+
+  test("continues detector scans after a canonical dossier publishes its session", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET publication_status = 'published', session_package_status = 'published'
+       WHERE session_id = ?`
+    ).run(dossierOnlyQuestion.id);
+
+    expect(discoverNextArtifactCandidatePage(db, { limit: 100 }).scannedSessionIds).toContain(
+      dossierOnlyQuestion.id
+    );
     db.close();
   });
 

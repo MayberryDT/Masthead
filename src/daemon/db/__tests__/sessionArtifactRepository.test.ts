@@ -225,7 +225,21 @@ describe("session artifact repository", () => {
     ["file", "callback-router"],
     ["tool", "oauth_probe"],
     ["verification", "callback smoke test"],
-    ["attention", "stale client secret"]
+    ["attention", "stale client secret"],
+    ["durable title", "pinequartz"],
+    ["durable summary", "amberlattice"],
+    ["durable purpose", "purposeglyph"],
+    ["durable outcome", "outcomebeacon"],
+    ["durable key work", "keyworkrivet"],
+    ["durable decision", "decisionharbor"],
+    ["durable blocker", "blockerthistle"],
+    ["durable verification summary", "verifycobalt"],
+    ["durable verification command", "commandmarigold"],
+    ["durable verification failure", "failureviolet"],
+    ["durable continuation next step", "nextstepcedar"],
+    ["durable continuation question", "questiontopaz"],
+    ["durable continuation constraint", "constraintwillow"],
+    ["durable warning", "warningcrimson"]
   ])("indexes canonical dossier %s text explicitly", async (_label, query) => {
     const db = await testDb();
     seedSession(db, {
@@ -257,6 +271,42 @@ describe("session artifact repository", () => {
         title: "Rotate the stale client secret"
       }
     ];
+    snapshot.durableEnrichment = {
+      sessionDossier: {
+        blockers: ["blockerthistle must be resolved before release."],
+        continuation: {
+          constraints: ["constraintwillow limits the rollout."],
+          nextStep: "Run nextstepcedar after approval.",
+          openQuestions: ["Should questiontopaz remain open?"]
+        },
+        decisions: ["Use decisionharbor for the callback flow."],
+        evidenceRefs: [],
+        keyWork: ["Completed keyworkrivet in the OAuth handler."],
+        outcome: "The outcomebeacon behavior is now stable.",
+        purpose: "The purposeglyph path preserves callback state.",
+        verification: {
+          commands: ["run commandmarigold"],
+          evidenceRefs: [],
+          failures: ["failureviolet remains a known failed attempt."],
+          status: "passed",
+          summary: "verifycobalt passed against the callback."
+        },
+        warnings: ["warningcrimson requires operator attention."]
+      },
+      sessionSummary: {
+        confidence: "high",
+        evidenceRefs: [],
+        state: "completed",
+        text: "amberlattice summarizes the durable result."
+      },
+      sessionTitle: {
+        basis: "dominant_work",
+        confidence: "high",
+        evidenceRefs: [],
+        text: "pinequartz durable title"
+      },
+      version: "session-capsule-v4"
+    };
     const artifact = applySessionArtifact(db, {
       artifactKind: "session_dossier",
       content: snapshot,
@@ -499,11 +549,13 @@ describe("session artifact repository", () => {
   test("refuses mixed V1 populations and detects relevant state changes by audit hash", async () => {
     const db = await testDb();
     seedExactFailedV1Generation(db);
+    const databaseId = getOrCreateDatabaseIdentity(db);
     const audit = auditFailedV1Generation(db);
+    const recoveryBackup = failedGenerationRecoveryBackup(databaseId, audit);
     db.prepare(
       "UPDATE workbench_session_state SET adr_status = 'required' WHERE session_id = 'session:failed-v1:0000'"
     ).run();
-    expect(() => invalidateFailedV1Generation(db, audit.auditHash)).toThrow("audit_hash_mismatch");
+    expect(() => invalidateFailedV1Generation(db, audit.auditHash, recoveryBackup)).toThrow("audit_hash_mismatch");
 
     db.prepare(
       `INSERT INTO session_artifacts (
@@ -530,8 +582,16 @@ describe("session artifact repository", () => {
   test("invalidates exact failed output, preserves V1 audit history, resets N/A, and rolls back every boundary", async () => {
     const db = await testDb();
     seedExactFailedV1Generation(db);
+    const databaseId = getOrCreateDatabaseIdentity(db);
     const audit = auditFailedV1Generation(db);
+    const recoveryBackup = failedGenerationRecoveryBackup(databaseId, audit);
     const before = recoveryCounts(db);
+    expect(() => invalidateFailedV1Generation(db, audit.auditHash, undefined as never))
+      .toThrow("failed_v1_recovery_backup_evidence_required");
+    expect(() => invalidateFailedV1Generation(db, audit.auditHash, {
+      ...recoveryBackup,
+      databaseId: "wrong-database-id"
+    })).toThrow("failed_v1_recovery_backup_identity_mismatch");
     const boundaries = [
       "search_deleted",
       "provenance_deleted",
@@ -541,7 +601,7 @@ describe("session artifact repository", () => {
       "activity_recorded"
     ] as const;
     for (const failedBoundary of boundaries) {
-      expect(() => invalidateFailedV1Generation(db, audit.auditHash, {
+      expect(() => invalidateFailedV1Generation(db, audit.auditHash, recoveryBackup, {
         onMutationBoundary(boundary) {
           if (boundary === failedBoundary) throw new Error(`injected:${boundary}`);
         }
@@ -550,12 +610,18 @@ describe("session artifact repository", () => {
       expect(auditFailedV1Generation(db).auditHash).toBe(audit.auditHash);
     }
 
-    const receipt = invalidateFailedV1Generation(db, audit.auditHash);
+    const mutableRecoveryBackup = { ...recoveryBackup };
+    const receipt = invalidateFailedV1Generation(db, audit.auditHash, mutableRecoveryBackup, {
+      onMutationBoundary(boundary) {
+        if (boundary === "search_deleted") mutableRecoveryBackup.auditHash = "0".repeat(64);
+      }
+    });
 
     expect(receipt).toMatchObject({
       artifactsInvalidated: FAILED_V1_DOSSIER_COUNT,
       auditHash: audit.auditHash,
       provenanceDeleted: FAILED_V1_DOSSIER_COUNT,
+      recoveryBackup,
       searchRowsDeleted: FAILED_V1_DOSSIER_COUNT,
       sessionsReset: FAILED_V1_DOSSIER_COUNT
     });
@@ -848,6 +914,25 @@ function seedExactFailedV1Generation(
     );
     members.forEach((member, index) => insertRunSession.run(runId, member.sessionId, member.claimId, index));
   }
+}
+
+function failedGenerationRecoveryBackup(
+  databaseId: string,
+  audit: ReturnType<typeof auditFailedV1Generation>
+) {
+  return {
+    artifacts: audit.totalArtifacts,
+    auditHash: audit.auditHash,
+    backupPath: "/verified/masthead.sqlite.backup-current",
+    backupPreserved: true as const,
+    databaseId,
+    device: "1",
+    inode: "2",
+    integrityResult: "ok" as const,
+    runs: audit.totalRuns,
+    sessions: audit.totalSessions,
+    sizeBytes: 1
+  };
 }
 
 function failedTemplateDossier(suffix: string): Record<string, unknown> & { title: string } {

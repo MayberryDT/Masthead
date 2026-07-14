@@ -425,6 +425,17 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     expect(audit).toMatchObject({ dossiers: 1_283, auditHash: expect.stringMatching(/^[a-f0-9]{64}$/u) });
     expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
 
+    const missingPreparedBackup = await runMastheadCli(
+      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", audit.auditHash, "--confirm", "--json"],
+      { env: {} }
+    );
+    expect(missingPreparedBackup.exitCode).toBe(1);
+    expect(JSON.parse(missingPreparedBackup.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_backup_path_invalid") },
+      ok: false
+    });
+    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
+
     const prepared = await runMastheadCli(
       ["workbench", "prepare-v1-recovery", "--db", dbPath, "--json"],
       { env: {} }
@@ -437,6 +448,54 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     });
     expect((await readdir(tempDir)).filter((name) => name.startsWith("masthead.sqlite.backup-"))).toHaveLength(1);
     expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
+    const backupPath = join(tempDir, "masthead.sqlite.backup-current");
+    const preparedBackupSafetyPath = join(tempDir, "prepared-backup-safety.sqlite");
+    await copyFile(backupPath, preparedBackupSafetyPath);
+
+    await writeFile(`${backupPath}-wal`, "");
+    const backupWithSidecar = await runMastheadCli(
+      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", audit.auditHash, "--confirm", "--json"],
+      { env: {} }
+    );
+    expect(JSON.parse(backupWithSidecar.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_backup_sidecar_present") },
+      ok: false
+    });
+    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
+    await rm(`${backupPath}-wal`);
+
+    const wrongIdentityBackup = new DatabaseSync(backupPath);
+    wrongIdentityBackup.prepare(
+      "UPDATE app_settings SET setting_json = ? WHERE setting_key = 'database_identity'"
+    ).run(JSON.stringify({ databaseId: "wrong-database-id" }));
+    wrongIdentityBackup.close();
+    const mismatchedBackupIdentity = await runMastheadCli(
+      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", audit.auditHash, "--confirm", "--json"],
+      { env: {} }
+    );
+    expect(JSON.parse(mismatchedBackupIdentity.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_identity_mismatch") },
+      ok: false
+    });
+    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
+    await copyFile(preparedBackupSafetyPath, backupPath);
+
+    const wrongPopulationBackup = new DatabaseSync(backupPath);
+    wrongPopulationBackup.prepare(
+      "UPDATE workbench_session_state SET adr_status = 'required' WHERE session_id = 'session:cli-failed:0000'"
+    ).run();
+    wrongPopulationBackup.close();
+    const mismatchedBackupPopulation = await runMastheadCli(
+      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", audit.auditHash, "--confirm", "--json"],
+      { env: {} }
+    );
+    expect(JSON.parse(mismatchedBackupPopulation.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_backup_audit_hash_mismatch") },
+      ok: false
+    });
+    expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
+    await copyFile(preparedBackupSafetyPath, backupPath);
+    await rm(preparedBackupSafetyPath);
 
     const missingHash = await runMastheadCli(
       ["workbench", "invalidate-v1-generation", "--db", dbPath, "--confirm", "--json"],
@@ -473,7 +532,24 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     expect(invalidated.exitCode).toBe(0);
     expect(JSON.parse(invalidated.stdout)).toMatchObject({
       ok: true,
-      receipt: { artifactsInvalidated: 1_283, auditHash: audit.auditHash, sessionsReset: 1_283 }
+      receipt: {
+        artifactsInvalidated: 1_283,
+        auditHash: audit.auditHash,
+        recoveryBackup: {
+          artifacts: 1_283,
+          auditHash: audit.auditHash,
+          backupPath,
+          backupPreserved: true,
+          databaseId,
+          device: expect.stringMatching(/^\d+$/u),
+          inode: expect.stringMatching(/^\d+$/u),
+          integrityResult: "ok",
+          runs: 66,
+          sessions: 1_283,
+          sizeBytes: expect.any(Number)
+        },
+        sessionsReset: 1_283
+      }
     });
     expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 0, runs: 66 });
     const verified = new DatabaseSync(dbPath, { readOnly: true });
@@ -482,7 +558,6 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     ).get()).toEqual({ adrStatus: "unknown", dossierStatus: "missing" });
     verified.close();
 
-    const backupPath = join(tempDir, "masthead.sqlite.backup-current");
     for (const suffix of ["-wal", "-shm", "-journal"]) {
       await expect(access(`${backupPath}${suffix}`)).rejects.toMatchObject({ code: "ENOENT" });
     }

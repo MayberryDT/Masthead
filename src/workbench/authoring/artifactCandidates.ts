@@ -88,10 +88,18 @@ export function discoverArtifactCandidates(
   db: MastheadDatabase,
   sessionIds: string[]
 ): WorkbenchArtifactCandidate[] {
-  return withImmediateTransaction(
-    db,
-    () => reconcileArtifactCandidates(db, normalizedStrings(sessionIds)).candidates
-  );
+  return withImmediateTransaction(db, () => {
+    const reconciled = reconcileArtifactCandidates(db, normalizedStrings(sessionIds));
+    for (const sessionId of reconciled.acknowledgedSessionIds) {
+      recordWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+        evidenceRevision: authoringEvidenceRevision(db, [sessionId]),
+        sessionId,
+        sourceRevision: getWorkbenchArtifactCandidateSourceRevision(db, sessionId)
+      });
+    }
+    return reconciled.candidates;
+  });
 }
 
 export function discoverArtifactCandidatePage(
@@ -106,7 +114,7 @@ export function discoverArtifactCandidatePage(
        INNER JOIN workbench_session_state
          ON workbench_session_state.session_id = sessions.session_id
        WHERE sessions.deleted_at IS NULL
-         AND workbench_session_state.publication_status = 'publish_path'
+         AND workbench_session_state.publication_status <> 'not_added_to_logbook'
          AND sessions.session_id > ?
        ORDER BY sessions.session_id
        LIMIT ?`
@@ -144,7 +152,7 @@ export function discoverNextArtifactCandidatePage(
         AND scans.source_revision = COALESCE(revisions.source_revision, 0)
         AND scans.detector_revision = ?
        WHERE sessions.deleted_at IS NULL
-         AND workbench_session_state.publication_status = 'publish_path'
+         AND workbench_session_state.publication_status <> 'not_added_to_logbook'
          AND scans.session_id IS NULL
        ORDER BY sessions.session_id
        LIMIT ?`
@@ -222,6 +230,19 @@ export function isArtifactCandidateEvidenceCurrent(
   db: MastheadDatabase,
   candidate: WorkbenchArtifactCandidate
 ): boolean {
+  if (
+    candidate.origin === "automatic" &&
+    candidate.provenanceSessionIds.some((sessionId) => {
+      const sourceRevision = getWorkbenchArtifactCandidateSourceRevision(db, sessionId);
+      return !hasWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+        sessionId,
+        sourceRevision
+      });
+    })
+  ) {
+    return false;
+  }
   if (candidate.origin !== "automatic" || !candidate.signatureKey) {
     return authoringEvidenceRevision(db, candidate.provenanceSessionIds) === candidate.evidenceRevision;
   }

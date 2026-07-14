@@ -124,14 +124,62 @@ function validV2Bundle(): WorkbenchAuthoringBundleV2 {
           {
             evidenceRef: "message:a:1",
             excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "problemSignature.errorStrings[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "problemSignature.affectedScope",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "preconditions[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "reproSteps[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
             path: "fixSteps[0]",
             supportKind: "change"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Changed validation behavior. Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "commands[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Changed validation behavior. Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "changedFiles[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "environmentRequirements[0]",
+            supportKind: "problem"
           },
           {
             evidenceRef: "message:a:1",
             excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
             path: "rootCause",
             supportKind: "root_cause"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "preventionNotes[0]",
+            supportKind: "remediation"
           },
           {
             evidenceRef: "tool_result:a:2",

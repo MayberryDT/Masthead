@@ -109,8 +109,8 @@ describe("durable artifact acceptance corpus", () => {
       ["verification", "Callback regression test passed after the nonce repair."]
     ]);
     expect(evaluatePersistedClaimSupport("runbook", body, evidence)).toMatchObject({
-      expectedCount: 3,
-      passedCount: 3,
+      expectedCount: 11,
+      passedCount: 11,
       integrityFailures: []
     });
 
@@ -183,13 +183,31 @@ function canonicalDossierShape(): SessionDossierDto {
 function validPersistedRunbook(): Record<string, unknown> {
   return {
     title: "Repair OAuth callback state nonce validation",
-    problemSignature: { symptoms: ["OAuth callback test failed with an invalid state nonce."] },
+    problemSignature: {
+      affectedScope: "OAuth callback test failed with an invalid state nonce.",
+      errorStrings: ["OAuth callback test failed with an invalid state nonce."],
+      symptoms: ["OAuth callback test failed with an invalid state nonce."]
+    },
+    preconditions: ["OAuth callback test failed with an invalid state nonce."],
+    reproSteps: ["OAuth callback test failed with an invalid state nonce."],
     fixSteps: ["Apply the recorded callback change: modified auth/callback.ts."],
+    commands: ["Apply the recorded callback change: modified auth/callback.ts."],
+    changedFiles: ["Apply the recorded callback change: modified auth/callback.ts."],
     validationChecks: ["Callback regression test passed after the nonce repair."],
+    environmentRequirements: ["OAuth callback test failed with an invalid state nonce."],
+    preventionNotes: ["Callback regression test passed after the nonce repair."],
     claimSupport: [
       { path: "problemSignature.symptoms[0]", evidenceRef: "problem", excerpt: "OAuth callback test failed with an invalid state nonce.", supportKind: "problem" },
+      { path: "problemSignature.errorStrings[0]", evidenceRef: "problem", excerpt: "OAuth callback test failed with an invalid state nonce.", supportKind: "problem" },
+      { path: "problemSignature.affectedScope", evidenceRef: "problem", excerpt: "OAuth callback test failed with an invalid state nonce.", supportKind: "problem" },
+      { path: "preconditions[0]", evidenceRef: "problem", excerpt: "OAuth callback test failed with an invalid state nonce.", supportKind: "problem" },
+      { path: "reproSteps[0]", evidenceRef: "problem", excerpt: "OAuth callback test failed with an invalid state nonce.", supportKind: "problem" },
       { path: "fixSteps[0]", evidenceRef: "change", excerpt: "modified auth/callback.ts", supportKind: "change" },
-      { path: "validationChecks[0]", evidenceRef: "verification", excerpt: "Callback regression test passed after the nonce repair.", supportKind: "verification" }
+      { path: "commands[0]", evidenceRef: "change", excerpt: "modified auth/callback.ts", supportKind: "change" },
+      { path: "changedFiles[0]", evidenceRef: "change", excerpt: "modified auth/callback.ts", supportKind: "change" },
+      { path: "validationChecks[0]", evidenceRef: "verification", excerpt: "Callback regression test passed after the nonce repair.", supportKind: "verification" },
+      { path: "environmentRequirements[0]", evidenceRef: "problem", excerpt: "OAuth callback test failed with an invalid state nonce.", supportKind: "problem" },
+      { path: "preventionNotes[0]", evidenceRef: "verification", excerpt: "Callback regression test passed after the nonce repair.", supportKind: "remediation" }
     ]
   };
 }

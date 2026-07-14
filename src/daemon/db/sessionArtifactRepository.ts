@@ -109,6 +109,20 @@ export type FailedGenerationAudit = {
   };
 };
 
+export type FailedGenerationRecoveryBackupEvidence = {
+  artifacts: number;
+  auditHash: string;
+  backupPath: string;
+  backupPreserved: true;
+  databaseId: string;
+  device: string;
+  inode: string;
+  integrityResult: "ok";
+  runs: number;
+  sessions: number;
+  sizeBytes: number;
+};
+
 export type FailedGenerationReceipt = {
   auditHash: string;
   artifactsInvalidated: number;
@@ -117,6 +131,7 @@ export type FailedGenerationReceipt = {
   sessionsReset: number;
   claimsReleased: number;
   activityId: string;
+  recoveryBackup: FailedGenerationRecoveryBackupEvidence;
 };
 
 export type FailedGenerationInvalidationBoundary =
@@ -319,6 +334,7 @@ export function indexSessionArtifactSearch(db: MastheadDatabase, artifactId: str
 }
 
 export function canonicalDossierSearchText(snapshot: PublishedSessionDossierV1): string {
+  const durable = snapshot.durableEnrichment;
   return [
     snapshot.identity.title,
     snapshot.identity.project,
@@ -329,7 +345,21 @@ export function canonicalDossierSearchText(snapshot: PublishedSessionDossierV1):
     snapshot.narrative.finalAssistantMessage,
     snapshot.narrative.liveSummary,
     snapshot.narrative.outcome,
-    snapshot.durableEnrichment?.sessionSummary.text,
+    durable?.sessionTitle.text,
+    durable?.sessionSummary.text,
+    durable?.sessionDossier.purpose,
+    durable?.sessionDossier.outcome,
+    ...(durable?.sessionDossier.keyWork ?? []),
+    ...(durable?.sessionDossier.decisions ?? []),
+    ...(durable?.sessionDossier.blockers ?? []),
+    durable?.sessionDossier.verification.status,
+    durable?.sessionDossier.verification.summary,
+    ...(durable?.sessionDossier.verification.commands ?? []),
+    ...(durable?.sessionDossier.verification.failures ?? []),
+    durable?.sessionDossier.continuation.nextStep,
+    ...(durable?.sessionDossier.continuation.openQuestions ?? []),
+    ...(durable?.sessionDossier.continuation.constraints ?? []),
+    ...(durable?.sessionDossier.warnings ?? []),
     ...snapshot.narrative.topics,
     ...snapshot.narrative.technologies,
     ...snapshot.narrative.unresolved,
@@ -450,9 +480,11 @@ export function auditFailedV1Generation(db: MastheadDatabase): FailedGenerationA
 export function invalidateFailedV1Generation(
   db: MastheadDatabase,
   expectedAuditHash: string,
+  recoveryBackup: FailedGenerationRecoveryBackupEvidence,
   options: { onMutationBoundary?: (boundary: FailedGenerationInvalidationBoundary) => void } = {}
 ): FailedGenerationReceipt {
   if (!/^[a-f0-9]{64}$/u.test(expectedAuditHash)) throw new Error("failed_v1_recovery_audit_hash_invalid");
+  if (!recoveryBackup) throw new Error("failed_v1_recovery_backup_evidence_required");
   return withImmediateTransaction(db, () => {
     const selection = selectFailedV1Generation(db);
     if (selection.audit.auditHash !== expectedAuditHash) {
@@ -460,6 +492,8 @@ export function invalidateFailedV1Generation(
         `failed_v1_recovery_audit_hash_mismatch:${expectedAuditHash}:${selection.audit.auditHash}`
       );
     }
+    const boundRecoveryBackup = { ...recoveryBackup };
+    validateFailedGenerationRecoveryBackup(db, selection.audit, boundRecoveryBackup);
     const now = new Date().toISOString();
     const deleteSearch = db.prepare("DELETE FROM session_artifact_search WHERE artifact_id = ?");
     const deleteProvenance = db.prepare("DELETE FROM session_artifact_provenance WHERE artifact_id = ?");
@@ -522,6 +556,7 @@ export function invalidateFailedV1Generation(
       JSON.stringify({
         artifactCount: selection.artifactIds.length,
         auditHash: expectedAuditHash,
+        recoveryBackup: boundRecoveryBackup,
         runIds: selection.runIds,
         sessionCount: selection.sessionIds.length
       })
@@ -534,10 +569,55 @@ export function invalidateFailedV1Generation(
       auditHash: expectedAuditHash,
       claimsReleased,
       provenanceDeleted,
+      recoveryBackup: boundRecoveryBackup,
       searchRowsDeleted,
       sessionsReset
     };
   });
+}
+
+function validateFailedGenerationRecoveryBackup(
+  db: MastheadDatabase,
+  audit: FailedGenerationAudit,
+  evidence: FailedGenerationRecoveryBackupEvidence
+): void {
+  if (
+    evidence.backupPreserved !== true || evidence.integrityResult !== "ok" ||
+    typeof evidence.backupPath !== "string" || !evidence.backupPath ||
+    !/^\d+$/u.test(evidence.device) || !/^\d+$/u.test(evidence.inode) ||
+    !Number.isSafeInteger(evidence.sizeBytes) || evidence.sizeBytes <= 0
+  ) {
+    throw new Error("failed_v1_recovery_backup_evidence_invalid");
+  }
+  if (evidence.auditHash !== audit.auditHash) {
+    throw new Error("failed_v1_recovery_backup_audit_hash_mismatch");
+  }
+  if (
+    evidence.artifacts !== audit.totalArtifacts || evidence.runs !== audit.totalRuns ||
+    evidence.sessions !== audit.totalSessions
+  ) {
+    throw new Error("failed_v1_recovery_backup_population_mismatch");
+  }
+  const identity = db.prepare(
+    "SELECT setting_json AS value FROM app_settings WHERE setting_key = 'database_identity'"
+  ).get() as { value: string } | undefined;
+  if (recoveryDatabaseId(identity?.value) !== evidence.databaseId) {
+    throw new Error("failed_v1_recovery_backup_identity_mismatch");
+  }
+}
+
+function recoveryDatabaseId(value: string | undefined): string {
+  if (!value) throw new Error("failed_v1_recovery_database_identity_missing");
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (
+      typeof parsed === "object" && parsed !== null && "databaseId" in parsed &&
+      typeof parsed.databaseId === "string" && parsed.databaseId
+    ) return parsed.databaseId;
+  } catch {
+    // Converted to one stable recovery error below.
+  }
+  throw new Error("failed_v1_recovery_database_identity_invalid");
 }
 
 function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelection {

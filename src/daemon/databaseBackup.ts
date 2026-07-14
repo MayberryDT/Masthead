@@ -7,7 +7,13 @@ import {
   acquireLegacyDataDirectoryGuard,
   assertWritableDatabaseLocation
 } from "../core/daemonOwnership.ts";
-import { auditFailedV1Generation } from "./db/sessionArtifactRepository.ts";
+import {
+  auditFailedV1Generation,
+  invalidateFailedV1Generation,
+  type FailedGenerationInvalidationBoundary,
+  type FailedGenerationReceipt,
+  type FailedGenerationRecoveryBackupEvidence
+} from "./db/sessionArtifactRepository.ts";
 
 export type ConsistentDatabaseBackupReceipt = {
   backupPath: string;
@@ -34,6 +40,8 @@ export type FailedV1RecoveryRestoreReceipt = {
   runsRestored: number;
   sessionsRestored: number;
 };
+
+export type FailedV1RecoveryInvalidationReceipt = FailedGenerationReceipt;
 
 export type DatabaseRestoreBoundary = "stage" | "verify_stage" | "before_promotion" | "verify_active";
 
@@ -177,6 +185,28 @@ export async function createVerifiedMigrationBackupInsideDaemonStartup(
   }
 }
 
+/** Invalidates the exact failed V1 population only after its prepared sibling recovery backup verifies. */
+export async function invalidateFailedV1GenerationInsideExclusiveMaintenance(
+  databasePath: string,
+  expectedAuditHash: string,
+  ownership: ExclusiveDatabaseMaintenance,
+  options: { onMutationBoundary?: (boundary: FailedGenerationInvalidationBoundary) => void } = {}
+): Promise<FailedV1RecoveryInvalidationReceipt> {
+  const activePath = resolve(databasePath);
+  if (ownership.databasePath !== activePath || ownership[exclusiveMaintenanceBrand] !== true) {
+    throw new Error("database_invalidation_exclusive_ownership_required");
+  }
+  if (!/^[a-f0-9]{64}$/u.test(expectedAuditHash)) throw new Error("failed_v1_recovery_audit_hash_invalid");
+  const recoveryBackup = await verifyFailedV1RecoveryBackupForInvalidation(activePath, expectedAuditHash);
+  const database = new DatabaseSync(activePath);
+  try {
+    database.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;");
+    return invalidateFailedV1Generation(database, expectedAuditHash, recoveryBackup, options);
+  } finally {
+    database.close();
+  }
+}
+
 /** Restores the one verified V1 recovery snapshot while daemon-equivalent ownership is held. */
 export async function restoreFailedV1RecoveryBackupInsideExclusiveMaintenance(
   databasePath: string,
@@ -243,6 +273,55 @@ export async function restoreFailedV1RecoveryBackupInsideExclusiveMaintenance(
   }
 }
 
+async function verifyFailedV1RecoveryBackupForInvalidation(
+  activePath: string,
+  expectedAuditHash: string
+): Promise<FailedGenerationRecoveryBackupEvidence> {
+  await assertRegularNonSymlinkPath(activePath, activePath, "database_invalidation_active_path_invalid");
+  const backupPath = join(dirname(activePath), `${basename(activePath)}.backup-current`);
+  await assertRegularNonSymlinkPath(backupPath, backupPath, "database_invalidation_backup_path_invalid");
+  await assertNoDatabaseSidecars(backupPath, "database_invalidation_backup_sidecar_present");
+  const before = await lstat(backupPath, { bigint: true });
+  const active = verifyRecoveryDatabase(activePath, true);
+  const backupVerification = verifyRecoveryDatabase(backupPath, true);
+  if (active.databaseId !== backupVerification.databaseId) {
+    throw new Error("database_invalidation_identity_mismatch");
+  }
+  if (active.audit?.auditHash !== expectedAuditHash) {
+    throw new Error("database_invalidation_active_audit_hash_mismatch");
+  }
+  if (backupVerification.audit?.auditHash !== expectedAuditHash) {
+    throw new Error("database_invalidation_backup_audit_hash_mismatch");
+  }
+  await assertNoDatabaseSidecars(backupPath, "database_invalidation_backup_sidecar_present");
+  const after = await lstat(backupPath, { bigint: true });
+  if (
+    before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size ||
+    before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
+  ) {
+    throw new Error("database_invalidation_backup_changed_during_verification");
+  }
+  const audit = backupVerification.audit;
+  if (!audit) throw new Error("database_invalidation_backup_audit_missing");
+  const sizeBytes = Number(after.size);
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) {
+    throw new Error("database_invalidation_backup_size_invalid");
+  }
+  return {
+    artifacts: audit.totalArtifacts,
+    auditHash: audit.auditHash,
+    backupPath,
+    backupPreserved: true,
+    databaseId: backupVerification.databaseId,
+    device: String(after.dev),
+    inode: String(after.ino),
+    integrityResult: "ok",
+    runs: audit.totalRuns,
+    sessions: audit.totalSessions,
+    sizeBytes
+  };
+}
+
 function verifyStagedBackup(stagePath: string): { databaseId: string } {
   let verified: DatabaseSync | undefined;
   try {
@@ -282,7 +361,10 @@ function verifyRecoveryDatabase(
 async function assertRegularNonSymlinkPath(path: string, expectedPath: string, errorCode: string): Promise<void> {
   const absolutePath = resolve(path);
   if (absolutePath !== expectedPath) throw new Error(errorCode);
-  const info = await lstat(absolutePath);
+  const info = await lstat(absolutePath).catch((error) => {
+    if (isErrno(error, "ENOENT")) throw new Error(errorCode);
+    throw error;
+  });
   if (!info.isFile() || info.isSymbolicLink()) throw new Error(errorCode);
   if ((await realpath(absolutePath)) !== absolutePath) throw new Error(errorCode);
 }

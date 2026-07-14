@@ -50,6 +50,7 @@ import {
   markContributionSatisfactionForProvenanceInTransaction,
   markWorkbenchArtifactAppliedInTransaction,
   markWorkbenchArtifactPublishedInTransaction,
+  markWorkbenchPublishedInTransaction,
   markWorkbenchTranscriptAvailableInTransaction,
   publishWorkbenchCandidateSessionInTransaction,
   publishWorkbenchSessionInTransaction,
@@ -562,7 +563,13 @@ export function publishCanonicalDossierInTransaction(
       sessionId
     });
   }
-  return publishSessionArtifactInTransaction(db, applied.artifactId)!;
+  const published = publishSessionArtifactInTransaction(db, applied.artifactId)!;
+  markWorkbenchPublishedInTransaction(db, {
+    actor,
+    publishedVia: "canonical_dossier_publish",
+    sessionId
+  });
+  return published;
 }
 
 export function publishCanonicalDossiers(
@@ -570,12 +577,32 @@ export function publishCanonicalDossiers(
   input: { actorId: string; sessionIds: string[] }
 ): CanonicalDossierPublicationReceipt {
   if (input.sessionIds.length > 100) throw new Error("canonical_dossier_batch_too_large");
-  return withImmediateTransaction(db, () => ({
-    artifactIds: input.sessionIds.map(
-      (sessionId) => publishCanonicalDossierInTransaction(db, sessionId, input.actorId).artifactId
-    ),
-    sessionIds: [...input.sessionIds]
-  }));
+  const sessionIds = [...input.sessionIds];
+  if (sessionIds.length === 0) throw new Error("canonical_dossier_batch_empty");
+  return withImmediateTransaction(db, () => {
+    for (const sessionId of sessionIds) assertSessionExists(db, sessionId);
+    assertCanonicalEvidence(db, authoringEvidenceManifestWithWarnings(db, sessionIds));
+    const actor = { id: input.actorId, kind: "agent" } as const;
+    for (const sessionId of sessionIds) {
+      let state = ensureWorkbenchSessionState(db, sessionId);
+      if (state.publicationStatus === "not_added_to_logbook") {
+        throw new Error(`authoring_session_not_on_publish_path:${sessionId}`);
+      }
+      if (state.transcriptStatus !== "available" && state.transcriptStatus !== "imported") {
+        markWorkbenchTranscriptAvailableInTransaction(db, { actor, sessionId });
+        state = readWorkbenchSessionState(db, sessionId)!;
+      }
+      if (state.qualityStatus !== "passed") {
+        markWorkbenchQualityPassedInTransaction(db, { actor, sessionId });
+      }
+    }
+    return {
+      artifactIds: sessionIds.map(
+        (sessionId) => publishCanonicalDossierInTransaction(db, sessionId, input.actorId).artifactId
+      ),
+      sessionIds
+    };
+  });
 }
 
 function requireLegacyAuthoringBundle(run: WorkbenchAuthoringRunDto): WorkbenchAuthoringBundle {

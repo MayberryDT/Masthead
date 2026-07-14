@@ -6,7 +6,8 @@ import type {
   WorkbenchAuthoringBundle,
   WorkbenchAuthoringBundleV2,
   WorkbenchAuthoringReceipt,
-  WorkbenchAuthoringReceiptV2
+  WorkbenchAuthoringReceiptV2,
+  WorkbenchClaimSupport
 } from "../../../shared/workbenchAuthoring.ts";
 import { seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
@@ -666,7 +667,7 @@ describe("Workbench authoring service", () => {
          WHERE session_id = 'session:a' AND event_type IN ('runbook_published', 'published')
          ORDER BY rowid`
       ).all()
-    ).toEqual([{ eventType: "runbook_published" }, { eventType: "published" }]);
+    ).toEqual([{ eventType: "published" }, { eventType: "runbook_published" }]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
     db.close();
   });
@@ -899,6 +900,14 @@ describe("Workbench authoring service", () => {
     expect(first.sessionIds).toEqual(["session:a", "session:b"]);
     expect(first.artifactIds).toHaveLength(2);
     expect(listSessionArtifacts(db, { publicationStatus: "published" })).toHaveLength(2);
+    for (const sessionId of first.sessionIds) {
+      expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
+        nextAction: "none",
+        publicationStatus: "published",
+        resolutionStatus: "automatic_resolved",
+        sessionPackageStatus: "published"
+      });
+    }
     expect(listSessionArtifacts(db)).toEqual(artifactsAfterFirst);
     expect(db.prepare("SELECT * FROM workbench_activity ORDER BY activity_id").all()).toEqual(
       activitiesAfterFirst
@@ -917,7 +926,7 @@ describe("Workbench authoring service", () => {
         actorId: "recovery",
         sessionIds: ["session:a", "session:missing"]
       })
-    ).toThrow("canonical_dossier_missing:session:missing");
+    ).toThrow("session_not_found:session:missing");
     expect(listSessionArtifacts(db)).toEqual(beforeFailure);
     expect([
       readWorkbenchSessionState(db, "session:a"),
@@ -1026,9 +1035,9 @@ describe("Workbench authoring service", () => {
     expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
       adrStatus: "not_applicable",
       incidentTimelineStatus: "not_applicable",
-      nextAction: "enrich",
+      nextAction: "none",
       publicationStatus: "published",
-      resolutionStatus: "compile_ready",
+      resolutionStatus: "automatic_resolved",
       runbookStatus: "applied",
       sessionPackageStatus: "published"
     });
@@ -1540,6 +1549,19 @@ function validCandidateBundle(
   const failureExcerpt = canonicalCandidateExcerpt(failureRef);
   const changeExcerpt = canonicalCandidateExcerpt(changeRef);
   const verificationExcerpt = canonicalCandidateExcerpt(verificationRef);
+  const joinSupports: WorkbenchClaimSupport[] = candidate.provenanceSessionIds.length > 1
+    ? candidate.provenanceSessionIds.map((sessionId) => {
+        const sessionToken = sessionId.replace(/^session:/, "");
+        const evidenceRef = candidate.signalEvidenceRefs.find((ref) => ref.includes(sessionToken));
+        if (!evidenceRef) throw new Error(`candidate_join_fixture_evidence_missing:${sessionId}`);
+        return {
+          evidenceRef,
+          excerpt: canonicalCandidateExcerpt(evidenceRef),
+          path: "joinRationale",
+          supportKind: "problem"
+        };
+      })
+    : [];
   return {
     artifact: {
       kind: candidate.kind,
@@ -1553,10 +1575,52 @@ function validCandidateBundle(
             supportKind: "problem"
           },
           {
+            evidenceRef: failureRef,
+            excerpt: failureExcerpt,
+            path: "problemSignature.errorStrings[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: failureRef,
+            excerpt: failureExcerpt,
+            path: "problemSignature.affectedScope",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: failureRef,
+            excerpt: failureExcerpt,
+            path: "preconditions[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: failureRef,
+            excerpt: failureExcerpt,
+            path: "reproSteps[0]",
+            supportKind: "problem"
+          },
+          {
             evidenceRef: changeRef,
             excerpt: changeExcerpt,
             path: "fixSteps[0]",
             supportKind: "change"
+          },
+          {
+            evidenceRef: changeRef,
+            excerpt: changeExcerpt,
+            path: "commands[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: changeRef,
+            excerpt: changeExcerpt,
+            path: "changedFiles[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: failureRef,
+            excerpt: failureExcerpt,
+            path: "environmentRequirements[0]",
+            supportKind: "problem"
           },
           {
             evidenceRef: failureRef,
@@ -1567,9 +1631,16 @@ function validCandidateBundle(
           {
             evidenceRef: verificationRef,
             excerpt: verificationExcerpt,
+            path: "preventionNotes[0]",
+            supportKind: "remediation"
+          },
+          {
+            evidenceRef: verificationRef,
+            excerpt: verificationExcerpt,
             path: "validationChecks[0]",
             supportKind: "verification"
-          }
+          },
+          ...joinSupports
         ],
         commands: ["npm test"],
         confidence: "low",

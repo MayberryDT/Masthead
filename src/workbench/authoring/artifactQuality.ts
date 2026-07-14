@@ -14,12 +14,15 @@ import {
 const MIN_SUPPORT_EXCERPT_LENGTH = 20;
 const PASSED_STATUSES = new Set(["completed", "passed", "success", "succeeded"]);
 const PASSED_CHECKPOINT_LABELS = new Set([
+  "incident_restored",
   "passed",
   "succeeded",
   "verification_passed",
   "verification_verified",
   "verified"
 ]);
+const TERMINAL_INCIDENT_STATUSES = new Set(["closed", "recovered", "resolved"]);
+const ACTIVE_INCIDENT_STATUSES = new Set(["active", "ongoing", "open"]);
 const PROTOCOL_PHRASES = [
   "cursor pagination",
   "canonical evidence",
@@ -48,6 +51,35 @@ const REQUIRED_SUPPORT_KINDS: Record<WorkbenchAutomaticArtifactKind, readonly Wo
   adr: ["decision", "alternative"],
   incident_timeline: ["problem", "timeline", "remediation"],
   runbook: ["problem", "change", "verification"]
+};
+
+const CLAIM_SUPPORT_PATH_RULES: Record<
+  WorkbenchAutomaticArtifactKind,
+  readonly { pattern: RegExp; supportKind: WorkbenchClaimSupport["supportKind"] }[]
+> = {
+  adr: [
+    { pattern: /^context$/, supportKind: "problem" },
+    { pattern: /^(?:decision|joinRationale|status)$/, supportKind: "decision" },
+    { pattern: /^alternatives\[\d+\]$/, supportKind: "alternative" },
+    { pattern: /^(?:affectedPaths|consequences|supersedes)\[\d+\]$/, supportKind: "decision" }
+  ],
+  incident_timeline: [
+    { pattern: /^(?:impact|joinRationale|symptom|contributingFactors\[\d+\])$/, supportKind: "problem" },
+    { pattern: /^timeline\[\d+\]\.summary$/, supportKind: "timeline" },
+    { pattern: /^rootCause$/, supportKind: "root_cause" },
+    { pattern: /^(?:prevention|remediation)\[\d+\]$/, supportKind: "remediation" }
+  ],
+  runbook: [
+    {
+      pattern: /^(?:problemSignature\.(?:affectedScope|(?:errorStrings|symptoms)\[\d+\])|(?:deadEnds|environmentRequirements|preconditions|reproSteps|risksOrGaps)\[\d+\])$/,
+      supportKind: "problem"
+    },
+    { pattern: /^joinRationale$/, supportKind: "problem" },
+    { pattern: /^(?:changedFiles|commands|fixSteps)\[\d+\]$/, supportKind: "change" },
+    { pattern: /^validationChecks\[\d+\]$/, supportKind: "verification" },
+    { pattern: /^rootCause$/, supportKind: "root_cause" },
+    { pattern: /^preventionNotes\[\d+\]$/, supportKind: "remediation" }
+  ]
 };
 
 export type ArtifactQualityFinding = {
@@ -155,8 +187,18 @@ export function validateArtifactQuality(input: {
   const validSupports = input.supports.filter(
     (support) => !validateClaimSupport(input.output, [support], input.evidenceByRef).length
   );
+  const supportIsGrounded = (support: WorkbenchClaimSupport): boolean => {
+    const evidence = input.evidenceByRef.get(support.evidenceRef);
+    return Boolean(
+      evidence &&
+      input.provenanceSessionIds.includes(evidence.sessionId) &&
+      supportKindMatchesPath(input.kind, input.output, support) &&
+      supportKindMatchesEvidence(support, evidence)
+    );
+  };
+  const groundedSupports = validSupports.filter(supportIsGrounded);
 
-  for (const path of requiredClaimPaths(input.kind, input.output)) {
+  for (const path of requiredClaimPaths(input.kind, input.output, input.provenanceSessionIds)) {
     if (!validSupports.some((support) => support.path === path)) {
       findings.push({
         code: "missing_claim_support",
@@ -176,16 +218,27 @@ export function validateArtifactQuality(input: {
   }
 
   for (const support of validSupports) {
-    const evidence = input.evidenceByRef.get(support.evidenceRef)!;
-    if (
-      !input.provenanceSessionIds.includes(evidence.sessionId) ||
-      !supportKindMatchesPath(support) ||
-      !supportKindMatchesEvidence(support, evidence)
-    ) {
+    if (!supportIsGrounded(support)) {
       findings.push({
         code: "invalid_support_kind_evidence",
         message: `${support.supportKind} support is not backed by the required canonical evidence class.`,
         path: support.path
+      });
+    }
+  }
+
+  if (new Set(input.provenanceSessionIds).size > 1 && stringPath(input.output.joinRationale, "joinRationale").length) {
+    const supportedSessions = new Set(
+      groundedSupports
+        .filter((support) => support.path === "joinRationale")
+        .map((support) => input.evidenceByRef.get(support.evidenceRef)!.sessionId)
+    );
+    for (const sessionId of new Set(input.provenanceSessionIds)) {
+      if (supportedSessions.has(sessionId)) continue;
+      findings.push({
+        code: "missing_claim_support",
+        message: `Multi-session joinRationale requires canonical claim support from provenance session: ${sessionId}.`,
+        path: "joinRationale"
       });
     }
   }
@@ -270,23 +323,60 @@ export function substantiveFingerprint(
   )));
 }
 
-function requiredClaimPaths(kind: WorkbenchAutomaticArtifactKind, output: Record<string, unknown>): string[] {
+function requiredClaimPaths(
+  kind: WorkbenchAutomaticArtifactKind,
+  output: Record<string, unknown>,
+  provenanceSessionIds: string[]
+): string[] {
+  const joinRationalePath = new Set(provenanceSessionIds).size > 1
+    ? stringPath(output.joinRationale, "joinRationale")
+    : [];
   if (kind === "runbook") {
+    const problemSignature = isRecord(output.problemSignature) ? output.problemSignature : {};
     return [
+      ...arrayPaths(problemSignature.symptoms, "problemSignature.symptoms"),
+      ...arrayPaths(problemSignature.errorStrings, "problemSignature.errorStrings"),
+      ...stringPath(problemSignature.affectedScope, "problemSignature.affectedScope"),
+      ...arrayPaths(output.preconditions, "preconditions"),
+      ...arrayPaths(output.reproSteps, "reproSteps"),
+      ...arrayPaths(output.deadEnds, "deadEnds"),
       ...arrayPaths(output.fixSteps, "fixSteps"),
+      ...arrayPaths(output.commands, "commands"),
+      ...arrayPaths(output.changedFiles, "changedFiles"),
+      ...arrayPaths(output.validationChecks, "validationChecks"),
+      ...arrayPaths(output.environmentRequirements, "environmentRequirements"),
       ...(typeof output.rootCause === "string" && output.rootCause.trim() && !isExplicitlyUnknown(output.rootCause)
         ? ["rootCause"]
         : []),
-      ...arrayPaths(output.validationChecks, "validationChecks")
+      ...arrayPaths(output.preventionNotes, "preventionNotes"),
+      ...arrayPaths(output.risksOrGaps, "risksOrGaps"),
+      ...joinRationalePath
     ];
   }
-  if (kind === "adr") return typeof output.decision === "string" && output.decision.trim() ? ["decision"] : [];
+  if (kind === "adr") {
+    return [
+      ...stringPath(output.context, "context"),
+      ...stringPath(output.decision, "decision"),
+      ...stringPath(output.status, "status"),
+      ...arrayPaths(output.alternatives, "alternatives"),
+      ...arrayPaths(output.consequences, "consequences"),
+      ...arrayPaths(output.affectedPaths, "affectedPaths"),
+      ...arrayPaths(output.supersedes, "supersedes"),
+      ...joinRationalePath
+    ];
+  }
   return [
+    ...stringPath(output.symptom, "symptom"),
+    ...stringPath(output.impact, "impact"),
     ...timelineClaimPaths(output.timeline),
     ...(typeof output.rootCause === "string" && output.rootCause.trim() && !isExplicitlyUnknown(output.rootCause)
       ? ["rootCause"]
       : []),
-    ...arrayPaths(output.remediation, "remediation")
+    ...arrayPaths(output.contributingFactors, "contributingFactors"),
+    ...arrayPaths(output.remediation, "remediation"),
+    ...arrayPaths(output.prevention, "prevention"),
+    ...stringPath(output.status, "status"),
+    ...joinRationalePath
   ];
 }
 
@@ -328,18 +418,22 @@ function supportKindMatchesEvidence(
   return true;
 }
 
-function supportKindMatchesPath(support: WorkbenchClaimSupport): boolean {
-  const allowed: Record<WorkbenchClaimSupport["supportKind"], RegExp> = {
-    alternative: /^alternatives\[\d+\]$/,
-    change: /^(?:changedFiles|commands|fixSteps)\[\d+\]$/,
-    decision: /^decision$/,
-    problem: /^(?:impact|problemSignature(?:\..+)?|reproSteps\[\d+\]|symptom)$/,
-    remediation: /^(?:prevention|remediation)\[\d+\]$/,
-    root_cause: /^rootCause$/,
-    timeline: /^timeline\[\d+\]\.summary$/,
-    verification: /^validationChecks\[\d+\]$/
-  };
-  return allowed[support.supportKind].test(support.path);
+function supportKindMatchesPath(
+  kind: WorkbenchAutomaticArtifactKind,
+  output: Record<string, unknown>,
+  support: WorkbenchClaimSupport
+): boolean {
+  if (kind === "incident_timeline" && support.path === "status") {
+    const status = typeof output.status === "string" ? normalizeWhitespace(output.status).toLowerCase() : "";
+    if (TERMINAL_INCIDENT_STATUSES.has(status)) return support.supportKind === "verification";
+    if (ACTIVE_INCIDENT_STATUSES.has(status)) return support.supportKind === "problem";
+    return support.supportKind === "problem" ||
+      support.supportKind === "remediation" ||
+      support.supportKind === "verification";
+  }
+  return CLAIM_SUPPORT_PATH_RULES[kind].some(
+    (rule) => rule.supportKind === support.supportKind && rule.pattern.test(support.path)
+  );
 }
 
 function validateTimelineOrder(
@@ -443,6 +537,10 @@ function arrayPaths(value: unknown, path: string): string[] {
   return Array.isArray(value)
     ? value.flatMap((entry, index) => typeof entry === "string" && entry.trim() ? [`${path}[${index}]`] : [])
     : [];
+}
+
+function stringPath(value: unknown, path: string): string[] {
+  return typeof value === "string" && value.trim() ? [path] : [];
 }
 
 function timelineClaimPaths(value: unknown): string[] {

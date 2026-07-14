@@ -66,9 +66,11 @@ describe("published session dossier snapshot", () => {
     expect(published.identity.title).toBe(live.identity.title);
   });
 
-  test("fingerprints every snapshot field except capturedAt", () => {
+  test("fingerprints canonical content but not capture time or publication-derived reuse presentation", () => {
     const first = buildPublishedDossierSnapshot(fixtureSessionDossier(), "2026-07-12T18:00:00.000Z");
     const recaptured = buildPublishedDossierSnapshot(fixtureSessionDossier(), "2026-07-12T19:00:00.000Z");
+    recaptured.reuse.mcpIncluded = !first.reuse.mcpIncluded;
+    recaptured.reuse.copyableContext = "Publication-derived presentation changed.";
     const changed = buildPublishedDossierSnapshot(fixtureSessionDossier(), "2026-07-12T18:00:00.000Z");
     changed.narrative.objective = "A substantively changed objective";
 
@@ -82,6 +84,29 @@ describe("published session dossier snapshot", () => {
 
     expect(dossierEvidenceRefs(snapshot)).toEqual([
       "attention:1",
+      "excerpt:1",
+      "file:1",
+      "narrative:1",
+      "timeline:1",
+      "tool:1"
+    ]);
+  });
+
+  test("collects evidence refs from every durable enrichment section", () => {
+    const snapshot = buildPublishedDossierSnapshot(fixtureSessionDossier());
+    snapshot.durableEnrichment!.sessionTitle.evidenceRefs = [evidenceRef("durable:title")];
+    snapshot.durableEnrichment!.sessionSummary.evidenceRefs = [evidenceRef("durable:summary")];
+    snapshot.durableEnrichment!.sessionDossier.evidenceRefs = [evidenceRef("durable:dossier")];
+    snapshot.durableEnrichment!.sessionDossier.verification.evidenceRefs = [
+      evidenceRef("durable:verification")
+    ];
+
+    expect(dossierEvidenceRefs(snapshot)).toEqual([
+      "attention:1",
+      "durable:dossier",
+      "durable:summary",
+      "durable:title",
+      "durable:verification",
       "excerpt:1",
       "file:1",
       "narrative:1",
