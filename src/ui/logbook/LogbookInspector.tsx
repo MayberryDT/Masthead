@@ -236,12 +236,44 @@ function CommonArtifactSections({ record }: { record: Record<string, unknown> })
   return (
     <>
       <ListSection label="Evidence" values={stringArrayField(record, "evidenceRefs")} />
+      <ClaimSupportSection values={record.claimSupport} />
       <ClaimEvidenceSection values={record.claimEvidence} />
       <ListSection label="Missing evidence" values={stringArrayField(record, "missingEvidence")} />
       <ListSection label="Provenance sessions" values={stringArrayField(record, "provenanceSessionIds")} />
       <TextSection label="Join rationale" value={stringField(record, "joinRationale")} />
       <TextSection label="Signature" value={stringField(record, "signatureKey")} />
     </>
+  );
+}
+
+function ClaimSupportSection({ values }: { values: unknown }) {
+  if (!Array.isArray(values)) return null;
+  const entries = values.flatMap((value) => {
+    const record = asRecord(value);
+    if (!record) return [];
+    const evidenceRef = stringField(record, "evidenceRef");
+    const excerpt = stringField(record, "excerpt");
+    const path = stringField(record, "path");
+    const supportKind = stringField(record, "supportKind");
+    if (!evidenceRef && !excerpt && !path && !supportKind) return [];
+    return [{ evidenceRef, excerpt, path, supportKind }];
+  });
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="logbook-inspector-section">
+      <p className="mono-label">Claim support</p>
+      <ul>
+        {entries.map((entry, index) => (
+          <li key={`${entry.path ?? "claim"}:${entry.evidenceRef ?? "evidence"}:${index}`}>
+            {entry.path ? <code>{entry.path}</code> : null}
+            {entry.supportKind ? <span>{` — ${sentenceLabel(entry.supportKind)}`}</span> : null}
+            {entry.excerpt ? <p>{entry.excerpt}</p> : null}
+            {entry.evidenceRef ? <code>{entry.evidenceRef}</code> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -470,6 +502,11 @@ function labelize(value: string): string {
     .filter(Boolean)
     .map((part) => part[0]!.toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function sentenceLabel(value: string): string {
+  const normalized = value.replaceAll("_", " ");
+  return normalized[0]!.toUpperCase() + normalized.slice(1);
 }
 
 function formatDateTime(value: string | undefined): string {

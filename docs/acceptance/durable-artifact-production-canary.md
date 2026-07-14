@@ -1,12 +1,14 @@
 # Durable artifact production recovery and canary evidence
 
-Status: **historical failed activation recovered; corrected schema-24 temporary-copy rehearsal pending; production invalidation not authorized**
+Status: **historical failed activation recovered; corrected temporary-copy rehearsal stopped by operator and is not a blocker for implementation closeout or isolated evaluation; production invalidation and rollout not authorized**
 
 This is the signed evidence record for Task 14 of the durable artifact recovery
-plan. It is deliberately incomplete until the corrected temporary-copy
-rehearsal and real human review are complete. Empty fields are stop signs, not
-permission to infer a pass. Production invalidation is forbidden until both of
-those gates are signed.
+plan. The corrected temporary-copy rehearsal was explicitly stopped on
+2026-07-14 before invalidation and must not be resumed without new operator
+authorization. Tyler also removed that rehearsal from the implementation-
+closeout and isolated-evaluation blocking path so the fixed product can be
+evaluated directly. Empty fields remain stop signs for production invalidation
+or rollout, not permission to infer a production canary pass.
 
 Do not paste transcripts, credentials, environment values, or raw session
 content into this file. Record database IDs, hashes, counts, artifact IDs,
@@ -28,6 +30,9 @@ session IDs, bounded claim excerpts, review scores, and receipt paths only.
   `2026-07-13T08:54:43-06:00`
 - Writable daemon stopped and lifecycle ownership verified: [x] — same time;
   the ownership probe reported `stoppedPids: []`
+- Corrected temporary-copy rehearsal stopped: [x] — explicit operator direction
+  on 2026-07-14; no invalidation, human-review receipt, production activation,
+  or rollout authorization followed
 
 No command below may be run against production until the first checkbox is
 signed. Temporary-copy rehearsal does not authorize production invalidation.
@@ -38,16 +43,45 @@ canary decision.
 
 | Item | Required evidence | Result |
 |---|---|---|
-| Release candidate | Branch `codex/durable-artifact-recovery`; corrected Gate C descendant | `95b23fc19f8e55afb11ae28dddba83e5f2a86d5a` |
-| Immutable production bundle | Exact staged path and SHA-256 digest for the corrected release candidate | `pending rebuild`; digest `pending` |
-| Packaged verification | Corrected manifest, release SHA, bundle digest, and packaged smoke | `pending` |
+| Release candidate | Branch `codex/durable-artifact-recovery`; corrected Gate C descendant | Evaluation app commit `95b23fc19f8e55afb11ae28dddba83e5f2a86d5a`; rehearsal-only coordinator follow-up `7d2cac5450c6a56baed1f5a78e9d65e1cd39f564`; current source also contains a later Logbook-only claim-support renderer follow-up |
+| Immutable evaluation bundle | Exact staged path and SHA-256 digest for the fixed evaluation app | `/tmp/masthead-durable-bundle-lOSmSz0J/Masthead-linux-x64-95b23fc1`; digest `e98e83c5724cf61677e4edba840a3b34ccd9a1dc029ff190ceb805ab7367bfe2` |
+| Packaged verification | Manifest, release SHA, bundle digest, and packaged smoke | PASS for the `95b23fc1` evaluation package — both release manifests bind `95b23fc19f8e55afb11ae28dddba83e5f2a86d5a`; the later source-only Logbook follow-up was focused-tested and built but not repackaged into the running evaluation instance |
 | Gate A | Original canonical dossier contract, snapshot, renderer, and responsive inspection | PASS |
 | Gate B | Real V2 runbook, ADR, and incident timeline validated, atomically published, and retrieved | PASS |
 | Recovery fixture | Recovery, CLI, and ownership tests | PASS — 91/91 |
 | Workbench fixture | Candidate UI/controller/client tests | PASS — 88/88 |
 | Durable artifact machine gate | `machineGatePassed: true`; `productionAccessed: false` | PASS |
-| Repository verification | Tests, build, schema-24 endpoint matrix, and smokes | Partitioned repository verification PASS; exact monolithic `npm run verify` pending |
-| In-app Browser | Candidate and dossier controls at desktop, tablet, 480px, and narrow widths | PASS |
+| Repository verification | Tests, build, schema-24 endpoint matrix, and smokes | PASS on app commit `95b23fc1` — exact `npm run verify` completed: 274 files / 2,138 tests, typecheck, build, endpoint matrix, bridge checks, and live/compatibility/import/MCP smokes; the later Logbook-only follow-up passed 14 focused inspector tests, no-citation/product/surface contracts, typecheck, and production build |
+| In-app Browser | Candidate, dossier, and grounding presentation at responsive widths | PASS — the `95b23fc1` evaluation package passed the original responsive inspection; the later source-only claim-support renderer passed a read-only live-fixture inspection at desktop, 820 px, and 390 px |
+
+### 2026-07-14 operator stop and isolated evaluation handoff
+
+- The 6.6 GB temporary-copy rehearsal at
+  `/tmp/masthead-durable-rehearsal-WeYNRUO2` was stopped with exit code `130`
+  during isolated recovery-backup integrity verification and was not resumed.
+- The rehearsal state remains `staged` in `rehearsal-state.json`. Its
+  `evidence/` directory contains only `01-source-byte-audit.json`,
+  `02-staged-audits.json`, and `daemon-migration.log`; no migration/prepare or
+  invalidation receipt was signed.
+- No process remains bound to the rehearsal root or its port. The rehearsal did
+  not target production writes and produced no production invalidation receipt;
+  recorded before/after device, inode, size, modification-time, and change-time
+  metadata matched for the active production database and its retained backup.
+- The exact `95b23fc1` package was instead launched against the new isolated
+  database `/tmp/masthead-eval-95b23fc1-qsK0XS/data/masthead.sqlite` (database
+  ID `65675fc0-a1ff-4b0c-b9c7-79f238db2ae8`, port `17484`). Its deterministic
+  12-session fixture published three canonical dossiers plus one runbook, one
+  ADR, and one incident timeline through the real V2 candidate lifecycle.
+- Focused packaged Electron, Logbook API, and packaged MCP stdio checks passed.
+  MCP `search_artifacts` followed by `get_artifact` retrieved all four artifact
+  kinds. The bounded evidence is summarized in GBrain page
+  `sessions/2026/07/masthead-durable-artifact-evaluation`. This is an evaluation
+  handoff, not a production human-review receipt or production-canary PASS.
+- The running `95b23fc1` evaluation package renders the complete optional
+  artifact bodies and provenance but predates the later source-only typed
+  `claimSupport` inspector section. Grounding remains retrievable through its
+  API and MCP; the source follow-up was verified separately and did not disturb
+  the handed-off app.
 
 ### Historical failed activation and recovery — not the release candidate
 
@@ -312,6 +346,11 @@ Abort on any count, membership, actor, creator, schema, template, window, or
 hash ambiguity. Do not broaden the selector to make production match.
 
 ## Step 4 — Corrected schema-24 temporary-copy rehearsal
+
+This incomplete section is preserved as evidence and as a prerequisite if
+production invalidation is reconsidered later. It is not required for the
+current implementation closeout or isolated evaluation, and no step may resume
+without new operator authorization.
 
 Production invalidation is forbidden until this entire temporary-copy rehearsal
 and its real human review are complete and signed. Every command in this section

@@ -213,6 +213,36 @@ describe("LogbookInspector", () => {
     expect(html).not.toContain("logbook-inspector-json");
   });
 
+  test("renders typed claim support as readable evidence", () => {
+    const html = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => {}}
+        artifact={{
+          kind: "runbook",
+          schemaVersion: "runbook-v2",
+          title: "Repair lock",
+          body: {
+            fixSteps: ["Close the inherited descriptor"],
+            rootCause: "Cancellation left the lock descriptor open.",
+            claimSupport: [
+              {
+                path: "rootCause",
+                evidenceRef: "message:session:lock:root-cause",
+                excerpt: "The cancelled worker retained the lock descriptor after shutdown.",
+                supportKind: "root_cause"
+              }
+            ]
+          },
+          provenanceSessionIds: ["session:lock"]
+        }}
+      />
+    );
+
+    for (const value of ["Claim support", "rootCause", "Root cause", "The cancelled worker retained the lock descriptor after shutdown.", "message:session:lock:root-cause"]) {
+      expect(html).toContain(value);
+    }
+  });
+
   test("renders complete ADR fields without raw JSON fallback", () => {
     const html = renderToStaticMarkup(
       <LogbookInspector
