@@ -9,6 +9,7 @@ import {
   evaluateCandidateLabels,
   isExplicitlyUnknown,
   normalizedDossierForComparison,
+  normalizedOriginalDossierForComparison,
   selectCanaryCandidates,
   validateDaemonCloseResult,
   validateHumanReviewReceipt,
@@ -49,6 +50,9 @@ describe("durable artifact temporary-copy rehearsal coordinator", () => {
     });
     expect(validated.daemonEntry).toBe(
       "/opt/Masthead-linux-x64-bbbbbbbb/resources/daemon/dist/src/daemon/main.js"
+    );
+    expect(validated.dossierEntry).toBe(
+      "/opt/Masthead-linux-x64-bbbbbbbb/resources/daemon/dist/src/daemon/db/sessionDossierRepository.js"
     );
   });
 
@@ -211,6 +215,39 @@ describe("durable artifact temporary-copy rehearsal coordinator", () => {
       identity: { title: "Useful session" },
       reuse: { copyableContext: "human context", mcpIncluded: true }
     });
+  });
+
+  test("historical dossier comparison neutralizes only the publication state for a previously unpublished session", () => {
+    const before = {
+      identity: { title: "Useful session" },
+      reuse: {
+        canonicalSessionId: "session:one",
+        copyableContext: "# Masthead Session Context\nSummary: durable human context\nAgent retrieval: excluded",
+        mcpIncluded: false,
+        sourceConfidence: "high",
+        sourceRuntime: "codex",
+        sourceSessionId: "source:one"
+      }
+    };
+    const after = structuredClone(before);
+    after.reuse.copyableContext = "# Masthead Session Context\nSummary: durable human context\nAgent retrieval: included";
+    after.reuse.mcpIncluded = true;
+
+    expect(normalizedOriginalDossierForComparison(before, false))
+      .toEqual(normalizedOriginalDossierForComparison(after, false));
+    expect(normalizedOriginalDossierForComparison(before, true))
+      .not.toEqual(normalizedOriginalDossierForComparison(after, true));
+
+    const changedHumanContext = structuredClone(after);
+    changedHumanContext.reuse.copyableContext =
+      "# Masthead Session Context\nSummary: different human context\nAgent retrieval: included";
+    expect(normalizedOriginalDossierForComparison(before, false))
+      .not.toEqual(normalizedOriginalDossierForComparison(changedHumanContext, false));
+
+    const missingTerminalState = structuredClone(before);
+    missingTerminalState.reuse.copyableContext = "# Masthead Session Context\nSummary: durable human context";
+    expect(() => normalizedOriginalDossierForComparison(missingTerminalState, false))
+      .toThrow("no terminal Agent retrieval state");
   });
 });
 

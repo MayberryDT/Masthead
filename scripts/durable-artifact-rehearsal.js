@@ -77,6 +77,7 @@ export function validateStaticRehearsalConfig(input) {
     bundleRoot,
     cliEntry: join(daemonRoot, "dist", "src", "cli", "mastheadctl.js"),
     daemonEntry: join(daemonRoot, "dist", "src", "daemon", "main.js"),
+    dossierEntry: join(daemonRoot, "dist", "src", "daemon", "db", "sessionDossierRepository.js"),
     expectedAuditHash: requiredHash(input.expectedAuditHash, "expectedAuditHash", 64),
     expectedBuildSha,
     expectedDatabaseId: requiredString(input.expectedDatabaseId, "expectedDatabaseId"),
@@ -472,24 +473,20 @@ async function runMigrateInvalidate(options) {
     let daemon;
     let health;
     let capabilities;
+    const sample = await readJson(config.samplePath);
+    const sampleSessionIds = sample.rows.map((row) => requiredString(row.sessionId, "sample sessionId"));
     try {
       daemon = await startIsolatedDaemon(config, state.cliCommand, "migration");
       health = daemon.health;
       capabilities = await getJson(config, "/workbench/authoring/capabilities");
       assertCapabilities(capabilities, config, state.cliCommand);
-      const sample = await readJson(config.samplePath);
-      const originals = {};
-      for (const row of sample.rows) {
-        const sessionId = requiredString(row.sessionId, "sample sessionId");
-        const response = await getJson(config, `/sessions/${encodeURIComponent(sessionId)}/dossier`);
-        originals[sessionId] = response.dossier;
-      }
-      await writeJsonAtomic(join(config.root, "private", "original-dossiers.json"), originals, 0o600);
     } finally {
       if (daemon) await stopDaemon(daemon);
     }
 
     await assertNoSidecars(config.activeDatabase);
+    const originals = await captureOriginalDossiers(config, sampleSessionIds);
+    await writeJsonAtomic(join(config.root, "private", "original-dossiers.json"), originals, 0o600);
     const prepared = await runMaintenance(config, [
       "workbench", "prepare-v1-recovery", "--db", config.activeDatabase, "--json"
     ]);
@@ -993,8 +990,19 @@ async function verifyDossiers(config, sessionIds, artifactIds, originals) {
     assertExactIds(artifact.provenanceSessionIds, [sessionId], "canonical dossier provenance mismatch");
     const body = record(artifact.body, "canonical dossier body");
     assertEqual(body.snapshotVersion, "canonical-session-dossier-v1", "canonical dossier snapshot version");
-    const expected = normalizedDossierForComparison(originals[sessionId]);
-    const actual = normalizedDossierForComparison(body);
+    const canonicalResponse = await getJson(config, `/sessions/${encodeURIComponent(sessionId)}/dossier`);
+    const canonical = record(canonicalResponse.dossier, "post-publication canonical dossier");
+    const artifactSnapshot = normalizedDossierForComparison(body);
+    const postPublicationCanonical = normalizedDossierForComparison(canonical);
+    if (JSON.stringify(artifactSnapshot) !== JSON.stringify(postPublicationCanonical)) {
+      throw new Error(`Canonical dossier artifact differs from post-publication canonical dossier for ${sessionId}`);
+    }
+    const original = record(originals[sessionId], "original canonical dossier record");
+    if (typeof original.wasPublished !== "boolean") {
+      throw new Error(`Original canonical dossier publication state is missing for ${sessionId}`);
+    }
+    const expected = normalizedOriginalDossierForComparison(original.dossier, original.wasPublished);
+    const actual = normalizedOriginalDossierForComparison(canonical, original.wasPublished);
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
       throw new Error(`Canonical dossier body differs from original dossier for ${sessionId}`);
     }
@@ -1006,9 +1014,47 @@ async function verifyDossiers(config, sessionIds, artifactIds, originals) {
     if (!search.artifacts?.some((entry) => entry.artifactId === artifactId)) {
       throw new Error(`Canonical dossier is not searchable by title: ${artifactId}`);
     }
-    rows.push({ artifactId, findable: true, materiallyEquivalent: true, sessionId });
+    rows.push({
+      artifactId,
+      artifactMatchesCanonical: true,
+      findable: true,
+      materiallyEquivalent: true,
+      previouslyPublished: original.wasPublished,
+      sessionId
+    });
   }
   return { count: rows.length, rows };
+}
+
+async function captureOriginalDossiers(config, sessionIds) {
+  await assertNoSidecars(config.activeDatabase);
+  await assertRegularNonSymlink(config.dossierEntry, "packaged canonical dossier repository");
+  const module = await import(pathToFileURL(config.dossierEntry).href);
+  if (typeof module.getSessionDossier !== "function") {
+    throw new Error("Packaged canonical dossier repository does not export getSessionDossier");
+  }
+  const database = openImmutableDatabase(config.activeDatabase);
+  try {
+    const publication = database.prepare(
+      `SELECT publication_status AS publicationStatus
+       FROM workbench_session_state
+       WHERE session_id = ?`
+    );
+    const originals = {};
+    for (const sessionId of sessionIds) {
+      const state = publication.get(sessionId);
+      if (!state) throw new Error(`Canonical dossier source session has no Workbench state: ${sessionId}`);
+      const dossier = module.getSessionDossier(database, sessionId);
+      if (!dossier) throw new Error(`Canonical dossier source session is missing: ${sessionId}`);
+      originals[sessionId] = {
+        dossier,
+        wasPublished: state.publicationStatus === "published"
+      };
+    }
+    return originals;
+  } finally {
+    database.close();
+  }
 }
 
 export function normalizedDossierForComparison(value) {
@@ -1016,6 +1062,24 @@ export function normalizedDossierForComparison(value) {
   delete dossier.artifacts;
   delete dossier.capturedAt;
   delete dossier.snapshotVersion;
+  return sortDeep(dossier);
+}
+
+export function normalizedOriginalDossierForComparison(value, wasPublished) {
+  const dossier = structuredClone(record(normalizedDossierForComparison(value), "original dossier comparison value"));
+  if (!wasPublished) {
+    const reuse = record(dossier.reuse, "original dossier reuse");
+    delete reuse.mcpIncluded;
+    const context = requiredString(reuse.copyableContext, "original dossier copyable context");
+    const neutralized = context.replace(
+      /\nAgent retrieval: (?:included|excluded)$/u,
+      "\nAgent retrieval: publication-state"
+    );
+    if (neutralized === context) {
+      throw new Error("Original unpublished dossier copyable context has no terminal Agent retrieval state");
+    }
+    reuse.copyableContext = neutralized;
+  }
   return sortDeep(dossier);
 }
 

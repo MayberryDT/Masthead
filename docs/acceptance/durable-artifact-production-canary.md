@@ -38,7 +38,7 @@ canary decision.
 
 | Item | Required evidence | Result |
 |---|---|---|
-| Release candidate | Branch `codex/durable-artifact-recovery`; corrected Gate C descendant | `FINAL_CORRECTED_RELEASE_SHA_PENDING` |
+| Release candidate | Branch `codex/durable-artifact-recovery`; corrected Gate C descendant | `95b23fc19f8e55afb11ae28dddba83e5f2a86d5a` |
 | Immutable production bundle | Exact staged path and SHA-256 digest for the corrected release candidate | `pending rebuild`; digest `pending` |
 | Packaged verification | Corrected manifest, release SHA, bundle digest, and packaged smoke | `pending` |
 | Gate A | Original canonical dossier contract, snapshot, renderer, and responsive inspection | PASS |
@@ -253,7 +253,7 @@ health URL is unavailable, then run the offline maintenance command:
 | Backup database ID | `a203fcdd-e720-4230-8146-967df054a2c4` |
 | Integrity result | `pending` |
 | Size in bytes | `6633172992` |
-| Frozen backup SHA-256 | `6e6a4939a9b5904518b015d121a2b96f3ba279c74fc3b0010c89522ba122f08a` |
+| Frozen backup SHA-256 | `1225c656b59ad89374ec5d98926012e5748d6e4299a7473dcef404af04dce874` |
 | Pages copied | `pending` |
 | Backup created at | `pending` |
 | Daemon stop command / receipt | `pending` |
@@ -262,9 +262,12 @@ Abort on ownership refusal, identity mismatch, audit drift, failed integrity, or
 more than one retained backup.
 
 The path, size, SHA-256, and database ID above were re-proven after safe
-lifecycle rollback recovery. They do not constitute a new
-`prepare-v1-recovery` CLI receipt; integrity, pages-copied, creation-time, and
-stop-command fields remain pending.
+lifecycle rollback recovery. The offline active database and `backup-current`
+are distinct single-link files with the same byte hash. A fresh private copy of
+the backup also reproduced the exact Step 3 V1 audit hash before rehearsal
+preflight. These checks do not constitute a new `prepare-v1-recovery` CLI
+receipt; integrity, pages-copied, creation-time, and stop-command fields remain
+pending.
 
 ## Step 3 — Exact failed V1 audit
 
@@ -350,7 +353,7 @@ evidence set outside the disposable root before that root may be deleted.
 Run the rehearsal in this exact order:
 
 1. Rebuild the immutable packaged bundle from exact corrected HEAD
-   `FINAL_CORRECTED_RELEASE_SHA_PENDING`. Do not run this step until that
+   `95b23fc19f8e55afb11ae28dddba83e5f2a86d5a`. Do not run this step until that
    placeholder is replaced by the final 40-hex commit. Verify its `release.json` SHA,
    content manifest, bundle digest, and packaged smoke against that same bundle.
 2. Create a fresh temporary root. Copy only the verified, self-contained
@@ -427,7 +430,7 @@ Run the rehearsal in this exact order:
 
 | Field | Recorded value |
 |---|---|
-| Corrected release SHA / schema | `FINAL_CORRECTED_RELEASE_SHA_PENDING` / `24` |
+| Corrected release SHA / schema | `95b23fc19f8e55afb11ae28dddba83e5f2a86d5a` / `24` |
 | Corrected bundle path / digest | `pending` / `pending` |
 | Temporary directory / isolated daemon URL | `pending` / `http://127.0.0.1:17483` |
 | Nested frozen schema-21 copy / SHA-256 | `pending` / `pending` |

@@ -19,6 +19,7 @@ export function validateStaticRehearsalConfig(input: RehearsalConfigInput): Rehe
   activeDatabase: string;
   cliEntry: string;
   daemonEntry: string;
+  dossierEntry: string;
   frozenDatabase: string;
   mcpEntry: string;
   nodePath: string;
@@ -89,3 +90,5 @@ export function validateHumanReviewReceipt(
 };
 
 export function normalizedDossierForComparison(value: unknown): unknown;
+
+export function normalizedOriginalDossierForComparison(value: unknown, wasPublished: boolean): unknown;
