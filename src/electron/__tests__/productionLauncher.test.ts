@@ -190,12 +190,12 @@ describe("production lifecycle launcher", () => {
     expect(now).toBe(300_000);
   });
 
-  test("bounds the external maintenance child at four hours with SIGTERM only", async () => {
+  test("gives prepare and restore a twelve-hour operation deadline with SIGTERM only", async () => {
     const source = await readFile("scripts/masthead-production.js", "utf8");
     const coldActivationReference = await readFile("docs/reference/production-cold-activation.md", "utf8");
-    expect(productionMaintenanceTimeoutPolicy()).toEqual({ exitGraceMs: 30_000, timeoutMs: 14_400_000 });
-    expect(source).toContain("PRODUCTION_MAINTENANCE_TIMEOUT_MS = 14_400_000");
-    expect(coldActivationReference).toContain("four-hour hard deadline");
+    expect(productionMaintenanceTimeoutPolicy()).toEqual({ exitGraceMs: 30_000, timeoutMs: 43_200_000 });
+    expect(source).toContain("PRODUCTION_MAINTENANCE_TIMEOUT_MS = 43_200_000");
+    expect(coldActivationReference).toContain("twelve-hour hard deadline");
     expect(source).toContain('child.kill("SIGTERM")');
     expect(source).not.toContain('child.kill("SIGKILL")');
     expect(source).not.toContain("migrationStageActive");

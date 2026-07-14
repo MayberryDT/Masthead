@@ -27,7 +27,7 @@ export function assertColdProductionOffline(
   dependencies?: Record<string, unknown>
 ): Promise<void>;
 export function productionHealthPollPolicy(): { intervalMs: 250; maxAttempts: 1200; timeoutMs: 300000 };
-export function productionMaintenanceTimeoutPolicy(): { exitGraceMs: 30000; timeoutMs: 14400000 };
+export function productionMaintenanceTimeoutPolicy(): { exitGraceMs: 30000; timeoutMs: 43200000 };
 export function captureMaintenanceSentinel(
   config: { dataDirectory: string },
   childIdentity: { pid: number; starttime: string },
