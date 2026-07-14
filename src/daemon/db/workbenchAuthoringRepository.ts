@@ -52,6 +52,25 @@ export type CompletedV1AuthoringRunRecoveryRow = {
 export function listCompletedV1AuthoringRunsForRecovery(
   db: MastheadDatabase
 ): CompletedV1AuthoringRunRecoveryRow[] {
+  const columns = db.prepare("PRAGMA table_info(workbench_authoring_runs)").all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+  const requiredColumns = [
+    "run_id",
+    "actor_id",
+    "status",
+    "bundle_json",
+    "receipt_json",
+    "created_at",
+    "completed_at"
+  ];
+  const hasContractVersion = columnNames.has("contract_version");
+  const hasCandidateId = columnNames.has("candidate_id");
+  if (requiredColumns.some((column) => !columnNames.has(column)) || hasContractVersion !== hasCandidateId) {
+    throw new Error("failed_v1_recovery_authoring_schema_invalid");
+  }
+  const contractFilter = hasContractVersion
+    ? "runs.contract_version = 'workbench-authoring-v1' AND"
+    : "";
   const rows = db.prepare(
     `SELECT
        runs.run_id AS runId,
@@ -61,8 +80,8 @@ export function listCompletedV1AuthoringRunsForRecovery(
        runs.created_at AS createdAt,
        runs.completed_at AS completedAt
      FROM workbench_authoring_runs AS runs
-     WHERE runs.contract_version = 'workbench-authoring-v1'
-       AND runs.status = 'completed'
+     WHERE ${contractFilter}
+       runs.status = 'completed'
        AND runs.bundle_json IS NOT NULL
        AND runs.receipt_json IS NOT NULL
        AND runs.completed_at IS NOT NULL

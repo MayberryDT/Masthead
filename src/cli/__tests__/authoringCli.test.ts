@@ -10,6 +10,7 @@ import { createMastheadDaemon, type MastheadDaemon } from "../../daemon/server.t
 import { acquireDatabaseWriterLock, acquireLegacyDataDirectoryGuard } from "../../core/daemonOwnership.ts";
 import type { DaemonConfig } from "../../daemon/config.ts";
 import { seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
+import { migrateTestDatabaseThrough } from "../../daemon/db/__tests__/schemaTestHelpers.ts";
 import { getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
@@ -698,6 +699,34 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       await expect(access(`${dbPath}${suffix}`)).rejects.toMatchObject({ code: "ENOENT" });
     }
   }, 120_000);
+
+  test("audits the exact failed V1 generation through the CLI on schema 21", async () => {
+    const tempDir = await makeTempDir("masthead-cli-v1-schema21-audit-");
+    const dbPath = join(tempDir, "masthead.sqlite");
+    const db = await openMastheadDatabase(dbPath);
+    migrateTestDatabaseThrough(db, 21);
+    getOrCreateDatabaseIdentity(db);
+    seedCliFailedV1Generation(db, { schema21: true });
+    db.close();
+
+    const audited = await runMastheadCli(
+      ["workbench", "audit-v1-generation", "--db", dbPath, "--json"],
+      { env: {} }
+    );
+
+    expect(audited.exitCode).toBe(0);
+    expect(JSON.parse(audited.stdout)).toMatchObject({
+      audit: {
+        auditHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        contractVersion: "workbench-authoring-v1",
+        dossiers: 1_283,
+        totalRuns: 66,
+        totalSessions: 1_283
+      },
+      databasePath: dbPath,
+      ok: true
+    });
+  }, 120_000);
 });
 
 async function startTestDaemon(): Promise<{ baseUrl: string; daemon: MastheadDaemon }> {
@@ -741,7 +770,10 @@ function authoringOutputCounts(db: Awaited<ReturnType<typeof openMastheadDatabas
   };
 }
 
-function seedCliFailedV1Generation(db: Awaited<ReturnType<typeof openMastheadDatabase>>): void {
+function seedCliFailedV1Generation(
+  db: Awaited<ReturnType<typeof openMastheadDatabase>>,
+  options: { schema21?: boolean } = {}
+): void {
   const createdAt = "2026-07-11T08:00:00.000Z";
   const publishedAt = "2026-07-11T08:30:00.000Z";
   const completedAt = "2026-07-11T09:00:00.000Z";
@@ -820,11 +852,14 @@ function seedCliFailedV1Generation(db: Awaited<ReturnType<typeof openMastheadDat
       notApplicable.push({ evidenceRefs: [], kind, reason: "No reusable output", sessionId });
     }
   }
-  const insertRun = db.prepare(
-    `INSERT INTO workbench_authoring_runs (run_id, actor_id, database_id, status, evidence_revision,
-      bundle_json, findings_json, receipt_json, created_at, updated_at, completed_at, contract_version,
-      candidate_id) VALUES (?, 'failed-agent', 'fixture-db', 'completed', 'cli-revision', ?, '[]', ?, ?, ?, ?,
-      'workbench-authoring-v1', NULL)`
+  const insertRun = db.prepare(options.schema21
+    ? `INSERT INTO workbench_authoring_runs (run_id, actor_id, database_id, status, evidence_revision,
+        bundle_json, findings_json, receipt_json, created_at, updated_at, completed_at)
+       VALUES (?, 'failed-agent', 'fixture-db', 'completed', 'cli-revision', ?, '[]', ?, ?, ?, ?)`
+    : `INSERT INTO workbench_authoring_runs (run_id, actor_id, database_id, status, evidence_revision,
+        bundle_json, findings_json, receipt_json, created_at, updated_at, completed_at, contract_version,
+        candidate_id) VALUES (?, 'failed-agent', 'fixture-db', 'completed', 'cli-revision', ?, '[]', ?, ?, ?, ?,
+        'workbench-authoring-v1', NULL)`
   );
   let offset = 0;
   for (let runIndex = 0; offset < packages.length; runIndex += 1) {

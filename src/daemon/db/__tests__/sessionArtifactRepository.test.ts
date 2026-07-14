@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { seedSession } from "./sessionTestHelpers.ts";
+import { migrateTestDatabaseThrough } from "./schemaTestHelpers.ts";
 import { getSessionDossier } from "../sessionDossierRepository.ts";
 import {
   applySessionArtifact,
@@ -475,6 +476,19 @@ describe("session artifact repository", () => {
     expect(totalChanges(db)).toBe(changesBefore);
   }, 60_000);
 
+  test("audits the exact failed V1 generation from a schema 21 database", async () => {
+    const db = await testDb(21);
+    seedExactFailedV1Generation(db, { schema21: true });
+
+    expect(auditFailedV1Generation(db)).toMatchObject({
+      contractVersion: "workbench-authoring-v1",
+      dossiers: FAILED_V1_DOSSIER_COUNT,
+      totalArtifacts: FAILED_V1_DOSSIER_COUNT,
+      totalRuns: 66,
+      totalSessions: FAILED_V1_DOSSIER_COUNT
+    });
+  }, 60_000);
+
   test("refuses an otherwise exact 1,283-dossier and 66-run population with useful non-template dossiers", async () => {
     const db = await testDb();
     seedExactFailedV1Generation(db, { usefulDossiers: true });
@@ -702,7 +716,7 @@ const FAILED_COMPLETED_AT = "2026-07-11T09:00:00.000Z";
 
 function seedExactFailedV1Generation(
   db: MastheadDatabase,
-  options: { usefulDossiers?: boolean } = {}
+  options: { schema21?: boolean; usefulDossiers?: boolean } = {}
 ): void {
   db.prepare("INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)").run(
     "host:failed-v1", "fixture", FAILED_CREATED_AT, FAILED_COMPLETED_AT
@@ -745,11 +759,15 @@ function seedExactFailedV1Generation(
   const insertSearch = db.prepare(
     "INSERT INTO session_artifact_search (artifact_id, title, summary, highlight, project, body) VALUES (?, ?, '', '', '', ?)"
   );
-  const insertRun = db.prepare(
-    `INSERT INTO workbench_authoring_runs (
-       run_id, actor_id, database_id, status, evidence_revision, bundle_json, findings_json,
-       receipt_json, created_at, updated_at, completed_at, contract_version, candidate_id
-     ) VALUES (?, 'failed-agent', 'fixture-db', 'completed', ?, ?, '[]', ?, ?, ?, ?, 'workbench-authoring-v1', NULL)`
+  const insertRun = db.prepare(options.schema21
+    ? `INSERT INTO workbench_authoring_runs (
+         run_id, actor_id, database_id, status, evidence_revision, bundle_json, findings_json,
+         receipt_json, created_at, updated_at, completed_at
+       ) VALUES (?, 'failed-agent', 'fixture-db', 'completed', ?, ?, '[]', ?, ?, ?, ?)`
+    : `INSERT INTO workbench_authoring_runs (
+         run_id, actor_id, database_id, status, evidence_revision, bundle_json, findings_json,
+         receipt_json, created_at, updated_at, completed_at, contract_version, candidate_id
+       ) VALUES (?, 'failed-agent', 'fixture-db', 'completed', ?, ?, '[]', ?, ?, ?, ?, 'workbench-authoring-v1', NULL)`
   );
   const insertRunSession = db.prepare(
     "INSERT INTO workbench_authoring_run_sessions (run_id, session_id, claim_id, ordinal) VALUES (?, ?, ?, ?)"
@@ -909,10 +927,11 @@ function setPublishedAt(db: MastheadDatabase, artifactId: string, publishedAt: s
   );
 }
 
-async function testDb(): Promise<MastheadDatabase> {
+async function testDb(throughVersion = 23): Promise<MastheadDatabase> {
   const tempDir = await mkdtemp(join(tmpdir(), "masthead-session-artifact-"));
   tempDirs.push(tempDir);
   const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
-  migrateDatabase(db);
+  if (throughVersion === 23) migrateDatabase(db);
+  else migrateTestDatabaseThrough(db, throughVersion);
   return db;
 }
