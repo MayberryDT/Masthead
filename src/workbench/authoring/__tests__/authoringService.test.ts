@@ -612,10 +612,10 @@ describe("Workbench authoring service", () => {
 
   test("finishes once and publishes the complete bundle atomically", async () => {
     const { db, runId } = await submittedAuthoringDb();
-    const canonicalBeforeFinish = getSessionDossier(db, "session:a")!;
 
     const first = finishAuthoringRun(db, { runId });
     const second = finishAuthoringRun(db, { runId });
+    const canonicalAfterFinish = getSessionDossier(db, "session:a")!;
 
     expect(second).toEqual(first);
     expect(first.contractVersion).toBe("workbench-authoring-v1");
@@ -641,7 +641,7 @@ describe("Workbench authoring service", () => {
       sessionId: "session:a"
     })[0]!;
     expect(omitCapturedAt(dossier.content)).toEqual(
-      omitCapturedAt(buildPublishedDossierSnapshot(canonicalBeforeFinish))
+      omitCapturedAt(buildPublishedDossierSnapshot(canonicalAfterFinish))
     );
     expect(dossier.createdBy).toBe("workbench_authoring_v2:codex");
     expect(first.publishedArtifactIds.every((artifactId) => getLogbookArtifactDetail(db, artifactId))).toBe(true);
@@ -941,6 +941,28 @@ describe("Workbench authoring service", () => {
         sessionIds: Array.from({ length: 101 }, (_, index) => `session:${index}`)
       })
     ).toThrow("canonical_dossier_batch_too_large");
+    db.close();
+  });
+
+  test("supersedes the published dossier when canonical evidence changes", async () => {
+    const db = await testDb();
+    seedSessionWithRedactedEvidence(db, "session:a");
+
+    const first = publishCanonicalDossiers(db, {
+      actorId: "recovery",
+      sessionIds: ["session:a"]
+    });
+    insertMessage(db, "session:a", "later-evidence", "A later canonical message materially changed the session record.");
+    const second = publishCanonicalDossiers(db, {
+      actorId: "recovery",
+      sessionIds: ["session:a"]
+    });
+
+    expect(second.artifactIds[0]).not.toBe(first.artifactIds[0]);
+    expect(listSessionArtifacts(db, { artifactKind: "session_dossier", sessionId: "session:a" })).toEqual([
+      expect.objectContaining({ artifactId: second.artifactIds[0], publicationStatus: "published", status: "current" }),
+      expect.objectContaining({ artifactId: first.artifactIds[0], publicationStatus: "published", status: "superseded" })
+    ]);
     db.close();
   });
 

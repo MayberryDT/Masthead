@@ -14,6 +14,7 @@ import {
   markWorkbenchNotAdded,
   markWorkbenchArtifactSatisfied,
   markWorkbenchSessionEnrichmentSatisfied,
+  readWorkbenchSessionState,
   recordWorkbenchActivity
 } from "../db/workbenchPipelineRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
@@ -67,7 +68,7 @@ describe("workbench API", () => {
     db.close();
   });
 
-  test("returns publish-path sessions without leaking Not Added details", async () => {
+  test("returns only publish-path sessions without leaking published or Not Added details", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedSession(daemon.database, {
       lifecycle: "ended",
@@ -113,29 +114,22 @@ describe("workbench API", () => {
     const body = await getJson(baseUrl, "/workbench/sessions?limit=10");
 
     expect(body).toMatchObject({ ok: true, scope: "default" });
-    expect(body.sessions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          activeClaim: {
-            claimId: claim.claims[0].claimId,
-            claimedBy: "codex",
-            expiresAt
-          },
-          latestActivity: expect.objectContaining({ eventType: expect.any(String), sessionId: "session:queue" }),
-          nextAction: "check_transcript",
-          publicationStatus: "publish_path",
-          sessionId: "session:queue",
-          title: "Queued session"
-        }),
-        expect.objectContaining({
-          nextAction: "enrich",
-          publicationStatus: "published",
-          sessionId: "session:published"
-        })
-      ])
-    );
-    expect(body.sessions).toHaveLength(2);
+    expect(body.sessions).toEqual([
+      expect.objectContaining({
+        activeClaim: {
+          claimId: claim.claims[0].claimId,
+          claimedBy: "codex",
+          expiresAt
+        },
+        latestActivity: expect.objectContaining({ eventType: expect.any(String), sessionId: "session:queue" }),
+        nextAction: "check_transcript",
+        publicationStatus: "publish_path",
+        sessionId: "session:queue",
+        title: "Queued session"
+      })
+    ]);
     expect(JSON.stringify(body)).not.toContain("session:not-added");
+    expect(JSON.stringify(body)).not.toContain("session:published");
   });
 
   test("returns Workbench activity rows", async () => {
@@ -377,7 +371,10 @@ describe("workbench API", () => {
 
     const queue = await getJson(baseUrl, "/workbench/sessions?limit=50");
     expect(queue.sessions.some((session: { sessionId: string }) => session.sessionId === "session:missing")).toBe(true);
-    expect(queue.sessions.some((session: { sessionId: string }) => session.sessionId === "session:published")).toBe(true);
+    expect(queue.sessions.some((session: { sessionId: string }) => session.sessionId === "session:published")).toBe(false);
+    expect(readWorkbenchSessionState(daemon.database, "session:published")).toMatchObject({
+      publicationStatus: "published"
+    });
   });
 
   test("POST claim and release round-trip on queue DTO", async () => {

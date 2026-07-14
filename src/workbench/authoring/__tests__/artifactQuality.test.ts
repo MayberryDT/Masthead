@@ -78,6 +78,26 @@ describe("artifact claim support", () => {
     );
   });
 
+  test("permits authoring self-process language when the exact field is directly supported", () => {
+    const evidence = fixtureEvidence();
+    const evidenceRef = "message:session:a:self-process";
+    const text = "I reviewed every item and limited assertions to the directly supported facts.";
+    evidence.set(evidenceRef, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T13:00:00.000Z",
+      role: "user",
+      sessionId: "session:a",
+      text
+    });
+
+    expect(findUnsupportedProtocolLanguage(
+      { approach: [text] },
+      [support("approach[0]", evidenceRef, text, "problem")],
+      evidence
+    )).toEqual([]);
+  });
+
   test("does not confuse operational review details with authoring self-process leakage", () => {
     const output = {
       decision: "The authorization policy limits JWT assertions to one issuer.",

@@ -1044,6 +1044,33 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("retains a real prompt appended after a leading AGENTS environment envelope", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:mixed-agents-and-prompt";
+    seedMessageSession(db, sessionId, [
+      {
+        role: "user",
+        text: [
+          "# AGENTS.md instructions for /tmp/example",
+          "<INSTRUCTIONS>",
+          "Decision: use a hosted database. Rejected alternative: local storage.",
+          "</INSTRUCTIONS>",
+          "<environment_context><cwd>/tmp/example</cwd></environment_context>",
+          "We decided to adopt SQLite as the local application database.",
+          "We rejected hosted Postgres because the application must remain local-first."
+        ].join("\n")
+      }
+    ]);
+
+    const candidates = discoverArtifactCandidates(db, [sessionId]);
+
+    expect(countKinds(candidates)).toEqual({ adr: 1 });
+    expect(candidates[0]?.signalEvidenceRefs).toEqual([
+      "message:production-shaped:mixed-agents-and-prompt:message:0"
+    ]);
+    db.close();
+  });
+
   test("orders equal epoch timestamps by numeric source record sequence", async () => {
     const db = await testDb();
     const sessionId = "session:production-shaped:epoch-source-order";

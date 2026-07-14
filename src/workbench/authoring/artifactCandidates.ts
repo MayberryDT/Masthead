@@ -30,7 +30,7 @@ import {
 
 export type WorkbenchArtifactCandidate = StoredWorkbenchArtifactCandidate;
 
-export const ARTIFACT_CANDIDATE_DETECTOR_REVISION = 3;
+export const ARTIFACT_CANDIDATE_DETECTOR_REVISION = 4;
 
 export type ArtifactCandidateProposal = {
   kind: WorkbenchAutomaticKind;
@@ -759,7 +759,7 @@ function extractSessionSignals(db: MastheadDatabase, sessionId: string): Session
   for (const { item } of transcript) {
     result.evidenceRefs.add(item.itemId);
     const normalized = normalizedItemText(item);
-    const processInstruction = isInjectedProcessInstructionMessage(item);
+    const processInstruction = item.kind === "message" && item.lowValue;
     const narrativeMessage =
       !processInstruction &&
       item.kind === "message" &&
@@ -785,7 +785,7 @@ function extractSessionSignals(db: MastheadDatabase, sessionId: string): Session
         result.alternativeRefs.push(ref);
       }
       result.incidentStageRefs.push(...incidentStageOccurrences(item, normalized, ref));
-      const signature = strongSignature(item.text);
+      const signature = strongSignature(itemNarrativeText(item));
       if (signature) {
         result.signatures.push(signature);
         result.signatureRefs.push({ ...ref, signatureKey: signature });
@@ -796,18 +796,6 @@ function extractSessionSignals(db: MastheadDatabase, sessionId: string): Session
   }
   result.signatures = normalizedStrings(result.signatures);
   return result;
-}
-
-function isInjectedProcessInstructionMessage(item: SessionTranscriptItem): boolean {
-  if (item.kind !== "message") return false;
-  const text = item.text.trimStart().toLowerCase();
-  return (
-    text.startsWith("<skill>") ||
-    text.startsWith("<environment_context>") ||
-    text.startsWith("<turn_aborted>") ||
-    text.startsWith("<subagent_notification>") ||
-    text.startsWith("# agents.md instructions")
-  );
 }
 
 function runbookChain(signals: SessionSignals[], selected?: Set<string>): [SignalRef, SignalRef, SignalRef] | undefined {
@@ -1228,7 +1216,7 @@ function incidentStageOccurrences(
   normalized: string,
   ref: SignalRef
 ): IncidentStageRef[] {
-  const anchors = incidentAnchors(item.text);
+  const anchors = incidentAnchors(itemNarrativeText(item));
   if (
     item.kind === "tool_result" &&
     (item.status === "failed" || (item.exitCode !== undefined && item.exitCode !== 0))
@@ -1789,7 +1777,12 @@ function signalSummary(kind: WorkbenchAutomaticKind, sessionCount: number): stri
 }
 
 function normalizedItemText(item: SessionTranscriptItem): string {
-  return `${item.label} ${item.text}`.toLowerCase();
+  const text = itemNarrativeText(item);
+  return `${item.label} ${text}`.toLowerCase();
+}
+
+function itemNarrativeText(item: SessionTranscriptItem): string {
+  return item.kind === "message" ? (item.narrativeText ?? item.text) : item.text;
 }
 
 function normalizedStrings(values: string[]): string[] {

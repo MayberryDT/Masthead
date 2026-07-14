@@ -17,12 +17,7 @@ export function buildPublishedDossierSnapshot(
 }
 
 export function dossierSnapshotFingerprint(snapshot: PublishedSessionDossierV1): string {
-  const { capturedAt: _capturedAt, reuse, ...canonical } = snapshot;
-  // These two reuse fields are presentation derived from the session's current
-  // publication policy. They can change immediately after this immutable
-  // snapshot is published, while the underlying canonical dossier does not.
-  const { copyableContext: _copyableContext, mcpIncluded: _mcpIncluded, ...stableReuse } = reuse;
-  const fingerprinted = { ...canonical, reuse: stableReuse };
+  const { capturedAt: _capturedAt, ...fingerprinted } = snapshot;
   return createHash("sha256").update(stableStringify(fingerprinted)).digest("hex");
 }
 

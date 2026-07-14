@@ -526,15 +526,47 @@ export function publishCanonicalDossierInTransaction(
   sessionId: string,
   actorId: string
 ): SessionArtifactRecord {
+  const canonicalBeforePublication = getSessionDossier(db, sessionId);
+  if (!canonicalBeforePublication) throw new Error(`canonical_dossier_missing:${sessionId}`);
+  const actor = { id: actorId, kind: "agent" } as const;
+  const finishPipeline = (): void => {
+    let state = readWorkbenchSessionState(db, sessionId);
+    if (
+      canonicalBeforePublication.enrichment.status === "current" &&
+      state?.sessionEnrichmentStatus !== "satisfied"
+    ) {
+      markWorkbenchSessionEnrichmentSatisfiedInTransaction(db, { actor, sessionId });
+      state = readWorkbenchSessionState(db, sessionId);
+    }
+    if (state?.sessionDossierStatus !== "satisfied") {
+      markWorkbenchArtifactAppliedInTransaction(db, {
+        actor,
+        artifactKind: "session_dossier",
+        sessionId
+      });
+    }
+    markWorkbenchPublishedInTransaction(db, {
+      actor,
+      publishedVia: "canonical_dossier_publish",
+      sessionId
+    });
+  };
+
+  // Publication changes canonical reuse fields such as MCP eligibility. Capture
+  // the durable dossier only after those state changes, within this transaction,
+  // so recovery reproduces the canonical dossier users originally published.
+  finishPipeline();
   const canonical = getSessionDossier(db, sessionId);
   if (!canonical) throw new Error(`canonical_dossier_missing:${sessionId}`);
   const snapshot = buildPublishedDossierSnapshot(canonical);
+  const snapshotFingerprint = dossierSnapshotFingerprint(snapshot);
+  const evidenceRevision = authoringEvidenceRevision(db, [sessionId]);
   const capsule = canonicalDossierCapsule(snapshot);
   const applied = applySessionArtifactInTransaction(db, {
     artifactKind: "session_dossier",
     confidence: capsule.confidence,
     content: snapshot,
-    contentFingerprint: dossierSnapshotFingerprint(snapshot),
+    contentFingerprint: snapshotFingerprint,
     createdBy: `workbench_authoring_v2:${actorId}`,
     evidenceRefs: dossierEvidenceRefs(snapshot),
     highlight: capsule.highlight,
@@ -547,28 +579,11 @@ export function publishCanonicalDossierInTransaction(
     validation: {
       canonicalSnapshot: true,
       contract: "canonical-session-dossier-v1",
+      evidenceRevision,
       ok: true
     }
   });
-  const actor = { id: actorId, kind: "agent" } as const;
-  let state = readWorkbenchSessionState(db, sessionId);
-  if (snapshot.enrichment.status === "current" && state?.sessionEnrichmentStatus !== "satisfied") {
-    markWorkbenchSessionEnrichmentSatisfiedInTransaction(db, { actor, sessionId });
-    state = readWorkbenchSessionState(db, sessionId);
-  }
-  if (state?.sessionDossierStatus !== "satisfied") {
-    markWorkbenchArtifactAppliedInTransaction(db, {
-      actor,
-      artifactKind: "session_dossier",
-      sessionId
-    });
-  }
   const published = publishSessionArtifactInTransaction(db, applied.artifactId)!;
-  markWorkbenchPublishedInTransaction(db, {
-    actor,
-    publishedVia: "canonical_dossier_publish",
-    sessionId
-  });
   return published;
 }
 
@@ -1078,7 +1093,11 @@ function evidenceByRef(db: MastheadDatabase, sessionIds: string[]): Map<string, 
         role: item.role,
         sessionId,
         status: item.status,
-        text: item.kind === "file_effect" ? `${item.label} ${item.text}` : item.text,
+        text: item.kind === "file_effect"
+          ? `${item.label} ${item.text}`
+          : item.kind === "message"
+            ? (item.narrativeText ?? item.text)
+            : item.text,
         toolName: item.toolName
       });
     }

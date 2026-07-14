@@ -224,7 +224,7 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
     seedDurableArtifactCorpus(db);
     seedAcceptanceEnrichments(db);
     const candidates = discoverArtifactCandidates(db, corpusSessionIds());
-    const canonicalDossiers = new Map<string, SessionDossierDto>();
+    const postPublicationCanonicalDossiers = new Map<string, SessionDossierDto>();
     const selected = [
       requireCandidate(candidates, "runbook", "session:oauth-fixed"),
       requireCandidate(candidates, "adr", "session:decision-local-first"),
@@ -234,11 +234,6 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
     const submittedOutputByArtifactId = new Map<string, Record<string, unknown>>();
 
     for (const candidate of selected) {
-      for (const sessionId of candidate.provenanceSessionIds) {
-        const canonical = getSessionDossier(db, sessionId);
-        if (!canonical) throw new Error(`fixture_dossier_missing:${sessionId}`);
-        canonicalDossiers.set(sessionId, structuredClone(canonical));
-      }
       const opened = openCandidateAuthoringRun(db, {
         actorId: "durable-artifact-gate",
         candidateId: candidate.candidateId,
@@ -249,6 +244,11 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
       if (!submitted.accepted) throw new Error(`fixture_bundle_rejected:${JSON.stringify(submitted.findings)}`);
       const receipt = requireV2Receipt(finishAuthoringRun(db, { runId: opened.run.runId }));
       receipts.push(receipt);
+      for (const sessionId of receipt.provenanceSessionIds) {
+        const canonical = getSessionDossier(db, sessionId);
+        if (!canonical) throw new Error(`fixture_dossier_missing:${sessionId}`);
+        postPublicationCanonicalDossiers.set(sessionId, structuredClone(canonical));
+      }
       submittedOutputByArtifactId.set(receipt.optionalArtifact.artifactId, structuredClone(bundle.artifact.output));
     }
 
@@ -265,7 +265,10 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
     const dossierFidelityChecks = receipts.flatMap((receipt) => receipt.dossierArtifactIds.map((artifactId, index) => {
       const sessionId = receipt.provenanceSessionIds[index]!;
       const detail = requireArtifact(db!, artifactId);
-      const comparison = comparePublishedDossierToCanonical(detail.body, canonicalDossiers.get(sessionId)!);
+      const comparison = comparePublishedDossierToCanonical(
+        detail.body,
+        postPublicationCanonicalDossiers.get(sessionId)!
+      );
       return {
         artifactId,
         matched: comparison.matched,

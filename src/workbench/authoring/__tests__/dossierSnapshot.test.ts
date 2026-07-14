@@ -66,16 +66,18 @@ describe("published session dossier snapshot", () => {
     expect(published.identity.title).toBe(live.identity.title);
   });
 
-  test("fingerprints canonical content but not capture time or publication-derived reuse presentation", () => {
+  test("fingerprints every snapshot field except capturedAt", () => {
     const first = buildPublishedDossierSnapshot(fixtureSessionDossier(), "2026-07-12T18:00:00.000Z");
     const recaptured = buildPublishedDossierSnapshot(fixtureSessionDossier(), "2026-07-12T19:00:00.000Z");
-    recaptured.reuse.mcpIncluded = !first.reuse.mcpIncluded;
-    recaptured.reuse.copyableContext = "Publication-derived presentation changed.";
+    const reuseChanged = buildPublishedDossierSnapshot(fixtureSessionDossier(), "2026-07-12T18:00:00.000Z");
+    reuseChanged.reuse.mcpIncluded = !first.reuse.mcpIncluded;
+    reuseChanged.reuse.copyableContext = "Publication-derived presentation changed.";
     const changed = buildPublishedDossierSnapshot(fixtureSessionDossier(), "2026-07-12T18:00:00.000Z");
     changed.narrative.objective = "A substantively changed objective";
 
     expect(dossierSnapshotFingerprint(first)).toMatch(/^[a-f0-9]{64}$/);
     expect(dossierSnapshotFingerprint(recaptured)).toBe(dossierSnapshotFingerprint(first));
+    expect(dossierSnapshotFingerprint(reuseChanged)).not.toBe(dossierSnapshotFingerprint(first));
     expect(dossierSnapshotFingerprint(changed)).not.toBe(dossierSnapshotFingerprint(first));
   });
 

@@ -1,4 +1,5 @@
 import { access } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { resolveWorkbenchDatabasePath } from "./dbPath.ts";
 import { errorResult, jsonResult, type CliResult } from "./output.ts";
@@ -45,7 +46,10 @@ export async function runFailedV1RecoveryMaintenance(
   try {
     await access(databasePath);
     if (command === "audit-v1-generation") {
-      const db = new DatabaseSync(databasePath, { readOnly: true });
+      await assertSelfContainedDatabase(databasePath);
+      const databaseUrl = pathToFileURL(databasePath);
+      databaseUrl.searchParams.set("immutable", "1");
+      const db = new DatabaseSync(databaseUrl.href, { readOnly: true });
       try {
         return jsonResult({ databasePath, ok: true, audit: auditFailedV1Generation(db) });
       } finally {
@@ -122,6 +126,17 @@ export async function runFailedV1RecoveryMaintenance(
       error instanceof Error ? error.message : String(error),
       json
     );
+  }
+}
+
+async function assertSelfContainedDatabase(databasePath: string): Promise<void> {
+  for (const suffix of ["-wal", "-shm", "-journal"]) {
+    try {
+      await access(`${databasePath}${suffix}`);
+      throw new Error(`v1_recovery_audit_database_not_self_contained:${suffix.slice(1)}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
 }
 

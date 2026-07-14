@@ -141,7 +141,17 @@ export function findUnsupportedProtocolLanguage(
   for (const field of humanFacingStrings(output)) {
     const normalizedValue = normalizeWhitespace(field.value).toLowerCase();
     const selfProcessLeak = SELF_PROCESS_PROTOCOL_PATTERNS.find(({ pattern }) => pattern.test(normalizedValue));
-    if (selfProcessLeak) {
+    const directlySupportedSelfProcess = selfProcessLeak && supports.some((support) => {
+      if (support.path !== field.path) return false;
+      const excerpt = normalizeWhitespace(support.excerpt);
+      const evidenceText = normalizeWhitespace(evidenceByRef.get(support.evidenceRef)?.text ?? "");
+      return (
+        excerpt.length >= MIN_SUPPORT_EXCERPT_LENGTH &&
+        selfProcessLeak.pattern.test(excerpt.toLowerCase()) &&
+        evidenceText.includes(excerpt)
+      );
+    });
+    if (selfProcessLeak && !directlySupportedSelfProcess) {
       findings.push({
         code: "unsupported_authoring_protocol_language",
         message: `Human-facing artifact text contains unsupported authoring self-process language: ${selfProcessLeak.label}.`,

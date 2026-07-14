@@ -124,6 +124,12 @@ describe("Masthead MCP tools", () => {
   test("returns bounded canonical transcript rows through a read-only tool", async () => {
     const db = await openDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:transcript", title: "Transcript MCP session" });
+    db.prepare("UPDATE runtimes SET runtime_kind = 'codex' WHERE runtime_id = (SELECT runtime_id FROM sessions WHERE session_id = ?)")
+      .run("session:transcript");
+    db.prepare("UPDATE messages SET text_redacted = ? WHERE session_id = ?").run(
+      `<skill>Internal instructions only.</skill>\n${"Grounded narrative ".repeat(20)}`,
+      "session:transcript"
+    );
     publishSessionToLogbook(db, "session:transcript");
 
     const result = getSessionTranscriptTool(db, { limit: 2, maxBytes: 40, role: "all", sessionId: "session:transcript" });
@@ -135,6 +141,9 @@ describe("Masthead MCP tools", () => {
     });
     expect(result.items.length).toBeLessThanOrEqual(2);
     expect(result.items.every((item) => Buffer.byteLength(item.text, "utf8") <= 40)).toBe(true);
+    const projected = result.items.find((item) => item.kind === "message")?.narrativeText;
+    expect(projected).toBeDefined();
+    expect(Buffer.byteLength(projected ?? "", "utf8")).toBeLessThanOrEqual(40);
     expect(db.prepare("SELECT tool_name, bounded_bytes, status FROM mcp_query_log").all()).toEqual([
       { bounded_bytes: 40, status: "succeeded", tool_name: "get_session_transcript" }
     ]);

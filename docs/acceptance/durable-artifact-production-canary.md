@@ -38,7 +38,7 @@ canary decision.
 
 | Item | Required evidence | Result |
 |---|---|---|
-| Release candidate | Branch `codex/durable-artifact-recovery`; corrected Gate C descendant | `7587cee0085cdb58d7e0bf1462918c365d87c446` |
+| Release candidate | Branch `codex/durable-artifact-recovery`; corrected Gate C descendant | `FINAL_CORRECTED_RELEASE_SHA_PENDING` |
 | Immutable production bundle | Exact staged path and SHA-256 digest for the corrected release candidate | `pending rebuild`; digest `pending` |
 | Packaged verification | Corrected manifest, release SHA, bundle digest, and packaged smoke | `pending` |
 | Gate A | Original canonical dossier contract, snapshot, renderer, and responsive inspection | PASS |
@@ -316,18 +316,51 @@ must resolve to a fresh temporary root and isolated port `17483`; resolving the
 production database, production data directory, or production port `17383` is
 an immediate stop.
 
+The production lifecycle's exact-child shutdown remains SIGTERM-only. A narrow
+exception applies only to coordinator-owned processes whose database, HOME,
+logs, and runtime are all inside this disposable rehearsal root: if such a child
+ignores SIGTERM for 30 seconds, the coordinator SIGKILLs and reaps it, flushes
+the log, and fails the phase. That exception never applies to a production or
+installed Masthead process.
+
+The fail-closed coordinator for this section is:
+
+```bash
+ROOT="$(mktemp -d /tmp/masthead-durable-rehearsal-XXXXXXXX)"
+EXPORT_PARENT="$(mktemp -d /tmp/masthead-durable-export-parent-XXXXXXXX)"
+chmod 700 "$ROOT" "$EXPORT_PARENT"
+EVIDENCE_EXPORT="$EXPORT_PARENT/masthead-durable-rehearsal-evidence-$(date +%Y%m%dT%H%M%S)"
+
+npm run rehearse:durable-artifacts -- help
+npm run rehearse:durable-artifacts -- preflight <all pinned identity/hash/path options>
+npm run rehearse:durable-artifacts -- stage <the same pinned options> --confirm-temporary-only
+npm run rehearse:durable-artifacts -- migrate-invalidate --root "$ROOT" --confirm-temporary-only
+npm run rehearse:durable-artifacts -- publish-discover --root "$ROOT" --confirm-temporary-only
+npm run rehearse:durable-artifacts -- serve-authoring --root "$ROOT" --confirm-temporary-only
+npm run rehearse:durable-artifacts -- verify --root "$ROOT" --confirm-temporary-only
+npm run rehearse:durable-artifacts -- human-review --root "$ROOT" --receipt "$REVIEW_RECEIPT" --receipt-sha256 "$REVIEW_SHA256" --confirm-temporary-only
+npm run rehearse:durable-artifacts -- restore --root "$ROOT" --evidence-export "$EVIDENCE_EXPORT" --confirm-temporary-only
+```
+
+Run `help` for the complete pinned preflight/stage option list. The coordinator
+never SQLite-opens the external production backup: it hashes and byte-copies it,
+then audits only the exact-hash temporary copy. Restore exports the complete
+evidence set outside the disposable root before that root may be deleted.
+
 Run the rehearsal in this exact order:
 
 1. Rebuild the immutable packaged bundle from exact corrected HEAD
-   `7587cee0085cdb58d7e0bf1462918c365d87c446`. Verify its `release.json` SHA,
+   `FINAL_CORRECTED_RELEASE_SHA_PENDING`. Do not run this step until that
+   placeholder is replaced by the final 40-hex commit. Verify its `release.json` SHA,
    content manifest, bundle digest, and packaged smoke against that same bundle.
 2. Create a fresh temporary root. Copy only the verified, self-contained
    `masthead.sqlite.backup-current` into it. Never copy the live database or any
    live WAL, SHM, or journal sidecar.
-3. With no isolated daemon running, audit both the source backup and active
-   temporary copy. Require the Step 1 database ID, the Step 3 audit hash, exactly
-   1,283 dossiers, zero optional artifacts, 66 V1 runs, 1,283 sessions, and no
-   sidecars on either copy.
+3. With no isolated daemon running, verify the source backup only by regular-file
+   identity, SHA-256, and absence of sidecars; never SQLite-open it. SQLite-audit
+   only the exact-hash active temporary copy. Require the Step 1 database ID, the
+   Step 3 audit hash, exactly 1,283 dossiers, zero optional artifacts, 66 V1 runs,
+   1,283 sessions, and no sidecars on the temporary copy.
 4. Before the corrected daemon first starts, preserve the audited schema-21 copy
    beneath `$ROOT/frozen-v1/masthead.sqlite`: use a same-filesystem rename of the
    temporary active copy into that nested directory, then copy the frozen file
@@ -394,7 +427,7 @@ Run the rehearsal in this exact order:
 
 | Field | Recorded value |
 |---|---|
-| Corrected release SHA / schema | `7587cee0085cdb58d7e0bf1462918c365d87c446` / `24` |
+| Corrected release SHA / schema | `FINAL_CORRECTED_RELEASE_SHA_PENDING` / `24` |
 | Corrected bundle path / digest | `pending` / `pending` |
 | Temporary directory / isolated daemon URL | `pending` / `http://127.0.0.1:17483` |
 | Nested frozen schema-21 copy / SHA-256 | `pending` / `pending` |
@@ -515,7 +548,13 @@ For both dossier and optional-artifact tables, each axis is an integer from 1 to
 places. Record a bounded note for every axis below 4. The canary median is the
 ordinary median of every reviewed artifact's unrounded five-axis mean, reported
 to two decimals. Review 100% of the 25 dossiers and 100% of optional canary
-artifacts; do not sample this phase.
+artifacts; do not sample this phase. The coordinator's
+`08-human-review-packet.json` is self-contained: every review row embeds the
+complete persisted body, capsule, provenance, and body SHA-256 alongside the
+machine-report and review-set hashes, so review does not depend on a daemon that
+has already stopped. Fill the companion
+`08-human-review-receipt-template.json`; it binds the signed scores to the exact
+packet, machine report, and review set.
 
 Map discovery back to the frozen 75-unit label receipt and record the confusion
 matrix. Recall is `TP / (TP + FN)` and precision is `TP / (TP + FP)`. An

@@ -425,6 +425,18 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     expect(audit).toMatchObject({ dossiers: 1_283, auditHash: expect.stringMatching(/^[a-f0-9]{64}$/u) });
     expect(readCliRecoveryCounts(dbPath)).toMatchObject({ artifacts: 1_283, runs: 66 });
 
+    await writeFile(`${dbPath}-wal`, "");
+    const nonSelfContainedAudit = await runMastheadCli(
+      ["workbench", "audit-v1-generation", "--db", dbPath, "--json"],
+      { env: {} }
+    );
+    expect(nonSelfContainedAudit.exitCode).toBe(1);
+    expect(JSON.parse(nonSelfContainedAudit.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: "v1_recovery_audit_database_not_self_contained:wal" },
+      ok: false
+    });
+    await rm(`${dbPath}-wal`);
+
     const missingPreparedBackup = await runMastheadCli(
       ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", audit.auditHash, "--confirm", "--json"],
       { env: {} }

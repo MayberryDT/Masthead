@@ -1,3 +1,4 @@
+import { projectSourceMessageNarrative } from "../../adapters/messageNarrative.ts";
 import type {
   SessionTranscriptCoverage,
   SessionTranscriptItem,
@@ -49,6 +50,10 @@ type MessageCoverageRow = {
   userMessages: number;
 };
 
+type MessageTextRow = {
+  text: string;
+};
+
 type TranscriptSelectPart = {
   sql: string;
   params: Array<number | string>;
@@ -87,13 +92,14 @@ function getTranscriptPage(
 }
 
 export function getTranscriptCoverage(db: MastheadDatabase, sessionId: string): SessionTranscriptCoverage {
+  const runtimeKind = sessionRuntimeKind(db, sessionId);
   const messages = db
     .prepare(
       `SELECT
         COUNT(*) AS messages,
         SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) AS userMessages,
         SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) AS assistantMessages,
-        SUM(CASE WHEN ${lowValueCondition("text_redacted")} THEN 1 ELSE 0 END) AS lowValueMessages
+        SUM(CASE WHEN ${genericLowValueCondition("text_redacted")} THEN 1 ELSE 0 END) AS lowValueMessages
       FROM messages
       WHERE session_id = ?`
     )
@@ -101,13 +107,15 @@ export function getTranscriptCoverage(db: MastheadDatabase, sessionId: string): 
   const messageCount = Number(messages.messages) || 0;
   const userMessages = Number(messages.userMessages) || 0;
   const assistantMessages = Number(messages.assistantMessages) || 0;
-  const lowValueMessages = Number(messages.lowValueMessages) || 0;
+  const lowValueMessages =
+    (Number(messages.lowValueMessages) || 0) +
+    countSourceControlOnlyMessages(db, sessionId, runtimeKind);
   return {
     assistantMessages,
     checkpoints: countRows(db, "checkpoints", sessionId),
     fileEffects: countRows(db, "file_effects", sessionId),
     hasUsableTranscript: userMessages + assistantMessages > 0 && lowValueMessages < messageCount,
-    lowValueItems: countLowValueTranscriptItems(db, sessionId),
+    lowValueItems: countLowValueTranscriptItems(db, sessionId, lowValueMessages),
     messages: messageCount,
     runtimeSignals: countRows(db, "runtime_signals", sessionId),
     toolCalls: countRows(db, "tool_calls", sessionId),
@@ -120,6 +128,7 @@ export function* iterateSessionTranscriptItems(
   db: MastheadDatabase,
   query: Pick<SessionTranscriptQuery, "order" | "sessionId">
 ): Generator<SessionTranscriptItem> {
+  const runtimeKind = sessionRuntimeKind(db, query.sessionId);
   const parts = transcriptSelectParts(query, true);
   if (parts.length === 0) return;
   const direction = query.order === "desc" ? "DESC" : "ASC";
@@ -131,7 +140,7 @@ export function* iterateSessionTranscriptItems(
       ORDER BY observedAt ${direction}, itemId ${direction}`
     )
     .iterate(...parts.flatMap((part) => part.params)) as Iterable<TranscriptRow>;
-  for (const row of rows) yield normalizeTranscriptItem(row, true);
+  for (const row of rows) yield normalizeTranscriptItem(row, true, runtimeKind);
 }
 
 function getTranscriptItems(
@@ -141,6 +150,7 @@ function getTranscriptItems(
   offset: number,
   preserveFullText: boolean
 ): SessionTranscriptItem[] {
+  const runtimeKind = sessionRuntimeKind(db, query.sessionId);
   const parts = transcriptSelectParts(query, preserveFullText);
   if (parts.length === 0) return [];
   const direction = query.order === "desc" ? "DESC" : "ASC";
@@ -153,7 +163,7 @@ function getTranscriptItems(
       LIMIT ? OFFSET ?`
     )
     .all(...parts.flatMap((part) => part.params), limit, offset) as TranscriptRow[];
-  return rows.map((row) => normalizeTranscriptItem(row, preserveFullText));
+  return rows.map((row) => normalizeTranscriptItem(row, preserveFullText, runtimeKind));
 }
 
 function countTranscriptItems(db: MastheadDatabase, query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">): number {
@@ -362,11 +372,24 @@ function fileEffectSelectPart(sessionId: string, query?: string): TranscriptSele
   };
 }
 
-function normalizeTranscriptItem(row: TranscriptRow, preserveFullText = false): SessionTranscriptItem {
+function normalizeTranscriptItem(
+  row: TranscriptRow,
+  preserveFullText = false,
+  runtimeKind?: string
+): SessionTranscriptItem {
   const baseText = row.text ?? row.label ?? "";
   const completeText = completeCanonicalText(row, baseText);
   const text = preserveFullText ? completeText : preview(completeText);
-  const lowValue = isLowValueText(baseText) || isLowValueText(row.label ?? "");
+  const narrative = row.kind === "message"
+    ? projectSourceMessageNarrative(runtimeKind, baseText)
+    : undefined;
+  const narrativeText = narrative
+    ? (preserveFullText ? narrative.text : preview(narrative.text))
+    : undefined;
+  const lowValue =
+    isGenericLowValueText(baseText) ||
+    isGenericLowValueText(row.label ?? "") ||
+    narrative?.controlOnly === true;
   return {
     ...(row.additions === null ? {} : { additions: row.additions }),
     ...(row.argumentsRedactedJson === null ? {} : { argumentsRedacted: parseJson(row.argumentsRedactedJson) }),
@@ -379,6 +402,7 @@ function normalizeTranscriptItem(row: TranscriptRow, preserveFullText = false): 
     kind: row.kind,
     label: row.label ?? labelForKind(row.kind),
     lowValue,
+    ...(narrativeText !== undefined && narrativeText !== text ? { narrativeText } : {}),
     observedAt: row.observedAt ?? "",
     role: normalizeRole(row.role),
     sessionId: row.sessionId,
@@ -415,24 +439,47 @@ function addTextQuery(clauses: string[], params: Array<number | string>, query: 
   params.push(`%${normalized}%`);
 }
 
-function countLowValueTranscriptItems(db: MastheadDatabase, sessionId: string): number {
+function countLowValueTranscriptItems(
+  db: MastheadDatabase,
+  sessionId: string,
+  lowValueMessages: number
+): number {
   return (
-    countLowValueRows(db, "messages", sessionId, lowValueCondition("text_redacted")) +
-    countLowValueRows(db, "tool_calls", sessionId, lowValueCondition("COALESCE(tool_name, 'Tool call')")) +
-    countLowValueRows(db, "tool_results", sessionId, `(${lowValueCondition("output_redacted")} OR ${lowValueCondition("status")})`) +
-    countLowValueRows(db, "checkpoints", sessionId, lowValueCondition("summary")) +
-    countLowValueRows(db, "runtime_signals", sessionId, lowValueCondition("title")) +
-    countLowValueRows(db, "file_effects", sessionId, lowValueCondition("path"))
+    lowValueMessages +
+    countLowValueRows(db, "tool_calls", sessionId, genericLowValueCondition("COALESCE(tool_name, 'Tool call')")) +
+    countLowValueRows(db, "tool_results", sessionId, `(${genericLowValueCondition("output_redacted")} OR ${genericLowValueCondition("status")})`) +
+    countLowValueRows(db, "checkpoints", sessionId, genericLowValueCondition("summary")) +
+    countLowValueRows(db, "runtime_signals", sessionId, genericLowValueCondition("title")) +
+    countLowValueRows(db, "file_effects", sessionId, genericLowValueCondition("path"))
   );
+}
+
+function countSourceControlOnlyMessages(
+  db: MastheadDatabase,
+  sessionId: string,
+  runtimeKind: string | undefined
+): number {
+  if (!runtimeKind) return 0;
+  const rows = db
+    .prepare(
+      `SELECT text_redacted AS text
+       FROM messages
+       WHERE session_id = ?
+         AND (ltrim(text_redacted, char(9) || char(10) || char(13) || ' ') LIKE '<%'
+           OR lower(ltrim(text_redacted, char(9) || char(10) || char(13) || ' ')) LIKE '# agents.md instructions%')`
+    )
+    .all(sessionId) as MessageTextRow[];
+  return rows.filter((row) => projectSourceMessageNarrative(runtimeKind, row.text).controlOnly).length;
 }
 
 function countLowValueRows(db: MastheadDatabase, table: string, sessionId: string, condition: string): number {
   return (db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE session_id = ? AND ${condition}`).get(sessionId) as CountRow).count;
 }
 
-function lowValueCondition(expression: string): string {
-  const normalized = `lower(trim(substr(COALESCE(${expression}, ''), 1, 820)))`;
-  return `(${normalized} IN ('codex hook event', 'runtime signal', 'tool call', 'shell', 'unknown') OR ${normalized} LIKE 'codex hook event:%')`;
+function genericLowValueCondition(expression: string): string {
+  const normalized = `lower(trim(substr(COALESCE(${expression}, ''), 1, 820), char(9) || char(10) || char(13) || ' '))`;
+  return `(${normalized} IN ('codex hook event', 'runtime signal', 'tool call', 'shell', 'unknown')
+    OR ${normalized} LIKE 'codex hook event:%')`;
 }
 
 function countRows(db: MastheadDatabase, table: string, sessionId: string): number {
@@ -454,7 +501,7 @@ function preview(value: string, max = 800): string {
   return normalized.length > max ? `${normalized.slice(0, max - 1).trim()}…` : normalized;
 }
 
-function isLowValueText(text: string): boolean {
+function isGenericLowValueText(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   return (
     normalized === "codex hook event" ||
@@ -464,6 +511,18 @@ function isLowValueText(text: string): boolean {
     normalized === "shell" ||
     normalized === "unknown"
   );
+}
+
+function sessionRuntimeKind(db: MastheadDatabase, sessionId: string): string | undefined {
+  const row = db
+    .prepare(
+      `SELECT runtimes.runtime_kind AS runtimeKind
+       FROM sessions
+       JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+       WHERE sessions.session_id = ?`
+    )
+    .get(sessionId) as { runtimeKind: string } | undefined;
+  return row?.runtimeKind;
 }
 
 function itemPrefix(kind: SessionTranscriptKind): string {
