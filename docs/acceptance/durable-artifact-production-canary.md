@@ -1,6 +1,6 @@
 # Durable artifact production recovery and canary evidence
 
-Status: **authorized; release candidate preparation in progress**
+Status: **authorized; final V2 cold activation in progress**
 
 This is the signed evidence record for Task 14 of the durable artifact recovery
 plan. It is deliberately incomplete until the production recovery is explicitly
@@ -34,7 +34,9 @@ canary decision.
 
 | Item | Required evidence | Result |
 |---|---|---|
-| Release candidate | Branch `codex/durable-artifact-recovery`; Gate C closeout `d3c61e2c` or a descendant with identical recovery contracts | `a2ea13d4` |
+| Release candidate | Branch `codex/durable-artifact-recovery`; Gate C closeout `d3c61e2c` or a descendant with identical recovery contracts | `8f648523b24c7d70e01efdc85dc73b6fde35c501` |
+| Immutable production bundle | Exact staged path and SHA-256 digest | `/home/tyler/.local/share/masthead-production/Masthead-linux-x64-0.1.0-8f648523`; `e58eceadd5d538dee640aaf7acaebfa57948ca042b5dfec54f8407786fc1a0d6` |
+| Packaged verification | Manifest and packaged smoke | PASS — 458 files; packaged smoke PASS |
 | Gate A | Original canonical dossier contract, snapshot, renderer, and responsive inspection | PASS |
 | Gate B | Real V2 runbook, ADR, and incident timeline validated, atomically published, and retrieved | PASS |
 | Recovery fixture | Recovery, CLI, and ownership tests | PASS — 91/91 |
@@ -85,6 +87,14 @@ Exact-child timeout remains SIGTERM-only;
 the parent may clear a resulting stale compatibility sentinel only from
 live-child-captured inode/token/content evidence while holding both canonical
 SQLite leases and repeating the offline and ownership proofs.
+
+The lifecycle-owned rollback recovery subsequently completed safely. At that
+recovery closeout, the active database and frozen backup were both
+6,633,172,992 bytes with database ID
+`a203fcdd-e720-4230-8146-967df054a2c4`; `current` was restored to the legacy
+target and production was proven offline. This is recovery evidence for the
+failed activation only. It is not a new `prepare-v1-recovery` receipt, a
+temporary-copy invalidation rehearsal, or authorization to invalidate V1 data.
 
 ## Step 1 — Installed V2 identity and current counts
 
@@ -149,31 +159,31 @@ It must not use generated V1 dossier prose or candidate discovery output.
 
 | Key | Evidence band | Slot | Frozen session ID | Selection reason |
 |---|---|---:|---|---|
-| S1 | Sparse | 1 | `pending` | `pending` |
-| S2 | Sparse | 2 | `pending` | `pending` |
-| S3 | Sparse | 3 | `pending` | `pending` |
-| S4 | Sparse | 4 | `pending` | `pending` |
-| S5 | Sparse | 5 | `pending` | `pending` |
-| O1 | Ordinary conversation | 1 | `pending` | `pending` |
-| O2 | Ordinary conversation | 2 | `pending` | `pending` |
-| O3 | Ordinary conversation | 3 | `pending` | `pending` |
-| O4 | Ordinary conversation | 4 | `pending` | `pending` |
-| O5 | Ordinary conversation | 5 | `pending` | `pending` |
-| T1 | Tool-heavy | 1 | `pending` | `pending` |
-| T2 | Tool-heavy | 2 | `pending` | `pending` |
-| T3 | Tool-heavy | 3 | `pending` | `pending` |
-| T4 | Tool-heavy | 4 | `pending` | `pending` |
-| T5 | Tool-heavy | 5 | `pending` | `pending` |
-| F1 | Failure/fix | 1 | `pending` | `pending` |
-| F2 | Failure/fix | 2 | `pending` | `pending` |
-| F3 | Failure/fix | 3 | `pending` | `pending` |
-| F4 | Failure/fix | 4 | `pending` | `pending` |
-| F5 | Failure/fix | 5 | `pending` | `pending` |
-| D1 | Decision-heavy | 1 | `pending` | `pending` |
-| D2 | Decision-heavy | 2 | `pending` | `pending` |
-| D3 | Decision-heavy | 3 | `pending` | `pending` |
-| D4 | Decision-heavy | 4 | `pending` | `pending` |
-| D5 | Decision-heavy | 5 | `pending` | `pending` |
+| S1 | Sparse | 1 | `session:c6fe4163237638c31c7281de8c751d8c` | Sticky Hermes completion notifications with a bounded transient-notification repair and verification summary. |
+| S2 | Sparse | 2 | `session:75070ddba5f638e51f93ebf69f38c70b` | Linux Mint captive-portal, suspend, and network UI problems answered with bounded NetworkManager alternatives. |
+| S3 | Sparse | 3 | `session:e9dfe470a25feca41360192db0ca39f2` | Jarvis 1Password runtime auth failure traced to a malformed upstream secret and summarized after repair. |
+| S4 | Sparse | 4 | `session:24049722ea8903c18ad66d4d64f7504f` | Fitbit and OpenClaw cron handoff resolved by repairing local device authorization scope. |
+| S5 | Sparse | 5 | `session:8a2437e1e402c203fa941b815f44db64` | One-shot migration away from a Git mirror toward direct workspace and SSH configuration editing. |
+| O1 | Ordinary conversation | 1 | `session:04065938f10a644f4ed91bb9224bb613` | Multi-turn Jarvis context recovery, audit discussion, approval-mode choice, restart, and verification. |
+| O2 | Ordinary conversation | 2 | `session:353310a00116949c8beb79747f379c0e` | Read-only 200-file review request followed by a challenge, correction, and evidence-focused follow-up. |
+| O3 | Ordinary conversation | 3 | `session:d112ad5a0d600e7127cad67d9d04e501` | Iterative funny-story request and revisions with a small, bounded set of skill reads. |
+| O4 | Ordinary conversation | 4 | `session:b5ba406a4a442465ebf67b1f37449ccb` | Career-history study collaboration covering format choice and interview-preparation refinement. |
+| O5 | Ordinary conversation | 5 | `session:91bc4e6dc57de8583a4d129c7026ac26` | Jarvis path-permission diagnosis, numbered choices, and UID/GID remediation validation. |
+| T1 | Tool-heavy | 1 | `session:45aa864c1f7ea43aa933c51a9b44410f` | Masthead production menu replacement spanning release tests, installation, and merge closeout. |
+| T2 | Tool-heavy | 2 | `session:46e33cad9a5397933cccfce31addb850` | Halla product build and removal plan carried through authorization and sustained execution. |
+| T3 | Tool-heavy | 3 | `session:a8802265cd0ea83ac48fb2fb6c727fb5` | Executioner application, funnel, and pricing recovery followed by an implementation handoff. |
+| T4 | Tool-heavy | 4 | `session:540476847ffcc4e6d22460471bf0c696` | VibeTyper-to-OpenTypeless migration investigation with extensive integration testing. |
+| T5 | Tool-heavy | 5 | `session:5662177018e13506528c4794c33fb027` | Client transcript analysis followed by a sustained Command Centre implementation goal. |
+| F1 | Failure/fix | 1 | `session:8d3ada7fa7adbbec1f9383ef2b12e832` | A required fixed-demo browser verifier failed, then focused script and documentation changes made it pass. |
+| F2 | Failure/fix | 2 | `session:3be28d785e021fc1235362519f616603` | Impossible red-and-active Masthead cards led to a conflict/status root-cause fix and focused tests. |
+| F3 | Failure/fix | 3 | `session:7a0f90fb2ae887ee7e28fd9c7eddc301` | Unreadable remote-control UI was traced through sidebar clipping and stylesheet caching to a verified repair. |
+| F4 | Failure/fix | 4 | `session:00a3355a298a08635b90ffcd7ded3a74` | A brittle and regressed Wargus path prompted a web-native pivot that passed browser smoke verification. |
+| F5 | Failure/fix | 5 | `session:b2d4e11e83ed11ac375b370bfeb5d9a9` | An absent or stale Masthead site was replaced and its production custom domains were verified. |
+| D1 | Decision-heavy | 1 | `session:5f1db8586f2425e57fef8212e46d9d2d` | Workbench direction resolves audit versus proposal, UI versus CLI, and queue-first scope decisions. |
+| D2 | Decision-heavy | 2 | `session:56128985d68f2e5bcce3ab07af7f2a7f` | Sextant grounded-agent and generated-view contract moved through approval and durable decision closeout. |
+| D3 | Decision-heavy | 3 | `session:8504d543a399cc79929c8f1def3ded68` | UI Design Directions was reshaped around element variations and a revised prototype workflow. |
+| D4 | Decision-heavy | 4 | `session:631440164376bc8384b1637e80373b60` | Decree of War resolves engine-native, fresh-application, command, and gameplay architecture choices. |
+| D5 | Decision-heavy | 5 | `session:241bb3d2390e71919f7917fb17e6dab0` | Daily Codex automation resolved report format, scheduling, local publication, and presentation choices. |
 
 An independent reviewer must label all 75 `(session ID, optional artifact kind)`
 units before discovery. The immutable label receipt contains exactly these
@@ -187,15 +197,16 @@ later publication results to this worksheet.
 
 | Frozen evidence | Recorded value |
 |---|---|
-| Sample receipt path | `pending` |
-| Sample row count (must be 25) | `pending` |
-| Sample SHA-256 | `pending` |
-| Label receipt path | `pending` |
-| Label row count (must be 75) | `pending` |
-| Positive labels by kind | `pending` |
-| Negative labels by kind | `pending` |
-| Label SHA-256 | `pending` |
-| Independent reviewer / signed at | `pending` |
+| Sample receipt path | `docs/acceptance/durable-artifact-production-sample.json` |
+| Sample row count (must be 25) | `25` |
+| Sample SHA-256 | `574e6edc2a03d0966f4de2f100acc5dc3bb19506b06c0d469596e51c782b933d` |
+| Sample receipt commit | `4c931d65` |
+| Label receipt path | `docs/acceptance/durable-artifact-production-labels.json` |
+| Label row count (must be 75) | `75` |
+| Positive labels by kind | runbook `14`; ADR `18`; incident timeline `10` |
+| Negative labels by kind | runbook `11`; ADR `7`; incident timeline `15` |
+| Label SHA-256 | `96cc853bb712d6e28f844b853fdd708d4961eedd7b1a31d6ffd01c21b87119c0` |
+| Independent reviewer / signed at | `codex-subagent:label_review`; receipt finalized `2026-07-13T23:51:54.960659454-06:00` |
 
 The evaluation unit for recall and precision is `(session ID, kind)`. A unit is
 discovered positive when at least one discovered candidate of that kind includes
@@ -225,16 +236,22 @@ health URL is unavailable, then run the offline maintenance command:
 
 | Field | Recorded value |
 |---|---|
-| Backup path | `pending` |
-| Backup database ID | `pending` |
+| Backup path | `/home/tyler/.config/masthead-production/masthead.sqlite.backup-current` |
+| Backup database ID | `a203fcdd-e720-4230-8146-967df054a2c4` |
 | Integrity result | `pending` |
-| Size in bytes | `pending` |
+| Size in bytes | `6633172992` |
+| Frozen backup SHA-256 | `6e6a4939a9b5904518b015d121a2b96f3ba279c74fc3b0010c89522ba122f08a` |
 | Pages copied | `pending` |
 | Backup created at | `pending` |
 | Daemon stop command / receipt | `pending` |
 
 Abort on ownership refusal, identity mismatch, audit drift, failed integrity, or
 more than one retained backup.
+
+The path, size, SHA-256, and database ID above were re-proven after safe
+lifecycle rollback recovery. They do not constitute a new
+`prepare-v1-recovery` CLI receipt; integrity, pages-copied, creation-time, and
+stop-command fields remain pending.
 
 ## Step 3 — Exact failed V1 audit
 
@@ -248,25 +265,32 @@ Run the read-only audit against the explicit production path:
 
 | Invariant | Expected | Observed |
 |---|---:|---:|
-| Contract version | `workbench-authoring-v1` | `pending` |
-| Dossiers | 1,283 | `pending` |
-| Runbooks | 0 | `pending` |
-| ADRs | 0 | `pending` |
-| Incident timelines | 0 | `pending` |
-| Total artifacts | 1,283 | `pending` |
-| Completed V1 runs | 66 | `pending` |
-| Sessions | 1,283 | `pending` |
-| Actors | exactly one | `pending` |
-| Creators | exactly one matching the actor | `pending` |
+| Contract version | `workbench-authoring-v1` | `workbench-authoring-v1` |
+| Dossiers | 1,283 | 1,283 |
+| Runbooks | 0 | 0 |
+| ADRs | 0 | 0 |
+| Incident timelines | 0 | 0 |
+| Total artifacts | 1,283 | 1,283 |
+| Completed V1 runs | 66 | 66 |
+| Sessions | 1,283 | 1,283 |
+| Actors | exactly one | `mastheadctl` |
+| Creators | exactly one matching the actor | `workbench_authoring:mastheadctl` |
 
 | Receipt field | Recorded value |
 |---|---|
-| Audit hash (SHA-256) | `pending` |
-| Template fingerprint | `pending` |
-| Generation fingerprint | `pending` |
-| Generation window | `pending` |
-| Publication window | `pending` |
-| Schema versions | `pending` |
+| Production database path | `/home/tyler/.config/masthead-production/masthead.sqlite` |
+| Production database ID | `a203fcdd-e720-4230-8146-967df054a2c4` |
+| Audit hash (SHA-256) | `0b0cd9dee1b3b2c8811bbb616a186dbbc9e2993d603fa89506bc696a2cc5129b` |
+| Template fingerprint | `f410928e4a0e88ba5584c18534891994dd03df234ebe2021964d9d94a66016e0` |
+| Generation fingerprint | `8ba491c2e428c900bba1dc3df68379bc1584f08f5210d3ceac81104d2a615669` |
+| Generation window | `2026-07-11T21:59:24.453Z` to `2026-07-12T06:37:22.540Z` |
+| Publication window | `2026-07-12T05:10:49.500Z` to `2026-07-12T06:37:22.531Z` |
+| Schema versions | `[session_dossier-v2]` |
+
+This was a real read-only audit of the schema-21 production database and it
+passed the exact selector. The final candidate includes the schema-21 audit
+compatibility path and corrected canonical-template matcher; neither change
+broadens the V1 selector or weakens the receipt hash.
 
 Abort on any count, membership, actor, creator, schema, template, window, or
 hash ambiguity. Do not broaden the selector to make production match.
@@ -285,6 +309,16 @@ holding daemon-equivalent exclusive ownership. Exercise those same restore
 steps against the temporary copy, including sidecar removal and post-restore
 identity/integrity checks. Empty or unproved commands prohibit production
 invalidation.
+
+### Schema-21 to schema-23 migration rehearsal (precondition only)
+
+A disposable 6.63 GB copy of the frozen schema-21 backup completed the
+schema-23 migration rehearsal. Migration itself took `758 ms`; both quick
+checks passed, the foreign-key check completed in `57556 ms`, and the final
+schema ledger exactly matched versions 1 through 23. Result: **PASS for schema
+migration compatibility only**. This did not exercise V1 invalidation,
+candidate authoring, human review, or rollback-after-invalidation, so none of
+the Step 4 gates below are satisfied by it.
 
 - [ ] Temporary copy database ID equals the production/backup database ID.
 - [ ] Rehearsal audit hash equals the Step 3 audit hash.
@@ -313,7 +347,7 @@ invalidation.
 | Production daemon start command | `pending` |
 | Exclusive-ownership restore command | `<installed-mastheadctl> workbench restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current> --audit-hash <sha256> --confirm --json` |
 | Restore rehearsal receipt | `pending` |
-| Frozen sample hash / label hash | `pending` |
+| Frozen sample hash / label hash | `574e6edc2a03d0966f4de2f100acc5dc3bb19506b06c0d469596e51c782b933d` / `96cc853bb712d6e28f844b853fdd708d4961eedd7b1a31d6ffd01c21b87119c0` |
 
 Production invalidation is forbidden unless this section is completely signed.
 
